@@ -59,7 +59,13 @@
                           SetDarkThemeRequested="OnSetDarkThemeCheckbox"
                           SetTransparentModeRequested="OnSetTransparentMode"
                           SetMicaModeRequested="OnSetMicaMode"
-                          SetAcrylicModeRequested="OnSetAcrylicMode" />
+                          SetAcrylicModeRequested="OnSetAcrylicMode"
+                          GitCloneRequested="OnGitClone"
+                          GitCloneCloseRequested="OnGitCloneClose"
+                          GitCloneStartRequested="OnGitCloneStart"
+                          GitCloneCancelRequested="OnGitCloneCancel"
+                          GitGetUpdatesRequested="OnGitGetUpdates"
+                          GitBranchSwitchRequested="OnGitBranchSwitch" />
 
     <views:SearchBarView DockPanel.Dock="Top"
                          Name="SearchBar"

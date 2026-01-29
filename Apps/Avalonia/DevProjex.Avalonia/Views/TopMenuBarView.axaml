@@ -11,6 +11,13 @@
         <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
         <MenuItem Header="{Binding MenuFileExit}" Click="OnExit" />
       </MenuItem>
+      <MenuItem Name="GitMenuItem" Header="Git">
+        <MenuItem Header="{Binding MenuGitClone}" Click="OnGitClone" />
+        <MenuItem Name="GitBranchMenuItem" Header="{Binding MenuGitBranch}" IsEnabled="{Binding IsGitMode}">
+          <!-- Branch items will be populated dynamically -->
+        </MenuItem>
+        <MenuItem Header="{Binding MenuGitGetUpdates}" Click="OnGitGetUpdates" IsEnabled="{Binding IsGitMode}" />
+      </MenuItem>
       <MenuItem Header="{Binding MenuCopy}" IsEnabled="{Binding IsProjectLoaded}">
         <MenuItem Header="{Binding MenuCopyFullTree}" Click="OnCopyFullTree" />
         <MenuItem Header="{Binding MenuCopySelectedTree}" Click="OnCopySelectedTree" />
@@ -92,6 +99,16 @@
            PlacementMode="Bottom"
            PlacementTarget="{Binding #HelpMenuItem}">
       <views:HelpPopoverView Name="HelpDocsPopover" />
+    </Popup>
+
+    <!-- Git Clone Popover (centered) -->
+    <Popup Name="GitClonePopup"
+           IsOpen="{Binding GitClonePopoverOpen, Mode=TwoWay}"
+           IsLightDismissEnabled="False"
+           PlacementConstraintAdjustment="All"
+           Placement="Center"
+           PlacementTarget="{Binding #MainMenu}">
+      <views:GitClonePopoverView Name="GitClonePopover" />
     </Popup>
   </Grid>
 </UserControl>

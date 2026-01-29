@@ -79,5 +79,29 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+
+  "Menu.Git.Clone": "Repository klonen...",
+  "Menu.Git.Branch": "Branch",
+  "Menu.Git.GetUpdates": "Aktualisierungen abrufen",
+
+  "Git.Clone.Title": "Repository klonen",
+  "Git.Clone.Description": "Repository-URL eingeben (GitHub oder andere)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Git wird überprüft...",
+  "Git.Clone.Progress.Cloning": "Klonen...",
+  "Git.Clone.Progress.Downloading": "Herunterladen...",
+  "Git.Clone.Progress.Extracting": "Entpacken...",
+  "Git.Clone.Progress.Preparing": "Vorbereiten...",
+  "Git.Clone.Progress.SwitchingBranch": "Branch wechseln...",
+
+  "Git.Error.GitNotFound": "Git ist nicht installiert. Download als ZIP-Archiv.",
+  "Git.Error.CloneFailed": "Repository konnte nicht geklont werden:\n{0}",
+  "Git.Error.InvalidUrl": "Ungültige Repository-URL",
+  "Git.Error.NetworkError": "Netzwerkfehler:\n{0}",
+  "Git.Error.BranchSwitchFailed": "Branch konnte nicht gewechselt werden:\n{0}",
+  "Git.Error.UpdateFailed": "Aktualisierungen konnten nicht abgerufen werden:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Abbrechen"
 }

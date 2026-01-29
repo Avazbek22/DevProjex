@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -29,6 +30,7 @@ using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Contracts;
 using DevProjex.Kernel.Models;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Avalonia;
 
@@ -52,6 +54,9 @@ public partial class MainWindow : Window
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
     private readonly ThemePresetStore _themePresetStore;
+    private readonly IGitRepositoryService _gitService;
+    private readonly IRepoCacheService _repoCacheService;
+    private readonly IZipDownloadService _zipDownloadService;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
@@ -61,6 +66,7 @@ public partial class MainWindow : Window
 
     private BuildTreeResult? _currentTree;
     private string? _currentPath;
+    private string? _currentProjectDisplayName;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
     private ThemePresetDb _themePresetDb = new();
@@ -74,6 +80,7 @@ public partial class MainWindow : Window
     private HashSet<string>? _filterExpansionSnapshot;
     private int _filterApplyVersion;
     private CancellationTokenSource? _refreshCts;
+    private CancellationTokenSource? _gitCloneCts;
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -95,6 +102,9 @@ public partial class MainWindow : Window
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
         _themePresetStore = services.ThemePresetStore;
+        _gitService = services.GitRepositoryService;
+        _repoCacheService = services.RepoCacheService;
+        _zipDownloadService = services.ZipDownloadService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         DataContext = _viewModel;
@@ -201,12 +211,23 @@ public partial class MainWindow : Window
         _refreshCts?.Cancel();
         _refreshCts?.Dispose();
 
+        // Cancel and dispose git clone token
+        _gitCloneCts?.Cancel();
+        _gitCloneCts?.Dispose();
+
         // Clear icon cache to release memory
         _iconCache.Clear();
 
         // Clear tree references
         _currentTree = null;
         _filterExpansionSnapshot = null;
+
+        // Clean up repository cache on exit
+        _repoCacheService.ClearAllCache();
+
+        // Dispose ZipDownloadService
+        if (_zipDownloadService is IDisposable disposable)
+            disposable.Dispose();
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
@@ -747,6 +768,254 @@ public partial class MainWindow : Window
         _themeBrushCoordinator.UpdateDynamicThemeBrushes();
     }
 
+    #region Git Operations
+
+    private void OnGitClone(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.GitCloneUrl = string.Empty;
+        _viewModel.GitCloneStatus = string.Empty;
+        _viewModel.GitCloneInProgress = false;
+        _viewModel.GitClonePopoverOpen = true;
+        e.Handled = true;
+    }
+
+    private void OnGitCloneClose(object? sender, RoutedEventArgs e)
+    {
+        CancelGitCloneOperation();
+        _viewModel.GitClonePopoverOpen = false;
+        e.Handled = true;
+    }
+
+    private async void OnGitCloneStart(object? sender, RoutedEventArgs e)
+    {
+        var url = _viewModel.GitCloneUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            await ShowErrorAsync(_viewModel.GitErrorInvalidUrl);
+            return;
+        }
+
+        _gitCloneCts?.Cancel();
+        _gitCloneCts = new CancellationTokenSource();
+        var cancellationToken = _gitCloneCts.Token;
+
+        _viewModel.GitCloneInProgress = true;
+        _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
+
+        string? targetPath = null;
+
+        try
+        {
+            targetPath = _repoCacheService.CreateRepositoryDirectory(url);
+            var progress = new Progress<string>(status =>
+            {
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    _viewModel.GitCloneStatus = status;
+                });
+            });
+
+            GitCloneResult result;
+
+            // Check if Git is available
+            var gitAvailable = await _gitService.IsGitAvailableAsync(cancellationToken);
+
+            if (gitAvailable)
+            {
+                _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCloning;
+                result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
+            }
+            else
+            {
+                // Fallback to ZIP download
+                _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
+                await Task.Delay(1500, cancellationToken);
+
+                _viewModel.GitCloneStatus = _viewModel.GitCloneProgressDownloading;
+                result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!result.Success)
+            {
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
+                _viewModel.GitClonePopoverOpen = false;
+                _viewModel.GitCloneInProgress = false;
+                await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
+                return;
+            }
+
+            // Successfully cloned - open the project
+            _viewModel.GitClonePopoverOpen = false;
+            _viewModel.GitCloneInProgress = false;
+            _viewModel.ProjectSourceType = result.SourceType;
+            _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
+
+            // Save repository name for display
+            _currentProjectDisplayName = result.RepositoryName;
+
+            await TryOpenFolderAsync(result.LocalPath, fromDialog: false);
+
+            // Load branches if Git mode
+            if (result.SourceType == ProjectSourceType.GitClone)
+                await RefreshGitBranchesAsync(result.LocalPath);
+        }
+        catch (OperationCanceledException)
+        {
+            if (targetPath is not null)
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
+        }
+        catch (Exception ex)
+        {
+            if (targetPath is not null)
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
+
+            _viewModel.GitClonePopoverOpen = false;
+            await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
+        }
+        finally
+        {
+            _viewModel.GitCloneInProgress = false;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnGitCloneCancel(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel.GitCloneInProgress)
+        {
+            CancelGitCloneOperation();
+        }
+        else
+        {
+            _viewModel.GitClonePopoverOpen = false;
+        }
+        e.Handled = true;
+    }
+
+    private void CancelGitCloneOperation()
+    {
+        _gitCloneCts?.Cancel();
+        _viewModel.GitCloneInProgress = false;
+    }
+
+    private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
+            return;
+
+        try
+        {
+            Cursor = new Cursor(StandardCursorType.Wait);
+
+            var progress = new Progress<string>(_ => { });
+            var success = await _gitService.PullUpdatesAsync(_currentPath, progress);
+
+            if (!success)
+            {
+                await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
+                return;
+            }
+
+            // Refresh branches and tree
+            await RefreshGitBranchesAsync(_currentPath);
+            await ReloadProjectAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
+        }
+        finally
+        {
+            Cursor = new Cursor(StandardCursorType.Arrow);
+        }
+
+        e.Handled = true;
+    }
+
+    private async void OnGitBranchSwitch(object? sender, string branchName)
+    {
+        if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
+            return;
+
+        try
+        {
+            Cursor = new Cursor(StandardCursorType.Wait);
+
+            var progress = new Progress<string>(_ => { });
+            var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress);
+
+            if (!success)
+            {
+                await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
+                return;
+            }
+
+            _viewModel.CurrentBranch = branchName;
+
+            // Refresh branches and tree
+            await RefreshGitBranchesAsync(_currentPath);
+            await ReloadProjectAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
+        }
+        finally
+        {
+            Cursor = new Cursor(StandardCursorType.Arrow);
+        }
+    }
+
+    private async Task RefreshGitBranchesAsync(string repositoryPath)
+    {
+        try
+        {
+            var branches = await _gitService.GetBranchesAsync(repositoryPath);
+
+            _viewModel.GitBranches.Clear();
+            foreach (var branch in branches)
+                _viewModel.GitBranches.Add(branch);
+
+            // Update branch menu
+            UpdateBranchMenu();
+        }
+        catch
+        {
+            // Ignore branch loading errors
+        }
+    }
+
+    private void UpdateBranchMenu()
+    {
+        var branchMenuItem = _topMenuBar?.GitBranchMenuItemControl;
+        if (branchMenuItem is null)
+            return;
+
+        branchMenuItem.Items.Clear();
+
+        foreach (var branch in _viewModel.GitBranches)
+        {
+            var item = new MenuItem
+            {
+                Header = branch.IsActive ? $"✓ {branch.Name}" : $"   {branch.Name}",
+                Tag = branch.Name
+            };
+
+            item.Click += (_, _) =>
+            {
+                if (item.Tag is string name)
+                    _topMenuBar?.OnGitBranchSwitch(name);
+            };
+
+            branchMenuItem.Items.Add(item);
+        }
+    }
+
+    #endregion
+
     private void OnAboutOpenLink(object? sender, RoutedEventArgs e)
     {
         OpenRepositoryLink();
@@ -1154,6 +1423,18 @@ public partial class MainWindow : Window
         _viewModel.IsProjectLoaded = true;
         _viewModel.SettingsVisible = true;
         _viewModel.SearchVisible = false;
+
+        // Set project source type based on how it was opened
+        // If opened from dialog (File → Open), it's LocalFolder
+        // If opened from Git clone, the source type is already set
+        if (fromDialog)
+        {
+            _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
+            _viewModel.CurrentBranch = string.Empty;
+            _viewModel.GitBranches.Clear();
+            _currentProjectDisplayName = null;
+        }
+
         UpdateTitle();
 
         await ReloadProjectAsync();
@@ -1302,10 +1583,12 @@ public partial class MainWindow : Window
 
             var root = BuildTreeViewModel(result.Root, null);
 
-            // Fix как в WinForms EnsureRootNodeVisible
+            // Set root display name: use repository name for git clones, folder name for local
             try
             {
-                root.DisplayName = new DirectoryInfo(_currentPath!).Name;
+                root.DisplayName = !string.IsNullOrEmpty(_currentProjectDisplayName)
+                    ? _currentProjectDisplayName
+                    : new DirectoryInfo(_currentPath!).Name;
             }
             catch
             {
@@ -1343,9 +1626,18 @@ public partial class MainWindow : Window
 
     private void UpdateTitle()
     {
-        _viewModel.Title = string.IsNullOrWhiteSpace(_currentPath)
-            ? MainWindowViewModel.BaseTitleWithAuthor
-            : $"{MainWindowViewModel.BaseTitle} - {_currentPath}";
+        if (string.IsNullOrWhiteSpace(_currentPath))
+        {
+            _viewModel.Title = MainWindowViewModel.BaseTitleWithAuthor;
+            return;
+        }
+
+        // Use repository name for Git clones, otherwise use full path
+        var displayPath = !string.IsNullOrEmpty(_currentProjectDisplayName)
+            ? _currentProjectDisplayName
+            : _currentPath;
+
+        _viewModel.Title = $"{MainWindowViewModel.BaseTitle} - {displayPath}";
     }
 
     private IgnoreRules BuildIgnoreRules(string rootPath)

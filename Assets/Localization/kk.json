@@ -79,5 +79,29 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+
+  "Menu.Git.Clone": "Репозиторийді клондау...",
+  "Menu.Git.Branch": "Тармақ",
+  "Menu.Git.GetUpdates": "Жаңартуларды алу",
+
+  "Git.Clone.Title": "Репозиторийді клондау",
+  "Git.Clone.Description": "Репозиторий URL мекенжайын енгізіңіз (GitHub немесе басқа)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Git тексерілуде...",
+  "Git.Clone.Progress.Cloning": "Клондалуда...",
+  "Git.Clone.Progress.Downloading": "Жүктелуде...",
+  "Git.Clone.Progress.Extracting": "Шығарылуда...",
+  "Git.Clone.Progress.Preparing": "Дайындалуда...",
+  "Git.Clone.Progress.SwitchingBranch": "Тармақ ауысуда...",
+
+  "Git.Error.GitNotFound": "Git орнатылмаған. ZIP архиві ретінде жүктелуде.",
+  "Git.Error.CloneFailed": "Репозиторийді клондау мүмкін болмады:\n{0}",
+  "Git.Error.InvalidUrl": "Қате репозиторий URL мекенжайы",
+  "Git.Error.NetworkError": "Желі қатесі:\n{0}",
+  "Git.Error.BranchSwitchFailed": "Тармақты ауыстыру мүмкін болмады:\n{0}",
+  "Git.Error.UpdateFailed": "Жаңартуларды алу мүмкін болмады:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Болдырмау"
 }

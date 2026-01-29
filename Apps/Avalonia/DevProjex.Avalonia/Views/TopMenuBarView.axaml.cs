@@ -57,6 +57,14 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? SetMicaModeRequested;
     public event EventHandler<RoutedEventArgs>? SetAcrylicModeRequested;
 
+    // Git events
+    public event EventHandler<RoutedEventArgs>? GitCloneRequested;
+    public event EventHandler<RoutedEventArgs>? GitCloneCloseRequested;
+    public event EventHandler<RoutedEventArgs>? GitCloneStartRequested;
+    public event EventHandler<RoutedEventArgs>? GitCloneCancelRequested;
+    public event EventHandler<RoutedEventArgs>? GitGetUpdatesRequested;
+    public event EventHandler<string>? GitBranchSwitchRequested;
+
     public TopMenuBarView()
     {
         InitializeComponent();
@@ -99,6 +107,20 @@ public partial class TopMenuBarView : UserControl
         {
             helpDocsPopup.Opened += OnHelpDocsPopupOpened;
             helpDocsPopup.Closed += OnHelpDocsPopupClosed;
+        }
+
+        var gitClonePopover = GitClonePopover;
+        if (gitClonePopover is not null)
+        {
+            gitClonePopover.CloseRequested += (_, e) => GitCloneCloseRequested?.Invoke(this, e);
+            gitClonePopover.StartCloneRequested += (_, e) => GitCloneStartRequested?.Invoke(this, e);
+            gitClonePopover.CancelRequested += (_, e) => GitCloneCancelRequested?.Invoke(this, e);
+        }
+
+        var gitClonePopup = GitClonePopup;
+        if (gitClonePopup is not null)
+        {
+            gitClonePopup.Opened += OnGitClonePopupOpened;
         }
     }
 
@@ -163,6 +185,69 @@ public partial class TopMenuBarView : UserControl
     private void OnAbout(object? sender, RoutedEventArgs e) => AboutRequested?.Invoke(sender, e);
 
     private void OnResetSettings(object? sender, RoutedEventArgs e) => ResetSettingsRequested?.Invoke(sender, e);
+
+    private void OnGitClone(object? sender, RoutedEventArgs e) => GitCloneRequested?.Invoke(sender, e);
+
+    private void OnGitGetUpdates(object? sender, RoutedEventArgs e) => GitGetUpdatesRequested?.Invoke(sender, e);
+
+    public void OnGitBranchSwitch(string branchName) => GitBranchSwitchRequested?.Invoke(this, branchName);
+
+    public MenuItem? GitBranchMenuItemControl => GitBranchMenuItem;
+
+    private void OnGitClonePopupOpened(object? sender, EventArgs e)
+    {
+        GitClonePopover?.Focus();
+        ApplyPopupBackdrop(GitClonePopup);
+        CenterGitClonePopupInWindow();
+    }
+
+    /// <summary>
+    /// Centers the Git clone popup in the main window.
+    /// </summary>
+    private void CenterGitClonePopupInWindow()
+    {
+        var popup = GitClonePopup;
+        var popover = GitClonePopover;
+        if (popup is null || popover is null)
+            return;
+
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+            return;
+
+        // Schedule positioning after layout is complete
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                var windowBounds = topLevel.Bounds;
+                var popoverSize = popover.Bounds.Size;
+
+                // Calculate center position
+                var centerX = (windowBounds.Width - popoverSize.Width) / 2;
+                var centerY = (windowBounds.Height - popoverSize.Height) / 2;
+
+                // Get current popup position relative to window
+                if (popup.Child is Visual popupRoot)
+                {
+                    var currentPos = popupRoot.TranslatePoint(new Point(0, 0), topLevel);
+                    if (currentPos.HasValue)
+                    {
+                        // Calculate offset needed to center
+                        var offsetX = centerX - currentPos.Value.X;
+                        var offsetY = centerY - currentPos.Value.Y;
+
+                        popup.HorizontalOffset = offsetX;
+                        popup.VerticalOffset = offsetY;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore positioning errors
+            }
+        }, global::Avalonia.Threading.DispatcherPriority.Render);
+    }
 
     private void OnThemePopupOpened(object? sender, EventArgs e)
     {

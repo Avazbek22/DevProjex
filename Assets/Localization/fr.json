@@ -79,5 +79,29 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+
+  "Menu.Git.Clone": "Cloner le dépôt...",
+  "Menu.Git.Branch": "Branche",
+  "Menu.Git.GetUpdates": "Obtenir les mises à jour",
+
+  "Git.Clone.Title": "Cloner le dépôt",
+  "Git.Clone.Description": "Entrez l'URL du dépôt (GitHub ou autre)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Vérification de git...",
+  "Git.Clone.Progress.Cloning": "Clonage...",
+  "Git.Clone.Progress.Downloading": "Téléchargement...",
+  "Git.Clone.Progress.Extracting": "Extraction...",
+  "Git.Clone.Progress.Preparing": "Préparation...",
+  "Git.Clone.Progress.SwitchingBranch": "Changement de branche...",
+
+  "Git.Error.GitNotFound": "Git n'est pas installé. Téléchargement en archive ZIP.",
+  "Git.Error.CloneFailed": "Échec du clonage du dépôt :\n{0}",
+  "Git.Error.InvalidUrl": "URL du dépôt invalide",
+  "Git.Error.NetworkError": "Erreur réseau :\n{0}",
+  "Git.Error.BranchSwitchFailed": "Échec du changement de branche :\n{0}",
+  "Git.Error.UpdateFailed": "Échec de la récupération des mises à jour :\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Annuler"
 }

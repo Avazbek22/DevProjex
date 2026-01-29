@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Media;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.ResourceStore;
+using DevProjex.Kernel.Models;
 
 namespace DevProjex.Avalonia.ViewModels;
 
@@ -47,6 +48,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _themePopoverOpen;
     private bool _helpPopoverOpen;
     private bool _helpDocsPopoverOpen;
+    private bool _gitClonePopoverOpen;
+
+    // Git state
+    private ProjectSourceType _projectSourceType = ProjectSourceType.LocalFolder;
+    private string _currentBranch = string.Empty;
+    private string _gitCloneUrl = string.Empty;
+    private string _gitCloneStatus = string.Empty;
+    private bool _gitCloneInProgress;
     private double _helpPopoverMaxWidth = 800;
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
@@ -331,6 +340,78 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    public bool GitClonePopoverOpen
+    {
+        get => _gitClonePopoverOpen;
+        set
+        {
+            if (_gitClonePopoverOpen == value) return;
+            _gitClonePopoverOpen = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    // Git properties
+    public ProjectSourceType ProjectSourceType
+    {
+        get => _projectSourceType;
+        set
+        {
+            if (_projectSourceType == value) return;
+            _projectSourceType = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsGitMode));
+        }
+    }
+
+    public bool IsGitMode => _projectSourceType == ProjectSourceType.GitClone;
+
+    public string CurrentBranch
+    {
+        get => _currentBranch;
+        set
+        {
+            if (_currentBranch == value) return;
+            _currentBranch = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public ObservableCollection<GitBranch> GitBranches { get; } = new();
+
+    public string GitCloneUrl
+    {
+        get => _gitCloneUrl;
+        set
+        {
+            if (_gitCloneUrl == value) return;
+            _gitCloneUrl = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string GitCloneStatus
+    {
+        get => _gitCloneStatus;
+        set
+        {
+            if (_gitCloneStatus == value) return;
+            _gitCloneStatus = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public bool GitCloneInProgress
+    {
+        get => _gitCloneInProgress;
+        set
+        {
+            if (_gitCloneInProgress == value) return;
+            _gitCloneInProgress = value;
+            RaisePropertyChanged();
+        }
+    }
+
     public double HelpPopoverMaxWidth
     {
         get => _helpPopoverMaxWidth;
@@ -602,6 +683,34 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string FilterByNamePlaceholder { get; private set; } = string.Empty;
     public string FilterTooltip { get; private set; } = string.Empty;
 
+    // Git menu localization
+    public string MenuGitClone { get; private set; } = string.Empty;
+    public string MenuGitBranch { get; private set; } = string.Empty;
+    public string MenuGitGetUpdates { get; private set; } = string.Empty;
+
+    // Git clone dialog localization
+    public string GitCloneTitle { get; private set; } = string.Empty;
+    public string GitCloneDescription { get; private set; } = string.Empty;
+    public string GitCloneUrlPlaceholder { get; private set; } = string.Empty;
+    public string GitCloneProgressCheckingGit { get; private set; } = string.Empty;
+    public string GitCloneProgressCloning { get; private set; } = string.Empty;
+    public string GitCloneProgressDownloading { get; private set; } = string.Empty;
+    public string GitCloneProgressExtracting { get; private set; } = string.Empty;
+    public string GitCloneProgressPreparing { get; private set; } = string.Empty;
+    public string GitCloneProgressSwitchingBranch { get; private set; } = string.Empty;
+
+    // Git error messages
+    public string GitErrorGitNotFound { get; private set; } = string.Empty;
+    public string GitErrorCloneFailed { get; private set; } = string.Empty;
+    public string GitErrorInvalidUrl { get; private set; } = string.Empty;
+    public string GitErrorNetworkError { get; private set; } = string.Empty;
+    public string GitErrorBranchSwitchFailed { get; private set; } = string.Empty;
+    public string GitErrorUpdateFailed { get; private set; } = string.Empty;
+
+    // Dialog buttons
+    public string DialogOK { get; private set; } = string.Empty;
+    public string DialogCancel { get; private set; } = string.Empty;
+
     public void UpdateLocalization()
     {
         MenuFile = _localization["Menu.File"];
@@ -649,6 +758,34 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuSearch = _localization["Menu.Search"];
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
+
+        // Git menu localization
+        MenuGitClone = _localization["Menu.Git.Clone"];
+        MenuGitBranch = _localization["Menu.Git.Branch"];
+        MenuGitGetUpdates = _localization["Menu.Git.GetUpdates"];
+
+        // Git clone dialog localization
+        GitCloneTitle = _localization["Git.Clone.Title"];
+        GitCloneDescription = _localization["Git.Clone.Description"];
+        GitCloneUrlPlaceholder = _localization["Git.Clone.UrlPlaceholder"];
+        GitCloneProgressCheckingGit = _localization["Git.Clone.Progress.CheckingGit"];
+        GitCloneProgressCloning = _localization["Git.Clone.Progress.Cloning"];
+        GitCloneProgressDownloading = _localization["Git.Clone.Progress.Downloading"];
+        GitCloneProgressExtracting = _localization["Git.Clone.Progress.Extracting"];
+        GitCloneProgressPreparing = _localization["Git.Clone.Progress.Preparing"];
+        GitCloneProgressSwitchingBranch = _localization["Git.Clone.Progress.SwitchingBranch"];
+
+        // Git error messages
+        GitErrorGitNotFound = _localization["Git.Error.GitNotFound"];
+        GitErrorCloneFailed = _localization["Git.Error.CloneFailed"];
+        GitErrorInvalidUrl = _localization["Git.Error.InvalidUrl"];
+        GitErrorNetworkError = _localization["Git.Error.NetworkError"];
+        GitErrorBranchSwitchFailed = _localization["Git.Error.BranchSwitchFailed"];
+        GitErrorUpdateFailed = _localization["Git.Error.UpdateFailed"];
+
+        // Dialog buttons
+        DialogOK = _localization["Dialog.OK"];
+        DialogCancel = _localization["Dialog.Cancel"];
 
         // Theme popover localization
         MenuTheme = _localization["Menu.Theme"];
@@ -724,6 +861,28 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(ThemePanelContrast));
         RaisePropertyChanged(nameof(ThemeBorderStrength));
         RaisePropertyChanged(nameof(ThemeMenuChildIntensity));
+
+        // Git localization
+        RaisePropertyChanged(nameof(MenuGitClone));
+        RaisePropertyChanged(nameof(MenuGitBranch));
+        RaisePropertyChanged(nameof(MenuGitGetUpdates));
+        RaisePropertyChanged(nameof(GitCloneTitle));
+        RaisePropertyChanged(nameof(GitCloneDescription));
+        RaisePropertyChanged(nameof(GitCloneUrlPlaceholder));
+        RaisePropertyChanged(nameof(GitCloneProgressCheckingGit));
+        RaisePropertyChanged(nameof(GitCloneProgressCloning));
+        RaisePropertyChanged(nameof(GitCloneProgressDownloading));
+        RaisePropertyChanged(nameof(GitCloneProgressExtracting));
+        RaisePropertyChanged(nameof(GitCloneProgressPreparing));
+        RaisePropertyChanged(nameof(GitCloneProgressSwitchingBranch));
+        RaisePropertyChanged(nameof(GitErrorGitNotFound));
+        RaisePropertyChanged(nameof(GitErrorCloneFailed));
+        RaisePropertyChanged(nameof(GitErrorInvalidUrl));
+        RaisePropertyChanged(nameof(GitErrorNetworkError));
+        RaisePropertyChanged(nameof(GitErrorBranchSwitchFailed));
+        RaisePropertyChanged(nameof(GitErrorUpdateFailed));
+        RaisePropertyChanged(nameof(DialogOK));
+        RaisePropertyChanged(nameof(DialogCancel));
     }
 
     /// <summary>

@@ -79,5 +79,29 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+
+  "Menu.Git.Clone": "Clona repository...",
+  "Menu.Git.Branch": "Branch",
+  "Menu.Git.GetUpdates": "Ottieni aggiornamenti",
+
+  "Git.Clone.Title": "Clona repository",
+  "Git.Clone.Description": "Inserisci l'URL del repository (GitHub o altro)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Verifica git...",
+  "Git.Clone.Progress.Cloning": "Clonazione...",
+  "Git.Clone.Progress.Downloading": "Download...",
+  "Git.Clone.Progress.Extracting": "Estrazione...",
+  "Git.Clone.Progress.Preparing": "Preparazione...",
+  "Git.Clone.Progress.SwitchingBranch": "Cambio branch...",
+
+  "Git.Error.GitNotFound": "Git non è installato. Download come archivio ZIP.",
+  "Git.Error.CloneFailed": "Impossibile clonare il repository:\n{0}",
+  "Git.Error.InvalidUrl": "URL del repository non valido",
+  "Git.Error.NetworkError": "Errore di rete:\n{0}",
+  "Git.Error.BranchSwitchFailed": "Impossibile cambiare branch:\n{0}",
+  "Git.Error.UpdateFailed": "Impossibile ottenere aggiornamenti:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Annulla"
 }

@@ -79,5 +79,29 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+
+  "Menu.Git.Clone": "Клон кардани репозиторӣ...",
+  "Menu.Git.Branch": "Шохча",
+  "Menu.Git.GetUpdates": "Гирифтани навсозиҳо",
+
+  "Git.Clone.Title": "Клон кардани репозиторӣ",
+  "Git.Clone.Description": "URL-и репозиториро ворид кунед (GitHub ё дигар)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Тафтиши git...",
+  "Git.Clone.Progress.Cloning": "Клон карда истодааст...",
+  "Git.Clone.Progress.Downloading": "Боргирӣ...",
+  "Git.Clone.Progress.Extracting": "Кушодан...",
+  "Git.Clone.Progress.Preparing": "Омодасозӣ...",
+  "Git.Clone.Progress.SwitchingBranch": "Иваз кардани шохча...",
+
+  "Git.Error.GitNotFound": "Git насб нашудааст. Ҳамчун архиви ZIP боргирӣ мешавад.",
+  "Git.Error.CloneFailed": "Клон кардани репозиторӣ муяссар нашуд:\n{0}",
+  "Git.Error.InvalidUrl": "URL-и репозиторӣ нодуруст аст",
+  "Git.Error.NetworkError": "Хатои шабака:\n{0}",
+  "Git.Error.BranchSwitchFailed": "Иваз кардани шохча муяссар нашуд:\n{0}",
+  "Git.Error.UpdateFailed": "Гирифтани навсозиҳо муяссар нашуд:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Бекор кардан"
 }
