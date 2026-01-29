@@ -196,9 +196,9 @@ public partial class TopMenuBarView : UserControl
 
     private void OnGitClonePopupOpened(object? sender, EventArgs e)
     {
-        GitClonePopover?.Focus();
         ApplyPopupBackdrop(GitClonePopup);
         CenterGitClonePopupInWindow();
+        FocusGitCloneUrlTextBox();
     }
 
     /// <summary>
@@ -215,38 +215,65 @@ public partial class TopMenuBarView : UserControl
         if (topLevel is null)
             return;
 
+        // Reset offsets first
+        popup.HorizontalOffset = 0;
+        popup.VerticalOffset = 0;
+
         // Schedule positioning after layout is complete
         global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             try
             {
                 var windowBounds = topLevel.Bounds;
-                var popoverSize = popover.Bounds.Size;
 
-                // Calculate center position
+                // Force measure to get actual size
+                popover.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                var popoverSize = popover.DesiredSize;
+
+                if (popoverSize.Width <= 0 || popoverSize.Height <= 0)
+                    popoverSize = popover.Bounds.Size;
+
+                // Get RootGrid position relative to TopLevel to account for its offset
+                var rootGrid = RootGrid;
+                var gridOffset = rootGrid?.TranslatePoint(new Point(0, 0), topLevel) ?? new Point(0, 0);
+
+                // Calculate center position in window coordinates
                 var centerX = (windowBounds.Width - popoverSize.Width) / 2;
                 var centerY = (windowBounds.Height - popoverSize.Height) / 2;
 
-                // Get current popup position relative to window
-                if (popup.Child is Visual popupRoot)
-                {
-                    var currentPos = popupRoot.TranslatePoint(new Point(0, 0), topLevel);
-                    if (currentPos.HasValue)
-                    {
-                        // Calculate offset needed to center
-                        var offsetX = centerX - currentPos.Value.X;
-                        var offsetY = centerY - currentPos.Value.Y;
-
-                        popup.HorizontalOffset = offsetX;
-                        popup.VerticalOffset = offsetY;
-                    }
-                }
+                // Subtract grid offset since popup is positioned relative to RootGrid
+                popup.HorizontalOffset = centerX - gridOffset.X;
+                popup.VerticalOffset = centerY - gridOffset.Y;
             }
             catch
             {
                 // Ignore positioning errors
             }
-        }, global::Avalonia.Threading.DispatcherPriority.Render);
+        }, global::Avalonia.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// Sets keyboard focus to the URL TextBox in Git clone popover.
+    /// </summary>
+    private void FocusGitCloneUrlTextBox()
+    {
+        // Schedule focus after layout and rendering are complete
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                var textBox = GitClonePopover?.UrlTextBoxControl;
+                if (textBox is not null)
+                {
+                    textBox.Focus();
+                    textBox.SelectAll();
+                }
+            }
+            catch
+            {
+                // Ignore focus errors
+            }
+        }, global::Avalonia.Threading.DispatcherPriority.Input);
     }
 
     private void OnThemePopupOpened(object? sender, EventArgs e)

@@ -4,7 +4,7 @@
              xmlns:views="using:DevProjex.Avalonia.Views"
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
              x:DataType="vm:MainWindowViewModel">
-  <Grid ColumnDefinitions="*,Auto" Margin="0">
+  <Grid Name="RootGrid" ColumnDefinitions="*,Auto" Margin="0">
     <Menu Name="MainMenu" Grid.Column="0" Margin="0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
@@ -101,13 +101,15 @@
       <views:HelpPopoverView Name="HelpDocsPopover" />
     </Popup>
 
-    <!-- Git Clone Popover (centered) -->
+    <!-- Git Clone Popover (centered in window) -->
     <Popup Name="GitClonePopup"
            IsOpen="{Binding GitClonePopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="False"
-           PlacementConstraintAdjustment="All"
-           Placement="Center"
-           PlacementTarget="{Binding #MainMenu}">
+           PlacementConstraintAdjustment="None"
+           Placement="AnchorAndGravity"
+           PlacementAnchor="TopLeft"
+           PlacementGravity="BottomRight"
+           PlacementTarget="{Binding #RootGrid}">
       <views:GitClonePopoverView Name="GitClonePopover" />
     </Popup>
   </Grid>
