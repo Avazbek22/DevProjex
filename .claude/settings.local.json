@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "Bash(Select-String -Pattern \"error|warning|успешно\")",
+      "Bash(Select-Object -Last 20)",
+      "Bash(dotnet test:*)"
     ]
   }
 }

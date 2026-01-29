@@ -99,6 +99,7 @@
   "Git.Error.CloneFailed": "Не удалось клонировать репозиторий:\n{0}",
   "Git.Error.InvalidUrl": "Неверный URL репозитория",
   "Git.Error.NetworkError": "Ошибка сети:\n{0}",
+  "Git.Error.NoInternetConnection": "Не удалось клонировать репозиторий. Пожалуйста, проверьте подключение к интернету.",
   "Git.Error.BranchSwitchFailed": "Не удалось переключить ветку:\n{0}",
   "Git.Error.UpdateFailed": "Не удалось получить обновления:\n{0}",
 

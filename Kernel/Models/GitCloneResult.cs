@@ -9,4 +9,5 @@ public sealed record GitCloneResult(
     ProjectSourceType SourceType,
     string? DefaultBranch,
     string? RepositoryName,
+    string? RepositoryUrl,
     string? ErrorMessage);

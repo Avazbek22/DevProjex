@@ -148,6 +148,38 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     #region Clone Tests
 
     [Fact]
+    public async Task CloneAsync_ReturnsError_ForNonGitUrl()
+    {
+        SkipIfNoGit();
+
+        var targetDir = Path.Combine(_tempDir!, "non-git-url-test");
+
+        // Try to clone a URL that is not a git repository (e.g., Telegram link)
+        var result = await _service.CloneAsync(
+            "https://t.me/addstickers/SomeSticker",
+            targetDir);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task CloneAsync_ReturnsError_ForInvalidDomain()
+    {
+        SkipIfNoGit();
+
+        var targetDir = Path.Combine(_tempDir!, "invalid-domain-test");
+
+        // Try to clone from a URL that doesn't exist
+        var result = await _service.CloneAsync(
+            "https://this-domain-absolutely-does-not-exist-xyz123.com/user/repo.git",
+            targetDir);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+    }
+
+    [Fact]
     public async Task CloneAsync_ClonesRepository_Successfully()
     {
         SkipIfNoGit();

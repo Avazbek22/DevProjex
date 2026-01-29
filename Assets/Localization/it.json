@@ -99,6 +99,7 @@
   "Git.Error.CloneFailed": "Impossibile clonare il repository:\n{0}",
   "Git.Error.InvalidUrl": "URL del repository non valido",
   "Git.Error.NetworkError": "Errore di rete:\n{0}",
+  "Git.Error.NoInternetConnection": "Impossibile clonare il repository. Controllare la connessione Internet.",
   "Git.Error.BranchSwitchFailed": "Impossibile cambiare branch:\n{0}",
   "Git.Error.UpdateFailed": "Impossibile ottenere aggiornamenti:\n{0}",
 

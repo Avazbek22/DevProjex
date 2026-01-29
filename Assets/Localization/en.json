@@ -103,6 +103,7 @@
   "Git.Error.CloneFailed": "Failed to clone repository:\n{0}",
   "Git.Error.InvalidUrl": "Invalid repository URL",
   "Git.Error.NetworkError": "Network error:\n{0}",
+  "Git.Error.NoInternetConnection": "Failed to clone repository. Please check your internet connection.",
   "Git.Error.BranchSwitchFailed": "Failed to switch branch:\n{0}",
   "Git.Error.UpdateFailed": "Failed to get updates:\n{0}",
 

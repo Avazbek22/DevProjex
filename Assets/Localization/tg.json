@@ -99,6 +99,7 @@
   "Git.Error.CloneFailed": "Клон кардани репозиторӣ муяссар нашуд:\n{0}",
   "Git.Error.InvalidUrl": "URL-и репозиторӣ нодуруст аст",
   "Git.Error.NetworkError": "Хатои шабака:\n{0}",
+  "Git.Error.NoInternetConnection": "Клон кардани репозиторӣ муяссар нашуд. Лутфан, пайвастшавии интернетро тафтиш кунед.",
   "Git.Error.BranchSwitchFailed": "Иваз кардани шохча муяссар нашуд:\n{0}",
   "Git.Error.UpdateFailed": "Гирифтани навсозиҳо муяссар нашуд:\n{0}",
 

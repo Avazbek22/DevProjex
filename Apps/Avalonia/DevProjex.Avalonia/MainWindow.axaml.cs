@@ -67,6 +67,7 @@ public partial class MainWindow : Window
     private BuildTreeResult? _currentTree;
     private string? _currentPath;
     private string? _currentProjectDisplayName;
+    private string? _currentRepositoryUrl;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
     private ThemePresetDb _themePresetDb = new();
@@ -795,6 +796,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Validate URL format before attempting to clone
+        if (!IsValidGitRepositoryUrl(url))
+        {
+            await ShowErrorAsync(_viewModel.GitErrorInvalidUrl);
+            return;
+        }
+
         _gitCloneCts?.Cancel();
         _gitCloneCts = new CancellationTokenSource();
         var cancellationToken = _gitCloneCts.Token;
@@ -806,6 +814,16 @@ public partial class MainWindow : Window
 
         try
         {
+            // Check internet connection before starting
+            var hasInternet = await CheckInternetConnectionAsync(cancellationToken);
+            if (!hasInternet)
+            {
+                _viewModel.GitCloneInProgress = false;
+                _viewModel.GitClonePopoverOpen = false;
+                await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
+                return;
+            }
+
             targetPath = _repoCacheService.CreateRepositoryDirectory(url);
             var progress = new Progress<string>(status =>
             {
@@ -852,8 +870,9 @@ public partial class MainWindow : Window
             _viewModel.ProjectSourceType = result.SourceType;
             _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
 
-            // Save repository name for display
+            // Save repository name and URL for display
             _currentProjectDisplayName = result.RepositoryName;
+            _currentRepositoryUrl = result.RepositoryUrl;
 
             await TryOpenFolderAsync(result.LocalPath, fromDialog: false);
 
@@ -954,6 +973,7 @@ public partial class MainWindow : Window
             }
 
             _viewModel.CurrentBranch = branchName;
+            UpdateTitle();
 
             // Refresh branches and tree
             await RefreshGitBranchesAsync(_currentPath);
@@ -1433,6 +1453,7 @@ public partial class MainWindow : Window
             _viewModel.CurrentBranch = string.Empty;
             _viewModel.GitBranches.Clear();
             _currentProjectDisplayName = null;
+            _currentRepositoryUrl = null;
         }
 
         UpdateTitle();
@@ -1632,12 +1653,22 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Use repository name for Git clones, otherwise use full path
-        var displayPath = !string.IsNullOrEmpty(_currentProjectDisplayName)
-            ? _currentProjectDisplayName
-            : _currentPath;
-
-        _viewModel.Title = $"{MainWindowViewModel.BaseTitle} - {displayPath}";
+        // For Git clones: show full URL + branch in square brackets
+        // For local folders: show full path
+        if (_viewModel.IsGitMode && !string.IsNullOrEmpty(_currentRepositoryUrl))
+        {
+            var branchDisplay = !string.IsNullOrEmpty(_viewModel.CurrentBranch)
+                ? $" [{_viewModel.CurrentBranch}]"
+                : string.Empty;
+            _viewModel.Title = $"{MainWindowViewModel.BaseTitle} - {_currentRepositoryUrl}{branchDisplay}";
+        }
+        else
+        {
+            var displayPath = !string.IsNullOrEmpty(_currentProjectDisplayName)
+                ? _currentProjectDisplayName
+                : _currentPath;
+            _viewModel.Title = $"{MainWindowViewModel.BaseTitle} - {displayPath}";
+        }
     }
 
     private IgnoreRules BuildIgnoreRules(string rootPath)
@@ -1698,6 +1729,107 @@ public partial class MainWindow : Window
 
         if (_viewModel.TreeNodes.FirstOrDefault() is { } root && !root.IsExpanded)
             root.IsExpanded = true;
+    }
+
+    /// <summary>
+    /// Validates that URL looks like a valid Git repository URL.
+    /// Accepts URLs from common Git hosting services (GitHub, GitLab, Bitbucket, etc.)
+    /// or any URL ending with .git
+    /// </summary>
+    private static bool IsValidGitRepositoryUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+
+        try
+        {
+            // Try to parse as URI
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                return false;
+
+            // Must be HTTP or HTTPS
+            if (uri.Scheme != "http" && uri.Scheme != "https")
+                return false;
+
+            var host = uri.Host.ToLowerInvariant();
+            var path = uri.AbsolutePath.ToLowerInvariant();
+
+            // Check for common Git hosting services
+            var validHosts = new[]
+            {
+                "github.com",
+                "gitlab.com",
+                "bitbucket.org",
+                "gitea.com",
+                "codeberg.org",
+                "sourceforge.net",
+                "git.sr.ht"
+            };
+
+            // Allow subdomains (e.g., gitlab.mycompany.com)
+            var isKnownHost = validHosts.Any(h => host == h || host.EndsWith("." + h));
+
+            // Or URL ends with .git extension
+            var hasGitExtension = path.EndsWith(".git");
+
+            // Or contains /git/ in path (common for self-hosted instances)
+            var hasGitInPath = path.Contains("/git/");
+
+            return isKnownHost || hasGitExtension || hasGitInPath;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks if internet connection is available by attempting to connect to reliable hosts.
+    /// Returns true if connection successful, false otherwise.
+    /// This is a simple check - we try to resolve DNS and connect to well-known hosts.
+    /// </summary>
+    private static async Task<bool> CheckInternetConnectionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Try to connect to multiple reliable hosts to avoid false negatives
+            // Use different providers to increase reliability
+            var hosts = new[]
+            {
+                "https://www.github.com",
+                "https://www.google.com",
+                "https://www.cloudflare.com"
+            };
+
+            using var httpClient = new System.Net.Http.HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(5)
+            };
+
+            // Try each host - if any succeeds, we have internet
+            foreach (var host in hosts)
+            {
+                try
+                {
+                    using var response = await httpClient.GetAsync(host, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    // If we get any response (even error status codes), it means we have connectivity
+                    return true;
+                }
+                catch
+                {
+                    // Try next host
+                    continue;
+                }
+            }
+
+            // All hosts failed
+            return false;
+        }
+        catch
+        {
+            // If exception occurs, assume no internet
+            return false;
+        }
     }
 
 }

@@ -58,6 +58,7 @@
                   Spacing="8">
         <Button Content="{Binding DialogOK}"
                 Classes="primary-action"
+                MinWidth="80"
                 Click="OnStartClone"
                 IsVisible="{Binding !GitCloneInProgress}"
                 IsEnabled="{Binding GitCloneUrl.Length}" />

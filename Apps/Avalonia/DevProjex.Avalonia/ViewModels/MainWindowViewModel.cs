@@ -704,6 +704,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string GitErrorCloneFailed { get; private set; } = string.Empty;
     public string GitErrorInvalidUrl { get; private set; } = string.Empty;
     public string GitErrorNetworkError { get; private set; } = string.Empty;
+    public string GitErrorNoInternetConnection { get; private set; } = string.Empty;
     public string GitErrorBranchSwitchFailed { get; private set; } = string.Empty;
     public string GitErrorUpdateFailed { get; private set; } = string.Empty;
 
@@ -780,6 +781,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         GitErrorCloneFailed = _localization["Git.Error.CloneFailed"];
         GitErrorInvalidUrl = _localization["Git.Error.InvalidUrl"];
         GitErrorNetworkError = _localization["Git.Error.NetworkError"];
+        GitErrorNoInternetConnection = _localization["Git.Error.NoInternetConnection"];
         GitErrorBranchSwitchFailed = _localization["Git.Error.BranchSwitchFailed"];
         GitErrorUpdateFailed = _localization["Git.Error.UpdateFailed"];
 
@@ -879,6 +881,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(GitErrorCloneFailed));
         RaisePropertyChanged(nameof(GitErrorInvalidUrl));
         RaisePropertyChanged(nameof(GitErrorNetworkError));
+        RaisePropertyChanged(nameof(GitErrorNoInternetConnection));
         RaisePropertyChanged(nameof(GitErrorBranchSwitchFailed));
         RaisePropertyChanged(nameof(GitErrorUpdateFailed));
         RaisePropertyChanged(nameof(DialogOK));

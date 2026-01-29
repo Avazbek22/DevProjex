@@ -77,13 +77,17 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
             if (result.ExitCode != 0)
             {
+                // Parse git error and provide user-friendly message
+                var errorMessage = ParseGitCloneError(result.Error);
+
                 return new GitCloneResult(
                     Success: false,
                     LocalPath: targetDirectory,
                     SourceType: ProjectSourceType.GitClone,
                     DefaultBranch: null,
                     RepositoryName: repoName,
-                    ErrorMessage: result.Error);
+                    RepositoryUrl: url,
+                    ErrorMessage: errorMessage);
             }
 
             // After clone, determine which branch we're on (usually main or master)
@@ -95,6 +99,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 SourceType: ProjectSourceType.GitClone,
                 DefaultBranch: defaultBranch,
                 RepositoryName: repoName,
+                RepositoryUrl: url,
                 ErrorMessage: null);
         }
         catch (OperationCanceledException)
@@ -110,8 +115,51 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 SourceType: ProjectSourceType.GitClone,
                 DefaultBranch: null,
                 RepositoryName: repoName,
+                RepositoryUrl: url,
                 ErrorMessage: ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Parses git clone error messages and returns user-friendly error text.
+    /// Git errors can be cryptic - this method translates them to understandable messages.
+    /// </summary>
+    private static string ParseGitCloneError(string gitError)
+    {
+        if (string.IsNullOrWhiteSpace(gitError))
+            return "Clone failed";
+
+        var error = gitError.ToLowerInvariant();
+
+        // Check for specific error patterns
+        if (error.Contains("not valid: is this a git repository") ||
+            error.Contains("not found") && error.Contains("repository") ||
+            error.Contains("fatal: repository") && error.Contains("not found"))
+        {
+            return "Invalid repository URL or repository does not exist";
+        }
+
+        if (error.Contains("could not resolve host") ||
+            error.Contains("failed to connect") ||
+            error.Contains("unable to access"))
+        {
+            return "Network error - check your internet connection";
+        }
+
+        if (error.Contains("authentication failed") ||
+            error.Contains("permission denied"))
+        {
+            return "Authentication failed - repository may be private";
+        }
+
+        if (error.Contains("timeout") ||
+            error.Contains("timed out"))
+        {
+            return "Connection timeout - repository may be too large or network is slow";
+        }
+
+        // Return original error if no specific pattern matched
+        return gitError;
     }
 
     /// <summary>

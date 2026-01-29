@@ -99,6 +99,7 @@
   "Git.Error.CloneFailed": "Échec du clonage du dépôt :\n{0}",
   "Git.Error.InvalidUrl": "URL du dépôt invalide",
   "Git.Error.NetworkError": "Erreur réseau :\n{0}",
+  "Git.Error.NoInternetConnection": "Échec du clonage du dépôt. Veuillez vérifier votre connexion Internet.",
   "Git.Error.BranchSwitchFailed": "Échec du changement de branche :\n{0}",
   "Git.Error.UpdateFailed": "Échec de la récupération des mises à jour :\n{0}",
 

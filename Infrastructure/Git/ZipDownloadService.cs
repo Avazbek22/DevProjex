@@ -45,6 +45,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                 SourceType: ProjectSourceType.ZipDownload,
                 DefaultBranch: null,
                 RepositoryName: repoName,
+                RepositoryUrl: repositoryUrl,
                 ErrorMessage: "Could not determine ZIP download URL");
         }
 
@@ -139,6 +140,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                 SourceType: ProjectSourceType.ZipDownload,
                 DefaultBranch: branch,
                 RepositoryName: repoName,
+                RepositoryUrl: repositoryUrl,
                 ErrorMessage: null);
         }
         catch (OperationCanceledException)
@@ -153,6 +155,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                 SourceType: ProjectSourceType.ZipDownload,
                 DefaultBranch: null,
                 RepositoryName: repoName,
+                RepositoryUrl: repositoryUrl,
                 ErrorMessage: ex.Message);
         }
         catch (Exception ex)
@@ -163,6 +166,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                 SourceType: ProjectSourceType.ZipDownload,
                 DefaultBranch: null,
                 RepositoryName: repoName,
+                RepositoryUrl: repositoryUrl,
                 ErrorMessage: ex.Message);
         }
         finally
