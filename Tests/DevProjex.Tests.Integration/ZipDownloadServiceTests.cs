@@ -166,10 +166,10 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
 
-        // Should report both downloading and extracting progress
+        // Should report percentages and phase transition marker
         Assert.NotEmpty(progressReports);
-        Assert.Contains(progressReports, r => r.Contains("Downloading"));
-        Assert.Contains(progressReports, r => r.Contains("Extracting"));
+        Assert.Contains(progressReports, r => r.EndsWith("%"));
+        Assert.Contains(progressReports, r => r == "::EXTRACTING::");
     }
 
     [Fact]
@@ -182,7 +182,8 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Cancel immediately
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
+        // Accept any OperationCanceledException subtype (TaskCanceledException inherits from it)
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: cts.Token));
     }
 

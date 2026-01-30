@@ -825,11 +825,32 @@ public partial class MainWindow : Window
             }
 
             targetPath = _repoCacheService.CreateRepositoryDirectory(url);
+
+            // Track current operation for progress reporting
+            string currentOperation = string.Empty;
+
             var progress = new Progress<string>(status =>
             {
                 global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
-                    _viewModel.GitCloneStatus = status;
+                    // Handle phase transition markers
+                    if (status == "::EXTRACTING::")
+                    {
+                        currentOperation = _viewModel.GitCloneProgressExtracting;
+                        _viewModel.GitCloneStatus = currentOperation;
+                        return;
+                    }
+
+                    // If status is just a percentage, append it to current operation message
+                    if (status.EndsWith('%') && status.Length <= 4 && !string.IsNullOrEmpty(currentOperation))
+                    {
+                        _viewModel.GitCloneStatus = $"{currentOperation} {status}";
+                    }
+                    else
+                    {
+                        // Git output or other dynamic message (contains progress info with %)
+                        _viewModel.GitCloneStatus = status;
+                    }
                 });
             });
 
@@ -840,7 +861,8 @@ public partial class MainWindow : Window
 
             if (gitAvailable)
             {
-                _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCloning;
+                currentOperation = _viewModel.GitCloneProgressCloning;
+                _viewModel.GitCloneStatus = currentOperation;
                 result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
             }
             else
@@ -849,7 +871,8 @@ public partial class MainWindow : Window
                 _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
                 await Task.Delay(1500, cancellationToken);
 
-                _viewModel.GitCloneStatus = _viewModel.GitCloneProgressDownloading;
+                currentOperation = _viewModel.GitCloneProgressDownloading;
+                _viewModel.GitCloneStatus = currentOperation;
                 result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
             }
 

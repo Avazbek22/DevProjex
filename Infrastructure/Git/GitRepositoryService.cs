@@ -65,7 +65,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
         try
         {
-            progress?.Report("Cloning...");
+            // Note: progress status is set by caller to show localized message
+            // We only report dynamic progress (git output with percentages)
 
             // SHALLOW CLONE: --depth 1 downloads only 1 commit for speed
             // This is intentional - we're a read-only viewer, not a full git client
@@ -354,7 +355,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     {
         try
         {
-            progress?.Report("Switching branch...");
+            // Note: progress status is set by caller to show localized message
 
             // STEP 1: Try to checkout existing local branch (fast path)
             // This works if the branch was previously fetched or is the default branch
@@ -368,7 +369,6 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
             // STEP 2: Branch doesn't exist locally - need to fetch it from remote
             // This is required for shallow clones where only default branch exists
-            progress?.Report("Fetching branch...");
 
             // First, tell git to track this branch from remote
             // This is needed because shallow clone only tracks default branch
@@ -393,7 +393,6 @@ public sealed class GitRepositoryService : IGitRepositoryService
             cancellationToken.ThrowIfCancellationRequested();
 
             // STEP 3: Create local branch from fetched remote branch
-            progress?.Report("Switching branch...");
 
             var createBranchResult = await RunGitCommandAsync(
                 repositoryPath,
@@ -458,7 +457,6 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
             // STEP 2: Fetch latest commits from remote
             // IMPORTANT: Do NOT use --depth here! It conflicts with shallow clone boundary
-            progress?.Report("Fetching...");
 
             var fetchResult = await RunGitCommandAsync(
                 repositoryPath,
@@ -477,7 +475,6 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
             // STEP 3: Reset local branch to match remote
             // This is safe because we never modify files - we're a read-only viewer
-            progress?.Report("Updating...");
 
             var resetResult = await RunGitCommandAsync(
                 repositoryPath,

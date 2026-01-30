@@ -53,10 +53,35 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
         try
         {
-            // Download ZIP
-            using (var response = await _httpClient.GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+            // Download ZIP - try main branch first, then master if 404
+            System.Net.Http.HttpResponseMessage? response = null;
+            try
             {
+                response = await _httpClient.GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+                // If 404 and we tried "main", try "master"
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound && branch == "main")
+                {
+                    response.Dispose();
+
+                    // Try with master branch
+                    if (TryGetZipUrlWithBranch(repositoryUrl, "master", out var masterZipUrl))
+                    {
+                        branch = "master";
+                        response = await _httpClient.GetAsync(masterZipUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    }
+                }
+
                 response.EnsureSuccessStatusCode();
+            }
+            catch
+            {
+                response?.Dispose();
+                throw;
+            }
+
+            using (response)
+            {
 
                 var totalBytes = response.Content.Headers.ContentLength;
                 await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -74,12 +99,16 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                     if (totalBytes.HasValue && totalBytes.Value > 0)
                     {
                         var percent = (int)(totalRead * 100 / totalBytes.Value);
-                        progress?.Report($"Downloading... {percent}%");
+                        // Report only percentage - caller shows localized "Downloading..." message
+                        progress?.Report($"{percent}%");
                     }
                 }
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+
+            // Notify caller that we're switching to extraction phase
+            progress?.Report("::EXTRACTING::");
 
             // Extract ZIP
             Directory.CreateDirectory(targetDirectory);
@@ -129,7 +158,8 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                     if (processedEntries % 50 == 0)
                     {
                         var percent = (int)(processedEntries * 100 / totalEntries);
-                        progress?.Report($"Extracting... {percent}%");
+                        // Report only percentage - caller shows localized "Extracting..." message
+                        progress?.Report($"{percent}%");
                     }
                 }
             }
@@ -186,8 +216,17 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
     public bool TryGetZipUrl(string repositoryUrl, out string zipUrl, out string? branch)
     {
+        // Try main branch first (most common default)
+        branch = "main";
+        return TryGetZipUrlWithBranch(repositoryUrl, branch, out zipUrl);
+    }
+
+    /// <summary>
+    /// Tries to get ZIP download URL for a specific branch.
+    /// </summary>
+    private bool TryGetZipUrlWithBranch(string repositoryUrl, string branchName, out string zipUrl)
+    {
         zipUrl = string.Empty;
-        branch = null;
 
         if (string.IsNullOrWhiteSpace(repositoryUrl))
             return false;
@@ -205,10 +244,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
         var owner = match.Groups["owner"].Value;
         var repo = match.Groups["repo"].Value;
 
-        // Default to main branch, will redirect to actual default if needed
-        branch = "main";
-        zipUrl = $"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip";
-
+        zipUrl = $"https://github.com/{owner}/{repo}/archive/refs/heads/{branchName}.zip";
         return true;
     }
 

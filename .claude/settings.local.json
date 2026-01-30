@@ -4,7 +4,13 @@
       "Bash(dotnet build:*)",
       "Bash(Select-String -Pattern \"error|warning|успешно\")",
       "Bash(Select-Object -Last 20)",
-      "Bash(dotnet test:*)"
+      "Bash(dotnet test:*)",
+      "Bash(curl:*)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(for file in *.json)",
+      "Bash(done)",
+      "Bash(git check-ignore:*)"
     ]
   }
 }

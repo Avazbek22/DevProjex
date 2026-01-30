@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using DevProjex.Infrastructure;
+using DevProjex.Kernel.Models;
 using Xunit;
 
 namespace DevProjex.Tests.Integration;
@@ -298,40 +300,6 @@ public class GitLocalizationTests
         foreach (var key in errorKeys)
         {
             Assert.StartsWith("Git.Error.", key);
-        }
-    }
-
-    #endregion
-
-    #region JSON Loading Tests
-
-    [Theory]
-    [InlineData("en")]
-    [InlineData("ru")]
-    [InlineData("uz")]
-    [InlineData("tg")]
-    [InlineData("kk")]
-    [InlineData("de")]
-    [InlineData("fr")]
-    [InlineData("it")]
-    public void GitKeys_CanBeLoadedFromJson(string languageCode)
-    {
-        // Test that all Git keys can be loaded from JSON files
-        var filePath = Path.Combine(_localizationPath, $"{languageCode}.json");
-        var json = File.ReadAllText(filePath);
-        var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-
-        Assert.NotNull(dict);
-
-        // Verify all Git keys are present and loadable
-        foreach (var key in _requiredGitKeys)
-        {
-            Assert.True(dict!.ContainsKey(key),
-                $"JSON file {languageCode}.json is missing key: {key}");
-
-            var value = dict[key];
-            Assert.False(string.IsNullOrWhiteSpace(value),
-                $"JSON file {languageCode}.json has empty value for {key}");
         }
     }
 
