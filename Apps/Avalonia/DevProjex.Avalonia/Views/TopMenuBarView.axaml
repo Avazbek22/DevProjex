@@ -101,16 +101,5 @@
       <views:HelpPopoverView Name="HelpDocsPopover" />
     </Popup>
 
-    <!-- Git Clone Popover (centered in window) -->
-    <Popup Name="GitClonePopup"
-           IsOpen="{Binding GitClonePopoverOpen, Mode=TwoWay}"
-           IsLightDismissEnabled="False"
-           PlacementConstraintAdjustment="None"
-           Placement="AnchorAndGravity"
-           PlacementAnchor="TopLeft"
-           PlacementGravity="BottomRight"
-           PlacementTarget="{Binding #RootGrid}">
-      <views:GitClonePopoverView Name="GitClonePopover" />
-    </Popup>
   </Grid>
 </UserControl>

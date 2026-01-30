@@ -59,9 +59,6 @@ public partial class TopMenuBarView : UserControl
 
     // Git events
     public event EventHandler<RoutedEventArgs>? GitCloneRequested;
-    public event EventHandler<RoutedEventArgs>? GitCloneCloseRequested;
-    public event EventHandler<RoutedEventArgs>? GitCloneStartRequested;
-    public event EventHandler<RoutedEventArgs>? GitCloneCancelRequested;
     public event EventHandler<RoutedEventArgs>? GitGetUpdatesRequested;
     public event EventHandler<string>? GitBranchSwitchRequested;
 
@@ -107,20 +104,6 @@ public partial class TopMenuBarView : UserControl
         {
             helpDocsPopup.Opened += OnHelpDocsPopupOpened;
             helpDocsPopup.Closed += OnHelpDocsPopupClosed;
-        }
-
-        var gitClonePopover = GitClonePopover;
-        if (gitClonePopover is not null)
-        {
-            gitClonePopover.CloseRequested += (_, e) => GitCloneCloseRequested?.Invoke(this, e);
-            gitClonePopover.StartCloneRequested += (_, e) => GitCloneStartRequested?.Invoke(this, e);
-            gitClonePopover.CancelRequested += (_, e) => GitCloneCancelRequested?.Invoke(this, e);
-        }
-
-        var gitClonePopup = GitClonePopup;
-        if (gitClonePopup is not null)
-        {
-            gitClonePopup.Opened += OnGitClonePopupOpened;
         }
     }
 
@@ -193,88 +176,6 @@ public partial class TopMenuBarView : UserControl
     public void OnGitBranchSwitch(string branchName) => GitBranchSwitchRequested?.Invoke(this, branchName);
 
     public MenuItem? GitBranchMenuItemControl => GitBranchMenuItem;
-
-    private void OnGitClonePopupOpened(object? sender, EventArgs e)
-    {
-        ApplyPopupBackdrop(GitClonePopup);
-        CenterGitClonePopupInWindow();
-        FocusGitCloneUrlTextBox();
-    }
-
-    /// <summary>
-    /// Centers the Git clone popup in the main window.
-    /// </summary>
-    private void CenterGitClonePopupInWindow()
-    {
-        var popup = GitClonePopup;
-        var popover = GitClonePopover;
-        if (popup is null || popover is null)
-            return;
-
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null)
-            return;
-
-        // Reset offsets first
-        popup.HorizontalOffset = 0;
-        popup.VerticalOffset = 0;
-
-        // Schedule positioning after layout is complete
-        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            try
-            {
-                var windowBounds = topLevel.Bounds;
-
-                // Force measure to get actual size
-                popover.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                var popoverSize = popover.DesiredSize;
-
-                if (popoverSize.Width <= 0 || popoverSize.Height <= 0)
-                    popoverSize = popover.Bounds.Size;
-
-                // Get RootGrid position relative to TopLevel to account for its offset
-                var rootGrid = RootGrid;
-                var gridOffset = rootGrid?.TranslatePoint(new Point(0, 0), topLevel) ?? new Point(0, 0);
-
-                // Calculate center position in window coordinates
-                var centerX = (windowBounds.Width - popoverSize.Width) / 2;
-                var centerY = (windowBounds.Height - popoverSize.Height) / 2;
-
-                // Subtract grid offset since popup is positioned relative to RootGrid
-                popup.HorizontalOffset = centerX - gridOffset.X;
-                popup.VerticalOffset = centerY - gridOffset.Y;
-            }
-            catch
-            {
-                // Ignore positioning errors
-            }
-        }, global::Avalonia.Threading.DispatcherPriority.Loaded);
-    }
-
-    /// <summary>
-    /// Sets keyboard focus to the URL TextBox in Git clone popover.
-    /// </summary>
-    private void FocusGitCloneUrlTextBox()
-    {
-        // Schedule focus after layout and rendering are complete
-        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            try
-            {
-                var textBox = GitClonePopover?.UrlTextBoxControl;
-                if (textBox is not null)
-                {
-                    textBox.Focus();
-                    textBox.SelectAll();
-                }
-            }
-            catch
-            {
-                // Ignore focus errors
-            }
-        }, global::Avalonia.Threading.DispatcherPriority.Input);
-    }
 
     private void OnThemePopupOpened(object? sender, EventArgs e)
     {

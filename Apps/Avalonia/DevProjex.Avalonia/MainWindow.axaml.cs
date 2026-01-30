@@ -82,6 +82,7 @@ public partial class MainWindow : Window
     private int _filterApplyVersion;
     private CancellationTokenSource? _refreshCts;
     private CancellationTokenSource? _gitCloneCts;
+    private GitCloneWindow? _gitCloneWindow;
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -439,8 +440,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ShowErrorAsync(string message) =>
-        await MessageDialog.ShowAsync(this, _localization["Msg.ErrorTitle"], message);
+    private async Task ShowErrorAsync(string message)
+    {
+        // Show error relative to Git Clone window if it's open, otherwise relative to main window
+        var owner = _gitCloneWindow ?? (Window)this;
+        await MessageDialog.ShowAsync(owner, _localization["Msg.ErrorTitle"], message);
+    }
 
     private async Task ShowInfoAsync(string message) =>
         await MessageDialog.ShowAsync(this, _localization["Msg.InfoTitle"], message);
@@ -776,14 +781,25 @@ public partial class MainWindow : Window
         _viewModel.GitCloneUrl = string.Empty;
         _viewModel.GitCloneStatus = string.Empty;
         _viewModel.GitCloneInProgress = false;
-        _viewModel.GitClonePopoverOpen = true;
+
+        // Create and show Git Clone window
+        _gitCloneWindow = new GitCloneWindow
+        {
+            DataContext = _viewModel
+        };
+
+        _gitCloneWindow.StartCloneRequested += OnGitCloneStart;
+        _gitCloneWindow.CancelRequested += OnGitCloneCancel;
+
+        _gitCloneWindow.ShowDialog(this);
         e.Handled = true;
     }
 
     private void OnGitCloneClose(object? sender, RoutedEventArgs e)
     {
         CancelGitCloneOperation();
-        _viewModel.GitClonePopoverOpen = false;
+        _gitCloneWindow?.Close();
+        _gitCloneWindow = null;
         e.Handled = true;
     }
 
@@ -819,7 +835,8 @@ public partial class MainWindow : Window
             if (!hasInternet)
             {
                 _viewModel.GitCloneInProgress = false;
-                _viewModel.GitClonePopoverOpen = false;
+                _gitCloneWindow?.Close();
+                _gitCloneWindow = null;
                 await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
                 return;
             }
@@ -881,14 +898,16 @@ public partial class MainWindow : Window
             if (!result.Success)
             {
                 _repoCacheService.DeleteRepositoryDirectory(targetPath);
-                _viewModel.GitClonePopoverOpen = false;
+                _gitCloneWindow?.Close();
+                _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
                 await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
                 return;
             }
 
             // Successfully cloned - open the project
-            _viewModel.GitClonePopoverOpen = false;
+            _gitCloneWindow?.Close();
+            _gitCloneWindow = null;
             _viewModel.GitCloneInProgress = false;
             _viewModel.ProjectSourceType = result.SourceType;
             _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
@@ -913,7 +932,8 @@ public partial class MainWindow : Window
             if (targetPath is not null)
                 _repoCacheService.DeleteRepositoryDirectory(targetPath);
 
-            _viewModel.GitClonePopoverOpen = false;
+            _gitCloneWindow?.Close();
+            _gitCloneWindow = null;
             await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
         }
         finally
@@ -932,7 +952,8 @@ public partial class MainWindow : Window
         }
         else
         {
-            _viewModel.GitClonePopoverOpen = false;
+            _gitCloneWindow?.Close();
+            _gitCloneWindow = null;
         }
         e.Handled = true;
     }

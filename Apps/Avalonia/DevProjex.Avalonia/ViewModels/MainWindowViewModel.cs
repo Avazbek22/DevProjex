@@ -48,7 +48,6 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _themePopoverOpen;
     private bool _helpPopoverOpen;
     private bool _helpDocsPopoverOpen;
-    private bool _gitClonePopoverOpen;
 
     // Git state
     private ProjectSourceType _projectSourceType = ProjectSourceType.LocalFolder;
@@ -336,17 +335,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (_helpDocsPopoverOpen == value) return;
             _helpDocsPopoverOpen = value;
-            RaisePropertyChanged();
-        }
-    }
-
-    public bool GitClonePopoverOpen
-    {
-        get => _gitClonePopoverOpen;
-        set
-        {
-            if (_gitClonePopoverOpen == value) return;
-            _gitClonePopoverOpen = value;
             RaisePropertyChanged();
         }
     }
