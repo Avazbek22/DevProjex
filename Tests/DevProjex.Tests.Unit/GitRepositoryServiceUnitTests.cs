@@ -102,8 +102,8 @@ public class GitRepositoryServiceUnitTests
         var testPath = "/tmp/test";
 
         // This is a structural test verifying the pattern is correct
-        Assert.True(testUrl.StartsWith("https://"));
-        Assert.True(testPath.Length > 0);
+        Assert.StartsWith("https://", testUrl);
+        Assert.NotEmpty(testPath);
     }
 
     #endregion

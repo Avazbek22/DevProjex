@@ -19,9 +19,8 @@
         <MenuItem Header="{Binding MenuGitGetUpdates}" Click="OnGitGetUpdates" IsEnabled="{Binding IsGitMode}" />
       </MenuItem>
       <MenuItem Header="{Binding MenuCopy}" IsEnabled="{Binding IsProjectLoaded}">
-        <MenuItem Header="{Binding MenuCopyFullTree}" Click="OnCopyFullTree" />
-        <MenuItem Header="{Binding MenuCopySelectedTree}" Click="OnCopySelectedTree" />
-        <MenuItem Header="{Binding MenuCopySelectedContent}" Click="OnCopySelectedContent" />
+        <MenuItem Header="{Binding MenuCopyTree}" Click="OnCopyTree" />
+        <MenuItem Header="{Binding MenuCopyContent}" Click="OnCopyContent" />
         <MenuItem Header="{Binding MenuCopyTreeAndContent}" Click="OnCopyTreeAndContent" />
       </MenuItem>
       <MenuItem Header="{Binding MenuView}" IsEnabled="{Binding IsProjectLoaded}">

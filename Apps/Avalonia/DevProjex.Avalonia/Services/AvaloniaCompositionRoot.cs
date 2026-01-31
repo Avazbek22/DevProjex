@@ -37,6 +37,7 @@ public static class AvaloniaCompositionRoot
         var treeExportService = new TreeExportService();
         var contentExportService = new SelectedContentExportService();
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
+        var toastService = new ToastService();
         var elevation = new ElevationService();
         var themePresetStore = new ThemePresetStore();
         var gitRepositoryService = new GitRepositoryService();
@@ -56,6 +57,7 @@ public static class AvaloniaCompositionRoot
             TreeExportService: treeExportService,
             ContentExportService: contentExportService,
             TreeAndContentExportService: treeAndContentExportService,
+            ToastService: toastService,
             IconStore: iconStore,
             GitRepositoryService: gitRepositoryService,
             RepoCacheService: repoCacheService,

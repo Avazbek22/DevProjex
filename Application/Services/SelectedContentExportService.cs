@@ -1,10 +1,14 @@
 using System.Text;
+using DevProjex.Kernel;
 
 namespace DevProjex.Application.Services;
 
 public sealed class SelectedContentExportService
 {
 	private const string ClipboardBlankLine = "\u00A0"; // NBSP: looks empty but won't collapse on paste
+	private const string NoContentMarker = "[No Content, 0 bytes]";
+	private const string WhitespaceMarkerPrefix = "[Whitespace, ";
+	private const string WhitespaceMarkerSuffix = " bytes]";
 
 	public string Build(IEnumerable<string> filePaths) => BuildAsync(filePaths, CancellationToken.None).GetAwaiter().GetResult();
 
@@ -12,8 +16,8 @@ public sealed class SelectedContentExportService
 	{
 		var files = filePaths
 			.Where(p => !string.IsNullOrWhiteSpace(p))
-			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+			.Distinct(PathComparer.Default)
+			.OrderBy(p => p, PathComparer.Default)
 			.ToList();
 
 		if (files.Count == 0)
@@ -26,8 +30,8 @@ public sealed class SelectedContentExportService
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
-			var (success, text) = await TryReadFileTextForClipboardAsync(file, cancellationToken).ConfigureAwait(false);
-			if (!success)
+			var (result, text, sizeBytes) = await TryReadFileTextForClipboardAsync(file, cancellationToken).ConfigureAwait(false);
+			if (result == ContentReadResult.None)
 				continue;
 
 			if (anyWritten)
@@ -40,22 +44,35 @@ public sealed class SelectedContentExportService
 
 			sb.AppendLine($"{file}:");
 			AppendClipboardBlankLine(sb);
-			sb.AppendLine(text);
+
+			switch (result)
+			{
+				case ContentReadResult.Empty:
+					sb.AppendLine(NoContentMarker);
+					break;
+				case ContentReadResult.Whitespace:
+					sb.AppendLine($"{WhitespaceMarkerPrefix}{sizeBytes}{WhitespaceMarkerSuffix}");
+					break;
+				default:
+					sb.AppendLine(text);
+					break;
+			}
 		}
 
 		return anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
 	}
 
-	private static async Task<(bool Success, string Text)> TryReadFileTextForClipboardAsync(string path, CancellationToken cancellationToken)
+	private static async Task<(ContentReadResult Result, string Text, long SizeBytes)> TryReadFileTextForClipboardAsync(string path, CancellationToken cancellationToken)
 	{
 		try
 		{
 			if (!File.Exists(path))
-				return (false, string.Empty);
+				return (ContentReadResult.None, string.Empty, 0);
 
 			var fi = new FileInfo(path);
-			if (fi.Length == 0)
-				return (false, string.Empty);
+			var sizeBytes = fi.Length;
+			if (sizeBytes == 0)
+				return (ContentReadResult.Empty, string.Empty, 0);
 
 			// Check for binary content (first 8KB)
 			await using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 4096, useAsync: true))
@@ -67,7 +84,7 @@ public sealed class SelectedContentExportService
 				for (int i = 0; i < read; i++)
 				{
 					if (buffer[i] == 0)
-						return (false, string.Empty);
+						return (ContentReadResult.None, string.Empty, sizeBytes);
 				}
 			}
 
@@ -76,13 +93,15 @@ public sealed class SelectedContentExportService
 				raw = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
 
 			if (string.IsNullOrWhiteSpace(raw))
-				return (false, string.Empty);
+				return (ContentReadResult.Whitespace, string.Empty, sizeBytes);
 
 			if (raw.IndexOf('\0') >= 0)
-				return (false, string.Empty);
+				return (ContentReadResult.None, string.Empty, sizeBytes);
 
 			var text = raw.TrimEnd('\r', '\n');
-			return string.IsNullOrWhiteSpace(text) ? (false, string.Empty) : (true, text);
+			return string.IsNullOrWhiteSpace(text)
+				? (ContentReadResult.Whitespace, string.Empty, sizeBytes)
+				: (ContentReadResult.Text, text, sizeBytes);
 		}
 		catch (OperationCanceledException)
 		{
@@ -90,9 +109,17 @@ public sealed class SelectedContentExportService
 		}
 		catch
 		{
-			return (false, string.Empty);
+			return (ContentReadResult.None, string.Empty, 0);
 		}
 	}
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
+
+	private enum ContentReadResult
+	{
+		None,
+		Text,
+		Empty,
+		Whitespace
+	}
 }

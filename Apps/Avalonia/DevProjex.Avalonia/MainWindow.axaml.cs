@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private readonly TreeExportService _treeExport;
     private readonly SelectedContentExportService _contentExport;
     private readonly TreeAndContentExportService _treeAndContentExport;
+    private readonly IToastService _toastService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
     private readonly ThemePresetStore _themePresetStore;
@@ -102,6 +103,7 @@ public partial class MainWindow : Window
         _treeExport = services.TreeExportService;
         _contentExport = services.ContentExportService;
         _treeAndContentExport = services.TreeAndContentExportService;
+        _toastService = services.ToastService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
         _themePresetStore = services.ThemePresetStore;
@@ -110,6 +112,7 @@ public partial class MainWindow : Window
         _zipDownloadService = services.ZipDownloadService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
+        _viewModel.SetToastItems(_toastService.Items);
         DataContext = _viewModel;
 
         InitializeComponent();
@@ -502,36 +505,27 @@ public partial class MainWindow : Window
 
     private void OnExit(object? sender, RoutedEventArgs e) => Close();
 
-    private async void OnCopyFullTree(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (!EnsureTreeReady()) return;
-
-            var content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
-            await SetClipboardTextAsync(content);
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync(ex.Message);
-        }
-    }
-
-    private async void OnCopySelectedTree(object? sender, RoutedEventArgs e)
+    private async void OnCopyTree(object? sender, RoutedEventArgs e)
     {
         try
         {
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            var content = _treeExport.BuildSelectedTree(_currentPath!, _currentTree!.Root, selected);
-            if (string.IsNullOrWhiteSpace(content))
+            string content;
+            if (selected.Count > 0)
             {
-                await ShowInfoAsync(_localization["Msg.NoCheckedTree"]);
-                return;
+                content = _treeExport.BuildSelectedTree(_currentPath!, _currentTree!.Root, selected);
+                if (string.IsNullOrWhiteSpace(content))
+                    content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
+            }
+            else
+            {
+                content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
             }
 
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
         {
@@ -539,21 +533,24 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnCopySelectedContent(object? sender, RoutedEventArgs e)
+    private async void OnCopyContent(object? sender, RoutedEventArgs e)
     {
         try
         {
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            var files = selected.Where(File.Exists)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
+                .Distinct(PathComparer.Default)
+                .OrderBy(path => path, PathComparer.Default)
                 .ToList();
 
             if (files.Count == 0)
             {
-                await ShowInfoAsync(_localization["Msg.NoCheckedFiles"]);
+                if (selected.Count > 0)
+                    await ShowInfoAsync(_localization["Msg.NoCheckedFiles"]);
+                else
+                    await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
@@ -566,6 +563,7 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
@@ -583,6 +581,7 @@ public partial class MainWindow : Window
             // Run file reading off UI thread
             var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
@@ -760,6 +759,7 @@ public partial class MainWindow : Window
     private void OnResetSettings(object? sender, RoutedEventArgs e)
     {
         ResetThemeSettings();
+        _toastService.Show(_localization["Toast.Settings.Reset"]);
         e.Handled = true;
     }
 
@@ -923,6 +923,7 @@ public partial class MainWindow : Window
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
                 await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
+                _toastService.Show(_localization["Toast.Git.CloneError"]);
                 return;
             }
 
@@ -945,6 +946,9 @@ public partial class MainWindow : Window
             // Load branches if Git mode
             if (result.SourceType == ProjectSourceType.GitClone)
                 await RefreshGitBranchesAsync(result.LocalPath);
+
+            if (_currentPath == result.LocalPath)
+                _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
         }
         catch (OperationCanceledException)
         {
@@ -964,6 +968,7 @@ public partial class MainWindow : Window
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
             await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
+            _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
         {
@@ -1003,6 +1008,7 @@ public partial class MainWindow : Window
             Cursor = new Cursor(StandardCursorType.Wait);
 
             var progress = new Progress<string>(_ => { });
+            var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath);
             var success = await _gitService.PullUpdatesAsync(_currentPath, progress);
 
             if (!success)
@@ -1014,6 +1020,12 @@ public partial class MainWindow : Window
             // Refresh branches and tree
             await RefreshGitBranchesAsync(_currentPath);
             await ReloadProjectAsync();
+
+            var afterHash = await _gitService.GetHeadCommitAsync(_currentPath);
+            if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
+                _toastService.Show(_localization["Toast.Git.NoUpdates"]);
+            else
+                _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
         }
         catch (Exception ex)
         {
@@ -1051,6 +1063,7 @@ public partial class MainWindow : Window
             // Refresh branches and tree
             await RefreshGitBranchesAsync(_currentPath);
             await ReloadProjectAsync();
+            _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
         }
         catch (Exception ex)
         {
@@ -1128,9 +1141,33 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void OnSearchNext(object? sender, RoutedEventArgs e) => _searchCoordinator.Navigate(1);
+    private void OnSearchNext(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
+            return;
 
-    private void OnSearchPrev(object? sender, RoutedEventArgs e) => _searchCoordinator.Navigate(-1);
+        if (!_searchCoordinator.HasMatches)
+        {
+            _toastService.Show(_localization["Toast.NoMatches"]);
+            return;
+        }
+
+        _searchCoordinator.Navigate(1);
+    }
+
+    private void OnSearchPrev(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
+            return;
+
+        if (!_searchCoordinator.HasMatches)
+        {
+            _toastService.Show(_localization["Toast.NoMatches"]);
+            return;
+        }
+
+        _searchCoordinator.Navigate(-1);
+    }
 
     private void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
@@ -1382,21 +1419,21 @@ public partial class MainWindow : Window
         // Copy hotkeys (как WinForms)
         if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.C)
         {
-            OnCopyFullTree(this, new RoutedEventArgs());
+            OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
         if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.C)
         {
-            OnCopySelectedTree(this, new RoutedEventArgs());
+            OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
         if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.V)
         {
-            OnCopySelectedContent(this, new RoutedEventArgs());
+            OnCopyContent(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
@@ -1546,11 +1583,10 @@ public partial class MainWindow : Window
     {
         // In Store builds, show a localized hint instead of attempting elevation.
         // Note: fire-and-forget here is acceptable as this is a terminal state (window closing or showing info)
-        if (!BuildFlags.AllowElevation)
-        {
-            _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
-            return false;
-        }
+#if DEVPROJEX_STORE
+        _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
+        return false;
+#endif
 
         if (_elevation.IsAdministrator) return false;
         if (_elevationAttempted) return false;
@@ -1700,6 +1736,9 @@ public partial class MainWindow : Window
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
 
+            if (!string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
+                _toastService.Show(_localization["Toast.NoMatches"]);
+
             _searchCoordinator.UpdateSearchMatches();
 
             // Suggest GC to collect old tree objects after building new one
@@ -1779,10 +1818,25 @@ public partial class MainWindow : Window
 
     private HashSet<string> GetCheckedPaths()
     {
-        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var selected = new HashSet<string>(PathComparer.Default);
         foreach (var node in _viewModel.TreeNodes)
             CollectChecked(node, selected);
         return selected;
+    }
+
+    private static IEnumerable<string> EnumerateFilePaths(TreeNodeDescriptor node)
+    {
+        if (!node.IsDirectory)
+        {
+            yield return node.FullPath;
+            yield break;
+        }
+
+        foreach (var child in node.Children)
+        {
+            foreach (var path in EnumerateFilePaths(child))
+                yield return path;
+        }
     }
 
     private static void CollectChecked(TreeNodeViewModel node, HashSet<string> selected)
@@ -1800,7 +1854,7 @@ public partial class MainWindow : Window
             .SelectMany(node => node.Flatten())
             .Where(node => node.IsExpanded)
             .Select(node => node.FullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(PathComparer.Default);
     }
 
     private void RestoreExpandedNodes(HashSet<string> expandedPaths)

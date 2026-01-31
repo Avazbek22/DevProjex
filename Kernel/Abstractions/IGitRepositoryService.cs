@@ -46,6 +46,13 @@ public interface IGitRepositoryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets the current HEAD commit hash.
+    /// </summary>
+    Task<string?> GetHeadCommitAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the current branch name.
     /// </summary>
     Task<string?> GetCurrentBranchAsync(

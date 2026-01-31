@@ -495,6 +495,34 @@ public sealed class GitRepositoryService : IGitRepositoryService
         }
     }
 
+    public async Task<string?> GetHeadCommitAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await RunGitCommandAsync(
+                repositoryPath,
+                "rev-parse HEAD",
+                cancellationToken);
+
+            if (result.ExitCode != 0)
+                return null;
+
+            return string.IsNullOrWhiteSpace(result.Output)
+                ? null
+                : result.Output.Trim();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Gets the name of the currently checked out branch.
     /// Returns null if in detached HEAD state or on error.

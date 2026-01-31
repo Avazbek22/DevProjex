@@ -19,6 +19,7 @@ public sealed record AvaloniaAppServices(
     TreeExportService TreeExportService,
     SelectedContentExportService ContentExportService,
     TreeAndContentExportService TreeAndContentExportService,
+    IToastService ToastService,
     IIconStore IconStore,
     IGitRepositoryService GitRepositoryService,
     IRepoCacheService RepoCacheService,
