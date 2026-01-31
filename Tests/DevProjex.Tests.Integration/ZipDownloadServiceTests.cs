@@ -40,7 +40,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), "DevProjexZipTests", Guid.NewGuid().ToString("N"));
+        _tempDir = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "ZipTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDir);
         return Task.CompletedTask;
     }

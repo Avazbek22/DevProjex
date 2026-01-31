@@ -41,7 +41,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _gitAvailable = await _service.IsGitAvailableAsync();
-        _tempDir = Path.Combine(Path.GetTempPath(), "DevProjexGitTests", Guid.NewGuid().ToString("N"));
+        _tempDir = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDir);
     }
 
