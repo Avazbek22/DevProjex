@@ -34,7 +34,8 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         _zipService = new ZipDownloadService();
         _gitService = new GitRepositoryService();
-        _cacheService = new RepoCacheService();
+        var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitIntegration");
+        _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();
     }
 

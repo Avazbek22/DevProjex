@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using DevProjex.Infrastructure.Git;
@@ -22,7 +23,8 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public GitBranchOperationsTests()
     {
         _service = new GitRepositoryService();
-        _cacheService = new RepoCacheService();
+        var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitIntegration");
+        _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();
     }
 

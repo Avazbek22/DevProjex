@@ -24,7 +24,8 @@ public sealed class GitCacheLifecycleTests : IDisposable
     public GitCacheLifecycleTests()
     {
         _gitService = new GitRepositoryService();
-        _cacheService = new RepoCacheService();
+        var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitIntegration");
+        _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();
     }
 
@@ -173,11 +174,12 @@ public sealed class GitCacheLifecycleTests : IDisposable
 
         try
         {
-            // Assert
+            // Assert - tests use custom cache path under Tests/GitIntegration
             var expectedRoot = Path.Combine(
                 Path.GetTempPath(),
                 "DevProjex",
-                "RepoCache");
+                "Tests",
+                "GitIntegration");
 
             var normalizedExpected = expectedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var normalizedCacheDir = cacheDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

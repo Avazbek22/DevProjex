@@ -22,6 +22,14 @@ public sealed class RepoCacheService : IRepoCacheService
 		CacheRootPath = Path.Combine(tempPath, AppFolderName, CacheFolderName);
 	}
 
+	/// <summary>
+	/// Constructor for testing with custom cache path.
+	/// </summary>
+	public RepoCacheService(string customCachePath)
+	{
+		CacheRootPath = customCachePath ?? throw new ArgumentNullException(nameof(customCachePath));
+	}
+
 	public string CreateRepositoryDirectory(string repositoryUrl)
 	{
 		var repoName = ExtractRepoName(repositoryUrl);

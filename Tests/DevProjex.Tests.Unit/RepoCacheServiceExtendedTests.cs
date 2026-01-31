@@ -18,8 +18,7 @@ public sealed class RepoCacheServiceExtendedTests : IDisposable
     {
         // Use temp directory for testing to avoid polluting real cache
         _testCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "ExtendedCacheTests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testCacheRoot);
-        _service = new RepoCacheService();
+        _service = new RepoCacheService(_testCacheRoot);
     }
 
     public void Dispose()
@@ -51,7 +50,7 @@ public sealed class RepoCacheServiceExtendedTests : IDisposable
             Assert.NotNull(path);
             Assert.NotEmpty(path);
             Assert.True(Directory.Exists(path));
-            Assert.Contains("RepoCache", path);
+            Assert.Contains("Tests", path);
         }
         finally
         {
@@ -273,7 +272,7 @@ public sealed class RepoCacheServiceExtendedTests : IDisposable
 
         Assert.StartsWith(tempPath, normalizedCacheRoot, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DevProjex", cacheRoot);
-        Assert.Contains("RepoCache", cacheRoot);
+        Assert.Contains("Tests", cacheRoot);
     }
 
     [Fact]

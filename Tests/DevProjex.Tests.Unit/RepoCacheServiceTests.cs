@@ -18,10 +18,9 @@ public class RepoCacheServiceTests : IDisposable
 
     public RepoCacheServiceTests()
     {
-        _service = new RepoCacheService();
         _originalCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "RepoCache");
         _testCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "CacheTests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testCacheRoot);
+        _service = new RepoCacheService(_testCacheRoot);
     }
 
     public void Dispose()
@@ -129,8 +128,8 @@ public class RepoCacheServiceTests : IDisposable
         {
             // Both should be created and be different
             Assert.NotEqual(dir1, dir2);
-            Assert.Contains("RepoCache", dir1);
-            Assert.Contains("RepoCache", dir2);
+            Assert.Contains("Tests", dir1);
+            Assert.Contains("Tests", dir2);
         }
         finally
         {
