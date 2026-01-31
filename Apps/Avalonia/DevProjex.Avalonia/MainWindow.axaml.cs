@@ -225,19 +225,8 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterExpansionSnapshot = null;
 
-        // Clean up repository cache on exit (async fire-and-forget)
-        // This ensures proper cleanup with retry logic
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _repoCacheService.ClearAllCacheAsync();
-            }
-            catch
-            {
-                // Best effort - ignore errors on shutdown
-            }
-        });
+        // Clean up repository cache on exit
+        _repoCacheService.ClearAllCache();
 
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
@@ -869,7 +858,7 @@ public partial class MainWindow : Window
             // Clean up previous cached repository before cloning a new one
             if (_currentCachedRepoPath is not null)
             {
-                await _repoCacheService.DeleteRepositoryDirectoryAsync(_currentCachedRepoPath, cancellationToken);
+                _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
                 _currentCachedRepoPath = null;
             }
 
@@ -929,7 +918,7 @@ public partial class MainWindow : Window
 
             if (!result.Success)
             {
-                await _repoCacheService.DeleteRepositoryDirectoryAsync(targetPath, cancellationToken);
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
@@ -962,14 +951,14 @@ public partial class MainWindow : Window
             if (targetPath is not null)
             {
                 // Use default cancellation token since operation was cancelled
-                _ = _repoCacheService.DeleteRepositoryDirectoryAsync(targetPath);
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
             }
         }
         catch (Exception ex)
         {
             if (targetPath is not null)
             {
-                _ = _repoCacheService.DeleteRepositoryDirectoryAsync(targetPath);
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
             }
 
             _gitCloneWindow?.Close();
@@ -1543,7 +1532,7 @@ public partial class MainWindow : Window
             // This ensures the previous Git clone cache gets cleaned up
             if (_currentCachedRepoPath is not null)
             {
-                await _repoCacheService.DeleteRepositoryDirectoryAsync(_currentCachedRepoPath);
+                _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
                 _currentCachedRepoPath = null;
             }
         }

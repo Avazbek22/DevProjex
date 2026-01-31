@@ -19,8 +19,8 @@ public class RepoCacheServiceTests : IDisposable
     public RepoCacheServiceTests()
     {
         _service = new RepoCacheService();
-        _originalCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "RepositoryCache");
-        _testCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjexTests", "CacheTests", Guid.NewGuid().ToString("N"));
+        _originalCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "RepoCache");
+        _testCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "CacheTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testCacheRoot);
     }
 

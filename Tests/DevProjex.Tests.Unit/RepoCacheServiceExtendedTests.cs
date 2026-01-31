@@ -17,7 +17,7 @@ public sealed class RepoCacheServiceExtendedTests : IDisposable
     public RepoCacheServiceExtendedTests()
     {
         // Use temp directory for testing to avoid polluting real cache
-        _testCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjex_Test_Cache", Guid.NewGuid().ToString());
+        _testCacheRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "ExtendedCacheTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testCacheRoot);
         _service = new RepoCacheService();
     }
