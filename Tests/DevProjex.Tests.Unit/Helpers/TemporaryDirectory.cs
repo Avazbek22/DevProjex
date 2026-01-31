@@ -7,7 +7,7 @@ internal sealed class TemporaryDirectory : IDisposable
 {
 	public TemporaryDirectory()
 	{
-		Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));
+		Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "DevProjex", "Tests", "Temp", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(Path);
 	}
 
