@@ -1,6 +1,6 @@
-using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Media;
+using System.Collections.ObjectModel;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Models;
@@ -618,6 +618,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuCopyTree { get; private set; } = string.Empty;
     public string MenuCopyContent { get; private set; } = string.Empty;
     public string MenuCopyTreeAndContent { get; private set; } = string.Empty;
+    public ObservableCollection<ToastMessageViewModel> ToastItems { get; private set; } = new();
     public string MenuView { get; private set; } = string.Empty;
     public string MenuViewExpandAll { get; private set; } = string.Empty;
     public string MenuViewCollapseAll { get; private set; } = string.Empty;
@@ -871,6 +872,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(GitErrorUpdateFailed));
         RaisePropertyChanged(nameof(DialogOK));
         RaisePropertyChanged(nameof(DialogCancel));
+    }
+
+    public void SetToastItems(ObservableCollection<ToastMessageViewModel> items)
+    {
+        ToastItems = items;
+        RaisePropertyChanged(nameof(ToastItems));
     }
 
     /// <summary>

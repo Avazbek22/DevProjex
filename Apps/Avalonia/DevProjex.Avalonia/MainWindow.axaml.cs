@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private readonly TreeExportService _treeExport;
     private readonly SelectedContentExportService _contentExport;
     private readonly TreeAndContentExportService _treeAndContentExport;
+    private readonly IToastService _toastService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
     private readonly ThemePresetStore _themePresetStore;
@@ -102,6 +103,7 @@ public partial class MainWindow : Window
         _treeExport = services.TreeExportService;
         _contentExport = services.ContentExportService;
         _treeAndContentExport = services.TreeAndContentExportService;
+        _toastService = services.ToastService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
         _themePresetStore = services.ThemePresetStore;
@@ -110,6 +112,7 @@ public partial class MainWindow : Window
         _zipDownloadService = services.ZipDownloadService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
+        _viewModel.SetToastItems(_toastService.Items);
         DataContext = _viewModel;
 
         InitializeComponent();
@@ -522,6 +525,7 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
         {
@@ -559,6 +563,7 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
@@ -576,6 +581,7 @@ public partial class MainWindow : Window
             // Run file reading off UI thread
             var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {

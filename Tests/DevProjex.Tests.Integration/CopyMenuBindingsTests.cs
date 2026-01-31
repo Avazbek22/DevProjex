@@ -26,9 +26,9 @@ public sealed class CopyMenuBindingsTests
 		var treeMatches = Regex.Matches(content, "Header=\\\"\\{Binding MenuCopyTree\\}");
 		var contentMatches = Regex.Matches(content, "Header=\\\"\\{Binding MenuCopyContent\\}");
 		var treeAndContentMatches = Regex.Matches(content, "Header=\\\"\\{Binding MenuCopyTreeAndContent\\}");
-		Assert.Equal(1, treeMatches.Count);
-		Assert.Equal(1, contentMatches.Count);
-		Assert.Equal(1, treeAndContentMatches.Count);
+		Assert.Single(treeMatches);
+		Assert.Single(contentMatches);
+		Assert.Single(treeAndContentMatches);
 	}
 
 	[Fact]

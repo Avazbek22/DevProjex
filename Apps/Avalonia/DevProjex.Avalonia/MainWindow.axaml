@@ -75,13 +75,14 @@
                          FilterKeyDown="OnFilterKeyDown"
                          FilterCloseRequested="OnFilterClose" />
 
-    <Grid ColumnDefinitions="*,Auto">
-      <TreeView Name="ProjectTree"
-                Grid.Column="0"
-                ItemsSource="{Binding TreeNodes}"
-                IsEnabled="{Binding IsProjectLoaded}"
-                FontFamily="{Binding SelectedFontFamily}"
-                FontSize="{Binding TreeFontSize}">
+    <Grid>
+      <Grid ColumnDefinitions="*,Auto">
+        <TreeView Name="ProjectTree"
+                  Grid.Column="0"
+                  ItemsSource="{Binding TreeNodes}"
+                  IsEnabled="{Binding IsProjectLoaded}"
+                  FontFamily="{Binding SelectedFontFamily}"
+                  FontSize="{Binding TreeFontSize}">
         <TreeView.ItemTemplate>
           <TreeDataTemplate ItemsSource="{Binding Children}">
             <Grid ColumnDefinitions="Auto,*">
@@ -113,13 +114,54 @@
         </TreeView.ItemTemplate>
       </TreeView>
 
-      <!-- Settings panel -->
-      <views:SettingsPanelView Grid.Column="1"
-                               Name="SettingsPanel"
-                               ApplySettingsRequested="OnApplySettings"
-                               IgnoreAllChanged="OnIgnoreAllChanged"
-                               ExtensionsAllChanged="OnExtensionsAllChanged"
-                               RootAllChanged="OnRootAllChanged" />
+        <!-- Settings panel -->
+        <views:SettingsPanelView Grid.Column="1"
+                                 Name="SettingsPanel"
+                                 ApplySettingsRequested="OnApplySettings"
+                                 IgnoreAllChanged="OnIgnoreAllChanged"
+                                 ExtensionsAllChanged="OnExtensionsAllChanged"
+                                 RootAllChanged="OnRootAllChanged" />
+      </Grid>
+
+      <ItemsControl ItemsSource="{Binding ToastItems}"
+                    IsHitTestVisible="False"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,38">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="8" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Border Background="{DynamicResource ThemePanelBrush}"
+                    CornerRadius="8"
+                    Padding="12,8"
+                    Opacity="{Binding Opacity}"
+                    MaxWidth="360"
+                    HorizontalAlignment="Center">
+              <Border.Transitions>
+                <Transitions>
+                  <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
+                </Transitions>
+              </Border.Transitions>
+              <Border.RenderTransform>
+                <TranslateTransform Y="{Binding OffsetY}">
+                  <TranslateTransform.Transitions>
+                    <Transitions>
+                      <DoubleTransition Property="Y" Duration="0:0:0.2" />
+                    </Transitions>
+                  </TranslateTransform.Transitions>
+                </TranslateTransform>
+              </Border.RenderTransform>
+              <TextBlock Text="{Binding Message}"
+                         TextWrapping="Wrap"
+                         FontSize="13" />
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
     </Grid>
   </DockPanel>
 </Window>
