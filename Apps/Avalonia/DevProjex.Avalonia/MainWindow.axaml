@@ -135,12 +135,14 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate>
-            <Border Background="{DynamicResource ThemePanelBrush}"
+            <Border Background="{DynamicResource AppPanelBrush}"
                     CornerRadius="8"
-                    Padding="12,8"
+                    Padding="14,10"
                     Opacity="{Binding Opacity}"
-                    MaxWidth="360"
-                    HorizontalAlignment="Center">
+                    MaxWidth="420"
+                    HorizontalAlignment="Center"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1">
               <Border.Transitions>
                 <Transitions>
                   <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
@@ -157,7 +159,8 @@
               </Border.RenderTransform>
               <TextBlock Text="{Binding Message}"
                          TextWrapping="Wrap"
-                         FontSize="13" />
+                         FontSize="14"
+                         Foreground="{DynamicResource AppTextBrush}" />
             </Border>
           </DataTemplate>
         </ItemsControl.ItemTemplate>

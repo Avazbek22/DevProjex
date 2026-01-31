@@ -7,7 +7,7 @@ namespace DevProjex.Avalonia.Services;
 public sealed class ToastService : IToastService
 {
 	private const int MaxToasts = 3;
-	private static readonly TimeSpan DisplayDuration = TimeSpan.FromSeconds(3);
+	private static readonly TimeSpan DisplayDuration = TimeSpan.FromSeconds(2);
 	private static readonly TimeSpan FadeDuration = TimeSpan.FromMilliseconds(200);
 	private static readonly TimeSpan UiAnimationDelay = TimeSpan.FromMilliseconds(10);
 
