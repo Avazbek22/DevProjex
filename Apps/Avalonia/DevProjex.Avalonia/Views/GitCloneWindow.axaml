@@ -10,6 +10,7 @@
         CanResize="False"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
+        SystemDecorations="BorderOnly"
         Icon="avares://DevProjex.Avalonia/AppIcon/icon-256.png">
   <Border Classes="theme-popover"
           Padding="16">
@@ -51,6 +52,7 @@
         <Button Content="{Binding DialogOK}"
                 Classes="primary-action"
                 MinWidth="80"
+                HorizontalContentAlignment="Center"
                 Click="OnStartClone"
                 IsVisible="{Binding !GitCloneInProgress}"
                 IsEnabled="{Binding GitCloneUrl.Length}" />
