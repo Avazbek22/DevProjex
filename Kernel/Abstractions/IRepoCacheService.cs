@@ -1,3 +1,6 @@
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace DevProjex.Kernel.Abstractions;
 
 /// <summary>
@@ -16,14 +19,32 @@ public interface IRepoCacheService
     string CreateRepositoryDirectory(string repositoryUrl);
 
     /// <summary>
-    /// Deletes a specific repository directory.
+    /// Deletes a specific repository directory (best-effort, may fail silently).
+    /// For reliable cleanup, use DeleteRepositoryDirectoryAsync.
     /// </summary>
     void DeleteRepositoryDirectory(string path);
 
     /// <summary>
-    /// Clears all cached repositories.
+    /// Deletes a specific repository directory with retry logic and proper error handling.
+    /// Returns true if deletion succeeded, false if deferred for later cleanup.
+    /// </summary>
+    Task<bool> DeleteRepositoryDirectoryAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Clears all cached repositories (best-effort, may fail silently).
     /// </summary>
     void ClearAllCache();
+
+    /// <summary>
+    /// Clears all cached repositories with retry logic.
+    /// </summary>
+    Task ClearAllCacheAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cleans up stale cache directories that failed to delete in previous sessions.
+    /// Should be called on application startup.
+    /// </summary>
+    void CleanupStaleCacheOnStartup();
 
     /// <summary>
     /// Checks if the given path is within the cache.
