@@ -615,9 +615,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuFileRefresh { get; private set; } = string.Empty;
     public string MenuFileExit { get; private set; } = string.Empty;
     public string MenuCopy { get; private set; } = string.Empty;
-    public string MenuCopyFullTree { get; private set; } = string.Empty;
-    public string MenuCopySelectedTree { get; private set; } = string.Empty;
-    public string MenuCopySelectedContent { get; private set; } = string.Empty;
+    public string MenuCopyTree { get; private set; } = string.Empty;
+    public string MenuCopyContent { get; private set; } = string.Empty;
     public string MenuCopyTreeAndContent { get; private set; } = string.Empty;
     public string MenuView { get; private set; } = string.Empty;
     public string MenuViewExpandAll { get; private set; } = string.Empty;
@@ -707,10 +706,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuFileRefresh = _localization["Menu.File.Refresh"];
         MenuFileExit = _localization["Menu.File.Exit"];
         MenuCopy = _localization["Menu.Copy"];
-        MenuCopyFullTree = _localization["Menu.Copy.FullTree"];
-        MenuCopySelectedTree = _localization["Menu.Copy.SelectedTree"];
-        MenuCopySelectedContent = _localization["Menu.Copy.SelectedContent"];
-        MenuCopyTreeAndContent = _localization["Menu.Copy.FullTreeAndContent"];
+        MenuCopyTree = _localization["Menu.Copy.Tree"];
+        MenuCopyContent = _localization["Menu.Copy.Content"];
+        MenuCopyTreeAndContent = _localization["Menu.Copy.TreeAndContent"];
         MenuView = _localization["Menu.View"];
         MenuViewExpandAll = _localization["Menu.View.ExpandAll"];
         MenuViewCollapseAll = _localization["Menu.View.CollapseAll"];
@@ -797,9 +795,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuFileRefresh));
         RaisePropertyChanged(nameof(MenuFileExit));
         RaisePropertyChanged(nameof(MenuCopy));
-        RaisePropertyChanged(nameof(MenuCopyFullTree));
-        RaisePropertyChanged(nameof(MenuCopySelectedTree));
-        RaisePropertyChanged(nameof(MenuCopySelectedContent));
+        RaisePropertyChanged(nameof(MenuCopyTree));
+        RaisePropertyChanged(nameof(MenuCopyContent));
         RaisePropertyChanged(nameof(MenuCopyTreeAndContent));
         RaisePropertyChanged(nameof(MenuView));
         RaisePropertyChanged(nameof(MenuViewExpandAll));

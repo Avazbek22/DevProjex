@@ -502,33 +502,23 @@ public partial class MainWindow : Window
 
     private void OnExit(object? sender, RoutedEventArgs e) => Close();
 
-    private async void OnCopyFullTree(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (!EnsureTreeReady()) return;
-
-            var content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
-            await SetClipboardTextAsync(content);
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync(ex.Message);
-        }
-    }
-
-    private async void OnCopySelectedTree(object? sender, RoutedEventArgs e)
+    private async void OnCopyTree(object? sender, RoutedEventArgs e)
     {
         try
         {
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            var content = _treeExport.BuildSelectedTree(_currentPath!, _currentTree!.Root, selected);
-            if (string.IsNullOrWhiteSpace(content))
+            string content;
+            if (selected.Count > 0)
             {
-                await ShowInfoAsync(_localization["Msg.NoCheckedTree"]);
-                return;
+                content = _treeExport.BuildSelectedTree(_currentPath!, _currentTree!.Root, selected);
+                if (string.IsNullOrWhiteSpace(content))
+                    content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
+            }
+            else
+            {
+                content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
             }
 
             await SetClipboardTextAsync(content);
@@ -539,21 +529,24 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnCopySelectedContent(object? sender, RoutedEventArgs e)
+    private async void OnCopyContent(object? sender, RoutedEventArgs e)
     {
         try
         {
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            var files = selected.Where(File.Exists)
+            var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
                 .Distinct(PathComparer.Default)
                 .OrderBy(path => path, PathComparer.Default)
                 .ToList();
 
             if (files.Count == 0)
             {
-                await ShowInfoAsync(_localization["Msg.NoCheckedFiles"]);
+                if (selected.Count > 0)
+                    await ShowInfoAsync(_localization["Msg.NoCheckedFiles"]);
+                else
+                    await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
@@ -1382,21 +1375,21 @@ public partial class MainWindow : Window
         // Copy hotkeys (как WinForms)
         if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.C)
         {
-            OnCopyFullTree(this, new RoutedEventArgs());
+            OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
         if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.C)
         {
-            OnCopySelectedTree(this, new RoutedEventArgs());
+            OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
         if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.V)
         {
-            OnCopySelectedContent(this, new RoutedEventArgs());
+            OnCopyContent(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
@@ -1782,6 +1775,21 @@ public partial class MainWindow : Window
         foreach (var node in _viewModel.TreeNodes)
             CollectChecked(node, selected);
         return selected;
+    }
+
+    private static IEnumerable<string> EnumerateFilePaths(TreeNodeDescriptor node)
+    {
+        if (!node.IsDirectory)
+        {
+            yield return node.FullPath;
+            yield break;
+        }
+
+        foreach (var child in node.Children)
+        {
+            foreach (var path in EnumerateFilePaths(child))
+                yield return path;
+        }
     }
 
     private static void CollectChecked(TreeNodeViewModel node, HashSet<string> selected)
