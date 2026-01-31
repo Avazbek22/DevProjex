@@ -19,6 +19,7 @@ public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
 
 	private static readonly string[] FolderNames =
 	{
+		"node_modules",
 		"dist",
 		"build",
 		".next",

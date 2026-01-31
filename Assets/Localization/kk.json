@@ -37,6 +37,7 @@
   "Filter.ByName": "Атау бойынша сүзгі",
   "Filter.Tooltip": "Атау бойынша сүзгі (Ctrl+Shift+N)",
   "Menu.Options": "Параметрлер",
+  "Menu.Options.TreeSettings": "Ағаш параметрлері",
   "Menu.Language": "Тіл",
   "Menu.Help": "Анықтама",
   "Menu.Help.Help": "Көмек",
@@ -56,6 +57,7 @@
   "Settings.Ignore.DotFolders": "нүктемен басталатын қалталар",
   "Settings.Ignore.DotFiles": "нүктемен басталатын файлдар",
   "Settings.All": "Барлығы",
+  "Settings.Ignore": "Елемеу:",
   "Settings.Extensions": "Файл түрлері:",
   "Settings.RootFolders": "Жоғарғы деңгей қалталары:",
   "Settings.Font": "Ағаш қарпі:",
@@ -79,5 +81,33 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+  "Tree.AccessDeniedRoot": "⛔ Қолжетімсіз (түбір)",
+  "Tree.AccessDenied": "⛔ Қолжетімсіз",
+  "Export.ReadError": "[Файлды оқу мүмкін болмады: {0}]",
+
+  "Menu.Git.Clone": "Репозиторийді клондау...",
+  "Menu.Git.Branch": "Тармақ",
+  "Menu.Git.GetUpdates": "Жаңартуларды алу",
+
+  "Git.Clone.Title": "Репозиторийді клондау",
+  "Git.Clone.Description": "Репозиторий URL мекенжайын енгізіңіз (GitHub немесе басқа)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Git тексерілуде...",
+  "Git.Clone.Progress.Cloning": "Клондалуда...",
+  "Git.Clone.Progress.Downloading": "Жүктелуде...",
+  "Git.Clone.Progress.Extracting": "Шығарылуда...",
+  "Git.Clone.Progress.Preparing": "Дайындалуда...",
+  "Git.Clone.Progress.SwitchingBranch": "Тармақ ауысуда...",
+
+  "Git.Error.GitNotFound": "Git орнатылмаған. ZIP архиві ретінде жүктелуде.",
+  "Git.Error.CloneFailed": "Репозиторийді клондау мүмкін болмады:\n{0}",
+  "Git.Error.InvalidUrl": "Қате репозиторий URL мекенжайы",
+  "Git.Error.NetworkError": "Желі қатесі:\n{0}",
+  "Git.Error.NoInternetConnection": "Репозиторийді клондау мүмкін болмады. Интернет қосылысын тексеріңіз.",
+  "Git.Error.BranchSwitchFailed": "Тармақты ауыстыру мүмкін болмады:\n{0}",
+  "Git.Error.UpdateFailed": "Жаңартуларды алу мүмкін болмады:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Болдырмау"
 }

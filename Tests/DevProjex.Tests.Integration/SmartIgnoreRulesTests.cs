@@ -6,15 +6,21 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class SmartIgnoreRulesTests
 {
-	// Verifies the common rule includes standard SCM/temp entries.
+	// Verifies the common rule includes standard system files.
+	// IDE/VCS folders are now controlled via DotFolders filter.
 	[Fact]
 	public void CommonSmartIgnoreRule_ReturnsKnownEntries()
 	{
 		var rule = new CommonSmartIgnoreRule();
 		var result = rule.Evaluate("/root");
 
-		Assert.Contains(".git", result.FolderNames);
+		// CommonSmartIgnore no longer includes IDE/VCS folders - they're controlled via DotFolders filter
+		Assert.Empty(result.FolderNames);
+
+		// System files are still filtered
 		Assert.Contains("thumbs.db", result.FileNames);
+		Assert.Contains(".ds_store", result.FileNames);
+		Assert.Contains("desktop.ini", result.FileNames);
 	}
 
 	// Verifies frontend ignore rule is empty when no marker files exist.
@@ -55,13 +61,15 @@ public sealed class SmartIgnoreRulesTests
 		Assert.Empty(result.FileNames);
 	}
 
-	// Verifies common smart-ignore folder set is case-insensitive.
+	// Verifies common smart-ignore file set is case-insensitive.
 	[Fact]
-	public void CommonSmartIgnoreRule_UsesCaseInsensitiveFolders()
+	public void CommonSmartIgnoreRule_UsesCaseInsensitiveFiles()
 	{
 		var rule = new CommonSmartIgnoreRule();
 		var result = rule.Evaluate("/root");
 
-		Assert.Contains(".GIT", result.FolderNames);
+		// Folders are now empty, test files instead
+		Assert.Contains("THUMBS.DB", result.FileNames);
+		Assert.Contains(".DS_STORE", result.FileNames);
 	}
 }

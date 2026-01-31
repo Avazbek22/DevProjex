@@ -222,7 +222,20 @@ public sealed class ThemePresetStoreTests
 		var path = store.GetPath();
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-			Directory.Delete(directory, recursive: true);
+		{
+			try
+			{
+				Directory.Delete(directory, recursive: true);
+			}
+			catch (UnauthorizedAccessException)
+			{
+				// Ignore - files may be locked by other tests
+			}
+			catch (IOException)
+			{
+				// Ignore - files may be in use
+			}
+		}
 
 		store.Save(new ThemePresetDb());
 
@@ -914,7 +927,20 @@ public sealed class ThemePresetStoreTests
 			File.Delete(path);
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-			Directory.Delete(directory, recursive: true);
+		{
+			try
+			{
+				Directory.Delete(directory, recursive: true);
+			}
+			catch (UnauthorizedAccessException)
+			{
+				// Ignore - files may be locked by other tests
+			}
+			catch (IOException)
+			{
+				// Ignore - files may be in use
+			}
+		}
 
 		var db = store.ResetToDefaults();
 

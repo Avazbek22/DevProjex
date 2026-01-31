@@ -57,6 +57,11 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? SetMicaModeRequested;
     public event EventHandler<RoutedEventArgs>? SetAcrylicModeRequested;
 
+    // Git events
+    public event EventHandler<RoutedEventArgs>? GitCloneRequested;
+    public event EventHandler<RoutedEventArgs>? GitGetUpdatesRequested;
+    public event EventHandler<string>? GitBranchSwitchRequested;
+
     public TopMenuBarView()
     {
         InitializeComponent();
@@ -163,6 +168,14 @@ public partial class TopMenuBarView : UserControl
     private void OnAbout(object? sender, RoutedEventArgs e) => AboutRequested?.Invoke(sender, e);
 
     private void OnResetSettings(object? sender, RoutedEventArgs e) => ResetSettingsRequested?.Invoke(sender, e);
+
+    private void OnGitClone(object? sender, RoutedEventArgs e) => GitCloneRequested?.Invoke(sender, e);
+
+    private void OnGitGetUpdates(object? sender, RoutedEventArgs e) => GitGetUpdatesRequested?.Invoke(sender, e);
+
+    public void OnGitBranchSwitch(string branchName) => GitBranchSwitchRequested?.Invoke(this, branchName);
+
+    public MenuItem? GitBranchMenuItemControl => GitBranchMenuItem;
 
     private void OnThemePopupOpened(object? sender, EventArgs e)
     {

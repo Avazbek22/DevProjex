@@ -66,6 +66,7 @@
   "Msg.PathNotFound": "Folder not found:\n{0}",
   "Msg.NoCheckedTree": "No checked files or folders (use checkboxes in the tree).",
   "Msg.NoCheckedFiles": "No checked files (checkboxes must be on files).",
+  "Msg.NoCheckedFilesShort": "No files selected.",
   "Msg.ElevationCanceled": "Elevation was canceled. The folder may not be fully accessible.",
   "Msg.AccessDeniedRoot": "Access denied for the selected folder. Try running as administrator.",
   "Msg.AccessDeniedElevationRequired": "Access denied. Run the app as administrator and try again.",
@@ -83,5 +84,30 @@
   "Msg.NoTextContent": "No text content to copy (selected files are empty or binary).",
   "Tree.AccessDeniedRoot": "⛔ Access denied (root)",
   "Tree.AccessDenied": "⛔ Access denied",
-  "Export.ReadError": "[Failed to read file: {0}]"
+  "Export.ReadError": "[Failed to read file: {0}]",
+
+  "Menu.Git.Clone": "Clone repository...",
+  "Menu.Git.Branch": "Branch",
+  "Menu.Git.GetUpdates": "Get updates",
+
+  "Git.Clone.Title": "Clone repository",
+  "Git.Clone.Description": "Enter repository URL (GitHub or other)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Checking git...",
+  "Git.Clone.Progress.Cloning": "Cloning...",
+  "Git.Clone.Progress.Downloading": "Downloading...",
+  "Git.Clone.Progress.Extracting": "Extracting...",
+  "Git.Clone.Progress.Preparing": "Preparing...",
+  "Git.Clone.Progress.SwitchingBranch": "Switching branch...",
+
+  "Git.Error.GitNotFound": "Git is not installed. Downloading as ZIP archive.",
+  "Git.Error.CloneFailed": "Failed to clone repository:\n{0}",
+  "Git.Error.InvalidUrl": "Invalid repository URL",
+  "Git.Error.NetworkError": "Network error:\n{0}",
+  "Git.Error.NoInternetConnection": "Failed to clone repository. Please check your internet connection.",
+  "Git.Error.BranchSwitchFailed": "Failed to switch branch:\n{0}",
+  "Git.Error.UpdateFailed": "Failed to get updates:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Cancel"
 }

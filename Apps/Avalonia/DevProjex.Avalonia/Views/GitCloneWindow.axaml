@@ -1,0 +1,64 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+        x:Class="DevProjex.Avalonia.Views.GitCloneWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding GitCloneTitle}"
+        Width="420"
+        MinWidth="360"
+        SizeToContent="Height"
+        CanResize="False"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        SystemDecorations="BorderOnly"
+        Icon="avares://DevProjex.Avalonia/AppIcon/icon-256.png">
+  <Border Classes="theme-popover"
+          Padding="16">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto">
+      <!-- Description (visible when not in progress) -->
+      <TextBlock Grid.Row="0"
+                 Text="{Binding GitCloneDescription}"
+                 Margin="0,0,0,8"
+                 TextWrapping="Wrap"
+                 FontSize="13"
+                 Opacity="0.8"
+                 IsVisible="{Binding !GitCloneInProgress}" />
+
+      <!-- URL Input (visible when not in progress) -->
+      <TextBox Grid.Row="1"
+               Name="UrlTextBox"
+               Text="{Binding GitCloneUrl, Mode=TwoWay}"
+               Watermark="{Binding GitCloneUrlPlaceholder}"
+               Margin="0,0,0,16"
+               IsVisible="{Binding !GitCloneInProgress}"
+               KeyDown="OnUrlKeyDown" />
+
+      <!-- Progress section (visible when in progress) -->
+      <StackPanel Grid.Row="1"
+                  Margin="0,0,0,16"
+                  IsVisible="{Binding GitCloneInProgress}">
+        <TextBlock Text="{Binding GitCloneStatus}"
+                   FontSize="13"
+                   Margin="0,0,0,8" />
+        <ProgressBar IsIndeterminate="True"
+                     Height="4" />
+      </StackPanel>
+
+      <!-- Buttons -->
+      <StackPanel Grid.Row="2"
+                  Orientation="Horizontal"
+                  HorizontalAlignment="Right"
+                  Spacing="8">
+        <Button Content="{Binding DialogOK}"
+                Classes="primary-action"
+                MinWidth="80"
+                HorizontalContentAlignment="Center"
+                Click="OnStartClone"
+                IsVisible="{Binding !GitCloneInProgress}"
+                IsEnabled="{Binding GitCloneUrl.Length}" />
+        <Button Content="{Binding DialogCancel}"
+                Click="OnCancel" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</Window>

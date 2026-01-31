@@ -37,6 +37,7 @@
   "Filter.ByName": "Фильтр по названию",
   "Filter.Tooltip": "Фильтр по названию (Ctrl+Shift+N)",
   "Menu.Options": "Параметры",
+  "Menu.Options.TreeSettings": "Настройки дерева",
   "Menu.Language": "Язык",
   "Menu.Help": "Справка",
   "Menu.Help.Help": "Помощь",
@@ -56,6 +57,7 @@
   "Settings.Ignore.DotFolders": "Папки с точкой в начале",
   "Settings.Ignore.DotFiles": "Файлы с точкой в начале",
   "Settings.All": "Все",
+  "Settings.Ignore": "Игнорировать:",
   "Settings.Extensions": "Типы файлов:",
   "Settings.RootFolders": "Папки верхнего уровня:",
   "Settings.Font": "Шрифт дерева:",
@@ -79,5 +81,33 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+  "Tree.AccessDeniedRoot": "⛔ Доступ запрещён (корень)",
+  "Tree.AccessDenied": "⛔ Доступ запрещён",
+  "Export.ReadError": "[Не удалось прочитать файл: {0}]",
+
+  "Menu.Git.Clone": "Клонировать репозиторий...",
+  "Menu.Git.Branch": "Ветка",
+  "Menu.Git.GetUpdates": "Получить обновления",
+
+  "Git.Clone.Title": "Клонирование репозитория",
+  "Git.Clone.Description": "Введите URL репозитория (GitHub или другой)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Проверка git...",
+  "Git.Clone.Progress.Cloning": "Клонирование...",
+  "Git.Clone.Progress.Downloading": "Загрузка...",
+  "Git.Clone.Progress.Extracting": "Распаковка...",
+  "Git.Clone.Progress.Preparing": "Подготовка...",
+  "Git.Clone.Progress.SwitchingBranch": "Переключение ветки...",
+
+  "Git.Error.GitNotFound": "Git не установлен. Загрузка в виде ZIP-архива.",
+  "Git.Error.CloneFailed": "Не удалось клонировать репозиторий:\n{0}",
+  "Git.Error.InvalidUrl": "Неверный URL репозитория",
+  "Git.Error.NetworkError": "Ошибка сети:\n{0}",
+  "Git.Error.NoInternetConnection": "Не удалось клонировать репозиторий. Пожалуйста, проверьте подключение к интернету.",
+  "Git.Error.BranchSwitchFailed": "Не удалось переключить ветку:\n{0}",
+  "Git.Error.UpdateFailed": "Не удалось получить обновления:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Отмена"
 }

@@ -37,6 +37,7 @@
   "Filter.ByName": "Nom bo'yicha filtr",
   "Filter.Tooltip": "Nom bo'yicha filtr (Ctrl+Shift+N)",
   "Menu.Options": "Sozlamalar",
+  "Menu.Options.TreeSettings": "Daraxt sozlamalari",
   "Menu.Language": "Til",
   "Menu.Help": "Yordam",
   "Menu.Help.Help": "Yordam",
@@ -56,6 +57,7 @@
   "Settings.Ignore.DotFolders": "nuqta bilan boshlanuvchi jildlar",
   "Settings.Ignore.DotFiles": "nuqta bilan boshlanuvchi fayllar",
   "Settings.All": "Barchasi",
+  "Settings.Ignore": "E'tiborsiz qoldirish:",
   "Settings.Extensions": "Fayl turlari:",
   "Settings.RootFolders": "Yuqori darajadagi jildlar:",
   "Settings.Font": "Daraxt shrift:",
@@ -79,5 +81,33 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+  "Tree.AccessDeniedRoot": "⛔ Ruxsat yo'q (ildiz)",
+  "Tree.AccessDenied": "⛔ Ruxsat yo'q",
+  "Export.ReadError": "[Faylni o'qib bo'lmadi: {0}]",
+
+  "Menu.Git.Clone": "Repozitoriyani klonlash...",
+  "Menu.Git.Branch": "Tarmoq",
+  "Menu.Git.GetUpdates": "Yangilanishlarni olish",
+
+  "Git.Clone.Title": "Repozitoriyani klonlash",
+  "Git.Clone.Description": "Repozitoriya URL manzilini kiriting (GitHub yoki boshqa)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Git tekshirilmoqda...",
+  "Git.Clone.Progress.Cloning": "Klonlanmoqda...",
+  "Git.Clone.Progress.Downloading": "Yuklanmoqda...",
+  "Git.Clone.Progress.Extracting": "Ochilmoqda...",
+  "Git.Clone.Progress.Preparing": "Tayyorlanmoqda...",
+  "Git.Clone.Progress.SwitchingBranch": "Tarmoq almashtirilmoqda...",
+
+  "Git.Error.GitNotFound": "Git o'rnatilmagan. ZIP arxiv sifatida yuklanmoqda.",
+  "Git.Error.CloneFailed": "Repozitoriyani klonlab bo'lmadi:\n{0}",
+  "Git.Error.InvalidUrl": "Noto'g'ri repozitoriya URL manzili",
+  "Git.Error.NetworkError": "Tarmoq xatosi:\n{0}",
+  "Git.Error.NoInternetConnection": "Repozitoriyani klonlab bo'lmadi. Iltimos, internet ulanishini tekshiring.",
+  "Git.Error.BranchSwitchFailed": "Tarmoqni almashtirib bo'lmadi:\n{0}",
+  "Git.Error.UpdateFailed": "Yangilanishlarni olib bo'lmadi:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Bekor qilish"
 }

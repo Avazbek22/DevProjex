@@ -7,7 +7,7 @@ internal sealed class TemporaryDirectory : IDisposable
 {
 	public TemporaryDirectory()
 	{
-		Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));
+		Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "DevProjex", "Tests", "Temp", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(Path);
 	}
 
@@ -43,6 +43,20 @@ internal sealed class TemporaryDirectory : IDisposable
 	public void Dispose()
 	{
 		if (Directory.Exists(Path))
-			Directory.Delete(Path, recursive: true);
+		{
+			try
+			{
+				Directory.Delete(Path, recursive: true);
+			}
+			catch (UnauthorizedAccessException)
+			{
+				// Ignore - files may be locked by Git or other processes
+				// OS will clean up temp files eventually
+			}
+			catch (IOException)
+			{
+				// Ignore - files may be in use
+			}
+		}
 	}
 }

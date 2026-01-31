@@ -37,6 +37,7 @@
   "Filter.ByName": "Nach Name filtern",
   "Filter.Tooltip": "Nach Name filtern (Ctrl+Shift+N)",
   "Menu.Options": "Optionen",
+  "Menu.Options.TreeSettings": "Baumeinstellungen",
   "Menu.Language": "Sprache",
   "Menu.Help": "Hilfe",
   "Menu.Help.Help": "Hilfe",
@@ -56,6 +57,7 @@
   "Settings.Ignore.DotFolders": "Ordner mit Punkt",
   "Settings.Ignore.DotFiles": "Dateien mit Punkt",
   "Settings.All": "Alle",
+  "Settings.Ignore": "Ignorieren:",
   "Settings.Extensions": "Dateitypen:",
   "Settings.RootFolders": "Ordner der obersten Ebene:",
   "Settings.Font": "Baum-Schrift:",
@@ -79,5 +81,33 @@
   "Language.Kk": "Қазақша",
   "Language.Fr": "Français",
   "Language.De": "Deutsch",
-  "Language.It": "Italiano"
+  "Language.It": "Italiano",
+  "Tree.AccessDeniedRoot": "⛔ Zugriff verweigert (Wurzel)",
+  "Tree.AccessDenied": "⛔ Zugriff verweigert",
+  "Export.ReadError": "[Datei konnte nicht gelesen werden: {0}]",
+
+  "Menu.Git.Clone": "Repository klonen...",
+  "Menu.Git.Branch": "Branch",
+  "Menu.Git.GetUpdates": "Aktualisierungen abrufen",
+
+  "Git.Clone.Title": "Repository klonen",
+  "Git.Clone.Description": "Repository-URL eingeben (GitHub oder andere)",
+  "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Progress.CheckingGit": "Git wird überprüft...",
+  "Git.Clone.Progress.Cloning": "Klonen...",
+  "Git.Clone.Progress.Downloading": "Herunterladen...",
+  "Git.Clone.Progress.Extracting": "Entpacken...",
+  "Git.Clone.Progress.Preparing": "Vorbereiten...",
+  "Git.Clone.Progress.SwitchingBranch": "Branch wechseln...",
+
+  "Git.Error.GitNotFound": "Git ist nicht installiert. Download als ZIP-Archiv.",
+  "Git.Error.CloneFailed": "Repository konnte nicht geklont werden:\n{0}",
+  "Git.Error.InvalidUrl": "Ungültige Repository-URL",
+  "Git.Error.NetworkError": "Netzwerkfehler:\n{0}",
+  "Git.Error.NoInternetConnection": "Repository konnte nicht geklont werden. Bitte überprüfen Sie Ihre Internetverbindung.",
+  "Git.Error.BranchSwitchFailed": "Branch konnte nicht gewechselt werden:\n{0}",
+  "Git.Error.UpdateFailed": "Aktualisierungen konnten nicht abgerufen werden:\n{0}",
+
+  "Dialog.OK": "OK",
+  "Dialog.Cancel": "Abbrechen"
 }

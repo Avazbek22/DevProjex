@@ -9,22 +9,19 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class SmartIgnoreRulesAdditionalTests
 {
-	[Theory]
-	// Verifies common smart ignore rule includes expected folder names.
-	[InlineData(".git")]
-	[InlineData(".svn")]
-	[InlineData(".hg")]
-	[InlineData(".vs")]
-	[InlineData(".idea")]
-	[InlineData(".vscode")]
-	[InlineData("node_modules")]
-	public void CommonSmartIgnoreRule_IncludesDefaultFolders(string folderName)
+	// CommonSmartIgnoreRule no longer includes folders - all folders (.git, .vs, .idea, etc.)
+	// are now controlled via DotFolders filter for predictable user control.
+	// This test was removed as folders are no longer part of CommonSmartIgnoreRule.
+
+	[Fact]
+	public void CommonSmartIgnoreRule_DoesNotIncludeFolders()
 	{
 		var rule = new CommonSmartIgnoreRule();
 
 		var result = rule.Evaluate("any");
 
-		Assert.Contains(folderName, result.FolderNames, StringComparer.OrdinalIgnoreCase);
+		// CommonSmartIgnoreRule now returns empty folder set
+		Assert.Empty(result.FolderNames);
 	}
 
 	[Theory]
@@ -73,6 +70,7 @@ public sealed class SmartIgnoreRulesAdditionalTests
 
 		var result = rule.Evaluate(temp.Path);
 
+		Assert.Contains("node_modules", result.FolderNames, StringComparer.OrdinalIgnoreCase);
 		Assert.Contains("dist", result.FolderNames, StringComparer.OrdinalIgnoreCase);
 		Assert.Contains("build", result.FolderNames, StringComparer.OrdinalIgnoreCase);
 		Assert.Contains(".next", result.FolderNames, StringComparer.OrdinalIgnoreCase);
