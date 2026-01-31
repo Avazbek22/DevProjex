@@ -2,6 +2,7 @@ using System;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
 
 namespace DevProjex.Avalonia.Views;
 
@@ -13,10 +14,11 @@ public partial class GitClonePopoverView : UserControl
 
     public GitClonePopoverView()
     {
-        InitializeComponent();
+        AvaloniaXamlLoader.Load(this);
+        UrlTextBoxControl = this.FindControl<TextBox>("UrlTextBox");
     }
 
-    public TextBox? UrlTextBoxControl => UrlTextBox;
+    public TextBox? UrlTextBoxControl { get; }
 
     private void OnClose(object? sender, RoutedEventArgs e)
     {
