@@ -19,7 +19,6 @@ using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
 using DevProjex.Avalonia.Views;
 using DevProjex.Avalonia.ViewModels;
 using ThemePresetStore = DevProjex.Infrastructure.ThemePresets.ThemePresetStore;
@@ -1547,11 +1546,10 @@ public partial class MainWindow : Window
     {
         // In Store builds, show a localized hint instead of attempting elevation.
         // Note: fire-and-forget here is acceptable as this is a terminal state (window closing or showing info)
-        if (!BuildFlags.AllowElevation)
-        {
-            _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
-            return false;
-        }
+#if DEVPROJEX_STORE
+        _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
+        return false;
+#endif
 
         if (_elevation.IsAdministrator) return false;
         if (_elevationAttempted) return false;

@@ -74,7 +74,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
                 Assert.True(result, $"Should recognize GitHub URL: {url}");
                 Assert.Contains("github.com", zipUrl);
                 Assert.Contains("archive", zipUrl);
-                Assert.NotEmpty(branch);
+                Assert.False(string.IsNullOrWhiteSpace(branch));
             }
             else
             {

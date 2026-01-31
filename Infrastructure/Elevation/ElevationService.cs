@@ -24,7 +24,9 @@ public sealed class ElevationService : IElevationService
 	public bool TryRelaunchAsAdministrator(CommandLineOptions options)
 	{
 		// Store builds must never trigger UAC or relaunch with elevation.
-		if (!BuildFlags.AllowElevation) return false;
+#if DEVPROJEX_STORE
+		return false;
+#endif
 		if (!OperatingSystem.IsWindows()) return false;
 
 		try
