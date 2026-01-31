@@ -19,6 +19,7 @@ using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
+using DevProjex.Kernel;
 using DevProjex.Avalonia.Views;
 using DevProjex.Avalonia.ViewModels;
 using ThemePresetStore = DevProjex.Infrastructure.ThemePresets.ThemePresetStore;
@@ -547,8 +548,8 @@ public partial class MainWindow : Window
 
             var selected = GetCheckedPaths();
             var files = selected.Where(File.Exists)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .Distinct(PathComparer.Default)
+                .OrderBy(path => path, PathComparer.Default)
                 .ToList();
 
             if (files.Count == 0)
@@ -1779,7 +1780,7 @@ public partial class MainWindow : Window
 
     private HashSet<string> GetCheckedPaths()
     {
-        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var selected = new HashSet<string>(PathComparer.Default);
         foreach (var node in _viewModel.TreeNodes)
             CollectChecked(node, selected);
         return selected;
@@ -1800,7 +1801,7 @@ public partial class MainWindow : Window
             .SelectMany(node => node.Flatten())
             .Where(node => node.IsExpanded)
             .Select(node => node.FullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(PathComparer.Default);
     }
 
     private void RestoreExpandedNodes(HashSet<string> expandedPaths)

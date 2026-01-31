@@ -1,4 +1,5 @@
 using System.Text;
+using DevProjex.Kernel;
 
 namespace DevProjex.Application.Services;
 
@@ -12,8 +13,8 @@ public sealed class SelectedContentExportService
 	{
 		var files = filePaths
 			.Where(p => !string.IsNullOrWhiteSpace(p))
-			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+			.Distinct(PathComparer.Default)
+			.OrderBy(p => p, PathComparer.Default)
 			.ToList();
 
 		if (files.Count == 0)
