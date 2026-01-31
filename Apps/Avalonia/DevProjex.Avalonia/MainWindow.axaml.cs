@@ -759,6 +759,7 @@ public partial class MainWindow : Window
     private void OnResetSettings(object? sender, RoutedEventArgs e)
     {
         ResetThemeSettings();
+        _toastService.Show(_localization["Toast.Settings.Reset"]);
         e.Handled = true;
     }
 
@@ -922,6 +923,7 @@ public partial class MainWindow : Window
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
                 await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
+                _toastService.Show(_localization["Toast.Git.CloneError"]);
                 return;
             }
 
@@ -944,6 +946,9 @@ public partial class MainWindow : Window
             // Load branches if Git mode
             if (result.SourceType == ProjectSourceType.GitClone)
                 await RefreshGitBranchesAsync(result.LocalPath);
+
+            if (_currentPath == result.LocalPath)
+                _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
         }
         catch (OperationCanceledException)
         {
@@ -963,6 +968,7 @@ public partial class MainWindow : Window
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
             await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
+            _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
         {
@@ -1002,6 +1008,7 @@ public partial class MainWindow : Window
             Cursor = new Cursor(StandardCursorType.Wait);
 
             var progress = new Progress<string>(_ => { });
+            var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath);
             var success = await _gitService.PullUpdatesAsync(_currentPath, progress);
 
             if (!success)
@@ -1013,6 +1020,12 @@ public partial class MainWindow : Window
             // Refresh branches and tree
             await RefreshGitBranchesAsync(_currentPath);
             await ReloadProjectAsync();
+
+            var afterHash = await _gitService.GetHeadCommitAsync(_currentPath);
+            if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
+                _toastService.Show(_localization["Toast.Git.NoUpdates"]);
+            else
+                _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
         }
         catch (Exception ex)
         {
@@ -1050,6 +1063,7 @@ public partial class MainWindow : Window
             // Refresh branches and tree
             await RefreshGitBranchesAsync(_currentPath);
             await ReloadProjectAsync();
+            _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
         }
         catch (Exception ex)
         {
@@ -1127,9 +1141,33 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void OnSearchNext(object? sender, RoutedEventArgs e) => _searchCoordinator.Navigate(1);
+    private void OnSearchNext(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
+            return;
 
-    private void OnSearchPrev(object? sender, RoutedEventArgs e) => _searchCoordinator.Navigate(-1);
+        if (!_searchCoordinator.HasMatches)
+        {
+            _toastService.Show(_localization["Toast.NoMatches"]);
+            return;
+        }
+
+        _searchCoordinator.Navigate(1);
+    }
+
+    private void OnSearchPrev(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
+            return;
+
+        if (!_searchCoordinator.HasMatches)
+        {
+            _toastService.Show(_localization["Toast.NoMatches"]);
+            return;
+        }
+
+        _searchCoordinator.Navigate(-1);
+    }
 
     private void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
@@ -1697,6 +1735,9 @@ public partial class MainWindow : Window
 
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
+
+            if (!string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
+                _toastService.Show(_localization["Toast.NoMatches"]);
 
             _searchCoordinator.UpdateSearchMatches();
 
