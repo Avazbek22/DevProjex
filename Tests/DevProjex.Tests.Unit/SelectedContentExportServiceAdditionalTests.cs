@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using DevProjex.Application.Services;
 using DevProjex.Tests.Unit.Helpers;
 using Xunit;
@@ -32,18 +33,40 @@ public sealed class SelectedContentExportServiceAdditionalTests
 	}
 
 	[Theory]
-	// Verifies invalid or empty file contents are ignored during export.
+	// Verifies whitespace-only file contents are exported with a marker.
 	[InlineData("")]
 	[InlineData("   ")]
 	[InlineData("\n")]
 	[InlineData("\r\n")]
 	[InlineData(" \n ")]
 	[InlineData("\t")]
+	public void Build_WhitespaceContents_AreMarked(string content)
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("sample.txt", content);
+		var service = new SelectedContentExportService();
+
+		var output = service.Build(new[] { file });
+
+		Assert.Contains($"{file}:", output);
+
+		if (content.Length == 0)
+		{
+			Assert.Contains("[No Content, 0 bytes]", output);
+			return;
+		}
+
+		var sizeBytes = Encoding.UTF8.GetByteCount(content);
+		Assert.Contains($"[Whitespace, {sizeBytes} bytes]", output);
+	}
+
+	[Theory]
+	// Verifies binary or null-byte contents are skipped.
 	[InlineData("\u0000")]
 	[InlineData("text\0")]
 	[InlineData("\0text")]
 	[InlineData("text\0more")]
-	public void Build_InvalidContents_AreSkipped(string content)
+	public void Build_BinaryContents_AreSkipped(string content)
 	{
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("sample.txt", content);
@@ -117,8 +140,11 @@ public sealed class SelectedContentExportServiceAdditionalTests
 
 		var output = service.Build(new[] { fileA, fileB, fileA });
 
-		var firstIndex = output.IndexOf(Path.Combine(temp.Path, expectedFirst), StringComparison.OrdinalIgnoreCase);
-		var secondIndex = output.IndexOf(Path.Combine(temp.Path, expectedSecond), StringComparison.OrdinalIgnoreCase);
+		var comparison = OperatingSystem.IsWindows()
+			? StringComparison.OrdinalIgnoreCase
+			: StringComparison.Ordinal;
+		var firstIndex = output.IndexOf(Path.Combine(temp.Path, expectedFirst), comparison);
+		var secondIndex = output.IndexOf(Path.Combine(temp.Path, expectedSecond), comparison);
 
 		Assert.True(firstIndex >= 0);
 		Assert.True(secondIndex > firstIndex);

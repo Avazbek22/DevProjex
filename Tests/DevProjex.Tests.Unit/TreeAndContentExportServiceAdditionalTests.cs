@@ -69,7 +69,8 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 		var output = service.Build(temp.Path, root, selected);
 
 		Assert.Contains("├── Root", output);
-		Assert.DoesNotContain($"{file}:", output);
+		Assert.Contains($"{file}:", output);
+		Assert.Contains("[No Content, 0 bytes]", output);
 	}
 
 	[Fact]
