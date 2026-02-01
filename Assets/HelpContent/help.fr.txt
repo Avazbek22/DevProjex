@@ -28,27 +28,24 @@ Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’e
 * Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
 
 ## 5) Copier
-### Copier l'arborescence complète
-Copie l’arborescence ASCII complète. Ctrl+Shift+C.
+### Copier l’arborescence
+Copie l’arborescence du projet.
+S’il y a des nœuds cochés, l’arborescence est construite à partir de la sélection ; si la sélection est vide ou invalide, l’arborescence complète est copiée.
+Raccourcis : Ctrl+Shift+C et Ctrl+Alt+C.
 
-### Copier l'arborescence sélectionnée
-Copie l’arborescence pour les nœuds cochés. Si rien n’est sélectionné, un message s’affiche. Ctrl+Alt+C.
+### Copier le contenu
+Copie le contenu des fichiers :
+* si des fichiers sont cochés — seuls ceux-ci ; sinon — tous les fichiers du projet ;
+* les fichiers non textuels sont ignorés (y compris les binaires) ;
+* pour les fichiers texte vides, le chemin et la ligne `[No Content, 0 bytes]` sont ajoutés ;
+* pour les fichiers ne contenant que des espaces/retours à la ligne, le chemin et la ligne `[Whitespace, N bytes]` sont ajoutés.
+Raccourci : Ctrl+Alt+V.
 
-### Copier le contenu des fichiers sélectionnés
-Copie le contenu des fichiers texte sélectionnés :
-* le fichier doit exister ;
-* les fichiers binaires sont ignorés (test de bytes nuls) ;
-* la sortie est triée et séparée par des lignes vides.
-
-Ctrl+Alt+V.
-
-### Copier l'arborescence complète et le contenu
-Combine arborescence et contenu :
-* l’arborescence est basée sur la sélection ; si elle est invalide, l’arborescence complète est utilisée ;
-* le contenu est ajouté uniquement pour les fichiers texte ;
-* s’il n’y a pas de contenu, seule l’arborescence est copiée.
-
-Ctrl+Shift+V.
+### Copier l’arborescence + le contenu
+Combine arborescence et contenu :
+* arborescence depuis la sélection ; si la sélection est vide ou invalide, l’arborescence complète est utilisée ;
+* contenu selon les mêmes règles que « Copier le contenu ».
+Raccourci : Ctrl+Shift+V.
 
 ## 6) Affichage
 ### Zoom
@@ -120,6 +117,7 @@ Les éléments [Beta] peuvent évoluer entre versions.
 
 ## 14) Aide → À propos
 Ouvre un popover avec les infos de l’app et un lien vers le dépôt.
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) remet les réglages de thème et d’effets aux valeurs par défaut.
 * Esc — fermer le popover
 
 ## 15) Langues

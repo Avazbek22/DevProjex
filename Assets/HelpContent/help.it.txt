@@ -28,27 +28,24 @@ La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
 * Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
 
 ## 5) Copia
-### Copia albero completo
-Copia l’albero ASCII completo. Ctrl+Shift+C.
+### Copia albero
+Copia l’albero del progetto.
+Se ci sono nodi selezionati, l’albero è costruito dalla selezione; se la selezione è vuota o non valida, viene copiato l’albero completo.
+Scorciatoie: Ctrl+Shift+C e Ctrl+Alt+C.
 
-### Copia albero selezionato
-Copia l’albero dei nodi selezionati. Se non c’è selezione, appare un messaggio. Ctrl+Alt+C.
+### Copia contenuto
+Copia il contenuto dei file:
+* se ci sono file selezionati — solo quelli; altrimenti — tutti i file del progetto;
+* i file non testuali vengono ignorati (inclusi i binari);
+* per i file di testo vuoti vengono riportati il percorso e la riga `[No Content, 0 bytes]`;
+* per i file composti solo da spazi/ritorni a capo vengono riportati il percorso e la riga `[Whitespace, N bytes]`.
+Scorciatoia: Ctrl+Alt+V.
 
-### Copia contenuto dei file selezionati
-Copia il contenuto dei soli file di testo selezionati:
-* il file deve esistere;
-* i file binari vengono ignorati (controllo byte nulli);
-* l’output è ordinato e separato da righe vuote.
-
-Ctrl+Alt+V.
-
-### Copia albero completo e contenuto
+### Copia albero + contenuto
 Combina albero e contenuto:
-* l’albero è costruito dalla selezione; se non valida, si usa l’albero completo;
-* il contenuto è aggiunto solo per file di testo;
-* se non c’è contenuto, si copia solo l’albero.
-
-Ctrl+Shift+V.
+* albero dalla selezione; se la selezione è vuota o non valida, viene usato l’albero completo;
+* contenuto secondo le stesse regole di «Copia contenuto».
+Scorciatoia: Ctrl+Shift+V.
 
 ## 6) Visualizza
 ### Zoom
@@ -120,6 +117,7 @@ Gli elementi [Beta] possono cambiare tra versioni.
 
 ## 14) Aiuto → Informazioni
 Apre un popover con info app e link al repository.
+Reimposta impostazioni (Aiuto → Reimposta impostazioni) riporta tema ed effetti ai valori predefiniti.
 * Esc — chiudi popover
 
 ## 15) Lingue

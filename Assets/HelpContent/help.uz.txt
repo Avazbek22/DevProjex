@@ -28,27 +28,24 @@ Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
 * Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset.
 
 ## 5) Nusxa
-### To'liq daraxtni nusxalash
-Loyihaning to‘liq ASCII‑daraxtini nusxalaydi. Ctrl+Shift+C.
+### Daraxtni nusxalash
+Loyiha daraxtini nusxalaydi.
+Agar belgilangan tugunlar bo‘lsa, daraxt tanlov bo‘yicha quriladi; tanlov bo‘sh yoki yaroqsiz bo‘lsa, to‘liq daraxt nusxalanadi.
+Tugmalar: Ctrl+Shift+C va Ctrl+Alt+C.
 
-### Tanlangan daraxtni nusxalash
-Belgilangan tugunlar bo‘yicha daraxtni nusxalaydi. Hech narsa belgilanmagan bo‘lsa, xabar chiqadi. Ctrl+Alt+C.
+### Mazmunni nusxalash
+Fayllar mazmunini nusxalaydi:
+* agar fayllar belgilangan bo‘lsa — faqat ular; aks holda — loyihadagi barcha fayllar;
+* matnli bo‘lmagan fayllar e’tiborga olinmaydi (binarlarni ham);
+* bo‘sh matnli fayllar uchun yo‘l va `[No Content, 0 bytes]` yoziladi;
+* faqat bo‘sh joylar/satr uzilishlaridan iborat fayllar uchun yo‘l va `[Whitespace, N bytes]` yoziladi.
+Tugma: Ctrl+Alt+V.
 
-### Tanlangan fayllar matnini nusxalash
-Faqat belgilangan matnli fayllar mazmunini nusxalaydi:
-* fayl mavjud bo‘lishi kerak;
-* binar fayllar o‘tkazib yuboriladi (null‑bayt tekshiruvi);
-* chiqish tartiblanadi va bo‘sh satrlar bilan ajratiladi.
-
-Ctrl+Alt+V.
-
-### To'liq daraxt va matnni nusxalash
+### Daraxt + mazmunni nusxalash
 Daraxt va mazmunni birlashtiradi:
-* daraxt belgilash bo‘yicha quriladi; noto‘g‘ri bo‘lsa, to‘liq daraxt olinadi;
-* mazmun faqat matnli fayllar uchun qo‘shiladi;
-* mazmun bo‘lmasa, faqat daraxt nusxalanadi.
-
-Ctrl+Shift+V.
+* daraxt tanlov bo‘yicha; agar tanlov bo‘sh yoki yaroqsiz bo‘lsa — to‘liq daraxt;
+* mazmun «Mazmunni nusxalash» qoidalari bo‘yicha.
+Tugma: Ctrl+Shift+V.
 
 ## 6) Ko‘rinish
 ### Masshtab
@@ -120,6 +117,7 @@ Tema popoveri quyilarni almashtiradi:
 
 ## 14) Yordam → Dastur haqida
 Ilova ma’lumoti va repozitoriy havolasi bilan popover ochadi.
+Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) tema va effekt sozlamalarini asl qiymatlarga qaytaradi.
 * Esc — popoverni yopish
 
 ## 15) Tillar

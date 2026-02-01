@@ -28,27 +28,24 @@ Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
 * Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>.
 
 ## 5) Kopieren
-### Kompletten Baum kopieren
-Kopiert den vollständigen ASCII‑Projektbaum. Ctrl+Shift+C.
+### Baum kopieren
+Kopiert den Projektbaum.
+Wenn Knoten markiert sind, wird der Baum aus der Auswahl gebaut; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert.
+Tastenkürzel: Ctrl+Shift+C und Ctrl+Alt+C.
 
-### Ausgewählten Baum kopieren
-Kopiert den Baum der markierten Knoten. Wenn nichts markiert ist, erscheint eine Meldung. Ctrl+Alt+C.
+### Inhalt kopieren
+Kopiert Dateiinhalte:
+* wenn Dateien markiert sind — nur diese; sonst — alle Projektdateien;
+* Nicht-Textdateien werden ignoriert (einschließlich Binärdateien);
+* bei leeren Textdateien werden Pfad und die Zeile `[No Content, 0 bytes]` ausgegeben;
+* bei Dateien, die nur aus Leerzeichen/Zeilenumbrüchen bestehen, werden Pfad und die Zeile `[Whitespace, N bytes]` ausgegeben.
+Tastenkürzel: Ctrl+Alt+V.
 
-### Inhalt ausgewählter Dateien kopieren
-Kopiert Inhalte nur ausgewählter Textdateien:
-* Datei muss existieren;
-* Binärdateien werden übersprungen (Null‑Byte‑Prüfung);
-* Ausgabe ist sortiert und durch Leerzeilen getrennt.
-
-Ctrl+Alt+V.
-
-### Kompletten Baum und Inhalt kopieren
+### Baum + Inhalt kopieren
 Kombiniert Baum und Inhalte:
-* Baum wird anhand der Auswahl erstellt; ist sie ungültig, wird der volle Baum verwendet;
-* Inhalte nur für Textdateien;
-* wenn kein Inhalt vorhanden ist, wird nur der Baum kopiert.
-
-Ctrl+Shift+V.
+* Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert;
+* Inhalte nach denselben Regeln wie „Inhalt kopieren“.
+Tastenkürzel: Ctrl+Shift+V.
 
 ## 6) Ansicht
 ### Zoom
@@ -120,6 +117,7 @@ Einträge mit [Beta] können sich zwischen Versionen ändern.
 
 ## 14) Hilfe → Über
 Öffnet ein Popover mit App‑Info und Repository‑Link.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt die Theme‑ und Effektwerte auf die Standardwerte zurück.
 * Esc — Popover schließen
 
 ## 15) Sprachen

@@ -28,27 +28,24 @@ The cache is stored in the system temp folder. On Windows it is usually:
 * Get updates — updates only the current branch: fetch and reset to origin/<branch>.
 
 ## 5) Copy
-### Copy full tree
-Copies the full ASCII project tree. Ctrl+Shift+C.
+### Copy tree
+Copies the project tree.
+If there are checked nodes, the tree is built from selection; if the selection is empty or invalid, the full tree is copied.
+Hotkeys: Ctrl+Shift+C and Ctrl+Alt+C.
 
-### Copy selected tree
-Copies the tree for selected (checked) nodes. If nothing is selected, a message is shown. Ctrl+Alt+C.
-
-### Copy selected content
-Copies contents of selected text files only:
-* the file must exist;
-* binary files are skipped (checked for null bytes);
-* output is sorted and separated by blank lines.
-
-Ctrl+Alt+V.
+### Copy content
+Copies file contents:
+* if files are checked — only those; otherwise — all project files;
+* non-text files are ignored (including binary);
+* for empty text files, the path and the line `[No Content, 0 bytes]` are output;
+* for files containing only whitespace/line breaks, the path and the line `[Whitespace, N bytes]` are output.
+Hotkey: Ctrl+Alt+V.
 
 ### Copy tree + content
 Combines tree and content:
-* tree is built from selection; if selection is invalid, full tree is used;
-* content is added only for text files;
-* if there is no content, only the tree is copied.
-
-Ctrl+Shift+V.
+* tree is built from selection; if selection is empty/invalid, the full tree is used;
+* content follows the same rules as “Copy content”.
+Hotkey: Ctrl+Shift+V.
 
 ## 6) View
 ### Zoom
@@ -120,6 +117,7 @@ Items marked [Beta] may change between versions.
 
 ## 14) Help → About
 Opens a popover with app info and repository link.
+Reset settings (Help → Reset settings) returns theme and effects settings to their default values.
 * Esc — close popover
 
 ## 15) Languages
