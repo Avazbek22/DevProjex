@@ -2,6 +2,7 @@ using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.Elevation;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
@@ -36,8 +37,12 @@ public static class AvaloniaCompositionRoot
         var treeExportService = new TreeExportService();
         var contentExportService = new SelectedContentExportService();
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
+        var toastService = new ToastService();
         var elevation = new ElevationService();
         var themePresetStore = new ThemePresetStore();
+        var gitRepositoryService = new GitRepositoryService();
+        var repoCacheService = new RepoCacheService();
+        var zipDownloadService = new ZipDownloadService();
 
         return new AvaloniaAppServices(
             Localization: localization,
@@ -52,6 +57,10 @@ public static class AvaloniaCompositionRoot
             TreeExportService: treeExportService,
             ContentExportService: contentExportService,
             TreeAndContentExportService: treeAndContentExportService,
-            IconStore: iconStore);
+            ToastService: toastService,
+            IconStore: iconStore,
+            GitRepositoryService: gitRepositoryService,
+            RepoCacheService: repoCacheService,
+            ZipDownloadService: zipDownloadService);
     }
 }

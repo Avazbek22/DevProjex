@@ -69,6 +69,8 @@ public sealed class TreeSearchCoordinator
         }
     }
 
+    public bool HasMatches => _searchMatches.Count > 0;
+
     public void UpdateHighlights(string? query)
     {
         var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();

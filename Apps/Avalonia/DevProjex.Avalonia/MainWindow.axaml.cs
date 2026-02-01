@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -29,6 +30,7 @@ using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Contracts;
 using DevProjex.Kernel.Models;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Avalonia;
 
@@ -49,9 +51,13 @@ public partial class MainWindow : Window
     private readonly TreeExportService _treeExport;
     private readonly SelectedContentExportService _contentExport;
     private readonly TreeAndContentExportService _treeAndContentExport;
+    private readonly IToastService _toastService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
     private readonly ThemePresetStore _themePresetStore;
+    private readonly IGitRepositoryService _gitService;
+    private readonly IRepoCacheService _repoCacheService;
+    private readonly IZipDownloadService _zipDownloadService;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
@@ -61,6 +67,8 @@ public partial class MainWindow : Window
 
     private BuildTreeResult? _currentTree;
     private string? _currentPath;
+    private string? _currentProjectDisplayName;
+    private string? _currentRepositoryUrl;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
     private ThemePresetDb _themePresetDb = new();
@@ -74,6 +82,9 @@ public partial class MainWindow : Window
     private HashSet<string>? _filterExpansionSnapshot;
     private int _filterApplyVersion;
     private CancellationTokenSource? _refreshCts;
+    private CancellationTokenSource? _gitCloneCts;
+    private GitCloneWindow? _gitCloneWindow;
+    private string? _currentCachedRepoPath;
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -92,11 +103,16 @@ public partial class MainWindow : Window
         _treeExport = services.TreeExportService;
         _contentExport = services.ContentExportService;
         _treeAndContentExport = services.TreeAndContentExportService;
+        _toastService = services.ToastService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
         _themePresetStore = services.ThemePresetStore;
+        _gitService = services.GitRepositoryService;
+        _repoCacheService = services.RepoCacheService;
+        _zipDownloadService = services.ZipDownloadService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
+        _viewModel.SetToastItems(_toastService.Items);
         DataContext = _viewModel;
 
         InitializeComponent();
@@ -201,12 +217,23 @@ public partial class MainWindow : Window
         _refreshCts?.Cancel();
         _refreshCts?.Dispose();
 
+        // Cancel and dispose git clone token
+        _gitCloneCts?.Cancel();
+        _gitCloneCts?.Dispose();
+
         // Clear icon cache to release memory
         _iconCache.Clear();
 
         // Clear tree references
         _currentTree = null;
         _filterExpansionSnapshot = null;
+
+        // Clean up repository cache on exit
+        _repoCacheService.ClearAllCache();
+
+        // Dispose ZipDownloadService
+        if (_zipDownloadService is IDisposable disposable)
+            disposable.Dispose();
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
@@ -242,6 +269,19 @@ public partial class MainWindow : Window
 
             if (!string.IsNullOrWhiteSpace(_startupOptions.Path))
                 await TryOpenFolderAsync(_startupOptions.Path!, fromDialog: false);
+
+            // Clean up stale cache from previous sessions (non-blocking background task)
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    _repoCacheService.CleanupStaleCacheOnStartup();
+                }
+                catch
+                {
+                    // Best effort - ignore errors
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -417,8 +457,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ShowErrorAsync(string message) =>
-        await MessageDialog.ShowAsync(this, _localization["Msg.ErrorTitle"], message);
+    private async Task ShowErrorAsync(string message)
+    {
+        // Show error relative to Git Clone window if it's open, otherwise relative to main window
+        var owner = _gitCloneWindow ?? (Window)this;
+        await MessageDialog.ShowAsync(owner, _localization["Msg.ErrorTitle"], message);
+    }
 
     private async Task ShowInfoAsync(string message) =>
         await MessageDialog.ShowAsync(this, _localization["Msg.InfoTitle"], message);
@@ -461,36 +505,27 @@ public partial class MainWindow : Window
 
     private void OnExit(object? sender, RoutedEventArgs e) => Close();
 
-    private async void OnCopyFullTree(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (!EnsureTreeReady()) return;
-
-            var content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
-            await SetClipboardTextAsync(content);
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync(ex.Message);
-        }
-    }
-
-    private async void OnCopySelectedTree(object? sender, RoutedEventArgs e)
+    private async void OnCopyTree(object? sender, RoutedEventArgs e)
     {
         try
         {
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            var content = _treeExport.BuildSelectedTree(_currentPath!, _currentTree!.Root, selected);
-            if (string.IsNullOrWhiteSpace(content))
+            string content;
+            if (selected.Count > 0)
             {
-                await ShowInfoAsync(_localization["Msg.NoCheckedTree"]);
-                return;
+                content = _treeExport.BuildSelectedTree(_currentPath!, _currentTree!.Root, selected);
+                if (string.IsNullOrWhiteSpace(content))
+                    content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
+            }
+            else
+            {
+                content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
             }
 
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
         {
@@ -498,21 +533,24 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnCopySelectedContent(object? sender, RoutedEventArgs e)
+    private async void OnCopyContent(object? sender, RoutedEventArgs e)
     {
         try
         {
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            var files = selected.Where(File.Exists)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
+                .Distinct(PathComparer.Default)
+                .OrderBy(path => path, PathComparer.Default)
                 .ToList();
 
             if (files.Count == 0)
             {
-                await ShowInfoAsync(_localization["Msg.NoCheckedFiles"]);
+                if (selected.Count > 0)
+                    await ShowInfoAsync(_localization["Msg.NoCheckedFiles"]);
+                else
+                    await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
@@ -525,6 +563,7 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
@@ -542,6 +581,7 @@ public partial class MainWindow : Window
             // Run file reading off UI thread
             var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
             await SetClipboardTextAsync(content);
+            _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
@@ -716,6 +756,372 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void OnResetSettings(object? sender, RoutedEventArgs e)
+    {
+        ResetThemeSettings();
+        _toastService.Show(_localization["Toast.Settings.Reset"]);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Resets all theme presets to factory defaults and reapplies current selection.
+    /// </summary>
+    private void ResetThemeSettings()
+    {
+        _themePresetDb = _themePresetStore.ResetToDefaults();
+
+        // Reparse last selected to get current theme variant and effect
+        if (!_themePresetStore.TryParseKey(_themePresetDb.LastSelected, out var theme, out var effect))
+        {
+            theme = ThemePresetVariant.Dark;
+            effect = ThemePresetEffect.Transparent;
+        }
+
+        _currentThemeVariant = theme;
+        _currentEffectMode = effect;
+
+        // Apply default preset values to ViewModel
+        ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
+
+        // Refresh visual effects
+        _themeBrushCoordinator.UpdateTransparencyEffect();
+        _themeBrushCoordinator.UpdateDynamicThemeBrushes();
+    }
+
+    #region Git Operations
+
+    private void OnGitClone(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.GitCloneUrl = string.Empty;
+        _viewModel.GitCloneStatus = string.Empty;
+        _viewModel.GitCloneInProgress = false;
+
+        // Create and show Git Clone window
+        _gitCloneWindow = new GitCloneWindow
+        {
+            DataContext = _viewModel
+        };
+
+        _gitCloneWindow.StartCloneRequested += OnGitCloneStart;
+        _gitCloneWindow.CancelRequested += OnGitCloneCancel;
+
+        _gitCloneWindow.ShowDialog(this);
+        e.Handled = true;
+    }
+
+    private void OnGitCloneClose(object? sender, RoutedEventArgs e)
+    {
+        CancelGitCloneOperation();
+        _gitCloneWindow?.Close();
+        _gitCloneWindow = null;
+        e.Handled = true;
+    }
+
+    private async void OnGitCloneStart(object? sender, RoutedEventArgs e)
+    {
+        var url = _viewModel.GitCloneUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            await ShowErrorAsync(_viewModel.GitErrorInvalidUrl);
+            return;
+        }
+
+        // Validate URL format before attempting to clone
+        if (!IsValidGitRepositoryUrl(url))
+        {
+            await ShowErrorAsync(_viewModel.GitErrorInvalidUrl);
+            return;
+        }
+
+        _gitCloneCts?.Cancel();
+        _gitCloneCts = new CancellationTokenSource();
+        var cancellationToken = _gitCloneCts.Token;
+
+        _viewModel.GitCloneInProgress = true;
+        _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
+
+        string? targetPath = null;
+
+        try
+        {
+            // Check internet connection before starting
+            var hasInternet = await CheckInternetConnectionAsync(cancellationToken);
+            if (!hasInternet)
+            {
+                _viewModel.GitCloneInProgress = false;
+                _gitCloneWindow?.Close();
+                _gitCloneWindow = null;
+                await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
+                return;
+            }
+
+            // Clean up previous cached repository before cloning a new one
+            if (_currentCachedRepoPath is not null)
+            {
+                _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
+                _currentCachedRepoPath = null;
+            }
+
+            targetPath = _repoCacheService.CreateRepositoryDirectory(url);
+
+            // Track current operation for progress reporting
+            string currentOperation = string.Empty;
+
+            var progress = new Progress<string>(status =>
+            {
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    // Handle phase transition markers
+                    if (status == "::EXTRACTING::")
+                    {
+                        currentOperation = _viewModel.GitCloneProgressExtracting;
+                        _viewModel.GitCloneStatus = currentOperation;
+                        return;
+                    }
+
+                    // If status is just a percentage, append it to current operation message
+                    if (status.EndsWith('%') && status.Length <= 4 && !string.IsNullOrEmpty(currentOperation))
+                    {
+                        _viewModel.GitCloneStatus = $"{currentOperation} {status}";
+                    }
+                    else
+                    {
+                        // Git output or other dynamic message (contains progress info with %)
+                        _viewModel.GitCloneStatus = status;
+                    }
+                });
+            });
+
+            GitCloneResult result;
+
+            // Check if Git is available
+            var gitAvailable = await _gitService.IsGitAvailableAsync(cancellationToken);
+
+            if (gitAvailable)
+            {
+                currentOperation = _viewModel.GitCloneProgressCloning;
+                _viewModel.GitCloneStatus = currentOperation;
+                result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
+            }
+            else
+            {
+                // Fallback to ZIP download
+                _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
+                await Task.Delay(1500, cancellationToken);
+
+                currentOperation = _viewModel.GitCloneProgressDownloading;
+                _viewModel.GitCloneStatus = currentOperation;
+                result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!result.Success)
+            {
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
+                _gitCloneWindow?.Close();
+                _gitCloneWindow = null;
+                _viewModel.GitCloneInProgress = false;
+                await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
+                _toastService.Show(_localization["Toast.Git.CloneError"]);
+                return;
+            }
+
+            // Successfully cloned - open the project
+            _gitCloneWindow?.Close();
+            _gitCloneWindow = null;
+            _viewModel.GitCloneInProgress = false;
+            _viewModel.ProjectSourceType = result.SourceType;
+            _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
+
+            // Save repository name and URL for display
+            _currentProjectDisplayName = result.RepositoryName;
+            _currentRepositoryUrl = result.RepositoryUrl;
+
+            // Save cache path for cleanup when project is closed or replaced
+            _currentCachedRepoPath = targetPath;
+
+            await TryOpenFolderAsync(result.LocalPath, fromDialog: false);
+
+            // Load branches if Git mode
+            if (result.SourceType == ProjectSourceType.GitClone)
+                await RefreshGitBranchesAsync(result.LocalPath);
+
+            if (_currentPath == result.LocalPath)
+                _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
+        }
+        catch (OperationCanceledException)
+        {
+            if (targetPath is not null)
+            {
+                // Use default cancellation token since operation was cancelled
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (targetPath is not null)
+            {
+                _repoCacheService.DeleteRepositoryDirectory(targetPath);
+            }
+
+            _gitCloneWindow?.Close();
+            _gitCloneWindow = null;
+            await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
+            _toastService.Show(_localization["Toast.Git.CloneError"]);
+        }
+        finally
+        {
+            _viewModel.GitCloneInProgress = false;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnGitCloneCancel(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel.GitCloneInProgress)
+        {
+            CancelGitCloneOperation();
+        }
+        else
+        {
+            _gitCloneWindow?.Close();
+            _gitCloneWindow = null;
+        }
+        e.Handled = true;
+    }
+
+    private void CancelGitCloneOperation()
+    {
+        _gitCloneCts?.Cancel();
+        _viewModel.GitCloneInProgress = false;
+    }
+
+    private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
+            return;
+
+        try
+        {
+            Cursor = new Cursor(StandardCursorType.Wait);
+
+            var progress = new Progress<string>(_ => { });
+            var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath);
+            var success = await _gitService.PullUpdatesAsync(_currentPath, progress);
+
+            if (!success)
+            {
+                await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
+                return;
+            }
+
+            // Refresh branches and tree
+            await RefreshGitBranchesAsync(_currentPath);
+            await ReloadProjectAsync();
+
+            var afterHash = await _gitService.GetHeadCommitAsync(_currentPath);
+            if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
+                _toastService.Show(_localization["Toast.Git.NoUpdates"]);
+            else
+                _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
+        }
+        finally
+        {
+            Cursor = new Cursor(StandardCursorType.Arrow);
+        }
+
+        e.Handled = true;
+    }
+
+    private async void OnGitBranchSwitch(object? sender, string branchName)
+    {
+        if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
+            return;
+
+        try
+        {
+            Cursor = new Cursor(StandardCursorType.Wait);
+
+            var progress = new Progress<string>(_ => { });
+            var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress);
+
+            if (!success)
+            {
+                await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
+                return;
+            }
+
+            _viewModel.CurrentBranch = branchName;
+            UpdateTitle();
+
+            // Refresh branches and tree
+            await RefreshGitBranchesAsync(_currentPath);
+            await ReloadProjectAsync();
+            _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
+        }
+        finally
+        {
+            Cursor = new Cursor(StandardCursorType.Arrow);
+        }
+    }
+
+    private async Task RefreshGitBranchesAsync(string repositoryPath)
+    {
+        try
+        {
+            var branches = await _gitService.GetBranchesAsync(repositoryPath);
+
+            _viewModel.GitBranches.Clear();
+            foreach (var branch in branches)
+                _viewModel.GitBranches.Add(branch);
+
+            // Update branch menu
+            UpdateBranchMenu();
+        }
+        catch
+        {
+            // Ignore branch loading errors
+        }
+    }
+
+    private void UpdateBranchMenu()
+    {
+        var branchMenuItem = _topMenuBar?.GitBranchMenuItemControl;
+        if (branchMenuItem is null)
+            return;
+
+        branchMenuItem.Items.Clear();
+
+        foreach (var branch in _viewModel.GitBranches)
+        {
+            var item = new MenuItem
+            {
+                Header = branch.IsActive ? $"✓ {branch.Name}" : $"   {branch.Name}",
+                Tag = branch.Name
+            };
+
+            item.Click += (_, _) =>
+            {
+                if (item.Tag is string name)
+                    _topMenuBar?.OnGitBranchSwitch(name);
+            };
+
+            branchMenuItem.Items.Add(item);
+        }
+    }
+
+    #endregion
+
     private void OnAboutOpenLink(object? sender, RoutedEventArgs e)
     {
         OpenRepositoryLink();
@@ -735,9 +1141,33 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void OnSearchNext(object? sender, RoutedEventArgs e) => _searchCoordinator.Navigate(1);
+    private void OnSearchNext(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
+            return;
 
-    private void OnSearchPrev(object? sender, RoutedEventArgs e) => _searchCoordinator.Navigate(-1);
+        if (!_searchCoordinator.HasMatches)
+        {
+            _toastService.Show(_localization["Toast.NoMatches"]);
+            return;
+        }
+
+        _searchCoordinator.Navigate(1);
+    }
+
+    private void OnSearchPrev(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
+            return;
+
+        if (!_searchCoordinator.HasMatches)
+        {
+            _toastService.Show(_localization["Toast.NoMatches"]);
+            return;
+        }
+
+        _searchCoordinator.Navigate(-1);
+    }
 
     private void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
@@ -989,21 +1419,21 @@ public partial class MainWindow : Window
         // Copy hotkeys (как WinForms)
         if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.C)
         {
-            OnCopyFullTree(this, new RoutedEventArgs());
+            OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
         if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.C)
         {
-            OnCopySelectedTree(this, new RoutedEventArgs());
+            OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
         if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.V)
         {
-            OnCopySelectedContent(this, new RoutedEventArgs());
+            OnCopyContent(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
@@ -1123,6 +1553,27 @@ public partial class MainWindow : Window
         _viewModel.IsProjectLoaded = true;
         _viewModel.SettingsVisible = true;
         _viewModel.SearchVisible = false;
+
+        // Set project source type based on how it was opened
+        // If opened from dialog (File → Open), it's LocalFolder
+        // If opened from Git clone, the source type is already set
+        if (fromDialog)
+        {
+            _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
+            _viewModel.CurrentBranch = string.Empty;
+            _viewModel.GitBranches.Clear();
+            _currentProjectDisplayName = null;
+            _currentRepositoryUrl = null;
+
+            // Clear cached repo path when opening from dialog (local folder)
+            // This ensures the previous Git clone cache gets cleaned up
+            if (_currentCachedRepoPath is not null)
+            {
+                _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
+                _currentCachedRepoPath = null;
+            }
+        }
+
         UpdateTitle();
 
         await ReloadProjectAsync();
@@ -1132,11 +1583,10 @@ public partial class MainWindow : Window
     {
         // In Store builds, show a localized hint instead of attempting elevation.
         // Note: fire-and-forget here is acceptable as this is a terminal state (window closing or showing info)
-        if (!BuildFlags.AllowElevation)
-        {
-            _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
-            return false;
-        }
+#if DEVPROJEX_STORE
+        _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
+        return false;
+#endif
 
         if (_elevation.IsAdministrator) return false;
         if (_elevationAttempted) return false;
@@ -1271,10 +1721,12 @@ public partial class MainWindow : Window
 
             var root = BuildTreeViewModel(result.Root, null);
 
-            // Fix как в WinForms EnsureRootNodeVisible
+            // Set root display name: use repository name for git clones, folder name for local
             try
             {
-                root.DisplayName = new DirectoryInfo(_currentPath!).Name;
+                root.DisplayName = !string.IsNullOrEmpty(_currentProjectDisplayName)
+                    ? _currentProjectDisplayName
+                    : new DirectoryInfo(_currentPath!).Name;
             }
             catch
             {
@@ -1283,6 +1735,9 @@ public partial class MainWindow : Window
 
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
+
+            if (!string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
+                _toastService.Show(_localization["Toast.NoMatches"]);
 
             _searchCoordinator.UpdateSearchMatches();
 
@@ -1312,9 +1767,28 @@ public partial class MainWindow : Window
 
     private void UpdateTitle()
     {
-        _viewModel.Title = string.IsNullOrWhiteSpace(_currentPath)
-            ? MainWindowViewModel.BaseTitleWithAuthor
-            : $"{MainWindowViewModel.BaseTitle} - {_currentPath}";
+        if (string.IsNullOrWhiteSpace(_currentPath))
+        {
+            _viewModel.Title = MainWindowViewModel.BaseTitleWithAuthor;
+            return;
+        }
+
+        // For Git clones: show full URL + branch in square brackets
+        // For local folders: show full path
+        if (_viewModel.IsGitMode && !string.IsNullOrEmpty(_currentRepositoryUrl))
+        {
+            var branchDisplay = !string.IsNullOrEmpty(_viewModel.CurrentBranch)
+                ? $" [{_viewModel.CurrentBranch}]"
+                : string.Empty;
+            _viewModel.Title = $"{MainWindowViewModel.BaseTitle} - {_currentRepositoryUrl}{branchDisplay}";
+        }
+        else
+        {
+            var displayPath = !string.IsNullOrEmpty(_currentProjectDisplayName)
+                ? _currentProjectDisplayName
+                : _currentPath;
+            _viewModel.Title = $"{MainWindowViewModel.BaseTitle} - {displayPath}";
+        }
     }
 
     private IgnoreRules BuildIgnoreRules(string rootPath)
@@ -1344,10 +1818,25 @@ public partial class MainWindow : Window
 
     private HashSet<string> GetCheckedPaths()
     {
-        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var selected = new HashSet<string>(PathComparer.Default);
         foreach (var node in _viewModel.TreeNodes)
             CollectChecked(node, selected);
         return selected;
+    }
+
+    private static IEnumerable<string> EnumerateFilePaths(TreeNodeDescriptor node)
+    {
+        if (!node.IsDirectory)
+        {
+            yield return node.FullPath;
+            yield break;
+        }
+
+        foreach (var child in node.Children)
+        {
+            foreach (var path in EnumerateFilePaths(child))
+                yield return path;
+        }
     }
 
     private static void CollectChecked(TreeNodeViewModel node, HashSet<string> selected)
@@ -1365,7 +1854,7 @@ public partial class MainWindow : Window
             .SelectMany(node => node.Flatten())
             .Where(node => node.IsExpanded)
             .Select(node => node.FullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(PathComparer.Default);
     }
 
     private void RestoreExpandedNodes(HashSet<string> expandedPaths)
@@ -1375,6 +1864,107 @@ public partial class MainWindow : Window
 
         if (_viewModel.TreeNodes.FirstOrDefault() is { } root && !root.IsExpanded)
             root.IsExpanded = true;
+    }
+
+    /// <summary>
+    /// Validates that URL looks like a valid Git repository URL.
+    /// Accepts URLs from common Git hosting services (GitHub, GitLab, Bitbucket, etc.)
+    /// or any URL ending with .git
+    /// </summary>
+    private static bool IsValidGitRepositoryUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+
+        try
+        {
+            // Try to parse as URI
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                return false;
+
+            // Must be HTTP or HTTPS
+            if (uri.Scheme != "http" && uri.Scheme != "https")
+                return false;
+
+            var host = uri.Host.ToLowerInvariant();
+            var path = uri.AbsolutePath.ToLowerInvariant();
+
+            // Check for common Git hosting services
+            var validHosts = new[]
+            {
+                "github.com",
+                "gitlab.com",
+                "bitbucket.org",
+                "gitea.com",
+                "codeberg.org",
+                "sourceforge.net",
+                "git.sr.ht"
+            };
+
+            // Allow subdomains (e.g., gitlab.mycompany.com)
+            var isKnownHost = validHosts.Any(h => host == h || host.EndsWith("." + h));
+
+            // Or URL ends with .git extension
+            var hasGitExtension = path.EndsWith(".git");
+
+            // Or contains /git/ in path (common for self-hosted instances)
+            var hasGitInPath = path.Contains("/git/");
+
+            return isKnownHost || hasGitExtension || hasGitInPath;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks if internet connection is available by attempting to connect to reliable hosts.
+    /// Returns true if connection successful, false otherwise.
+    /// This is a simple check - we try to resolve DNS and connect to well-known hosts.
+    /// </summary>
+    private static async Task<bool> CheckInternetConnectionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Try to connect to multiple reliable hosts to avoid false negatives
+            // Use different providers to increase reliability
+            var hosts = new[]
+            {
+                "https://www.github.com",
+                "https://www.google.com",
+                "https://www.cloudflare.com"
+            };
+
+            using var httpClient = new System.Net.Http.HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(5)
+            };
+
+            // Try each host - if any succeeds, we have internet
+            foreach (var host in hosts)
+            {
+                try
+                {
+                    using var response = await httpClient.GetAsync(host, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    // If we get any response (even error status codes), it means we have connectivity
+                    return true;
+                }
+                catch
+                {
+                    // Try next host
+                    continue;
+                }
+            }
+
+            // All hosts failed
+            return false;
+        }
+        catch
+        {
+            // If exception occurs, assume no internet
+            return false;
+        }
     }
 
 }

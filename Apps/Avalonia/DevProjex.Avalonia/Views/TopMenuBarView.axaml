@@ -4,17 +4,23 @@
              xmlns:views="using:DevProjex.Avalonia.Views"
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
              x:DataType="vm:MainWindowViewModel">
-  <Grid ColumnDefinitions="*,Auto" Margin="0">
+  <Grid Name="RootGrid" ColumnDefinitions="*,Auto" Margin="0">
     <Menu Name="MainMenu" Grid.Column="0" Margin="0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
         <MenuItem Header="{Binding MenuFileExit}" Click="OnExit" />
       </MenuItem>
+      <MenuItem Name="GitMenuItem" Header="Git">
+        <MenuItem Header="{Binding MenuGitClone}" Click="OnGitClone" />
+        <MenuItem Name="GitBranchMenuItem" Header="{Binding MenuGitBranch}" IsEnabled="{Binding IsGitMode}">
+          <!-- Branch items will be populated dynamically -->
+        </MenuItem>
+        <MenuItem Header="{Binding MenuGitGetUpdates}" Click="OnGitGetUpdates" IsEnabled="{Binding IsGitMode}" />
+      </MenuItem>
       <MenuItem Header="{Binding MenuCopy}" IsEnabled="{Binding IsProjectLoaded}">
-        <MenuItem Header="{Binding MenuCopyFullTree}" Click="OnCopyFullTree" />
-        <MenuItem Header="{Binding MenuCopySelectedTree}" Click="OnCopySelectedTree" />
-        <MenuItem Header="{Binding MenuCopySelectedContent}" Click="OnCopySelectedContent" />
+        <MenuItem Header="{Binding MenuCopyTree}" Click="OnCopyTree" />
+        <MenuItem Header="{Binding MenuCopyContent}" Click="OnCopyContent" />
         <MenuItem Header="{Binding MenuCopyTreeAndContent}" Click="OnCopyTreeAndContent" />
       </MenuItem>
       <MenuItem Header="{Binding MenuView}" IsEnabled="{Binding IsProjectLoaded}">
@@ -48,6 +54,8 @@
       <MenuItem Name="HelpMenuItem" Header="{Binding MenuHelp}">
         <MenuItem Header="{Binding MenuHelpHelp}" Click="OnHelp" />
         <MenuItem Header="{Binding MenuHelpAbout}" Click="OnAbout" />
+        <Separator />
+        <MenuItem Header="{Binding MenuHelpResetSettings}" Click="OnResetSettings" />
       </MenuItem>
     </Menu>
     <Button Grid.Column="1"
@@ -58,8 +66,8 @@
             ToolTip.Tip="{Binding FilterTooltip}"
             ToolTip.Placement="Left">
       <Image Source="avares://DevProjex.Avalonia/IconPacks/Default/UIFilter.png"
-             Width="16"
-             Height="16"
+             Width="24"
+             Height="24"
              Stretch="Uniform" />
     </Button>
 
@@ -91,5 +99,6 @@
            PlacementTarget="{Binding #HelpMenuItem}">
       <views:HelpPopoverView Name="HelpDocsPopover" />
     </Popup>
+
   </Grid>
 </UserControl>

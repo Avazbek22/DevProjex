@@ -18,30 +18,36 @@ Tastenkürzel:
 * Ordner öffnen… — Wurzelordner öffnen (Ctrl+O)
 * Aktualisieren — Baum neu einlesen und aufbauen (F5)
 
-## 4) Kopieren
-### Kompletten Baum kopieren
-Kopiert den vollständigen ASCII‑Projektbaum. Ctrl+Shift+C.
+## 4) Git
+Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
 
-### Ausgewählten Baum kopieren
-Kopiert den Baum der markierten Knoten. Wenn nichts markiert ist, erscheint eine Meldung. Ctrl+Alt+C.
+Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
+`%TEMP%\DevProjex\RepoCache`
 
-### Inhalt ausgewählter Dateien kopieren
-Kopiert Inhalte nur ausgewählter Textdateien:
-* Datei muss existieren;
-* Binärdateien werden übersprungen (Null‑Byte‑Prüfung);
-* Ausgabe ist sortiert und durch Leerzeilen getrennt.
+* Branch — zeigt die Liste der Remote‑Branches; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn nicht, wird sie per fetch geladen und lokal erstellt.
+* Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>.
 
-Ctrl+Alt+V.
+## 5) Kopieren
+### Baum kopieren
+Kopiert den Projektbaum.
+Wenn Knoten markiert sind, wird der Baum aus der Auswahl gebaut; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert.
+Tastenkürzel: Ctrl+Shift+C und Ctrl+Alt+C.
 
-### Kompletten Baum und Inhalt kopieren
+### Inhalt kopieren
+Kopiert Dateiinhalte:
+* wenn Dateien markiert sind — nur diese; sonst — alle Projektdateien;
+* Nicht-Textdateien werden ignoriert (einschließlich Binärdateien);
+* bei leeren Textdateien werden Pfad und die Zeile `[No Content, 0 bytes]` ausgegeben;
+* bei Dateien, die nur aus Leerzeichen/Zeilenumbrüchen bestehen, werden Pfad und die Zeile `[Whitespace, N bytes]` ausgegeben.
+Tastenkürzel: Ctrl+Alt+V.
+
+### Baum + Inhalt kopieren
 Kombiniert Baum und Inhalte:
-* Baum wird anhand der Auswahl erstellt; ist sie ungültig, wird der volle Baum verwendet;
-* Inhalte nur für Textdateien;
-* wenn kein Inhalt vorhanden ist, wird nur der Baum kopiert.
+* Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert;
+* Inhalte nach denselben Regeln wie „Inhalt kopieren“.
+Tastenkürzel: Ctrl+Shift+V.
 
-Ctrl+Shift+V.
-
-## 5) Ansicht
+## 6) Ansicht
 ### Zoom
 * Ctrl++ / Ctrl+= — vergrößern
 * Ctrl+- — verkleinern
@@ -53,7 +59,7 @@ Bereich: 6–28, Reset: 12.
 ### Kompaktmodus
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
 
-## 6) Suche im Baum
+## 7) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
 * Ctrl+F — anzeigen/ausblenden
 * Enter — nächstes Ergebnis
@@ -62,12 +68,12 @@ Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellung
 
 Die Suche öffnet nur benötigte Zweige; beim Leeren der Suche wird der Baum eingeklappt (außer der Wurzel).
 
-## 7) Filter nach Namen
+## 8) Filter nach Namen
 Zeigt nur passende Knoten und ihre Eltern. Aktualisierung mit Verzögerung (Debounce).
 * Ctrl+Shift+N — Filter anzeigen/ausblenden
 * Esc — Filter schließen
 
-## 8) Optionen
+## 9) Optionen
 Rechts befinden sich Listen:
 * Baum‑Schrift — mit Anwenden bestätigen
 * Ignorieren
@@ -78,14 +84,14 @@ Jede Liste hat einen Alle‑Schalter.
 
 Ctrl+P — Panel anzeigen/ausblenden.
 
-## 9) Ignore und Smart Ignore
+## 10) Ignore und Smart Ignore
 ### Normale Regeln
 Ausschluss typischer Artefakte und „Rauschen“ (z. B. bin/obj, versteckte Elemente, Punkt‑Elemente).
 
 ### Smart Ignore
 Zusätzliche „smarte“ Ausschlüsse (VCS/IDE‑Ordner, typische Junk‑Dateien). Frontend‑Regeln aktivieren sich nur, wenn passende Marker gefunden werden (package/lock‑Dateien).
 
-## 10) Wie der Baum gebaut wird
+## 11) Wie der Baum gebaut wird
 Das Ergebnis hängt ab von:
 * ausgewählte Ordner der obersten Ebene
 * ausgewählte Dateitypen
@@ -94,14 +100,14 @@ Das Ergebnis hängt ab von:
 
 Wenn der Zugriff verweigert wird, wird der Knoten als Zugriff verweigert markiert.
 
-## 11) Symbole
+## 12) Symbole
 Auswahlreihenfolge:
 1) Knotentyp (Ordner/Datei)
 2) exakter Name (wenn eine Regel vorhanden ist)
 3) Erweiterung
 4) sonst — unbekannt
 
-## 12) Thema und Effekte
+## 13) Thema und Effekte
 Das Theme‑Popover ermöglicht:
 * helles/dunkles Theme
 * Transparent / Mica / Acrylic
@@ -109,13 +115,14 @@ Das Theme‑Popover ermöglicht:
 
 Einträge mit [Beta] können sich zwischen Versionen ändern.
 
-## 13) Hilfe → Über
+## 14) Hilfe → Über
 Öffnet ein Popover mit App‑Info und Repository‑Link.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt die Theme‑ und Effektwerte auf die Standardwerte zurück.
 * Esc — Popover schließen
 
-## 14) Sprachen
+## 15) Sprachen
 Die Sprache wird über das Sprache‑Menü gewählt.
 
-## 15) Hinweise
+## 16) Hinweise
 * Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.

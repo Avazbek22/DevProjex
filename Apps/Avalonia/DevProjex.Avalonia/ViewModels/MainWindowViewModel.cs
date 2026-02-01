@@ -1,8 +1,9 @@
-using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Media;
+using System.Collections.ObjectModel;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.ResourceStore;
+using DevProjex.Kernel.Models;
 
 namespace DevProjex.Avalonia.ViewModels;
 
@@ -47,6 +48,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _themePopoverOpen;
     private bool _helpPopoverOpen;
     private bool _helpDocsPopoverOpen;
+
+    // Git state
+    private ProjectSourceType _projectSourceType = ProjectSourceType.LocalFolder;
+    private string _currentBranch = string.Empty;
+    private string _gitCloneUrl = string.Empty;
+    private string _gitCloneStatus = string.Empty;
+    private bool _gitCloneInProgress;
     private double _helpPopoverMaxWidth = 800;
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
@@ -331,6 +339,67 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    // Git properties
+    public ProjectSourceType ProjectSourceType
+    {
+        get => _projectSourceType;
+        set
+        {
+            if (_projectSourceType == value) return;
+            _projectSourceType = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsGitMode));
+        }
+    }
+
+    public bool IsGitMode => _projectSourceType == ProjectSourceType.GitClone;
+
+    public string CurrentBranch
+    {
+        get => _currentBranch;
+        set
+        {
+            if (_currentBranch == value) return;
+            _currentBranch = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public ObservableCollection<GitBranch> GitBranches { get; } = new();
+
+    public string GitCloneUrl
+    {
+        get => _gitCloneUrl;
+        set
+        {
+            if (_gitCloneUrl == value) return;
+            _gitCloneUrl = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string GitCloneStatus
+    {
+        get => _gitCloneStatus;
+        set
+        {
+            if (_gitCloneStatus == value) return;
+            _gitCloneStatus = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public bool GitCloneInProgress
+    {
+        get => _gitCloneInProgress;
+        set
+        {
+            if (_gitCloneInProgress == value) return;
+            _gitCloneInProgress = value;
+            RaisePropertyChanged();
+        }
+    }
+
     public double HelpPopoverMaxWidth
     {
         get => _helpPopoverMaxWidth;
@@ -546,10 +615,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuFileRefresh { get; private set; } = string.Empty;
     public string MenuFileExit { get; private set; } = string.Empty;
     public string MenuCopy { get; private set; } = string.Empty;
-    public string MenuCopyFullTree { get; private set; } = string.Empty;
-    public string MenuCopySelectedTree { get; private set; } = string.Empty;
-    public string MenuCopySelectedContent { get; private set; } = string.Empty;
+    public string MenuCopyTree { get; private set; } = string.Empty;
+    public string MenuCopyContent { get; private set; } = string.Empty;
     public string MenuCopyTreeAndContent { get; private set; } = string.Empty;
+    public ObservableCollection<ToastMessageViewModel> ToastItems { get; private set; } = new();
     public string MenuView { get; private set; } = string.Empty;
     public string MenuViewExpandAll { get; private set; } = string.Empty;
     public string MenuViewCollapseAll { get; private set; } = string.Empty;
@@ -568,6 +637,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuHelp { get; private set; } = string.Empty;
     public string MenuHelpHelp { get; private set; } = string.Empty;
     public string MenuHelpAbout { get; private set; } = string.Empty;
+    public string MenuHelpResetSettings { get; private set; } = string.Empty;
     public string HelpHelpTitle { get; private set; } = string.Empty;
     public string HelpHelpBody { get; private set; } = string.Empty;
     public string HelpAboutTitle { get; private set; } = string.Empty;
@@ -601,6 +671,35 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string FilterByNamePlaceholder { get; private set; } = string.Empty;
     public string FilterTooltip { get; private set; } = string.Empty;
 
+    // Git menu localization
+    public string MenuGitClone { get; private set; } = string.Empty;
+    public string MenuGitBranch { get; private set; } = string.Empty;
+    public string MenuGitGetUpdates { get; private set; } = string.Empty;
+
+    // Git clone dialog localization
+    public string GitCloneTitle { get; private set; } = string.Empty;
+    public string GitCloneDescription { get; private set; } = string.Empty;
+    public string GitCloneUrlPlaceholder { get; private set; } = string.Empty;
+    public string GitCloneProgressCheckingGit { get; private set; } = string.Empty;
+    public string GitCloneProgressCloning { get; private set; } = string.Empty;
+    public string GitCloneProgressDownloading { get; private set; } = string.Empty;
+    public string GitCloneProgressExtracting { get; private set; } = string.Empty;
+    public string GitCloneProgressPreparing { get; private set; } = string.Empty;
+    public string GitCloneProgressSwitchingBranch { get; private set; } = string.Empty;
+
+    // Git error messages
+    public string GitErrorGitNotFound { get; private set; } = string.Empty;
+    public string GitErrorCloneFailed { get; private set; } = string.Empty;
+    public string GitErrorInvalidUrl { get; private set; } = string.Empty;
+    public string GitErrorNetworkError { get; private set; } = string.Empty;
+    public string GitErrorNoInternetConnection { get; private set; } = string.Empty;
+    public string GitErrorBranchSwitchFailed { get; private set; } = string.Empty;
+    public string GitErrorUpdateFailed { get; private set; } = string.Empty;
+
+    // Dialog buttons
+    public string DialogOK { get; private set; } = string.Empty;
+    public string DialogCancel { get; private set; } = string.Empty;
+
     public void UpdateLocalization()
     {
         MenuFile = _localization["Menu.File"];
@@ -608,10 +707,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuFileRefresh = _localization["Menu.File.Refresh"];
         MenuFileExit = _localization["Menu.File.Exit"];
         MenuCopy = _localization["Menu.Copy"];
-        MenuCopyFullTree = _localization["Menu.Copy.FullTree"];
-        MenuCopySelectedTree = _localization["Menu.Copy.SelectedTree"];
-        MenuCopySelectedContent = _localization["Menu.Copy.SelectedContent"];
-        MenuCopyTreeAndContent = _localization["Menu.Copy.FullTreeAndContent"];
+        MenuCopyTree = _localization["Menu.Copy.Tree"];
+        MenuCopyContent = _localization["Menu.Copy.Content"];
+        MenuCopyTreeAndContent = _localization["Menu.Copy.TreeAndContent"];
         MenuView = _localization["Menu.View"];
         MenuViewExpandAll = _localization["Menu.View.ExpandAll"];
         MenuViewCollapseAll = _localization["Menu.View.CollapseAll"];
@@ -630,6 +728,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuHelp = _localization["Menu.Help"];
         MenuHelpHelp = _localization["Menu.Help.Help"];
         MenuHelpAbout = _localization["Menu.Help.About"];
+        MenuHelpResetSettings = _localization["Menu.Help.ResetSettings"];
         HelpHelpTitle = _localization["Help.Help.Title"];
         HelpHelpBody = _helpContentProvider.GetHelpBody(_localization.CurrentLanguage);
         HelpAboutTitle = _localization["Help.About.Title"];
@@ -647,6 +746,35 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuSearch = _localization["Menu.Search"];
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
+
+        // Git menu localization
+        MenuGitClone = _localization["Menu.Git.Clone"];
+        MenuGitBranch = _localization["Menu.Git.Branch"];
+        MenuGitGetUpdates = _localization["Menu.Git.GetUpdates"];
+
+        // Git clone dialog localization
+        GitCloneTitle = _localization["Git.Clone.Title"];
+        GitCloneDescription = _localization["Git.Clone.Description"];
+        GitCloneUrlPlaceholder = _localization["Git.Clone.UrlPlaceholder"];
+        GitCloneProgressCheckingGit = _localization["Git.Clone.Progress.CheckingGit"];
+        GitCloneProgressCloning = _localization["Git.Clone.Progress.Cloning"];
+        GitCloneProgressDownloading = _localization["Git.Clone.Progress.Downloading"];
+        GitCloneProgressExtracting = _localization["Git.Clone.Progress.Extracting"];
+        GitCloneProgressPreparing = _localization["Git.Clone.Progress.Preparing"];
+        GitCloneProgressSwitchingBranch = _localization["Git.Clone.Progress.SwitchingBranch"];
+
+        // Git error messages
+        GitErrorGitNotFound = _localization["Git.Error.GitNotFound"];
+        GitErrorCloneFailed = _localization["Git.Error.CloneFailed"];
+        GitErrorInvalidUrl = _localization["Git.Error.InvalidUrl"];
+        GitErrorNetworkError = _localization["Git.Error.NetworkError"];
+        GitErrorNoInternetConnection = _localization["Git.Error.NoInternetConnection"];
+        GitErrorBranchSwitchFailed = _localization["Git.Error.BranchSwitchFailed"];
+        GitErrorUpdateFailed = _localization["Git.Error.UpdateFailed"];
+
+        // Dialog buttons
+        DialogOK = _localization["Dialog.OK"];
+        DialogCancel = _localization["Dialog.Cancel"];
 
         // Theme popover localization
         MenuTheme = _localization["Menu.Theme"];
@@ -668,9 +796,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuFileRefresh));
         RaisePropertyChanged(nameof(MenuFileExit));
         RaisePropertyChanged(nameof(MenuCopy));
-        RaisePropertyChanged(nameof(MenuCopyFullTree));
-        RaisePropertyChanged(nameof(MenuCopySelectedTree));
-        RaisePropertyChanged(nameof(MenuCopySelectedContent));
+        RaisePropertyChanged(nameof(MenuCopyTree));
+        RaisePropertyChanged(nameof(MenuCopyContent));
         RaisePropertyChanged(nameof(MenuCopyTreeAndContent));
         RaisePropertyChanged(nameof(MenuView));
         RaisePropertyChanged(nameof(MenuViewExpandAll));
@@ -690,6 +817,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuHelp));
         RaisePropertyChanged(nameof(MenuHelpHelp));
         RaisePropertyChanged(nameof(MenuHelpAbout));
+        RaisePropertyChanged(nameof(MenuHelpResetSettings));
         RaisePropertyChanged(nameof(HelpHelpTitle));
         RaisePropertyChanged(nameof(HelpHelpBody));
         RaisePropertyChanged(nameof(HelpAboutTitle));
@@ -721,6 +849,35 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(ThemePanelContrast));
         RaisePropertyChanged(nameof(ThemeBorderStrength));
         RaisePropertyChanged(nameof(ThemeMenuChildIntensity));
+
+        // Git localization
+        RaisePropertyChanged(nameof(MenuGitClone));
+        RaisePropertyChanged(nameof(MenuGitBranch));
+        RaisePropertyChanged(nameof(MenuGitGetUpdates));
+        RaisePropertyChanged(nameof(GitCloneTitle));
+        RaisePropertyChanged(nameof(GitCloneDescription));
+        RaisePropertyChanged(nameof(GitCloneUrlPlaceholder));
+        RaisePropertyChanged(nameof(GitCloneProgressCheckingGit));
+        RaisePropertyChanged(nameof(GitCloneProgressCloning));
+        RaisePropertyChanged(nameof(GitCloneProgressDownloading));
+        RaisePropertyChanged(nameof(GitCloneProgressExtracting));
+        RaisePropertyChanged(nameof(GitCloneProgressPreparing));
+        RaisePropertyChanged(nameof(GitCloneProgressSwitchingBranch));
+        RaisePropertyChanged(nameof(GitErrorGitNotFound));
+        RaisePropertyChanged(nameof(GitErrorCloneFailed));
+        RaisePropertyChanged(nameof(GitErrorInvalidUrl));
+        RaisePropertyChanged(nameof(GitErrorNetworkError));
+        RaisePropertyChanged(nameof(GitErrorNoInternetConnection));
+        RaisePropertyChanged(nameof(GitErrorBranchSwitchFailed));
+        RaisePropertyChanged(nameof(GitErrorUpdateFailed));
+        RaisePropertyChanged(nameof(DialogOK));
+        RaisePropertyChanged(nameof(DialogCancel));
+    }
+
+    public void SetToastItems(ObservableCollection<ToastMessageViewModel> items)
+    {
+        ToastItems = items;
+        RaisePropertyChanged(nameof(ToastItems));
     }
 
     /// <summary>

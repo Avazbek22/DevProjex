@@ -61,6 +61,17 @@ public sealed class ThemePresetStore
         db.Presets[key] = preset;
     }
 
+    /// <summary>
+    /// Resets all presets to factory defaults and saves the result.
+    /// Returns the new database with default values applied.
+    /// </summary>
+    public ThemePresetDb ResetToDefaults()
+    {
+        var defaultDb = CreateDefaultDb();
+        TrySave(defaultDb);
+        return defaultDb;
+    }
+
     public string GetPath()
     {
         var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);

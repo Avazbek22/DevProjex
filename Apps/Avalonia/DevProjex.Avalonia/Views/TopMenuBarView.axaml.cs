@@ -22,9 +22,8 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? OpenFolderRequested;
     public event EventHandler<RoutedEventArgs>? RefreshRequested;
     public event EventHandler<RoutedEventArgs>? ExitRequested;
-    public event EventHandler<RoutedEventArgs>? CopyFullTreeRequested;
-    public event EventHandler<RoutedEventArgs>? CopySelectedTreeRequested;
-    public event EventHandler<RoutedEventArgs>? CopySelectedContentRequested;
+    public event EventHandler<RoutedEventArgs>? CopyTreeRequested;
+    public event EventHandler<RoutedEventArgs>? CopyContentRequested;
     public event EventHandler<RoutedEventArgs>? CopyTreeAndContentRequested;
     public event EventHandler<RoutedEventArgs>? ExpandAllRequested;
     public event EventHandler<RoutedEventArgs>? CollapseAllRequested;
@@ -50,11 +49,17 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? AboutCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutOpenLinkRequested;
     public event EventHandler<RoutedEventArgs>? AboutCopyLinkRequested;
+    public event EventHandler<RoutedEventArgs>? ResetSettingsRequested;
     public event EventHandler<RoutedEventArgs>? SetLightThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetDarkThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetTransparentModeRequested;
     public event EventHandler<RoutedEventArgs>? SetMicaModeRequested;
     public event EventHandler<RoutedEventArgs>? SetAcrylicModeRequested;
+
+    // Git events
+    public event EventHandler<RoutedEventArgs>? GitCloneRequested;
+    public event EventHandler<RoutedEventArgs>? GitGetUpdatesRequested;
+    public event EventHandler<string>? GitBranchSwitchRequested;
 
     public TopMenuBarView()
     {
@@ -109,12 +114,9 @@ public partial class TopMenuBarView : UserControl
 
     private void OnExit(object? sender, RoutedEventArgs e) => ExitRequested?.Invoke(sender, e);
 
-    private void OnCopyFullTree(object? sender, RoutedEventArgs e) => CopyFullTreeRequested?.Invoke(sender, e);
+    private void OnCopyTree(object? sender, RoutedEventArgs e) => CopyTreeRequested?.Invoke(sender, e);
 
-    private void OnCopySelectedTree(object? sender, RoutedEventArgs e) => CopySelectedTreeRequested?.Invoke(sender, e);
-
-    private void OnCopySelectedContent(object? sender, RoutedEventArgs e)
-        => CopySelectedContentRequested?.Invoke(sender, e);
+    private void OnCopyContent(object? sender, RoutedEventArgs e) => CopyContentRequested?.Invoke(sender, e);
 
     private void OnCopyTreeAndContent(object? sender, RoutedEventArgs e)
         => CopyTreeAndContentRequested?.Invoke(sender, e);
@@ -160,6 +162,16 @@ public partial class TopMenuBarView : UserControl
     private void OnHelp(object? sender, RoutedEventArgs e) => HelpRequested?.Invoke(sender, e);
 
     private void OnAbout(object? sender, RoutedEventArgs e) => AboutRequested?.Invoke(sender, e);
+
+    private void OnResetSettings(object? sender, RoutedEventArgs e) => ResetSettingsRequested?.Invoke(sender, e);
+
+    private void OnGitClone(object? sender, RoutedEventArgs e) => GitCloneRequested?.Invoke(sender, e);
+
+    private void OnGitGetUpdates(object? sender, RoutedEventArgs e) => GitGetUpdatesRequested?.Invoke(sender, e);
+
+    public void OnGitBranchSwitch(string branchName) => GitBranchSwitchRequested?.Invoke(this, branchName);
+
+    public MenuItem? GitBranchMenuItemControl => GitBranchMenuItem;
 
     private void OnThemePopupOpened(object? sender, EventArgs e)
     {

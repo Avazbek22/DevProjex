@@ -18,30 +18,36 @@ Hotkeys:
 * Open folder… — open root folder (Ctrl+O)
 * Refresh — rescan and rebuild the tree (F5)
 
-## 4) Copy
-### Copy full tree
-Copies the full ASCII project tree. Ctrl+Shift+C.
+## 4) Git
+Git menu is available only for projects cloned via DevProjex (Git Clone). The app does not touch your files — it works only with the cache.
 
-### Copy selected tree
-Copies the tree for selected (checked) nodes. If nothing is selected, a message is shown. Ctrl+Alt+C.
+The cache is stored in the system temp folder. On Windows it is usually:
+`%TEMP%\DevProjex\RepoCache`
 
-### Copy selected content
-Copies contents of selected text files only:
-* the file must exist;
-* binary files are skipped (checked for null bytes);
-* output is sorted and separated by blank lines.
+* Branch — shows the list of remote branches; switching updates the tree to the selected branch. If the branch already exists locally, switching is offline (no update). If it does not exist locally, it is fetched and created.
+* Get updates — updates only the current branch: fetch and reset to origin/<branch>.
 
-Ctrl+Alt+V.
+## 5) Copy
+### Copy tree
+Copies the project tree.
+If there are checked nodes, the tree is built from selection; if the selection is empty or invalid, the full tree is copied.
+Hotkeys: Ctrl+Shift+C and Ctrl+Alt+C.
+
+### Copy content
+Copies file contents:
+* if files are checked — only those; otherwise — all project files;
+* non-text files are ignored (including binary);
+* for empty text files, the path and the line `[No Content, 0 bytes]` are output;
+* for files containing only whitespace/line breaks, the path and the line `[Whitespace, N bytes]` are output.
+Hotkey: Ctrl+Alt+V.
 
 ### Copy tree + content
 Combines tree and content:
-* tree is built from selection; if selection is invalid, full tree is used;
-* content is added only for text files;
-* if there is no content, only the tree is copied.
+* tree is built from selection; if selection is empty/invalid, the full tree is used;
+* content follows the same rules as “Copy content”.
+Hotkey: Ctrl+Shift+V.
 
-Ctrl+Shift+V.
-
-## 5) View
+## 6) View
 ### Zoom
 * Ctrl++ / Ctrl+= — zoom in
 * Ctrl+- — zoom out
@@ -53,7 +59,7 @@ Range: 6–28, reset is 12.
 ### Compact Mode
 Makes the UI denser: smaller spacing in the tree and settings.
 
-## 6) Search (tree)
+## 7) Search (tree)
 Opens the search bar, highlights matches, and allows navigation.
 * Ctrl+F — show/hide
 * Enter — next result
@@ -62,12 +68,12 @@ Opens the search bar, highlights matches, and allows navigation.
 
 Search auto-expands only the needed branches; clearing the query collapses the tree (except root).
 
-## 7) Filter (by name)
+## 8) Filter (by name)
 Shows only nodes matching the filter string and their parents. Updates are debounced.
 * Ctrl+Shift+N — show/hide filter
 * Esc — close filter
 
-## 8) Options (settings panel)
+## 9) Options (settings panel)
 Lists on the right:
 * Font (tree font) — apply with Apply
 * Ignore options
@@ -78,14 +84,14 @@ Each list has an All toggle.
 
 Ctrl+P — show/hide the panel.
 
-## 9) Ignore and Smart Ignore
+## 10) Ignore and Smart Ignore
 ### Regular rules
 Exclude common artifacts and noise (e.g., bin/obj, hidden items, dot-items, etc.).
 
 ### Smart Ignore
 Additional smart exclusions (e.g., VCS/IDE folders and typical junk files). Frontend rules activate only when related project markers are detected (package/lock files).
 
-## 10) How the tree is built
+## 11) How the tree is built
 Result depends on:
 * selected Root folders
 * selected Extensions
@@ -94,14 +100,14 @@ Result depends on:
 
 If access is denied, the node is marked Access denied.
 
-## 11) Icons
+## 12) Icons
 Icon selection order:
 1) node type (folder/file)
 2) exact name (if rule exists)
 3) extension
 4) otherwise — unknown
 
-## 12) Theme and effects
+## 13) Theme and effects
 Theme popover lets you switch:
 * light/dark theme
 * Transparent / Mica / Acrylic
@@ -109,13 +115,14 @@ Theme popover lets you switch:
 
 Items marked [Beta] may change between versions.
 
-## 13) Help → About
+## 14) Help → About
 Opens a popover with app info and repository link.
+Reset settings (Help → Reset settings) returns theme and effects settings to their default values.
 * Esc — close popover
 
-## 14) Languages
+## 15) Languages
 Language is selected via the Language menu.
 
-## 15) Notes
+## 16) Notes
 * By default, dark theme and transparency effects are enabled (if supported).
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.

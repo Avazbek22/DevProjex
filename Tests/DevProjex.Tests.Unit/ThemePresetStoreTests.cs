@@ -222,7 +222,20 @@ public sealed class ThemePresetStoreTests
 		var path = store.GetPath();
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-			Directory.Delete(directory, recursive: true);
+		{
+			try
+			{
+				Directory.Delete(directory, recursive: true);
+			}
+			catch (UnauthorizedAccessException)
+			{
+				// Ignore - files may be locked by other tests
+			}
+			catch (IOException)
+			{
+				// Ignore - files may be in use
+			}
+		}
 
 		store.Save(new ThemePresetDb());
 
@@ -691,6 +704,648 @@ public sealed class ThemePresetStoreTests
 
 		Assert.True(File.Exists(store.GetPath()));
 	}
+
+	#region ResetToDefaults Tests
+
+	[Fact]
+	// Ensures ResetToDefaults returns a database with all theme/effect combinations.
+	public void ResetToDefaults_ReturnsAllPresetCombinations()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var db = store.ResetToDefaults();
+
+		foreach (var theme in Enum.GetValues<ThemeVariant>())
+		{
+			foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+			{
+				var key = $"{theme}.{effect}";
+				Assert.True(db.Presets.ContainsKey(key), $"Missing preset: {key}");
+			}
+		}
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults overwrites any previously saved custom presets.
+	public void ResetToDefaults_OverwritesCustomPresets()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		// Save custom preset with unique values
+		var customDb = new ThemePresetDb
+		{
+			SchemaVersion = 1,
+			Presets = new Dictionary<string, ThemePreset>
+			{
+				["Dark.Transparent"] = new ThemePreset
+				{
+					Theme = ThemeVariant.Dark,
+					Effect = ThemeEffectMode.Transparent,
+					MaterialIntensity = 999,
+					BlurRadius = 999,
+					PanelContrast = 999,
+					MenuChildIntensity = 999,
+					BorderStrength = 999
+				}
+			},
+			LastSelected = "Dark.Transparent"
+		};
+		store.Save(customDb);
+
+		// Reset to defaults
+		var resetDb = store.ResetToDefaults();
+
+		// Verify custom values were replaced (we don't know exact defaults, but 999 is unrealistic)
+		var preset = resetDb.Presets["Dark.Transparent"];
+		Assert.NotEqual(999, preset.MaterialIntensity);
+		Assert.NotEqual(999, preset.BlurRadius);
+		Assert.NotEqual(999, preset.PanelContrast);
+		Assert.NotEqual(999, preset.MenuChildIntensity);
+		Assert.NotEqual(999, preset.BorderStrength);
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults saves the file immediately.
+	public void ResetToDefaults_SavesFileImmediately()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+		var path = store.GetPath();
+
+		if (File.Exists(path))
+			File.Delete(path);
+
+		store.ResetToDefaults();
+
+		Assert.True(File.Exists(path));
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults values match what Load returns for a fresh database.
+	public void ResetToDefaults_PresetValuesMatchLoadDefaults()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+		var path = store.GetPath();
+
+		// Clear any existing file
+		if (File.Exists(path))
+			File.Delete(path);
+
+		// Get defaults from Load (creates fresh defaults)
+		var loadedDefaults = store.Load();
+
+		// Clear again and call ResetToDefaults
+		if (File.Exists(path))
+			File.Delete(path);
+		var resetDefaults = store.ResetToDefaults();
+
+		// All presets should have identical values
+		foreach (var theme in Enum.GetValues<ThemeVariant>())
+		{
+			foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+			{
+				var key = $"{theme}.{effect}";
+				var loadedPreset = loadedDefaults.Presets[key];
+				var resetPreset = resetDefaults.Presets[key];
+
+				Assert.Equal(loadedPreset.Theme, resetPreset.Theme);
+				Assert.Equal(loadedPreset.Effect, resetPreset.Effect);
+				Assert.Equal(loadedPreset.MaterialIntensity, resetPreset.MaterialIntensity);
+				Assert.Equal(loadedPreset.BlurRadius, resetPreset.BlurRadius);
+				Assert.Equal(loadedPreset.PanelContrast, resetPreset.PanelContrast);
+				Assert.Equal(loadedPreset.MenuChildIntensity, resetPreset.MenuChildIntensity);
+				Assert.Equal(loadedPreset.BorderStrength, resetPreset.BorderStrength);
+			}
+		}
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults returns a database with a valid LastSelected key.
+	public void ResetToDefaults_LastSelectedIsValid()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var db = store.ResetToDefaults();
+
+		Assert.False(string.IsNullOrWhiteSpace(db.LastSelected));
+		Assert.True(db.Presets.ContainsKey(db.LastSelected));
+		Assert.True(store.TryParseKey(db.LastSelected, out _, out _));
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults returns a database with valid schema version.
+	public void ResetToDefaults_HasValidSchemaVersion()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var db = store.ResetToDefaults();
+
+		Assert.True(db.SchemaVersion > 0);
+	}
+
+	[Theory]
+	// Ensures ResetToDefaults presets have matching theme/effect metadata.
+	[InlineData(ThemeVariant.Light, ThemeEffectMode.Transparent)]
+	[InlineData(ThemeVariant.Light, ThemeEffectMode.Mica)]
+	[InlineData(ThemeVariant.Light, ThemeEffectMode.Acrylic)]
+	[InlineData(ThemeVariant.Dark, ThemeEffectMode.Transparent)]
+	[InlineData(ThemeVariant.Dark, ThemeEffectMode.Mica)]
+	[InlineData(ThemeVariant.Dark, ThemeEffectMode.Acrylic)]
+	public void ResetToDefaults_AllPresetsHaveMatchingMetadata(ThemeVariant theme, ThemeEffectMode effect)
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var db = store.ResetToDefaults();
+		var key = $"{theme}.{effect}";
+		var preset = db.Presets[key];
+
+		Assert.Equal(theme, preset.Theme);
+		Assert.Equal(effect, preset.Effect);
+	}
+
+	[Fact]
+	// Ensures multiple calls to ResetToDefaults return consistent values.
+	public void ResetToDefaults_ReturnsConsistentDefaults()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var first = store.ResetToDefaults();
+		var second = store.ResetToDefaults();
+
+		foreach (var theme in Enum.GetValues<ThemeVariant>())
+		{
+			foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+			{
+				var key = $"{theme}.{effect}";
+				var firstPreset = first.Presets[key];
+				var secondPreset = second.Presets[key];
+
+				Assert.Equal(firstPreset.MaterialIntensity, secondPreset.MaterialIntensity);
+				Assert.Equal(firstPreset.BlurRadius, secondPreset.BlurRadius);
+				Assert.Equal(firstPreset.PanelContrast, secondPreset.PanelContrast);
+				Assert.Equal(firstPreset.MenuChildIntensity, secondPreset.MenuChildIntensity);
+				Assert.Equal(firstPreset.BorderStrength, secondPreset.BorderStrength);
+			}
+		}
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults works even when file was corrupted.
+	public void ResetToDefaults_WorksWithCorruptedFile()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+		var path = store.GetPath();
+		var directory = Path.GetDirectoryName(path);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+		File.WriteAllText(path, "{ invalid json content");
+
+		var db = store.ResetToDefaults();
+
+		Assert.NotEmpty(db.Presets);
+		Assert.True(db.SchemaVersion > 0);
+		Assert.False(string.IsNullOrWhiteSpace(db.LastSelected));
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults works when no file exists.
+	public void ResetToDefaults_WorksWithMissingFile()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+		var path = store.GetPath();
+
+		if (File.Exists(path))
+			File.Delete(path);
+		var directory = Path.GetDirectoryName(path);
+		if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+		{
+			try
+			{
+				Directory.Delete(directory, recursive: true);
+			}
+			catch (UnauthorizedAccessException)
+			{
+				// Ignore - files may be locked by other tests
+			}
+			catch (IOException)
+			{
+				// Ignore - files may be in use
+			}
+		}
+
+		var db = store.ResetToDefaults();
+
+		Assert.NotEmpty(db.Presets);
+		Assert.True(File.Exists(path));
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults preset values are within valid slider ranges (0-100).
+	public void ResetToDefaults_AllValuesWithinValidRange()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var db = store.ResetToDefaults();
+
+		foreach (var preset in db.Presets.Values)
+		{
+			Assert.InRange(preset.MaterialIntensity, 0, 100);
+			Assert.InRange(preset.BlurRadius, 0, 100);
+			Assert.InRange(preset.PanelContrast, 0, 100);
+			Assert.InRange(preset.MenuChildIntensity, 0, 100);
+			Assert.InRange(preset.BorderStrength, 0, 100);
+		}
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults file can be loaded again and matches.
+	public void ResetToDefaults_PersistedFileCanBeLoaded()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var resetDb = store.ResetToDefaults();
+		var loadedDb = store.Load();
+
+		Assert.Equal(resetDb.SchemaVersion, loadedDb.SchemaVersion);
+		Assert.Equal(resetDb.LastSelected, loadedDb.LastSelected);
+		Assert.Equal(resetDb.Presets.Count, loadedDb.Presets.Count);
+
+		foreach (var key in resetDb.Presets.Keys)
+		{
+			var resetPreset = resetDb.Presets[key];
+			var loadedPreset = loadedDb.Presets[key];
+
+			Assert.Equal(resetPreset.MaterialIntensity, loadedPreset.MaterialIntensity);
+			Assert.Equal(resetPreset.BlurRadius, loadedPreset.BlurRadius);
+			Assert.Equal(resetPreset.PanelContrast, loadedPreset.PanelContrast);
+			Assert.Equal(resetPreset.MenuChildIntensity, loadedPreset.MenuChildIntensity);
+			Assert.Equal(resetPreset.BorderStrength, loadedPreset.BorderStrength);
+		}
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults does not preserve any previously selected custom preset key.
+	public void ResetToDefaults_IgnoresPreviousLastSelected()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		// Save with unusual lastSelected
+		var customDb = new ThemePresetDb
+		{
+			SchemaVersion = 1,
+			Presets = new Dictionary<string, ThemePreset>
+			{
+				["Light.Acrylic"] = new ThemePreset
+				{
+					Theme = ThemeVariant.Light,
+					Effect = ThemeEffectMode.Acrylic,
+					MaterialIntensity = 50,
+					BlurRadius = 50,
+					PanelContrast = 50,
+					MenuChildIntensity = 50,
+					BorderStrength = 50
+				}
+			},
+			LastSelected = "Light.Acrylic"
+		};
+		store.Save(customDb);
+
+		// Reset should use default lastSelected, not the custom one
+		var resetDb = store.ResetToDefaults();
+
+		// We don't know the exact default, but it should be valid
+		Assert.True(store.TryParseKey(resetDb.LastSelected, out _, out _));
+		Assert.True(resetDb.Presets.ContainsKey(resetDb.LastSelected));
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults restores values after multiple custom modifications.
+	public void ResetToDefaults_RestoresAfterMultipleModifications()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		// Get baseline defaults
+		var baseline = store.ResetToDefaults();
+		var baselineValues = CaptureAllPresetValues(baseline);
+
+		// Modify all presets with unique custom values
+		foreach (var theme in Enum.GetValues<ThemeVariant>())
+		{
+			foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+			{
+				var customPreset = new ThemePreset
+				{
+					Theme = theme,
+					Effect = effect,
+					MaterialIntensity = 11.11,
+					BlurRadius = 22.22,
+					PanelContrast = 33.33,
+					MenuChildIntensity = 44.44,
+					BorderStrength = 55.55
+				};
+				store.SetPreset(baseline, theme, effect, customPreset);
+			}
+		}
+		store.Save(baseline);
+
+		// Verify custom values were saved
+		var loaded = store.Load();
+		foreach (var preset in loaded.Presets.Values)
+		{
+			Assert.Equal(11.11, preset.MaterialIntensity);
+		}
+
+		// Reset and verify defaults are restored
+		var reset = store.ResetToDefaults();
+		var resetValues = CaptureAllPresetValues(reset);
+
+		Assert.Equal(baselineValues, resetValues);
+	}
+
+	[Theory]
+	// Ensures each preset combination is properly reset to its specific default.
+	[InlineData(ThemeVariant.Light, ThemeEffectMode.Transparent)]
+	[InlineData(ThemeVariant.Light, ThemeEffectMode.Mica)]
+	[InlineData(ThemeVariant.Light, ThemeEffectMode.Acrylic)]
+	[InlineData(ThemeVariant.Dark, ThemeEffectMode.Transparent)]
+	[InlineData(ThemeVariant.Dark, ThemeEffectMode.Mica)]
+	[InlineData(ThemeVariant.Dark, ThemeEffectMode.Acrylic)]
+	public void ResetToDefaults_RestoresSpecificPresetToDefault(ThemeVariant theme, ThemeEffectMode effect)
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+		var key = $"{theme}.{effect}";
+
+		// Get original default for this specific preset
+		var originalDb = store.ResetToDefaults();
+		var originalPreset = originalDb.Presets[key];
+		var originalValues = CapturePresetValues(originalPreset);
+
+		// Modify only this preset
+		var customPreset = new ThemePreset
+		{
+			Theme = theme,
+			Effect = effect,
+			MaterialIntensity = 1.23,
+			BlurRadius = 4.56,
+			PanelContrast = 7.89,
+			MenuChildIntensity = 10.11,
+			BorderStrength = 12.13
+		};
+		store.SetPreset(originalDb, theme, effect, customPreset);
+		store.Save(originalDb);
+
+		// Reset and verify this specific preset is restored
+		var resetDb = store.ResetToDefaults();
+		var resetPreset = resetDb.Presets[key];
+		var resetValues = CapturePresetValues(resetPreset);
+
+		Assert.Equal(originalValues, resetValues);
+	}
+
+	[Fact]
+	// Ensures reset cycle works correctly: default -> custom -> reset -> custom -> reset.
+	public void ResetToDefaults_WorksInRepeatedResetCycle()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		// First reset to get baseline
+		var baseline = store.ResetToDefaults();
+		var baselineValues = CaptureAllPresetValues(baseline);
+
+		for (int cycle = 0; cycle < 3; cycle++)
+		{
+			// Modify with cycle-specific values
+			foreach (var theme in Enum.GetValues<ThemeVariant>())
+			{
+				foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+				{
+					var custom = new ThemePreset
+					{
+						Theme = theme,
+						Effect = effect,
+						MaterialIntensity = 10 + cycle,
+						BlurRadius = 20 + cycle,
+						PanelContrast = 30 + cycle,
+						MenuChildIntensity = 40 + cycle,
+						BorderStrength = 50 + cycle
+					};
+					store.SetPreset(baseline, theme, effect, custom);
+				}
+			}
+			store.Save(baseline);
+
+			// Reset and verify
+			var reset = store.ResetToDefaults();
+			var resetValues = CaptureAllPresetValues(reset);
+
+			Assert.Equal(baselineValues, resetValues);
+		}
+	}
+
+	[Fact]
+	// Ensures reset does not preserve any custom slider values.
+	public void ResetToDefaults_NoCustomValuesRemain()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		// Use obviously wrong values that cannot be defaults
+		const double impossibleValue = 123.456789;
+
+		var db = new ThemePresetDb
+		{
+			SchemaVersion = 1,
+			Presets = new Dictionary<string, ThemePreset>(),
+			LastSelected = "Dark.Transparent"
+		};
+
+		foreach (var theme in Enum.GetValues<ThemeVariant>())
+		{
+			foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+			{
+				db.Presets[$"{theme}.{effect}"] = new ThemePreset
+				{
+					Theme = theme,
+					Effect = effect,
+					MaterialIntensity = impossibleValue,
+					BlurRadius = impossibleValue,
+					PanelContrast = impossibleValue,
+					MenuChildIntensity = impossibleValue,
+					BorderStrength = impossibleValue
+				};
+			}
+		}
+		store.Save(db);
+
+		// Reset
+		var reset = store.ResetToDefaults();
+
+		// Verify none of the impossible values remain
+		foreach (var preset in reset.Presets.Values)
+		{
+			Assert.NotEqual(impossibleValue, preset.MaterialIntensity);
+			Assert.NotEqual(impossibleValue, preset.BlurRadius);
+			Assert.NotEqual(impossibleValue, preset.PanelContrast);
+			Assert.NotEqual(impossibleValue, preset.MenuChildIntensity);
+			Assert.NotEqual(impossibleValue, preset.BorderStrength);
+		}
+	}
+
+	[Fact]
+	// Ensures different theme variants have independent default values after reset.
+	public void ResetToDefaults_ThemeVariantsHaveIndependentDefaults()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var db = store.ResetToDefaults();
+
+		// For same effect, Light and Dark may have different defaults
+		foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+		{
+			var lightPreset = db.Presets[$"Light.{effect}"];
+			var darkPreset = db.Presets[$"Dark.{effect}"];
+
+			// Both should have valid values
+			Assert.InRange(lightPreset.MaterialIntensity, 0, 100);
+			Assert.InRange(darkPreset.MaterialIntensity, 0, 100);
+
+			// Metadata should match their keys
+			Assert.Equal(ThemeVariant.Light, lightPreset.Theme);
+			Assert.Equal(ThemeVariant.Dark, darkPreset.Theme);
+			Assert.Equal(effect, lightPreset.Effect);
+			Assert.Equal(effect, darkPreset.Effect);
+		}
+	}
+
+	[Fact]
+	// Ensures different effects have independent default values after reset.
+	public void ResetToDefaults_EffectModesHaveIndependentDefaults()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var db = store.ResetToDefaults();
+
+		// For same theme, different effects may have different defaults
+		foreach (var theme in Enum.GetValues<ThemeVariant>())
+		{
+			var transparentPreset = db.Presets[$"{theme}.Transparent"];
+			var micaPreset = db.Presets[$"{theme}.Mica"];
+			var acrylicPreset = db.Presets[$"{theme}.Acrylic"];
+
+			// All should have valid values
+			Assert.InRange(transparentPreset.MaterialIntensity, 0, 100);
+			Assert.InRange(micaPreset.MaterialIntensity, 0, 100);
+			Assert.InRange(acrylicPreset.MaterialIntensity, 0, 100);
+
+			// Metadata should match their keys
+			Assert.Equal(theme, transparentPreset.Theme);
+			Assert.Equal(theme, micaPreset.Theme);
+			Assert.Equal(theme, acrylicPreset.Theme);
+			Assert.Equal(ThemeEffectMode.Transparent, transparentPreset.Effect);
+			Assert.Equal(ThemeEffectMode.Mica, micaPreset.Effect);
+			Assert.Equal(ThemeEffectMode.Acrylic, acrylicPreset.Effect);
+		}
+	}
+
+	[Fact]
+	// Ensures file content after reset matches expected JSON structure.
+	public void ResetToDefaults_WritesValidJsonStructure()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		store.ResetToDefaults();
+
+		var json = File.ReadAllText(store.GetPath());
+		using var doc = JsonDocument.Parse(json);
+		var root = doc.RootElement;
+
+		// Verify structure
+		Assert.True(root.TryGetProperty("schemaVersion", out var schemaVersion));
+		Assert.True(schemaVersion.GetInt32() > 0);
+
+		Assert.True(root.TryGetProperty("lastSelected", out var lastSelected));
+		Assert.False(string.IsNullOrWhiteSpace(lastSelected.GetString()));
+
+		Assert.True(root.TryGetProperty("presets", out var presets));
+		Assert.Equal(JsonValueKind.Object, presets.ValueKind);
+
+		// Count presets (should be 6: 2 themes × 3 effects)
+		int count = 0;
+		foreach (var _ in presets.EnumerateObject())
+			count++;
+		Assert.Equal(6, count);
+	}
+
+	[Fact]
+	// Ensures each preset in reset database contains all required properties.
+	public void ResetToDefaults_AllPresetsHaveRequiredProperties()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var db = store.ResetToDefaults();
+
+		foreach (var kvp in db.Presets)
+		{
+			var preset = kvp.Value;
+			Assert.NotNull(preset);
+
+			// Verify theme and effect are set (not default enum values for wrong key)
+			Assert.True(Enum.IsDefined(preset.Theme));
+			Assert.True(Enum.IsDefined(preset.Effect));
+
+			// Verify all slider values are initialized (not default 0 unless intentional)
+			// We check they're within valid range, which implies they were set
+			Assert.True(preset.MaterialIntensity >= 0 && preset.MaterialIntensity <= 100,
+				$"MaterialIntensity out of range for {kvp.Key}");
+			Assert.True(preset.BlurRadius >= 0 && preset.BlurRadius <= 100,
+				$"BlurRadius out of range for {kvp.Key}");
+			Assert.True(preset.PanelContrast >= 0 && preset.PanelContrast <= 100,
+				$"PanelContrast out of range for {kvp.Key}");
+			Assert.True(preset.MenuChildIntensity >= 0 && preset.MenuChildIntensity <= 100,
+				$"MenuChildIntensity out of range for {kvp.Key}");
+			Assert.True(preset.BorderStrength >= 0 && preset.BorderStrength <= 100,
+				$"BorderStrength out of range for {kvp.Key}");
+		}
+	}
+
+	// Helper to capture all preset values for comparison
+	private static Dictionary<string, (double MI, double BR, double PC, double MCI, double BS)> CaptureAllPresetValues(ThemePresetDb db)
+	{
+		var result = new Dictionary<string, (double, double, double, double, double)>();
+		foreach (var kvp in db.Presets)
+		{
+			result[kvp.Key] = CapturePresetValues(kvp.Value);
+		}
+		return result;
+	}
+
+	// Helper to capture single preset values
+	private static (double MI, double BR, double PC, double MCI, double BS) CapturePresetValues(ThemePreset preset)
+	{
+		return (preset.MaterialIntensity, preset.BlurRadius, preset.PanelContrast,
+			preset.MenuChildIntensity, preset.BorderStrength);
+	}
+
+	#endregion
 
 	private static void WritePresetFile(string path, ThemePresetDb db)
 	{

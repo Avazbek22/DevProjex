@@ -21,7 +21,8 @@ public sealed class SelectedContentExportServiceTests
 		var result = service.Build(new[] { missing, empty, valid });
 
 		Assert.Contains("note.txt:", result);
-		Assert.DoesNotContain("empty.txt", result);
+		Assert.Contains("empty.txt:", result);
+		Assert.Contains("[No Content, 0 bytes]", result);
 		Assert.DoesNotContain("missing.txt", result);
 	}
 
@@ -64,7 +65,8 @@ public sealed class SelectedContentExportServiceTests
 		var service = new SelectedContentExportService();
 		var result = service.Build(new[] { whitespace });
 
-		Assert.Equal(string.Empty, result);
+		Assert.Contains("space.txt:", result);
+		Assert.Contains("[Whitespace, 3 bytes]", result);
 	}
 
 	// Verifies duplicate file paths are included once.
@@ -167,8 +169,11 @@ public sealed class SelectedContentExportServiceTests
 		var service = new SelectedContentExportService();
 		var result = service.Build(new[] { fileB, fileA });
 
-		var firstIndex = result.IndexOf("a.txt:", StringComparison.OrdinalIgnoreCase);
-		var secondIndex = result.IndexOf("B.txt:", StringComparison.OrdinalIgnoreCase);
+		var comparison = OperatingSystem.IsWindows()
+			? StringComparison.OrdinalIgnoreCase
+			: StringComparison.Ordinal;
+		var firstIndex = result.IndexOf("a.txt:", comparison);
+		var secondIndex = result.IndexOf("B.txt:", comparison);
 		Assert.True(firstIndex < secondIndex);
 	}
 

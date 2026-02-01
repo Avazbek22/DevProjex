@@ -18,30 +18,36 @@ Raccourcis :
 * Ouvrir le dossier… — ouvrir le dossier racine (Ctrl+O)
 * Actualiser — relire et reconstruire l’arborescence (F5)
 
-## 4) Copier
-### Copier l'arborescence complète
-Copie l’arborescence ASCII complète. Ctrl+Shift+C.
+## 4) Git
+Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git Clone). L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
 
-### Copier l'arborescence sélectionnée
-Copie l’arborescence pour les nœuds cochés. Si rien n’est sélectionné, un message s’affiche. Ctrl+Alt+C.
+Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’est généralement :
+`%TEMP%\DevProjex\RepoCache`
 
-### Copier le contenu des fichiers sélectionnés
-Copie le contenu des fichiers texte sélectionnés :
-* le fichier doit exister ;
-* les fichiers binaires sont ignorés (test de bytes nuls) ;
-* la sortie est triée et séparée par des lignes vides.
+* Branche — affiche la liste des branches distantes ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement est hors ligne (sans mise à jour). Sinon, elle est récupérée (fetch) et créée localement.
+* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
 
-Ctrl+Alt+V.
+## 5) Copier
+### Copier l’arborescence
+Copie l’arborescence du projet.
+S’il y a des nœuds cochés, l’arborescence est construite à partir de la sélection ; si la sélection est vide ou invalide, l’arborescence complète est copiée.
+Raccourcis : Ctrl+Shift+C et Ctrl+Alt+C.
 
-### Copier l'arborescence complète et le contenu
-Combine arborescence et contenu :
-* l’arborescence est basée sur la sélection ; si elle est invalide, l’arborescence complète est utilisée ;
-* le contenu est ajouté uniquement pour les fichiers texte ;
-* s’il n’y a pas de contenu, seule l’arborescence est copiée.
+### Copier le contenu
+Copie le contenu des fichiers :
+* si des fichiers sont cochés — seuls ceux-ci ; sinon — tous les fichiers du projet ;
+* les fichiers non textuels sont ignorés (y compris les binaires) ;
+* pour les fichiers texte vides, le chemin et la ligne `[No Content, 0 bytes]` sont ajoutés ;
+* pour les fichiers ne contenant que des espaces/retours à la ligne, le chemin et la ligne `[Whitespace, N bytes]` sont ajoutés.
+Raccourci : Ctrl+Alt+V.
 
-Ctrl+Shift+V.
+### Copier l’arborescence + le contenu
+Combine arborescence et contenu :
+* arborescence depuis la sélection ; si la sélection est vide ou invalide, l’arborescence complète est utilisée ;
+* contenu selon les mêmes règles que « Copier le contenu ».
+Raccourci : Ctrl+Shift+V.
 
-## 5) Affichage
+## 6) Affichage
 ### Zoom
 * Ctrl++ / Ctrl+= — agrandir
 * Ctrl+- — réduire
@@ -53,7 +59,7 @@ Plage : 6–28, reset : 12.
 ### Mode compact
 Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
 
-## 6) Recherche dans l’arbre
+## 7) Recherche dans l’arbre
 Ouvre la recherche, met en évidence les correspondances et permet la navigation.
 * Ctrl+F — afficher/masquer
 * Enter — résultat suivant
@@ -62,12 +68,12 @@ Ouvre la recherche, met en évidence les correspondances et permet la navigation
 
 La recherche n’ouvre que les branches nécessaires ; en effaçant la requête, l’arbre se replie (sauf la racine).
 
-## 7) Filtrer par nom
+## 8) Filtrer par nom
 Affiche uniquement les nœuds correspondant au filtre et leurs parents. Mise à jour avec délai (debounce).
 * Ctrl+Shift+N — afficher/masquer le filtre
 * Esc — fermer le filtre
 
-## 8) Options
+## 9) Options
 Listes à droite :
 * Police de l’arborescence — appliquer avec Appliquer
 * Ignorer
@@ -78,14 +84,14 @@ Chaque liste a un bouton Tous.
 
 Ctrl+P — afficher/masquer le panneau.
 
-## 9) Ignore et Smart Ignore
+## 10) Ignore et Smart Ignore
 ### Règles classiques
 Exclut les artefacts et « bruits » courants (bin/obj, éléments cachés, éléments avec point, etc.).
 
 ### Smart Ignore
 Exclusions « intelligentes » (dossiers VCS/IDE, fichiers indésirables). Les règles frontend s’activent uniquement si des marqueurs sont détectés (fichiers package/lock).
 
-## 10) Construction de l’arbre
+## 11) Construction de l’arbre
 Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
 * types de fichiers sélectionnés
@@ -94,14 +100,14 @@ Le résultat dépend de :
 
 Si l’accès est refusé, le nœud est marqué Accès refusé.
 
-## 11) Icônes
+## 12) Icônes
 Ordre de sélection :
 1) type de nœud (dossier/fichier)
 2) nom exact (s’il existe une règle)
 3) extension
 4) sinon — inconnu
 
-## 12) Thème et effets
+## 13) Thème et effets
 Le popover de thème permet :
 * thème clair/sombre
 * Transparent / Mica / Acrylic
@@ -109,13 +115,14 @@ Le popover de thème permet :
 
 Les éléments [Beta] peuvent évoluer entre versions.
 
-## 13) Aide → À propos
+## 14) Aide → À propos
 Ouvre un popover avec les infos de l’app et un lien vers le dépôt.
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) remet les réglages de thème et d’effets aux valeurs par défaut.
 * Esc — fermer le popover
 
-## 14) Langues
+## 15) Langues
 La langue se choisit via le menu Langue.
 
-## 15) Notes
+## 16) Notes
 * Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
