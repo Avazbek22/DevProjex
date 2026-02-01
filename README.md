@@ -33,11 +33,13 @@ Older versions are available on the Releases page.
 * **Multiple copy modes** (tree / content / combined)
 * **Search & name filtering** for large projects
 * **Smart Ignore** (stack-aware defaults + configurable rules)
+* **Git integration** (clone by URL, switch branches, get updates in cached copies)
 * **Modern appearance system**
 
   * Light / Dark
   * Transparency & blur where supported
   * Presets stored locally
+* **Animated toasts** for user feedback
 * **Localization** (8 languages)
 * **Responsive async scanning** (UI stays smooth on big folders)
 
@@ -63,17 +65,16 @@ DevProjex is not tied to a specific language or IDE.
 * Lets you select files/folders via checkboxes
 * Copies:
 
-  * full tree
-  * selected tree
-  * selected text file contents
-  * tree + content in one payload
+  * tree (selection-aware, falls back to full)
+  * content (selection-aware, falls back to all files)
+  * tree + content (selection-aware, falls back to full)
 * Supports smart ignore rules (VCS, IDEs, build outputs)
 * Works well on large, layered projects
 
 ### ❌ Does not
 
 * Edit, rename, move, or delete files
-* Run code or change git state
+* Run code or modify your repositories (no commits/merges)
 * Export binary file contents
 
 ---
