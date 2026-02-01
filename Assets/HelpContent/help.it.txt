@@ -18,7 +18,16 @@ Scorciatoie:
 * Apri cartella… — apri la cartella radice (Ctrl+O)
 * Aggiorna — rileggi e ricostruisci l’albero (F5)
 
-## 4) Copia
+## 4) Git
+Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Clone). L'app non tocca i tuoi file — lavora solo con la cache.
+
+La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
+`%TEMP%\DevProjex\RepoCache`
+
+* Branch — mostra l’elenco dei branch remoti; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste, viene scaricato (fetch) e creato localmente.
+* Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
+
+## 5) Copia
 ### Copia albero completo
 Copia l’albero ASCII completo. Ctrl+Shift+C.
 
@@ -41,7 +50,7 @@ Combina albero e contenuto:
 
 Ctrl+Shift+V.
 
-## 5) Visualizza
+## 6) Visualizza
 ### Zoom
 * Ctrl++ / Ctrl+= — aumenta
 * Ctrl+- — riduci
@@ -53,7 +62,7 @@ Intervallo: 6–28, reset: 12.
 ### Modalità compatta
 Rende l’interfaccia più densa: spazi più piccoli nell’albero e nelle impostazioni.
 
-## 6) Ricerca nell’albero
+## 7) Ricerca nell’albero
 Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 * Ctrl+F — mostra/nascondi
 * Enter — risultato successivo
@@ -62,12 +71,12 @@ Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 
 La ricerca apre solo i rami necessari; svuotando la query l’albero si richiude (tranne la radice).
 
-## 7) Filtra per nome
+## 8) Filtra per nome
 Mostra solo i nodi che corrispondono al filtro e i loro genitori. Aggiornamento con debounce.
 * Ctrl+Shift+N — mostra/nascondi filtro
 * Esc — chiudi filtro
 
-## 8) Opzioni
+## 9) Opzioni
 Liste a destra:
 * Font albero — applica con Applica
 * Ignora
@@ -78,14 +87,14 @@ Ogni lista ha il toggle Tutti.
 
 Ctrl+P — mostra/nascondi pannello.
 
-## 9) Ignore e Smart Ignore
+## 10) Ignore e Smart Ignore
 ### Regole normali
 Escludi artefatti e “rumore” comuni (bin/obj, elementi nascosti, elementi con punto, ecc.).
 
 ### Smart Ignore
 Esclusioni “intelligenti” (cartelle VCS/IDE e file spazzatura). Le regole frontend si attivano solo se sono rilevati indicatori (file package/lock).
 
-## 10) Come si costruisce l’albero
+## 11) Come si costruisce l’albero
 Il risultato dipende da:
 * cartelle di primo livello selezionate
 * tipi di file selezionati
@@ -94,14 +103,14 @@ Il risultato dipende da:
 
 Se l’accesso è negato, il nodo è marcato Accesso negato.
 
-## 11) Icone
+## 12) Icone
 Ordine di scelta:
 1) tipo nodo (cartella/file)
 2) nome esatto (se esiste una regola)
 3) estensione
 4) altrimenti — sconosciuto
 
-## 12) Tema ed effetti
+## 13) Tema ed effetti
 Il popover del tema permette di scegliere:
 * tema chiaro/scuro
 * Trasparente / Mica / Acrylic
@@ -109,13 +118,13 @@ Il popover del tema permette di scegliere:
 
 Gli elementi [Beta] possono cambiare tra versioni.
 
-## 13) Aiuto → Informazioni
+## 14) Aiuto → Informazioni
 Apre un popover con info app e link al repository.
 * Esc — chiudi popover
 
-## 14) Lingue
+## 15) Lingue
 La lingua si seleziona dal menu Lingua.
 
-## 15) Note
+## 16) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
