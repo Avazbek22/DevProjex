@@ -66,8 +66,8 @@
             ToolTip.Tip="{Binding FilterTooltip}"
             ToolTip.Placement="Left">
       <Image Source="avares://DevProjex.Avalonia/IconPacks/Default/UIFilter.png"
-             Width="16"
-             Height="16"
+             Width="24"
+             Height="24"
              Stretch="Uniform" />
     </Button>
 
