@@ -1,0 +1,10 @@
+DevProjex is a read-only desktop tool for inspecting local folders and Git repositories.
+It helps you understand project structure quickly and share context without modifying user data.
+
+- Read-only: no file modifications, no commits, no pushes
+- Git operations are limited to clone/fetch/checkout in a local cache
+- Safe for large repositories and monorepos
+- Export project tree and selected file content for sharing
+- Updates are delivered only through Microsoft Store
+
+Built with .NET 10 and Avalonia for a consistent cross-platform experience.

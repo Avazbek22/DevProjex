@@ -1581,12 +1581,12 @@ public partial class MainWindow : Window
 
     private bool TryElevateAndRestart(string path)
     {
-        // In Store builds, show a localized hint instead of attempting elevation.
-        // Note: fire-and-forget here is acceptable as this is a terminal state (window closing or showing info)
-#if DEVPROJEX_STORE
-        _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
-        return false;
-#endif
+        if (!BuildFlags.AllowElevation)
+        {
+            // Store builds: never attempt elevation, just show a clear message.
+            _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
+            return false;
+        }
 
         if (_elevation.IsAdministrator) return false;
         if (_elevationAttempted) return false;

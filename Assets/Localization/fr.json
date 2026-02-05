@@ -81,7 +81,7 @@
   "Msg.NoTextContent": "Aucun contenu texte à copier (les fichiers sélectionnés sont vides ou binaires).",
   "Msg.ElevationCanceled": "L’élévation a été annulée. Le dossier peut ne pas être entièrement accessible.",
   "Msg.AccessDeniedRoot": "Accès refusé au dossier sélectionné. Essayez en administrateur.",
-  "Msg.AccessDeniedElevationRequired": "Accès refusé. Lancez l’application en tant qu’administrateur et réessayez.",
+  "Msg.AccessDeniedElevationRequired": "Accès refusé. Lancez l’application manuellement en tant qu’administrateur ou choisissez un autre dossier.",
   "Msg.AboutStub": "Les informations sur le programme seront ici (stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",

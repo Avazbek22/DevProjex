@@ -81,7 +81,7 @@
   "Msg.NoTextContent": "Nusxalash uchun matn yo‘q (tanlangan fayllar bo‘sh yoki binar).",
   "Msg.ElevationCanceled": "Administrator huquqlari bekor qilindi. Jild to‘liq ochilmasligi mumkin.",
   "Msg.AccessDeniedRoot": "Tanlangan jildga ruxsat yo‘q. Administrator sifatida ishga tushiring.",
-  "Msg.AccessDeniedElevationRequired": "Ruxsat yo‘q. Ilovani administrator sifatida ishga tushirib, qayta urinib ko‘ring.",
+  "Msg.AccessDeniedElevationRequired": "Ruxsat yo‘q. Ilovani administrator sifatida qo‘lda ishga tushiring yoki boshqa jildni tanlang.",
   "Msg.AboutStub": "Bu yerda dastur haqida ma’lumot bo‘ladi (stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",

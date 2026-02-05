@@ -1,0 +1,2 @@
+DevProjex is a packaged desktop (Win32/Avalonia) application and requires full-trust execution to run the desktop process.
+The app is read-only, does not modify user files, and does not perform self-updates.

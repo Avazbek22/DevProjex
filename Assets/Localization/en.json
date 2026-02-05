@@ -79,7 +79,7 @@
   "Msg.NoCheckedFilesShort": "No files selected.",
   "Msg.ElevationCanceled": "Elevation was canceled. The folder may not be fully accessible.",
   "Msg.AccessDeniedRoot": "Access denied for the selected folder. Try running as administrator.",
-  "Msg.AccessDeniedElevationRequired": "Access denied. Run the app as administrator and try again.",
+  "Msg.AccessDeniedElevationRequired": "Access denied. Run the app as administrator manually or choose another folder.",
   "Msg.AboutStub": "Program information will be here (stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",

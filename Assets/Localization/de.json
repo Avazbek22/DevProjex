@@ -81,7 +81,7 @@
   "Msg.NoTextContent": "Kein Textinhalt zum Kopieren (ausgewählte Dateien sind leer oder binär).",
   "Msg.ElevationCanceled": "Erhöhung wurde abgebrochen. Der Ordner ist möglicherweise nicht vollständig zugänglich.",
   "Msg.AccessDeniedRoot": "Zugriff verweigert. Als Administrator ausführen.",
-  "Msg.AccessDeniedElevationRequired": "Zugriff verweigert. Starten Sie die App als Administrator und versuchen Sie es erneut.",
+  "Msg.AccessDeniedElevationRequired": "Zugriff verweigert. Starten Sie die App manuell als Administrator oder wählen Sie einen anderen Ordner.",
   "Msg.AboutStub": "Programminfo kommt hier hin (Stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",
