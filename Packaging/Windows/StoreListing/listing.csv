@@ -1,4 +1,7 @@
-Need to share project structure with a colleague? Preparing context for ChatGPT or Copilot? Explaining architecture in a code review?
+Field,en-us
+ProductTitle,DevProjex
+ShortDescription,Visual project context builder for humans and AI. Copy tree, code, or both — instantly.
+Description,"Need to share project structure with a colleague? Preparing context for ChatGPT or Copilot? Explaining architecture in a code review?
 
 DevProjex builds a clean, visual tree of any folder or repository. Select what matters with checkboxes, and copy it to clipboard — as an ASCII tree, file contents, or both combined.
 
@@ -21,4 +24,11 @@ https://github.com/Avazbek22/DevProjex
 Inspect every line of code. Report issues. Contribute if you'd like.
 
 Works on any project — not tied to a specific language or IDE.
-Made with .NET 10 and Avalonia UI.
+Made with .NET 10 and Avalonia UI."
+SearchTerms,git;repository;project;folder;tree;code;developer;context;AI;clipboard;source-available
+CopyrightAndTrademarkInfo,
+AdditionalLicenseTerms,
+DevelopedBy,
+PrivacyPolicyUrl,
+WebsiteUrl,https://github.com/Avazbek22/DevProjex
+SupportContactInfo,
