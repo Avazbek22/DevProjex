@@ -300,12 +300,13 @@ public partial class MainWindow : Window
         if (_dropZoneIconTransform is null)
             return;
 
-        const double periodSeconds = 3.2;
-        const double amplitudePx = 5.0;
+        //Folder's animaion parameters
+        const double periodSeconds = 2.0; // Animation speed
+        const double amplitudePx = 4.0; // Vertical distance
         var phase = _dropZoneFloatClock.Elapsed.TotalSeconds / periodSeconds * 2 * Math.PI;
 
-        // Shifted sine keeps the icon in a gentle "floating up then down" range.
-        _dropZoneIconTransform.Y = -amplitudePx + (Math.Sin(phase) + 1d) * 0.5d * amplitudePx;
+        // Symmetric sine motion makes the floating clearly visible.
+        _dropZoneIconTransform.Y = Math.Sin(phase) * amplitudePx;
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)

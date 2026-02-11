@@ -153,8 +153,8 @@
                     ClipToBounds="False">
               <!-- Folder icon with floating animation -->
               <Viewbox Name="DropZoneIcon"
-                       Width="100"
-                       Height="100"
+                       Width="128"
+                       Height="128"
                        VerticalAlignment="Bottom">
                 <Canvas Width="100" Height="90">
                   <!-- Folder back shape -->
