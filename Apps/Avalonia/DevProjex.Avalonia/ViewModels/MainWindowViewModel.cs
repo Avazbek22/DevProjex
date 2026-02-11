@@ -62,7 +62,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _statusLineCountText = "Lines: 0";
     private string _statusCharCountText = "Chars: 0";
     private string _statusTokenEstimateText = "~Tokens: 0";
-    private string _statusOperationText = "Ready";
+    private string _statusOperationText = string.Empty;
     private bool _statusBusy;
     private bool _statusProgressIsIndeterminate = true;
     private double _statusProgressValue;
@@ -769,6 +769,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string DropZoneTitle { get; private set; } = string.Empty;
     public string DropZoneButtonText { get; private set; } = string.Empty;
     public string DropZoneHotkeyHint { get; private set; } = string.Empty;
+    public string DropZoneCloneButtonText { get; private set; } = string.Empty;
+
+    public string StatusOperationLoadingProject { get; private set; } = string.Empty;
+    public string StatusOperationRefreshingProject { get; private set; } = string.Empty;
+    public string StatusOperationGettingUpdates { get; private set; } = string.Empty;
+    public string StatusOperationGettingUpdatesBranch { get; private set; } = string.Empty;
+    public string StatusOperationSwitchingBranch { get; private set; } = string.Empty;
 
     // Git menu localization
     public string MenuGitClone { get; private set; } = string.Empty;
@@ -850,6 +857,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         DropZoneTitle = _localization["DropZone.Title"];
         DropZoneButtonText = _localization["DropZone.Button"];
         DropZoneHotkeyHint = _localization["DropZone.HotkeyHint"];
+        DropZoneCloneButtonText = _localization["DropZone.CloneButton"];
+
+        StatusOperationLoadingProject = _localization["Status.Operation.LoadingProject"];
+        StatusOperationRefreshingProject = _localization["Status.Operation.RefreshingProject"];
+        StatusOperationGettingUpdates = _localization["Status.Operation.GettingUpdates"];
+        StatusOperationGettingUpdatesBranch = _localization["Status.Operation.GettingUpdatesBranch"];
+        StatusOperationSwitchingBranch = _localization["Status.Operation.SwitchingBranch"];
 
         // Git menu localization
         MenuGitClone = _localization["Menu.Git.Clone"];
@@ -943,6 +957,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(DropZoneTitle));
         RaisePropertyChanged(nameof(DropZoneButtonText));
         RaisePropertyChanged(nameof(DropZoneHotkeyHint));
+        RaisePropertyChanged(nameof(DropZoneCloneButtonText));
+
+        RaisePropertyChanged(nameof(StatusOperationLoadingProject));
+        RaisePropertyChanged(nameof(StatusOperationRefreshingProject));
+        RaisePropertyChanged(nameof(StatusOperationGettingUpdates));
+        RaisePropertyChanged(nameof(StatusOperationGettingUpdatesBranch));
+        RaisePropertyChanged(nameof(StatusOperationSwitchingBranch));
 
         // Theme popover localization
         RaisePropertyChanged(nameof(MenuTheme));

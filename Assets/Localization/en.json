@@ -120,7 +120,17 @@
   "Dialog.OK": "OK",
   "Dialog.Cancel": "Cancel",
 
+  "DropZone.CloneButton": "Clone",
   "DropZone.Title": "Drop folder here",
   "DropZone.Button": "Choose folder",
-  "DropZone.HotkeyHint": "to quick open"
+  "DropZone.HotkeyHint": "to quick open",
+
+  "Status.Operation.LoadingProject": "Loading project",
+  "Status.Operation.RefreshingProject": "Refreshing project",
+  "Status.Operation.GettingUpdates": "Updating",
+  "Status.Operation.GettingUpdatesBranch": "Updating {0}",
+  "Status.Operation.SwitchingBranch": "Switching branch {0}",
+  "Status.Metric.Lines": "Lines: {0}",
+  "Status.Metric.Chars": "Chars: {0}",
+  "Status.Metric.Tokens": "~Tokens: {0}"
 }

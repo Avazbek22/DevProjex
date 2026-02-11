@@ -120,7 +120,17 @@
   "Dialog.OK": "OK",
   "Dialog.Cancel": "Отмена",
 
+  "DropZone.CloneButton": "Клонировать",
   "DropZone.Title": "Перетащите папку сюда",
   "DropZone.Button": "Выбрать папку",
-  "DropZone.HotkeyHint": "для быстрого открытия"
+  "DropZone.HotkeyHint": "для быстрого открытия",
+
+  "Status.Operation.LoadingProject": "Загрузка проекта",
+  "Status.Operation.RefreshingProject": "Обновление проекта",
+  "Status.Operation.GettingUpdates": "Обновление",
+  "Status.Operation.GettingUpdatesBranch": "Обновление {0}",
+  "Status.Operation.SwitchingBranch": "Переключение ветки {0}",
+  "Status.Metric.Lines": "Строки: {0}",
+  "Status.Metric.Chars": "Символы: {0}",
+  "Status.Metric.Tokens": "~Токены: {0}"
 }

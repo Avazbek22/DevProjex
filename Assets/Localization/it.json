@@ -120,7 +120,17 @@
   "Dialog.OK": "OK",
   "Dialog.Cancel": "Annulla",
 
+  "DropZone.CloneButton": "Clona",
   "DropZone.Title": "Trascina la cartella qui",
   "DropZone.Button": "Scegli cartella",
-  "DropZone.HotkeyHint": "per aprire rapidamente"
+  "DropZone.HotkeyHint": "per aprire rapidamente",
+
+  "Status.Operation.LoadingProject": "Caricamento progetto",
+  "Status.Operation.RefreshingProject": "Aggiornamento progetto",
+  "Status.Operation.GettingUpdates": "Aggiornamento",
+  "Status.Operation.GettingUpdatesBranch": "Aggiornamento {0}",
+  "Status.Operation.SwitchingBranch": "Cambio branch {0}",
+  "Status.Metric.Lines": "Righe: {0}",
+  "Status.Metric.Chars": "Caratteri: {0}",
+  "Status.Metric.Tokens": "~Token: {0}"
 }

@@ -120,7 +120,17 @@
   "Dialog.OK": "OK",
   "Dialog.Cancel": "Бекор кардан",
 
+  "DropZone.CloneButton": "Клон кардан",
   "DropZone.Title": "Ҷузвдонро ба ин ҷо партоед",
   "DropZone.Button": "Интихоби ҷузвдон",
-  "DropZone.HotkeyHint": "барои кушодани зуд"
+  "DropZone.HotkeyHint": "барои кушодани зуд",
+
+  "Status.Operation.LoadingProject": "Боркунии лоиҳа",
+  "Status.Operation.RefreshingProject": "Навсозии лоиҳа",
+  "Status.Operation.GettingUpdates": "Навсозӣ",
+  "Status.Operation.GettingUpdatesBranch": "Навсозӣ {0}",
+  "Status.Operation.SwitchingBranch": "Ивазкунии шоха {0}",
+  "Status.Metric.Lines": "Сатрҳо: {0}",
+  "Status.Metric.Chars": "Аломатҳо: {0}",
+  "Status.Metric.Tokens": "~Токенҳо: {0}"
 }
