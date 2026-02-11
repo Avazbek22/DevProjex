@@ -357,6 +357,17 @@
         <Setter Property="Margin" Value="0,1" />
     </Style>
 
+    <Style Selector="Border.ignore-option-item">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
+    </Style>
+
+    <Style Selector="Border.ignore-option-separator">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="Margin" Value="0,0,0,2" />
+    </Style>
+
     <Style Selector="CheckBox.section-all">
         <Setter Property="VerticalAlignment" Value="Bottom" />
         <Setter Property="HorizontalAlignment" Value="Right" />
@@ -392,6 +403,10 @@
         <Setter Property="Margin" Value="6,0,0,0" />
         <!-- Fluent template can override FontSize on the presenter; force it here. -->
         <Setter Property="FontSize" Value="{Binding $parent[CheckBox].FontSize}" />
+    </Style>
+
+    <Style Selector="Window.compact-mode Border.ignore-option-separator">
+        <Setter Property="Margin" Value="0,-4,0,3" />
     </Style>
 
     <!-- "All" checkboxes: same scale as list items, but text is compensated below. -->

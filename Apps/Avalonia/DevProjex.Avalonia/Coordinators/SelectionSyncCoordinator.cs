@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -248,7 +249,7 @@ public sealed class SelectionSyncCoordinator
         });
     }
 
-    public void PopulateIgnoreOptionsForRootSelection(IReadOnlyCollection<string> rootFolders)
+    public void PopulateIgnoreOptionsForRootSelection(IReadOnlyCollection<string> rootFolders, string? currentPath = null)
     {
         var previousSelections = _ignoreSelectionCache;
 
@@ -266,7 +267,9 @@ public sealed class SelectionSyncCoordinator
                 return;
             }
 
-            _ignoreOptions = _ignoreOptionsService.GetOptions();
+            var path = string.IsNullOrWhiteSpace(currentPath) ? _currentPathProvider() : currentPath;
+            var hasGitIgnore = HasGitIgnore(path);
+            _ignoreOptions = _ignoreOptionsService.GetOptions(includeGitIgnore: hasGitIgnore);
             bool hasPrevious = _ignoreSelectionInitialized;
 
             foreach (var option in _ignoreOptions)
@@ -299,7 +302,7 @@ public sealed class SelectionSyncCoordinator
 
         var selectedRoots = GetSelectedRootFolders();
         await PopulateExtensionsForRootSelectionAsync(currentPath, selectedRoots);
-        PopulateIgnoreOptionsForRootSelection(selectedRoots);
+        PopulateIgnoreOptionsForRootSelection(selectedRoots, currentPath);
     }
 
     public async Task RefreshRootAndDependentsAsync(string currentPath)
@@ -383,9 +386,25 @@ public sealed class SelectionSyncCoordinator
         if (_ignoreSelectionInitialized || _ignoreSelectionCache.Count > 0)
             return;
 
-        _ignoreOptions = _ignoreOptionsService.GetOptions();
+        var hasGitIgnore = HasGitIgnore(_currentPathProvider() ?? _lastLoadedPath);
+        _ignoreOptions = _ignoreOptionsService.GetOptions(includeGitIgnore: hasGitIgnore);
         _ignoreSelectionCache = new HashSet<IgnoreOptionId>(
             _ignoreOptions.Where(option => option.DefaultChecked).Select(option => option.Id));
+    }
+
+    private static bool HasGitIgnore(string? rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath))
+            return false;
+
+        try
+        {
+            return File.Exists(Path.Combine(rootPath, ".gitignore"));
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public void UpdateExtensionsSelectionCache()

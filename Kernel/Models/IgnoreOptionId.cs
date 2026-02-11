@@ -2,8 +2,7 @@ namespace DevProjex.Kernel.Models;
 
 public enum IgnoreOptionId
 {
-	BinFolders,
-	ObjFolders,
+	UseGitIgnore,
 	HiddenFolders,
 	HiddenFiles,
 	DotFolders,

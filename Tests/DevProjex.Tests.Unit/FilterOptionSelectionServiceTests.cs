@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using DevProjex.Application.Services;
@@ -53,10 +53,7 @@ public sealed class FilterOptionSelectionServiceTests
 	public void BuildRootFolderOptions_ExcludesIgnoredWhenNoPrevious()
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: true,
-			IgnoreObjFolders: true,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: false,
@@ -65,8 +62,8 @@ public sealed class FilterOptionSelectionServiceTests
 
 		var options = service.BuildRootFolderOptions(new[] { "bin", "obj", "logs", ".cache", "src" }, new HashSet<string>(), rules);
 
-		Assert.False(options.Single(o => o.Name == "bin").IsChecked);
-		Assert.False(options.Single(o => o.Name == "obj").IsChecked);
+		Assert.True(options.Single(o => o.Name == "bin").IsChecked);
+		Assert.True(options.Single(o => o.Name == "obj").IsChecked);
 		Assert.False(options.Single(o => o.Name == "logs").IsChecked);
 		Assert.False(options.Single(o => o.Name == ".cache").IsChecked);
 		Assert.True(options.Single(o => o.Name == "src").IsChecked);
@@ -77,10 +74,7 @@ public sealed class FilterOptionSelectionServiceTests
 	public void BuildRootFolderOptions_RespectsPreviousSelections()
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: true,
-			IgnoreObjFolders: true,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: false,
@@ -111,10 +105,7 @@ public sealed class FilterOptionSelectionServiceTests
 	public void BuildRootFolderOptions_RespectsExplicitSelectionEvenIfIgnored()
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: true,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
@@ -132,10 +123,7 @@ public sealed class FilterOptionSelectionServiceTests
 	public void BuildRootFolderOptions_PreservesInputOrder()
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
@@ -164,10 +152,7 @@ public sealed class FilterOptionSelectionServiceTests
 	public void BuildRootFolderOptions_ReturnsEmptyWhenNoFolders()
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
@@ -196,10 +181,7 @@ public sealed class FilterOptionSelectionServiceTests
 	public void BuildRootFolderOptions_ExcludesSmartIgnoredFolders()
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
@@ -217,10 +199,7 @@ public sealed class FilterOptionSelectionServiceTests
 	public void BuildRootFolderOptions_ExcludesDotFolders()
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: false,
@@ -233,3 +212,7 @@ public sealed class FilterOptionSelectionServiceTests
 		Assert.True(options.Single(o => o.Name == "src").IsChecked);
 	}
 }
+
+
+
+

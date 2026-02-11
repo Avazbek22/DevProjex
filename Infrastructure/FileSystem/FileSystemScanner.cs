@@ -179,13 +179,13 @@ public sealed class FileSystemScanner : IFileSystemScanner
 	/// </summary>
 	private static bool ShouldSkipDirectoryByName(string name, string fullPath, IgnoreRules rules)
 	{
+		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(fullPath, isDirectory: true, name))
+		{
+			if (!rules.GitIgnoreMatcher.ShouldTraverseIgnoredDirectory(fullPath, name))
+				return true;
+		}
+
 		if (rules.SmartIgnoredFolders.Contains(name))
-			return true;
-
-		if (rules.IgnoreBinFolders && name.Equals("bin", StringComparison.OrdinalIgnoreCase))
-			return true;
-
-		if (rules.IgnoreObjFolders && name.Equals("obj", StringComparison.OrdinalIgnoreCase))
 			return true;
 
 		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
@@ -217,6 +217,9 @@ public sealed class FileSystemScanner : IFileSystemScanner
 	/// </summary>
 	private static bool ShouldSkipFileByName(string name, string fullPath, IgnoreRules rules)
 	{
+		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(fullPath, isDirectory: false, name))
+			return true;
+
 		if (rules.SmartIgnoredFiles.Contains(name))
 			return true;
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Abstractions;
@@ -20,11 +20,11 @@ public sealed class IgnoreRulesServiceTests
 		var smart = new SmartIgnoreService(new[] { new StubSmartIgnoreRule(smartResult) });
 		var service = new IgnoreRulesService(smart);
 
-		var rules = service.Build("/root", new[] { IgnoreOptionId.BinFolders, IgnoreOptionId.DotFiles });
+		var rules = service.Build("/root", new[] { IgnoreOptionId.HiddenFolders, IgnoreOptionId.DotFiles });
 
-		Assert.True(rules.IgnoreBinFolders);
+		Assert.True(rules.IgnoreHiddenFolders);
 		Assert.True(rules.IgnoreDotFiles);
-		Assert.False(rules.IgnoreObjFolders);
+		Assert.False(rules.IgnoreHiddenFiles);
 		Assert.Contains("cache", rules.SmartIgnoredFolders);
 		Assert.Contains("thumbs.db", rules.SmartIgnoredFiles);
 	}
@@ -38,8 +38,8 @@ public sealed class IgnoreRulesServiceTests
 
 		var rules = service.Build("/root", Array.Empty<IgnoreOptionId>());
 
-		Assert.False(rules.IgnoreBinFolders);
-		Assert.False(rules.IgnoreObjFolders);
+		Assert.False(rules.IgnoreHiddenFolders);
+		Assert.False(rules.IgnoreHiddenFiles);
 		Assert.False(rules.IgnoreHiddenFolders);
 		Assert.False(rules.IgnoreHiddenFiles);
 		Assert.False(rules.IgnoreDotFolders);
@@ -71,16 +71,16 @@ public sealed class IgnoreRulesServiceTests
 
 		var rules = service.Build("/root", new[]
 		{
-			IgnoreOptionId.BinFolders,
-			IgnoreOptionId.ObjFolders,
+			IgnoreOptionId.HiddenFolders,
+			IgnoreOptionId.HiddenFiles,
 			IgnoreOptionId.HiddenFolders,
 			IgnoreOptionId.HiddenFiles,
 			IgnoreOptionId.DotFolders,
 			IgnoreOptionId.DotFiles
 		});
 
-		Assert.True(rules.IgnoreBinFolders);
-		Assert.True(rules.IgnoreObjFolders);
+		Assert.True(rules.IgnoreHiddenFolders);
+		Assert.True(rules.IgnoreHiddenFiles);
 		Assert.True(rules.IgnoreHiddenFolders);
 		Assert.True(rules.IgnoreHiddenFiles);
 		Assert.True(rules.IgnoreDotFolders);
@@ -103,3 +103,4 @@ public sealed class IgnoreRulesServiceTests
 		Assert.Contains("thumbs.db", rules.SmartIgnoredFiles);
 	}
 }
+

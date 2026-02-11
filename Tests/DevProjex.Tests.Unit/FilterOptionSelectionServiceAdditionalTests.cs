@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using DevProjex.Application.Models;
@@ -77,8 +77,8 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 
 	[Theory]
 	// Verifies ignored folders are unchecked when no previous selections exist.
-	[InlineData("bin", false)]
-	[InlineData("obj", false)]
+	[InlineData("bin", true)]
+	[InlineData("obj", true)]
 	[InlineData(".git", false)]
 	[InlineData("node_modules", false)]
 	[InlineData("src", true)]
@@ -90,11 +90,8 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 	public void BuildRootFolderOptions_DefaultsToNonIgnored(string folderName, bool expectedChecked)
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: true,
-			IgnoreObjFolders: true,
-			IgnoreHiddenFolders: true,
-			IgnoreHiddenFiles: true,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: true,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules", ".idea", ".vscode" },
@@ -123,11 +120,8 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 	public void BuildRootFolderOptions_RespectsPreviousSelections(string previousSelections, string folderName, bool expectedChecked)
 	{
 		var service = new FilterOptionSelectionService();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: true,
-			IgnoreObjFolders: true,
-			IgnoreHiddenFolders: true,
-			IgnoreHiddenFiles: true,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: true,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
@@ -145,3 +139,7 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 		Assert.Equal(expectedChecked, target.IsChecked);
 	}
 }
+
+
+
+

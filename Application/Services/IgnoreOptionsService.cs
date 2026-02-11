@@ -12,16 +12,25 @@ public sealed class IgnoreOptionsService
 		_localization = localization;
 	}
 
-	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions()
+	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(bool includeGitIgnore = false)
 	{
-		return new[]
+		var options = new List<IgnoreOptionDescriptor>();
+		if (includeGitIgnore)
 		{
-			new IgnoreOptionDescriptor(IgnoreOptionId.BinFolders, _localization["Settings.Ignore.BinFolders"], true),
-			new IgnoreOptionDescriptor(IgnoreOptionId.ObjFolders, _localization["Settings.Ignore.ObjFolders"], true),
+			options.Add(new IgnoreOptionDescriptor(
+				IgnoreOptionId.UseGitIgnore,
+				_localization["Settings.Ignore.UseGitIgnore"],
+				true));
+		}
+
+		options.AddRange(new[]
+		{
 			new IgnoreOptionDescriptor(IgnoreOptionId.HiddenFolders, _localization["Settings.Ignore.HiddenFolders"], true),
 			new IgnoreOptionDescriptor(IgnoreOptionId.HiddenFiles, _localization["Settings.Ignore.HiddenFiles"], true),
 			new IgnoreOptionDescriptor(IgnoreOptionId.DotFolders, _localization["Settings.Ignore.DotFolders"], true),
 			new IgnoreOptionDescriptor(IgnoreOptionId.DotFiles, _localization["Settings.Ignore.DotFiles"], true)
-		};
+		});
+
+		return options;
 	}
 }

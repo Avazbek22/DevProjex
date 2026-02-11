@@ -14,7 +14,7 @@ public sealed class ResourceStoreTests
 		var catalog = new JsonLocalizationCatalog();
 		var dict = catalog.Get(AppLanguage.En);
 
-		Assert.Contains("Settings.Ignore.BinFolders", dict.Keys);
+		Assert.Contains("Settings.Ignore.UseGitIgnore", dict.Keys);
 	}
 
 	// Verifies embedded icon store returns bytes for known keys.

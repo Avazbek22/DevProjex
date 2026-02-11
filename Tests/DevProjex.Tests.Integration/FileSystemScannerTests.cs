@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Kernel.Models;
@@ -19,7 +19,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("root.txt", "root");
 
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>());
+		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
 		var result = scanner.GetExtensions(temp.Path, rules);
 
@@ -39,7 +39,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("visible.txt", "visible");
 
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(false, false, false, true, false, true, new HashSet<string>(), new HashSet<string>());
+		var rules = new IgnoreRules(false, true, false, true, new HashSet<string>(), new HashSet<string>());
 
 		var result = scanner.GetExtensions(temp.Path, rules);
 
@@ -57,7 +57,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("src/nested.txt", "nested");
 
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>());
+		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
 		var result = scanner.GetRootFileExtensions(temp.Path, rules);
 
@@ -74,11 +74,11 @@ public sealed class FileSystemScannerTests
 		temp.CreateDirectory("src");
 
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(true, false, false, false, false, false, new HashSet<string>(), new HashSet<string>());
+		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
 		var result = scanner.GetRootFolderNames(temp.Path, rules);
 
-		Assert.DoesNotContain("bin", result.Value);
+		Assert.Contains("bin", result.Value);
 		Assert.Contains("src", result.Value);
 	}
 
@@ -97,7 +97,7 @@ public sealed class FileSystemScannerTests
 	public void GetExtensions_ReturnsEmptyForMissingRoot()
 	{
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>());
+		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
 		var result = scanner.GetExtensions("/path/does/not/exist", rules);
 
@@ -115,10 +115,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("kept/file.md", "keep");
 
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
@@ -140,10 +137,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("visible.txt", "visible");
 
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: false,
@@ -165,7 +159,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateDirectory("A");
 
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>());
+		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
 		var result = scanner.GetRootFolderNames(temp.Path, rules);
 
@@ -182,11 +176,36 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("visible.txt", "visible");
 
 		var scanner = new FileSystemScanner();
-		var rules = new IgnoreRules(false, false, false, false, false, true, new HashSet<string>(), new HashSet<string>());
+		var rules = new IgnoreRules(false, false, false, true, new HashSet<string>(), new HashSet<string>());
 
 		var result = scanner.GetRootFileExtensions(temp.Path, rules);
 
 		Assert.Contains(".txt", result.Value);
 		Assert.DoesNotContain(".cs", result.Value);
 	}
+
+	[Fact]
+	public void GetExtensions_WithGitIgnoreNegation_CollectsUnignoredDescendantExtensions()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("build/keep.txt", "keep");
+		temp.CreateFile("build/drop.log", "drop");
+
+		var matcher = GitIgnoreMatcher.Build(temp.Path, new[] { "build/", "!build/keep.txt" });
+		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>())
+		{
+			UseGitIgnore = true,
+			GitIgnoreMatcher = matcher
+		};
+
+		var scanner = new FileSystemScanner();
+		var result = scanner.GetExtensions(temp.Path, rules);
+
+		Assert.Contains(".txt", result.Value);
+		Assert.DoesNotContain(".log", result.Value);
+	}
 }
+
+
+
+

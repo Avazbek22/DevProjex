@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using DevProjex.Application.Services;
@@ -79,12 +79,9 @@ public sealed class ExportMarkersIntegrationTests
 		var options = new TreeFilterOptions(
 			AllowedExtensions: allowedExtensions,
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-			IgnoreRules: new IgnoreRules(
-				IgnoreBinFolders: false,
-				IgnoreObjFolders: false,
-				IgnoreHiddenFolders: false,
-				IgnoreHiddenFiles: false,
-				IgnoreDotFolders: false,
+			IgnoreRules: new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 				SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
@@ -116,3 +113,7 @@ public sealed class ExportMarkersIntegrationTests
 		public string GetIconKey(FileSystemNode node) => node.IsDirectory ? "folder" : "file";
 	}
 }
+
+
+
+

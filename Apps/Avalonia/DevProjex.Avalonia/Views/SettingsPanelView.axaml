@@ -7,7 +7,7 @@
   <UserControl.Resources>
     <converters:FontFamilyDisplayNameConverter x:Key="FontFamilyDisplayNameConverter" />
   </UserControl.Resources>
-  <Border Width="320" Classes="panel" IsVisible="{Binding SettingsVisible}" IsEnabled="{Binding IsProjectLoaded}">
+  <Border Width="320" Classes="panel" BorderThickness="0" IsVisible="{Binding SettingsVisible}" IsEnabled="{Binding IsProjectLoaded}">
     <Grid RowDefinitions="Auto,*,*,*">
       <!-- Font section - Auto height -->
       <StackPanel Grid.Row="0" Spacing="6">
@@ -50,8 +50,17 @@
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <CheckBox Classes="list-item" Content="{Binding Label}"
-                            IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                  <Border Classes="ignore-option-item">
+                    <Grid RowDefinitions="Auto,Auto">
+                      <CheckBox Grid.Row="0"
+                                Classes="list-item"
+                                Content="{Binding Label}"
+                                IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                      <Border Grid.Row="1"
+                              Classes="ignore-option-separator"
+                              IsVisible="{Binding IsGitIgnoreOption}" />
+                    </Grid>
+                  </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Kernel.Contracts;
@@ -34,12 +34,9 @@ public sealed class BuildTreeUseCaseTests
 		var result = useCase.Execute(new BuildTreeRequest("/root", new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(),
 			AllowedRootFolders: new HashSet<string>(),
-			IgnoreRules: new IgnoreRules(
-				IgnoreBinFolders: false,
-				IgnoreObjFolders: false,
-				IgnoreHiddenFolders: false,
-				IgnoreHiddenFiles: false,
-				IgnoreDotFolders: false,
+			IgnoreRules: new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
 				SmartIgnoredFiles: new HashSet<string>()))));
@@ -72,12 +69,9 @@ public sealed class BuildTreeUseCaseTests
 		var result = useCase.Execute(new BuildTreeRequest("/root", new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(),
 			AllowedRootFolders: new HashSet<string>(),
-			IgnoreRules: new IgnoreRules(
-				IgnoreBinFolders: false,
-				IgnoreObjFolders: false,
-				IgnoreHiddenFolders: false,
-				IgnoreHiddenFiles: false,
-				IgnoreDotFolders: false,
+			IgnoreRules: new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
 				SmartIgnoredFiles: new HashSet<string>()))));
@@ -86,3 +80,7 @@ public sealed class BuildTreeUseCaseTests
 		Assert.True(result.HadAccessDenied);
 	}
 }
+
+
+
+

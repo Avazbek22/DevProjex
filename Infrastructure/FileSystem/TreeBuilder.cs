@@ -143,13 +143,13 @@ public sealed class TreeBuilder : ITreeBuilder
 
 	private static bool ShouldSkipDirectory(FileSystemInfo entry, IgnoreRules rules)
 	{
+		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name))
+		{
+			if (!rules.GitIgnoreMatcher.ShouldTraverseIgnoredDirectory(entry.FullName, entry.Name))
+				return true;
+		}
+
 		if (rules.SmartIgnoredFolders.Contains(entry.Name))
-			return true;
-
-		if (rules.IgnoreBinFolders && entry.Name.Equals("bin", StringComparison.OrdinalIgnoreCase))
-			return true;
-
-		if (rules.IgnoreObjFolders && entry.Name.Equals("obj", StringComparison.OrdinalIgnoreCase))
 			return true;
 
 		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
@@ -178,6 +178,9 @@ public sealed class TreeBuilder : ITreeBuilder
 
 	private static bool ShouldSkipFile(FileSystemInfo entry, IgnoreRules rules)
 	{
+		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(entry.FullName, isDirectory: false, entry.Name))
+			return true;
+
 		if (rules.SmartIgnoredFiles.Contains(entry.Name))
 			return true;
 

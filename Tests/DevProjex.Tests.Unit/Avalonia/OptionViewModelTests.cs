@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using DevProjex.Avalonia.ViewModels;
 using DevProjex.Kernel.Models;
 using Xunit;
@@ -53,9 +53,9 @@ public sealed class OptionViewModelTests
     [Fact]
     public void IgnoreOptionViewModel_Constructor_SetsProperties()
     {
-        var option = new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "Bin", true);
+        var option = new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "Bin", true);
 
-        Assert.Equal(IgnoreOptionId.BinFolders, option.Id);
+        Assert.Equal(IgnoreOptionId.HiddenFolders, option.Id);
         Assert.Equal("Bin", option.Label);
         Assert.True(option.IsChecked);
     }
@@ -95,7 +95,7 @@ public sealed class OptionViewModelTests
     [Fact]
     public void IgnoreOptionViewModel_IsChecked_SameValueDoesNotRaiseCheckedChanged()
     {
-        var option = new IgnoreOptionViewModel(IgnoreOptionId.ObjFolders, "obj", false);
+        var option = new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "obj", false);
         var called = false;
         option.CheckedChanged += (_, _) => called = true;
 
@@ -129,7 +129,7 @@ public sealed class OptionViewModelTests
     [Fact]
     public void IgnoreOptionViewModel_CheckedChanged_FiresOncePerChange()
     {
-        var option = new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", false);
+        var option = new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", false);
         var count = 0;
         option.CheckedChanged += (_, _) => count++;
 
@@ -139,3 +139,4 @@ public sealed class OptionViewModelTests
     }
 
 }
+
