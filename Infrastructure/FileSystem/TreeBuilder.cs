@@ -143,6 +143,9 @@ public sealed class TreeBuilder : ITreeBuilder
 
 	private static bool ShouldSkipDirectory(FileSystemInfo entry, IgnoreRules rules)
 	{
+		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name))
+			return true;
+
 		if (rules.SmartIgnoredFolders.Contains(entry.Name))
 			return true;
 
@@ -178,6 +181,9 @@ public sealed class TreeBuilder : ITreeBuilder
 
 	private static bool ShouldSkipFile(FileSystemInfo entry, IgnoreRules rules)
 	{
+		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(entry.FullName, isDirectory: false, entry.Name))
+			return true;
+
 		if (rules.SmartIgnoredFiles.Contains(entry.Name))
 			return true;
 

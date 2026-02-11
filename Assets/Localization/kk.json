@@ -59,6 +59,7 @@
   "Help.About.CopyLink": "Сілтемені көшіру",
   "Dialog.SelectRoot": "Жоба түбір қалтасын таңдаңыз",
   "Settings.IgnoreTitle": "Елемеу:",
+  "Settings.Ignore.UseGitIgnore": ".gitignore пайдалану",
   "Settings.Ignore.BinFolders": "bin қалталары",
   "Settings.Ignore.ObjFolders": "obj қалталары",
   "Settings.Ignore.HiddenFolders": "жасырын қалталар",

@@ -59,6 +59,7 @@
   "Help.About.CopyLink": "Copier le lien",
   "Dialog.SelectRoot": "Sélectionnez le dossier racine du projet",
   "Settings.IgnoreTitle": "Ignorer :",
+  "Settings.Ignore.UseGitIgnore": "Utiliser .gitignore",
   "Settings.Ignore.BinFolders": "dossiers bin",
   "Settings.Ignore.ObjFolders": "dossiers obj",
   "Settings.Ignore.HiddenFolders": "dossiers cachés",

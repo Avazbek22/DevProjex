@@ -16,6 +16,8 @@ public sealed class IgnoreOptionViewModel : ViewModelBase
 
     public IgnoreOptionId Id { get; }
 
+    public bool IsGitIgnoreOption => Id == IgnoreOptionId.UseGitIgnore;
+
     public string Label
     {
         get => _label;

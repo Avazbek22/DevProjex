@@ -59,6 +59,7 @@
   "Help.About.CopyLink": "Link kopieren",
   "Dialog.SelectRoot": "Projekt-Stammordner auswählen",
   "Settings.IgnoreTitle": "Ignorieren:",
+  "Settings.Ignore.UseGitIgnore": ".gitignore verwenden",
   "Settings.Ignore.BinFolders": "bin-Ordner",
   "Settings.Ignore.ObjFolders": "obj-Ordner",
   "Settings.Ignore.HiddenFolders": "versteckte Ordner",

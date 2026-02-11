@@ -59,6 +59,7 @@
   "Help.About.CopyLink": "Havolani nusxalash",
   "Dialog.SelectRoot": "Loyiha ildiz jildini tanlang",
   "Settings.IgnoreTitle": "E’tiborsiz qoldirish:",
+  "Settings.Ignore.UseGitIgnore": ".gitignore dan foydalanish",
   "Settings.Ignore.BinFolders": "bin jildlari",
   "Settings.Ignore.ObjFolders": "obj jildlari",
   "Settings.Ignore.HiddenFolders": "yashirin jildlar",

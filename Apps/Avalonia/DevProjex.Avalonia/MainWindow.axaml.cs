@@ -611,7 +611,7 @@ public partial class MainWindow : Window
 
         if (_currentPath is not null)
         {
-            _selectionCoordinator.PopulateIgnoreOptionsForRootSelection(_selectionCoordinator.GetSelectedRootFolders());
+            _selectionCoordinator.PopulateIgnoreOptionsForRootSelection(_selectionCoordinator.GetSelectedRootFolders(), _currentPath);
         }
     }
 

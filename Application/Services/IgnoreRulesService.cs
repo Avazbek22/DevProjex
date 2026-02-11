@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using DevProjex.Kernel.Models;
 
@@ -16,6 +17,13 @@ public sealed class IgnoreRulesService
 	public IgnoreRules Build(string rootPath, IReadOnlyCollection<IgnoreOptionId> selectedOptions)
 	{
 		var smart = _smartIgnore.Build(rootPath);
+		var useGitIgnore = selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
+		var gitIgnoreMatcher = GitIgnoreMatcher.Empty;
+		if (useGitIgnore)
+		{
+			gitIgnoreMatcher = TryBuildGitIgnoreMatcher(rootPath);
+			useGitIgnore = !ReferenceEquals(gitIgnoreMatcher, GitIgnoreMatcher.Empty);
+		}
 
 		return new IgnoreRules(
 			IgnoreBinFolders: selectedOptions.Contains(IgnoreOptionId.BinFolders),
@@ -25,6 +33,29 @@ public sealed class IgnoreRulesService
 			IgnoreDotFolders: selectedOptions.Contains(IgnoreOptionId.DotFolders),
 			IgnoreDotFiles: selectedOptions.Contains(IgnoreOptionId.DotFiles),
 			SmartIgnoredFolders: smart.FolderNames,
-			SmartIgnoredFiles: smart.FileNames);
+			SmartIgnoredFiles: smart.FileNames)
+		{
+			UseGitIgnore = useGitIgnore,
+			GitIgnoreMatcher = gitIgnoreMatcher
+		};
+	}
+
+	private static GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath)
+	{
+		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+			return GitIgnoreMatcher.Empty;
+
+		var gitIgnorePath = Path.Combine(rootPath, ".gitignore");
+		if (!File.Exists(gitIgnorePath))
+			return GitIgnoreMatcher.Empty;
+
+		try
+		{
+			return GitIgnoreMatcher.Build(rootPath, File.ReadLines(gitIgnorePath));
+		}
+		catch
+		{
+			return GitIgnoreMatcher.Empty;
+		}
 	}
 }

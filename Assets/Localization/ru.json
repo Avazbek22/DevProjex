@@ -59,6 +59,7 @@
   "Help.About.CopyLink": "Скопировать ссылку",
   "Dialog.SelectRoot": "Выберите корневую папку проекта",
   "Settings.IgnoreTitle": "Игнорировать:",
+  "Settings.Ignore.UseGitIgnore": "Использовать .gitignore",
   "Settings.Ignore.BinFolders": "Папки bin",
   "Settings.Ignore.ObjFolders": "Папки obj",
   "Settings.Ignore.HiddenFolders": "Скрытые папки",

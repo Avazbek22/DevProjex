@@ -50,8 +50,11 @@
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <CheckBox Classes="list-item" Content="{Binding Label}"
-                            IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                  <Border Classes="ignore-option-item"
+                          Classes.gitignore-option="{Binding IsGitIgnoreOption}">
+                    <CheckBox Classes="list-item" Content="{Binding Label}"
+                              IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                  </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>

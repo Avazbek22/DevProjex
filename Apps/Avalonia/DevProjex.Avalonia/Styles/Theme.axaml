@@ -357,6 +357,18 @@
         <Setter Property="Margin" Value="0,1" />
     </Style>
 
+    <Style Selector="Border.ignore-option-item">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
+    </Style>
+
+    <Style Selector="Border.ignore-option-item.gitignore-option">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="0,0,0,4" />
+        <Setter Property="Margin" Value="0,0,0,4" />
+    </Style>
+
     <Style Selector="CheckBox.section-all">
         <Setter Property="VerticalAlignment" Value="Bottom" />
         <Setter Property="HorizontalAlignment" Value="Right" />
