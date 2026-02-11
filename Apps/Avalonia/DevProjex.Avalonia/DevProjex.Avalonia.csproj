@@ -32,6 +32,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AvaloniaResource Include="..\..\..\Assets\IconPacks\Default\UIFilter.png">
+      <Link>IconPacks\Default\UIFilter.png</Link>
+    </AvaloniaResource>
     <!-- Application window icon (cross-platform, used by Avalonia Window.Icon) -->
     <AvaloniaResource Include="..\..\..\Assets\AppIcon\Linux\png\256.png">
       <Link>AppIcon\icon-256.png</Link>
