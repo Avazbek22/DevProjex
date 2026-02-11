@@ -118,5 +118,19 @@
   "Git.Error.UpdateFailed": "Жаңартуларды алу мүмкін болмады:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Болдырмау"
+  "Dialog.Cancel": "Болдырмау",
+
+  "DropZone.CloneButton": "Клондау",
+  "DropZone.Title": "Қалтаны осы жерге тастаңыз",
+  "DropZone.Button": "Қалтаны таңдау",
+  "DropZone.HotkeyHint": "жылдам ашу үшін",
+
+  "Status.Operation.LoadingProject": "Жобаны жүктеу",
+  "Status.Operation.RefreshingProject": "Жобаны жаңарту",
+  "Status.Operation.GettingUpdates": "Жаңарту",
+  "Status.Operation.GettingUpdatesBranch": "Жаңарту {0}",
+  "Status.Operation.SwitchingBranch": "Тармақты ауыстыру {0}",
+  "Status.Metric.Lines": "Жолдар: {0}",
+  "Status.Metric.Chars": "Таңбалар: {0}",
+  "Status.Metric.Tokens": "~Токендер: {0}"
 }

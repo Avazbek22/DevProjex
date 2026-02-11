@@ -15,6 +15,14 @@
     <Color x:Key="TreeSearchHighlightColor">#F7C76B</Color>
     <Color x:Key="TreeSearchCurrentColor">#F9A825</Color>
 
+    <!-- Drop Zone Colors - Light Theme -->
+    <Color x:Key="DropZoneBorderColor">#0066CC</Color>
+    <Color x:Key="DropZoneInnerColor">#70F0F0F0</Color>
+    <Color x:Key="DropZoneFolderBackColor">#0078D4</Color>
+    <Color x:Key="DropZoneFolderFrontColor">#3DA0E3</Color>
+    <Color x:Key="DropZoneArrowColor">#FFFFFF</Color>
+    <Color x:Key="DropZoneKbdColor">#20000000</Color>
+
     <!-- Brushes -->
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
@@ -29,6 +37,14 @@
     <SolidColorBrush x:Key="TreeSearchHighlightTextBrush" Color="#000000" />
     <SolidColorBrush x:Key="MenuPopupBrush" Color="{StaticResource AppPanelColor}"/>
     <SolidColorBrush x:Key="MenuChildPopupBrush" Color="{StaticResource AppPanelColor}"/>
+
+    <!-- Drop Zone Brushes - Light Theme -->
+    <SolidColorBrush x:Key="DropZoneBorderBrush" Color="{StaticResource DropZoneBorderColor}" />
+    <SolidColorBrush x:Key="DropZoneInnerBrush" Color="{StaticResource DropZoneInnerColor}" />
+    <SolidColorBrush x:Key="DropZoneFolderBackBrush" Color="{StaticResource DropZoneFolderBackColor}" />
+    <SolidColorBrush x:Key="DropZoneFolderFrontBrush" Color="{StaticResource DropZoneFolderFrontColor}" />
+    <SolidColorBrush x:Key="DropZoneArrowBrush" Color="{StaticResource DropZoneArrowColor}" />
+    <SolidColorBrush x:Key="DropZoneKbdBrush" Color="{StaticResource DropZoneKbdColor}" />
   </ResourceDictionary>
 
   <ResourceDictionary x:Key="Dark">
@@ -42,6 +58,14 @@
     <Color x:Key="TreeSelectionColor">#254861</Color>
     <Color x:Key="TreeSearchHighlightColor">#E6A23A</Color>
     <Color x:Key="TreeSearchCurrentColor">#F39C12</Color>
+
+    <!-- Drop Zone Colors - Dark Theme -->
+    <Color x:Key="DropZoneBorderColor">#4DA6FF</Color>
+    <Color x:Key="DropZoneInnerColor">#50181820</Color>
+    <Color x:Key="DropZoneFolderBackColor">#1E6BBF</Color>
+    <Color x:Key="DropZoneFolderFrontColor">#2D8CFF</Color>
+    <Color x:Key="DropZoneArrowColor">#FFFFFF</Color>
+    <Color x:Key="DropZoneKbdColor">#25FFFFFF</Color>
 
     <!-- Brushes -->
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
@@ -57,6 +81,14 @@
     <SolidColorBrush x:Key="TreeSearchHighlightTextBrush" Color="#000000" />
     <SolidColorBrush x:Key="MenuPopupBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="MenuChildPopupBrush" Color="{StaticResource AppPanelColor}"/>
+
+    <!-- Drop Zone Brushes - Dark Theme -->
+    <SolidColorBrush x:Key="DropZoneBorderBrush" Color="{StaticResource DropZoneBorderColor}" />
+    <SolidColorBrush x:Key="DropZoneInnerBrush" Color="{StaticResource DropZoneInnerColor}" />
+    <SolidColorBrush x:Key="DropZoneFolderBackBrush" Color="{StaticResource DropZoneFolderBackColor}" />
+    <SolidColorBrush x:Key="DropZoneFolderFrontBrush" Color="{StaticResource DropZoneFolderFrontColor}" />
+    <SolidColorBrush x:Key="DropZoneArrowBrush" Color="{StaticResource DropZoneArrowColor}" />
+    <SolidColorBrush x:Key="DropZoneKbdBrush" Color="{StaticResource DropZoneKbdColor}" />
   </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
@@ -281,15 +313,19 @@
     <Style Selector="Border.search-panel">
         <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Margin" Value="0" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="Margin" Value="4,2,4,0" />
     </Style>
 
     <Style Selector="Border.filter-panel">
         <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Margin" Value="0" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="Margin" Value="4,2,4,0" />
     </Style>
 
     <Style Selector="Button.menu-icon-button">
@@ -312,6 +348,8 @@
         <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Padding" Value="5" />
     </Style>
 

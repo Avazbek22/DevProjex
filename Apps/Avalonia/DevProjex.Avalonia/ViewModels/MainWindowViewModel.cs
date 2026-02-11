@@ -59,6 +59,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
     private double _aboutPopoverMaxHeight = 380;
+    private string _statusLineCountText = "Lines: 0";
+    private string _statusCharCountText = "Chars: 0";
+    private string _statusTokenEstimateText = "~Tokens: 0";
+    private string _statusOperationText = string.Empty;
+    private bool _statusBusy;
+    private bool _statusProgressIsIndeterminate = true;
+    private double _statusProgressValue;
 
     public MainWindowViewModel(LocalizationService localization, HelpContentProvider helpContentProvider)
     {
@@ -81,6 +88,93 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new();
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new();
     public ObservableCollection<FontFamily> FontFamilies { get; } = new();
+
+    public string StatusLineCountText
+    {
+        get => _statusLineCountText;
+        set
+        {
+            if (_statusLineCountText == value) return;
+            _statusLineCountText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string StatusCharCountText
+    {
+        get => _statusCharCountText;
+        set
+        {
+            if (_statusCharCountText == value) return;
+            _statusCharCountText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string StatusTokenEstimateText
+    {
+        get => _statusTokenEstimateText;
+        set
+        {
+            if (_statusTokenEstimateText == value) return;
+            _statusTokenEstimateText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string StatusOperationText
+    {
+        get => _statusOperationText;
+        set
+        {
+            if (_statusOperationText == value) return;
+            _statusOperationText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public bool StatusBusy
+    {
+        get => _statusBusy;
+        set
+        {
+            if (_statusBusy == value) return;
+            _statusBusy = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(StatusProgressVisible));
+            RaisePropertyChanged(nameof(StatusProgressPercentVisible));
+        }
+    }
+
+    public bool StatusProgressIsIndeterminate
+    {
+        get => _statusProgressIsIndeterminate;
+        set
+        {
+            if (_statusProgressIsIndeterminate == value) return;
+            _statusProgressIsIndeterminate = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(StatusProgressPercentVisible));
+        }
+    }
+
+    public double StatusProgressValue
+    {
+        get => _statusProgressValue;
+        set
+        {
+            if (Math.Abs(_statusProgressValue - value) < 0.1) return;
+            _statusProgressValue = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(StatusProgressPercentText));
+        }
+    }
+
+    public bool StatusProgressVisible => _statusBusy;
+
+    public bool StatusProgressPercentVisible => _statusBusy && !_statusProgressIsIndeterminate;
+
+    public string StatusProgressPercentText => $"{Math.Clamp((int)Math.Round(_statusProgressValue), 0, 100)}%";
 
     public string Title
     {
@@ -519,7 +613,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // Применённый шрифт (TreeView берет отсюда)
+    // Applied font (TreeView reads it from here)
     public FontFamily? SelectedFontFamily
     {
         get => _selectedFontFamily;
@@ -533,7 +627,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // Выбранный в ComboBox (как WinForms _pendingFontName)
+    // Selected in ComboBox (same as WinForms _pendingFontName)
     public FontFamily? PendingFontFamily
     {
         get => _pendingFontFamily;
@@ -671,6 +765,18 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string FilterByNamePlaceholder { get; private set; } = string.Empty;
     public string FilterTooltip { get; private set; } = string.Empty;
 
+    // Drop Zone localization
+    public string DropZoneTitle { get; private set; } = string.Empty;
+    public string DropZoneButtonText { get; private set; } = string.Empty;
+    public string DropZoneHotkeyHint { get; private set; } = string.Empty;
+    public string DropZoneCloneButtonText { get; private set; } = string.Empty;
+
+    public string StatusOperationLoadingProject { get; private set; } = string.Empty;
+    public string StatusOperationRefreshingProject { get; private set; } = string.Empty;
+    public string StatusOperationGettingUpdates { get; private set; } = string.Empty;
+    public string StatusOperationGettingUpdatesBranch { get; private set; } = string.Empty;
+    public string StatusOperationSwitchingBranch { get; private set; } = string.Empty;
+
     // Git menu localization
     public string MenuGitClone { get; private set; } = string.Empty;
     public string MenuGitBranch { get; private set; } = string.Empty;
@@ -746,6 +852,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuSearch = _localization["Menu.Search"];
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
+
+        // Drop Zone localization
+        DropZoneTitle = _localization["DropZone.Title"];
+        DropZoneButtonText = _localization["DropZone.Button"];
+        DropZoneHotkeyHint = _localization["DropZone.HotkeyHint"];
+        DropZoneCloneButtonText = _localization["DropZone.CloneButton"];
+
+        StatusOperationLoadingProject = _localization["Status.Operation.LoadingProject"];
+        StatusOperationRefreshingProject = _localization["Status.Operation.RefreshingProject"];
+        StatusOperationGettingUpdates = _localization["Status.Operation.GettingUpdates"];
+        StatusOperationGettingUpdatesBranch = _localization["Status.Operation.GettingUpdatesBranch"];
+        StatusOperationSwitchingBranch = _localization["Status.Operation.SwitchingBranch"];
 
         // Git menu localization
         MenuGitClone = _localization["Menu.Git.Clone"];
@@ -835,6 +953,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(FilterByNamePlaceholder));
         RaisePropertyChanged(nameof(FilterTooltip));
 
+        // Drop Zone localization
+        RaisePropertyChanged(nameof(DropZoneTitle));
+        RaisePropertyChanged(nameof(DropZoneButtonText));
+        RaisePropertyChanged(nameof(DropZoneHotkeyHint));
+        RaisePropertyChanged(nameof(DropZoneCloneButtonText));
+
+        RaisePropertyChanged(nameof(StatusOperationLoadingProject));
+        RaisePropertyChanged(nameof(StatusOperationRefreshingProject));
+        RaisePropertyChanged(nameof(StatusOperationGettingUpdates));
+        RaisePropertyChanged(nameof(StatusOperationGettingUpdatesBranch));
+        RaisePropertyChanged(nameof(StatusOperationSwitchingBranch));
+
         // Theme popover localization
         RaisePropertyChanged(nameof(MenuTheme));
         RaisePropertyChanged(nameof(ThemeModeLabel));
@@ -882,7 +1012,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     /// Updates the "All" checkbox labels with item counts.
-    /// Shows "Все (N)" if count > 0, otherwise just "Все".
+    /// Shows "<localized All> (N)" if count > 0, otherwise just "<localized All>".
     /// </summary>
     public void UpdateAllCheckboxLabels()
     {

@@ -118,5 +118,19 @@
   "Git.Error.UpdateFailed": "Échec de la récupération des mises à jour :\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Annuler"
+  "Dialog.Cancel": "Annuler",
+
+  "DropZone.CloneButton": "Cloner",
+  "DropZone.Title": "Déposez le dossier ici",
+  "DropZone.Button": "Choisir un dossier",
+  "DropZone.HotkeyHint": "pour ouvrir rapidement",
+
+  "Status.Operation.LoadingProject": "Chargement du projet",
+  "Status.Operation.RefreshingProject": "Actualisation du projet",
+  "Status.Operation.GettingUpdates": "Mise a jour",
+  "Status.Operation.GettingUpdatesBranch": "Mise a jour {0}",
+  "Status.Operation.SwitchingBranch": "Changement de branche {0}",
+  "Status.Metric.Lines": "Lignes: {0}",
+  "Status.Metric.Chars": "Caracteres: {0}",
+  "Status.Metric.Tokens": "~Jetons: {0}"
 }
