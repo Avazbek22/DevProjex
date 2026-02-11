@@ -146,7 +146,7 @@
                      Margin="1" />
 
           <!-- Content -->
-          <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,*"
+          <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,1.7*"
                 Margin="40">
 
             <!-- Fixed-height icon container -->
@@ -188,18 +188,34 @@
                        HorizontalAlignment="Center"
                        Margin="0,0,0,6" />
 
-            <!-- Secondary text -->
-            <TextBlock Grid.Row="3"
-                       Text="{Binding DropZoneSubtitle}"
-                       FontSize="14"
-                       Foreground="{DynamicResource AppMutedTextBrush}"
-                       HorizontalAlignment="Center"
-                       Margin="0,0,0,24" />
+            <!-- Secondary text with hotkey hint -->
+            <StackPanel Grid.Row="3"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        Margin="0,0,0,12"
+                        Spacing="8"
+                        Opacity="0.7">
+              <TextBlock Text="{Binding DropZoneHotkeyHint}"
+                         FontSize="14"
+                         Foreground="{DynamicResource AppMutedTextBrush}"
+                         VerticalAlignment="Center" />
+              <Border Background="{DynamicResource DropZoneKbdBrush}"
+                      CornerRadius="4"
+                      Padding="6,3"
+                      BorderBrush="{DynamicResource AppBorderBrush}"
+                      BorderThickness="1">
+                <TextBlock Text="Ctrl+O"
+                           FontSize="11"
+                           FontFamily="Consolas, monospace"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+              </Border>
+            </StackPanel>
 
             <!-- Folder selection button -->
             <Button Grid.Row="4"
                     Classes="drop-zone-button primary-action"
                     HorizontalAlignment="Center"
+                    Margin="0,16,0,0"
                     Padding="24,12"
                     CornerRadius="10"
                     BorderThickness="0"
@@ -218,29 +234,6 @@
               </StackPanel>
             </Button>
 
-            <!-- Hotkey hint -->
-            <StackPanel Grid.Row="5"
-                        Orientation="Horizontal"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Top"
-                        Margin="0,20,0,0"
-                        Spacing="6"
-                        Opacity="0.7">
-              <Border Background="{DynamicResource DropZoneKbdBrush}"
-                      CornerRadius="4"
-                      Padding="6,3"
-                      BorderBrush="{DynamicResource AppBorderBrush}"
-                      BorderThickness="1">
-                <TextBlock Text="Ctrl+O"
-                           FontSize="11"
-                           FontFamily="Consolas, monospace"
-                           Foreground="{DynamicResource AppMutedTextBrush}" />
-              </Border>
-              <TextBlock Text="{Binding DropZoneHotkeyHint}"
-                         FontSize="11"
-                         Foreground="{DynamicResource AppMutedTextBrush}"
-                         VerticalAlignment="Center" />
-            </StackPanel>
           </Grid>
         </Grid>
       </Border>
