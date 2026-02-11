@@ -16,8 +16,7 @@ public sealed class IgnoreOptionsServiceTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
-				["Settings.Ignore.BinFolders"] = "Bin",
-				["Settings.Ignore.ObjFolders"] = "Obj",
+				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
 				["Settings.Ignore.HiddenFiles"] = "HiddenFiles",
 				["Settings.Ignore.DotFolders"] = "DotFolders",
@@ -29,9 +28,9 @@ public sealed class IgnoreOptionsServiceTests
 
 		var options = service.GetOptions();
 
-		Assert.Equal(6, options.Count);
+		Assert.Equal(4, options.Count);
 		Assert.All(options, option => Assert.True(option.DefaultChecked));
-		Assert.Contains(options, option => option.Id == IgnoreOptionId.BinFolders && option.Label == "Bin");
+		Assert.Contains(options, option => option.Id == IgnoreOptionId.HiddenFolders && option.Label == "HiddenFolders");
 		Assert.Contains(options, option => option.Id == IgnoreOptionId.DotFiles && option.Label == "DotFiles");
 	}
 
@@ -43,8 +42,7 @@ public sealed class IgnoreOptionsServiceTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
-				["Settings.Ignore.BinFolders"] = "Bin",
-				["Settings.Ignore.ObjFolders"] = "Obj",
+				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
 				["Settings.Ignore.HiddenFiles"] = "HiddenFiles",
 				["Settings.Ignore.DotFolders"] = "DotFolders",
@@ -56,12 +54,10 @@ public sealed class IgnoreOptionsServiceTests
 
 		var options = service.GetOptions();
 
-		Assert.Equal(IgnoreOptionId.BinFolders, options[0].Id);
-		Assert.Equal(IgnoreOptionId.ObjFolders, options[1].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFolders, options[2].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFiles, options[3].Id);
-		Assert.Equal(IgnoreOptionId.DotFolders, options[4].Id);
-		Assert.Equal(IgnoreOptionId.DotFiles, options[5].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFolders, options[0].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFiles, options[1].Id);
+		Assert.Equal(IgnoreOptionId.DotFolders, options[2].Id);
+		Assert.Equal(IgnoreOptionId.DotFiles, options[3].Id);
 	}
 
 	// Verifies localized labels are populated for all options.
@@ -72,8 +68,7 @@ public sealed class IgnoreOptionsServiceTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
-				["Settings.Ignore.BinFolders"] = "Bin",
-				["Settings.Ignore.ObjFolders"] = "Obj",
+				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
 				["Settings.Ignore.HiddenFiles"] = "HiddenFiles",
 				["Settings.Ignore.DotFolders"] = "DotFolders",
@@ -86,5 +81,30 @@ public sealed class IgnoreOptionsServiceTests
 		var options = service.GetOptions();
 
 		Assert.All(options, option => Assert.False(string.IsNullOrWhiteSpace(option.Label)));
+	}
+
+	[Fact]
+	public void GetOptions_WhenGitIgnoreIncluded_AddsOptionAsFirst()
+	{
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>
+			{
+				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
+				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
+				["Settings.Ignore.HiddenFiles"] = "HiddenFiles",
+				["Settings.Ignore.DotFolders"] = "DotFolders",
+				["Settings.Ignore.DotFiles"] = "DotFiles"
+			}
+		});
+		var localization = new LocalizationService(catalog, AppLanguage.En);
+		var service = new IgnoreOptionsService(localization);
+
+		var options = service.GetOptions(includeGitIgnore: true);
+
+		Assert.Equal(5, options.Count);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
+		Assert.Equal("Use GitIgnore", options[0].Label);
+		Assert.True(options[0].DefaultChecked);
 	}
 }

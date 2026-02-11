@@ -14,8 +14,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
-				["Settings.Ignore.BinFolders"] = "Ignore bin",
-				["Settings.Ignore.ObjFolders"] = "Ignore obj",
+				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "Ignore hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Ignore hidden files",
 				["Settings.Ignore.DotFolders"] = "Ignore dot folders",
@@ -31,13 +30,11 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 
 		var options = service.GetOptions();
 
-		Assert.Equal(6, options.Count);
+		Assert.Equal(4, options.Count);
 	}
 
 	[Theory]
 	// Verifies option IDs are present for all supported ignore settings.
-	[InlineData(IgnoreOptionId.BinFolders)]
-	[InlineData(IgnoreOptionId.ObjFolders)]
 	[InlineData(IgnoreOptionId.HiddenFolders)]
 	[InlineData(IgnoreOptionId.HiddenFiles)]
 	[InlineData(IgnoreOptionId.DotFolders)]
@@ -53,8 +50,6 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 
 	[Theory]
 	// Verifies option labels are resolved from localization resources.
-	[InlineData(IgnoreOptionId.BinFolders, "Ignore bin")]
-	[InlineData(IgnoreOptionId.ObjFolders, "Ignore obj")]
 	[InlineData(IgnoreOptionId.HiddenFolders, "Ignore hidden folders")]
 	[InlineData(IgnoreOptionId.HiddenFiles, "Ignore hidden files")]
 	[InlineData(IgnoreOptionId.DotFolders, "Ignore dot folders")]
@@ -88,5 +83,18 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 		var options = service.GetOptions();
 
 		Assert.Equal(options.Count, options.Select(option => option.Id).Distinct().Count());
+	}
+
+	[Fact]
+	public void GetOptions_WithGitIgnore_IncludesUseGitIgnoreAsFirstOption()
+	{
+		var service = new IgnoreOptionsService(new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		var options = service.GetOptions(includeGitIgnore: true);
+
+		Assert.Equal(5, options.Count);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
+		Assert.Equal("Use GitIgnore", options[0].Label);
+		Assert.True(options[0].DefaultChecked);
 	}
 }

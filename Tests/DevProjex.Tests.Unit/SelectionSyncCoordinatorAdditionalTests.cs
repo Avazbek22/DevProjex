@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using DevProjex.Application.Services;
@@ -49,8 +50,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	public void HandleIgnoreAllChanged_ChecksAllIgnoreOptions()
 	{
 		var viewModel = CreateViewModel();
-		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", false));
-		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.ObjFolders, "obj", false));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "hidden folders", false));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.DotFolders, "dot folders", false));
 
 		var coordinator = CreateCoordinator(viewModel);
 
@@ -109,7 +110,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	{
 		var viewModel = CreateViewModel();
 		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
-		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "hidden folders", true));
 
 		var coordinator = CreateCoordinator(viewModel);
 
@@ -208,7 +209,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	public void PopulateIgnoreOptionsForRootSelection_EmptyRoots_ClearsIgnoreOptionsAndAllFlag()
 	{
 		var viewModel = CreateViewModel();
-		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "hidden folders", true));
 		viewModel.AllIgnoreChecked = true;
 
 		var coordinator = CreateCoordinator(viewModel);
@@ -232,10 +233,71 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		coordinator.PopulateIgnoreOptionsForRootSelection(new[] { "src" });
 
-		var bin = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.BinFolders);
-		var obj = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.ObjFolders);
-		Assert.True(bin.IsChecked);
-		Assert.False(obj.IsChecked);
+		var hiddenFolders = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFolders);
+		var hiddenFiles = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFiles);
+		Assert.True(hiddenFolders.IsChecked);
+		Assert.False(hiddenFiles.IsChecked);
+	}
+
+	[Fact]
+	public void PopulateIgnoreOptionsForRootSelection_WhenGitIgnoreExists_AddsUseGitIgnoreOption()
+	{
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"devprojex-tests-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempRoot);
+		File.WriteAllText(Path.Combine(tempRoot, ".gitignore"), "bin/");
+		try
+		{
+			var viewModel = CreateViewModel();
+			var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+			var scanner = new StubFileSystemScanner();
+			var scanOptions = new ScanOptionsUseCase(scanner);
+			var coordinator = new SelectionSyncCoordinator(
+				viewModel,
+				scanOptions,
+				new FilterOptionSelectionService(),
+				new IgnoreOptionsService(localization),
+				_ => new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>()),
+				_ => false,
+				() => tempRoot);
+
+			coordinator.PopulateIgnoreOptionsForRootSelection(new[] { "src" }, tempRoot);
+
+			Assert.Contains(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void PopulateIgnoreOptionsForRootSelection_WhenGitIgnoreMissing_DoesNotAddUseGitIgnoreOption()
+	{
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"devprojex-tests-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempRoot);
+		try
+		{
+			var viewModel = CreateViewModel();
+			var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+			var scanner = new StubFileSystemScanner();
+			var scanOptions = new ScanOptionsUseCase(scanner);
+			var coordinator = new SelectionSyncCoordinator(
+				viewModel,
+				scanOptions,
+				new FilterOptionSelectionService(),
+				new IgnoreOptionsService(localization),
+				_ => new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>()),
+				_ => false,
+				() => tempRoot);
+
+			coordinator.PopulateIgnoreOptionsForRootSelection(new[] { "src" }, tempRoot);
+
+			Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
 	}
 
 	private static MainWindowViewModel CreateViewModel()
@@ -277,8 +339,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
-				["Settings.Ignore.BinFolders"] = "bin folders",
-				["Settings.Ignore.ObjFolders"] = "obj folders",
+				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
 				["Settings.Ignore.DotFolders"] = "dot folders",
