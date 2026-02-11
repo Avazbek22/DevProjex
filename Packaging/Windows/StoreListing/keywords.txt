@@ -1,0 +1,1 @@
+read-only,project viewer,folder tree,source code,git,repository,code review,documentation,developer tools,structure,export,tree view,avalonia,.net,msix

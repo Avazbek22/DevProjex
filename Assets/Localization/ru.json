@@ -81,7 +81,7 @@
   "Msg.NoTextContent": "Нет текстового содержимого для копирования (выбранные файлы пустые или бинарные).",
   "Msg.ElevationCanceled": "Повышение прав отменено. Папка может открыться не полностью.",
   "Msg.AccessDeniedRoot": "Нет доступа к выбранной папке. Попробуйте запустить приложение от имени администратора.",
-  "Msg.AccessDeniedElevationRequired": "Нет доступа. Запустите приложение с повышенными правами и повторите попытку.",
+  "Msg.AccessDeniedElevationRequired": "Доступ запрещён. Запустите приложение от имени администратора вручную или выберите другую папку.",
   "Msg.AboutStub": "Здесь будет информация о программе (заглушка).",
   "Language.Ru": "Русский",
   "Language.En": "English",
@@ -118,5 +118,19 @@
   "Git.Error.UpdateFailed": "Не удалось получить обновления:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Отмена"
+  "Dialog.Cancel": "Отмена",
+
+  "DropZone.CloneButton": "Клонировать",
+  "DropZone.Title": "Перетащите папку сюда",
+  "DropZone.Button": "Выбрать папку",
+  "DropZone.HotkeyHint": "для быстрого открытия",
+
+  "Status.Operation.LoadingProject": "Загрузка проекта",
+  "Status.Operation.RefreshingProject": "Обновление проекта",
+  "Status.Operation.GettingUpdates": "Обновление",
+  "Status.Operation.GettingUpdatesBranch": "Обновление {0}",
+  "Status.Operation.SwitchingBranch": "Переключение ветки {0}",
+  "Status.Metric.Lines": "Строки: {0}",
+  "Status.Metric.Chars": "Символы: {0}",
+  "Status.Metric.Tokens": "~Токены: {0}"
 }

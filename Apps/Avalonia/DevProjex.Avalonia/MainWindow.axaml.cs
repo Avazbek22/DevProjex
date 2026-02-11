@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -85,6 +86,13 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gitCloneCts;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
+    private Viewbox? _dropZoneIcon;
+    private TranslateTransform? _dropZoneIconTransform;
+    private global::Avalonia.Threading.DispatcherTimer? _dropZoneFloatTimer;
+    private readonly Stopwatch _dropZoneFloatClock = new();
+    private int _statusLineCount;
+    private int _statusCharCount;
+    private int _statusTokenEstimate;
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -114,8 +122,18 @@ public partial class MainWindow : Window
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _viewModel.SetToastItems(_toastService.Items);
         DataContext = _viewModel;
+        ApplyStatusMetricTexts();
 
         InitializeComponent();
+
+        // Setup drag & drop for the drop zone
+        var dropZone = this.FindControl<Border>("DropZoneContainer");
+        if (dropZone is not null)
+        {
+            dropZone.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            dropZone.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
+            dropZone.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
+        }
 
         InitializeThemePresets();
 
@@ -126,6 +144,15 @@ public partial class MainWindow : Window
         _topMenuBar = this.FindControl<TopMenuBarView>("TopMenuBar");
         _searchBar = this.FindControl<SearchBarView>("SearchBar");
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
+        _dropZoneIcon = this.FindControl<Viewbox>("DropZoneIcon");
+
+        if (_dropZoneIcon is not null)
+        {
+            _dropZoneIconTransform = new TranslateTransform();
+            _dropZoneIcon.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
+            _dropZoneIcon.RenderTransform = _dropZoneIconTransform;
+            EnsureDropZoneFloatAnimationStarted();
+        }
 
         if (_treeView is not null)
         {
@@ -169,7 +196,7 @@ public partial class MainWindow : Window
         _viewModelPropertyChangedHandler = (_, args) =>
         {
             if (args.PropertyName == nameof(MainWindowViewModel.SearchQuery))
-                _searchCoordinator.UpdateSearchMatches();
+                _searchCoordinator.OnSearchQueryChanged();
             else if (args.PropertyName == nameof(MainWindowViewModel.NameFilter))
                 _filterCoordinator.OnNameFilterChanged();
             else if (args.PropertyName is nameof(MainWindowViewModel.MaterialIntensity)
@@ -181,6 +208,8 @@ public partial class MainWindow : Window
                 _themeBrushCoordinator.UpdateTransparencyEffect();
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
+            else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
+                UpdateDropZoneFloatAnimationState();
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
 
@@ -211,6 +240,7 @@ public partial class MainWindow : Window
             _viewModel.PropertyChanged -= _viewModelPropertyChangedHandler;
 
         // Dispose coordinators
+        _searchCoordinator.Dispose();
         _filterCoordinator.Dispose();
 
         // Cancel and dispose refresh token
@@ -234,6 +264,55 @@ public partial class MainWindow : Window
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
             disposable.Dispose();
+
+        if (_dropZoneFloatTimer is not null)
+        {
+            _dropZoneFloatTimer.Stop();
+            _dropZoneFloatTimer.Tick -= OnDropZoneFloatTick;
+        }
+    }
+
+    private void EnsureDropZoneFloatAnimationStarted()
+    {
+        if (_dropZoneIcon is null || _dropZoneIconTransform is null)
+            return;
+
+        _dropZoneFloatTimer ??= new global::Avalonia.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+        _dropZoneFloatTimer.Tick -= OnDropZoneFloatTick;
+        _dropZoneFloatTimer.Tick += OnDropZoneFloatTick;
+
+        _dropZoneFloatClock.Restart();
+        _dropZoneFloatTimer.Start();
+    }
+
+    private void UpdateDropZoneFloatAnimationState()
+    {
+        if (_viewModel.IsProjectLoaded)
+        {
+            _dropZoneFloatTimer?.Stop();
+            if (_dropZoneIconTransform is not null)
+                _dropZoneIconTransform.Y = 0;
+            return;
+        }
+
+        EnsureDropZoneFloatAnimationStarted();
+    }
+
+    private void OnDropZoneFloatTick(object? sender, EventArgs e)
+    {
+        if (_dropZoneIconTransform is null)
+            return;
+
+        //Folder's animaion parameters
+        const double periodSeconds = 2.0; // Animation speed
+        const double amplitudePx = 4.0; // Vertical distance
+        var phase = _dropZoneFloatClock.Elapsed.TotalSeconds / periodSeconds * 2 * Math.PI;
+
+        // Symmetric sine motion makes the floating clearly visible.
+        _dropZoneIconTransform.Y = Math.Sin(phase) * amplitudePx;
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
@@ -288,6 +367,84 @@ public partial class MainWindow : Window
             await ShowErrorAsync(ex.Message);
         }
     }
+
+    #region Drop Zone Handlers
+
+    private void OnDropZoneClick(object? sender, PointerPressedEventArgs e)
+    {
+        // Ignore if clicked on the button (button has its own handler)
+        if (e.Source is Button) return;
+
+        OnOpenFolder(sender, new RoutedEventArgs());
+    }
+
+    private void OnDropZoneDragEnter(object? sender, DragEventArgs e)
+    {
+        var hasFolder = e.Data.GetDataFormats().Any(f =>
+            f == DataFormats.Files);
+
+        e.DragEffects = hasFolder ? DragDropEffects.Copy : DragDropEffects.None;
+
+        // Add visual feedback class
+        if (sender is Border border)
+        {
+            border.Classes.Add("drag-over");
+        }
+    }
+
+    private void OnDropZoneDragLeave(object? sender, DragEventArgs e)
+    {
+        // Remove visual feedback class
+        if (sender is Border border)
+        {
+            border.Classes.Remove("drag-over");
+        }
+    }
+
+    private async void OnDropZoneDrop(object? sender, DragEventArgs e)
+    {
+        // Remove visual feedback class
+        if (sender is Border border)
+        {
+            border.Classes.Remove("drag-over");
+        }
+
+        try
+        {
+            var files = e.Data.GetFiles();
+            if (files is null) return;
+
+            var folder = files
+                .Select(f => f.TryGetLocalPath())
+                .Where(p => !string.IsNullOrWhiteSpace(p) && Directory.Exists(p))
+                .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(folder))
+            {
+                // Maybe it's a file - try to get its directory
+                var file = files
+                    .Select(f => f.TryGetLocalPath())
+                    .Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p))
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrWhiteSpace(file))
+                {
+                    folder = Path.GetDirectoryName(file);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(folder))
+            {
+                await TryOpenFolderAsync(folder, fromDialog: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    #endregion
 
     private void ApplyStartupThemePreset()
     {
@@ -449,6 +606,7 @@ public partial class MainWindow : Window
     private void ApplyLocalization()
     {
         _viewModel.UpdateLocalization();
+        ApplyStatusMetricTexts();
         UpdateTitle();
 
         if (_currentPath is not null)
@@ -493,12 +651,15 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
+        BeginStatusOperation(_viewModel.StatusOperationRefreshingProject, indeterminate: true);
         try
         {
             await ReloadProjectAsync();
+            CompleteStatusOperation();
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -525,10 +686,13 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
+            UpdateStatusMetricsFromContent(content);
+            CompleteStatusOperation();
             _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -555,18 +719,23 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
+            BeginStatusOperation("Preparing content...", indeterminate: true);
             var content = await Task.Run(() => _contentExport.BuildAsync(files, CancellationToken.None));
             if (string.IsNullOrWhiteSpace(content))
             {
+                CompleteStatusOperation();
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
             await SetClipboardTextAsync(content);
+            UpdateStatusMetricsFromContent(content);
+            CompleteStatusOperation();
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -579,12 +748,16 @@ public partial class MainWindow : Window
 
             var selected = GetCheckedPaths();
             // Run file reading off UI thread
+            BeginStatusOperation("Building export...", indeterminate: true);
             var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
             await SetClipboardTextAsync(content);
+            UpdateStatusMetricsFromContent(content);
+            CompleteStatusOperation();
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -948,7 +1121,9 @@ public partial class MainWindow : Window
                 await RefreshGitBranchesAsync(result.LocalPath);
 
             if (_currentPath == result.LocalPath)
+            {
                 _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1006,13 +1181,27 @@ public partial class MainWindow : Window
         try
         {
             Cursor = new Cursor(StandardCursorType.Wait);
+            var statusText = string.IsNullOrWhiteSpace(_viewModel.CurrentBranch)
+                ? _viewModel.StatusOperationGettingUpdates
+                : _localization.Format("Status.Operation.GettingUpdatesBranch", _viewModel.CurrentBranch);
+            BeginStatusOperation(statusText, indeterminate: true);
 
-            var progress = new Progress<string>(_ => { });
+            var progress = new Progress<string>(status =>
+            {
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (TryParseTrailingPercent(status, out var percent))
+                        UpdateStatusOperationProgress(percent, statusText);
+                    else
+                        UpdateStatusOperationText(statusText);
+                });
+            });
             var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath);
             var success = await _gitService.PullUpdatesAsync(_currentPath, progress);
 
             if (!success)
             {
+                CompleteStatusOperation();
                 await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
                 return;
             }
@@ -1023,12 +1212,19 @@ public partial class MainWindow : Window
 
             var afterHash = await _gitService.GetHeadCommitAsync(_currentPath);
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
+            {
                 _toastService.Show(_localization["Toast.Git.NoUpdates"]);
+                CompleteStatusOperation();
+            }
             else
+            {
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
+                CompleteStatusOperation();
+            }
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
         }
         finally
@@ -1047,12 +1243,24 @@ public partial class MainWindow : Window
         try
         {
             Cursor = new Cursor(StandardCursorType.Wait);
+            var statusText = _localization.Format("Status.Operation.SwitchingBranch", branchName);
+            BeginStatusOperation(statusText, indeterminate: true);
 
-            var progress = new Progress<string>(_ => { });
+            var progress = new Progress<string>(status =>
+            {
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (TryParseTrailingPercent(status, out var percent))
+                        UpdateStatusOperationProgress(percent, statusText);
+                    else
+                        UpdateStatusOperationText(statusText);
+                });
+            });
             var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress);
 
             if (!success)
             {
+                CompleteStatusOperation();
                 await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
                 return;
             }
@@ -1063,10 +1271,12 @@ public partial class MainWindow : Window
             // Refresh branches and tree
             await RefreshGitBranchesAsync(_currentPath);
             await ReloadProjectAsync();
+            CompleteStatusOperation();
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
         }
         finally
@@ -1248,7 +1458,7 @@ public partial class MainWindow : Window
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            await RefreshTreeAsync();
+            await RefreshTreeAsync(interactiveFilter: true);
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -1297,6 +1507,7 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Enter)
         {
+            _searchCoordinator.UpdateSearchMatches();
             if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
                 _searchCoordinator.Navigate(-1);
             else
@@ -1310,7 +1521,7 @@ public partial class MainWindow : Window
     {
         var mods = e.KeyModifiers;
 
-        // Ctrl+O (всегда доступно)
+        // Ctrl+O (always available)
         if (mods == KeyModifiers.Control && e.Key == Key.O)
         {
             OnOpenFolder(this, new RoutedEventArgs());
@@ -1318,7 +1529,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Ctrl+F (только при загруженном проекте — как WinForms miSearch.Enabled)
+        // Ctrl+F (available only when a project is loaded, same as WinForms miSearch.Enabled)
         if (mods == KeyModifiers.Control && e.Key == Key.F)
         {
             OnToggleSearch(this, new RoutedEventArgs());
@@ -1335,7 +1546,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Esc закрывает help popover
+        // Esc closes the help popover
         if (e.Key == Key.Escape && _viewModel.HelpPopoverOpen)
         {
             _viewModel.HelpPopoverOpen = false;
@@ -1349,7 +1560,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Esc закрывает поиск
+        // Esc closes search
         if (e.Key == Key.Escape && _viewModel.SearchVisible)
         {
             CloseSearch();
@@ -1357,7 +1568,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // F5 refresh (как WinForms)
+        // F5 refresh (same as WinForms)
         if (e.Key == Key.F5)
         {
             if (_viewModel.IsProjectLoaded)
@@ -1367,7 +1578,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Zoom горячие клавиши (в WinForms работают даже без проекта)
+        // Zoom hotkeys (in WinForms they work even without a loaded project)
         if (mods == KeyModifiers.Control && (e.Key == Key.OemPlus || e.Key == Key.Add))
         {
             AdjustTreeFontSize(1);
@@ -1416,7 +1627,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Copy hotkeys (как WinForms)
+        // Copy hotkeys (same as WinForms)
         if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.C)
         {
             OnCopyTree(this, new RoutedEventArgs());
@@ -1515,7 +1726,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Font family — как WinForms: применяется только по Apply
+            // Font family follows WinForms behavior: applied only on Apply
             var pending = _viewModel.PendingFontFamily;
             if (pending is not null &&
                 !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))
@@ -1549,44 +1760,54 @@ public partial class MainWindow : Window
             return;
         }
 
-        _currentPath = path;
-        _viewModel.IsProjectLoaded = true;
-        _viewModel.SettingsVisible = true;
-        _viewModel.SearchVisible = false;
-
-        // Set project source type based on how it was opened
-        // If opened from dialog (File → Open), it's LocalFolder
-        // If opened from Git clone, the source type is already set
-        if (fromDialog)
+        BeginStatusOperation(_viewModel.StatusOperationLoadingProject, indeterminate: true);
+        try
         {
-            _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
-            _viewModel.CurrentBranch = string.Empty;
-            _viewModel.GitBranches.Clear();
-            _currentProjectDisplayName = null;
-            _currentRepositoryUrl = null;
+            _currentPath = path;
+            _viewModel.IsProjectLoaded = true;
+            _viewModel.SettingsVisible = true;
+            _viewModel.SearchVisible = false;
 
-            // Clear cached repo path when opening from dialog (local folder)
-            // This ensures the previous Git clone cache gets cleaned up
-            if (_currentCachedRepoPath is not null)
+            // Set project source type based on how it was opened
+            // If opened from dialog (File → Open), it's LocalFolder
+            // If opened from Git clone, the source type is already set
+            if (fromDialog)
             {
-                _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
-                _currentCachedRepoPath = null;
+                _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
+                _viewModel.CurrentBranch = string.Empty;
+                _viewModel.GitBranches.Clear();
+                _currentProjectDisplayName = null;
+                _currentRepositoryUrl = null;
+
+                // Clear cached repo path when opening from dialog (local folder)
+                // This ensures the previous Git clone cache gets cleaned up
+                if (_currentCachedRepoPath is not null)
+                {
+                    _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
+                    _currentCachedRepoPath = null;
+                }
             }
+
+            UpdateTitle();
+
+            await ReloadProjectAsync();
+            CompleteStatusOperation();
         }
-
-        UpdateTitle();
-
-        await ReloadProjectAsync();
+        catch
+        {
+            CompleteStatusOperation();
+            throw;
+        }
     }
 
     private bool TryElevateAndRestart(string path)
     {
-        // In Store builds, show a localized hint instead of attempting elevation.
-        // Note: fire-and-forget here is acceptable as this is a terminal state (window closing or showing info)
-#if DEVPROJEX_STORE
-        _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
-        return false;
-#endif
+        if (!BuildFlags.AllowElevation)
+        {
+            // Store builds: never attempt elevation, just show a clear message.
+            _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
+            return false;
+        }
 
         if (_elevation.IsAdministrator) return false;
         if (_elevationAttempted) return false;
@@ -1663,16 +1884,17 @@ public partial class MainWindow : Window
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     }
 
-    private async Task RefreshTreeAsync()
+    private async Task RefreshTreeAsync(bool interactiveFilter = false)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
 
         using var _ = PerformanceMetrics.Measure("RefreshTreeAsync");
 
         // Cancel any previous refresh operation to avoid race conditions
-        _refreshCts?.Cancel();
         var cts = new CancellationTokenSource();
-        _refreshCts = cts;
+        var previousRefreshCts = Interlocked.Exchange(ref _refreshCts, cts);
+        previousRefreshCts?.Cancel();
+        previousRefreshCts?.Dispose();
         var cancellationToken = cts.Token;
 
         var allowedExt = new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
@@ -1690,7 +1912,8 @@ public partial class MainWindow : Window
             IgnoreRules: ignoreRules,
             NameFilter: nameFilter);
 
-        Cursor = new Cursor(StandardCursorType.Wait);
+        if (!interactiveFilter)
+            Cursor = new Cursor(StandardCursorType.Wait);
         try
         {
             BuildTreeResult result;
@@ -1736,18 +1959,20 @@ public partial class MainWindow : Window
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
 
-            if (!string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
+            if (!interactiveFilter && !string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
                 _toastService.Show(_localization["Toast.NoMatches"]);
 
             _searchCoordinator.UpdateSearchMatches();
 
             // Suggest GC to collect old tree objects after building new one
             // Using non-blocking mode to avoid UI freeze
-            GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+            if (!interactiveFilter)
+                GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
         }
         finally
         {
-            Cursor = new Cursor(StandardCursorType.Arrow);
+            if (!interactiveFilter)
+                Cursor = new Cursor(StandardCursorType.Arrow);
         }
     }
 
@@ -1795,6 +2020,87 @@ public partial class MainWindow : Window
     {
         var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
         return _ignoreRulesService.Build(rootPath, selected);
+    }
+
+    private void BeginStatusOperation(string text, bool indeterminate = true)
+    {
+        _viewModel.StatusOperationText = text;
+        _viewModel.StatusBusy = true;
+        _viewModel.StatusProgressIsIndeterminate = indeterminate;
+        if (indeterminate)
+            _viewModel.StatusProgressValue = 0;
+    }
+
+    private void UpdateStatusOperationText(string text)
+    {
+        _viewModel.StatusOperationText = text;
+    }
+
+    private void UpdateStatusOperationProgress(double percent, string? text = null)
+    {
+        if (!string.IsNullOrWhiteSpace(text))
+            _viewModel.StatusOperationText = text;
+
+        _viewModel.StatusBusy = true;
+        _viewModel.StatusProgressIsIndeterminate = false;
+        _viewModel.StatusProgressValue = Math.Clamp(percent, 0, 100);
+    }
+
+    private void CompleteStatusOperation()
+    {
+        _viewModel.StatusOperationText = string.Empty;
+        _viewModel.StatusBusy = false;
+        _viewModel.StatusProgressIsIndeterminate = true;
+        _viewModel.StatusProgressValue = 0;
+    }
+
+    private void UpdateStatusMetricsFromContent(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            _statusLineCount = 0;
+            _statusCharCount = 0;
+            _statusTokenEstimate = 0;
+            ApplyStatusMetricTexts();
+            return;
+        }
+
+        var lineCount = 1;
+        for (var i = 0; i < content.Length; i++)
+        {
+            if (content[i] == '\n')
+                lineCount++;
+        }
+
+        _statusLineCount = lineCount;
+        _statusCharCount = content.Length;
+        _statusTokenEstimate = (int)Math.Ceiling(_statusCharCount / 4.0);
+        ApplyStatusMetricTexts();
+    }
+
+    private void ApplyStatusMetricTexts()
+    {
+        _viewModel.StatusLineCountText = _localization.Format("Status.Metric.Lines", _statusLineCount);
+        _viewModel.StatusCharCountText = _localization.Format("Status.Metric.Chars", _statusCharCount);
+        _viewModel.StatusTokenEstimateText = _localization.Format("Status.Metric.Tokens", _statusTokenEstimate);
+    }
+
+    private static bool TryParseTrailingPercent(string status, out double percent)
+    {
+        percent = 0;
+        if (string.IsNullOrWhiteSpace(status))
+            return false;
+
+        var trimmed = status.Trim();
+        if (!trimmed.EndsWith('%'))
+            return false;
+
+        var lastSpace = trimmed.LastIndexOf(' ');
+        var token = lastSpace >= 0 ? trimmed[(lastSpace + 1)..] : trimmed;
+        token = token.TrimEnd('%');
+
+        return double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out percent) ||
+               double.TryParse(token, NumberStyles.Float, CultureInfo.CurrentCulture, out percent);
     }
 
     private async Task SetClipboardTextAsync(string content)

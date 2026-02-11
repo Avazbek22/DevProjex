@@ -10,7 +10,10 @@
       "Bash(git checkout:*)",
       "Bash(for file in *.json)",
       "Bash(done)",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "Bash(timeout 8 dotnet run:*)",
+      "Bash(timeout 6 dotnet run:*)",
+      "Bash(timeout 5 dotnet run:*)"
     ]
   }
 }

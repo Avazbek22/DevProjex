@@ -79,7 +79,7 @@
   "Msg.NoCheckedFilesShort": "No files selected.",
   "Msg.ElevationCanceled": "Elevation was canceled. The folder may not be fully accessible.",
   "Msg.AccessDeniedRoot": "Access denied for the selected folder. Try running as administrator.",
-  "Msg.AccessDeniedElevationRequired": "Access denied. Run the app as administrator and try again.",
+  "Msg.AccessDeniedElevationRequired": "Access denied. Run the app as administrator manually or choose another folder.",
   "Msg.AboutStub": "Program information will be here (stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",
@@ -118,5 +118,19 @@
   "Git.Error.UpdateFailed": "Failed to get updates:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Cancel"
+  "Dialog.Cancel": "Cancel",
+
+  "DropZone.CloneButton": "Clone",
+  "DropZone.Title": "Drop folder here",
+  "DropZone.Button": "Choose folder",
+  "DropZone.HotkeyHint": "to quick open",
+
+  "Status.Operation.LoadingProject": "Loading project",
+  "Status.Operation.RefreshingProject": "Refreshing project",
+  "Status.Operation.GettingUpdates": "Updating",
+  "Status.Operation.GettingUpdatesBranch": "Updating {0}",
+  "Status.Operation.SwitchingBranch": "Switching branch {0}",
+  "Status.Metric.Lines": "Lines: {0}",
+  "Status.Metric.Chars": "Chars: {0}",
+  "Status.Metric.Tokens": "~Tokens: {0}"
 }

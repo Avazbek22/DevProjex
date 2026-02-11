@@ -81,7 +81,7 @@
   "Msg.NoTextContent": "Көшіруге мәтіндік мазмұн жоқ (файлдар бос немесе бинарлы).",
   "Msg.ElevationCanceled": "Әкімші құқықтарын көтеру тоқтатылды. Қалта толық ашылмауы мүмкін.",
   "Msg.AccessDeniedRoot": "Таңдалған қалтаға рұқсат жоқ. Әкімші ретінде іске қосыңыз.",
-  "Msg.AccessDeniedElevationRequired": "Қолжетімсіз. Қолданбаны әкімші ретінде іске қосып, қайта көріңіз.",
+  "Msg.AccessDeniedElevationRequired": "Қолжетімсіз. Қолданбаны әкімші ретінде қолмен іске қосыңыз немесе басқа қалтаны таңдаңыз.",
   "Msg.AboutStub": "Мұнда бағдарлама туралы ақпарат болады (stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",
@@ -118,5 +118,19 @@
   "Git.Error.UpdateFailed": "Жаңартуларды алу мүмкін болмады:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Болдырмау"
+  "Dialog.Cancel": "Болдырмау",
+
+  "DropZone.CloneButton": "Клондау",
+  "DropZone.Title": "Қалтаны осы жерге тастаңыз",
+  "DropZone.Button": "Қалтаны таңдау",
+  "DropZone.HotkeyHint": "жылдам ашу үшін",
+
+  "Status.Operation.LoadingProject": "Жобаны жүктеу",
+  "Status.Operation.RefreshingProject": "Жобаны жаңарту",
+  "Status.Operation.GettingUpdates": "Жаңарту",
+  "Status.Operation.GettingUpdatesBranch": "Жаңарту {0}",
+  "Status.Operation.SwitchingBranch": "Тармақты ауыстыру {0}",
+  "Status.Metric.Lines": "Жолдар: {0}",
+  "Status.Metric.Chars": "Таңбалар: {0}",
+  "Status.Metric.Tokens": "~Токендер: {0}"
 }

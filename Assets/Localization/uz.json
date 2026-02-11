@@ -81,7 +81,7 @@
   "Msg.NoTextContent": "Nusxalash uchun matn yo‘q (tanlangan fayllar bo‘sh yoki binar).",
   "Msg.ElevationCanceled": "Administrator huquqlari bekor qilindi. Jild to‘liq ochilmasligi mumkin.",
   "Msg.AccessDeniedRoot": "Tanlangan jildga ruxsat yo‘q. Administrator sifatida ishga tushiring.",
-  "Msg.AccessDeniedElevationRequired": "Ruxsat yo‘q. Ilovani administrator sifatida ishga tushirib, qayta urinib ko‘ring.",
+  "Msg.AccessDeniedElevationRequired": "Ruxsat yo‘q. Ilovani administrator sifatida qo‘lda ishga tushiring yoki boshqa jildni tanlang.",
   "Msg.AboutStub": "Bu yerda dastur haqida ma’lumot bo‘ladi (stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",
@@ -118,5 +118,19 @@
   "Git.Error.UpdateFailed": "Yangilanishlarni olib bo'lmadi:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Bekor qilish"
+  "Dialog.Cancel": "Bekor qilish",
+
+  "DropZone.CloneButton": "Klonlash",
+  "DropZone.Title": "Papkani bu yerga tashlang",
+  "DropZone.Button": "Papkani tanlash",
+  "DropZone.HotkeyHint": "tez ochish uchun",
+
+  "Status.Operation.LoadingProject": "Loyiha yuklanmoqda",
+  "Status.Operation.RefreshingProject": "Loyiha yangilanmoqda",
+  "Status.Operation.GettingUpdates": "Yangilash",
+  "Status.Operation.GettingUpdatesBranch": "Yangilash {0}",
+  "Status.Operation.SwitchingBranch": "Tarmoqni almashtirish {0}",
+  "Status.Metric.Lines": "Qatorlar: {0}",
+  "Status.Metric.Chars": "Belgilar: {0}",
+  "Status.Metric.Tokens": "~Tokenlar: {0}"
 }

@@ -14,7 +14,7 @@ public sealed class NameFilterCoordinator : IDisposable
     public NameFilterCoordinator(Action<CancellationToken> applyFilterRealtime)
     {
         _applyFilterRealtime = applyFilterRealtime;
-        _filterDebounceTimer = new System.Timers.Timer(200) // Reduced from 300ms for better responsiveness
+        _filterDebounceTimer = new System.Timers.Timer(280)
         {
             AutoReset = false
         };

@@ -1,0 +1,34 @@
+Field,en-us
+ProductTitle,DevProjex
+ShortDescription,Visual project context builder for humans and AI. Copy tree, code, or both — instantly.
+Description,"Need to share project structure with a colleague? Preparing context for ChatGPT or Copilot? Explaining architecture in a code review?
+
+DevProjex builds a clean, visual tree of any folder or repository. Select what matters with checkboxes, and copy it to clipboard — as an ASCII tree, file contents, or both combined.
+
+What you get:
+
+- Three copy modes — tree only, content only, or tree + content. Selection-aware or full export.
+- Smart filtering — Built-in ignore rules for node_modules, build outputs, IDE configs. Customize as needed.
+- Git support — Clone repos by URL, switch branches, fetch updates — all in a safe local cache.
+- Search & filter — Find files fast in large codebases.
+- 8 languages — English, Russian, Spanish, and more.
+
+Built for trust:
+
+- Read-only by design — DevProjex never modifies your files, never commits, never pushes.
+- No telemetry, no cloud, no account required.
+
+Source-available on GitHub:
+https://github.com/Avazbek22/DevProjex
+
+Inspect every line of code. Report issues. Contribute if you'd like.
+
+Works on any project — not tied to a specific language or IDE.
+Made with .NET 10 and Avalonia UI."
+SearchTerms,git;repository;project;folder;tree;code;developer;context;AI;clipboard;source-available
+CopyrightAndTrademarkInfo,
+AdditionalLicenseTerms,
+DevelopedBy,
+PrivacyPolicyUrl,
+WebsiteUrl,https://github.com/Avazbek22/DevProjex
+SupportContactInfo,

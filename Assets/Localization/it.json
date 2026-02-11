@@ -81,7 +81,7 @@
   "Msg.NoTextContent": "Nessun contenuto di testo da copiare (i file selezionati sono vuoti o binari).",
   "Msg.ElevationCanceled": "Elevazione annullata. La cartella potrebbe non essere completamente accessibile.",
   "Msg.AccessDeniedRoot": "Accesso negato. Prova come amministratore.",
-  "Msg.AccessDeniedElevationRequired": "Accesso negato. Avvia l’app come amministratore e riprova.",
+  "Msg.AccessDeniedElevationRequired": "Accesso negato. Avvia l’app manualmente come amministratore o scegli un’altra cartella.",
   "Msg.AboutStub": "Le info del programma saranno qui (stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",
@@ -118,5 +118,19 @@
   "Git.Error.UpdateFailed": "Impossibile ottenere aggiornamenti:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Annulla"
+  "Dialog.Cancel": "Annulla",
+
+  "DropZone.CloneButton": "Clona",
+  "DropZone.Title": "Trascina la cartella qui",
+  "DropZone.Button": "Scegli cartella",
+  "DropZone.HotkeyHint": "per aprire rapidamente",
+
+  "Status.Operation.LoadingProject": "Caricamento progetto",
+  "Status.Operation.RefreshingProject": "Aggiornamento progetto",
+  "Status.Operation.GettingUpdates": "Aggiornamento",
+  "Status.Operation.GettingUpdatesBranch": "Aggiornamento {0}",
+  "Status.Operation.SwitchingBranch": "Cambio branch {0}",
+  "Status.Metric.Lines": "Righe: {0}",
+  "Status.Metric.Chars": "Caratteri: {0}",
+  "Status.Metric.Tokens": "~Token: {0}"
 }

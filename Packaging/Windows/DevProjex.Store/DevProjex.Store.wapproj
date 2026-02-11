@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProjectGuid>{D7E8F0C1-7B8E-4D4A-AF58-0D13FBC90F8A}</ProjectGuid>
+    <TargetPlatformVersion>10.0.19041.0</TargetPlatformVersion>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <Configurations>Debug;Release;ReleaseStore</Configurations>
+    <Platforms>x64</Platforms>
+    <AppxBundle>Always</AppxBundle>
+    <AppxBundlePlatforms>x64</AppxBundlePlatforms>
+    <AppxPackageDir>$(SolutionDir)publish\store\</AppxPackageDir>
+    <AppxManifest>Package.appxmanifest</AppxManifest>
+    <AppxPackageManifest>Package.appxmanifest</AppxPackageManifest>
+    <EntryPointProjectUniqueName>..\..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj</EntryPointProjectUniqueName>
+    <UapAppxPackageBuildMode>StoreUpload</UapAppxPackageBuildMode>
+    <GenerateAppInstallerFile>false</GenerateAppInstallerFile>
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\..\Assets\AppIcon\Windows\VisualAssets\*.png">
+      <Link>Assets\%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AppxManifest Include="Package.appxmanifest" />
+  </ItemGroup>
+
+  <Import Project="$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props" Condition="Exists('$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props')" />
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props" Condition="Exists('$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props')" />
+  <Import Project="$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets" Condition="Exists('$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets')" />
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets" Condition="Exists('$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets')" />
+</Project>

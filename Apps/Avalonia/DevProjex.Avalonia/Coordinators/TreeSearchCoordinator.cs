@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Threading;
 using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Styling;
@@ -11,10 +13,13 @@ using DevProjex.Avalonia.ViewModels;
 
 namespace DevProjex.Avalonia.Coordinators;
 
-public sealed class TreeSearchCoordinator
+public sealed class TreeSearchCoordinator : IDisposable
 {
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeView _treeView;
+    private readonly System.Timers.Timer _searchDebounceTimer;
+    private readonly object _searchCtsLock = new();
+    private CancellationTokenSource? _searchCts;
     private readonly List<TreeNodeViewModel> _searchMatches = new();
     private int _searchMatchIndex = -1;
     private TreeNodeViewModel? _currentSearchMatch;
@@ -30,6 +35,33 @@ public sealed class TreeSearchCoordinator
     {
         _viewModel = viewModel;
         _treeView = treeView;
+        _searchDebounceTimer = new System.Timers.Timer(120)
+        {
+            AutoReset = false
+        };
+        _searchDebounceTimer.Elapsed += (_, _) =>
+        {
+            CancellationToken token;
+            lock (_searchCtsLock)
+            {
+                _searchCts?.Cancel();
+                _searchCts?.Dispose();
+                _searchCts = new CancellationTokenSource();
+                token = _searchCts.Token;
+            }
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!token.IsCancellationRequested)
+                    UpdateSearchMatches();
+            }, DispatcherPriority.Background);
+        };
+    }
+
+    public void OnSearchQueryChanged()
+    {
+        _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Start();
     }
 
     public void UpdateSearchMatches()
@@ -89,6 +121,18 @@ public sealed class TreeSearchCoordinator
         _searchMatches.TrimExcess();
 
         // Note: Don't call UpdateHighlights here - nodes may already be cleared
+    }
+
+    public void Dispose()
+    {
+        _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Dispose();
+        lock (_searchCtsLock)
+        {
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+            _searchCts = null;
+        }
     }
 
     public void Navigate(int step)

@@ -10,9 +10,28 @@
         CanResize="False"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
-        SystemDecorations="BorderOnly"
+        Background="Transparent"
+        SystemDecorations="None"
+        TransparencyLevelHint="AcrylicBlur, Blur, None"
         Icon="avares://DevProjex.Avalonia/AppIcon/icon-256.png">
-  <Border Classes="theme-popover"
+  <Window.Styles>
+    <Style Selector="Border.clone-window-card">
+      <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="BoxShadow" Value="0 6 20 0 #50000000" />
+    </Style>
+
+    <Style Selector="StackPanel.clone-progress-surface">
+      <Setter Property="Margin" Value="0,0,0,16" />
+    </Style>
+  </Window.Styles>
+
+  <Border Name="CloneWindowCard"
+          Classes="clone-window-card"
           Padding="16">
     <Grid RowDefinitions="Auto,Auto,Auto,Auto">
       <!-- Description (visible when not in progress) -->
@@ -35,7 +54,7 @@
 
       <!-- Progress section (visible when in progress) -->
       <StackPanel Grid.Row="1"
-                  Margin="0,0,0,16"
+                  Classes="clone-progress-surface"
                   IsVisible="{Binding GitCloneInProgress}">
         <TextBlock Text="{Binding GitCloneStatus}"
                    FontSize="13"

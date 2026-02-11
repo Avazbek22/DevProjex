@@ -81,7 +81,7 @@
   "Msg.NoTextContent": "Kein Textinhalt zum Kopieren (ausgewählte Dateien sind leer oder binär).",
   "Msg.ElevationCanceled": "Erhöhung wurde abgebrochen. Der Ordner ist möglicherweise nicht vollständig zugänglich.",
   "Msg.AccessDeniedRoot": "Zugriff verweigert. Als Administrator ausführen.",
-  "Msg.AccessDeniedElevationRequired": "Zugriff verweigert. Starten Sie die App als Administrator und versuchen Sie es erneut.",
+  "Msg.AccessDeniedElevationRequired": "Zugriff verweigert. Starten Sie die App manuell als Administrator oder wählen Sie einen anderen Ordner.",
   "Msg.AboutStub": "Programminfo kommt hier hin (Stub).",
   "Language.Ru": "Русский",
   "Language.En": "English",
@@ -118,5 +118,19 @@
   "Git.Error.UpdateFailed": "Aktualisierungen konnten nicht abgerufen werden:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Abbrechen"
+  "Dialog.Cancel": "Abbrechen",
+
+  "DropZone.CloneButton": "Klonen",
+  "DropZone.Title": "Ordner hierher ziehen",
+  "DropZone.Button": "Ordner auswählen",
+  "DropZone.HotkeyHint": "zum schnellen Öffnen",
+
+  "Status.Operation.LoadingProject": "Projekt wird geladen",
+  "Status.Operation.RefreshingProject": "Projekt wird aktualisiert",
+  "Status.Operation.GettingUpdates": "Aktualisierung",
+  "Status.Operation.GettingUpdatesBranch": "Aktualisierung {0}",
+  "Status.Operation.SwitchingBranch": "Zweigwechsel {0}",
+  "Status.Metric.Lines": "Zeilen: {0}",
+  "Status.Metric.Chars": "Zeichen: {0}",
+  "Status.Metric.Tokens": "~Token: {0}"
 }
