@@ -313,15 +313,19 @@
     <Style Selector="Border.search-panel">
         <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Margin" Value="0" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="Margin" Value="4,2,4,0" />
     </Style>
 
     <Style Selector="Border.filter-panel">
         <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Margin" Value="0" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="Margin" Value="4,2,4,0" />
     </Style>
 
     <Style Selector="Button.menu-icon-button">

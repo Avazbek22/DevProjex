@@ -153,7 +153,7 @@
                          FilterKeyDown="OnFilterKeyDown"
                          FilterCloseRequested="OnFilterClose" />
 
-    <Border DockPanel.Dock="Bottom" Classes="status-strip">
+    <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
       <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
         <TextBlock Grid.Column="0"
                    Text="{Binding StatusLineCountText}"
@@ -310,28 +310,44 @@
               </Border>
             </StackPanel>
 
-            <!-- Folder selection button -->
-            <Button Grid.Row="4"
-                    Classes="drop-zone-button primary-action"
-                    HorizontalAlignment="Center"
-                    Margin="0,16,0,0"
-                    Padding="24,12"
-                    CornerRadius="10"
-                    BorderThickness="0"
-                    Cursor="Hand"
-                    Click="OnOpenFolder">
-              <StackPanel Orientation="Horizontal" Spacing="10">
-                <!-- Folder icon -->
-                <Path Fill="#FFFFFF"
-                      Width="18" Height="18"
-                      Stretch="Uniform"
-                      Data="M 1,3 L 1,15 L 17,15 L 17,5 L 9,5 L 7,3 Z M 2,6 L 16,6 L 16,14 L 2,14 Z" />
-                <TextBlock Text="{Binding DropZoneButtonText}"
+            <StackPanel Grid.Row="4"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        Spacing="10"
+                        Margin="0,16,0,0">
+              <!-- Folder selection button -->
+              <Button Classes="drop-zone-button primary-action"
+                      Padding="24,12"
+                      CornerRadius="10"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      Click="OnOpenFolder">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <!-- Folder icon -->
+                  <Path Fill="#FFFFFF"
+                        Width="18" Height="18"
+                        Stretch="Uniform"
+                        Data="M 1,3 L 1,15 L 17,15 L 17,5 L 9,5 L 7,3 Z M 2,6 L 16,6 L 16,14 L 2,14 Z" />
+                  <TextBlock Text="{Binding DropZoneButtonText}"
+                             FontSize="14"
+                             FontWeight="SemiBold"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+
+              <Button Classes="drop-zone-button primary-action"
+                      Padding="20,12"
+                      CornerRadius="10"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      Click="OnGitClone">
+                <TextBlock Text="{Binding MenuGitClone}"
                            FontSize="14"
                            FontWeight="SemiBold"
+                           Foreground="#FFFFFF"
                            VerticalAlignment="Center" />
-              </StackPanel>
-            </Button>
+              </Button>
+            </StackPanel>
 
           </Grid>
         </Grid>
