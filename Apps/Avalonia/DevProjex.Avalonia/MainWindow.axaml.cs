@@ -1397,7 +1397,7 @@ public partial class MainWindow : Window
     {
         var mods = e.KeyModifiers;
 
-        // Ctrl+O (всегда доступно)
+        // Ctrl+O (always available)
         if (mods == KeyModifiers.Control && e.Key == Key.O)
         {
             OnOpenFolder(this, new RoutedEventArgs());
@@ -1405,7 +1405,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Ctrl+F (только при загруженном проекте — как WinForms miSearch.Enabled)
+        // Ctrl+F (available only when a project is loaded, same as WinForms miSearch.Enabled)
         if (mods == KeyModifiers.Control && e.Key == Key.F)
         {
             OnToggleSearch(this, new RoutedEventArgs());
@@ -1422,7 +1422,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Esc закрывает help popover
+        // Esc closes the help popover
         if (e.Key == Key.Escape && _viewModel.HelpPopoverOpen)
         {
             _viewModel.HelpPopoverOpen = false;
@@ -1436,7 +1436,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Esc закрывает поиск
+        // Esc closes search
         if (e.Key == Key.Escape && _viewModel.SearchVisible)
         {
             CloseSearch();
@@ -1444,7 +1444,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // F5 refresh (как WinForms)
+        // F5 refresh (same as WinForms)
         if (e.Key == Key.F5)
         {
             if (_viewModel.IsProjectLoaded)
@@ -1454,7 +1454,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Zoom горячие клавиши (в WinForms работают даже без проекта)
+        // Zoom hotkeys (in WinForms they work even without a loaded project)
         if (mods == KeyModifiers.Control && (e.Key == Key.OemPlus || e.Key == Key.Add))
         {
             AdjustTreeFontSize(1);
@@ -1503,7 +1503,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Copy hotkeys (как WinForms)
+        // Copy hotkeys (same as WinForms)
         if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.C)
         {
             OnCopyTree(this, new RoutedEventArgs());
@@ -1602,7 +1602,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Font family — как WinForms: применяется только по Apply
+            // Font family follows WinForms behavior: applied only on Apply
             var pending = _viewModel.PendingFontFamily;
             if (pending is not null &&
                 !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))

@@ -20,7 +20,7 @@
 
     <!-- Drop Zone Styles -->
 
-    <!-- Анимация движения пунктиров по кругу - быстрее -->
+    <!-- Dashed border animation around the drop zone -->
     <Style Selector="Rectangle.drop-zone-border">
       <Setter Property="Opacity" Value="1" />
       <Setter Property="StrokeDashOffset" Value="0" />
@@ -40,21 +40,30 @@
       <Setter Property="StrokeThickness" Value="3" />
     </Style>
 
-    <!-- Анимация парящей иконки папки - плавное парение внутри контейнера -->
+    <!-- Floating folder icon animation with a smooth, continuous loop -->
     <Style Selector="Viewbox.drop-zone-icon">
       <Style.Animations>
-        <Animation Duration="0:0:2" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
+        <Animation Duration="0:0:3.2" IterationCount="INFINITE" PlaybackDirection="Normal" Easing="SineEaseInOut">
           <KeyFrame Cue="0%">
-            <Setter Property="Margin" Value="0,12,0,0" />
+            <Setter Property="Margin" Value="0,8,0,0" />
+          </KeyFrame>
+          <KeyFrame Cue="25%">
+            <Setter Property="Margin" Value="0,4,0,0" />
+          </KeyFrame>
+          <KeyFrame Cue="50%">
+            <Setter Property="Margin" Value="0,0,0,0" />
+          </KeyFrame>
+          <KeyFrame Cue="75%">
+            <Setter Property="Margin" Value="0,4,0,0" />
           </KeyFrame>
           <KeyFrame Cue="100%">
-            <Setter Property="Margin" Value="0,0,0,0" />
+            <Setter Property="Margin" Value="0,8,0,0" />
           </KeyFrame>
         </Animation>
       </Style.Animations>
     </Style>
 
-    <!-- Кнопка drop zone - плавные transitions -->
+    <!-- Drop zone button with smooth transitions -->
     <Style Selector="Button.drop-zone-button">
       <Setter Property="Opacity" Value="1" />
       <Setter Property="Transitions">
@@ -129,7 +138,7 @@
                          FilterCloseRequested="OnFilterClose" />
 
     <Grid>
-      <!-- Drop Zone - показывается когда проект НЕ загружен -->
+      <!-- Drop zone shown when no project is loaded -->
       <Border Name="DropZoneContainer"
               Classes="drop-zone-outer"
               IsVisible="{Binding !IsProjectLoaded}"
@@ -142,7 +151,7 @@
               DragDrop.AllowDrop="True">
 
         <Grid>
-          <!-- Пунктирная рамка через Rectangle -->
+          <!-- Dashed frame rendered via Rectangle -->
           <Rectangle Classes="drop-zone-border"
                      RadiusX="20" RadiusY="20"
                      StrokeThickness="2.5"
@@ -150,38 +159,38 @@
                      StrokeDashArray="8,6"
                      Fill="Transparent" />
 
-          <!-- Лёгкий полупрозрачный фон -->
+          <!-- Soft semi-transparent background -->
           <Rectangle RadiusX="20" RadiusY="20"
                      Fill="{DynamicResource DropZoneInnerBrush}"
                      Margin="1" />
 
-          <!-- Контент -->
+          <!-- Content -->
           <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,*"
                 Margin="40">
 
-            <!-- Контейнер фиксированной высоты для иконки -->
+            <!-- Fixed-height icon container -->
             <Border Grid.Row="1"
                     Height="115"
                     Margin="0,0,0,20"
                     Background="Transparent"
                     ClipToBounds="False">
-              <!-- Иконка папки с анимацией парения -->
+              <!-- Folder icon with floating animation -->
               <Viewbox Classes="drop-zone-icon"
                        Width="100"
                        Height="100"
                        VerticalAlignment="Bottom">
                 <Canvas Width="100" Height="90">
-                  <!-- Папка - задняя часть -->
+                  <!-- Folder back shape -->
                   <Path Canvas.Left="10" Canvas.Top="15"
                         Fill="{DynamicResource DropZoneFolderBackBrush}"
                         Data="M 0,12 L 0,60 Q 0,65 5,65 L 75,65 Q 80,65 80,60 L 80,12 Q 80,7 75,7 L 32,7 L 27,0 L 5,0 Q 0,0 0,5 Z" />
 
-                  <!-- Папка - передняя часть -->
+                  <!-- Folder front shape -->
                   <Path Canvas.Left="10" Canvas.Top="15"
                         Fill="{DynamicResource DropZoneFolderFrontBrush}"
                         Data="M 0,22 L 0,60 Q 0,65 5,65 L 75,65 Q 80,65 80,60 L 80,22 Q 80,17 75,17 L 5,17 Q 0,17 0,22 Z" />
 
-                  <!-- Стрелка вниз -->
+                  <!-- Down arrow -->
                   <Path Canvas.Left="40" Canvas.Top="28"
                         Fill="{DynamicResource DropZoneArrowBrush}"
                         Data="M 10,0 L 10,14 L 4,14 L 10,24 L 16,14 L 10,14 L 10,0 Z" />
@@ -189,7 +198,7 @@
               </Viewbox>
             </Border>
 
-            <!-- Главный текст -->
+            <!-- Primary text -->
             <TextBlock Grid.Row="2"
                        Text="{Binding DropZoneTitle}"
                        FontSize="24"
@@ -198,7 +207,7 @@
                        HorizontalAlignment="Center"
                        Margin="0,0,0,6" />
 
-            <!-- Подтекст -->
+            <!-- Secondary text -->
             <TextBlock Grid.Row="3"
                        Text="{Binding DropZoneSubtitle}"
                        FontSize="14"
@@ -206,7 +215,7 @@
                        HorizontalAlignment="Center"
                        Margin="0,0,0,24" />
 
-            <!-- Кнопка выбора папки -->
+            <!-- Folder selection button -->
             <Button Grid.Row="4"
                     Classes="drop-zone-button primary-action"
                     HorizontalAlignment="Center"
@@ -216,7 +225,7 @@
                     Cursor="Hand"
                     Click="OnOpenFolder">
               <StackPanel Orientation="Horizontal" Spacing="10">
-                <!-- Иконка папки -->
+                <!-- Folder icon -->
                 <Path Fill="#FFFFFF"
                       Width="18" Height="18"
                       Stretch="Uniform"
@@ -228,7 +237,7 @@
               </StackPanel>
             </Button>
 
-            <!-- Подсказка о горячей клавише -->
+            <!-- Hotkey hint -->
             <StackPanel Grid.Row="5"
                         Orientation="Horizontal"
                         HorizontalAlignment="Center"
@@ -255,7 +264,7 @@
         </Grid>
       </Border>
 
-      <!-- Project Tree - показывается когда проект загружен -->
+      <!-- Project tree shown when a project is loaded -->
       <Grid ColumnDefinitions="*,Auto"
             IsVisible="{Binding IsProjectLoaded}">
         <TreeView Name="ProjectTree"

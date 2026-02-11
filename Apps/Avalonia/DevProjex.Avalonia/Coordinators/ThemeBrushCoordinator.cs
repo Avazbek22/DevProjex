@@ -37,13 +37,13 @@ public sealed class ThemeBrushCoordinator
 
         Dispatcher.UIThread.Post(() =>
         {
-            // Защита: если элемент уже отцеплен от дерева (закрыли меню/окно) — ничего не делаем.
+            // Guard: if the element is already detached from the visual tree (menu/window closed), do nothing.
             if (menuItem.GetVisualRoot() is null)
                 return;
 
             ApplyBrushesToMenuItemPopup(menuItem);
 
-            // Вложенные меню: применяем, но фактически отработает только для IsOpen попапов (см. ниже).
+            // Nested menus: apply recursively, but it effectively updates only popups that are currently IsOpen (see below).
             foreach (var child in menuItem.GetVisualDescendants().OfType<MenuItem>())
             {
                 ApplyBrushesToMenuItemPopup(child);

@@ -519,7 +519,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // Применённый шрифт (TreeView берет отсюда)
+    // Applied font (TreeView reads it from here)
     public FontFamily? SelectedFontFamily
     {
         get => _selectedFontFamily;
@@ -533,7 +533,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // Выбранный в ComboBox (как WinForms _pendingFontName)
+    // Selected in ComboBox (same as WinForms _pendingFontName)
     public FontFamily? PendingFontFamily
     {
         get => _pendingFontFamily;
@@ -900,7 +900,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     /// Updates the "All" checkbox labels with item counts.
-    /// Shows "Все (N)" if count > 0, otherwise just "Все".
+    /// Shows "<localized All> (N)" if count > 0, otherwise just "<localized All>".
     /// </summary>
     public void UpdateAllCheckboxLabels()
     {
