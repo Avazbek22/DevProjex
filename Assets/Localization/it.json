@@ -60,8 +60,6 @@
   "Dialog.SelectRoot": "Seleziona la cartella radice del progetto",
   "Settings.IgnoreTitle": "Ignora:",
   "Settings.Ignore.UseGitIgnore": "Usa .gitignore",
-  "Settings.Ignore.BinFolders": "cartelle bin",
-  "Settings.Ignore.ObjFolders": "cartelle obj",
   "Settings.Ignore.HiddenFolders": "cartelle nascoste",
   "Settings.Ignore.HiddenFiles": "file nascosti",
   "Settings.Ignore.DotFolders": "cartelle con punto iniziale",
