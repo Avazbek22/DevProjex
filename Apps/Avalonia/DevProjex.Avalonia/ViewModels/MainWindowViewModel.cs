@@ -669,7 +669,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public Thickness TreeItemPadding => _isCompactMode ? new Thickness(0, -20) : new Thickness(4, 1);
 
     // Settings lists use an ItemsPanel with explicit Spacing (can go negative to tighten).
-    public double SettingsListSpacing => _isCompactMode ? -7 : -3;
+    public double SettingsListSpacing => _isCompactMode ? -5 : -3;
 
     public bool AllExtensionsChecked
     {
