@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Linq;
 
 namespace DevProjex.Kernel.Models;
 
@@ -7,6 +8,7 @@ public sealed class GitIgnoreMatcher
 {
     private readonly string _normalizedRootPath;
     private readonly IReadOnlyList<Rule> _rules;
+    private readonly StringComparison _pathComparison;
 
     public static GitIgnoreMatcher Empty { get; } = new(string.Empty, Array.Empty<Rule>());
 
@@ -14,7 +16,12 @@ public sealed class GitIgnoreMatcher
     {
         _normalizedRootPath = normalizedRootPath;
         _rules = rules;
+        _pathComparison = OperatingSystem.IsLinux()
+            ? StringComparison.Ordinal
+            : StringComparison.OrdinalIgnoreCase;
     }
+
+    public bool HasNegationRules => _rules.Any(static rule => rule.IsNegation);
 
     public static GitIgnoreMatcher Build(string rootPath, IEnumerable<string> lines)
     {
@@ -66,7 +73,7 @@ public sealed class GitIgnoreMatcher
                 continue;
 
             var hasSlash = line.Contains('/');
-            var matchByNameOnly = !anchored && !hasSlash;
+            var matchByNameOnly = !anchored && !hasSlash && !directoryOnly;
 
             var globRegex = GlobToRegex(line);
             var regexPattern = matchByNameOnly
@@ -77,7 +84,8 @@ public sealed class GitIgnoreMatcher
                 new Regex(regexPattern, regexOptions),
                 isNegation,
                 directoryOnly,
-                matchByNameOnly));
+                matchByNameOnly,
+                ComputeStaticPrefix(line)));
         }
 
         return new GitIgnoreMatcher(normalizedRoot, rules);
@@ -85,15 +93,8 @@ public sealed class GitIgnoreMatcher
 
     public bool IsIgnored(string fullPath, bool isDirectory, string name)
     {
-        if (_rules.Count == 0 || string.IsNullOrWhiteSpace(fullPath))
-            return false;
-
-        var normalizedFullPath = NormalizePath(fullPath);
-        if (!normalizedFullPath.StartsWith(_normalizedRootPath, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var relativePath = normalizedFullPath[_normalizedRootPath.Length..].TrimStart('/');
-        if (relativePath.Length == 0)
+        var relativePath = GetRelativePath(fullPath);
+        if (relativePath is null)
             return false;
 
         var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath) : name;
@@ -101,9 +102,6 @@ public sealed class GitIgnoreMatcher
 
         foreach (var rule in _rules)
         {
-            if (rule.DirectoryOnly && !isDirectory)
-                continue;
-
             var target = rule.MatchByNameOnly ? normalizedName : relativePath;
             if (!rule.Pattern.IsMatch(target))
                 continue;
@@ -112,6 +110,55 @@ public sealed class GitIgnoreMatcher
         }
 
         return ignored;
+    }
+
+    public bool ShouldTraverseIgnoredDirectory(string fullPath, string name)
+    {
+        if (!HasNegationRules)
+            return false;
+
+        var relativePath = GetRelativePath(fullPath);
+        if (relativePath is null)
+            return false;
+
+        foreach (var rule in _rules)
+        {
+            if (!rule.IsNegation)
+                continue;
+
+            if (rule.MatchByNameOnly)
+                return true;
+
+            if (rule.StaticPrefix.Length == 0)
+                return true;
+
+            var rulePrefixWithSlash = $"{rule.StaticPrefix}/";
+            var relativeWithSlash = $"{relativePath}/";
+
+            if (rulePrefixWithSlash.StartsWith(relativeWithSlash, _pathComparison))
+                return true;
+
+            if (relativeWithSlash.StartsWith(rulePrefixWithSlash, _pathComparison))
+                return true;
+
+            if (string.Equals(rule.StaticPrefix, relativePath, _pathComparison))
+                return true;
+        }
+
+        return false;
+    }
+
+    private string? GetRelativePath(string fullPath)
+    {
+        if (_rules.Count == 0 || string.IsNullOrWhiteSpace(fullPath))
+            return null;
+
+        var normalizedFullPath = NormalizePath(fullPath);
+        if (!normalizedFullPath.StartsWith(_normalizedRootPath, _pathComparison))
+            return null;
+
+        var relativePath = normalizedFullPath[_normalizedRootPath.Length..].TrimStart('/');
+        return relativePath.Length == 0 ? null : relativePath;
     }
 
     private static string BuildPathRegex(string globRegex, bool anchored, bool directoryOnly)
@@ -166,8 +213,20 @@ public sealed class GitIgnoreMatcher
         return sb.ToString();
     }
 
+    private static string ComputeStaticPrefix(string pattern)
+    {
+        var idx = pattern.IndexOfAny(['*', '?', '[']);
+        var prefix = idx < 0 ? pattern : pattern[..idx];
+        return prefix.Trim('/');
+    }
+
     private static string NormalizePath(string path)
         => path.Replace('\\', '/');
 
-    private sealed record Rule(Regex Pattern, bool IsNegation, bool DirectoryOnly, bool MatchByNameOnly);
+    private sealed record Rule(
+        Regex Pattern,
+        bool IsNegation,
+        bool DirectoryOnly,
+        bool MatchByNameOnly,
+        string StaticPrefix);
 }

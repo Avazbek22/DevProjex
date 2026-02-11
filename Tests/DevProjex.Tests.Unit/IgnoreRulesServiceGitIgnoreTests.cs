@@ -64,4 +64,31 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 			Directory.Delete(tempRoot, recursive: true);
 		}
 	}
+
+	[Fact]
+	public void Build_WhenGitIgnoreChanges_RebuildsMatcherFromUpdatedContent()
+	{
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"devprojex-tests-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempRoot);
+		try
+		{
+			var gitIgnorePath = Path.Combine(tempRoot, ".gitignore");
+			File.WriteAllText(gitIgnorePath, "bin/");
+
+			var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+			var firstRules = service.Build(tempRoot, new[] { IgnoreOptionId.UseGitIgnore });
+			Assert.True(firstRules.GitIgnoreMatcher.IsIgnored(Path.Combine(tempRoot, "bin"), isDirectory: true, "bin"));
+			Assert.False(firstRules.GitIgnoreMatcher.IsIgnored(Path.Combine(tempRoot, "dist"), isDirectory: true, "dist"));
+
+			File.WriteAllText(gitIgnorePath, "dist/");
+			var secondRules = service.Build(tempRoot, new[] { IgnoreOptionId.UseGitIgnore });
+
+			Assert.False(secondRules.GitIgnoreMatcher.IsIgnored(Path.Combine(tempRoot, "bin"), isDirectory: true, "bin"));
+			Assert.True(secondRules.GitIgnoreMatcher.IsIgnored(Path.Combine(tempRoot, "dist"), isDirectory: true, "dist"));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
 }

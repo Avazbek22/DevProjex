@@ -180,7 +180,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 	private static bool ShouldSkipDirectoryByName(string name, string fullPath, IgnoreRules rules)
 	{
 		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(fullPath, isDirectory: true, name))
-			return true;
+		{
+			if (!rules.GitIgnoreMatcher.ShouldTraverseIgnoredDirectory(fullPath, name))
+				return true;
+		}
 
 		if (rules.SmartIgnoredFolders.Contains(name))
 			return true;

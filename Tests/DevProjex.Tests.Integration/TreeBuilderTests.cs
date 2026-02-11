@@ -284,4 +284,33 @@ public sealed class TreeBuilderTests
 
 		Assert.DoesNotContain(result.Root.Children, child => child.Name == "root.txt");
 	}
+
+	[Fact]
+	public void Build_WithGitIgnoreNegation_KeepsExplicitlyUnignoredFile()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("build/keep.txt", "keep");
+		temp.CreateFile("build/drop.txt", "drop");
+
+		var matcher = GitIgnoreMatcher.Build(temp.Path, new[] { "build/", "!build/keep.txt" });
+		var rules = new IgnoreRules(
+			false, false, false, false, false, false,
+			new HashSet<string>(), new HashSet<string>())
+		{
+			UseGitIgnore = true,
+			GitIgnoreMatcher = matcher
+		};
+
+		var options = new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".txt" },
+			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "build" },
+			IgnoreRules: rules);
+
+		var builder = new TreeBuilder();
+		var result = builder.Build(temp.Path, options);
+
+		var build = result.Root.Children.Single(child => child.Name == "build");
+		Assert.Contains(build.Children, child => child.Name == "keep.txt");
+		Assert.DoesNotContain(build.Children, child => child.Name == "drop.txt");
+	}
 }

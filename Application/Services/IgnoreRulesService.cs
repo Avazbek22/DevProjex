@@ -8,6 +8,10 @@ namespace DevProjex.Application.Services;
 public sealed class IgnoreRulesService
 {
 	private readonly SmartIgnoreService _smartIgnore;
+	private const int CacheLimit = 64;
+	private static readonly object CacheSync = new();
+	private static readonly Dictionary<string, GitIgnoreCacheEntry> GitIgnoreCache =
+		new(OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
 
 	public IgnoreRulesService(SmartIgnoreService smartIgnore)
 	{
@@ -51,11 +55,36 @@ public sealed class IgnoreRulesService
 
 		try
 		{
-			return GitIgnoreMatcher.Build(rootPath, File.ReadLines(gitIgnorePath));
+			var fileInfo = new FileInfo(gitIgnorePath);
+			var cacheKey = fileInfo.FullName;
+			var signature = new GitIgnoreSignature(fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length);
+
+			lock (CacheSync)
+			{
+				if (GitIgnoreCache.TryGetValue(cacheKey, out var cached) &&
+				    cached.Signature.Equals(signature))
+				{
+					return cached.Matcher;
+				}
+			}
+
+			var matcher = GitIgnoreMatcher.Build(rootPath, File.ReadLines(gitIgnorePath));
+			lock (CacheSync)
+			{
+				GitIgnoreCache[cacheKey] = new GitIgnoreCacheEntry(signature, matcher);
+				if (GitIgnoreCache.Count > CacheLimit)
+					GitIgnoreCache.Clear();
+			}
+
+			return matcher;
 		}
 		catch
 		{
 			return GitIgnoreMatcher.Empty;
 		}
 	}
+
+	private sealed record GitIgnoreSignature(long LastWriteTicksUtc, long LengthBytes);
+
+	private sealed record GitIgnoreCacheEntry(GitIgnoreSignature Signature, GitIgnoreMatcher Matcher);
 }

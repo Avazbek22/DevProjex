@@ -189,4 +189,25 @@ public sealed class FileSystemScannerTests
 		Assert.Contains(".txt", result.Value);
 		Assert.DoesNotContain(".cs", result.Value);
 	}
+
+	[Fact]
+	public void GetExtensions_WithGitIgnoreNegation_CollectsUnignoredDescendantExtensions()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("build/keep.txt", "keep");
+		temp.CreateFile("build/drop.log", "drop");
+
+		var matcher = GitIgnoreMatcher.Build(temp.Path, new[] { "build/", "!build/keep.txt" });
+		var rules = new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>())
+		{
+			UseGitIgnore = true,
+			GitIgnoreMatcher = matcher
+		};
+
+		var scanner = new FileSystemScanner();
+		var result = scanner.GetExtensions(temp.Path, rules);
+
+		Assert.Contains(".txt", result.Value);
+		Assert.DoesNotContain(".log", result.Value);
+	}
 }
