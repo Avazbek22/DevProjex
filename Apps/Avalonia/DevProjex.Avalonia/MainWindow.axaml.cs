@@ -85,6 +85,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gitCloneCts;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
+    private Viewbox? _dropZoneIcon;
+    private TranslateTransform? _dropZoneIconTransform;
+    private global::Avalonia.Threading.DispatcherTimer? _dropZoneFloatTimer;
+    private readonly Stopwatch _dropZoneFloatClock = new();
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -135,6 +139,15 @@ public partial class MainWindow : Window
         _topMenuBar = this.FindControl<TopMenuBarView>("TopMenuBar");
         _searchBar = this.FindControl<SearchBarView>("SearchBar");
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
+        _dropZoneIcon = this.FindControl<Viewbox>("DropZoneIcon");
+
+        if (_dropZoneIcon is not null)
+        {
+            _dropZoneIconTransform = new TranslateTransform();
+            _dropZoneIcon.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
+            _dropZoneIcon.RenderTransform = _dropZoneIconTransform;
+            EnsureDropZoneFloatAnimationStarted();
+        }
 
         if (_treeView is not null)
         {
@@ -190,6 +203,8 @@ public partial class MainWindow : Window
                 _themeBrushCoordinator.UpdateTransparencyEffect();
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
+            else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
+                UpdateDropZoneFloatAnimationState();
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
 
@@ -243,6 +258,54 @@ public partial class MainWindow : Window
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
             disposable.Dispose();
+
+        if (_dropZoneFloatTimer is not null)
+        {
+            _dropZoneFloatTimer.Stop();
+            _dropZoneFloatTimer.Tick -= OnDropZoneFloatTick;
+        }
+    }
+
+    private void EnsureDropZoneFloatAnimationStarted()
+    {
+        if (_dropZoneIcon is null || _dropZoneIconTransform is null)
+            return;
+
+        _dropZoneFloatTimer ??= new global::Avalonia.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+        _dropZoneFloatTimer.Tick -= OnDropZoneFloatTick;
+        _dropZoneFloatTimer.Tick += OnDropZoneFloatTick;
+
+        _dropZoneFloatClock.Restart();
+        _dropZoneFloatTimer.Start();
+    }
+
+    private void UpdateDropZoneFloatAnimationState()
+    {
+        if (_viewModel.IsProjectLoaded)
+        {
+            _dropZoneFloatTimer?.Stop();
+            if (_dropZoneIconTransform is not null)
+                _dropZoneIconTransform.Y = 0;
+            return;
+        }
+
+        EnsureDropZoneFloatAnimationStarted();
+    }
+
+    private void OnDropZoneFloatTick(object? sender, EventArgs e)
+    {
+        if (_dropZoneIconTransform is null)
+            return;
+
+        const double periodSeconds = 3.2;
+        const double amplitudePx = 5.0;
+        var phase = _dropZoneFloatClock.Elapsed.TotalSeconds / periodSeconds * 2 * Math.PI;
+
+        // Shifted sine keeps the icon in a gentle "floating up then down" range.
+        _dropZoneIconTransform.Y = -amplitudePx + (Math.Sin(phase) + 1d) * 0.5d * amplitudePx;
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
