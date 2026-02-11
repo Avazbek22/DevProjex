@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -191,7 +192,7 @@ public partial class MainWindow : Window
         _viewModelPropertyChangedHandler = (_, args) =>
         {
             if (args.PropertyName == nameof(MainWindowViewModel.SearchQuery))
-                _searchCoordinator.UpdateSearchMatches();
+                _searchCoordinator.OnSearchQueryChanged();
             else if (args.PropertyName == nameof(MainWindowViewModel.NameFilter))
                 _filterCoordinator.OnNameFilterChanged();
             else if (args.PropertyName is nameof(MainWindowViewModel.MaterialIntensity)
@@ -235,6 +236,7 @@ public partial class MainWindow : Window
             _viewModel.PropertyChanged -= _viewModelPropertyChangedHandler;
 
         // Dispose coordinators
+        _searchCoordinator.Dispose();
         _filterCoordinator.Dispose();
 
         // Cancel and dispose refresh token
@@ -644,12 +646,15 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
+        BeginStatusOperation("Refreshing project...", indeterminate: true);
         try
         {
             await ReloadProjectAsync();
+            CompleteStatusOperation("Project refreshed");
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -676,10 +681,13 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
+            UpdateStatusMetricsFromContent(content);
+            CompleteStatusOperation(_localization["Toast.Copy.Tree"]);
             _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -706,18 +714,23 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
+            BeginStatusOperation("Preparing content...", indeterminate: true);
             var content = await Task.Run(() => _contentExport.BuildAsync(files, CancellationToken.None));
             if (string.IsNullOrWhiteSpace(content))
             {
+                CompleteStatusOperation();
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
             await SetClipboardTextAsync(content);
+            UpdateStatusMetricsFromContent(content);
+            CompleteStatusOperation(_localization["Toast.Copy.Content"]);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -730,12 +743,16 @@ public partial class MainWindow : Window
 
             var selected = GetCheckedPaths();
             // Run file reading off UI thread
+            BeginStatusOperation("Building export...", indeterminate: true);
             var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
             await SetClipboardTextAsync(content);
+            UpdateStatusMetricsFromContent(content);
+            CompleteStatusOperation(_localization["Toast.Copy.TreeAndContent"]);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -990,6 +1007,7 @@ public partial class MainWindow : Window
 
         _viewModel.GitCloneInProgress = true;
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
+        BeginStatusOperation(_viewModel.GitCloneStatus, indeterminate: true);
 
         string? targetPath = null;
 
@@ -1002,6 +1020,7 @@ public partial class MainWindow : Window
                 _viewModel.GitCloneInProgress = false;
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
+                CompleteStatusOperation(_viewModel.GitErrorNoInternetConnection);
                 await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
                 return;
             }
@@ -1027,6 +1046,7 @@ public partial class MainWindow : Window
                     {
                         currentOperation = _viewModel.GitCloneProgressExtracting;
                         _viewModel.GitCloneStatus = currentOperation;
+                        BeginStatusOperation(currentOperation, indeterminate: true);
                         return;
                     }
 
@@ -1034,11 +1054,17 @@ public partial class MainWindow : Window
                     if (status.EndsWith('%') && status.Length <= 4 && !string.IsNullOrEmpty(currentOperation))
                     {
                         _viewModel.GitCloneStatus = $"{currentOperation} {status}";
+                        if (TryParseTrailingPercent(status, out var percent))
+                            UpdateStatusOperationProgress(percent, currentOperation);
                     }
                     else
                     {
                         // Git output or other dynamic message (contains progress info with %)
                         _viewModel.GitCloneStatus = status;
+                        if (TryParseTrailingPercent(status, out var percent))
+                            UpdateStatusOperationProgress(percent, currentOperation);
+                        else
+                            UpdateStatusOperationText(_viewModel.GitCloneStatus);
                     }
                 });
             });
@@ -1052,16 +1078,19 @@ public partial class MainWindow : Window
             {
                 currentOperation = _viewModel.GitCloneProgressCloning;
                 _viewModel.GitCloneStatus = currentOperation;
+                BeginStatusOperation(currentOperation, indeterminate: true);
                 result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
             }
             else
             {
                 // Fallback to ZIP download
                 _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
+                UpdateStatusOperationText(_viewModel.GitCloneStatus);
                 await Task.Delay(1500, cancellationToken);
 
                 currentOperation = _viewModel.GitCloneProgressDownloading;
                 _viewModel.GitCloneStatus = currentOperation;
+                BeginStatusOperation(currentOperation, indeterminate: true);
                 result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
             }
 
@@ -1073,6 +1102,7 @@ public partial class MainWindow : Window
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
+                CompleteStatusOperation("Clone failed");
                 await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
                 _toastService.Show(_localization["Toast.Git.CloneError"]);
                 return;
@@ -1099,7 +1129,10 @@ public partial class MainWindow : Window
                 await RefreshGitBranchesAsync(result.LocalPath);
 
             if (_currentPath == result.LocalPath)
+            {
                 _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
+                CompleteStatusOperation(_localization["Toast.Git.CloneSuccess"]);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1108,6 +1141,7 @@ public partial class MainWindow : Window
                 // Use default cancellation token since operation was cancelled
                 _repoCacheService.DeleteRepositoryDirectory(targetPath);
             }
+            CompleteStatusOperation("Operation canceled");
         }
         catch (Exception ex)
         {
@@ -1118,12 +1152,15 @@ public partial class MainWindow : Window
 
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
+            CompleteStatusOperation("Clone failed");
             await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
             _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
         {
             _viewModel.GitCloneInProgress = false;
+            if (_viewModel.StatusBusy)
+                CompleteStatusOperation();
         }
 
         e.Handled = true;
@@ -1147,6 +1184,7 @@ public partial class MainWindow : Window
     {
         _gitCloneCts?.Cancel();
         _viewModel.GitCloneInProgress = false;
+        CompleteStatusOperation("Operation canceled");
     }
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
@@ -1157,13 +1195,24 @@ public partial class MainWindow : Window
         try
         {
             Cursor = new Cursor(StandardCursorType.Wait);
+            BeginStatusOperation("Getting updates...", indeterminate: true);
 
-            var progress = new Progress<string>(_ => { });
+            var progress = new Progress<string>(status =>
+            {
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (TryParseTrailingPercent(status, out var percent))
+                        UpdateStatusOperationProgress(percent, "Getting updates...");
+                    else
+                        UpdateStatusOperationText("Getting updates...");
+                });
+            });
             var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath);
             var success = await _gitService.PullUpdatesAsync(_currentPath, progress);
 
             if (!success)
             {
+                CompleteStatusOperation("Update failed");
                 await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
                 return;
             }
@@ -1174,12 +1223,19 @@ public partial class MainWindow : Window
 
             var afterHash = await _gitService.GetHeadCommitAsync(_currentPath);
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
+            {
                 _toastService.Show(_localization["Toast.Git.NoUpdates"]);
+                CompleteStatusOperation(_localization["Toast.Git.NoUpdates"]);
+            }
             else
+            {
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
+                CompleteStatusOperation(_localization["Toast.Git.UpdatesApplied"]);
+            }
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation("Update failed");
             await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
         }
         finally
@@ -1198,12 +1254,23 @@ public partial class MainWindow : Window
         try
         {
             Cursor = new Cursor(StandardCursorType.Wait);
+            BeginStatusOperation($"Switching branch: {branchName}", indeterminate: true);
 
-            var progress = new Progress<string>(_ => { });
+            var progress = new Progress<string>(status =>
+            {
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (TryParseTrailingPercent(status, out var percent))
+                        UpdateStatusOperationProgress(percent, $"Switching branch: {branchName}");
+                    else
+                        UpdateStatusOperationText($"Switching branch: {branchName}");
+                });
+            });
             var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress);
 
             if (!success)
             {
+                CompleteStatusOperation("Branch switch failed");
                 await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
                 return;
             }
@@ -1214,10 +1281,12 @@ public partial class MainWindow : Window
             // Refresh branches and tree
             await RefreshGitBranchesAsync(_currentPath);
             await ReloadProjectAsync();
+            CompleteStatusOperation(_localization.Format("Toast.Git.BranchSwitched", branchName));
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
         }
         catch (Exception ex)
         {
+            CompleteStatusOperation("Branch switch failed");
             await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
         }
         finally
@@ -1399,7 +1468,7 @@ public partial class MainWindow : Window
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            await RefreshTreeAsync();
+            await RefreshTreeAsync(interactiveFilter: true);
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -1448,6 +1517,7 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Enter)
         {
+            _searchCoordinator.UpdateSearchMatches();
             if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
                 _searchCoordinator.Navigate(-1);
             else
@@ -1700,34 +1770,44 @@ public partial class MainWindow : Window
             return;
         }
 
-        _currentPath = path;
-        _viewModel.IsProjectLoaded = true;
-        _viewModel.SettingsVisible = true;
-        _viewModel.SearchVisible = false;
-
-        // Set project source type based on how it was opened
-        // If opened from dialog (File → Open), it's LocalFolder
-        // If opened from Git clone, the source type is already set
-        if (fromDialog)
+        BeginStatusOperation("Loading project...", indeterminate: true);
+        try
         {
-            _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
-            _viewModel.CurrentBranch = string.Empty;
-            _viewModel.GitBranches.Clear();
-            _currentProjectDisplayName = null;
-            _currentRepositoryUrl = null;
+            _currentPath = path;
+            _viewModel.IsProjectLoaded = true;
+            _viewModel.SettingsVisible = true;
+            _viewModel.SearchVisible = false;
 
-            // Clear cached repo path when opening from dialog (local folder)
-            // This ensures the previous Git clone cache gets cleaned up
-            if (_currentCachedRepoPath is not null)
+            // Set project source type based on how it was opened
+            // If opened from dialog (File → Open), it's LocalFolder
+            // If opened from Git clone, the source type is already set
+            if (fromDialog)
             {
-                _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
-                _currentCachedRepoPath = null;
+                _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
+                _viewModel.CurrentBranch = string.Empty;
+                _viewModel.GitBranches.Clear();
+                _currentProjectDisplayName = null;
+                _currentRepositoryUrl = null;
+
+                // Clear cached repo path when opening from dialog (local folder)
+                // This ensures the previous Git clone cache gets cleaned up
+                if (_currentCachedRepoPath is not null)
+                {
+                    _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
+                    _currentCachedRepoPath = null;
+                }
             }
+
+            UpdateTitle();
+
+            await ReloadProjectAsync();
+            CompleteStatusOperation("Project loaded");
         }
-
-        UpdateTitle();
-
-        await ReloadProjectAsync();
+        catch
+        {
+            CompleteStatusOperation();
+            throw;
+        }
     }
 
     private bool TryElevateAndRestart(string path)
@@ -1814,16 +1894,17 @@ public partial class MainWindow : Window
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     }
 
-    private async Task RefreshTreeAsync()
+    private async Task RefreshTreeAsync(bool interactiveFilter = false)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
 
         using var _ = PerformanceMetrics.Measure("RefreshTreeAsync");
 
         // Cancel any previous refresh operation to avoid race conditions
-        _refreshCts?.Cancel();
         var cts = new CancellationTokenSource();
-        _refreshCts = cts;
+        var previousRefreshCts = Interlocked.Exchange(ref _refreshCts, cts);
+        previousRefreshCts?.Cancel();
+        previousRefreshCts?.Dispose();
         var cancellationToken = cts.Token;
 
         var allowedExt = new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
@@ -1841,7 +1922,8 @@ public partial class MainWindow : Window
             IgnoreRules: ignoreRules,
             NameFilter: nameFilter);
 
-        Cursor = new Cursor(StandardCursorType.Wait);
+        if (!interactiveFilter)
+            Cursor = new Cursor(StandardCursorType.Wait);
         try
         {
             BuildTreeResult result;
@@ -1887,18 +1969,20 @@ public partial class MainWindow : Window
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
 
-            if (!string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
+            if (!interactiveFilter && !string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
                 _toastService.Show(_localization["Toast.NoMatches"]);
 
             _searchCoordinator.UpdateSearchMatches();
 
             // Suggest GC to collect old tree objects after building new one
             // Using non-blocking mode to avoid UI freeze
-            GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+            if (!interactiveFilter)
+                GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
         }
         finally
         {
-            Cursor = new Cursor(StandardCursorType.Arrow);
+            if (!interactiveFilter)
+                Cursor = new Cursor(StandardCursorType.Arrow);
         }
     }
 
@@ -1946,6 +2030,81 @@ public partial class MainWindow : Window
     {
         var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
         return _ignoreRulesService.Build(rootPath, selected);
+    }
+
+    private void BeginStatusOperation(string text, bool indeterminate = true)
+    {
+        _viewModel.StatusOperationText = text;
+        _viewModel.StatusBusy = true;
+        _viewModel.StatusProgressIsIndeterminate = indeterminate;
+        if (indeterminate)
+            _viewModel.StatusProgressValue = 0;
+    }
+
+    private void UpdateStatusOperationText(string text)
+    {
+        _viewModel.StatusOperationText = text;
+    }
+
+    private void UpdateStatusOperationProgress(double percent, string? text = null)
+    {
+        if (!string.IsNullOrWhiteSpace(text))
+            _viewModel.StatusOperationText = text;
+
+        _viewModel.StatusBusy = true;
+        _viewModel.StatusProgressIsIndeterminate = false;
+        _viewModel.StatusProgressValue = Math.Clamp(percent, 0, 100);
+    }
+
+    private void CompleteStatusOperation(string text = "Ready")
+    {
+        _viewModel.StatusOperationText = text;
+        _viewModel.StatusBusy = false;
+        _viewModel.StatusProgressIsIndeterminate = true;
+        _viewModel.StatusProgressValue = 0;
+    }
+
+    private void UpdateStatusMetricsFromContent(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            _viewModel.StatusLineCountText = "Lines: 0";
+            _viewModel.StatusCharCountText = "Chars: 0";
+            _viewModel.StatusTokenEstimateText = "~Tokens: 0";
+            return;
+        }
+
+        var lineCount = 1;
+        for (var i = 0; i < content.Length; i++)
+        {
+            if (content[i] == '\n')
+                lineCount++;
+        }
+
+        var charCount = content.Length;
+        var tokenEstimate = (int)Math.Ceiling(charCount / 4.0);
+
+        _viewModel.StatusLineCountText = $"Lines: {lineCount}";
+        _viewModel.StatusCharCountText = $"Chars: {charCount}";
+        _viewModel.StatusTokenEstimateText = $"~Tokens: {tokenEstimate}";
+    }
+
+    private static bool TryParseTrailingPercent(string status, out double percent)
+    {
+        percent = 0;
+        if (string.IsNullOrWhiteSpace(status))
+            return false;
+
+        var trimmed = status.Trim();
+        if (!trimmed.EndsWith('%'))
+            return false;
+
+        var lastSpace = trimmed.LastIndexOf(' ');
+        var token = lastSpace >= 0 ? trimmed[(lastSpace + 1)..] : trimmed;
+        token = token.TrimEnd('%');
+
+        return double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out percent) ||
+               double.TryParse(token, NumberStyles.Float, CultureInfo.CurrentCulture, out percent);
     }
 
     private async Task SetClipboardTextAsync(string content)

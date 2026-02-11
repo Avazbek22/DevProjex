@@ -60,6 +60,42 @@
     <Style Selector="Button.drop-zone-button:pressed">
       <Setter Property="Opacity" Value="0.7" />
     </Style>
+
+    <Style Selector="Border.island-panel">
+      <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <Style Selector="Border.content-island">
+      <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <Style Selector="Border.content-island TreeView">
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Border.settings-island">
+      <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <Style Selector="Border.status-strip">
+      <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="10,5" />
+    </Style>
+
+    <Style Selector="ProgressBar.status-progress">
+      <Setter Property="Height" Value="4" />
+      <Setter Property="MinWidth" Value="120" />
+      <Setter Property="MaxWidth" Value="170" />
+      <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
   </Window.Styles>
 
   <DockPanel LastChildFill="True">
@@ -116,6 +152,64 @@
                          Name="FilterBar"
                          FilterKeyDown="OnFilterKeyDown"
                          FilterCloseRequested="OnFilterClose" />
+
+    <Border DockPanel.Dock="Bottom" Classes="status-strip">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
+        <TextBlock Grid.Column="0"
+                   Text="{Binding StatusLineCountText}"
+                   FontSize="12"
+                   Opacity="0.85"
+                   Margin="0,0,8,0"
+                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1"
+                   Text="|"
+                   FontSize="12"
+                   Opacity="0.5"
+                   Margin="0,0,8,0"
+                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="2"
+                   Text="{Binding StatusCharCountText}"
+                   FontSize="12"
+                   Opacity="0.85"
+                   Margin="0,0,8,0"
+                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="3"
+                   Text="|"
+                   FontSize="12"
+                   Opacity="0.5"
+                   Margin="0,0,8,0"
+                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="4"
+                   Text="{Binding StatusTokenEstimateText}"
+                   FontSize="12"
+                   Opacity="0.85"
+                   Margin="0,0,10,0"
+                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="5"
+                   Text="{Binding StatusOperationText}"
+                   FontSize="12"
+                   Opacity="0.8"
+                   VerticalAlignment="Center" />
+
+        <StackPanel Grid.Column="7"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Center">
+          <ProgressBar Classes="status-progress"
+                       IsVisible="{Binding StatusProgressVisible}"
+                       IsIndeterminate="{Binding StatusProgressIsIndeterminate}"
+                       Value="{Binding StatusProgressValue}"
+                       Minimum="0"
+                       Maximum="100"
+                       VerticalAlignment="Center" />
+          <TextBlock Text="{Binding StatusProgressPercentText}"
+                     IsVisible="{Binding StatusProgressPercentVisible}"
+                     FontSize="11"
+                     Opacity="0.75"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+      </Grid>
+    </Border>
 
     <Grid>
       <!-- Drop zone shown when no project is loaded -->
@@ -245,50 +339,58 @@
 
       <!-- Project tree shown when a project is loaded -->
       <Grid ColumnDefinitions="*,Auto"
-            IsVisible="{Binding IsProjectLoaded}">
-        <TreeView Name="ProjectTree"
-                  Grid.Column="0"
-                  ItemsSource="{Binding TreeNodes}"
-                  IsEnabled="{Binding IsProjectLoaded}"
-                  FontFamily="{Binding SelectedFontFamily}"
-                  FontSize="{Binding TreeFontSize}">
-        <TreeView.ItemTemplate>
-          <TreeDataTemplate ItemsSource="{Binding Children}">
-            <Grid ColumnDefinitions="Auto,*">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-              <StackPanel Grid.Column="1"
-                          Orientation="Horizontal"
-                          Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
-                <CheckBox IsThreeState="True"
-                          IsChecked="{Binding IsChecked, Mode=TwoWay}"
-                          VerticalAlignment="Center" />
-                <Image Source="{Binding Icon}"
-                       Width="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                       Height="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                       Stretch="Uniform"
-                       VerticalAlignment="Center" />
-                <TextBlock Inlines="{Binding DisplayInlines}"
-                           VerticalAlignment="Center"
-                           Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                           FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                           FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                           Foreground="{DynamicResource AppTextBrush}" />
-              </StackPanel>
-            </Grid>
-          </TreeDataTemplate>
-        </TreeView.ItemTemplate>
-      </TreeView>
+            IsVisible="{Binding IsProjectLoaded}"
+            Margin="4,3,4,3">
+        <Border Grid.Column="0"
+                Classes="island-panel content-island"
+                Margin="0,0,4,0">
+          <TreeView Name="ProjectTree"
+                    Grid.Column="0"
+                    ItemsSource="{Binding TreeNodes}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    FontFamily="{Binding SelectedFontFamily}"
+                    FontSize="{Binding TreeFontSize}">
+          <TreeView.ItemTemplate>
+            <TreeDataTemplate ItemsSource="{Binding Children}">
+              <Grid ColumnDefinitions="Auto,*">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
+                  <CheckBox IsThreeState="True"
+                            IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                            VerticalAlignment="Center" />
+                  <Image Source="{Binding Icon}"
+                         Width="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                         Height="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                         Stretch="Uniform"
+                         VerticalAlignment="Center" />
+                  <TextBlock Inlines="{Binding DisplayInlines}"
+                             VerticalAlignment="Center"
+                             Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                             FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                             FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                             Foreground="{DynamicResource AppTextBrush}" />
+                </StackPanel>
+              </Grid>
+            </TreeDataTemplate>
+          </TreeView.ItemTemplate>
+        </TreeView>
+        </Border>
 
-        <!-- Settings panel -->
-        <views:SettingsPanelView Grid.Column="1"
-                                 Name="SettingsPanel"
-                                 ApplySettingsRequested="OnApplySettings"
-                                 IgnoreAllChanged="OnIgnoreAllChanged"
-                                 ExtensionsAllChanged="OnExtensionsAllChanged"
-                                 RootAllChanged="OnRootAllChanged" />
+        <Border Grid.Column="1"
+                Classes="island-panel settings-island"
+                IsVisible="{Binding SettingsVisible}">
+          <!-- Settings panel -->
+          <views:SettingsPanelView Name="SettingsPanel"
+                                   ApplySettingsRequested="OnApplySettings"
+                                   IgnoreAllChanged="OnIgnoreAllChanged"
+                                   ExtensionsAllChanged="OnExtensionsAllChanged"
+                                   RootAllChanged="OnRootAllChanged" />
+        </Border>
       </Grid>
 
       <ItemsControl ItemsSource="{Binding ToastItems}"

@@ -12,7 +12,22 @@
         WindowStartupLocation="CenterOwner"
         SystemDecorations="BorderOnly"
         Icon="avares://DevProjex.Avalonia/AppIcon/icon-256.png">
-  <Border Classes="theme-popover"
+  <Window.Styles>
+    <Style Selector="Border.clone-window-card">
+      <Setter Property="CornerRadius" Value="14" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <Style Selector="Border.clone-progress-surface">
+      <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="10" />
+    </Style>
+  </Window.Styles>
+
+  <Border Classes="theme-popover clone-window-card"
           Padding="16">
     <Grid RowDefinitions="Auto,Auto,Auto,Auto">
       <!-- Description (visible when not in progress) -->
@@ -34,15 +49,18 @@
                KeyDown="OnUrlKeyDown" />
 
       <!-- Progress section (visible when in progress) -->
-      <StackPanel Grid.Row="1"
-                  Margin="0,0,0,16"
-                  IsVisible="{Binding GitCloneInProgress}">
-        <TextBlock Text="{Binding GitCloneStatus}"
-                   FontSize="13"
-                   Margin="0,0,0,8" />
-        <ProgressBar IsIndeterminate="True"
-                     Height="4" />
-      </StackPanel>
+      <Border Grid.Row="1"
+              Classes="clone-progress-surface"
+              Margin="0,0,0,16"
+              IsVisible="{Binding GitCloneInProgress}">
+        <StackPanel>
+          <TextBlock Text="{Binding GitCloneStatus}"
+                     FontSize="13"
+                     Margin="0,0,0,8" />
+          <ProgressBar IsIndeterminate="True"
+                       Height="4" />
+        </StackPanel>
+      </Border>
 
       <!-- Buttons -->
       <StackPanel Grid.Row="2"

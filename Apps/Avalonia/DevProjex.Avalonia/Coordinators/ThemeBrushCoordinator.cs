@@ -197,6 +197,20 @@ public sealed class ThemeBrushCoordinator
             menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 150, 255);
         }
 
+        if (_viewModel.HasAnyEffect)
+        {
+            // Keep window surface denser than content islands and preserve visible submenu contrast response.
+            bgAlpha = (byte)Math.Clamp(bgAlpha + 22, 90, 255);
+
+            const int minAlphaGap = 12;
+            var maxPanelAlpha = Math.Max(60, bgAlpha - minAlphaGap);
+            panelAlpha = (byte)Math.Clamp(panelAlpha, 60, maxPanelAlpha);
+
+            menuAlpha = (byte)Math.Clamp(panelAlpha + 28 + (contrast * 16), 120, 255);
+            var submenuDelta = 10 + (menuChild * 80);
+            menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 45, 255);
+        }
+
         borderAlpha = (byte)Math.Round(255 * borderStrength);
 
         var bgColor = Color.FromArgb(bgAlpha, bgBase.R, bgBase.G, bgBase.B);

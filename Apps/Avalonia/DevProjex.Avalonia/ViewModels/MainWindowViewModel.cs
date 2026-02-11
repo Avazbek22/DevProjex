@@ -59,6 +59,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
     private double _aboutPopoverMaxHeight = 380;
+    private string _statusLineCountText = "Lines: 0";
+    private string _statusCharCountText = "Chars: 0";
+    private string _statusTokenEstimateText = "~Tokens: 0";
+    private string _statusOperationText = "Ready";
+    private bool _statusBusy;
+    private bool _statusProgressIsIndeterminate = true;
+    private double _statusProgressValue;
 
     public MainWindowViewModel(LocalizationService localization, HelpContentProvider helpContentProvider)
     {
@@ -81,6 +88,93 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new();
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new();
     public ObservableCollection<FontFamily> FontFamilies { get; } = new();
+
+    public string StatusLineCountText
+    {
+        get => _statusLineCountText;
+        set
+        {
+            if (_statusLineCountText == value) return;
+            _statusLineCountText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string StatusCharCountText
+    {
+        get => _statusCharCountText;
+        set
+        {
+            if (_statusCharCountText == value) return;
+            _statusCharCountText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string StatusTokenEstimateText
+    {
+        get => _statusTokenEstimateText;
+        set
+        {
+            if (_statusTokenEstimateText == value) return;
+            _statusTokenEstimateText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string StatusOperationText
+    {
+        get => _statusOperationText;
+        set
+        {
+            if (_statusOperationText == value) return;
+            _statusOperationText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public bool StatusBusy
+    {
+        get => _statusBusy;
+        set
+        {
+            if (_statusBusy == value) return;
+            _statusBusy = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(StatusProgressVisible));
+            RaisePropertyChanged(nameof(StatusProgressPercentVisible));
+        }
+    }
+
+    public bool StatusProgressIsIndeterminate
+    {
+        get => _statusProgressIsIndeterminate;
+        set
+        {
+            if (_statusProgressIsIndeterminate == value) return;
+            _statusProgressIsIndeterminate = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(StatusProgressPercentVisible));
+        }
+    }
+
+    public double StatusProgressValue
+    {
+        get => _statusProgressValue;
+        set
+        {
+            if (Math.Abs(_statusProgressValue - value) < 0.1) return;
+            _statusProgressValue = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(StatusProgressPercentText));
+        }
+    }
+
+    public bool StatusProgressVisible => _statusBusy;
+
+    public bool StatusProgressPercentVisible => _statusBusy && !_statusProgressIsIndeterminate;
+
+    public string StatusProgressPercentText => $"{Math.Clamp((int)Math.Round(_statusProgressValue), 0, 100)}%";
 
     public string Title
     {
