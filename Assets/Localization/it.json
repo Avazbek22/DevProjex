@@ -121,7 +121,6 @@
   "Dialog.Cancel": "Annulla",
 
   "DropZone.Title": "Trascina la cartella qui",
-  "DropZone.Subtitle": "o clicca per sfogliare",
   "DropZone.Button": "Scegli cartella",
   "DropZone.HotkeyHint": "per aprire rapidamente"
 }

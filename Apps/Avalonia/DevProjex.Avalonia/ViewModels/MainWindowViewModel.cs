@@ -673,7 +673,6 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     // Drop Zone localization
     public string DropZoneTitle { get; private set; } = string.Empty;
-    public string DropZoneSubtitle { get; private set; } = string.Empty;
     public string DropZoneButtonText { get; private set; } = string.Empty;
     public string DropZoneHotkeyHint { get; private set; } = string.Empty;
 
@@ -755,7 +754,6 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         // Drop Zone localization
         DropZoneTitle = _localization["DropZone.Title"];
-        DropZoneSubtitle = _localization["DropZone.Subtitle"];
         DropZoneButtonText = _localization["DropZone.Button"];
         DropZoneHotkeyHint = _localization["DropZone.HotkeyHint"];
 
@@ -849,7 +847,6 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         // Drop Zone localization
         RaisePropertyChanged(nameof(DropZoneTitle));
-        RaisePropertyChanged(nameof(DropZoneSubtitle));
         RaisePropertyChanged(nameof(DropZoneButtonText));
         RaisePropertyChanged(nameof(DropZoneHotkeyHint));
 

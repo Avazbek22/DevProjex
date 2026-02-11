@@ -121,7 +121,6 @@
   "Dialog.Cancel": "Отмена",
 
   "DropZone.Title": "Перетащите папку сюда",
-  "DropZone.Subtitle": "или нажмите для выбора",
   "DropZone.Button": "Выбрать папку",
   "DropZone.HotkeyHint": "для быстрого открытия"
 }

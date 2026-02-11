@@ -14,7 +14,6 @@
     <PackageReference Include="Avalonia" Version="11.0.10" />
     <PackageReference Include="Avalonia.Desktop" Version="11.0.10" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.0.10" />
-    <PackageReference Include="FluentIcons.Avalonia" Version="2.0.318" />
   </ItemGroup>
 
   <!--  Do not remove ref to Test for correct testing-->

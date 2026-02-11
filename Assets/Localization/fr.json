@@ -121,7 +121,6 @@
   "Dialog.Cancel": "Annuler",
 
   "DropZone.Title": "Déposez le dossier ici",
-  "DropZone.Subtitle": "ou cliquez pour parcourir",
   "DropZone.Button": "Choisir un dossier",
   "DropZone.HotkeyHint": "pour ouvrir rapidement"
 }

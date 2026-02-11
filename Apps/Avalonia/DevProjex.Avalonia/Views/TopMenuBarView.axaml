@@ -5,6 +5,7 @@
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
              x:DataType="vm:MainWindowViewModel">
   <Grid Name="RootGrid" ColumnDefinitions="*,Auto" Margin="0">
+    <!-- Keep menu surface spanning both columns to avoid transparency seams near the filter button. -->
     <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="2" Margin="0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />

@@ -121,7 +121,6 @@
   "Dialog.Cancel": "Abbrechen",
 
   "DropZone.Title": "Ordner hierher ziehen",
-  "DropZone.Subtitle": "oder klicken zum Durchsuchen",
   "DropZone.Button": "Ordner auswählen",
   "DropZone.HotkeyHint": "zum schnellen Öffnen"
 }
