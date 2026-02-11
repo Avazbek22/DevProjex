@@ -152,12 +152,6 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.SmartIgnoredFolders.Contains(entry.Name))
 			return true;
 
-		if (rules.IgnoreBinFolders && entry.Name.Equals("bin", StringComparison.OrdinalIgnoreCase))
-			return true;
-
-		if (rules.IgnoreObjFolders && entry.Name.Equals("obj", StringComparison.OrdinalIgnoreCase))
-			return true;
-
 		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
 			return true;
 

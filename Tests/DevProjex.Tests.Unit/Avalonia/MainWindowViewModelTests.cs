@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using DevProjex.Avalonia.ViewModels;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.ResourceStore;
@@ -872,8 +872,8 @@ public sealed class MainWindowViewModelTests
             ["Settings.All"] = "All"
         });
 
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.ObjFolders, "obj", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "obj", true));
 
         Assert.Equal("All (2)", viewModel.SettingsAllIgnore);
     }
@@ -913,8 +913,8 @@ public sealed class MainWindowViewModelTests
         {
             ["Settings.All"] = "All"
         });
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.ObjFolders, "obj", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "obj", true));
 
         viewModel.IgnoreOptions.RemoveAt(0);
 
@@ -958,7 +958,7 @@ public sealed class MainWindowViewModelTests
         {
             ["Settings.All"] = "All"
         });
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
 
         viewModel.IgnoreOptions.Clear();
 
@@ -1001,7 +1001,7 @@ public sealed class MainWindowViewModelTests
             ["Settings.All"] = "All"
         });
 
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
         viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
         viewModel.Extensions.Add(new SelectionOptionViewModel(".js", true));
         // RootFolders stays empty
@@ -1042,7 +1042,7 @@ public sealed class MainWindowViewModelTests
                 raised = true;
         };
 
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
 
         Assert.True(raised);
     }
@@ -1093,10 +1093,10 @@ public sealed class MainWindowViewModelTests
             ["Settings.All"] = "All"
         });
 
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
         Assert.Equal("All (1)", viewModel.SettingsAllIgnore);
 
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.ObjFolders, "obj", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "obj", true));
         Assert.Equal("All (2)", viewModel.SettingsAllIgnore);
 
         viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "hidden", true));
@@ -1141,7 +1141,7 @@ public sealed class MainWindowViewModelTests
         {
             ["Settings.All"] = "All"
         });
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
         viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
         viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
 
@@ -1160,8 +1160,8 @@ public sealed class MainWindowViewModelTests
             ["Settings.All"] = "All"
         });
 
-        var item1 = new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true);
-        var item2 = new IgnoreOptionViewModel(IgnoreOptionId.ObjFolders, "obj", true);
+        var item1 = new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true);
+        var item2 = new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "obj", true);
 
         viewModel.IgnoreOptions.Add(item1);
         viewModel.IgnoreOptions.Add(item2);
@@ -1241,9 +1241,9 @@ public sealed class MainWindowViewModelTests
         {
             ["Settings.All"] = "All"
         });
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
 
-        viewModel.IgnoreOptions.Insert(0, new IgnoreOptionViewModel(IgnoreOptionId.ObjFolders, "obj", true));
+        viewModel.IgnoreOptions.Insert(0, new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "obj", true));
 
         Assert.Equal("All (2)", viewModel.SettingsAllIgnore);
     }
@@ -1305,7 +1305,7 @@ public sealed class MainWindowViewModelTests
         {
             ["Settings.All"] = "All"
         });
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
 
         var raised = false;
         viewModel.PropertyChanged += (_, e) =>
@@ -1375,7 +1375,7 @@ public sealed class MainWindowViewModelTests
 
         for (var i = 0; i < count; i++)
         {
-            viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, $"item{i}", true));
+            viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, $"item{i}", true));
         }
 
         Assert.Equal(expected, viewModel.SettingsAllIgnore);
@@ -1419,7 +1419,7 @@ public sealed class MainWindowViewModelTests
             if (e.PropertyName == nameof(viewModel.SettingsAllRootFolders)) rootFoldersRaised = true;
         };
 
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.BinFolders, "bin", true));
+        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
 
         // All three should be raised because UpdateAllCheckboxLabels updates all
         Assert.True(ignoreRaised);
@@ -1429,3 +1429,4 @@ public sealed class MainWindowViewModelTests
 
     #endregion
 }
+

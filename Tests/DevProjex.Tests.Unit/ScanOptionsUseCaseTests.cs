@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using DevProjex.Application.UseCases;
 using DevProjex.Kernel.Contracts;
@@ -27,10 +27,7 @@ public sealed class ScanOptionsUseCaseTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.Execute(new ScanOptionsRequest("/root", new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var result = useCase.Execute(new ScanOptionsRequest("/root", new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
@@ -50,10 +47,7 @@ public sealed class ScanOptionsUseCaseTests
 		var scanner = new StubFileSystemScanner();
 		var useCase = new ScanOptionsUseCase(scanner);
 
-		var result = useCase.GetExtensionsForRootFolders("/root", new List<string>(), new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var result = useCase.GetExtensionsForRootFolders("/root", new List<string>(), new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
@@ -91,12 +85,9 @@ public sealed class ScanOptionsUseCaseTests
 		var result = useCase.GetExtensionsForRootFolders(
 			"/root",
 			new List<string> { "src", "docs" },
-			new IgnoreRules(
-				IgnoreBinFolders: false,
-				IgnoreObjFolders: false,
-				IgnoreHiddenFolders: false,
-				IgnoreHiddenFiles: false,
-				IgnoreDotFolders: false,
+			new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
 				SmartIgnoredFiles: new HashSet<string>()));
@@ -137,10 +128,7 @@ public sealed class ScanOptionsUseCaseTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.Execute(new ScanOptionsRequest("/root", new IgnoreRules(
-			IgnoreBinFolders: false,
-			IgnoreObjFolders: false,
-			IgnoreHiddenFolders: false,
+		var result = useCase.Execute(new ScanOptionsRequest("/root", new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
@@ -173,12 +161,9 @@ public sealed class ScanOptionsUseCaseTests
 		var result = useCase.GetExtensionsForRootFolders(
 			"/root",
 			new List<string> { "src" },
-			new IgnoreRules(
-				IgnoreBinFolders: false,
-				IgnoreObjFolders: false,
-				IgnoreHiddenFolders: false,
-				IgnoreHiddenFiles: false,
-				IgnoreDotFolders: false,
+			new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
 				SmartIgnoredFiles: new HashSet<string>()));
@@ -207,12 +192,9 @@ public sealed class ScanOptionsUseCaseTests
 		var result = useCase.GetExtensionsForRootFolders(
 			"/root",
 			new List<string> { "src" },
-			new IgnoreRules(
-				IgnoreBinFolders: false,
-				IgnoreObjFolders: false,
-				IgnoreHiddenFolders: false,
-				IgnoreHiddenFiles: false,
-				IgnoreDotFolders: false,
+			new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
 				SmartIgnoredFiles: new HashSet<string>()));
@@ -221,3 +203,7 @@ public sealed class ScanOptionsUseCaseTests
 		Assert.Contains(".cs", result.Value);
 	}
 }
+
+
+
+

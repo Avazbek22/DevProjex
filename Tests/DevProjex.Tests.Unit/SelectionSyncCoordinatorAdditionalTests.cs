@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -256,7 +256,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 				scanOptions,
 				new FilterOptionSelectionService(),
 				new IgnoreOptionsService(localization),
-				_ => new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>()),
+				_ => new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>()),
 				_ => false,
 				() => tempRoot);
 
@@ -286,7 +286,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 				scanOptions,
 				new FilterOptionSelectionService(),
 				new IgnoreOptionsService(localization),
-				_ => new IgnoreRules(false, false, false, false, false, false, new HashSet<string>(), new HashSet<string>()),
+				_ => new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>()),
 				_ => false,
 				() => tempRoot);
 
@@ -313,10 +313,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		var scanOptions = new ScanOptionsUseCase(scanner);
 		var filterService = new FilterOptionSelectionService();
 		var ignoreService = new IgnoreOptionsService(localization);
-		Func<string, IgnoreRules> buildIgnoreRules = _ => new IgnoreRules(
-			false,
-			false,
-			false,
+		Func<string, IgnoreRules> buildIgnoreRules = _ => new IgnoreRules(false,
 			false,
 			false,
 			false,
@@ -350,3 +347,4 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		return new StubLocalizationCatalog(data);
 	}
 }
+

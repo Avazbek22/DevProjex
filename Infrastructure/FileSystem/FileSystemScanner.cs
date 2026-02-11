@@ -188,12 +188,6 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		if (rules.SmartIgnoredFolders.Contains(name))
 			return true;
 
-		if (rules.IgnoreBinFolders && name.Equals("bin", StringComparison.OrdinalIgnoreCase))
-			return true;
-
-		if (rules.IgnoreObjFolders && name.Equals("obj", StringComparison.OrdinalIgnoreCase))
-			return true;
-
 		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
 			return true;
 

@@ -30,8 +30,6 @@ public sealed class IgnoreRulesService
 		}
 
 		return new IgnoreRules(
-			IgnoreBinFolders: selectedOptions.Contains(IgnoreOptionId.BinFolders),
-			IgnoreObjFolders: selectedOptions.Contains(IgnoreOptionId.ObjFolders),
 			IgnoreHiddenFolders: selectedOptions.Contains(IgnoreOptionId.HiddenFolders),
 			IgnoreHiddenFiles: selectedOptions.Contains(IgnoreOptionId.HiddenFiles),
 			IgnoreDotFolders: selectedOptions.Contains(IgnoreOptionId.DotFolders),
