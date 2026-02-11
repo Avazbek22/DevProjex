@@ -38,6 +38,9 @@
 
     <Style Selector="Border.drop-zone-outer:pointerover Rectangle.drop-zone-border">
       <Setter Property="StrokeThickness" Value="3" />
+      <Setter Property="Margin" Value="-1.5" />
+      <Setter Property="RadiusX" Value="21.5" />
+      <Setter Property="RadiusY" Value="21.5" />
     </Style>
 
     <!-- Drop zone button with smooth transitions -->
@@ -127,13 +130,14 @@
               PointerPressed="OnDropZoneClick"
               DragDrop.AllowDrop="True">
 
-        <Grid>
+        <Grid ClipToBounds="False">
           <!-- Dashed frame rendered via Rectangle -->
           <Rectangle Classes="drop-zone-border"
-                     RadiusX="20" RadiusY="20"
+                     RadiusX="21.25" RadiusY="21.25"
                      StrokeThickness="2.5"
                      Stroke="{DynamicResource DropZoneBorderBrush}"
                      StrokeDashArray="8,6"
+                     Margin="-1.25"
                      Fill="Transparent" />
 
           <!-- Soft semi-transparent background -->
