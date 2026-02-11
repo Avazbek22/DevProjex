@@ -118,5 +118,10 @@
   "Git.Error.UpdateFailed": "Aktualisierungen konnten nicht abgerufen werden:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Abbrechen"
+  "Dialog.Cancel": "Abbrechen",
+
+  "DropZone.Title": "Ordner hierher ziehen",
+  "DropZone.Subtitle": "oder klicken zum Durchsuchen",
+  "DropZone.Button": "Ordner auswählen",
+  "DropZone.HotkeyHint": "zum schnellen Öffnen"
 }

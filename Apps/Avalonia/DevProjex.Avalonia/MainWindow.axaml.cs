@@ -117,6 +117,15 @@ public partial class MainWindow : Window
 
         InitializeComponent();
 
+        // Setup drag & drop for the drop zone
+        var dropZone = this.FindControl<Border>("DropZoneContainer");
+        if (dropZone is not null)
+        {
+            dropZone.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            dropZone.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
+            dropZone.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
+        }
+
         InitializeThemePresets();
 
         _viewModel.UpdateHelpPopoverMaxSize(Bounds.Size);
@@ -288,6 +297,84 @@ public partial class MainWindow : Window
             await ShowErrorAsync(ex.Message);
         }
     }
+
+    #region Drop Zone Handlers
+
+    private void OnDropZoneClick(object? sender, PointerPressedEventArgs e)
+    {
+        // Ignore if clicked on the button (button has its own handler)
+        if (e.Source is Button) return;
+
+        OnOpenFolder(sender, new RoutedEventArgs());
+    }
+
+    private void OnDropZoneDragEnter(object? sender, DragEventArgs e)
+    {
+        var hasFolder = e.Data.GetDataFormats().Any(f =>
+            f == DataFormats.Files);
+
+        e.DragEffects = hasFolder ? DragDropEffects.Copy : DragDropEffects.None;
+
+        // Add visual feedback class
+        if (sender is Border border)
+        {
+            border.Classes.Add("drag-over");
+        }
+    }
+
+    private void OnDropZoneDragLeave(object? sender, DragEventArgs e)
+    {
+        // Remove visual feedback class
+        if (sender is Border border)
+        {
+            border.Classes.Remove("drag-over");
+        }
+    }
+
+    private async void OnDropZoneDrop(object? sender, DragEventArgs e)
+    {
+        // Remove visual feedback class
+        if (sender is Border border)
+        {
+            border.Classes.Remove("drag-over");
+        }
+
+        try
+        {
+            var files = e.Data.GetFiles();
+            if (files is null) return;
+
+            var folder = files
+                .Select(f => f.TryGetLocalPath())
+                .Where(p => !string.IsNullOrWhiteSpace(p) && Directory.Exists(p))
+                .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(folder))
+            {
+                // Maybe it's a file - try to get its directory
+                var file = files
+                    .Select(f => f.TryGetLocalPath())
+                    .Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p))
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrWhiteSpace(file))
+                {
+                    folder = Path.GetDirectoryName(file);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(folder))
+            {
+                await TryOpenFolderAsync(folder, fromDialog: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    #endregion
 
     private void ApplyStartupThemePreset()
     {

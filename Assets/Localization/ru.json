@@ -118,5 +118,10 @@
   "Git.Error.UpdateFailed": "Не удалось получить обновления:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Отмена"
+  "Dialog.Cancel": "Отмена",
+
+  "DropZone.Title": "Перетащите папку сюда",
+  "DropZone.Subtitle": "или нажмите для выбора",
+  "DropZone.Button": "Выбрать папку",
+  "DropZone.HotkeyHint": "для быстрого открытия"
 }

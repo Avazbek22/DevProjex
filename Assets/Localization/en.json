@@ -118,5 +118,10 @@
   "Git.Error.UpdateFailed": "Failed to get updates:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Cancel"
+  "Dialog.Cancel": "Cancel",
+
+  "DropZone.Title": "Drop folder here",
+  "DropZone.Subtitle": "or click to browse",
+  "DropZone.Button": "Choose folder",
+  "DropZone.HotkeyHint": "to quick open"
 }

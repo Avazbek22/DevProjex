@@ -14,9 +14,62 @@
     <Style Selector="TreeViewItem">
       <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
       <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
-      <!-- Tree item padding is driven by the ViewModel for compact mode. -->
       <Setter Property="Padding"
               Value="{Binding DataContext.TreeItemPadding, RelativeSource={RelativeSource AncestorType=TreeView}}" />
+    </Style>
+
+    <!-- Drop Zone Styles -->
+
+    <!-- Анимация движения пунктиров по кругу - быстрее -->
+    <Style Selector="Rectangle.drop-zone-border">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="StrokeDashOffset" Value="0" />
+      <Style.Animations>
+        <Animation Duration="0:0:0.8" IterationCount="INFINITE">
+          <KeyFrame Cue="0%">
+            <Setter Property="StrokeDashOffset" Value="0" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="StrokeDashOffset" Value="-14" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
+    <Style Selector="Border.drop-zone-outer:pointerover Rectangle.drop-zone-border">
+      <Setter Property="StrokeThickness" Value="3" />
+    </Style>
+
+    <!-- Анимация парящей иконки папки - плавное парение внутри контейнера -->
+    <Style Selector="Viewbox.drop-zone-icon">
+      <Style.Animations>
+        <Animation Duration="0:0:2" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
+          <KeyFrame Cue="0%">
+            <Setter Property="Margin" Value="0,12,0,0" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="Margin" Value="0,0,0,0" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
+    <!-- Кнопка drop zone - плавные transitions -->
+    <Style Selector="Button.drop-zone-button">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Opacity" Duration="0:0:0.25" Easing="CubicEaseInOut" />
+        </Transitions>
+      </Setter>
+    </Style>
+
+    <Style Selector="Button.drop-zone-button:pointerover">
+      <Setter Property="Opacity" Value="0.85" />
+    </Style>
+
+    <Style Selector="Button.drop-zone-button:pressed">
+      <Setter Property="Opacity" Value="0.7" />
     </Style>
   </Window.Styles>
 
@@ -76,7 +129,135 @@
                          FilterCloseRequested="OnFilterClose" />
 
     <Grid>
-      <Grid ColumnDefinitions="*,Auto">
+      <!-- Drop Zone - показывается когда проект НЕ загружен -->
+      <Border Name="DropZoneContainer"
+              Classes="drop-zone-outer"
+              IsVisible="{Binding !IsProjectLoaded}"
+              Background="Transparent"
+              Margin="60"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch"
+              Cursor="Hand"
+              PointerPressed="OnDropZoneClick"
+              DragDrop.AllowDrop="True">
+
+        <Grid>
+          <!-- Пунктирная рамка через Rectangle -->
+          <Rectangle Classes="drop-zone-border"
+                     RadiusX="20" RadiusY="20"
+                     StrokeThickness="2.5"
+                     Stroke="{DynamicResource DropZoneBorderBrush}"
+                     StrokeDashArray="8,6"
+                     Fill="Transparent" />
+
+          <!-- Лёгкий полупрозрачный фон -->
+          <Rectangle RadiusX="20" RadiusY="20"
+                     Fill="{DynamicResource DropZoneInnerBrush}"
+                     Margin="1" />
+
+          <!-- Контент -->
+          <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,*"
+                Margin="40">
+
+            <!-- Контейнер фиксированной высоты для иконки -->
+            <Border Grid.Row="1"
+                    Height="115"
+                    Margin="0,0,0,20"
+                    Background="Transparent"
+                    ClipToBounds="False">
+              <!-- Иконка папки с анимацией парения -->
+              <Viewbox Classes="drop-zone-icon"
+                       Width="100"
+                       Height="100"
+                       VerticalAlignment="Bottom">
+                <Canvas Width="100" Height="90">
+                  <!-- Папка - задняя часть -->
+                  <Path Canvas.Left="10" Canvas.Top="15"
+                        Fill="{DynamicResource DropZoneFolderBackBrush}"
+                        Data="M 0,12 L 0,60 Q 0,65 5,65 L 75,65 Q 80,65 80,60 L 80,12 Q 80,7 75,7 L 32,7 L 27,0 L 5,0 Q 0,0 0,5 Z" />
+
+                  <!-- Папка - передняя часть -->
+                  <Path Canvas.Left="10" Canvas.Top="15"
+                        Fill="{DynamicResource DropZoneFolderFrontBrush}"
+                        Data="M 0,22 L 0,60 Q 0,65 5,65 L 75,65 Q 80,65 80,60 L 80,22 Q 80,17 75,17 L 5,17 Q 0,17 0,22 Z" />
+
+                  <!-- Стрелка вниз -->
+                  <Path Canvas.Left="40" Canvas.Top="28"
+                        Fill="{DynamicResource DropZoneArrowBrush}"
+                        Data="M 10,0 L 10,14 L 4,14 L 10,24 L 16,14 L 10,14 L 10,0 Z" />
+                </Canvas>
+              </Viewbox>
+            </Border>
+
+            <!-- Главный текст -->
+            <TextBlock Grid.Row="2"
+                       Text="{Binding DropZoneTitle}"
+                       FontSize="24"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource AppTextBrush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,6" />
+
+            <!-- Подтекст -->
+            <TextBlock Grid.Row="3"
+                       Text="{Binding DropZoneSubtitle}"
+                       FontSize="14"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,24" />
+
+            <!-- Кнопка выбора папки -->
+            <Button Grid.Row="4"
+                    Classes="drop-zone-button primary-action"
+                    HorizontalAlignment="Center"
+                    Padding="24,12"
+                    CornerRadius="10"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    Click="OnOpenFolder">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <!-- Иконка папки -->
+                <Path Fill="#FFFFFF"
+                      Width="18" Height="18"
+                      Stretch="Uniform"
+                      Data="M 1,3 L 1,15 L 17,15 L 17,5 L 9,5 L 7,3 Z M 2,6 L 16,6 L 16,14 L 2,14 Z" />
+                <TextBlock Text="{Binding DropZoneButtonText}"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+
+            <!-- Подсказка о горячей клавише -->
+            <StackPanel Grid.Row="5"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,20,0,0"
+                        Spacing="6"
+                        Opacity="0.7">
+              <Border Background="{DynamicResource DropZoneKbdBrush}"
+                      CornerRadius="4"
+                      Padding="6,3"
+                      BorderBrush="{DynamicResource AppBorderBrush}"
+                      BorderThickness="1">
+                <TextBlock Text="Ctrl+O"
+                           FontSize="11"
+                           FontFamily="Consolas, monospace"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+              </Border>
+              <TextBlock Text="{Binding DropZoneHotkeyHint}"
+                         FontSize="11"
+                         Foreground="{DynamicResource AppMutedTextBrush}"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </Grid>
+        </Grid>
+      </Border>
+
+      <!-- Project Tree - показывается когда проект загружен -->
+      <Grid ColumnDefinitions="*,Auto"
+            IsVisible="{Binding IsProjectLoaded}">
         <TreeView Name="ProjectTree"
                   Grid.Column="0"
                   ItemsSource="{Binding TreeNodes}"
@@ -90,7 +271,6 @@
                 <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />
                 <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
-              <!-- Compact mode controls row spacing via the ViewModel to avoid template overrides. -->
               <StackPanel Grid.Column="1"
                           Orientation="Horizontal"
                           Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">

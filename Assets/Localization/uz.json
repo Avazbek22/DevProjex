@@ -118,5 +118,10 @@
   "Git.Error.UpdateFailed": "Yangilanishlarni olib bo'lmadi:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Bekor qilish"
+  "Dialog.Cancel": "Bekor qilish",
+
+  "DropZone.Title": "Papkani bu yerga tashlang",
+  "DropZone.Subtitle": "yoki tanlash uchun bosing",
+  "DropZone.Button": "Papkani tanlash",
+  "DropZone.HotkeyHint": "tez ochish uchun"
 }

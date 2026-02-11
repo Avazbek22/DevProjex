@@ -671,6 +671,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string FilterByNamePlaceholder { get; private set; } = string.Empty;
     public string FilterTooltip { get; private set; } = string.Empty;
 
+    // Drop Zone localization
+    public string DropZoneTitle { get; private set; } = string.Empty;
+    public string DropZoneSubtitle { get; private set; } = string.Empty;
+    public string DropZoneButtonText { get; private set; } = string.Empty;
+    public string DropZoneHotkeyHint { get; private set; } = string.Empty;
+
     // Git menu localization
     public string MenuGitClone { get; private set; } = string.Empty;
     public string MenuGitBranch { get; private set; } = string.Empty;
@@ -746,6 +752,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuSearch = _localization["Menu.Search"];
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
+
+        // Drop Zone localization
+        DropZoneTitle = _localization["DropZone.Title"];
+        DropZoneSubtitle = _localization["DropZone.Subtitle"];
+        DropZoneButtonText = _localization["DropZone.Button"];
+        DropZoneHotkeyHint = _localization["DropZone.HotkeyHint"];
 
         // Git menu localization
         MenuGitClone = _localization["Menu.Git.Clone"];
@@ -834,6 +846,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuSearch));
         RaisePropertyChanged(nameof(FilterByNamePlaceholder));
         RaisePropertyChanged(nameof(FilterTooltip));
+
+        // Drop Zone localization
+        RaisePropertyChanged(nameof(DropZoneTitle));
+        RaisePropertyChanged(nameof(DropZoneSubtitle));
+        RaisePropertyChanged(nameof(DropZoneButtonText));
+        RaisePropertyChanged(nameof(DropZoneHotkeyHint));
 
         // Theme popover localization
         RaisePropertyChanged(nameof(MenuTheme));

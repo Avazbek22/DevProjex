@@ -118,5 +118,10 @@
   "Git.Error.UpdateFailed": "Жаңартуларды алу мүмкін болмады:\n{0}",
 
   "Dialog.OK": "OK",
-  "Dialog.Cancel": "Болдырмау"
+  "Dialog.Cancel": "Болдырмау",
+
+  "DropZone.Title": "Қалтаны осы жерге тастаңыз",
+  "DropZone.Subtitle": "немесе таңдау үшін басыңыз",
+  "DropZone.Button": "Қалтаны таңдау",
+  "DropZone.HotkeyHint": "жылдам ашу үшін"
 }
