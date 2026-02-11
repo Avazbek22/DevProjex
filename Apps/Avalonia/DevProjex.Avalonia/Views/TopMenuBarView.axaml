@@ -2,9 +2,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
              xmlns:views="using:DevProjex.Avalonia.Views"
+             xmlns:ic="using:FluentIcons.Avalonia"
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
              x:DataType="vm:MainWindowViewModel">
-  <Grid Name="RootGrid" ColumnDefinitions="*,Auto" Margin="0">
+  <Grid Name="RootGrid"
+        ColumnDefinitions="*,Auto"
+        Margin="0"
+        Background="{DynamicResource AppPanelBrush}">
     <Menu Name="MainMenu" Grid.Column="0" Margin="0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
@@ -65,10 +69,10 @@
             IsVisible="{Binding IsProjectLoaded}"
             ToolTip.Tip="{Binding FilterTooltip}"
             ToolTip.Placement="Left">
-      <Image Source="avares://DevProjex.Avalonia/IconPacks/Default/UIFilter.png"
-             Width="24"
-             Height="24"
-             Stretch="Uniform" />
+      <ic:SymbolIcon Symbol="Filter"
+                     IconVariant="Regular"
+                     FontSize="20"
+                     Foreground="{DynamicResource AppTextBrush}" />
     </Button>
 
     <!-- Theme Popover -->

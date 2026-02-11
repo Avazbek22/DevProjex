@@ -14,6 +14,7 @@
     <PackageReference Include="Avalonia" Version="11.0.10" />
     <PackageReference Include="Avalonia.Desktop" Version="11.0.10" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.0.10" />
+    <PackageReference Include="FluentIcons.Avalonia" Version="2.0.318" />
   </ItemGroup>
 
   <!--  Do not remove ref to Test for correct testing-->
@@ -31,9 +32,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="..\..\..\Assets\IconPacks\Default\UIFilter.png">
-      <Link>IconPacks\Default\UIFilter.png</Link>
-    </AvaloniaResource>
     <!-- Application window icon (cross-platform, used by Avalonia Window.Icon) -->
     <AvaloniaResource Include="..\..\..\Assets\AppIcon\Linux\png\256.png">
       <Link>AppIcon\icon-256.png</Link>
