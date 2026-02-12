@@ -67,7 +67,8 @@
             IsVisible="{Binding IsProjectLoaded}"
             Margin="0,0,4,0"
             ToolTip.Tip="{Binding CopyFormatTooltip}"
-            ToolTip.ShowDelay="700">
+            ToolTip.ShowDelay="700"
+            ToolTip.Placement="Bottom">
       <Panel>
         <!-- Sliding thumb indicator - single element that moves -->
         <Border Name="SegmentThumb"
