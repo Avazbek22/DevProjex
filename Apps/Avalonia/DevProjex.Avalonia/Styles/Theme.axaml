@@ -556,4 +556,88 @@
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
     </Style>
 
+    <!-- ============================================== -->
+    <!-- Segmented Control Styles                       -->
+    <!-- ============================================== -->
+
+    <!-- Container: pill-shaped border around the entire segmented control -->
+    <Style Selector="Border.segmented-control">
+        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <!-- Base style for segment buttons (RadioButton styled as segment) -->
+    <Style Selector="RadioButton.segment-button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="MinWidth" Value="44" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <BrushTransition Property="Foreground" Duration="0:0:0.15" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+        <!-- Hide the default radio button circle -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Border Name="PART_Border"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}"
+                        Padding="{TemplateBinding Padding}">
+                    <ContentPresenter Name="PART_ContentPresenter"
+                                      Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                      TextElement.Foreground="{TemplateBinding Foreground}" />
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <!-- Segment button: hover state (unselected) -->
+    <Style Selector="RadioButton.segment-button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+
+    <!-- Segment button: pressed state -->
+    <Style Selector="RadioButton.segment-button:pressed">
+        <Setter Property="Opacity" Value="0.85" />
+    </Style>
+
+    <!-- Segment button: checked/selected state -->
+    <Style Selector="RadioButton.segment-button:checked">
+        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="Foreground" Value="#FFFFFF" />
+    </Style>
+
+    <!-- Segment button: checked + hover -->
+    <Style Selector="RadioButton.segment-button:checked:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="Foreground" Value="#FFFFFF" />
+        <Setter Property="Opacity" Value="0.9" />
+    </Style>
+
+    <!-- Segment button: disabled state -->
+    <Style Selector="RadioButton.segment-button:disabled">
+        <Setter Property="Opacity" Value="0.5" />
+    </Style>
+
 </Styles>

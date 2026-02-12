@@ -7,6 +7,15 @@ using DevProjex.Kernel.Models;
 
 namespace DevProjex.Avalonia.ViewModels;
 
+/// <summary>
+/// Specifies the export format for copying content.
+/// </summary>
+public enum ExportFormat
+{
+    Ascii,
+    Json
+}
+
 public sealed class MainWindowViewModel : ViewModelBase
 {
     public const string BaseTitle = "DevProjex v4.1";
@@ -33,6 +42,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isDarkTheme = true;
     private bool _isCompactMode;
     private bool _filterVisible;
+    private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
     private bool _isMicaEnabled;
     private bool _isAcrylicEnabled;
     private bool _isTransparentEnabled = true;
@@ -278,6 +288,37 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (_filterVisible == value) return;
             _filterVisible = value;
             RaisePropertyChanged();
+        }
+    }
+
+    public ExportFormat SelectedExportFormat
+    {
+        get => _selectedExportFormat;
+        set
+        {
+            if (_selectedExportFormat == value) return;
+            _selectedExportFormat = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsAsciiFormatSelected));
+            RaisePropertyChanged(nameof(IsJsonFormatSelected));
+        }
+    }
+
+    public bool IsAsciiFormatSelected
+    {
+        get => _selectedExportFormat == ExportFormat.Ascii;
+        set
+        {
+            if (value) SelectedExportFormat = ExportFormat.Ascii;
+        }
+    }
+
+    public bool IsJsonFormatSelected
+    {
+        get => _selectedExportFormat == ExportFormat.Json;
+        set
+        {
+            if (value) SelectedExportFormat = ExportFormat.Json;
         }
     }
 

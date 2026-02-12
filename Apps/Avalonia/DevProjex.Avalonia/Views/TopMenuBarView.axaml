@@ -4,9 +4,9 @@
              xmlns:views="using:DevProjex.Avalonia.Views"
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
              x:DataType="vm:MainWindowViewModel">
-  <Grid Name="RootGrid" ColumnDefinitions="*,Auto" Margin="0">
-    <!-- Keep menu surface spanning both columns to avoid transparency seams near the filter button. -->
-    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="2" Margin="0">
+  <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto" Margin="0">
+    <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
+    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="3" Margin="0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
@@ -59,7 +59,27 @@
         <MenuItem Header="{Binding MenuHelpResetSettings}" Click="OnResetSettings" />
       </MenuItem>
     </Menu>
-    <Button Grid.Column="1"
+
+    <!-- Format Switcher: Segmented Control (ASCII/JSON) -->
+    <Border Grid.Column="1"
+            Classes="segmented-control"
+            IsEnabled="{Binding IsProjectLoaded}"
+            IsVisible="{Binding IsProjectLoaded}"
+            Margin="0,0,4,0"
+            ToolTip.Tip="Export format">
+      <StackPanel Orientation="Horizontal" Spacing="2">
+        <RadioButton Classes="segment-button"
+                     Content="ASCII"
+                     GroupName="ExportFormat"
+                     IsChecked="{Binding IsAsciiFormatSelected, Mode=TwoWay}" />
+        <RadioButton Classes="segment-button"
+                     Content="JSON"
+                     GroupName="ExportFormat"
+                     IsChecked="{Binding IsJsonFormatSelected, Mode=TwoWay}" />
+      </StackPanel>
+    </Border>
+
+    <Button Grid.Column="2"
             Classes="menu-icon-button"
             Click="OnToggleFilter"
             IsEnabled="{Binding IsProjectLoaded}"
