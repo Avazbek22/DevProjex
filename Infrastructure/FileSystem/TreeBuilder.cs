@@ -83,6 +83,12 @@ public sealed class TreeBuilder : ITreeBuilder
 
 				BuildChildren(dirNode, entry.FullName, options, isRoot: false, state);
 
+				// Skip empty directories - they provide no value in the tree
+				// This also handles ignored directories that were traversed for negation rules
+				// but ended up with no visible children
+				if (dirNode.Children.Count == 0 && !dirNode.IsAccessDenied)
+					continue;
+
 				// If name filter is active, only include directories that have matching children or match themselves
 				if (hasNameFilter)
 				{

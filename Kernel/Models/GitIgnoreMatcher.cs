@@ -148,21 +148,28 @@ public sealed class GitIgnoreMatcher
             if (!rule.IsNegation)
                 continue;
 
+            // Name-only negation rules (like !keep.txt) can match files anywhere
+            // so we must traverse all ignored directories
             if (rule.MatchByNameOnly)
                 return true;
 
+            // Path-based negation rules with no static prefix (like !**/*.txt)
+            // could match anywhere, so we must traverse
             if (rule.StaticPrefix.Length == 0)
                 return true;
 
             var rulePrefixWithSlash = $"{rule.StaticPrefix}/";
             var relativeWithSlash = $"{relativePath}/";
 
+            // Negation target is inside this directory
             if (rulePrefixWithSlash.StartsWith(relativeWithSlash, _pathComparison))
                 return true;
 
+            // This directory is inside the negation target path
             if (relativeWithSlash.StartsWith(rulePrefixWithSlash, _pathComparison))
                 return true;
 
+            // Exact match
             if (string.Equals(rule.StaticPrefix, relativePath, _pathComparison))
                 return true;
         }

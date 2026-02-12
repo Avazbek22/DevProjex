@@ -30,11 +30,43 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	// Buffer size for streaming read (balance between memory and I/O efficiency)
 	private const int StreamingBufferSize = 8192;
 
+	// Known binary extensions - skip file read entirely (fast path)
+	private static readonly HashSet<string> KnownBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
+	{
+		// Images
+		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
+		// Video
+		".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
+		// Audio
+		".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
+		// Archives
+		".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
+		// Executables/Libraries
+		".exe", ".dll", ".so", ".dylib", ".pdb", ".ilk",
+		// Documents (binary)
+		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+		// Fonts
+		".ttf", ".otf", ".woff", ".woff2", ".eot",
+		// Other binary
+		".bin", ".dat", ".db", ".sqlite", ".mdb"
+	};
+
 	/// <inheritdoc />
-	public async Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
+	public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
+	{
+		// Synchronous implementation - no Task.Run needed when called from Parallel.ForEachAsync
+		return Task.FromResult(IsTextFileSync(path, cancellationToken));
+	}
+
+	private static bool IsTextFileSync(string path, CancellationToken cancellationToken)
 	{
 		try
 		{
+			// Fast path: known binary extensions - no file I/O needed
+			var ext = Path.GetExtension(path);
+			if (KnownBinaryExtensions.Contains(ext))
+				return false;
+
 			var fileInfo = new FileInfo(path);
 			if (!fileInfo.Exists)
 				return false;
@@ -44,8 +76,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				return true;
 
 			// Check for null bytes in first 512 bytes
-			return await Task.Run(() => CheckForNullBytes(path, cancellationToken), cancellationToken)
-				.ConfigureAwait(false);
+			return CheckForNullBytes(path, cancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
@@ -58,10 +89,22 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	}
 
 	/// <inheritdoc />
-	public async Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
+	public Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
+	{
+		// Synchronous implementation - no Task.Run needed when called from Parallel.ForEachAsync
+		// This avoids ThreadPool explosion when processing thousands of files
+		return Task.FromResult(GetTextFileMetricsSync(path, cancellationToken));
+	}
+
+	private TextFileMetrics? GetTextFileMetricsSync(string path, CancellationToken cancellationToken)
 	{
 		try
 		{
+			// Fast path: known binary extensions - no file I/O needed
+			var ext = Path.GetExtension(path);
+			if (KnownBinaryExtensions.Contains(ext))
+				return null;
+
 			var fileInfo = new FileInfo(path);
 			if (!fileInfo.Exists)
 				return null;
@@ -78,10 +121,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 					IsWhitespaceOnly: false);
 
 			// Check if binary first (fast - only 512 bytes)
-			var isText = await Task.Run(() => CheckForNullBytes(path, cancellationToken), cancellationToken)
-				.ConfigureAwait(false);
-
-			if (!isText)
+			if (!CheckForNullBytes(path, cancellationToken))
 				return null;
 
 			// For very large files, estimate metrics without reading
@@ -96,8 +136,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			}
 
 			// Stream through file counting metrics without loading content into memory
-			return await Task.Run(() => CountMetricsStreaming(path, sizeBytes, cancellationToken), cancellationToken)
-				.ConfigureAwait(false);
+			return CountMetricsStreaming(path, sizeBytes, cancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
@@ -116,10 +155,21 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	}
 
 	/// <inheritdoc />
-	public async Task<TextFileContent?> TryReadAsTextAsync(string path, long maxSizeForFullRead, CancellationToken cancellationToken = default)
+	public Task<TextFileContent?> TryReadAsTextAsync(string path, long maxSizeForFullRead, CancellationToken cancellationToken = default)
+	{
+		// Synchronous implementation - no Task.Run needed when called from parallel context
+		return Task.FromResult(TryReadAsTextSync(path, maxSizeForFullRead, cancellationToken));
+	}
+
+	private TextFileContent? TryReadAsTextSync(string path, long maxSizeForFullRead, CancellationToken cancellationToken)
 	{
 		try
 		{
+			// Fast path: known binary extensions - no file I/O needed
+			var ext = Path.GetExtension(path);
+			if (KnownBinaryExtensions.Contains(ext))
+				return null;
+
 			var fileInfo = new FileInfo(path);
 			if (!fileInfo.Exists)
 				return null;
@@ -138,10 +188,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 					IsEstimated: false);
 
 			// Check if binary (fast - only 512 bytes)
-			var isText = await Task.Run(() => CheckForNullBytes(path, cancellationToken), cancellationToken)
-				.ConfigureAwait(false);
-
-			if (!isText)
+			if (!CheckForNullBytes(path, cancellationToken))
 				return null;
 
 			// For large files, return estimated metrics without full content
@@ -158,8 +205,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			}
 
 			// Read full content for export
-			return await Task.Run(() => ReadFullContent(path, sizeBytes, cancellationToken), cancellationToken)
-				.ConfigureAwait(false);
+			return ReadFullContent(path, sizeBytes, cancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
