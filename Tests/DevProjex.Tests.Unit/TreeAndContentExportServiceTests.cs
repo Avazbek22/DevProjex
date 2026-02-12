@@ -28,7 +28,7 @@ public sealed class TreeAndContentExportServiceTests
 				new TreeNodeDescriptor("file.txt", file, false, false, "text", new List<TreeNodeDescriptor>())
 			});
 
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 
 		var result = service.Build(temp.Path, root, new HashSet<string> { file });
 
@@ -48,7 +48,7 @@ public sealed class TreeAndContentExportServiceTests
 			IconKey: "folder",
 			Children: new List<TreeNodeDescriptor>());
 
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var result = service.Build("/root", root, new HashSet<string>());
 
 		Assert.Contains("/root:", result);
@@ -66,7 +66,7 @@ public sealed class TreeAndContentExportServiceTests
 			IconKey: "folder",
 			Children: new List<TreeNodeDescriptor>());
 
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var result = service.Build("/root", root, new HashSet<string> { "/root/missing.txt" });
 
 		Assert.Contains("/root:", result);
@@ -91,7 +91,7 @@ public sealed class TreeAndContentExportServiceTests
 				new TreeNodeDescriptor("notes.txt", file, false, false, "text", new List<TreeNodeDescriptor>())
 			});
 
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var result = service.Build(temp.Path, root, new HashSet<string> { "/missing/file.txt" });
 
 		Assert.Contains("notes.txt", result);
@@ -118,7 +118,7 @@ public sealed class TreeAndContentExportServiceTests
 				new TreeNodeDescriptor("b.txt", second, false, false, "text", new List<TreeNodeDescriptor>())
 			});
 
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var result = service.Build(temp.Path, root, new HashSet<string>());
 
 		Assert.Contains("a.txt:", result);
@@ -147,7 +147,7 @@ public sealed class TreeAndContentExportServiceTests
 			});
 
 
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var result = service.Build(temp.Path, root, new HashSet<string>());
 
 
@@ -183,7 +183,7 @@ public sealed class TreeAndContentExportServiceTests
 					})
 			});
 
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var result = service.Build(temp.Path, root, new HashSet<string> { folder });
 
 		Assert.Contains("src", result);
@@ -205,7 +205,7 @@ public sealed class TreeAndContentExportServiceTests
 			IconKey: "text",
 			Children: new List<TreeNodeDescriptor>());
 
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var result = service.Build(temp.Path, root, new HashSet<string>());
 
 		Assert.Contains("root.txt:", result);

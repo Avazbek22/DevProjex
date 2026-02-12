@@ -14,7 +14,7 @@ public sealed class SelectedContentExportServiceAdditionalTests
 	// Verifies empty input yields an empty export.
 	public void Build_EmptyList_ReturnsEmpty()
 	{
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 
 		var output = service.Build(Array.Empty<string>());
 
@@ -25,7 +25,7 @@ public sealed class SelectedContentExportServiceAdditionalTests
 	// Verifies whitespace paths are ignored.
 	public void Build_IgnoresWhitespacePaths()
 	{
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 
 		var output = service.Build(new[] { " ", "\t", "\n" });
 
@@ -44,7 +44,7 @@ public sealed class SelectedContentExportServiceAdditionalTests
 	{
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("sample.txt", content);
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 
 		var output = service.Build(new[] { file });
 
@@ -70,7 +70,7 @@ public sealed class SelectedContentExportServiceAdditionalTests
 	{
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("sample.txt", content);
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 
 		var output = service.Build(new[] { file });
 
@@ -93,7 +93,7 @@ public sealed class SelectedContentExportServiceAdditionalTests
 	{
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("sample.txt", content);
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 
 		var output = service.Build(new[] { file });
 
@@ -111,7 +111,7 @@ public sealed class SelectedContentExportServiceAdditionalTests
 	public void Build_MissingFiles_AreIgnored(string relativePath)
 	{
 		using var temp = new TemporaryDirectory();
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 		var missing = Path.Combine(temp.Path, relativePath);
 
 		var output = service.Build(new[] { missing });
@@ -136,7 +136,7 @@ public sealed class SelectedContentExportServiceAdditionalTests
 		using var temp = new TemporaryDirectory();
 		var fileA = temp.CreateFile(first, "A");
 		var fileB = temp.CreateFile(second, "B");
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 
 		var output = service.Build(new[] { fileA, fileB, fileA });
 

@@ -111,6 +111,26 @@ public sealed class GitIgnoreMatcher
             ignored = !rule.IsNegation;
         }
 
+        // For directories: if not directly ignored, check if all contents would be ignored
+        // Pattern like **/bin/* ignores contents but not the directory itself
+        // For UI purposes, if all contents are ignored, the directory should be hidden too
+        // Skip this optimization if there are negation rules - they might un-ignore specific files
+        if (!ignored && isDirectory && !HasNegationRules)
+        {
+            var testChildPath = relativePath + "/_";
+            foreach (var rule in _rules)
+            {
+                if (rule.DirectoryOnly || rule.MatchByNameOnly)
+                    continue;
+
+                if (rule.Pattern.IsMatch(testChildPath))
+                {
+                    ignored = true;
+                    break;
+                }
+            }
+        }
+
         return ignored;
     }
 

@@ -59,6 +59,7 @@ public partial class MainWindow : Window
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
+    private readonly IFileContentAnalyzer _fileContentAnalyzer;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
@@ -121,6 +122,7 @@ public partial class MainWindow : Window
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
+        _fileContentAnalyzer = services.FileContentAnalyzer;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _viewModel.SetToastItems(_toastService.Items);
@@ -2329,7 +2331,8 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Initialize file metrics cache after tree is built.
-    /// Scans all files in background to cache their metrics.
+    /// Scans all files in parallel using IFileContentAnalyzer as single source of truth.
+    /// Binary files are skipped via extension check (fast) or null-byte detection.
     /// </summary>
     private async Task InitializeFileMetricsCacheAsync(CancellationToken cancellationToken)
     {
@@ -2353,56 +2356,52 @@ public partial class MainWindow : Window
                     filePaths.Add(node.FullPath);
             }
 
-            // Scan files in background
-            await Task.Run(() =>
+            // Clear cache before scanning
+            lock (_metricsLock)
             {
-                lock (_metricsLock)
-                {
-                    _fileMetricsCache.Clear();
-                }
+                _fileMetricsCache.Clear();
+            }
 
-                foreach (var filePath in filePaths)
+            // Process files in parallel for better performance
+            // Limit parallelism to avoid overwhelming the disk I/O
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2),
+                CancellationToken = linkedCts.Token
+            };
+
+            await Parallel.ForEachAsync(filePaths, parallelOptions, async (filePath, ct) =>
+            {
+                try
                 {
-                    if (linkedCts.Token.IsCancellationRequested)
+                    // GetTextFileMetricsAsync uses streaming - no full content in memory:
+                    // 1. Null-byte detection in first 512 bytes (fast binary check)
+                    // 2. Streams through file counting lines/chars without storing content
+                    // 3. Large files (>10MB) get estimated metrics
+                    var metrics = await _fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
+                        .ConfigureAwait(false);
+
+                    // Skip binary files - they won't be exported
+                    if (metrics is null)
                         return;
 
-                    try
+                    lock (_metricsLock)
                     {
-                        var fileInfo = new FileInfo(filePath);
-                        if (!fileInfo.Exists)
-                            continue;
-
-                        // Skip very large files (>10MB) for performance
-                        if (fileInfo.Length > 10 * 1024 * 1024)
-                        {
-                            lock (_metricsLock)
-                            {
-                                _fileMetricsCache[filePath] = new FileMetricsData(
-                                    fileInfo.Length,
-                                    EstimateLinesFromSize(fileInfo.Length),
-                                    (int)Math.Min(fileInfo.Length, int.MaxValue));
-                            }
-                            continue;
-                        }
-
-                        // Read file to count lines and characters
-                        var content = File.ReadAllText(filePath);
-                        var lineCount = content.Length == 0 ? 0 : 1 + content.Count(c => c == '\n');
-
-                        lock (_metricsLock)
-                        {
-                            _fileMetricsCache[filePath] = new FileMetricsData(
-                                fileInfo.Length,
-                                lineCount,
-                                content.Length);
-                        }
-                    }
-                    catch
-                    {
-                        // Skip files that can't be read
+                        _fileMetricsCache[filePath] = new FileMetricsData(
+                            metrics.SizeBytes,
+                            metrics.LineCount,
+                            metrics.CharCount);
                     }
                 }
-            }, linkedCts.Token);
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Skip files that can't be read
+                }
+            });
 
             // Initial metrics calculation after cache is ready
             RecalculateMetricsAsync();
@@ -2414,11 +2413,6 @@ public partial class MainWindow : Window
             _viewModel.StatusMetricsVisible = false;
         }
     }
-
-    /// <summary>
-    /// Estimate line count from file size (rough approximation: ~60 chars per line).
-    /// </summary>
-    private static int EstimateLinesFromSize(long size) => (int)Math.Max(1, size / 60);
 
     /// <summary>
     /// Recalculate both tree and content metrics based on current selection.
@@ -2539,17 +2533,19 @@ public partial class MainWindow : Window
     /// <summary>
     /// Calculate metrics for file content output.
     /// Sums up metrics from cached file data for selected files.
+    /// Only counts files that are actually text (present in cache) - binary files are excluded.
     /// </summary>
     private (int Lines, int Chars, int Tokens) CalculateContentMetrics(TreeNodeViewModel root, bool hasSelection)
     {
         int totalLines = 0;
         int totalChars = 0;
+        int textFileCount = 0;
 
         // Collect file paths based on selection state
         var filePaths = new List<string>();
         CollectFilePaths(root, hasSelection, filePaths);
 
-        // Sum up metrics from cache
+        // Sum up metrics from cache - only text files are in cache (binary files are excluded)
         lock (_metricsLock)
         {
             foreach (var path in filePaths)
@@ -2558,14 +2554,17 @@ public partial class MainWindow : Window
                 {
                     totalLines += metrics.LineCount;
                     totalChars += metrics.CharCount;
+                    textFileCount++;
                 }
+                // Binary files are not in cache, so they are automatically excluded
             }
         }
 
         // Add overhead for file path headers in output (e.g., "// path/to/file.cs" per file)
-        // Each file adds: separator line + path comment + blank line = ~3 lines, ~100 chars average
-        int headerOverhead = filePaths.Count * 3;
-        int headerCharOverhead = filePaths.Count * 80;
+        // Each file adds: separator line + path comment + blank line = ~3 lines, ~80 chars average
+        // Only count text files that will actually be exported
+        int headerOverhead = textFileCount * 3;
+        int headerCharOverhead = textFileCount * 80;
         totalLines += headerOverhead;
         totalChars += headerCharOverhead;
 

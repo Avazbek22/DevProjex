@@ -28,14 +28,16 @@ public static class AvaloniaCompositionRoot
         var smartIgnoreRules = new ISmartIgnoreRule[]
         {
             new CommonSmartIgnoreRule(),
-            new FrontendArtifactsIgnoreRule()
+            new FrontendArtifactsIgnoreRule(),
+            new DotNetArtifactsIgnoreRule()
         };
         var smartIgnoreService = new SmartIgnoreService(smartIgnoreRules);
         var ignoreOptionsService = new IgnoreOptionsService(localization);
         var ignoreRulesService = new IgnoreRulesService(smartIgnoreService);
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();
-        var contentExportService = new SelectedContentExportService();
+        var fileContentAnalyzer = new FileContentAnalyzer();
+        var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
         var toastService = new ToastService();
         var elevation = new ElevationService();
@@ -61,6 +63,7 @@ public static class AvaloniaCompositionRoot
             IconStore: iconStore,
             GitRepositoryService: gitRepositoryService,
             RepoCacheService: repoCacheService,
-            ZipDownloadService: zipDownloadService);
+            ZipDownloadService: zipDownloadService,
+            FileContentAnalyzer: fileContentAnalyzer);
     }
 }

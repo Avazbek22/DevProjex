@@ -40,9 +40,38 @@ public sealed class ScanOptionsUseCaseTests
 		Assert.True(result.HadAccessDenied);
 	}
 
-	// Verifies no folder selection returns only root file extensions.
+	// Verifies root file extensions are scanned even when no subfolders exist.
+	// This is the fix for Problem 1: folders with only root-level files.
 	[Fact]
-	public void GetExtensionsForRootFolders_ReturnsRootFilesWhenNoFolders()
+	public void GetExtensionsForRootFolders_ScansRootFilesEvenWhenNoSubfolders()
+	{
+		var scanner = new StubFileSystemScanner
+		{
+			GetRootFileExtensionsHandler = (_, _) => new ScanResult<HashSet<string>>(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".txt", ".md" },
+				RootAccessDenied: false,
+				HadAccessDenied: false)
+		};
+		var useCase = new ScanOptionsUseCase(scanner);
+
+		var result = useCase.GetExtensionsForRootFolders("/root", new List<string>(), new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(),
+			SmartIgnoredFiles: new HashSet<string>()));
+
+		// Root files should be scanned even with empty folder selection
+		Assert.Equal(2, result.Value.Count);
+		Assert.Contains(".txt", result.Value);
+		Assert.Contains(".md", result.Value);
+		Assert.False(result.RootAccessDenied);
+		Assert.False(result.HadAccessDenied);
+	}
+
+	// Verifies empty result when scanner returns no root files and no folders selected.
+	[Fact]
+	public void GetExtensionsForRootFolders_ReturnsEmptyWhenNoRootFilesAndNoFolders()
 	{
 		var scanner = new StubFileSystemScanner();
 		var useCase = new ScanOptionsUseCase(scanner);

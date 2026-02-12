@@ -179,17 +179,8 @@ public sealed class SelectionSyncCoordinator
             : new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
                 StringComparer.OrdinalIgnoreCase);
 
-        if (rootFolders.Count == 0)
-        {
-            _viewModel.Extensions.Clear();
-            _suppressExtensionAllCheck = true;
-            _viewModel.AllExtensionsChecked = false;
-            _suppressExtensionAllCheck = false;
-            SyncAllCheckbox(_viewModel.Extensions, ref _suppressExtensionAllCheck,
-                value => _viewModel.AllExtensionsChecked = value);
-            return Task.CompletedTask;
-        }
-
+        // Always scan extensions, even when rootFolders.Count == 0.
+        // ScanOptionsUseCase.GetExtensionsForRootFolders will include root-level files.
         var ignoreRules = _buildIgnoreRules(path);
         return Task.Run(async () =>
         {
@@ -258,15 +249,8 @@ public sealed class SelectionSyncCoordinator
         {
             _viewModel.IgnoreOptions.Clear();
 
-            if (rootFolders.Count == 0)
-            {
-                _ignoreOptions = Array.Empty<IgnoreOptionDescriptor>();
-                _suppressIgnoreAllCheck = true;
-                _viewModel.AllIgnoreChecked = false;
-                _suppressIgnoreAllCheck = false;
-                return;
-            }
-
+            // Always populate ignore options, even when rootFolders.Count == 0.
+            // Ignore options apply to root-level files as well.
             var path = string.IsNullOrWhiteSpace(currentPath) ? _currentPathProvider() : currentPath;
             var hasGitIgnore = HasGitIgnore(path);
             _ignoreOptions = _ignoreOptionsService.GetOptions(includeGitIgnore: hasGitIgnore);

@@ -23,4 +23,5 @@ public sealed record AvaloniaAppServices(
     IIconStore IconStore,
     IGitRepositoryService GitRepositoryService,
     IRepoCacheService RepoCacheService,
-    IZipDownloadService ZipDownloadService);
+    IZipDownloadService ZipDownloadService,
+    IFileContentAnalyzer FileContentAnalyzer);

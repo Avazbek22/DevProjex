@@ -34,9 +34,8 @@ public sealed class ScanOptionsUseCase
 	{
 		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-		if (rootFolders.Count == 0)
-			return new ScanResult<HashSet<string>>(extensions, false, false);
-
+		// Always scan root-level files, even when no subfolders are selected.
+		// This ensures folders containing only files (no subdirectories) work correctly.
 		var rootFiles = _scanner.GetRootFileExtensions(rootPath, ignoreRules);
 		foreach (var ext in rootFiles.Value)
 			extensions.Add(ext);
@@ -44,6 +43,7 @@ public sealed class ScanOptionsUseCase
 		bool rootAccessDenied = rootFiles.RootAccessDenied;
 		bool hadAccessDenied = rootFiles.HadAccessDenied;
 
+		// Scan extensions from selected subfolders
 		foreach (var folder in rootFolders)
 		{
 			var folderPath = Path.Combine(rootPath, folder);

@@ -15,7 +15,11 @@
       "Bash(timeout 6 dotnet run:*)",
       "Bash(timeout 5 dotnet run:*)",
       "Bash(find:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(dir \"C:\\\\Users\\\\Avazbek\\\\RiderProjects\\\\DevProjex\\\\Application\" /b)",
+      "Bash(taskkill:*)",
+      "Bash(timeout:*)",
+      "Bash(powershell:*)"
     ]
   }
 }

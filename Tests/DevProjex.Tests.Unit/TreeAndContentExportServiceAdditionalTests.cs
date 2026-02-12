@@ -16,7 +16,7 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("alpha.txt", "Alpha");
 		var root = BuildTree(temp.Path, file);
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 
 		var output = service.Build(temp.Path, root, new HashSet<string>());
 
@@ -31,7 +31,7 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("alpha.txt", "Alpha");
 		var root = BuildTree(temp.Path, file);
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var selected = new HashSet<string> { file };
 
 		var output = service.Build(temp.Path, root, selected);
@@ -47,7 +47,7 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("alpha.txt", "Alpha");
 		var root = BuildTree(temp.Path, file);
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var selected = new HashSet<string> { Path.Combine(temp.Path, "missing.txt") };
 
 		var output = service.Build(temp.Path, root, selected);
@@ -63,7 +63,7 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("alpha.txt", string.Empty);
 		var root = BuildTree(temp.Path, file);
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var selected = new HashSet<string> { file };
 
 		var output = service.Build(temp.Path, root, selected);
@@ -81,7 +81,7 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 		var alpha = temp.CreateFile("alpha.txt", "Alpha");
 		var beta = temp.CreateFile("beta.txt", "Beta");
 		var root = BuildTree(temp.Path, alpha, beta);
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var selected = new HashSet<string> { beta };
 
 		var output = service.Build(temp.Path, root, selected);

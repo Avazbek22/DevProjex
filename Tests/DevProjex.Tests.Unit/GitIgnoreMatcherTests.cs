@@ -811,4 +811,153 @@ public sealed class GitIgnoreMatcherTests
 	}
 
 	#endregion
+
+	#region Content-Based Directory Ignore (dir/* patterns)
+
+	[Fact]
+	public void IsIgnored_ContentPatternIgnoresDirectory_WhenAllContentsIgnored()
+	{
+		// Pattern **/bin/* ignores all contents of bin, so bin directory itself should be ignored
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/bin/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/bin", true, "bin"));
+		Assert.True(matcher.IsIgnored("/repo/src/Project/bin", true, "bin"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPatternIgnoresDirectory_ObjFolder()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/obj/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/obj", true, "obj"));
+		Assert.True(matcher.IsIgnored("/repo/src/Project/obj", true, "obj"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPatternIgnoresDirectory_NodeModules()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/node_modules/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/node_modules", true, "node_modules"));
+		Assert.True(matcher.IsIgnored("/repo/packages/app/node_modules", true, "node_modules"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPatternIgnoresDirectory_DistFolder()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/dist/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/dist", true, "dist"));
+		Assert.True(matcher.IsIgnored("/repo/packages/ui/dist", true, "dist"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPatternIgnoresDirectory_TargetFolder()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/target/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/target", true, "target"));
+		Assert.True(matcher.IsIgnored("/repo/module/target", true, "target"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPatternIgnoresDirectory_VendorFolder()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/vendor/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/vendor", true, "vendor"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPatternIgnoresDirectory_CacheFolder()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/.cache/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/.cache", true, ".cache"));
+		Assert.True(matcher.IsIgnored("/repo/project/.cache", true, ".cache"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPattern_DoesNotIgnoreUnrelatedDirectory()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/bin/*" });
+
+		Assert.False(matcher.IsIgnored("/repo/src", true, "src"));
+		Assert.False(matcher.IsIgnored("/repo/lib", true, "lib"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPattern_DoesNotIgnoreFiles()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/bin/*" });
+
+		// Files named "bin" should not be ignored by this pattern
+		Assert.False(matcher.IsIgnored("/repo/bin", false, "bin"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPattern_WithNegation_DoesNotIgnoreDirectory()
+	{
+		// When negation rules exist, we should be conservative and NOT hide the directory
+		// because some contents might be un-ignored
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/bin/*", "!**/bin/keep.dll" });
+
+		// With negation rules, directory should NOT be hidden (conservative approach)
+		Assert.False(matcher.IsIgnored("/repo/bin", true, "bin"));
+	}
+
+	[Fact]
+	public void IsIgnored_ContentPattern_CharacterClass()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/[Bb]in/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/bin", true, "bin"));
+		Assert.True(matcher.IsIgnored("/repo/Bin", true, "Bin"));
+		Assert.True(matcher.IsIgnored("/repo/src/Project/bin", true, "bin"));
+	}
+
+	[Fact]
+	public void IsIgnored_DirectPatternStillWorks()
+	{
+		// Direct directory patterns should still work
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "bin/" });
+
+		Assert.True(matcher.IsIgnored("/repo/bin", true, "bin"));
+		Assert.True(matcher.IsIgnored("/repo/src/bin", true, "bin"));
+	}
+
+	[Fact]
+	public void IsIgnored_BothDirectAndContentPatterns()
+	{
+		// Both bin/ and **/bin/* should work together
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "[Oo]bj/", "**/[Bb]in/*" });
+
+		Assert.True(matcher.IsIgnored("/repo/obj", true, "obj"));
+		Assert.True(matcher.IsIgnored("/repo/Obj", true, "Obj"));
+		Assert.True(matcher.IsIgnored("/repo/bin", true, "bin"));
+		Assert.True(matcher.IsIgnored("/repo/Bin", true, "Bin"));
+		Assert.True(matcher.IsIgnored("/repo/src/Project/obj", true, "obj"));
+		Assert.True(matcher.IsIgnored("/repo/src/Project/bin", true, "bin"));
+	}
+
+	[Fact]
+	public void IsIgnored_SpecificFilePattern_DoesNotIgnoreDirectory()
+	{
+		// Pattern *.log should NOT cause directories to be ignored
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "*.log" });
+
+		Assert.False(matcher.IsIgnored("/repo/logs", true, "logs"));
+	}
+
+	[Fact]
+	public void IsIgnored_PartialContentPattern_DoesNotIgnoreDirectory()
+	{
+		// Pattern logs/*.log only ignores .log files in logs, not all contents
+		// So logs directory should NOT be hidden
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "logs/*.log" });
+
+		Assert.False(matcher.IsIgnored("/repo/logs", true, "logs"));
+	}
+
+	#endregion
 }
