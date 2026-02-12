@@ -130,6 +130,7 @@
   "Status.Operation.GettingUpdates": "Обновление",
   "Status.Operation.GettingUpdatesBranch": "Обновление {0}",
   "Status.Operation.SwitchingBranch": "Переключение ветки {0}",
+  "Status.Operation.CalculatingData": "Подсчет данных",
   "Status.Metric.Lines": "Строки: {0}",
   "Status.Metric.Chars": "Символы: {0}",
   "Status.Metric.Tokens": "~Токены: {0}",

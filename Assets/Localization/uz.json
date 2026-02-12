@@ -130,6 +130,7 @@
   "Status.Operation.GettingUpdates": "Yangilash",
   "Status.Operation.GettingUpdatesBranch": "Yangilash {0}",
   "Status.Operation.SwitchingBranch": "Tarmoqni almashtirish {0}",
+  "Status.Operation.CalculatingData": "Ma'lumotlarni hisoblash",
   "Status.Metric.Lines": "Qatorlar: {0}",
   "Status.Metric.Chars": "Belgilar: {0}",
   "Status.Metric.Tokens": "~Tokenlar: {0}",

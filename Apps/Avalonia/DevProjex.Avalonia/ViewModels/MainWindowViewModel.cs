@@ -73,6 +73,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _statusContentStatsText = string.Empty;
     private string _statusOperationText = string.Empty;
     private bool _statusBusy;
+    private bool _statusMetricsVisible;
     private bool _statusProgressIsIndeterminate = true;
     private double _statusProgressValue;
 
@@ -173,6 +174,17 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool StatusProgressPercentVisible => _statusBusy && !_statusProgressIsIndeterminate;
 
     public string StatusProgressPercentText => $"{Math.Clamp((int)Math.Round(_statusProgressValue), 0, 100)}%";
+
+    public bool StatusMetricsVisible
+    {
+        get => _statusMetricsVisible;
+        set
+        {
+            if (_statusMetricsVisible == value) return;
+            _statusMetricsVisible = value;
+            RaisePropertyChanged();
+        }
+    }
 
     public string Title
     {
@@ -810,6 +822,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string StatusOperationGettingUpdates { get; private set; } = string.Empty;
     public string StatusOperationGettingUpdatesBranch { get; private set; } = string.Empty;
     public string StatusOperationSwitchingBranch { get; private set; } = string.Empty;
+    public string StatusOperationCalculatingData { get; private set; } = string.Empty;
 
     // Git menu localization
     public string MenuGitClone { get; private set; } = string.Empty;
@@ -903,6 +916,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         StatusOperationGettingUpdates = _localization["Status.Operation.GettingUpdates"];
         StatusOperationGettingUpdatesBranch = _localization["Status.Operation.GettingUpdatesBranch"];
         StatusOperationSwitchingBranch = _localization["Status.Operation.SwitchingBranch"];
+        StatusOperationCalculatingData = _localization["Status.Operation.CalculatingData"];
 
         // Git menu localization
         MenuGitClone = _localization["Menu.Git.Clone"];
@@ -1008,6 +1022,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(StatusOperationGettingUpdates));
         RaisePropertyChanged(nameof(StatusOperationGettingUpdatesBranch));
         RaisePropertyChanged(nameof(StatusOperationSwitchingBranch));
+        RaisePropertyChanged(nameof(StatusOperationCalculatingData));
 
         // Theme popover localization
         RaisePropertyChanged(nameof(MenuTheme));

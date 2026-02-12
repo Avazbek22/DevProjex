@@ -1770,6 +1770,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        _viewModel.StatusMetricsVisible = false;
         BeginStatusOperation(_viewModel.StatusOperationLoadingProject, indeterminate: true);
         try
         {
@@ -1883,6 +1884,9 @@ public partial class MainWindow : Window
 
         // Clear current tree descriptor reference (this is the second copy of the tree)
         _currentTree = null;
+        _viewModel.StatusMetricsVisible = false;
+        _viewModel.StatusTreeStatsText = string.Empty;
+        _viewModel.StatusContentStatsText = string.Empty;
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
@@ -1922,8 +1926,13 @@ public partial class MainWindow : Window
             IgnoreRules: ignoreRules,
             NameFilter: nameFilter);
 
+        var waitCursorActive = false;
         if (!interactiveFilter)
+        {
+            _viewModel.StatusMetricsVisible = false;
             Cursor = new Cursor(StandardCursorType.Wait);
+            waitCursorActive = true;
+        }
         try
         {
             BuildTreeResult result;
@@ -1978,8 +1987,14 @@ public partial class MainWindow : Window
             // Only do full scan on initial load, not on interactive filter changes
             if (!interactiveFilter)
             {
-                // Fire and forget - background task for metrics initialization
-                var metricsTask = InitializeFileMetricsCacheAsync(cancellationToken);
+                if (waitCursorActive)
+                {
+                    Cursor = new Cursor(StandardCursorType.Arrow);
+                    waitCursorActive = false;
+                }
+
+                UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
+                await InitializeFileMetricsCacheAsync(cancellationToken);
             }
             else
             {
@@ -1994,7 +2009,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (!interactiveFilter)
+            if (!interactiveFilter && waitCursorActive)
                 Cursor = new Cursor(StandardCursorType.Arrow);
         }
     }
@@ -2324,6 +2339,11 @@ public partial class MainWindow : Window
 
         try
         {
+            UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
+            _viewModel.StatusBusy = true;
+            _viewModel.StatusProgressIsIndeterminate = true;
+            _viewModel.StatusProgressValue = 0;
+
             // Collect all file paths from tree
             var filePaths = new List<string>();
             foreach (var node in _viewModel.TreeNodes.SelectMany(n => n.Flatten()))
@@ -2385,10 +2405,12 @@ public partial class MainWindow : Window
 
             // Initial metrics calculation after cache is ready
             RecalculateMetricsAsync();
+            _viewModel.StatusMetricsVisible = true;
         }
         catch (OperationCanceledException)
         {
             // Cancelled, ignore
+            _viewModel.StatusMetricsVisible = false;
         }
     }
 
@@ -2614,6 +2636,11 @@ public partial class MainWindow : Window
             >= 10_000 => $"{value / 1_000.0:F1}K",
             _ => value.ToString("N0")
         };
+    }
+
+    private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)
+    {
+        // Reserved for future cancellation support.
     }
 
     #endregion

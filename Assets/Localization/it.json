@@ -130,6 +130,7 @@
   "Status.Operation.GettingUpdates": "Aggiornamento",
   "Status.Operation.GettingUpdatesBranch": "Aggiornamento {0}",
   "Status.Operation.SwitchingBranch": "Cambio branch {0}",
+  "Status.Operation.CalculatingData": "Calcolo dei dati",
   "Status.Metric.Lines": "Righe: {0}",
   "Status.Metric.Chars": "Caratteri: {0}",
   "Status.Metric.Tokens": "~Token: {0}",

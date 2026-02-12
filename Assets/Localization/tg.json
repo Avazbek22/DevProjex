@@ -130,6 +130,7 @@
   "Status.Operation.GettingUpdates": "Навсозӣ",
   "Status.Operation.GettingUpdatesBranch": "Навсозӣ {0}",
   "Status.Operation.SwitchingBranch": "Ивазкунии шоха {0}",
+  "Status.Operation.CalculatingData": "Ҳисобкунии додаҳо",
   "Status.Metric.Lines": "Сатрҳо: {0}",
   "Status.Metric.Chars": "Аломатҳо: {0}",
   "Status.Metric.Tokens": "~Токенҳо: {0}",
