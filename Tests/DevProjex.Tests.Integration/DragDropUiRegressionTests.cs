@@ -11,13 +11,18 @@ public sealed class DragDropUiRegressionTests
     private static readonly Lazy<string> RepoRoot = new(FindRepositoryRoot);
 
     [Fact]
-    public void TopMenuBar_MenuSpansBothColumns_ToAvoidFilterAreaSeam()
+    public void TopMenuBar_MenuSpansAllColumns_ToAvoidFilterAreaSeam()
     {
         var file = Path.Combine(RepoRoot.Value, "Apps", "Avalonia", "DevProjex.Avalonia", "Views", "TopMenuBarView.axaml");
         var content = File.ReadAllText(file);
 
-        Assert.Contains("Name=\"MainMenu\" Grid.Column=\"0\" Grid.ColumnSpan=\"2\"", content);
-        Assert.Contains("Button Grid.Column=\"1\"", content);
+        // Menu spans all 3 columns (menu items, format switcher, filter button)
+        Assert.Contains("Name=\"MainMenu\" Grid.Column=\"0\" Grid.ColumnSpan=\"3\"", content);
+        // Format switcher in column 1
+        Assert.Contains("Grid.Column=\"1\"", content);
+        Assert.Contains("segmented-control", content);
+        // Filter button in column 2
+        Assert.Contains("Button Grid.Column=\"2\"", content);
         Assert.Contains("Classes=\"menu-icon-button\"", content);
     }
 

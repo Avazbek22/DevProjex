@@ -46,10 +46,12 @@ public sealed class GitIgnoreMatcher
             if (line.Length == 0 || line.StartsWith('#'))
                 continue;
 
-            if (line.StartsWith(@"\#") || line.StartsWith(@"\!"))
+            var escapedSpecial = line.StartsWith(@"\#") || line.StartsWith(@"\!");
+            if (escapedSpecial)
                 line = line[1..];
 
-            var isNegation = line.StartsWith('!');
+            // Only treat as negation if not escaped
+            var isNegation = !escapedSpecial && line.StartsWith('!');
             if (isNegation)
             {
                 line = line[1..];
