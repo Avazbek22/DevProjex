@@ -132,5 +132,7 @@
   "Status.Operation.SwitchingBranch": "Zweigwechsel {0}",
   "Status.Metric.Lines": "Zeilen: {0}",
   "Status.Metric.Chars": "Zeichen: {0}",
-  "Status.Metric.Tokens": "~Token: {0}"
+  "Status.Metric.Tokens": "~Token: {0}",
+  "Status.Tree.Label": "Baum",
+  "Status.Content.Label": "Inhalt"
 }

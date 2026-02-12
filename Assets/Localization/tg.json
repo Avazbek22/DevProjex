@@ -132,5 +132,7 @@
   "Status.Operation.SwitchingBranch": "Ивазкунии шоха {0}",
   "Status.Metric.Lines": "Сатрҳо: {0}",
   "Status.Metric.Chars": "Аломатҳо: {0}",
-  "Status.Metric.Tokens": "~Токенҳо: {0}"
+  "Status.Metric.Tokens": "~Токенҳо: {0}",
+  "Status.Tree.Label": "Дарахт",
+  "Status.Content.Label": "Мундариҷа"
 }

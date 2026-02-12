@@ -69,9 +69,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
     private double _aboutPopoverMaxHeight = 380;
-    private string _statusLineCountText = "Lines: 0";
-    private string _statusCharCountText = "Chars: 0";
-    private string _statusTokenEstimateText = "~Tokens: 0";
+    private string _statusTreeStatsText = string.Empty;
+    private string _statusContentStatsText = string.Empty;
     private string _statusOperationText = string.Empty;
     private bool _statusBusy;
     private bool _statusProgressIsIndeterminate = true;
@@ -99,35 +98,24 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new();
     public ObservableCollection<FontFamily> FontFamilies { get; } = new();
 
-    public string StatusLineCountText
+    public string StatusTreeStatsText
     {
-        get => _statusLineCountText;
+        get => _statusTreeStatsText;
         set
         {
-            if (_statusLineCountText == value) return;
-            _statusLineCountText = value;
+            if (_statusTreeStatsText == value) return;
+            _statusTreeStatsText = value;
             RaisePropertyChanged();
         }
     }
 
-    public string StatusCharCountText
+    public string StatusContentStatsText
     {
-        get => _statusCharCountText;
+        get => _statusContentStatsText;
         set
         {
-            if (_statusCharCountText == value) return;
-            _statusCharCountText = value;
-            RaisePropertyChanged();
-        }
-    }
-
-    public string StatusTokenEstimateText
-    {
-        get => _statusTokenEstimateText;
-        set
-        {
-            if (_statusTokenEstimateText == value) return;
-            _statusTokenEstimateText = value;
+            if (_statusContentStatsText == value) return;
+            _statusContentStatsText = value;
             RaisePropertyChanged();
         }
     }
@@ -807,6 +795,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string FilterTooltip { get; private set; } = string.Empty;
     public string CopyFormatTooltip { get; private set; } = string.Empty;
 
+    // StatusBar labels
+    public string StatusTreeLabel { get; private set; } = string.Empty;
+    public string StatusContentLabel { get; private set; } = string.Empty;
+
     // Drop Zone localization
     public string DropZoneTitle { get; private set; } = string.Empty;
     public string DropZoneButtonText { get; private set; } = string.Empty;
@@ -895,6 +887,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
         CopyFormatTooltip = _localization["CopyFormat.Tooltip"];
+
+        // StatusBar labels
+        StatusTreeLabel = _localization["Status.Tree.Label"];
+        StatusContentLabel = _localization["Status.Content.Label"];
 
         // Drop Zone localization
         DropZoneTitle = _localization["DropZone.Title"];
@@ -996,6 +992,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(FilterByNamePlaceholder));
         RaisePropertyChanged(nameof(FilterTooltip));
         RaisePropertyChanged(nameof(CopyFormatTooltip));
+
+        // StatusBar labels
+        RaisePropertyChanged(nameof(StatusTreeLabel));
+        RaisePropertyChanged(nameof(StatusContentLabel));
 
         // Drop Zone localization
         RaisePropertyChanged(nameof(DropZoneTitle));

@@ -132,5 +132,7 @@
   "Status.Operation.SwitchingBranch": "Tarmoqni almashtirish {0}",
   "Status.Metric.Lines": "Qatorlar: {0}",
   "Status.Metric.Chars": "Belgilar: {0}",
-  "Status.Metric.Tokens": "~Tokenlar: {0}"
+  "Status.Metric.Tokens": "~Tokenlar: {0}",
+  "Status.Tree.Label": "Daraxt",
+  "Status.Content.Label": "Mazmun"
 }

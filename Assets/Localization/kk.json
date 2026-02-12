@@ -132,5 +132,7 @@
   "Status.Operation.SwitchingBranch": "Тармақты ауыстыру {0}",
   "Status.Metric.Lines": "Жолдар: {0}",
   "Status.Metric.Chars": "Таңбалар: {0}",
-  "Status.Metric.Tokens": "~Токендер: {0}"
+  "Status.Metric.Tokens": "~Токендер: {0}",
+  "Status.Tree.Label": "Ағаш",
+  "Status.Content.Label": "Мазмұн"
 }

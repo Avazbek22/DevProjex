@@ -132,5 +132,7 @@
   "Status.Operation.SwitchingBranch": "Changement de branche {0}",
   "Status.Metric.Lines": "Lignes: {0}",
   "Status.Metric.Chars": "Caracteres: {0}",
-  "Status.Metric.Tokens": "~Jetons: {0}"
+  "Status.Metric.Tokens": "~Jetons: {0}",
+  "Status.Tree.Label": "Arborescence",
+  "Status.Content.Label": "Contenu"
 }

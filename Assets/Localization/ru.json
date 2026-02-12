@@ -132,5 +132,7 @@
   "Status.Operation.SwitchingBranch": "Переключение ветки {0}",
   "Status.Metric.Lines": "Строки: {0}",
   "Status.Metric.Chars": "Символы: {0}",
-  "Status.Metric.Tokens": "~Токены: {0}"
+  "Status.Metric.Tokens": "~Токены: {0}",
+  "Status.Tree.Label": "Дерево",
+  "Status.Content.Label": "Содержимое"
 }

@@ -90,9 +90,12 @@ public partial class MainWindow : Window
     private TranslateTransform? _dropZoneIconTransform;
     private global::Avalonia.Threading.DispatcherTimer? _dropZoneFloatTimer;
     private readonly Stopwatch _dropZoneFloatClock = new();
-    private int _statusLineCount;
-    private int _statusCharCount;
-    private int _statusTokenEstimate;
+
+    // Real-time metrics calculation
+    private readonly object _metricsLock = new();
+    private CancellationTokenSource? _metricsCalculationCts;
+    private global::Avalonia.Threading.DispatcherTimer? _metricsDebounceTimer;
+    private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -122,7 +125,7 @@ public partial class MainWindow : Window
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _viewModel.SetToastItems(_toastService.Items);
         DataContext = _viewModel;
-        ApplyStatusMetricTexts();
+        SubscribeToMetricsUpdates();
 
         InitializeComponent();
 
@@ -210,6 +213,8 @@ public partial class MainWindow : Window
                 HandleThemePopoverStateChange();
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
                 UpdateDropZoneFloatAnimationState();
+            else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
+                RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
 
@@ -238,6 +243,14 @@ public partial class MainWindow : Window
         // Unsubscribe from ViewModel
         if (_viewModelPropertyChangedHandler is not null)
             _viewModel.PropertyChanged -= _viewModelPropertyChangedHandler;
+
+        // Unsubscribe from tree checkbox changes for metrics
+        UnsubscribeFromMetricsUpdates();
+
+        // Cancel metrics calculation
+        _metricsCalculationCts?.Cancel();
+        _metricsCalculationCts?.Dispose();
+        _metricsDebounceTimer?.Stop();
 
         // Dispose coordinators
         _searchCoordinator.Dispose();
@@ -606,7 +619,7 @@ public partial class MainWindow : Window
     private void ApplyLocalization()
     {
         _viewModel.UpdateLocalization();
-        ApplyStatusMetricTexts();
+        RecalculateMetricsAsync(); // Update metrics text with new localization
         UpdateTitle();
 
         if (_currentPath is not null)
@@ -686,7 +699,6 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
-            UpdateStatusMetricsFromContent(content);
             CompleteStatusOperation();
             _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
@@ -729,7 +741,6 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
-            UpdateStatusMetricsFromContent(content);
             CompleteStatusOperation();
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
@@ -751,7 +762,6 @@ public partial class MainWindow : Window
             BeginStatusOperation("Building export...", indeterminate: true);
             var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
             await SetClipboardTextAsync(content);
-            UpdateStatusMetricsFromContent(content);
             CompleteStatusOperation();
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
@@ -1964,6 +1974,19 @@ public partial class MainWindow : Window
 
             _searchCoordinator.UpdateSearchMatches();
 
+            // Initialize file metrics cache in background for real-time status bar updates
+            // Only do full scan on initial load, not on interactive filter changes
+            if (!interactiveFilter)
+            {
+                // Fire and forget - background task for metrics initialization
+                var metricsTask = InitializeFileMetricsCacheAsync(cancellationToken);
+            }
+            else
+            {
+                // For filter changes, just recalculate from existing cache
+                RecalculateMetricsAsync();
+            }
+
             // Suggest GC to collect old tree objects after building new one
             // Using non-blocking mode to avoid UI freeze
             if (!interactiveFilter)
@@ -2054,36 +2077,6 @@ public partial class MainWindow : Window
         _viewModel.StatusProgressValue = 0;
     }
 
-    private void UpdateStatusMetricsFromContent(string content)
-    {
-        if (string.IsNullOrEmpty(content))
-        {
-            _statusLineCount = 0;
-            _statusCharCount = 0;
-            _statusTokenEstimate = 0;
-            ApplyStatusMetricTexts();
-            return;
-        }
-
-        var lineCount = 1;
-        for (var i = 0; i < content.Length; i++)
-        {
-            if (content[i] == '\n')
-                lineCount++;
-        }
-
-        _statusLineCount = lineCount;
-        _statusCharCount = content.Length;
-        _statusTokenEstimate = (int)Math.Ceiling(_statusCharCount / 4.0);
-        ApplyStatusMetricTexts();
-    }
-
-    private void ApplyStatusMetricTexts()
-    {
-        _viewModel.StatusLineCountText = _localization.Format("Status.Metric.Lines", _statusLineCount);
-        _viewModel.StatusCharCountText = _localization.Format("Status.Metric.Chars", _statusCharCount);
-        _viewModel.StatusTokenEstimateText = _localization.Format("Status.Metric.Tokens", _statusTokenEstimate);
-    }
 
     private static bool TryParseTrailingPercent(string status, out double percent)
     {
@@ -2272,5 +2265,357 @@ public partial class MainWindow : Window
             return false;
         }
     }
+
+    #region Real-time Status Metrics
+
+    /// <summary>
+    /// Cached file metrics for efficient real-time updates.
+    /// </summary>
+    private sealed record FileMetricsData(long Size, int LineCount, int CharCount)
+    {
+        public int EstimatedTokens => (int)Math.Ceiling(CharCount / 4.0);
+    }
+
+    /// <summary>
+    /// Subscribe to checkbox change events for real-time metrics updates.
+    /// </summary>
+    private void SubscribeToMetricsUpdates()
+    {
+        TreeNodeViewModel.GlobalCheckedChanged += OnTreeNodeCheckedChanged;
+    }
+
+    /// <summary>
+    /// Unsubscribe from checkbox change events.
+    /// </summary>
+    private void UnsubscribeFromMetricsUpdates()
+    {
+        TreeNodeViewModel.GlobalCheckedChanged -= OnTreeNodeCheckedChanged;
+    }
+
+    /// <summary>
+    /// Handle checkbox change with debouncing to avoid excessive recalculations.
+    /// </summary>
+    private void OnTreeNodeCheckedChanged(object? sender, EventArgs e)
+    {
+        // Debounce rapid checkbox changes (e.g., when selecting parent node)
+        _metricsDebounceTimer?.Stop();
+        _metricsDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(50)
+        };
+        _metricsDebounceTimer.Tick += (_, _) =>
+        {
+            _metricsDebounceTimer.Stop();
+            RecalculateMetricsAsync();
+        };
+        _metricsDebounceTimer.Start();
+    }
+
+    /// <summary>
+    /// Initialize file metrics cache after tree is built.
+    /// Scans all files in background to cache their metrics.
+    /// </summary>
+    private async Task InitializeFileMetricsCacheAsync(CancellationToken cancellationToken)
+    {
+        // Cancel any previous calculation
+        _metricsCalculationCts?.Cancel();
+        _metricsCalculationCts = new CancellationTokenSource();
+        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _metricsCalculationCts.Token);
+
+        try
+        {
+            // Collect all file paths from tree
+            var filePaths = new List<string>();
+            foreach (var node in _viewModel.TreeNodes.SelectMany(n => n.Flatten()))
+            {
+                if (!node.Descriptor.IsDirectory && !node.Descriptor.IsAccessDenied)
+                    filePaths.Add(node.FullPath);
+            }
+
+            // Scan files in background
+            await Task.Run(() =>
+            {
+                lock (_metricsLock)
+                {
+                    _fileMetricsCache.Clear();
+                }
+
+                foreach (var filePath in filePaths)
+                {
+                    if (linkedCts.Token.IsCancellationRequested)
+                        return;
+
+                    try
+                    {
+                        var fileInfo = new FileInfo(filePath);
+                        if (!fileInfo.Exists)
+                            continue;
+
+                        // Skip very large files (>10MB) for performance
+                        if (fileInfo.Length > 10 * 1024 * 1024)
+                        {
+                            lock (_metricsLock)
+                            {
+                                _fileMetricsCache[filePath] = new FileMetricsData(
+                                    fileInfo.Length,
+                                    EstimateLinesFromSize(fileInfo.Length),
+                                    (int)Math.Min(fileInfo.Length, int.MaxValue));
+                            }
+                            continue;
+                        }
+
+                        // Read file to count lines and characters
+                        var content = File.ReadAllText(filePath);
+                        var lineCount = content.Length == 0 ? 0 : 1 + content.Count(c => c == '\n');
+
+                        lock (_metricsLock)
+                        {
+                            _fileMetricsCache[filePath] = new FileMetricsData(
+                                fileInfo.Length,
+                                lineCount,
+                                content.Length);
+                        }
+                    }
+                    catch
+                    {
+                        // Skip files that can't be read
+                    }
+                }
+            }, linkedCts.Token);
+
+            // Initial metrics calculation after cache is ready
+            RecalculateMetricsAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled, ignore
+        }
+    }
+
+    /// <summary>
+    /// Estimate line count from file size (rough approximation: ~60 chars per line).
+    /// </summary>
+    private static int EstimateLinesFromSize(long size) => (int)Math.Max(1, size / 60);
+
+    /// <summary>
+    /// Recalculate both tree and content metrics based on current selection.
+    /// </summary>
+    private void RecalculateMetricsAsync()
+    {
+        if (!_viewModel.IsProjectLoaded || _viewModel.TreeNodes.Count == 0)
+        {
+            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+            return;
+        }
+
+        var treeRoot = _viewModel.TreeNodes.FirstOrDefault();
+        if (treeRoot == null)
+            return;
+
+        // Determine which nodes are selected (if any explicitly checked, use those; otherwise use all)
+        var hasAnyChecked = HasAnyCheckedNodes(treeRoot);
+
+        // Calculate tree metrics (ASCII tree structure)
+        var treeMetrics = CalculateTreeMetrics(treeRoot, hasAnyChecked);
+
+        // Calculate content metrics (file contents)
+        var contentMetrics = CalculateContentMetrics(treeRoot, hasAnyChecked);
+
+        // Update UI on dispatcher thread
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            UpdateStatusBarMetrics(
+                treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
+                contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
+        });
+    }
+
+    /// <summary>
+    /// Check if any node in the tree is explicitly checked.
+    /// </summary>
+    private static bool HasAnyCheckedNodes(TreeNodeViewModel root)
+    {
+        if (root.IsChecked == true)
+            return true;
+
+        foreach (var child in root.Children)
+        {
+            if (HasAnyCheckedNodes(child))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Calculate metrics for tree output based on selected format (ASCII or JSON).
+    /// Estimates lines, characters, and tokens for the tree structure text.
+    /// </summary>
+    private (int Lines, int Chars, int Tokens) CalculateTreeMetrics(TreeNodeViewModel root, bool hasSelection)
+    {
+        int lineCount = 0;
+        int charCount = 0;
+
+        var isJson = _viewModel.SelectedExportFormat == ExportFormat.Json;
+
+        // Count nodes that will be included in tree output
+        CountTreeNodes(root, hasSelection, ref lineCount, ref charCount, 0, true, isJson);
+
+        if (isJson)
+        {
+            // JSON overhead: opening/closing braces, array brackets, etc.
+            // Estimate: ~20 chars for root structure + ~10 per node for JSON syntax
+            int nodeCount = lineCount;
+            charCount += 20 + (nodeCount * 10);
+            // JSON typically has more lines due to formatting
+            lineCount += nodeCount / 2;
+        }
+
+        // Token estimate: ~4 chars per token
+        int tokens = (int)Math.Ceiling(charCount / 4.0);
+
+        return (lineCount, charCount, tokens);
+    }
+
+    /// <summary>
+    /// Recursively count tree nodes and estimate character count.
+    /// </summary>
+    private void CountTreeNodes(TreeNodeViewModel node, bool hasSelection, ref int lineCount, ref int charCount, int depth, bool isRoot, bool isJson)
+    {
+        // If there's a selection, only count nodes that are checked or have checked descendants
+        if (hasSelection && node.IsChecked == false)
+            return;
+
+        // Each node is one line
+        lineCount++;
+
+        if (isJson)
+        {
+            // JSON format: {"name": "filename", "type": "file", "children": [...]}
+            // Estimate: indent (depth * 2) + "name" key + value + type + structure chars
+            int indent = depth * 2;
+            int nameLen = node.DisplayName.Length;
+            // ~30 chars for JSON syntax per node + name length + indent
+            charCount += indent + nameLen + 30;
+        }
+        else
+        {
+            // ASCII tree format: "├── filename" or "└── filename"
+            // Estimate chars per line: prefix (depth * 4) + name + newline
+            int prefixLen = isRoot ? 0 : depth * 4;
+            charCount += prefixLen + node.DisplayName.Length + 1; // +1 for newline
+        }
+
+        // Recursively count children
+        foreach (var child in node.Children)
+        {
+            CountTreeNodes(child, hasSelection, ref lineCount, ref charCount, depth + 1, false, isJson);
+        }
+    }
+
+    /// <summary>
+    /// Calculate metrics for file content output.
+    /// Sums up metrics from cached file data for selected files.
+    /// </summary>
+    private (int Lines, int Chars, int Tokens) CalculateContentMetrics(TreeNodeViewModel root, bool hasSelection)
+    {
+        int totalLines = 0;
+        int totalChars = 0;
+
+        // Collect file paths based on selection state
+        var filePaths = new List<string>();
+        CollectFilePaths(root, hasSelection, filePaths);
+
+        // Sum up metrics from cache
+        lock (_metricsLock)
+        {
+            foreach (var path in filePaths)
+            {
+                if (_fileMetricsCache.TryGetValue(path, out var metrics))
+                {
+                    totalLines += metrics.LineCount;
+                    totalChars += metrics.CharCount;
+                }
+            }
+        }
+
+        // Add overhead for file path headers in output (e.g., "// path/to/file.cs" per file)
+        // Each file adds: separator line + path comment + blank line = ~3 lines, ~100 chars average
+        int headerOverhead = filePaths.Count * 3;
+        int headerCharOverhead = filePaths.Count * 80;
+        totalLines += headerOverhead;
+        totalChars += headerCharOverhead;
+
+        int tokens = (int)Math.Ceiling(totalChars / 4.0);
+
+        return (totalLines, totalChars, tokens);
+    }
+
+    /// <summary>
+    /// Collect file paths from tree based on selection state.
+    /// </summary>
+    private static void CollectFilePaths(TreeNodeViewModel node, bool hasSelection, List<string> filePaths)
+    {
+        // If there's a selection, only include checked files
+        if (hasSelection)
+        {
+            if (node.IsChecked == true && !node.Descriptor.IsDirectory)
+            {
+                filePaths.Add(node.FullPath);
+            }
+            else if (node.IsChecked != false) // null or true - has some checked descendants
+            {
+                foreach (var child in node.Children)
+                    CollectFilePaths(child, hasSelection, filePaths);
+            }
+        }
+        else
+        {
+            // No selection - include all files
+            if (!node.Descriptor.IsDirectory && !node.Descriptor.IsAccessDenied)
+            {
+                filePaths.Add(node.FullPath);
+            }
+
+            foreach (var child in node.Children)
+                CollectFilePaths(child, hasSelection, filePaths);
+        }
+    }
+
+    /// <summary>
+    /// Update status bar with calculated metrics.
+    /// </summary>
+    private void UpdateStatusBarMetrics(
+        int treeLines, int treeChars, int treeTokens,
+        int contentLines, int contentChars, int contentTokens)
+    {
+        // Format: [Lines: X | Chars: X | ~Tokens: X]
+        var linesLabel = _localization.Format("Status.Metric.Lines", "{0}");
+        var charsLabel = _localization.Format("Status.Metric.Chars", "{0}");
+        var tokensLabel = _localization.Format("Status.Metric.Tokens", "{0}");
+
+        // Extract format pattern (e.g., "Lines: {0}" -> "Lines:")
+        var linesPrefix = linesLabel.Replace("{0}", "").Trim();
+        var charsPrefix = charsLabel.Replace("{0}", "").Trim();
+        var tokensPrefix = tokensLabel.Replace("{0}", "").Trim();
+
+        _viewModel.StatusTreeStatsText = $"[{linesPrefix} {FormatNumber(treeLines)} | {charsPrefix} {FormatNumber(treeChars)} | {tokensPrefix} {FormatNumber(treeTokens)}]";
+        _viewModel.StatusContentStatsText = $"[{linesPrefix} {FormatNumber(contentLines)} | {charsPrefix} {FormatNumber(contentChars)} | {tokensPrefix} {FormatNumber(contentTokens)}]";
+    }
+
+    /// <summary>
+    /// Format large numbers with K/M suffixes for readability.
+    /// </summary>
+    private static string FormatNumber(int value)
+    {
+        return value switch
+        {
+            >= 1_000_000 => $"{value / 1_000_000.0:F1}M",
+            >= 10_000 => $"{value / 1_000.0:F1}K",
+            _ => value.ToString("N0")
+        };
+    }
+
+    #endregion
 
 }

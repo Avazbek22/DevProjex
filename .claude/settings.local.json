@@ -13,7 +13,9 @@
       "Bash(git check-ignore:*)",
       "Bash(timeout 8 dotnet run:*)",
       "Bash(timeout 6 dotnet run:*)",
-      "Bash(timeout 5 dotnet run:*)"
+      "Bash(timeout 5 dotnet run:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)"
     ]
   }
 }

@@ -15,6 +15,12 @@ public sealed class TreeNodeViewModel : ViewModelBase
     private string _displayName;
     private bool _isCurrentSearchMatch;
 
+    /// <summary>
+    /// Raised when checkbox state changes. Used for real-time metrics updates.
+    /// Only fires on user-initiated changes (not cascading updates from parent/children).
+    /// </summary>
+    public static event EventHandler? GlobalCheckedChanged;
+
     public TreeNodeViewModel(
         TreeNodeDescriptor descriptor,
         TreeNodeViewModel? parent,
@@ -213,7 +219,11 @@ public sealed class TreeNodeViewModel : ViewModelBase
         }
 
         if (updateParent)
+        {
             Parent?.UpdateCheckedFromChildren();
+            // Fire global event for metrics recalculation (only on user-initiated top-level change)
+            GlobalCheckedChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void UpdateCheckedFromChildren()

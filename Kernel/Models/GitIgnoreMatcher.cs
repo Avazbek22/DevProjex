@@ -171,16 +171,51 @@ public sealed class GitIgnoreMatcher
     private static string GlobToRegex(string pattern)
     {
         var sb = new StringBuilder(pattern.Length * 2);
+        var inCharClass = false;
+
         for (var i = 0; i < pattern.Length; i++)
         {
             var current = pattern[i];
+
+            if (inCharClass)
+            {
+                // Inside character class - pass through most characters,
+                // but handle closing bracket and escape special regex chars
+                if (current == ']')
+                {
+                    sb.Append(']');
+                    inCharClass = false;
+                }
+                else if (current == '\\' && i + 1 < pattern.Length)
+                {
+                    // Escape sequence in character class
+                    sb.Append('\\').Append(pattern[++i]);
+                }
+                else
+                {
+                    sb.Append(current);
+                }
+                continue;
+            }
+
             switch (current)
             {
                 case '*':
                     if (i + 1 < pattern.Length && pattern[i + 1] == '*')
                     {
-                        sb.Append(".*");
-                        i++;
+                        // Check if ** is followed by /
+                        if (i + 2 < pattern.Length && pattern[i + 2] == '/')
+                        {
+                            // **/ means "zero or more directories"
+                            sb.Append("(?:.*/)?");
+                            i += 2; // Skip both * and /
+                        }
+                        else
+                        {
+                            // ** at end or not followed by / - match anything
+                            sb.Append(".*");
+                            i++;
+                        }
                     }
                     else
                     {
@@ -189,6 +224,11 @@ public sealed class GitIgnoreMatcher
                     break;
                 case '?':
                     sb.Append("[^/]");
+                    break;
+                case '[':
+                    // Start of character class - preserve it for regex
+                    sb.Append('[');
+                    inCharClass = true;
                     break;
                 case '.':
                 case '(':
@@ -199,7 +239,6 @@ public sealed class GitIgnoreMatcher
                 case '$':
                 case '{':
                 case '}':
-                case '[':
                 case ']':
                 case '\\':
                     sb.Append('\\').Append(current);
