@@ -16,6 +16,7 @@
   "Toast.Git.UpdatesApplied": "Updates received",
   "Toast.Git.NoUpdates": "No updates",
   "Toast.Git.BranchSwitched": "Switched to branch: {0}",
+  "Toast.Refresh.Success": "Refreshed",
   "Toast.Settings.Reset": "Settings reset",
   "Menu.View": "View",
   "Menu.View.ExpandAll": "Expand all",

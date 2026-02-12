@@ -16,6 +16,7 @@
   "Toast.Git.UpdatesApplied": "Жаңартулар алынды",
   "Toast.Git.NoUpdates": "Жаңартулар жоқ",
   "Toast.Git.BranchSwitched": "Бұтақ ауыстырылды: {0}",
+  "Toast.Refresh.Success": "Жаңартылды",
   "Toast.Settings.Reset": "Баптаулар қалпына келтірілді",
   "Menu.View": "Көрініс",
   "Menu.View.ExpandAll": "Барлығын ашу",

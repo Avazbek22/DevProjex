@@ -16,6 +16,7 @@
   "Toast.Git.UpdatesApplied": "Mises à jour reçues",
   "Toast.Git.NoUpdates": "Aucune mise à jour",
   "Toast.Git.BranchSwitched": "Branche changée : {0}",
+  "Toast.Refresh.Success": "Actualisé",
   "Toast.Settings.Reset": "Paramètres réinitialisés",
   "Menu.View": "Affichage",
   "Menu.View.ExpandAll": "Tout développer",

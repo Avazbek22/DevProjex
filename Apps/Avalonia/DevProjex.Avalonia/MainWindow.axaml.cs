@@ -669,6 +669,7 @@ public partial class MainWindow : Window
         {
             await ReloadProjectAsync();
             CompleteStatusOperation();
+            _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
         catch (Exception ex)
         {

@@ -16,6 +16,7 @@
   "Toast.Git.UpdatesApplied": "Yangilanishlar olindi",
   "Toast.Git.NoUpdates": "Yangilanishlar yo‘q",
   "Toast.Git.BranchSwitched": "Tarmoqqa o‘tildi: {0}",
+  "Toast.Refresh.Success": "Yangilandi",
   "Toast.Settings.Reset": "Sozlamalar tiklandi",
   "Menu.View": "Ko'rinish",
   "Menu.View.ExpandAll": "Hammasini ochish",

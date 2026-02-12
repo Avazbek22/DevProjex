@@ -212,7 +212,6 @@
                      VerticalAlignment="Center" />
           <Button Classes="status-cancel"
                   Click="OnStatusOperationCancelRequested"
-                  ToolTip.Tip="X"
                   VerticalAlignment="Center">
             <Grid Width="16" Height="16">
               <Ellipse Fill="{DynamicResource AppPanelBrush}"

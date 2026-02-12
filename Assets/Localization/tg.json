@@ -16,6 +16,7 @@
   "Toast.Git.UpdatesApplied": "Навсозиҳо гирифта шуданд",
   "Toast.Git.NoUpdates": "Навсозиҳо нест",
   "Toast.Git.BranchSwitched": "Ба шоха гузашт: {0}",
+  "Toast.Refresh.Success": "Навсозӣ шуд",
   "Toast.Settings.Reset": "Танзимот барқарор шуд",
   "Menu.View": "Намоиш",
   "Menu.View.ExpandAll": "Кушодани ҳама",

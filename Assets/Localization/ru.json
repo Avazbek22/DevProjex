@@ -16,6 +16,7 @@
   "Toast.Git.UpdatesApplied": "Обновления получены",
   "Toast.Git.NoUpdates": "Обновлений нет",
   "Toast.Git.BranchSwitched": "Ветка переключена на: {0}",
+  "Toast.Refresh.Success": "Обновлено",
   "Toast.Settings.Reset": "Настройки сброшены",
   "Menu.View": "Вид",
   "Menu.View.ExpandAll": "Развернуть всё",
