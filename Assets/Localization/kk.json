@@ -45,6 +45,7 @@
   "Menu.Search": "Іздеу",
   "Filter.ByName": "Атау бойынша сүзгі",
   "Filter.Tooltip": "Атау бойынша сүзгі (Ctrl+Shift+N)",
+  "CopyFormat.Tooltip": "Көшіру форматы",
   "Menu.Options": "Параметрлер",
   "Menu.Options.TreeSettings": "Ағаш параметрлері",
   "Menu.Language": "Тіл",

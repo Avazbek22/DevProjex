@@ -45,6 +45,7 @@
   "Menu.Search": "Qidirish",
   "Filter.ByName": "Nom bo'yicha filtr",
   "Filter.Tooltip": "Nom bo'yicha filtr (Ctrl+Shift+N)",
+  "CopyFormat.Tooltip": "Nusxa formati",
   "Menu.Options": "Sozlamalar",
   "Menu.Options.TreeSettings": "Daraxt sozlamalari",
   "Menu.Language": "Til",

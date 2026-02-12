@@ -45,6 +45,7 @@
   "Menu.Search": "Поиск",
   "Filter.ByName": "Фильтр по названию",
   "Filter.Tooltip": "Фильтр по названию (Ctrl+Shift+N)",
+  "CopyFormat.Tooltip": "Формат копирования",
   "Menu.Options": "Параметры",
   "Menu.Options.TreeSettings": "Настройки дерева",
   "Menu.Language": "Язык",

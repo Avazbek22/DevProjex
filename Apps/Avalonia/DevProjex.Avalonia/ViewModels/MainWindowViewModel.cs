@@ -805,6 +805,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuSearch { get; private set; } = string.Empty;
     public string FilterByNamePlaceholder { get; private set; } = string.Empty;
     public string FilterTooltip { get; private set; } = string.Empty;
+    public string CopyFormatTooltip { get; private set; } = string.Empty;
 
     // Drop Zone localization
     public string DropZoneTitle { get; private set; } = string.Empty;
@@ -893,6 +894,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuSearch = _localization["Menu.Search"];
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
+        CopyFormatTooltip = _localization["CopyFormat.Tooltip"];
 
         // Drop Zone localization
         DropZoneTitle = _localization["DropZone.Title"];
@@ -993,6 +995,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuSearch));
         RaisePropertyChanged(nameof(FilterByNamePlaceholder));
         RaisePropertyChanged(nameof(FilterTooltip));
+        RaisePropertyChanged(nameof(CopyFormatTooltip));
 
         // Drop Zone localization
         RaisePropertyChanged(nameof(DropZoneTitle));
