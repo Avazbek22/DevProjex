@@ -60,23 +60,37 @@
       </MenuItem>
     </Menu>
 
-    <!-- Format Switcher: Segmented Control (ASCII/JSON) -->
+    <!-- Format Switcher: Segmented Control (ASCII/JSON) with sliding thumb -->
     <Border Grid.Column="1"
             Classes="segmented-control"
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
             Margin="0,0,4,0"
             ToolTip.Tip="Export format">
-      <StackPanel Orientation="Horizontal" Spacing="2">
-        <RadioButton Classes="segment-button"
-                     Content="ASCII"
-                     GroupName="ExportFormat"
-                     IsChecked="{Binding IsAsciiFormatSelected, Mode=TwoWay}" />
-        <RadioButton Classes="segment-button"
-                     Content="JSON"
-                     GroupName="ExportFormat"
-                     IsChecked="{Binding IsJsonFormatSelected, Mode=TwoWay}" />
-      </StackPanel>
+      <Panel>
+        <!-- Sliding thumb indicator - single element that moves -->
+        <Border Name="SegmentThumb"
+                Classes="segment-thumb"
+                Width="48"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Classes.segment-thumb-right="{Binding IsJsonFormatSelected}" />
+
+        <!-- Buttons container -->
+        <StackPanel Orientation="Horizontal">
+          <!-- ASCII button -->
+          <Button Classes="segment-text-button"
+                  Classes.segment-selected="{Binding IsAsciiFormatSelected}"
+                  Content="ASCII"
+                  Click="OnAsciiFormatClick" />
+
+          <!-- JSON button -->
+          <Button Classes="segment-text-button"
+                  Classes.segment-selected="{Binding IsJsonFormatSelected}"
+                  Content="JSON"
+                  Click="OnJsonFormatClick" />
+        </StackPanel>
+      </Panel>
     </Border>
 
     <Button Grid.Column="2"

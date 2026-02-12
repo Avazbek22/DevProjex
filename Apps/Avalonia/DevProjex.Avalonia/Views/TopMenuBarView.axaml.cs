@@ -140,6 +140,18 @@ public partial class TopMenuBarView : UserControl
 
     private void OnToggleFilter(object? sender, RoutedEventArgs e) => ToggleFilterRequested?.Invoke(sender, e);
 
+    private void OnAsciiFormatClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.SelectedExportFormat = ExportFormat.Ascii;
+    }
+
+    private void OnJsonFormatClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.SelectedExportFormat = ExportFormat.Json;
+    }
+
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
         => ThemeMenuClickRequested?.Invoke(sender, e);
 
