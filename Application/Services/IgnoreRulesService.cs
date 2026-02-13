@@ -61,7 +61,7 @@ public sealed class IgnoreRulesService
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
-		var availability = BuildIgnoreOptionsAvailability(context);
+		var availability = BuildRuntimeIgnoreOptionsAvailability(context);
 		var requestedGitIgnore = availability.IncludeGitIgnore &&
 		                         selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 
@@ -126,13 +126,13 @@ public sealed class IgnoreRulesService
 		IReadOnlyCollection<string> selectedRootFolders)
 	{
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
-		return BuildIgnoreOptionsAvailability(context);
+		return BuildUiIgnoreOptionsAvailability(context);
 	}
 
 	private static readonly IReadOnlySet<string> EmptyStringSet =
 		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-	private static IgnoreOptionsAvailability BuildIgnoreOptionsAvailability(ProjectScanContext context)
+	private static IgnoreOptionsAvailability BuildRuntimeIgnoreOptionsAvailability(ProjectScanContext context)
 	{
 		if (context.Scopes.Count == 0)
 			return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
@@ -140,6 +140,58 @@ public sealed class IgnoreRulesService
 		var includeGitIgnore = context.HasAnyGitIgnore;
 		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore && context.HasAnyWithoutGitIgnore;
 		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
+	}
+
+	private IgnoreOptionsAvailability BuildUiIgnoreOptionsAvailability(ProjectScanContext context)
+	{
+		if (context.Scopes.Count == 0)
+			return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
+
+		var includeGitIgnore = context.HasAnyGitIgnore;
+		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore &&
+		                         context.HasAnyWithoutGitIgnore &&
+		                         HasRelevantSmartIgnoreCandidates(context);
+		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
+	}
+
+	private bool HasRelevantSmartIgnoreCandidates(ProjectScanContext context)
+	{
+		var scopesToCheck = context.Scopes
+			.Where(scope => !scope.HasGitIgnore)
+			.ToArray();
+		if (scopesToCheck.Length == 0)
+			return false;
+
+		foreach (var scope in scopesToCheck)
+		{
+			if (scope.HasProjectMarker || HasSmartCandidatesInRootEntries(scope.RootPath))
+				return true;
+		}
+
+		return false;
+	}
+
+	private bool HasSmartCandidatesInRootEntries(string rootPath)
+	{
+		var smart = _smartIgnore.Build(rootPath);
+		if (smart.FolderNames.Count == 0)
+			return false;
+
+		try
+		{
+			foreach (var directory in Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly))
+			{
+				var name = Path.GetFileName(directory);
+				if (smart.FolderNames.Contains(name))
+					return true;
+			}
+		}
+		catch
+		{
+			// Best-effort check.
+		}
+
+		return false;
 	}
 
 	private SmartIgnoreResult BuildScopedSmartIgnore(IReadOnlyList<ProjectScope> scopes)
@@ -245,7 +297,11 @@ public sealed class IgnoreRulesService
 		{
 			return ProjectScanContext.FromScopes(new[]
 			{
-				new ProjectScope(rootPath, rootHasGitIgnore, LooksLikeProject: true)
+				new ProjectScope(
+					rootPath,
+					rootHasGitIgnore,
+					HasProjectMarker: rootHasProjectMarker,
+					LooksLikeProject: rootHasGitIgnore || rootHasProjectMarker)
 			});
 		}
 
@@ -258,7 +314,11 @@ public sealed class IgnoreRulesService
 			{
 				var hasGitIgnore = HasGitIgnoreFile(directoryPath);
 				var hasMarker = HasProjectMarker(directoryPath);
-				scopedCandidates.Add(new ProjectScope(directoryPath, hasGitIgnore, hasGitIgnore || hasMarker));
+				scopedCandidates.Add(new ProjectScope(
+					directoryPath,
+					hasGitIgnore,
+					HasProjectMarker: hasMarker,
+					LooksLikeProject: hasGitIgnore || hasMarker));
 			});
 
 		var candidates = scopedCandidates
@@ -269,7 +329,11 @@ public sealed class IgnoreRulesService
 		{
 			var selectedScopes = new List<ProjectScope>(candidates.Length + (rootHasGitIgnore ? 1 : 0));
 			if (rootHasGitIgnore)
-				selectedScopes.Add(new ProjectScope(rootPath, HasGitIgnore: true, LooksLikeProject: true));
+				selectedScopes.Add(new ProjectScope(
+					rootPath,
+					HasGitIgnore: true,
+					HasProjectMarker: rootHasProjectMarker,
+					LooksLikeProject: true));
 			selectedScopes.AddRange(candidates);
 
 			return ProjectScanContext.FromScopes(selectedScopes);
@@ -280,13 +344,21 @@ public sealed class IgnoreRulesService
 		{
 			return ProjectScanContext.FromScopes(new[]
 			{
-				new ProjectScope(rootPath, rootHasGitIgnore, LooksLikeProject: true)
+				new ProjectScope(
+					rootPath,
+					rootHasGitIgnore,
+					HasProjectMarker: rootHasProjectMarker,
+					LooksLikeProject: rootHasGitIgnore || rootHasProjectMarker)
 			});
 		}
 
 		var scopes = new List<ProjectScope>(candidates.Length + (rootHasGitIgnore ? 1 : 0));
 		if (rootHasGitIgnore)
-			scopes.Add(new ProjectScope(rootPath, HasGitIgnore: true, LooksLikeProject: true));
+			scopes.Add(new ProjectScope(
+				rootPath,
+				HasGitIgnore: true,
+				HasProjectMarker: rootHasProjectMarker,
+				LooksLikeProject: true));
 		scopes.AddRange(candidates);
 
 		return ProjectScanContext.FromScopes(scopes);
@@ -421,6 +493,7 @@ public sealed class IgnoreRulesService
 	private sealed record ProjectScope(
 		string RootPath,
 		bool HasGitIgnore,
+		bool HasProjectMarker,
 		bool LooksLikeProject);
 
 	private sealed record ProjectScanContext(

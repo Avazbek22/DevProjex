@@ -734,6 +734,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    public bool HasRootFolderOptions => RootFolders.Count > 0;
+
     public bool AllIgnoreChecked
     {
         get => _allIgnoreChecked;
@@ -1086,5 +1088,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(SettingsAllIgnore));
         RaisePropertyChanged(nameof(SettingsAllExtensions));
         RaisePropertyChanged(nameof(SettingsAllRootFolders));
+        RaisePropertyChanged(nameof(HasRootFolderOptions));
     }
 }

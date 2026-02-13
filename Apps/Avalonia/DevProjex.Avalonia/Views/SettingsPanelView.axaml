@@ -103,6 +103,7 @@
           <TextBlock Classes="section-title" Grid.Column="0" Text="{Binding SettingsRootFolders}" Margin="0" FontSize="15"/>
           <CheckBox Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"
                     IsChecked="{Binding AllRootFoldersChecked, Mode=TwoWay}"
+                    IsEnabled="{Binding HasRootFolderOptions}"
                     Checked="OnRootAllChanged" Unchecked="OnRootAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
