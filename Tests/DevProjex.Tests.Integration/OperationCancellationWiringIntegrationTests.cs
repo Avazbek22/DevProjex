@@ -49,6 +49,26 @@ public sealed class OperationCancellationWiringIntegrationTests
         Assert.True(genericExceptionIndex > operationCanceledIndex, "Generic exception catch must come after cancellation catch.");
     }
 
+    [Fact]
+    public void MainWindow_GitUpdateAndSwitch_DoNotUseWaitCursorAssignments()
+    {
+        var content = ReadMainWindowCode();
+
+        var updateStart = content.IndexOf("private async void OnGitGetUpdates(", StringComparison.Ordinal);
+        var switchStart = content.IndexOf("private async void OnGitBranchSwitch(", StringComparison.Ordinal);
+        var refreshBranchesStart = content.IndexOf("private async Task RefreshGitBranchesAsync(", StringComparison.Ordinal);
+
+        Assert.True(updateStart >= 0, "OnGitGetUpdates method not found.");
+        Assert.True(switchStart > updateStart, "OnGitBranchSwitch method boundary not found.");
+        Assert.True(refreshBranchesStart > switchStart, "RefreshGitBranchesAsync method boundary not found.");
+
+        var updateBody = content.Substring(updateStart, switchStart - updateStart);
+        var switchBody = content.Substring(switchStart, refreshBranchesStart - switchStart);
+
+        Assert.DoesNotContain("Cursor = new Cursor(StandardCursorType.Wait)", updateBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("Cursor = new Cursor(StandardCursorType.Wait)", switchBody, StringComparison.Ordinal);
+    }
+
     private static string ReadMainWindowCode()
     {
         var repoRoot = FindRepositoryRoot();

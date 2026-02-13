@@ -1691,7 +1691,6 @@ public partial class MainWindow : Window
         long? statusOperationId = null;
         try
         {
-            Cursor = new Cursor(StandardCursorType.Wait);
             var statusText = string.IsNullOrWhiteSpace(_viewModel.CurrentBranch)
                 ? _viewModel.StatusOperationGettingUpdates
                 : _localization.Format("Status.Operation.GettingUpdatesBranch", _viewModel.CurrentBranch);
@@ -1749,7 +1748,6 @@ public partial class MainWindow : Window
         }
         finally
         {
-            Cursor = new Cursor(StandardCursorType.Arrow);
             DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
 
@@ -1766,7 +1764,6 @@ public partial class MainWindow : Window
         long? statusOperationId = null;
         try
         {
-            Cursor = new Cursor(StandardCursorType.Wait);
             var statusText = _localization.Format("Status.Operation.SwitchingBranch", branchName);
             statusOperationId = BeginStatusOperation(
                 statusText,
@@ -1785,6 +1782,10 @@ public partial class MainWindow : Window
                 });
             });
             var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress, cancellationToken);
+
+            // A lightweight retry helps recover from transient remote/network hiccups.
+            if (!success)
+                success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress: null, cancellationToken);
 
             if (!success)
             {
@@ -1814,7 +1815,6 @@ public partial class MainWindow : Window
         }
         finally
         {
-            Cursor = new Cursor(StandardCursorType.Arrow);
             DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
     }
