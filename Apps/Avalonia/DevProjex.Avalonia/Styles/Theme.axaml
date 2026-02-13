@@ -114,12 +114,40 @@
         <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="TextBox:focus">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <Style Selector="TextBox:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
     <Style Selector="ComboBox">
         <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="ComboBox:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <Style Selector="ComboBox:focus">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
     <Style Selector="TreeView">
@@ -264,30 +292,75 @@
         <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="Button:pointerover">
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
     </Style>
 
+    <Style Selector="Button:pressed">
+        <Setter Property="RenderTransform" Value="scale(0.97)" />
+    </Style>
+
     <Style Selector="Button.primary-action">
         <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
         <Setter Property="Foreground" Value="#FFFFFF" />
+        <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="Button.primary-action:pointerover">
         <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-        <Setter Property="Opacity" Value="0.9" />
+        <Setter Property="RenderTransform" Value="scale(1.02)" />
     </Style>
 
     <Style Selector="Button.primary-action:pressed">
         <Setter Property="Opacity" Value="0.85" />
+        <Setter Property="RenderTransform" Value="scale(0.98)" />
     </Style>
 
     <Style Selector="ScrollViewer">
         <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- ScrollBar thumb animations -->
+    <Style Selector="ScrollBar /template/ Thumb">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="ScrollBar /template/ Thumb:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <!-- ToolTip animations -->
+    <Style Selector="ToolTip">
+        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="TextBlock.section-title">
@@ -308,6 +381,12 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="Padding" Value="10" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.2" Easing="CubicEaseOut" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.2" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="Border.search-panel">
@@ -317,6 +396,16 @@
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Margin" Value="4,2,4,0" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <DoubleTransition Property="Opacity" Duration="0:0:0.2" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.search-panel:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
     <Style Selector="Border.filter-panel">
@@ -326,6 +415,16 @@
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Margin" Value="4,2,4,0" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <DoubleTransition Property="Opacity" Duration="0:0:0.2" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.filter-panel:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
     <Style Selector="Button.menu-icon-button">
@@ -334,10 +433,22 @@
         <Setter Property="Padding" Value="8,4" />
         <Setter Property="Margin" Value="0" />
         <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="Button.menu-icon-button:pointerover">
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="RenderTransform" Value="scale(1.05)" />
+    </Style>
+
+    <Style Selector="Button.menu-icon-button:pressed">
+        <Setter Property="RenderTransform" Value="scale(0.95)" />
     </Style>
 
     <Style Selector="StackPanel.settings-section">
@@ -351,6 +462,38 @@
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Padding" Value="5" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.2" Easing="CubicEaseOut" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.checklist-border:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <!-- CheckBox base transitions -->
+    <Style Selector="CheckBox">
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.1" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="CheckBox /template/ Border#NormalRectangle">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="CheckBox:pointerover /template/ Border#NormalRectangle">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
     <Style Selector="CheckBox.list-item">
@@ -450,6 +593,15 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="BoxShadow" Value="0 4 16 0 #40000000" />
+        <Setter Property="RenderTransformOrigin" Value="50%,0%" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <BrushTransition Property="Background" Duration="0:0:0.2" Easing="CubicEaseOut" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.2" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="TextBlock.popover-section-title">
@@ -472,15 +624,52 @@
         <Setter Property="MinHeight" Value="16" />
     </Style>
 
+    <!-- ProgressBar styling -->
+    <Style Selector="ProgressBar">
+        <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Foreground" Duration="0:0:0.2" Easing="CubicEaseOut" />
+                <BrushTransition Property="Background" Duration="0:0:0.2" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
     <!-- Slider styling -->
     <Style Selector="Slider">
         <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Foreground" Duration="0:0:0.2" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Slider /template/ Thumb">
+        <Setter Property="Transitions">
+            <Transitions>
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Slider /template/ Thumb:pointerover">
+        <Setter Property="RenderTransform" Value="scale(1.1)" />
     </Style>
 
     <!-- Menu and MenuItem styling -->
     <Style Selector="MenuItem">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+
+    <Style Selector="MenuItem /template/ Border#PART_LayoutRoot">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
@@ -518,6 +707,13 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Padding" Value="4" />
+        <Setter Property="RenderTransformOrigin" Value="50%,0%" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="MenuFlyoutPresenter">
@@ -526,6 +722,13 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Padding" Value="4" />
+        <Setter Property="RenderTransformOrigin" Value="50%,0%" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <!-- Menu popup backgrounds -->
