@@ -230,13 +230,15 @@ public sealed class FileSystemScannerParallelTests
 		var task1 = Task.Run(() => scanner.GetExtensions(temp1.Path, rules));
 		var task2 = Task.Run(() => scanner.GetExtensions(temp2.Path, rules));
 
-		await Task.WhenAll(task1, task2);
+		var results = await Task.WhenAll(task1, task2);
+		var result1 = results[0];
+		var result2 = results[1];
 
-		Assert.Contains(".cs", task1.Result.Value);
-		Assert.DoesNotContain(".txt", task1.Result.Value);
+		Assert.Contains(".cs", result1.Value);
+		Assert.DoesNotContain(".txt", result1.Value);
 
-		Assert.Contains(".txt", task2.Result.Value);
-		Assert.DoesNotContain(".cs", task2.Result.Value);
+		Assert.Contains(".txt", result2.Value);
+		Assert.DoesNotContain(".cs", result2.Value);
 	}
 
 	/// <summary>

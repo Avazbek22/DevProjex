@@ -120,6 +120,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _isBackgroundMetricsActive;
     private int _metricsRecalcVersion;
+    private CancellationTokenSource? _recalculateMetricsCts;
     private long _statusOperationSequence;
     private long _activeStatusOperationId;
     private static readonly HashSet<string> MetricsWarmupBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -326,6 +327,8 @@ public partial class MainWindow : Window
         // Cancel metrics calculation
         _metricsCalculationCts?.Cancel();
         _metricsCalculationCts?.Dispose();
+        _recalculateMetricsCts?.Cancel();
+        _recalculateMetricsCts?.Dispose();
         _metricsDebounceTimer?.Stop();
 
         // Dispose coordinators
@@ -2593,6 +2596,7 @@ public partial class MainWindow : Window
     {
         _isBackgroundMetricsActive = false;
         _metricsCalculationCts?.Cancel();
+        _recalculateMetricsCts?.Cancel();
     }
 
 
@@ -2976,6 +2980,7 @@ public partial class MainWindow : Window
     /// <summary>
     /// Recalculate both tree and content metrics based on current selection.
     /// Calculations run in parallel on background threads for better performance.
+    /// Cancels any previous calculation to avoid stale updates and wasted CPU.
     /// </summary>
     private void RecalculateMetricsAsync()
     {
@@ -2984,6 +2989,11 @@ public partial class MainWindow : Window
             UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
             return;
         }
+
+        // Cancel previous calculation to avoid wasted CPU and stale updates
+        _recalculateMetricsCts?.Cancel();
+        _recalculateMetricsCts = new CancellationTokenSource();
+        var token = _recalculateMetricsCts.Token;
 
         var recalcVersion = Interlocked.Increment(ref _metricsRecalcVersion);
         var treeRoot = _viewModel.TreeNodes.FirstOrDefault();
@@ -3002,6 +3012,10 @@ public partial class MainWindow : Window
         // Run calculations in parallel on background threads
         Task.Run(() =>
         {
+            // Early exit if cancelled before starting
+            if (token.IsCancellationRequested)
+                return;
+
             if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
             {
                 global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -3009,11 +3023,26 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Calculate tree and content metrics in parallel
-            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat));
-            var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths));
+            // Check cancellation before starting heavy calculations
+            if (token.IsCancellationRequested)
+                return;
 
-            Task.WaitAll(treeMetricsTask, contentMetricsTask);
+            // Calculate tree and content metrics in parallel
+            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
+            var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
+
+            try
+            {
+                Task.WaitAll([treeMetricsTask, contentMetricsTask], token);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // Calculation was cancelled, exit gracefully
+            }
+
+            // Check cancellation after calculations complete
+            if (token.IsCancellationRequested)
+                return;
 
             var treeMetrics = treeMetricsTask.Result;
             var contentMetrics = contentMetricsTask.Result;
@@ -3021,14 +3050,15 @@ public partial class MainWindow : Window
             // Update UI on dispatcher thread
             global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                if (recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
+                // Double-check: version must match AND not cancelled
+                if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
                     return;
 
                 UpdateStatusBarMetrics(
                     treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
                     contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
             });
-        });
+        }, token);
     }
 
     /// <summary>

@@ -396,15 +396,15 @@ public sealed class ScanOptionsUseCaseParallelTests
 				new ScanOptionsRequest($"/root{idx}", CreateDefaultRules())));
 		}
 
-		await Task.WhenAll(tasks);
+		var results = await Task.WhenAll(tasks);
 
 		// Each Execute call invokes both handlers
 		Assert.Equal(20, callCount);
 
-		foreach (var task in tasks)
+		foreach (var result in results)
 		{
-			Assert.Contains(".cs", task.Result.Extensions);
-			Assert.Contains("src", task.Result.RootFolders);
+			Assert.Contains(".cs", result.Extensions);
+			Assert.Contains("src", result.RootFolders);
 		}
 	}
 
