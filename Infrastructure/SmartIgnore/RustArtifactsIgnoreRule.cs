@@ -1,44 +1,20 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.SmartIgnore;
 
-public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
+/// <summary>
+/// Smart ignore rule for Rust build output folders.
+/// Activates when Cargo.toml exists in the scope root.
+/// </summary>
+public sealed class RustArtifactsIgnoreRule : ISmartIgnoreRule
 {
-	private static readonly string[] MarkerFiles =
-	{
-		"package.json",
-		"package-lock.json",
-		"pnpm-lock.yaml",
-		"yarn.lock",
-		"bun.lockb",
-		"bun.lock",
-		"pnpm-workspace.yaml",
-		"npm-shrinkwrap.json"
-	};
-
 	private static readonly string[] FolderNames =
 	{
-		"node_modules",
-		"dist",
-		"build",
-		".next",
-		".nuxt",
-		".turbo",
-		".svelte-kit",
-		".angular",
-		"coverage",
-		".cache",
-		".parcel-cache",
-		".vite",
-		".output",
-		".astro",
-		"storybook-static",
-		"out"
+		"target"
 	};
 
 	public SmartIgnoreResult Evaluate(string rootPath)
@@ -48,8 +24,7 @@ public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
-		bool hasMarker = MarkerFiles.Any(marker => File.Exists(Path.Combine(rootPath, marker)));
-		if (!hasMarker)
+		if (!File.Exists(Path.Combine(rootPath, "Cargo.toml")))
 			return new SmartIgnoreResult(
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase));

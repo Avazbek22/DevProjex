@@ -7,38 +7,22 @@ using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.SmartIgnore;
 
-public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
+/// <summary>
+/// Smart ignore rule for Go dependency/build folders.
+/// Activates when go.mod or go.work exists in the scope root.
+/// </summary>
+public sealed class GoArtifactsIgnoreRule : ISmartIgnoreRule
 {
 	private static readonly string[] MarkerFiles =
 	{
-		"package.json",
-		"package-lock.json",
-		"pnpm-lock.yaml",
-		"yarn.lock",
-		"bun.lockb",
-		"bun.lock",
-		"pnpm-workspace.yaml",
-		"npm-shrinkwrap.json"
+		"go.mod",
+		"go.work"
 	};
 
 	private static readonly string[] FolderNames =
 	{
-		"node_modules",
-		"dist",
-		"build",
-		".next",
-		".nuxt",
-		".turbo",
-		".svelte-kit",
-		".angular",
-		"coverage",
-		".cache",
-		".parcel-cache",
-		".vite",
-		".output",
-		".astro",
-		"storybook-static",
-		"out"
+		"vendor",
+		"bin"
 	};
 
 	public SmartIgnoreResult Evaluate(string rootPath)

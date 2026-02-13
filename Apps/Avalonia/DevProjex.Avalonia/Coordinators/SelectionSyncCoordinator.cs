@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Linq;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -21,7 +21,8 @@ public sealed class SelectionSyncCoordinator
     private readonly ScanOptionsUseCase _scanOptions;
     private readonly FilterOptionSelectionService _filterSelectionService;
     private readonly IgnoreOptionsService _ignoreOptionsService;
-    private readonly Func<string, IgnoreRules> _buildIgnoreRules;
+    private readonly Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, IgnoreRules> _buildIgnoreRules;
+    private readonly Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> _getIgnoreOptionsAvailability;
     private readonly Func<string, bool> _tryElevateAndRestart;
     private readonly Func<string?> _currentPathProvider;
 
@@ -40,7 +41,28 @@ public sealed class SelectionSyncCoordinator
     private bool _suppressIgnoreItemCheck;
     private int _rootScanVersion;
     private int _extensionScanVersion;
+    private int _ignoreOptionsVersion;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
+
+    public SelectionSyncCoordinator(
+        MainWindowViewModel viewModel,
+        ScanOptionsUseCase scanOptions,
+        FilterOptionSelectionService filterSelectionService,
+        IgnoreOptionsService ignoreOptionsService,
+        Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, IgnoreRules> buildIgnoreRules,
+        Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> getIgnoreOptionsAvailability,
+        Func<string, bool> tryElevateAndRestart,
+        Func<string?> currentPathProvider)
+    {
+        _viewModel = viewModel;
+        _scanOptions = scanOptions;
+        _filterSelectionService = filterSelectionService;
+        _ignoreOptionsService = ignoreOptionsService;
+        _buildIgnoreRules = buildIgnoreRules;
+        _getIgnoreOptionsAvailability = getIgnoreOptionsAvailability;
+        _tryElevateAndRestart = tryElevateAndRestart;
+        _currentPathProvider = currentPathProvider;
+    }
 
     public SelectionSyncCoordinator(
         MainWindowViewModel viewModel,
@@ -50,14 +72,18 @@ public sealed class SelectionSyncCoordinator
         Func<string, IgnoreRules> buildIgnoreRules,
         Func<string, bool> tryElevateAndRestart,
         Func<string?> currentPathProvider)
+        : this(
+            viewModel,
+            scanOptions,
+            filterSelectionService,
+            ignoreOptionsService,
+            (rootPath, _, _) => buildIgnoreRules(rootPath),
+            (rootPath, _) => new IgnoreOptionsAvailability(
+                IncludeGitIgnore: HasGitIgnore(rootPath),
+                IncludeSmartIgnore: false),
+            tryElevateAndRestart,
+            currentPathProvider)
     {
-        _viewModel = viewModel;
-        _scanOptions = scanOptions;
-        _filterSelectionService = filterSelectionService;
-        _ignoreOptionsService = ignoreOptionsService;
-        _buildIgnoreRules = buildIgnoreRules;
-        _tryElevateAndRestart = tryElevateAndRestart;
-        _currentPathProvider = currentPathProvider;
     }
 
     public void HookOptionListeners(ObservableCollection<SelectionOptionViewModel> options)
@@ -181,7 +207,8 @@ public sealed class SelectionSyncCoordinator
 
         // Always scan extensions, even when rootFolders.Count == 0.
         // ScanOptionsUseCase.GetExtensionsForRootFolders will include root-level files.
-        var ignoreRules = _buildIgnoreRules(path);
+        var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
+        var ignoreRules = _buildIgnoreRules(path, selectedIgnoreOptions, rootFolders);
         return Task.Run(async () =>
         {
             // Scan extensions off the UI thread to avoid freezing on large folders.
@@ -209,7 +236,8 @@ public sealed class SelectionSyncCoordinator
         var prev = new HashSet<string>(_viewModel.RootFolders.Where(o => o.IsChecked).Select(o => o.Name),
             StringComparer.OrdinalIgnoreCase);
 
-        var ignoreRules = _buildIgnoreRules(path);
+        var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
+        var ignoreRules = _buildIgnoreRules(path, selectedIgnoreOptions, null);
         return Task.Run(async () =>
         {
             // Scan root folders off the UI thread to keep the window responsive.
@@ -240,39 +268,39 @@ public sealed class SelectionSyncCoordinator
         });
     }
 
-    public void PopulateIgnoreOptionsForRootSelection(IReadOnlyCollection<string> rootFolders, string? currentPath = null)
+    public async Task PopulateIgnoreOptionsForRootSelectionAsync(
+        IReadOnlyCollection<string> rootFolders,
+        string? currentPath = null)
     {
-        var previousSelections = _ignoreSelectionCache;
+        var previousSelections = new HashSet<IgnoreOptionId>(_ignoreSelectionCache);
+        var hasPreviousSelections = _ignoreSelectionInitialized;
+        var path = string.IsNullOrWhiteSpace(currentPath) ? _currentPathProvider() : currentPath;
+        var version = Interlocked.Increment(ref _ignoreOptionsVersion);
 
-        _suppressIgnoreItemCheck = true;
-        try
+        var availability = await Task.Run(() => ResolveIgnoreOptionsAvailability(path, rootFolders))
+            .ConfigureAwait(false);
+        var options = _ignoreOptionsService.GetOptions(availability);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            _viewModel.IgnoreOptions.Clear();
+            if (version != _ignoreOptionsVersion)
+                return;
 
-            // Always populate ignore options, even when rootFolders.Count == 0.
-            // Ignore options apply to root-level files as well.
-            var path = string.IsNullOrWhiteSpace(currentPath) ? _currentPathProvider() : currentPath;
-            var hasGitIgnore = HasGitIgnore(path);
-            _ignoreOptions = _ignoreOptionsService.GetOptions(includeGitIgnore: hasGitIgnore);
-            bool hasPrevious = _ignoreSelectionInitialized;
+            ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
+        });
+    }
 
-            foreach (var option in _ignoreOptions)
-            {
-                bool isChecked = previousSelections.Contains(option.Id) ||
-                                 (!hasPrevious && option.DefaultChecked);
-                _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, isChecked));
-            }
-        }
-        finally
-        {
-            _suppressIgnoreItemCheck = false;
-        }
+    public void PopulateIgnoreOptionsForRootSelection(
+        IReadOnlyCollection<string> rootFolders,
+        string? currentPath = null)
+    {
+        var previousSelections = new HashSet<IgnoreOptionId>(_ignoreSelectionCache);
+        var hasPreviousSelections = _ignoreSelectionInitialized;
+        var path = string.IsNullOrWhiteSpace(currentPath) ? _currentPathProvider() : currentPath;
+        var availability = ResolveIgnoreOptionsAvailability(path, rootFolders);
+        var options = _ignoreOptionsService.GetOptions(availability);
 
-        if (_viewModel.AllIgnoreChecked)
-            SetAllChecked(_viewModel.IgnoreOptions, true, ref _suppressIgnoreItemCheck);
-
-        UpdateIgnoreSelectionCache();
-        SyncIgnoreAllCheckbox();
+        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
     }
 
     public IReadOnlyCollection<string> GetSelectedRootFolders()
@@ -285,8 +313,8 @@ public sealed class SelectionSyncCoordinator
         if (string.IsNullOrEmpty(currentPath)) return;
 
         var selectedRoots = GetSelectedRootFolders();
+        await PopulateIgnoreOptionsForRootSelectionAsync(selectedRoots, currentPath);
         await PopulateExtensionsForRootSelectionAsync(currentPath, selectedRoots);
-        PopulateIgnoreOptionsForRootSelection(selectedRoots, currentPath);
     }
 
     public async Task RefreshRootAndDependentsAsync(string currentPath)
@@ -301,6 +329,10 @@ public sealed class SelectionSyncCoordinator
                 ClearCachesForNewProject();
             }
             _lastLoadedPath = currentPath;
+
+            // Warm ignore options first so root/extension scans use the latest ignore selection
+            // without blocking UI on initial availability discovery.
+            await PopulateIgnoreOptionsForRootSelectionAsync(Array.Empty<string>(), currentPath);
 
             // Run in order so root folders are ready before extensions/ignore lists refresh.
             await PopulateRootFoldersAsync(currentPath);
@@ -370,10 +402,59 @@ public sealed class SelectionSyncCoordinator
         if (_ignoreSelectionInitialized || _ignoreSelectionCache.Count > 0)
             return;
 
-        var hasGitIgnore = HasGitIgnore(_currentPathProvider() ?? _lastLoadedPath);
-        _ignoreOptions = _ignoreOptionsService.GetOptions(includeGitIgnore: hasGitIgnore);
+        var path = _currentPathProvider() ?? _lastLoadedPath;
+        var selectedRoots = GetSelectedRootFolders();
+        var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots);
+        _ignoreOptions = _ignoreOptionsService.GetOptions(availability);
         _ignoreSelectionCache = new HashSet<IgnoreOptionId>(
             _ignoreOptions.Where(option => option.DefaultChecked).Select(option => option.Id));
+    }
+
+    private IgnoreOptionsAvailability ResolveIgnoreOptionsAvailability(
+        string? path,
+        IReadOnlyCollection<string> selectedRootFolders)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
+
+        try
+        {
+            return _getIgnoreOptionsAvailability(path, selectedRootFolders);
+        }
+        catch
+        {
+            return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
+        }
+    }
+
+    private void ApplyIgnoreOptions(
+        IReadOnlyList<IgnoreOptionDescriptor> options,
+        IReadOnlySet<IgnoreOptionId> previousSelections,
+        bool hasPreviousSelections)
+    {
+        _suppressIgnoreItemCheck = true;
+        try
+        {
+            _viewModel.IgnoreOptions.Clear();
+            _ignoreOptions = options;
+
+            foreach (var option in _ignoreOptions)
+            {
+                var isChecked = previousSelections.Contains(option.Id) ||
+                                (!hasPreviousSelections && option.DefaultChecked);
+                _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, isChecked));
+            }
+        }
+        finally
+        {
+            _suppressIgnoreItemCheck = false;
+        }
+
+        if (_viewModel.AllIgnoreChecked)
+            SetAllChecked(_viewModel.IgnoreOptions, true, ref _suppressIgnoreItemCheck);
+
+        UpdateIgnoreSelectionCache();
+        SyncIgnoreAllCheckbox();
     }
 
     private static bool HasGitIgnore(string? rootPath)

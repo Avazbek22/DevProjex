@@ -7,37 +7,26 @@ using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.SmartIgnore;
 
-public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
+/// <summary>
+/// Smart ignore rule for Java/Kotlin/Gradle build output folders.
+/// Activates when Maven/Gradle markers are present in the scope root.
+/// </summary>
+public sealed class JvmArtifactsIgnoreRule : ISmartIgnoreRule
 {
 	private static readonly string[] MarkerFiles =
 	{
-		"package.json",
-		"package-lock.json",
-		"pnpm-lock.yaml",
-		"yarn.lock",
-		"bun.lockb",
-		"bun.lock",
-		"pnpm-workspace.yaml",
-		"npm-shrinkwrap.json"
+		"pom.xml",
+		"build.gradle",
+		"build.gradle.kts",
+		"settings.gradle",
+		"settings.gradle.kts"
 	};
 
 	private static readonly string[] FolderNames =
 	{
-		"node_modules",
-		"dist",
+		"target",
+		".gradle",
 		"build",
-		".next",
-		".nuxt",
-		".turbo",
-		".svelte-kit",
-		".angular",
-		"coverage",
-		".cache",
-		".parcel-cache",
-		".vite",
-		".output",
-		".astro",
-		"storybook-static",
 		"out"
 	};
 

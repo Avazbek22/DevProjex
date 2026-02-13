@@ -62,6 +62,7 @@
   "Dialog.SelectRoot": "Loyiha ildiz jildini tanlang",
   "Settings.IgnoreTitle": "E’tiborsiz qoldirish:",
   "Settings.Ignore.UseGitIgnore": ".gitignore dan foydalanish",
+  "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HiddenFolders": "yashirin jildlar",
   "Settings.Ignore.HiddenFiles": "yashirin fayllar",
   "Settings.Ignore.DotFolders": "nuqta bilan boshlanuvchi jildlar",

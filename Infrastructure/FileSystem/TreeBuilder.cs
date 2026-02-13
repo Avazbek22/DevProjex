@@ -155,13 +155,15 @@ public sealed class TreeBuilder : ITreeBuilder
 
 	private static bool ShouldSkipDirectory(FileSystemInfo entry, IgnoreRules rules)
 	{
-		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name))
+		var matcher = rules.ResolveGitIgnoreMatcher(entry.FullName);
+		if (!ReferenceEquals(matcher, GitIgnoreMatcher.Empty) &&
+		    matcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name))
 		{
-			if (!rules.GitIgnoreMatcher.ShouldTraverseIgnoredDirectory(entry.FullName, entry.Name))
+			if (!matcher.ShouldTraverseIgnoredDirectory(entry.FullName, entry.Name))
 				return true;
 		}
 
-		if (rules.SmartIgnoredFolders.Contains(entry.Name))
+		if (rules.ShouldApplySmartIgnore(entry.FullName) && rules.SmartIgnoredFolders.Contains(entry.Name))
 			return true;
 
 		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
@@ -190,10 +192,12 @@ public sealed class TreeBuilder : ITreeBuilder
 
 	private static bool ShouldSkipFile(FileSystemInfo entry, IgnoreRules rules)
 	{
-		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(entry.FullName, isDirectory: false, entry.Name))
+		var matcher = rules.ResolveGitIgnoreMatcher(entry.FullName);
+		if (!ReferenceEquals(matcher, GitIgnoreMatcher.Empty) &&
+		    matcher.IsIgnored(entry.FullName, isDirectory: false, entry.Name))
 			return true;
 
-		if (rules.SmartIgnoredFiles.Contains(entry.Name))
+		if (rules.ShouldApplySmartIgnore(entry.FullName) && rules.SmartIgnoredFiles.Contains(entry.Name))
 			return true;
 
 		if (rules.IgnoreDotFiles && entry.Name.StartsWith(".", StringComparison.Ordinal))

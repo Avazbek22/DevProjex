@@ -7,38 +7,24 @@ using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.SmartIgnore;
 
-public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
+/// <summary>
+/// Smart ignore rule for Ruby/Rails generated and dependency folders.
+/// Activates when Gemfile or Gemfile.lock exists in the scope root.
+/// </summary>
+public sealed class RubyArtifactsIgnoreRule : ISmartIgnoreRule
 {
 	private static readonly string[] MarkerFiles =
 	{
-		"package.json",
-		"package-lock.json",
-		"pnpm-lock.yaml",
-		"yarn.lock",
-		"bun.lockb",
-		"bun.lock",
-		"pnpm-workspace.yaml",
-		"npm-shrinkwrap.json"
+		"Gemfile",
+		"Gemfile.lock"
 	};
 
 	private static readonly string[] FolderNames =
 	{
-		"node_modules",
-		"dist",
-		"build",
-		".next",
-		".nuxt",
-		".turbo",
-		".svelte-kit",
-		".angular",
-		"coverage",
-		".cache",
-		".parcel-cache",
-		".vite",
-		".output",
-		".astro",
-		"storybook-static",
-		"out"
+		".bundle",
+		"vendor",
+		"log",
+		"tmp"
 	};
 
 	public SmartIgnoreResult Evaluate(string rootPath)

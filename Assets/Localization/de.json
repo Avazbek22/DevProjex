@@ -62,6 +62,7 @@
   "Dialog.SelectRoot": "Projekt-Stammordner auswählen",
   "Settings.IgnoreTitle": "Ignorieren:",
   "Settings.Ignore.UseGitIgnore": ".gitignore verwenden",
+  "Settings.Ignore.SmartIgnore": "Smart Ignore",
   "Settings.Ignore.HiddenFolders": "versteckte Ordner",
   "Settings.Ignore.HiddenFiles": "versteckte Dateien",
   "Settings.Ignore.DotFolders": "Ordner mit Punkt",

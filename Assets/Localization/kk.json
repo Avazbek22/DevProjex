@@ -62,6 +62,7 @@
   "Dialog.SelectRoot": "Жоба түбір қалтасын таңдаңыз",
   "Settings.IgnoreTitle": "Елемеу:",
   "Settings.Ignore.UseGitIgnore": ".gitignore пайдалану",
+  "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HiddenFolders": "жасырын қалталар",
   "Settings.Ignore.HiddenFiles": "жасырын файлдар",
   "Settings.Ignore.DotFolders": "нүктемен басталатын қалталар",

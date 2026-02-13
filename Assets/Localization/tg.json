@@ -62,6 +62,7 @@
   "Dialog.SelectRoot": "Ҷузвдони решаи лоиҳаро интихоб кунед",
   "Settings.IgnoreTitle": "Нодида гирифтан:",
   "Settings.Ignore.UseGitIgnore": "Истифодаи .gitignore",
+  "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HiddenFolders": "ҷузвдонҳои пинҳонӣ",
   "Settings.Ignore.HiddenFiles": "файлҳои пинҳонӣ",
   "Settings.Ignore.DotFolders": "ҷузвдонҳои бо нуқта оғозшаванда",

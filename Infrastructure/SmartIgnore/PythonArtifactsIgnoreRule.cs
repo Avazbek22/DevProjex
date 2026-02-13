@@ -7,38 +7,38 @@ using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.SmartIgnore;
 
-public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
+/// <summary>
+/// Smart ignore rule for Python cache and virtual environment folders.
+/// Activates only when Python project markers are detected in the scope root.
+/// </summary>
+public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule
 {
 	private static readonly string[] MarkerFiles =
 	{
-		"package.json",
-		"package-lock.json",
-		"pnpm-lock.yaml",
-		"yarn.lock",
-		"bun.lockb",
-		"bun.lock",
-		"pnpm-workspace.yaml",
-		"npm-shrinkwrap.json"
+		"pyproject.toml",
+		"requirements.txt",
+		"requirements-dev.txt",
+		"setup.py",
+		"setup.cfg",
+		"Pipfile",
+		"poetry.lock",
+		"environment.yml"
 	};
 
 	private static readonly string[] FolderNames =
 	{
-		"node_modules",
-		"dist",
-		"build",
-		".next",
-		".nuxt",
-		".turbo",
-		".svelte-kit",
-		".angular",
-		"coverage",
-		".cache",
-		".parcel-cache",
-		".vite",
-		".output",
-		".astro",
-		"storybook-static",
-		"out"
+		"__pycache__",
+		".pytest_cache",
+		".mypy_cache",
+		".ruff_cache",
+		".tox",
+		".nox",
+		".venv",
+		"venv",
+		"env",
+		".hypothesis",
+		".ipynb_checkpoints",
+		".pyre"
 	};
 
 	public SmartIgnoreResult Evaluate(string rootPath)

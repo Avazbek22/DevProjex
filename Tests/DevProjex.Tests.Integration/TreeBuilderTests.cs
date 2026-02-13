@@ -109,7 +109,10 @@ public sealed class TreeBuilderTests
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ignored", "keep" },
 			IgnoreRules: new IgnoreRules(false, false, false, false,
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ignored" },
-				new HashSet<string>()));
+				new HashSet<string>())
+			{
+				UseSmartIgnore = true
+			});
 
 		var builder = new TreeBuilder();
 		var result = builder.Build(temp.Path, options);
@@ -688,6 +691,7 @@ public sealed class TreeBuilderTests
 			new HashSet<string>())
 		{
 			UseGitIgnore = true,
+			UseSmartIgnore = true,
 			GitIgnoreMatcher = matcher
 		};
 
@@ -720,6 +724,7 @@ public sealed class TreeBuilderTests
 			new HashSet<string>())
 		{
 			UseGitIgnore = true,
+			UseSmartIgnore = true,
 			GitIgnoreMatcher = matcher
 		};
 
@@ -874,7 +879,10 @@ public sealed class TreeBuilderTests
 
 		var rules = new IgnoreRules(false, false, false, false,
 			new HashSet<string>(),
-			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Thumbs.db", ".DS_Store", "desktop.ini" });
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Thumbs.db", ".DS_Store", "desktop.ini" })
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".db", ".ini", "" },

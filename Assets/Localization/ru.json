@@ -62,6 +62,7 @@
   "Dialog.SelectRoot": "Выберите корневую папку проекта",
   "Settings.IgnoreTitle": "Игнорировать:",
   "Settings.Ignore.UseGitIgnore": "Использовать .gitignore",
+  "Settings.Ignore.SmartIgnore": "Умный игнор",
   "Settings.Ignore.HiddenFolders": "Скрытые папки",
   "Settings.Ignore.HiddenFiles": "Скрытые файлы",
   "Settings.Ignore.DotFolders": "Папки с точкой в начале",

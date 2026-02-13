@@ -12,10 +12,18 @@ public sealed class IgnoreOptionsService
 		_localization = localization;
 	}
 
-	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(bool includeGitIgnore = false)
+	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
 		var options = new List<IgnoreOptionDescriptor>();
-		if (includeGitIgnore)
+		if (availability.IncludeSmartIgnore)
+		{
+			options.Add(new IgnoreOptionDescriptor(
+				IgnoreOptionId.SmartIgnore,
+				_localization["Settings.Ignore.SmartIgnore"],
+				true));
+		}
+
+		if (availability.IncludeGitIgnore)
 		{
 			options.Add(new IgnoreOptionDescriptor(
 				IgnoreOptionId.UseGitIgnore,
@@ -32,5 +40,19 @@ public sealed class IgnoreOptionsService
 		});
 
 		return options;
+	}
+
+	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions()
+	{
+		return GetOptions(new IgnoreOptionsAvailability(
+			IncludeGitIgnore: false,
+			IncludeSmartIgnore: false));
+	}
+
+	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(bool includeGitIgnore)
+	{
+		return GetOptions(new IgnoreOptionsAvailability(
+			IncludeGitIgnore: includeGitIgnore,
+			IncludeSmartIgnore: false));
 	}
 }

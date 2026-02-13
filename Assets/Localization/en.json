@@ -62,6 +62,7 @@
   "Dialog.SelectRoot": "Select the project root folder",
   "Settings.IgnoreTitle": "Ignore:",
   "Settings.Ignore.UseGitIgnore": "Use .gitignore",
+  "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HiddenFolders": "Hidden folders",
   "Settings.Ignore.HiddenFiles": "Hidden files",
   "Settings.Ignore.DotFolders": "dot folders",

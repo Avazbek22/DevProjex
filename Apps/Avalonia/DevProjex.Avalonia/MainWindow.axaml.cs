@@ -232,6 +232,7 @@ public partial class MainWindow : Window
             _filterSelectionService,
             _ignoreOptionsService,
             BuildIgnoreRules,
+            GetIgnoreOptionsAvailability,
             TryElevateAndRestart,
             () => _currentPath);
 
@@ -684,7 +685,9 @@ public partial class MainWindow : Window
 
         if (_currentPath is not null)
         {
-            _selectionCoordinator.PopulateIgnoreOptionsForRootSelection(_selectionCoordinator.GetSelectedRootFolders(), _currentPath);
+            _ = _selectionCoordinator.PopulateIgnoreOptionsForRootSelectionAsync(
+                _selectionCoordinator.GetSelectedRootFolders(),
+                _currentPath);
         }
     }
 
@@ -2145,7 +2148,8 @@ public partial class MainWindow : Window
         var allowedRoot = new HashSet<string>(_viewModel.RootFolders.Where(o => o.IsChecked).Select(o => o.Name),
             StringComparer.OrdinalIgnoreCase);
 
-        var ignoreRules = BuildIgnoreRules(_currentPath);
+        var selectedIgnoreOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
+        var ignoreRules = BuildIgnoreRules(_currentPath, selectedIgnoreOptions, allowedRoot);
 
         var nameFilter = string.IsNullOrWhiteSpace(_viewModel.NameFilter) ? null : _viewModel.NameFilter.Trim();
 
@@ -2288,10 +2292,26 @@ public partial class MainWindow : Window
         }
     }
 
+    private IgnoreRules BuildIgnoreRules(
+        string rootPath,
+        IReadOnlyCollection<IgnoreOptionId> selectedOptions,
+        IReadOnlyCollection<string>? selectedRootFolders)
+    {
+        return _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+    }
+
+    private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
+        string rootPath,
+        IReadOnlyCollection<string> selectedRootFolders)
+    {
+        return _ignoreRulesService.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
+    }
+
     private IgnoreRules BuildIgnoreRules(string rootPath)
     {
         var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
-        return _ignoreRulesService.Build(rootPath, selected);
+        var selectedRoots = _selectionCoordinator.GetSelectedRootFolders();
+        return BuildIgnoreRules(rootPath, selected, selectedRoots);
     }
 
     private long BeginStatusOperation(string text, bool indeterminate = true)

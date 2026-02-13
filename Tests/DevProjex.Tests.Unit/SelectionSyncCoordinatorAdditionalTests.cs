@@ -319,6 +319,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
+				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",

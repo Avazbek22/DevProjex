@@ -120,7 +120,10 @@ public sealed class FileSystemScannerTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ignored" },
-			SmartIgnoredFiles: new HashSet<string>());
+			SmartIgnoredFiles: new HashSet<string>())
+		{
+			UseSmartIgnore = true
+		};
 
 		var result = scanner.GetExtensions(temp.Path, rules);
 

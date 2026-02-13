@@ -29,7 +29,13 @@ public static class AvaloniaCompositionRoot
         {
             new CommonSmartIgnoreRule(),
             new FrontendArtifactsIgnoreRule(),
-            new DotNetArtifactsIgnoreRule()
+            new DotNetArtifactsIgnoreRule(),
+            new PythonArtifactsIgnoreRule(),
+            new JvmArtifactsIgnoreRule(),
+            new RustArtifactsIgnoreRule(),
+            new GoArtifactsIgnoreRule(),
+            new PhpArtifactsIgnoreRule(),
+            new RubyArtifactsIgnoreRule()
         };
         var smartIgnoreService = new SmartIgnoreService(smartIgnoreRules);
         var ignoreOptionsService = new IgnoreOptionsService(localization);
