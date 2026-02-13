@@ -22,7 +22,18 @@ public sealed class SmartIgnoreService
 
 		foreach (var rule in _rules)
 		{
-			var result = rule.Evaluate(rootPath);
+			SmartIgnoreResult result;
+			try
+			{
+				result = rule.Evaluate(rootPath);
+			}
+			catch
+			{
+				// Fault isolation: one problematic rule or inaccessible folder
+				// must not break the whole ignore pipeline.
+				continue;
+			}
+
 			foreach (var folder in result.FolderNames)
 				folders.Add(folder);
 			foreach (var file in result.FileNames)

@@ -198,6 +198,23 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		Assert.Empty(rules.SmartIgnoredFiles);
 	}
 
+	[Fact]
+	public void GetIgnoreOptionsAvailability_DoesNotThrow_WhenSmartIgnoreRuleFails()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/America.sln", "");
+
+		var smartService = new SmartIgnoreService(new DevProjex.Kernel.Abstractions.ISmartIgnoreRule[]
+		{
+			new ThrowingSmartIgnoreRule()
+		});
+		var service = new IgnoreRulesService(smartService);
+
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, new[] { "Documents" });
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+	}
+
 	private static (string OpenedRootPath, IReadOnlyCollection<string> SelectedRootFolders) ResolveRootMode(
 		string tempPath,
 		int rootMode)
@@ -215,5 +232,13 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 				SelectedRootFolders: new[] { "America" }),
 			_ => throw new ArgumentOutOfRangeException(nameof(rootMode), rootMode, "Unsupported root mode.")
 		};
+	}
+
+	private sealed class ThrowingSmartIgnoreRule : DevProjex.Kernel.Abstractions.ISmartIgnoreRule
+	{
+		public SmartIgnoreResult Evaluate(string rootPath)
+		{
+			throw new UnauthorizedAccessException("Access denied.");
+		}
 	}
 }

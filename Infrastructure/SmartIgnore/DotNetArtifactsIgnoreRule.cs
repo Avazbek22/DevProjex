@@ -34,8 +34,18 @@ public sealed class DotNetArtifactsIgnoreRule : ISmartIgnoreRule
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
-		bool hasMarker = MarkerExtensions.Any(ext =>
-			Directory.EnumerateFiles(rootPath, "*" + ext, SearchOption.TopDirectoryOnly).Any());
+		bool hasMarker;
+		try
+		{
+			hasMarker = MarkerExtensions.Any(ext =>
+				Directory.EnumerateFiles(rootPath, "*" + ext, SearchOption.TopDirectoryOnly).Any());
+		}
+		catch
+		{
+			return new SmartIgnoreResult(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		}
 
 		if (!hasMarker)
 			return new SmartIgnoreResult(
