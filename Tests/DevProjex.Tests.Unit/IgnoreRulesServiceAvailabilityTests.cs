@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Models;
@@ -119,5 +120,100 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.False(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_ParentFolderWithNestedGitIgnoreProject_ShowsGitOption()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/.gitignore", "bin/\nobj/\n");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, new[] { "Documents" });
+
+		Assert.True(availability.IncludeGitIgnore);
+		Assert.False(availability.IncludeSmartIgnore);
+	}
+
+	[Theory]
+	[InlineData(0)]
+	[InlineData(1)]
+	[InlineData(2)]
+	public void GetIgnoreOptionsAvailability_NestedDotNetProject_AvailabilityStableAcrossOpenedRootLevels(int rootMode)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/America.sln", "");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+
+		var (openedRootPath, selectedRootFolders) = ResolveRootMode(temp.Path, rootMode);
+		var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+		var availability = service.GetIgnoreOptionsAvailability(openedRootPath, selectedRootFolders);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+	}
+
+	[Theory]
+	[InlineData(0, false)]
+	[InlineData(1, true)]
+	[InlineData(2, false)]
+	public void GetIgnoreOptionsAvailability_NestedGitIgnoreProject_ReflectsDiscoveredScopesByOpenedRootLevel(
+		int rootMode,
+		bool expectedIncludeSmartIgnore)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/.gitignore", "bin/\nobj/\n");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+
+		var (openedRootPath, selectedRootFolders) = ResolveRootMode(temp.Path, rootMode);
+		var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+		var availability = service.GetIgnoreOptionsAvailability(openedRootPath, selectedRootFolders);
+
+		Assert.True(availability.IncludeGitIgnore);
+		Assert.Equal(expectedIncludeSmartIgnore, availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void Build_ParentFolderWithNestedGitIgnoreProject_KeepsSmartToggleExplicitWhenSmartOptionAvailable()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/.gitignore", "bin/\nobj/\n");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+
+		var smartService = new SmartIgnoreService(new DevProjex.Kernel.Abstractions.ISmartIgnoreRule[]
+		{
+			new DotNetArtifactsIgnoreRule()
+		});
+		var service = new IgnoreRulesService(smartService);
+		var rules = service.Build(
+			temp.Path,
+			new[] { IgnoreOptionId.UseGitIgnore },
+			selectedRootFolders: new[] { "Documents" });
+
+		Assert.True(rules.UseGitIgnore);
+		Assert.False(rules.UseSmartIgnore);
+		Assert.NotEmpty(rules.ScopedGitIgnoreMatchers);
+		Assert.Empty(rules.SmartIgnoredFolders);
+		Assert.Empty(rules.SmartIgnoredFiles);
+	}
+
+	private static (string OpenedRootPath, IReadOnlyCollection<string> SelectedRootFolders) ResolveRootMode(
+		string tempPath,
+		int rootMode)
+	{
+		return rootMode switch
+		{
+			0 => (
+				OpenedRootPath: tempPath,
+				SelectedRootFolders: new[] { "Documents" }),
+			1 => (
+				OpenedRootPath: System.IO.Path.Combine(tempPath, "Documents"),
+				SelectedRootFolders: new[] { "Visual Studio 2019" }),
+			2 => (
+				OpenedRootPath: System.IO.Path.Combine(tempPath, "Documents", "Visual Studio 2019"),
+				SelectedRootFolders: new[] { "America" }),
+			_ => throw new ArgumentOutOfRangeException(nameof(rootMode), rootMode, "Unsupported root mode.")
+		};
 	}
 }

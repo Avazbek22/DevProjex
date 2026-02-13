@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.SmartIgnore;
@@ -92,6 +93,166 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 	}
 
 	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void SelectedParentFolderDepthTwo_DotNetProject_SmartIgnoreToggleControlsBinObjVisibility(bool useSmartIgnore)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/America.sln", "");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/Program.cs", "class Program {}");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
+
+		var smartService = new SmartIgnoreService(new ISmartIgnoreRule[]
+		{
+			new DotNetArtifactsIgnoreRule()
+		});
+		var rulesService = new IgnoreRulesService(smartService);
+		var selectedOptions = useSmartIgnore
+			? new[] { IgnoreOptionId.SmartIgnore }
+			: Array.Empty<IgnoreOptionId>();
+
+		var rules = rulesService.Build(
+			temp.Path,
+			selectedOptions,
+			selectedRootFolders: new[] { "Documents" });
+
+		Assert.Equal(useSmartIgnore, rules.UseSmartIgnore);
+
+		var treeBuilder = new TreeBuilder();
+		var result = treeBuilder.Build(temp.Path, new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj", ".sln" },
+			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Documents" },
+			IgnoreRules: rules));
+
+		var documents = result.Root.Children.Single(child => child.Name == "Documents");
+		var vsFolder = documents.Children.Single(child => child.Name == "Visual Studio 2019");
+		var americaContainer = vsFolder.Children.Single(child => child.Name == "America");
+		var projectFolder = americaContainer.Children.Single(child => child.Name == "America");
+
+		Assert.Equal(!useSmartIgnore, projectFolder.Children.Any(child => child.Name == "bin"));
+		Assert.Equal(!useSmartIgnore, projectFolder.Children.Any(child => child.Name == "obj"));
+		Assert.Contains(projectFolder.Children, child => child.Name == "Program.cs");
+	}
+
+	[Theory]
+	[InlineData(0, false)]
+	[InlineData(0, true)]
+	[InlineData(1, false)]
+	[InlineData(1, true)]
+	[InlineData(2, false)]
+	[InlineData(2, true)]
+	public void NestedDotNetProject_SmartIgnoreToggle_WorksForDifferentOpenedRootLevels(int rootMode, bool useSmartIgnore)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/America.sln", "");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/Program.cs", "class Program {}");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
+
+		var (openedRootPath, selectedRootFolders, pathChain) = ResolveRootMode(temp.Path, rootMode);
+		var smartService = new SmartIgnoreService(new ISmartIgnoreRule[]
+		{
+			new DotNetArtifactsIgnoreRule()
+		});
+		var rulesService = new IgnoreRulesService(smartService);
+		var selectedOptions = useSmartIgnore
+			? new[] { IgnoreOptionId.SmartIgnore }
+			: Array.Empty<IgnoreOptionId>();
+		var rules = rulesService.Build(openedRootPath, selectedOptions, selectedRootFolders);
+
+		var treeBuilder = new TreeBuilder();
+		var result = treeBuilder.Build(openedRootPath, new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj", ".sln" },
+			AllowedRootFolders: new HashSet<string>(selectedRootFolders, StringComparer.OrdinalIgnoreCase),
+			IgnoreRules: rules));
+
+		var projectFolder = WalkChain(result.Root, pathChain);
+		Assert.Equal(!useSmartIgnore, projectFolder.Children.Any(child => child.Name == "bin"));
+		Assert.Equal(!useSmartIgnore, projectFolder.Children.Any(child => child.Name == "obj"));
+		Assert.Contains(projectFolder.Children, child => child.Name == "Program.cs");
+	}
+
+	[Fact]
+	public void SelectedParentFolderDepthTwo_WithNestedGitIgnore_HidesBinObjViaGitIgnore()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/.gitignore", "bin/\nobj/\n");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/Program.cs", "class Program {}");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
+
+		var smartService = new SmartIgnoreService(new ISmartIgnoreRule[]
+		{
+			new DotNetArtifactsIgnoreRule()
+		});
+		var rulesService = new IgnoreRulesService(smartService);
+		var rules = rulesService.Build(
+			temp.Path,
+			new[] { IgnoreOptionId.UseGitIgnore },
+			selectedRootFolders: new[] { "Documents" });
+
+		Assert.True(rules.UseGitIgnore);
+		Assert.False(rules.UseSmartIgnore);
+
+		var treeBuilder = new TreeBuilder();
+		var result = treeBuilder.Build(temp.Path, new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj" },
+			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Documents" },
+			IgnoreRules: rules));
+
+		var documents = result.Root.Children.Single(child => child.Name == "Documents");
+		var vsFolder = documents.Children.Single(child => child.Name == "Visual Studio 2019");
+		var americaContainer = vsFolder.Children.Single(child => child.Name == "America");
+		var projectFolder = americaContainer.Children.Single(child => child.Name == "America");
+
+		Assert.DoesNotContain(projectFolder.Children, child => child.Name == "bin");
+		Assert.DoesNotContain(projectFolder.Children, child => child.Name == "obj");
+		Assert.Contains(projectFolder.Children, child => child.Name == "Program.cs");
+	}
+
+	[Theory]
+	[InlineData(0)]
+	[InlineData(1)]
+	[InlineData(2)]
+	public void NestedGitIgnoreProject_UseGitIgnore_WorksForDifferentOpenedRootLevels(int rootMode)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/.gitignore", "bin/\nobj/\n");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/Program.cs", "class Program {}");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
+
+		var (openedRootPath, selectedRootFolders, pathChain) = ResolveRootMode(temp.Path, rootMode);
+		var smartService = new SmartIgnoreService(new ISmartIgnoreRule[]
+		{
+			new DotNetArtifactsIgnoreRule()
+		});
+		var rulesService = new IgnoreRulesService(smartService);
+		var rules = rulesService.Build(
+			openedRootPath,
+			new[] { IgnoreOptionId.UseGitIgnore },
+			selectedRootFolders: selectedRootFolders);
+
+		Assert.True(rules.UseGitIgnore);
+
+		var treeBuilder = new TreeBuilder();
+		var result = treeBuilder.Build(openedRootPath, new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj", ".sln" },
+			AllowedRootFolders: new HashSet<string>(selectedRootFolders, StringComparer.OrdinalIgnoreCase),
+			IgnoreRules: rules));
+
+		var projectFolder = WalkChain(result.Root, pathChain);
+		Assert.DoesNotContain(projectFolder.Children, child => child.Name == "bin");
+		Assert.DoesNotContain(projectFolder.Children, child => child.Name == "obj");
+		Assert.Contains(projectFolder.Children, child => child.Name == "Program.cs");
+	}
+
+	[Theory]
 	[InlineData(false, false)]
 	[InlineData(true, false)]
 	[InlineData(false, true)]
@@ -160,5 +321,35 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 				new HashSet<string>(_folders, StringComparer.OrdinalIgnoreCase),
 				new HashSet<string>(_files, StringComparer.OrdinalIgnoreCase));
 		}
+	}
+
+	private static (string OpenedRootPath, IReadOnlyCollection<string> SelectedRootFolders, IReadOnlyList<string> ProjectPathChain)
+		ResolveRootMode(string tempPath, int rootMode)
+	{
+		return rootMode switch
+		{
+			0 => (
+				OpenedRootPath: tempPath,
+				SelectedRootFolders: new[] { "Documents" },
+				ProjectPathChain: new[] { "Documents", "Visual Studio 2019", "America", "America" }),
+			1 => (
+				OpenedRootPath: Path.Combine(tempPath, "Documents"),
+				SelectedRootFolders: new[] { "Visual Studio 2019" },
+				ProjectPathChain: new[] { "Visual Studio 2019", "America", "America" }),
+			2 => (
+				OpenedRootPath: Path.Combine(tempPath, "Documents", "Visual Studio 2019"),
+				SelectedRootFolders: new[] { "America" },
+				ProjectPathChain: new[] { "America", "America" }),
+			_ => throw new ArgumentOutOfRangeException(nameof(rootMode), rootMode, "Unsupported root mode.")
+		};
+	}
+
+	private static FileSystemNode WalkChain(FileSystemNode root, IReadOnlyList<string> chain)
+	{
+		var current = root;
+		foreach (var segment in chain)
+			current = current.Children.Single(child => child.Name == segment);
+
+		return current;
 	}
 }

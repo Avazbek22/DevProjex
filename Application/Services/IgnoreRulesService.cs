@@ -431,10 +431,12 @@ public sealed class IgnoreRulesService
 			if (currentDepth >= maxDepth)
 				continue;
 
-			IEnumerable<string> children;
+			string[] children;
 			try
 			{
-				children = Directory.EnumerateDirectories(currentPath, "*", SearchOption.TopDirectoryOnly);
+				// Materialize eagerly so access errors are handled inside this try/catch
+				// and don't escape later from deferred enumeration in parallel scan.
+				children = Directory.GetDirectories(currentPath, "*", SearchOption.TopDirectoryOnly);
 			}
 			catch
 			{
