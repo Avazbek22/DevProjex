@@ -375,6 +375,7 @@
                   <TextBlock Text="{Binding DropZoneButtonText}"
                              FontSize="14"
                              FontWeight="SemiBold"
+                             Foreground="#FFFFFF"
                              VerticalAlignment="Center" />
                 </StackPanel>
               </Button>
