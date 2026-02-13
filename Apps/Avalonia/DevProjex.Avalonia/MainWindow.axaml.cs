@@ -1858,9 +1858,6 @@ public partial class MainWindow : Window
             _viewModel.SettingsVisible = true;
             _viewModel.SearchVisible = false;
 
-            // Animate settings panel in
-            AnimateSettingsPanel(true);
-
             // Set project source type based on how it was opened
             // If opened from dialog (File → Open), it's LocalFolder
             // If opened from Git clone, the source type is already set
@@ -2074,6 +2071,11 @@ public partial class MainWindow : Window
                     Cursor = new Cursor(StandardCursorType.Arrow);
                     waitCursorActive = false;
                 }
+
+                // Animate settings panel BEFORE metrics calculation starts
+                // so user sees the panel immediately after tree renders
+                if (_viewModel.SettingsVisible && !_settingsAnimating)
+                    AnimateSettingsPanel(true);
 
                 UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
                 await InitializeFileMetricsCacheAsync(cancellationToken);
