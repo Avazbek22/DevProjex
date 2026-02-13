@@ -9,13 +9,15 @@
     <Color x:Key="AppPanelColor">#F3F3F3</Color>
     <Color x:Key="AppBorderColor">#C7C7C7</Color>
     <Color x:Key="AppAccentColor">#0078D4</Color>
+    <Color x:Key="AppAccentHoverColor">#1A8BE0</Color>
+    <Color x:Key="AppAccentPressedColor">#006BBE</Color>
     <Color x:Key="AppTextColor">#1A1A1A</Color>
     <Color x:Key="AppMutedTextColor">#5E5E5E</Color>
     <Color x:Key="TreeSelectionColor">#DCEEFF</Color>
     <Color x:Key="TreeSearchHighlightColor">#F7C76B</Color>
     <Color x:Key="TreeSearchCurrentColor">#F9A825</Color>
-    <Color x:Key="MenuHoverColor">#E0E0E0</Color>
-    <Color x:Key="MenuPressedColor">#D0D0D0</Color>
+    <Color x:Key="MenuHoverColor">#E6E6E6</Color>
+    <Color x:Key="MenuPressedColor">#D9D9D9</Color>
 
     <!-- Drop Zone Colors - Light Theme -->
     <Color x:Key="DropZoneBorderColor">#0066CC</Color>
@@ -30,6 +32,9 @@
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="AppBorderBrush" Color="{StaticResource AppBorderColor}" />
     <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource AppAccentColor}" />
+    <SolidColorBrush x:Key="AppAccentHoverBrush" Color="{StaticResource AppAccentHoverColor}" />
+    <SolidColorBrush x:Key="AppAccentPressedBrush" Color="{StaticResource AppAccentPressedColor}" />
+    <SolidColorBrush x:Key="PrimaryActionForegroundBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="AppTextBrush" Color="{StaticResource AppTextColor}" />
     <SolidColorBrush x:Key="AppMutedTextBrush" Color="{StaticResource AppMutedTextColor}" />
     <SolidColorBrush x:Key="TreeSelectionBrush" Color="{StaticResource TreeSelectionColor}" />
@@ -41,6 +46,8 @@
     <SolidColorBrush x:Key="MenuChildPopupBrush" Color="{StaticResource AppPanelColor}"/>
     <SolidColorBrush x:Key="MenuHoverBrush" Color="{StaticResource MenuHoverColor}"/>
     <SolidColorBrush x:Key="MenuPressedBrush" Color="{StaticResource MenuPressedColor}"/>
+    <SolidColorBrush x:Key="MenuChildHoverBrush" Color="{StaticResource MenuHoverColor}"/>
+    <SolidColorBrush x:Key="MenuChildPressedBrush" Color="{StaticResource MenuPressedColor}"/>
 
     <!-- Drop Zone Brushes - Light Theme -->
     <SolidColorBrush x:Key="DropZoneBorderBrush" Color="{StaticResource DropZoneBorderColor}" />
@@ -57,6 +64,8 @@
     <Color x:Key="AppPanelColor">#17171A</Color>
     <Color x:Key="AppBorderColor">#2B2F36</Color>
     <Color x:Key="AppAccentColor">#2D8CFF</Color>
+    <Color x:Key="AppAccentHoverColor">#4A9CFF</Color>
+    <Color x:Key="AppAccentPressedColor">#257DE3</Color>
     <Color x:Key="AppTextColor">#E7E9EF</Color>
     <Color x:Key="AppMutedTextColor">#9AA3B2</Color>
     <Color x:Key="TreeSelectionColor">#254861</Color>
@@ -78,6 +87,9 @@
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="AppBorderBrush" Color="{StaticResource AppBorderColor}" />
     <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource AppAccentColor}" />
+    <SolidColorBrush x:Key="AppAccentHoverBrush" Color="{StaticResource AppAccentHoverColor}" />
+    <SolidColorBrush x:Key="AppAccentPressedBrush" Color="{StaticResource AppAccentPressedColor}" />
+    <SolidColorBrush x:Key="PrimaryActionForegroundBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="AppTextBrush" Color="{StaticResource AppTextColor}" />
     <SolidColorBrush x:Key="AppMutedTextBrush" Color="{StaticResource AppMutedTextColor}" />
     <SolidColorBrush x:Key="TreeSelectionBrush" Color="{StaticResource TreeSelectionColor}" />
@@ -89,6 +101,8 @@
     <SolidColorBrush x:Key="MenuChildPopupBrush" Color="{StaticResource AppPanelColor}"/>
     <SolidColorBrush x:Key="MenuHoverBrush" Color="{StaticResource MenuHoverColor}"/>
     <SolidColorBrush x:Key="MenuPressedBrush" Color="{StaticResource MenuPressedColor}"/>
+    <SolidColorBrush x:Key="MenuChildHoverBrush" Color="{StaticResource MenuHoverColor}"/>
+    <SolidColorBrush x:Key="MenuChildPressedBrush" Color="{StaticResource MenuPressedColor}"/>
 
     <!-- Drop Zone Brushes - Dark Theme -->
     <SolidColorBrush x:Key="DropZoneBorderBrush" Color="{StaticResource DropZoneBorderColor}" />
@@ -322,12 +336,14 @@
     <Style Selector="Button.primary-action">
         <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-        <Setter Property="Foreground" Value="#FFFFFF" />
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
         <Setter Property="RenderTransformOrigin" Value="50%,50%" />
         <Setter Property="Transitions">
             <Transitions>
                 <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.22" Easing="CubicEaseInOut" />
+                <BrushTransition Property="Background" Duration="0:0:0.18" Easing="CubicEaseInOut" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.18" Easing="CubicEaseInOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -335,25 +351,36 @@
     <!-- Override Fluent template-level background for primary buttons -->
     <Style Selector="Button.primary-action /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
+    </Style>
+
+    <Style Selector="Button.primary-action TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
+    </Style>
+
+    <Style Selector="Button.primary-action Path">
+        <Setter Property="Fill" Value="{DynamicResource PrimaryActionForegroundBrush}" />
     </Style>
 
     <Style Selector="Button.primary-action:pointerover">
-        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-        <Setter Property="RenderTransform" Value="scale(1.02)" />
+        <Setter Property="Background" Value="{DynamicResource AppAccentHoverBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentHoverBrush}" />
+        <Setter Property="RenderTransform" Value="scale(1.01)" />
     </Style>
 
     <Style Selector="Button.primary-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AppAccentHoverBrush}" />
     </Style>
 
     <Style Selector="Button.primary-action:pressed">
-        <Setter Property="Opacity" Value="0.85" />
-        <Setter Property="RenderTransform" Value="scale(0.98)" />
+        <Setter Property="Background" Value="{DynamicResource AppAccentPressedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentPressedBrush}" />
+        <Setter Property="Opacity" Value="0.95" />
+        <Setter Property="RenderTransform" Value="scale(0.985)" />
     </Style>
 
     <Style Selector="Button.primary-action:pressed /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AppAccentPressedBrush}" />
     </Style>
 
     <Style Selector="ScrollViewer">
@@ -766,6 +793,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="BoxShadow" Value="0 8 24 0 #2A000000" />
         <Setter Property="Padding" Value="4" />
     </Style>
 
@@ -776,6 +804,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="BoxShadow" Value="0 8 24 0 #2A000000" />
         <Setter Property="Padding" Value="4" />
     </Style>
 
@@ -791,11 +820,11 @@
     </Style>
 
     <Style Selector="MenuItem MenuItem:pointerover /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+        <Setter Property="Background" Value="{DynamicResource MenuChildHoverBrush}" />
     </Style>
 
     <Style Selector="MenuItem MenuItem:pressed /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource MenuPressedBrush}" />
+        <Setter Property="Background" Value="{DynamicResource MenuChildPressedBrush}" />
     </Style>
 
     <!-- ============================================== -->
