@@ -1,4 +1,4 @@
-﻿## 1) Qu’est‑ce que c’est et pourquoi
+## 1) Qu’est‑ce que c’est et pourquoi
 DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour code review, support, formation et partage de structure avec un assistant IA.
 
 Important : l’application est en lecture seule et ne modifie jamais les fichiers.
@@ -28,6 +28,16 @@ Règles de format :
 * Exporter arborescence et contenu — le bloc arborescence suit le sélecteur ASCII/JSON, le bloc contenu reste textuel.
 
 Les fichiers exportés sont écrits en UTF-8 sans BOM.
+
+### Drag & Drop
+Le glisser-déposer fonctionne dans la zone de démarrage (Drop Zone) quand aucun projet n’est chargé.
+
+Règles :
+* vous pouvez déposer un dossier ;
+* vous pouvez déposer un fichier — dans ce cas, le dossier contenant ce fichier est ouvert ;
+* si plusieurs éléments sont déposés, le premier chemin local valide est utilisé ;
+* si un chemin est indisponible ou inexistant, les mêmes vérifications d’accès que pour « Ouvrir le dossier… » sont appliquées ;
+* les éléments non pris en charge ou non locaux sont ignorés.
 
 ## 4) Git
 Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git Clone). L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
@@ -189,16 +199,44 @@ Smart Ignore (s’il est activé) complète le filtrage dans les zones détecté
 5. Dossier sans règles pertinentes.
 Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’est pas pertinent, ces options sont masquées.
 Seules les règles de visibilité de base restent actives.
-## 11) Construction de l’arbre
+## 11) Comment l’arbre et les métriques sont calculés
 Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
 * types de fichiers sélectionnés
 * règles d’exclusion
 * filtre actif
+* nœuds cochés dans l’arbre (pour les opérations basées sur la sélection)
 
 Si l’accès est refusé, le nœud est marqué Accès refusé.
 
-Les compteurs de la barre d’état sont recalculés selon le format actuel de l’arborescence (ASCII/JSON) pour les opérations qui incluent l’arbre. Lors du basculement ASCII/JSON, les valeurs sont mises à jour immédiatement.
+### 11.1 Ce que montrent les compteurs de la barre d’état
+La barre d’état contient deux blocs :
+* Arbre — métriques de la sortie texte de l’arborescence ;
+* Contenu — métriques de la sortie de contenu des fichiers.
+
+Format :
+* Lignes
+* Caractères
+* ~Tokens (approximation)
+
+Les grandes valeurs sont affichées en format compact (K/M).
+
+### 11.2 Comment les métriques sont calculées
+Métriques de l’arbre :
+* sont calculées à partir de la sortie réelle de l’arbre générée par le même pipeline d’export ;
+* respectent le format ASCII/JSON courant.
+
+Métriques du contenu :
+* suivent les mêmes règles que la copie/export du contenu ;
+* les fichiers binaires sont exclus ;
+* les fichiers vides et uniquement blancs sont comptés via des marqueurs de service (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
+
+### 11.3 Quand les compteurs sont mis à jour
+Le recalcul est effectué :
+* après ouverture/actualisation d’un projet ;
+* après application des paramètres (ignore, types de fichiers, dossiers racine) ;
+* lors des changements de cases à cocher dans l’arbre (avec debounce) ;
+* lors du basculement ASCII/JSON (pour les opérations utilisant l’arbre).
 
 ## 12) Icônes
 Ordre de sélection :
@@ -223,8 +261,24 @@ Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) remet l
 ## 15) Langues
 La langue se choisit via le menu Langue.
 
-## 16) Notes
+## 16) Barre de progression et annulation
+La partie centrale de la barre d’état affiche l’opération active et sa progression.
+
+Modes de progression :
+* Indeterminate — sans pourcentage (durée inconnue).
+* Determinate — avec pourcentage (0–100).
+
+Comportement :
+* pendant le calcul de données en arrière-plan, une progression en pourcentage est affichée ;
+* pour certaines opérations Git, le pourcentage est affiché si la source de progression le fournit ;
+* pour les opérations très rapides, la progression peut n’apparaître que brièvement.
+
+Bouton X (annuler) dans la barre d’état :
+* exécute une annulation best-effort pour les opérations qui prennent en charge l’annulation ;
+* arrête le calcul de données en arrière-plan ;
+* pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
+
+## 17) Notes
 * Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
-
 

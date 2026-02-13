@@ -1,4 +1,4 @@
-﻿## 1) Cos’è e a cosa serve
+## 1) Cos’è e a cosa serve
 DevProjex prepara rapidamente il contesto del progetto: mostra la struttura di cartelle/file, permette di selezionare gli elementi e copiare l’albero e/o il contenuto dei file negli appunti. Utile per code review, supporto, formazione e condivisione della struttura con un assistente AI.
 
 Importante: l’app è solo in lettura e non modifica i file.
@@ -28,6 +28,16 @@ Regole di formato:
 * Esporta albero e contenuto — il blocco albero segue il selettore ASCII/JSON, il blocco contenuto resta testuale.
 
 I file esportati vengono scritti in UTF-8 senza BOM.
+
+### Drag & Drop
+Il drag & drop funziona nell’area iniziale (Drop Zone) quando nessun progetto è caricato.
+
+Regole:
+* puoi trascinare una cartella;
+* puoi trascinare un file — in questo caso viene aperta la cartella che lo contiene;
+* se vengono trascinati più elementi, viene usato il primo percorso locale valido;
+* se un percorso non è disponibile o non esiste, vengono applicati gli stessi controlli di accesso di «Apri cartella…»;
+* elementi non supportati o non locali vengono ignorati.
 
 ## 4) Git
 Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Clone). L'app non tocca i tuoi file — lavora solo con la cache.
@@ -189,16 +199,44 @@ Viene mostrato « Usa .gitignore ».
 5. Cartella senza regole pertinenti.
 Se non viene trovato `.gitignore` e Smart Ignore non è pertinente, queste opzioni non vengono mostrate.
 Restano solo le regole base di visibilità.
-## 11) Come si costruisce l’albero
+## 11) Come vengono calcolati albero e metriche
 Il risultato dipende da:
 * cartelle di primo livello selezionate
 * tipi di file selezionati
 * regole di esclusione
 * filtro attivo
+* nodi selezionati con checkbox nell’albero (per operazioni basate sulla selezione)
 
 Se l’accesso è negato, il nodo è marcato Accesso negato.
 
-I contatori nella barra di stato vengono ricalcolati in base al formato corrente dell’albero (ASCII/JSON) per le operazioni che includono l’albero. Quando si cambia ASCII/JSON, i valori si aggiornano subito.
+### 11.1 Cosa mostrano i contatori nella barra di stato
+La barra di stato contiene due blocchi:
+* Albero — metriche dell’output testuale dell’albero;
+* Contenuto — metriche dell’output contenuti file.
+
+Formato:
+* Righe
+* Caratteri
+* ~Token (stima)
+
+I valori grandi sono mostrati in formato compatto (K/M).
+
+### 11.2 Come vengono calcolate le metriche
+Metriche albero:
+* sono calcolate dall’output reale dell’albero generato dalla stessa pipeline di export;
+* rispettano il formato ASCII/JSON corrente.
+
+Metriche contenuto:
+* seguono le stesse regole della copia/export contenuto;
+* i file binari sono esclusi;
+* file vuoti e solo spazi sono conteggiati tramite marker di servizio (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
+
+### 11.3 Quando i contatori vengono aggiornati
+Il ricalcolo avviene:
+* dopo apertura/aggiornamento progetto;
+* dopo applicazione impostazioni (ignore, tipi file, cartelle root);
+* quando cambiano le checkbox nell’albero (con debounce);
+* quando si passa ASCII/JSON (per operazioni che usano l’albero).
 
 ## 12) Icone
 Ordine di scelta:
@@ -223,8 +261,24 @@ Reimposta impostazioni (Aiuto → Reimposta impostazioni) riporta tema ed effett
 ## 15) Lingue
 La lingua si seleziona dal menu Lingua.
 
-## 16) Note
+## 16) Barra di avanzamento e annullamento
+Nella parte centrale della barra di stato vengono mostrati operazione attiva e progresso.
+
+Modalità progresso:
+* Indeterminate — senza percentuale (durata sconosciuta).
+* Determinate — con percentuale (0–100).
+
+Comportamento:
+* durante il calcolo dati in background viene mostrata la percentuale;
+* per alcune operazioni Git la percentuale viene mostrata se la sorgente la fornisce;
+* per operazioni molto rapide il progresso può apparire solo per poco tempo.
+
+Pulsante X (annulla) nella barra di stato:
+* esegue annullamento best-effort per operazioni che supportano l’annullamento;
+* interrompe il calcolo dati in background;
+* per operazioni senza supporto annullamento, ferma l’indicazione nella barra di stato, mentre l’operazione può comunque terminare in background.
+
+## 17) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
-
 

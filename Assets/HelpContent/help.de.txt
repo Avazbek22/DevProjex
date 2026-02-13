@@ -1,4 +1,4 @@
-﻿## 1) Was ist das und wozu
+## 1) Was ist das und wozu
 DevProjex bereitet den Projektkontext schnell auf: zeigt die Ordner/Dateistruktur, erlaubt das Markieren von Elementen und das Kopieren des Baums und/oder von Dateiinhalten in die Zwischenablage. Nützlich für Code‑Reviews, Support, Schulung und das Teilen der Struktur mit einem KI‑Assistenten.
 
 Wichtig: Die App arbeitet nur lesend und ändert keine Dateien.
@@ -28,6 +28,16 @@ Formatregeln:
 * Baum und Inhalt exportieren — Baumblock folgt dem ASCII/JSON-Schalter, Inhaltsblock bleibt Text.
 
 Exportdateien werden in UTF-8 ohne BOM geschrieben.
+
+### Drag & Drop
+Drag & Drop funktioniert im Startbereich (Drop Zone), wenn kein Projekt geladen ist.
+
+Regeln:
+* ein Ordner kann abgelegt werden;
+* eine Datei kann abgelegt werden — dann wird ihr enthaltender Ordner geöffnet;
+* bei mehreren abgelegten Objekten wird der erste passende lokale Pfad verwendet;
+* wenn ein Pfad nicht verfügbar ist oder nicht existiert, gelten dieselben Zugriffsprüfungen wie bei „Ordner öffnen…“;
+* nicht unterstützte oder nicht-lokale Objekte werden ignoriert.
 
 ## 4) Git
 Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
@@ -189,16 +199,44 @@ Smart Ignore (wenn aktiviert) ergänzt die Filterung in den gefundenen Bereichen
 5. Ordner ohne relevante Regeln.
 Wenn keine `.gitignore` gefunden wird und Smart Ignore nicht relevant ist, werden diese Punkte nicht angezeigt.
 Es bleiben nur die grundlegenden Sichtbarkeitsregeln.
-## 11) Wie der Baum gebaut wird
+## 11) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
 * ausgewählte Ordner der obersten Ebene
 * ausgewählte Dateitypen
 * Ignorier‑Regeln
 * aktivem Filter
+* markierten Knoten im Baum (für auswahlbasierte Operationen)
 
 Wenn der Zugriff verweigert wird, wird der Knoten als Zugriff verweigert markiert.
 
-Die Zähler in der Statusleiste werden für Operationen mit Baum unter Berücksichtigung des aktuellen Baumformats (ASCII/JSON) neu berechnet. Beim Umschalten zwischen ASCII/JSON werden die Werte sofort aktualisiert.
+### 11.1 Was die Zähler in der Statusleiste zeigen
+Die Statusleiste hat zwei Blöcke:
+* Baum — Kennzahlen der Baum-Textausgabe;
+* Inhalt — Kennzahlen der exportierten Dateiinhalte.
+
+Format:
+* Zeilen
+* Zeichen
+* ~Tokens (ungefähr)
+
+Große Werte werden kompakt mit K/M angezeigt.
+
+### 11.2 Wie die Kennzahlen berechnet werden
+Baum-Kennzahlen:
+* werden aus der tatsächlichen Baum-Ausgabe berechnet, die von derselben Export-Pipeline erzeugt wird;
+* berücksichtigen das aktuelle ASCII/JSON-Format.
+
+Inhalt-Kennzahlen:
+* folgen denselben Regeln wie beim Kopieren/Exportieren von Inhalten;
+* Binärdateien werden ausgeschlossen;
+* leere und nur aus Leerraum bestehende Dateien werden über Servicemarker gezählt (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
+
+### 11.3 Wann die Zähler aktualisiert werden
+Neu berechnet wird:
+* nach dem Öffnen/Aktualisieren eines Projekts;
+* nach dem Anwenden von Einstellungen (Ignore, Dateitypen, Root-Ordner);
+* bei Änderungen von Checkboxen im Baum (mit Debounce);
+* beim Umschalten ASCII/JSON (für Operationen mit Baum-Ausgabe).
 
 ## 12) Symbole
 Auswahlreihenfolge:
@@ -223,8 +261,24 @@ Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt die Th
 ## 15) Sprachen
 Die Sprache wird über das Sprache‑Menü gewählt.
 
-## 16) Hinweise
+## 16) Fortschrittsbalken und Abbrechen
+In der Mitte der Statusleiste werden aktive Operation und Fortschritt angezeigt.
+
+Fortschrittsmodi:
+* Indeterminate — ohne Prozent (Dauer unbekannt).
+* Determinate — mit Prozent (0–100).
+
+Verhalten:
+* während der Hintergrundberechnung von Daten wird Prozentfortschritt angezeigt;
+* bei einigen Git-Operationen wird Prozent angezeigt, wenn die Fortschrittsquelle ihn liefert;
+* bei sehr schnellen Operationen kann der Fortschritt nur kurz sichtbar sein.
+
+X-Schaltfläche (Abbrechen) in der Statusleiste:
+* führt eine Best-Effort-Abbruchanforderung für Operationen mit Abbruchunterstützung aus;
+* stoppt die Hintergrundberechnung von Daten;
+* bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
+
+## 17) Hinweise
 * Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.
-
 

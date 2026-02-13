@@ -1,4 +1,4 @@
-﻿## 1) Nima va nima uchun
+## 1) Nima va nima uchun
 DevProjex loyiha kontekstini tez tayyorlaydi: papka/fayl tuzilmasini ko‘rsatadi, elementlarni belgilash va daraxtni va/yoki fayl mazmunini buferga nusxalash imkonini beradi. Code review, qo‘llab‑quvvatlash, o‘qitish va loyiha tuzilmasini AI‑yordamchiga berish uchun qulay.
 
 Muhim: ilova faqat o‘qish rejimida ishlaydi va fayllarni o‘zgartirmaydi.
@@ -28,6 +28,16 @@ Format qoidalari:
 * Daraxt va mazmunni eksport qilish — daraxt bloki ASCII/JSON tumbleriga bog‘liq, mazmun bloki matn bo‘lib qoladi.
 
 Eksport fayllari UTF-8 (BOMsiz) formatida yoziladi.
+
+### Drag & Drop
+Drag & Drop loyiha yuklanmagan holatda boshlang‘ich maydonda (Drop Zone) ishlaydi.
+
+Qoidalar:
+* papkani tashlash mumkin;
+* faylni tashlash mumkin — bu holda fayl joylashgan papka ochiladi;
+* bir nechta obyekt tashlansa, birinchi mos lokal yo‘l ishlatiladi;
+* yo‘l mavjud bo‘lmasa yoki kirish bo‘lmasa, «Jildni ochish…» dagi kabi bir xil kirish tekshiruvlari qo‘llanadi;
+* qo‘llab-quvvatlanmaydigan yoki lokal bo‘lmagan obyektlar e’tiborga olinmaydi.
 
 ## 4) Git
 Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
@@ -189,16 +199,44 @@ Smart Ignore (yoqilgan bo‘lsa) aniqlangan hududlarda filtrlashni to‘ldiradi.
 5. Mos qoidalarsiz papka.
 Agar `.gitignore` topilmasa va Smart Ignore mos bo‘lmasa, bu variantlar ko‘rsatilmaydi.
 Faqat asosiy ko‘rinish qoidalari qoladi.
-## 11) Daraxt qanday quriladi
+## 11) Daraxt va metrikalar qanday hisoblanadi
 Natija quyidagilarga bog‘liq:
 * tanlangan yuqori darajadagi jildlar
 * tanlangan fayl turlari
 * e’tiborsiz qoldirish qoidalari
 * faol filtr
+* daraxtdagi checkbox orqali belgilangan tugunlar (tanlovga asoslangan amallar uchun)
 
 Agar ruxsat bo‘lmasa, tugun "Kirish taqiqlangan" deb belgilanadi.
 
-Status-bardagi hisoblagichlar daraxt qatnashadigan amallar uchun joriy daraxt formati (ASCII/JSON) asosida qayta hisoblanadi. ASCII/JSON almashtirilganda qiymatlar darhol yangilanadi.
+### 11.1 Status-bardagi hisoblagichlar nimani ko‘rsatadi
+Status-barda ikki blok bor:
+* Daraxt — daraxtning matnli chiqishi metrikalari;
+* Mazmun — fayl mazmuni chiqishi metrikalari.
+
+Format:
+* Satrlar
+* Belgilar
+* ~Tokenlar (taxminiy)
+
+Katta qiymatlar qisqa formatda (K/M) ko‘rsatiladi.
+
+### 11.2 Metrikalar qanday hisoblanadi
+Daraxt metrikalari:
+* aynan eksport pipeline’i yaratadigan real daraxt matni bo‘yicha hisoblanadi;
+* joriy ASCII/JSON formatini hisobga oladi.
+
+Mazmun metrikalari:
+* mazmunni nusxalash/eksport qilish qoidalari bilan bir xil hisoblanadi;
+* binar fayllar kiritilmaydi;
+* bo‘sh va faqat bo‘sh joyli fayllar servis markerlari orqali hisoblanadi (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
+
+### 11.3 Hisoblagichlar qachon yangilanadi
+Qayta hisoblash quyidagi holatlarda bajariladi:
+* loyiha ochilgandan/yangilangandan keyin;
+* sozlamalar qo‘llangandan keyin (ignore, fayl turlari, root jildlar);
+* daraxtdagi checkboxlar o‘zgarganda (debounce bilan);
+* ASCII/JSON almashtirilganda (daraxt ishlatiladigan amallar uchun).
 
 ## 12) Ikonkalar
 Ikonka tanlash tartibi:
@@ -223,8 +261,24 @@ Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) tema va effekt sozlamalar
 ## 15) Tillar
 Til menyusi orqali tanlanadi.
 
-## 16) Eslatmalar
+## 16) Progress-bar va bekor qilish
+Status-bar markazida faol amal va progress ko‘rsatiladi.
+
+Progress rejimlari:
+* Indeterminate — foizsiz (amal davomiyligi noma’lum).
+* Determinate — foiz bilan (0–100).
+
+Xulq-atvor:
+* fon rejimida ma’lumot hisoblash vaqtida foizli progress ko‘rsatiladi;
+* ayrim Git amallarida progress manbasi foiz berganda foiz ko‘rsatiladi;
+* juda tez amallarda progress juda qisqa ko‘rinishi mumkin.
+
+Status-bardagi X (bekor qilish) tugmasi:
+* bekor qilishni qo‘llaydigan amallar uchun best-effort bekor qilishni bajaradi;
+* fon rejimidagi ma’lumot hisoblashni to‘xtatadi;
+* bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
+
+## 17) Eslatmalar
 * Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.
-
 
