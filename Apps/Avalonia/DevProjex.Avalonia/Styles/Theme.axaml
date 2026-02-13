@@ -407,9 +407,6 @@
         </Setter>
     </Style>
 
-    <Style Selector="Border.search-panel:pointerover">
-        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-    </Style>
 
     <Style Selector="Border.filter-panel">
         <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
@@ -426,9 +423,6 @@
         </Setter>
     </Style>
 
-    <Style Selector="Border.filter-panel:pointerover">
-        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-    </Style>
 
     <!-- Rounded controls inside search/filter panels -->
     <Style Selector="Border.search-panel TextBox, Border.filter-panel TextBox">
@@ -674,18 +668,20 @@
     <Style Selector="MenuItem">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Margin" Value="2" />
     </Style>
 
     <Style Selector="MenuItem /template/ Border#PART_LayoutRoot">
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
-            </Transitions>
-        </Setter>
+        <Setter Property="CornerRadius" Value="6" />
     </Style>
 
     <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="MenuItem:pressed /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
     </Style>
 
     <!-- Hard-disable TreeViewItem hover/selection background in Fluent template -->
@@ -765,10 +761,20 @@
     <!-- Submenu item backgrounds -->
     <Style Selector="MenuItem MenuItem">
         <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="Margin" Value="2,1" />
+    </Style>
+
+    <Style Selector="MenuItem MenuItem /template/ Border#PART_LayoutRoot">
+        <Setter Property="CornerRadius" Value="5" />
     </Style>
 
     <Style Selector="MenuItem MenuItem:pointerover /template/ Border#PART_LayoutRoot">
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="MenuItem MenuItem:pressed /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
     </Style>
 
     <!-- ============================================== -->
