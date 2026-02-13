@@ -195,7 +195,10 @@ public sealed class SelectionSyncCoordinator
         }
     }
 
-    public Task PopulateExtensionsForRootSelectionAsync(string path, IReadOnlyCollection<string> rootFolders)
+    public Task PopulateExtensionsForRootSelectionAsync(
+        string path,
+        IReadOnlyCollection<string> rootFolders,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(path)) return Task.CompletedTask;
         var version = Interlocked.Increment(ref _extensionScanVersion);
@@ -211,24 +214,29 @@ public sealed class SelectionSyncCoordinator
         var ignoreRules = _buildIgnoreRules(path, selectedIgnoreOptions, rootFolders);
         return Task.Run(async () =>
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Scan extensions off the UI thread to avoid freezing on large folders.
-            var scan = _scanOptions.GetExtensionsForRootFolders(path, rootFolders, ignoreRules);
+            var scan = _scanOptions.GetExtensionsForRootFolders(path, rootFolders, ignoreRules, cancellationToken);
             if (scan.RootAccessDenied)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var elevated = await Dispatcher.UIThread.InvokeAsync(() => _tryElevateAndRestart(path));
                 if (elevated) return;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var options = _filterSelectionService.BuildExtensionOptions(scan.Value, prev);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (version != _extensionScanVersion) return;
                 ApplyExtensionOptions(options);
             });
-        });
+        }, cancellationToken);
     }
 
-    public Task PopulateRootFoldersAsync(string path)
+    public Task PopulateRootFoldersAsync(string path, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(path)) return Task.CompletedTask;
         var version = Interlocked.Increment(ref _rootScanVersion);
@@ -240,17 +248,22 @@ public sealed class SelectionSyncCoordinator
         var ignoreRules = _buildIgnoreRules(path, selectedIgnoreOptions, null);
         return Task.Run(async () =>
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Scan root folders off the UI thread to keep the window responsive.
-            var scan = _scanOptions.Execute(new ScanOptionsRequest(path, ignoreRules));
+            var scan = _scanOptions.Execute(new ScanOptionsRequest(path, ignoreRules), cancellationToken);
             if (scan.RootAccessDenied)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var elevated = await Dispatcher.UIThread.InvokeAsync(() => _tryElevateAndRestart(path));
                 if (elevated) return;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var options = _filterSelectionService.BuildRootFolderOptions(scan.RootFolders, prev, ignoreRules);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (version != _rootScanVersion) return;
                 _viewModel.RootFolders.Clear();
 
@@ -265,24 +278,27 @@ public sealed class SelectionSyncCoordinator
                 SyncAllCheckbox(_viewModel.RootFolders, ref _suppressRootAllCheck,
                     value => _viewModel.AllRootFoldersChecked = value);
             });
-        });
+        }, cancellationToken);
     }
 
     public async Task PopulateIgnoreOptionsForRootSelectionAsync(
         IReadOnlyCollection<string> rootFolders,
-        string? currentPath = null)
+        string? currentPath = null,
+        CancellationToken cancellationToken = default)
     {
         var previousSelections = new HashSet<IgnoreOptionId>(_ignoreSelectionCache);
         var hasPreviousSelections = _ignoreSelectionInitialized;
         var path = string.IsNullOrWhiteSpace(currentPath) ? _currentPathProvider() : currentPath;
         var version = Interlocked.Increment(ref _ignoreOptionsVersion);
 
-        var availability = await Task.Run(() => ResolveIgnoreOptionsAvailability(path, rootFolders))
+        var availability = await Task.Run(() => ResolveIgnoreOptionsAvailability(path, rootFolders), cancellationToken)
             .ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         var options = _ignoreOptionsService.GetOptions(availability);
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (version != _ignoreOptionsVersion)
                 return;
 
@@ -308,21 +324,26 @@ public sealed class SelectionSyncCoordinator
         return _viewModel.RootFolders.Where(o => o.IsChecked).Select(o => o.Name).ToList();
     }
 
-    public async Task UpdateLiveOptionsFromRootSelectionAsync(string? currentPath)
+    public async Task UpdateLiveOptionsFromRootSelectionAsync(
+        string? currentPath,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(currentPath)) return;
+        cancellationToken.ThrowIfCancellationRequested();
 
         var selectedRoots = GetSelectedRootFolders();
-        await PopulateIgnoreOptionsForRootSelectionAsync(selectedRoots, currentPath);
-        await PopulateExtensionsForRootSelectionAsync(currentPath, selectedRoots);
+        await PopulateIgnoreOptionsForRootSelectionAsync(selectedRoots, currentPath, cancellationToken);
+        await PopulateExtensionsForRootSelectionAsync(currentPath, selectedRoots, cancellationToken);
     }
 
-    public async Task RefreshRootAndDependentsAsync(string currentPath)
+    public async Task RefreshRootAndDependentsAsync(string currentPath, CancellationToken cancellationToken = default)
     {
         // Serialize refresh operations to prevent race conditions
-        await _refreshLock.WaitAsync().ConfigureAwait(false);
+        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Clear old caches when switching to a different folder
             if (_lastLoadedPath is not null && !string.Equals(_lastLoadedPath, currentPath, StringComparison.OrdinalIgnoreCase))
             {
@@ -332,11 +353,14 @@ public sealed class SelectionSyncCoordinator
 
             // Warm ignore options first so root/extension scans use the latest ignore selection
             // without blocking UI on initial availability discovery.
-            await PopulateIgnoreOptionsForRootSelectionAsync(Array.Empty<string>(), currentPath);
+            await PopulateIgnoreOptionsForRootSelectionAsync(Array.Empty<string>(), currentPath, cancellationToken);
 
             // Run in order so root folders are ready before extensions/ignore lists refresh.
-            await PopulateRootFoldersAsync(currentPath);
-            await UpdateLiveOptionsFromRootSelectionAsync(currentPath);
+            await PopulateRootFoldersAsync(currentPath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var selectedRoots = GetSelectedRootFolders();
+            await PopulateIgnoreOptionsForRootSelectionAsync(selectedRoots, currentPath, cancellationToken);
+            await PopulateExtensionsForRootSelectionAsync(currentPath, selectedRoots, cancellationToken);
         }
         finally
         {

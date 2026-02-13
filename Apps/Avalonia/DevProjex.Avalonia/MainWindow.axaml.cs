@@ -9,7 +9,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -38,6 +37,16 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow : Window
 {
+    private enum StatusOperationType
+    {
+        None = 0,
+        LoadProject = 1,
+        RefreshProject = 2,
+        MetricsCalculation = 3,
+        GitPullUpdates = 4,
+        GitSwitchBranch = 5
+    }
+
     public MainWindow()
         : this(CommandLineOptions.Empty, AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty))
     {
@@ -85,8 +94,10 @@ public partial class MainWindow : Window
     private FilterBarView? _filterBar;
     private HashSet<string>? _filterExpansionSnapshot;
     private int _filterApplyVersion;
+    private CancellationTokenSource? _projectOperationCts;
     private CancellationTokenSource? _refreshCts;
     private CancellationTokenSource? _gitCloneCts;
+    private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private Viewbox? _dropZoneIcon;
@@ -123,6 +134,9 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _recalculateMetricsCts;
     private long _statusOperationSequence;
     private long _activeStatusOperationId;
+    private StatusOperationType _activeStatusOperationType;
+    private Action? _activeStatusCancelAction;
+    private bool _metricsCancellationRequestedByUser;
     private static readonly HashSet<string> MetricsWarmupBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
@@ -336,12 +350,16 @@ public partial class MainWindow : Window
         _filterCoordinator.Dispose();
 
         // Cancel and dispose refresh token
+        _projectOperationCts?.Cancel();
+        _projectOperationCts?.Dispose();
         _refreshCts?.Cancel();
         _refreshCts?.Dispose();
 
         // Cancel and dispose git clone token
         _gitCloneCts?.Cancel();
         _gitCloneCts?.Dispose();
+        _gitOperationCts?.Cancel();
+        _gitOperationCts?.Dispose();
 
         // Clear icon cache to release memory
         _iconCache.Clear();
@@ -453,6 +471,10 @@ public partial class MainWindow : Window
                     // Best effort - ignore errors
                 }
             });
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is handled by status operation fallback.
         }
         catch (Exception ex)
         {
@@ -737,6 +759,10 @@ public partial class MainWindow : Window
 
             await TryOpenFolderAsync(path, fromDialog: true);
         }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is handled by status operation fallback.
+        }
         catch (Exception ex)
         {
             await ShowErrorAsync(ex.Message);
@@ -745,17 +771,32 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
-        var statusOperationId = BeginStatusOperation(_viewModel.StatusOperationRefreshingProject, indeterminate: true);
+        var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
+        var cancellationToken = refreshCts.Token;
+        var statusOperationId = BeginStatusOperation(
+            _viewModel.StatusOperationRefreshingProject,
+            indeterminate: true,
+            operationType: StatusOperationType.RefreshProject,
+            cancelAction: () => refreshCts.Cancel());
         try
         {
-            await ReloadProjectAsync();
+            await ReloadProjectAsync(cancellationToken);
             CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            CompleteStatusOperation(statusOperationId);
+            _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
         }
         catch (Exception ex)
         {
             CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(ex.Message);
+        }
+        finally
+        {
+            DisposeIfCurrent(ref _projectOperationCts, refreshCts);
         }
     }
 
@@ -1618,6 +1659,8 @@ public partial class MainWindow : Window
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
 
+        var gitCts = ReplaceCancellationSource(ref _gitOperationCts);
+        var cancellationToken = gitCts.Token;
         long? statusOperationId = null;
         try
         {
@@ -1625,7 +1668,11 @@ public partial class MainWindow : Window
             var statusText = string.IsNullOrWhiteSpace(_viewModel.CurrentBranch)
                 ? _viewModel.StatusOperationGettingUpdates
                 : _localization.Format("Status.Operation.GettingUpdatesBranch", _viewModel.CurrentBranch);
-            statusOperationId = BeginStatusOperation(statusText, indeterminate: true);
+            statusOperationId = BeginStatusOperation(
+                statusText,
+                indeterminate: true,
+                operationType: StatusOperationType.GitPullUpdates,
+                cancelAction: () => gitCts.Cancel());
 
             var progress = new Progress<string>(status =>
             {
@@ -1637,8 +1684,8 @@ public partial class MainWindow : Window
                         UpdateStatusOperationText(statusText);
                 });
             });
-            var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath);
-            var success = await _gitService.PullUpdatesAsync(_currentPath, progress);
+            var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
+            var success = await _gitService.PullUpdatesAsync(_currentPath, progress, cancellationToken);
 
             if (!success)
             {
@@ -1648,10 +1695,10 @@ public partial class MainWindow : Window
             }
 
             // Refresh branches and tree
-            await RefreshGitBranchesAsync(_currentPath);
-            await ReloadProjectAsync();
+            await RefreshGitBranchesAsync(_currentPath, cancellationToken);
+            await ReloadProjectAsync(cancellationToken);
 
-            var afterHash = await _gitService.GetHeadCommitAsync(_currentPath);
+            var afterHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
             {
                 _toastService.Show(_localization["Toast.Git.NoUpdates"]);
@@ -1663,6 +1710,11 @@ public partial class MainWindow : Window
                 CompleteStatusOperation(statusOperationId);
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            CompleteStatusOperation(statusOperationId);
+            _toastService.Show(_localization["Toast.Operation.GitCanceled"]);
+        }
         catch (Exception ex)
         {
             CompleteStatusOperation(statusOperationId);
@@ -1671,6 +1723,7 @@ public partial class MainWindow : Window
         finally
         {
             Cursor = new Cursor(StandardCursorType.Arrow);
+            DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
 
         e.Handled = true;
@@ -1681,12 +1734,18 @@ public partial class MainWindow : Window
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
 
+        var gitCts = ReplaceCancellationSource(ref _gitOperationCts);
+        var cancellationToken = gitCts.Token;
         long? statusOperationId = null;
         try
         {
             Cursor = new Cursor(StandardCursorType.Wait);
             var statusText = _localization.Format("Status.Operation.SwitchingBranch", branchName);
-            statusOperationId = BeginStatusOperation(statusText, indeterminate: true);
+            statusOperationId = BeginStatusOperation(
+                statusText,
+                indeterminate: true,
+                operationType: StatusOperationType.GitSwitchBranch,
+                cancelAction: () => gitCts.Cancel());
 
             var progress = new Progress<string>(status =>
             {
@@ -1698,7 +1757,7 @@ public partial class MainWindow : Window
                         UpdateStatusOperationText(statusText);
                 });
             });
-            var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress);
+            var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress, cancellationToken);
 
             if (!success)
             {
@@ -1711,10 +1770,15 @@ public partial class MainWindow : Window
             UpdateTitle();
 
             // Refresh branches and tree
-            await RefreshGitBranchesAsync(_currentPath);
-            await ReloadProjectAsync();
+            await RefreshGitBranchesAsync(_currentPath, cancellationToken);
+            await ReloadProjectAsync(cancellationToken);
             CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            CompleteStatusOperation(statusOperationId);
+            _toastService.Show(_localization["Toast.Operation.GitCanceled"]);
         }
         catch (Exception ex)
         {
@@ -1724,14 +1788,15 @@ public partial class MainWindow : Window
         finally
         {
             Cursor = new Cursor(StandardCursorType.Arrow);
+            DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
     }
 
-    private async Task RefreshGitBranchesAsync(string repositoryPath)
+    private async Task RefreshGitBranchesAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
         try
         {
-            var branches = await _gitService.GetBranchesAsync(repositoryPath);
+            var branches = await _gitService.GetBranchesAsync(repositoryPath, cancellationToken);
 
             _viewModel.GitBranches.Clear();
             foreach (var branch in branches)
@@ -1739,6 +1804,10 @@ public partial class MainWindow : Window
 
             // Update branch menu
             UpdateBranchMenu();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
@@ -2196,6 +2265,10 @@ public partial class MainWindow : Window
 
             await RefreshTreeAsync();
         }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is handled by status operation fallback.
+        }
         catch (Exception ex)
         {
             await ShowErrorAsync(ex.Message);
@@ -2220,8 +2293,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
+        var cancellationToken = projectLoadCts.Token;
         _viewModel.StatusMetricsVisible = false;
-        var statusOperationId = BeginStatusOperation(_viewModel.StatusOperationLoadingProject, indeterminate: true);
+        var statusOperationId = BeginStatusOperation(
+            _viewModel.StatusOperationLoadingProject,
+            indeterminate: true,
+            operationType: StatusOperationType.LoadProject,
+            cancelAction: () => projectLoadCts.Cancel());
         try
         {
             _currentPath = path;
@@ -2251,13 +2330,27 @@ public partial class MainWindow : Window
 
             UpdateTitle();
 
-            await ReloadProjectAsync();
+            await ReloadProjectAsync(cancellationToken);
+            CompleteStatusOperation(statusOperationId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (IsStatusOperationActive(statusOperationId) && _viewModel.IsProjectLoaded)
+            {
+                ResetToInitialProjectStateAfterCancellation();
+                _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
+            }
+
             CompleteStatusOperation(statusOperationId);
         }
         catch
         {
             CompleteStatusOperation(statusOperationId);
             throw;
+        }
+        finally
+        {
+            DisposeIfCurrent(ref _projectOperationCts, projectLoadCts);
         }
     }
 
@@ -2291,22 +2384,21 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private async Task ReloadProjectAsync()
+    private async Task ReloadProjectAsync(CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
-
-        // Clear old state before loading new project to release memory
-        ClearPreviousProjectState();
+        cancellationToken.ThrowIfCancellationRequested();
 
         // Keep root/extension scans sequenced to avoid inconsistent UI states.
-        await _selectionCoordinator.RefreshRootAndDependentsAsync(_currentPath);
-        await RefreshTreeAsync();
+        await _selectionCoordinator.RefreshRootAndDependentsAsync(_currentPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await RefreshTreeAsync(cancellationToken: cancellationToken);
     }
 
     /// <summary>
     /// Clears state from previous project to release memory before loading a new one.
     /// </summary>
-    private void ClearPreviousProjectState()
+    private void ClearPreviousProjectState(bool forceCompactingGc = false)
     {
         // Clear search state first (holds references to TreeNodeViewModel)
         _searchCoordinator.ClearSearchState();
@@ -2347,25 +2439,35 @@ public partial class MainWindow : Window
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
 
-        // Force GC to collect released objects immediately
-        // This is intentional - user expects memory to drop when switching projects
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        if (forceCompactingGc)
+        {
+            // Use compacting collection only for explicit reset flows.
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        }
+        else
+        {
+            // Avoid blocking the UI thread for routine state transitions.
+            GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+        }
     }
 
-    private async Task RefreshTreeAsync(bool interactiveFilter = false)
+    private async Task RefreshTreeAsync(bool interactiveFilter = false, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
+        cancellationToken.ThrowIfCancellationRequested();
 
         using var _ = PerformanceMetrics.Measure("RefreshTreeAsync");
 
         // Cancel any previous refresh operation to avoid race conditions
-        var cts = new CancellationTokenSource();
-        var previousRefreshCts = Interlocked.Exchange(ref _refreshCts, cts);
+        var refreshCts = new CancellationTokenSource();
+        var previousRefreshCts = Interlocked.Exchange(ref _refreshCts, refreshCts);
         previousRefreshCts?.Cancel();
         previousRefreshCts?.Dispose();
-        var cancellationToken = cts.Token;
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(refreshCts.Token, cancellationToken);
+        var linkedToken = linkedCts.Token;
 
         var allowedExt = new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
             StringComparer.OrdinalIgnoreCase);
@@ -2397,11 +2499,13 @@ public partial class MainWindow : Window
             // Build the tree off the UI thread to keep the window responsive on large folders.
             using (PerformanceMetrics.Measure("BuildTree"))
             {
-                result = await Task.Run(() => _buildTree.Execute(new BuildTreeRequest(_currentPath, options)), cancellationToken);
+                result = await Task.Run(
+                    () => _buildTree.Execute(new BuildTreeRequest(_currentPath, options), linkedToken),
+                    linkedToken);
             }
 
             // Check if this operation was superseded by a newer one
-            cancellationToken.ThrowIfCancellationRequested();
+            linkedToken.ThrowIfCancellationRequested();
 
             // Clear references to old tree BEFORE replacing to allow GC
             _searchCoordinator.ClearSearchState();
@@ -2429,9 +2533,9 @@ public partial class MainWindow : Window
                 var node = BuildTreeViewModel(result.Root, null);
                 node.DisplayName = displayName;
                 return node;
-            }, cancellationToken);
+            }, linkedToken);
 
-            cancellationToken.ThrowIfCancellationRequested();
+            linkedToken.ThrowIfCancellationRequested();
 
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
@@ -2457,7 +2561,7 @@ public partial class MainWindow : Window
                     AnimateSettingsPanel(true);
 
                 UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
-                await InitializeFileMetricsCacheAsync(cancellationToken);
+                await InitializeFileMetricsCacheAsync(linkedToken);
             }
             else
             {
@@ -2474,6 +2578,8 @@ public partial class MainWindow : Window
         {
             if (!interactiveFilter && waitCursorActive)
                 Cursor = new Cursor(StandardCursorType.Arrow);
+
+            DisposeIfCurrent(ref _refreshCts, refreshCts);
         }
     }
 
@@ -2554,10 +2660,16 @@ public partial class MainWindow : Window
         return BuildIgnoreRules(rootPath, selected, selectedRoots);
     }
 
-    private long BeginStatusOperation(string text, bool indeterminate = true)
+    private long BeginStatusOperation(
+        string text,
+        bool indeterminate = true,
+        StatusOperationType operationType = StatusOperationType.None,
+        Action? cancelAction = null)
     {
         var operationId = Interlocked.Increment(ref _statusOperationSequence);
         Interlocked.Exchange(ref _activeStatusOperationId, operationId);
+        _activeStatusOperationType = operationType;
+        _activeStatusCancelAction = cancelAction;
 
         _viewModel.StatusOperationText = text;
         _viewModel.StatusBusy = true;
@@ -2599,6 +2711,8 @@ public partial class MainWindow : Window
         _viewModel.StatusBusy = false;
         _viewModel.StatusProgressIsIndeterminate = true;
         _viewModel.StatusProgressValue = 0;
+        _activeStatusOperationType = StatusOperationType.None;
+        _activeStatusCancelAction = null;
     }
 
     private bool IsStatusOperationActive(long operationId) =>
@@ -2613,6 +2727,52 @@ public partial class MainWindow : Window
         _isBackgroundMetricsActive = false;
         _metricsCalculationCts?.Cancel();
         _recalculateMetricsCts?.Cancel();
+    }
+
+    private static CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)
+    {
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref target, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts;
+    }
+
+    private static void DisposeIfCurrent(ref CancellationTokenSource? target, CancellationTokenSource candidate)
+    {
+        var observed = Interlocked.CompareExchange(ref target, null, candidate);
+        if (ReferenceEquals(observed, candidate))
+        {
+            candidate.Dispose();
+        }
+    }
+
+    private void ResetToInitialProjectStateAfterCancellation()
+    {
+        CancelBackgroundMetricsCalculation();
+        ClearPreviousProjectState();
+
+        _currentPath = null;
+        _currentTree = null;
+        _currentProjectDisplayName = null;
+        _currentRepositoryUrl = null;
+        _filterExpansionSnapshot = null;
+
+        _viewModel.IsProjectLoaded = false;
+        _viewModel.SettingsVisible = false;
+        _viewModel.SearchVisible = false;
+        _viewModel.FilterVisible = false;
+        _viewModel.StatusMetricsVisible = false;
+        _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
+        _viewModel.CurrentBranch = string.Empty;
+        _viewModel.GitBranches.Clear();
+        _viewModel.RootFolders.Clear();
+        _viewModel.Extensions.Clear();
+        _viewModel.IgnoreOptions.Clear();
+        UpdateBranchMenu();
+
+        UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+        UpdateTitle();
     }
 
 
@@ -2865,8 +3025,13 @@ public partial class MainWindow : Window
         _metricsCalculationCts = new CancellationTokenSource();
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _metricsCalculationCts.Token);
 
+        _metricsCancellationRequestedByUser = false;
         _isBackgroundMetricsActive = true;
-        var statusOperationId = BeginStatusOperation(_viewModel.StatusOperationCalculatingData, indeterminate: false);
+        var statusOperationId = BeginStatusOperation(
+            _viewModel.StatusOperationCalculatingData,
+            indeterminate: false,
+            operationType: StatusOperationType.MetricsCalculation,
+            cancelAction: CancelBackgroundMetricsCalculation);
         try
         {
             if (IsStatusOperationActive(statusOperationId))
@@ -2982,9 +3147,15 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            // Cancelled by user action - show partial results if available
+            // Show explicit fallback for user-initiated cancellation.
             _isBackgroundMetricsActive = false;
-            if (_fileMetricsCache.Count > 0)
+            if (_metricsCancellationRequestedByUser)
+            {
+                _metricsCancellationRequestedByUser = false;
+                UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+                _viewModel.StatusMetricsVisible = true;
+            }
+            else if (_fileMetricsCache.Count > 0)
             {
                 RecalculateMetricsAsync();
                 _viewModel.StatusMetricsVisible = true;
@@ -3191,12 +3362,41 @@ public partial class MainWindow : Window
 
     private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)
     {
-        // Best-effort cancellation for operations that have cancellation tokens.
+        var activeOperationId = Interlocked.Read(ref _activeStatusOperationId);
+        var activeOperationType = _activeStatusOperationType;
+        var cancelAction = _activeStatusCancelAction;
+
+        // Primary cancellation path for the currently visible status operation.
+        try
+        {
+            cancelAction?.Invoke();
+        }
+        catch
+        {
+            // Ignore cancellation callback errors and continue with fallback logic.
+        }
+
+        // Secondary cancellation path for legacy/background operations.
+        _projectOperationCts?.Cancel();
         _refreshCts?.Cancel();
         _gitCloneCts?.Cancel();
-        CancelBackgroundMetricsCalculation();
+        _gitOperationCts?.Cancel();
 
-        var activeOperationId = Interlocked.Read(ref _activeStatusOperationId);
+        if (activeOperationType == StatusOperationType.MetricsCalculation)
+        {
+            _metricsCancellationRequestedByUser = true;
+            CancelBackgroundMetricsCalculation();
+            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+            _viewModel.StatusMetricsVisible = _viewModel.IsProjectLoaded;
+            _toastService.Show(_localization["Toast.Operation.MetricsCanceled"]);
+        }
+
+        if (activeOperationType == StatusOperationType.LoadProject)
+        {
+            ResetToInitialProjectStateAfterCancellation();
+            _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
+        }
+
         CompleteStatusOperation(activeOperationId);
     }
 

@@ -20,13 +20,15 @@ public sealed class ScanOptionsUseCase
 		_scanner = scanner;
 	}
 
-	public ScanOptionsResult Execute(ScanOptionsRequest request)
+	public ScanOptionsResult Execute(ScanOptionsRequest request, CancellationToken cancellationToken = default)
 	{
-		// Run extensions and root folders scans in parallel for better performance
-		var extensionsTask = Task.Run(() => _scanner.GetExtensions(request.RootPath, request.IgnoreRules));
-		var rootFoldersTask = Task.Run(() => _scanner.GetRootFolderNames(request.RootPath, request.IgnoreRules));
+		cancellationToken.ThrowIfCancellationRequested();
 
-		Task.WaitAll(extensionsTask, rootFoldersTask);
+		// Run extensions and root folders scans in parallel for better performance
+		var extensionsTask = Task.Run(() => _scanner.GetExtensions(request.RootPath, request.IgnoreRules, cancellationToken), cancellationToken);
+		var rootFoldersTask = Task.Run(() => _scanner.GetRootFolderNames(request.RootPath, request.IgnoreRules, cancellationToken), cancellationToken);
+
+		Task.WaitAll([extensionsTask, rootFoldersTask], cancellationToken);
 
 		var extensions = extensionsTask.Result;
 		var rootFolders = rootFoldersTask.Result;
@@ -41,8 +43,11 @@ public sealed class ScanOptionsUseCase
 	public ScanResult<HashSet<string>> GetExtensionsForRootFolders(
 		string rootPath,
 		IReadOnlyCollection<string> rootFolders,
-		IgnoreRules ignoreRules)
+		IgnoreRules ignoreRules,
+		CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		// Thread-safe collection for parallel aggregation
 		var extensions = new ConcurrentBag<string>();
 		var rootAccessDenied = 0;
@@ -50,7 +55,7 @@ public sealed class ScanOptionsUseCase
 
 		// Always scan root-level files, even when no subfolders are selected.
 		// This ensures folders containing only files (no subdirectories) work correctly.
-		var rootFiles = _scanner.GetRootFileExtensions(rootPath, ignoreRules);
+		var rootFiles = _scanner.GetRootFileExtensions(rootPath, ignoreRules, cancellationToken);
 		foreach (var ext in rootFiles.Value)
 			extensions.Add(ext);
 
@@ -60,12 +65,18 @@ public sealed class ScanOptionsUseCase
 		// Scan extensions from selected subfolders in parallel
 		if (rootFolders.Count > 0)
 		{
-			var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism };
+			var parallelOptions = new ParallelOptions
+			{
+				MaxDegreeOfParallelism = MaxParallelism,
+				CancellationToken = cancellationToken
+			};
 
 			Parallel.ForEach(rootFolders, parallelOptions, folder =>
 			{
+				cancellationToken.ThrowIfCancellationRequested();
+
 				var folderPath = Path.Combine(rootPath, folder);
-				var result = _scanner.GetExtensions(folderPath, ignoreRules);
+				var result = _scanner.GetExtensions(folderPath, ignoreRules, cancellationToken);
 
 				foreach (var ext in result.Value)
 					extensions.Add(ext);

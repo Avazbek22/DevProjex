@@ -6,7 +6,7 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class TreeBuilder : ITreeBuilder
 {
-	public TreeBuildResult Build(string rootPath, TreeFilterOptions options)
+	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
 		var state = new BuildState();
 
@@ -23,7 +23,8 @@ public sealed class TreeBuilder : ITreeBuilder
 			path: rootPath,
 			options: options,
 			isRoot: true,
-			state: state);
+			state: state,
+			cancellationToken: cancellationToken);
 
 		return new TreeBuildResult(root, state.RootAccessDenied, state.HadAccessDenied);
 	}
@@ -33,8 +34,11 @@ public sealed class TreeBuilder : ITreeBuilder
 		string path,
 		TreeFilterOptions options,
 		bool isRoot,
-		BuildState state)
+		BuildState state,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		FileSystemInfo[] entries;
 		try
 		{
@@ -61,6 +65,8 @@ public sealed class TreeBuilder : ITreeBuilder
 
 		foreach (var entry in entries)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+
 			var name = entry.Name;
 			bool isDir = IsDirectory(entry);
 
@@ -81,7 +87,7 @@ public sealed class TreeBuilder : ITreeBuilder
 					isAccessDenied: false,
 					children: new List<FileSystemNode>());
 
-				BuildChildren(dirNode, entry.FullName, options, isRoot: false, state);
+				BuildChildren(dirNode, entry.FullName, options, isRoot: false, state, cancellationToken);
 
 				// Keep full directory context when extension/ignore filters remove all files.
 				// Name filter remains strict to preserve intentional narrowing behavior.

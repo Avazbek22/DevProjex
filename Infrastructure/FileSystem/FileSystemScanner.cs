@@ -27,8 +27,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		}
 	}
 
-	public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules)
+	public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 			return new ScanResult<HashSet<string>>(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
 
@@ -45,6 +47,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 		while (pending.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+
 			var dir = pending.Pop();
 			directories.Add(dir);
 
@@ -52,6 +56,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 			try
 			{
 				subDirs = Directory.GetDirectories(dir);
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
 			}
 			catch (UnauthorizedAccessException)
 			{
@@ -66,6 +74,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 			foreach (var sd in subDirs)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
+
 				var dirName = Path.GetFileName(sd);
 				if (ShouldSkipDirectoryByName(dirName, sd, rules))
 					continue;
@@ -77,14 +87,24 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		}
 
 		// Second pass: scan files in all directories in parallel
-		var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism };
+		var parallelOptions = new ParallelOptions
+		{
+			MaxDegreeOfParallelism = MaxParallelism,
+			CancellationToken = cancellationToken
+		};
 
 		Parallel.ForEach(directories, parallelOptions, dir =>
 		{
+			parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
 			string[] files;
 			try
 			{
 				files = Directory.GetFiles(dir);
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
 			}
 			catch (UnauthorizedAccessException)
 			{
@@ -98,6 +118,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 			foreach (var file in files)
 			{
+				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
 				var name = Path.GetFileName(file);
 
 				if (ShouldSkipFileByName(name, file, rules))
@@ -114,8 +136,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		return new ScanResult<HashSet<string>>(uniqueExtensions, rootAccessDenied == 1, hadAccessDenied == 1);
 	}
 
-	public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules)
+	public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
@@ -129,6 +153,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		{
 			files = Directory.GetFiles(rootPath);
 		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
 		catch (UnauthorizedAccessException)
 		{
 			return new ScanResult<HashSet<string>>(exts, true, true);
@@ -140,6 +168,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 		foreach (var file in files)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+
 			var name = Path.GetFileName(file);
 			if (ShouldSkipFileByName(name, file, rules))
 				continue;
@@ -152,8 +182,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		return new ScanResult<HashSet<string>>(exts, rootAccessDenied, hadAccessDenied);
 	}
 
-	public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules)
+	public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		var names = new List<string>();
 
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
@@ -163,6 +195,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		try
 		{
 			dirs = Directory.GetDirectories(rootPath);
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
 		}
 		catch (UnauthorizedAccessException)
 		{
@@ -175,6 +211,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 		foreach (var dir in dirs)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+
 			var dirName = Path.GetFileName(dir);
 			if (ShouldSkipDirectoryByName(dirName, dir, rules))
 				continue;

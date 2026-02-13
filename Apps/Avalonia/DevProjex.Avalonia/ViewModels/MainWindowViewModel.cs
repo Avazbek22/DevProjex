@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Media;
+using System.Collections.Specialized;
 using System.Collections.ObjectModel;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.ResourceStore;
@@ -91,6 +92,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         IgnoreOptions.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
         Extensions.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
         RootFolders.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
+        ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
     }
 
     private ObservableCollection<TreeNodeViewModel> _treeNodes = new();
@@ -776,6 +778,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuCopyContent { get; private set; } = string.Empty;
     public string MenuCopyTreeAndContent { get; private set; } = string.Empty;
     public ObservableCollection<ToastMessageViewModel> ToastItems { get; private set; } = new();
+    public bool HasToastItems => ToastItems.Count > 0;
     public string MenuView { get; private set; } = string.Empty;
     public string MenuViewExpandAll { get; private set; } = string.Empty;
     public string MenuViewCollapseAll { get; private set; } = string.Empty;
@@ -1095,9 +1098,18 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public void SetToastItems(ObservableCollection<ToastMessageViewModel> items)
     {
+        if (ReferenceEquals(ToastItems, items))
+            return;
+
+        ToastItems.CollectionChanged -= OnToastItemsCollectionChanged;
         ToastItems = items;
+        ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
         RaisePropertyChanged(nameof(ToastItems));
+        RaisePropertyChanged(nameof(HasToastItems));
     }
+
+    private void OnToastItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        RaisePropertyChanged(nameof(HasToastItems));
 
     /// <summary>
     /// Updates the "All" checkbox labels with item counts.
