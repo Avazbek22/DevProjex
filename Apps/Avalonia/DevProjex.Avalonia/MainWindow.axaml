@@ -16,6 +16,11 @@
       <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
       <Setter Property="Padding"
               Value="{Binding DataContext.TreeItemPadding, RelativeSource={RelativeSource AncestorType=TreeView}}" />
+      <Setter Property="ItemsPanel">
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </Setter>
     </Style>
 
     <!-- Drop Zone Styles -->
@@ -425,6 +430,11 @@
                     IsEnabled="{Binding IsProjectLoaded}"
                     FontFamily="{Binding SelectedFontFamily}"
                     FontSize="{Binding TreeFontSize}">
+          <TreeView.ItemsPanel>
+            <ItemsPanelTemplate>
+              <VirtualizingStackPanel />
+            </ItemsPanelTemplate>
+          </TreeView.ItemsPanel>
           <TreeView.ItemTemplate>
             <TreeDataTemplate ItemsSource="{Binding Children}">
               <Grid ColumnDefinitions="Auto,*">
@@ -443,7 +453,15 @@
                          Height="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                          Stretch="Uniform"
                          VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding DisplayName}"
+                             IsVisible="{Binding !HasHighlightedDisplay}"
+                             VerticalAlignment="Center"
+                             Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                             FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                             FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                             Foreground="{DynamicResource AppTextBrush}" />
                   <TextBlock Inlines="{Binding DisplayInlines}"
+                             IsVisible="{Binding HasHighlightedDisplay}"
                              VerticalAlignment="Center"
                              Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
                              FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"

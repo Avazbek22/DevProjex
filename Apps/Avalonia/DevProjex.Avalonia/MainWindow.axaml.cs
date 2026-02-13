@@ -119,6 +119,17 @@ public partial class MainWindow : Window
     private volatile bool _isBackgroundMetricsActive;
     private long _statusOperationSequence;
     private long _activeStatusOperationId;
+    private static readonly HashSet<string> MetricsWarmupBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
+        ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
+        ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
+        ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
+        ".exe", ".dll", ".so", ".dylib", ".pdb", ".ilk",
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".ttf", ".otf", ".woff", ".woff2", ".eot",
+        ".bin", ".dat", ".db", ".sqlite", ".mdb"
+    };
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -2655,6 +2666,18 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // Skip warmup scan for obvious binary-only datasets (e.g. screenshot folders).
+            if (filePaths.TrueForAll(IsDefinitelyBinaryByExtensionForMetricsWarmup))
+            {
+                _isBackgroundMetricsActive = false;
+                if (IsStatusOperationActive(statusOperationId))
+                    _viewModel.StatusProgressValue = 100;
+                RecalculateMetricsAsync();
+                _viewModel.StatusMetricsVisible = true;
+                CompleteStatusOperation(statusOperationId);
+                return;
+            }
+
             var processedCount = 0;
             var lastProgressPercent = 0;
 
@@ -2694,12 +2717,13 @@ public partial class MainWindow : Window
                         }
                     }
 
-                    // Update progress periodically (every 2%)
+                    // Update progress periodically (every 5%) to reduce UI dispatch pressure.
                     var current = Interlocked.Increment(ref processedCount);
                     var progressPercent = (int)(current * 100.0 / totalFiles);
-                    if (progressPercent >= lastProgressPercent + 2)
+                    var observed = Volatile.Read(ref lastProgressPercent);
+                    if (progressPercent >= observed + 5 &&
+                        Interlocked.CompareExchange(ref lastProgressPercent, progressPercent, observed) == observed)
                     {
-                        Interlocked.Exchange(ref lastProgressPercent, progressPercent);
                         await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                         {
                             if (_isBackgroundMetricsActive && IsStatusOperationActive(statusOperationId))
@@ -2881,6 +2905,12 @@ public partial class MainWindow : Window
             >= 10_000 => $"{value / 1_000.0:F1}K",
             _ => value.ToString("N0")
         };
+    }
+
+    private static bool IsDefinitelyBinaryByExtensionForMetricsWarmup(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return !string.IsNullOrWhiteSpace(extension) && MetricsWarmupBinaryExtensions.Contains(extension);
     }
 
     private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)

@@ -71,13 +71,15 @@ public sealed class TreeSearchCoordinator : IDisposable
         UpdateCurrentSearchMatch(null);
 
         var query = _viewModel.SearchQuery;
-        UpdateHighlights(query);
         if (string.IsNullOrWhiteSpace(query))
         {
+            ClearHighlightsIfNeeded();
             foreach (var node in _viewModel.TreeNodes)
                 CollapseAllExceptRoot(node);
             return;
         }
+
+        UpdateHighlights(query);
 
         _searchMatches.AddRange(TreeSearchEngine.CollectMatches(
             _viewModel.TreeNodes,
@@ -216,6 +218,19 @@ public sealed class TreeSearchCoordinator : IDisposable
         {
             child.IsExpanded = false;
             CollapseAllExceptRoot(child);
+        }
+    }
+
+    private void ClearHighlightsIfNeeded()
+    {
+        var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
+
+        foreach (var node in _viewModel.TreeNodes.SelectMany(n => n.Flatten()))
+        {
+            if (!node.HasHighlightedDisplay && !node.IsCurrentSearchMatch)
+                continue;
+
+            node.UpdateSearchHighlight(null, highlightBackground, highlightForeground, normalForeground, currentBackground);
         }
     }
 

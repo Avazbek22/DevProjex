@@ -14,6 +14,8 @@ public sealed class TreeNodeViewModel : ViewModelBase
     private bool _isSelected;
     private string _displayName;
     private bool _isCurrentSearchMatch;
+    private InlineCollection? _displayInlines;
+    private bool _hasHighlightedDisplay;
 
     /// <summary>
     /// Raised when checkbox state changes. Used for real-time metrics updates.
@@ -42,7 +44,18 @@ public sealed class TreeNodeViewModel : ViewModelBase
 
     public IImage? Icon { get; set; }
 
-    public InlineCollection DisplayInlines { get; } = new();
+    public InlineCollection? DisplayInlines => _displayInlines;
+
+    public bool HasHighlightedDisplay
+    {
+        get => _hasHighlightedDisplay;
+        private set
+        {
+            if (_hasHighlightedDisplay == value) return;
+            _hasHighlightedDisplay = value;
+            RaisePropertyChanged();
+        }
+    }
 
     public bool IsCurrentSearchMatch
     {
@@ -154,7 +167,9 @@ public sealed class TreeNodeViewModel : ViewModelBase
             list.TrimExcess();
 
         // Clear UI-related objects
-        DisplayInlines.Clear();
+        _displayInlines?.Clear();
+        _displayInlines = null;
+        _hasHighlightedDisplay = false;
         Icon = null;
 
         // Break circular references to help GC
@@ -169,14 +184,24 @@ public sealed class TreeNodeViewModel : ViewModelBase
         IBrush? normalForeground,
         IBrush? currentHighlightBackground)
     {
-        DisplayInlines.Clear();
-
         if (string.IsNullOrWhiteSpace(query))
         {
-            DisplayInlines.Add(new Run(DisplayName) { Foreground = normalForeground });
-            RaisePropertyChanged(nameof(DisplayInlines));
+            if (_displayInlines is { Count: > 0 })
+            {
+                _displayInlines.Clear();
+                RaisePropertyChanged(nameof(DisplayInlines));
+            }
+
+            HasHighlightedDisplay = false;
             return;
         }
+
+        var createdInlines = _displayInlines is null;
+        var inlines = _displayInlines ??= new InlineCollection();
+        inlines.Clear();
+
+        if (createdInlines)
+            RaisePropertyChanged(nameof(DisplayInlines));
 
         var startIndex = 0;
         while (startIndex < DisplayName.Length)
@@ -184,15 +209,15 @@ public sealed class TreeNodeViewModel : ViewModelBase
             var index = DisplayName.IndexOf(query, startIndex, StringComparison.OrdinalIgnoreCase);
             if (index < 0)
             {
-                DisplayInlines.Add(new Run(DisplayName[startIndex..]) { Foreground = normalForeground });
+                inlines.Add(new Run(DisplayName[startIndex..]) { Foreground = normalForeground });
                 break;
             }
 
             if (index > startIndex)
-                DisplayInlines.Add(new Run(DisplayName[startIndex..index]) { Foreground = normalForeground });
+                inlines.Add(new Run(DisplayName[startIndex..index]) { Foreground = normalForeground });
 
             var matchBackground = IsCurrentSearchMatch ? currentHighlightBackground : highlightBackground;
-            DisplayInlines.Add(new Run(DisplayName.Substring(index, query.Length))
+            inlines.Add(new Run(DisplayName.Substring(index, query.Length))
             {
                 Background = matchBackground,
                 Foreground = highlightForeground
@@ -201,9 +226,10 @@ public sealed class TreeNodeViewModel : ViewModelBase
             startIndex = index + query.Length;
         }
 
-        if (DisplayInlines.Count == 0)
-            DisplayInlines.Add(new Run(DisplayName) { Foreground = normalForeground });
+        if (inlines.Count == 0)
+            inlines.Add(new Run(DisplayName) { Foreground = normalForeground });
 
+        HasHighlightedDisplay = true;
         RaisePropertyChanged(nameof(DisplayInlines));
     }
 
