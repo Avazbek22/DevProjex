@@ -398,7 +398,7 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="ClipToBounds" Value="True" />
-        <Setter Property="Margin" Value="4,2,4,0" />
+        <Setter Property="Margin" Value="0,2,0,0" />
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
@@ -417,7 +417,7 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="ClipToBounds" Value="True" />
-        <Setter Property="Margin" Value="4,2,4,0" />
+        <Setter Property="Margin" Value="0,2,0,0" />
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
