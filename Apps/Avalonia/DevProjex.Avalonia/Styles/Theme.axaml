@@ -914,6 +914,7 @@
     </Style>
 
     <Style Selector="Button.segment-text-button.segment-selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource SegmentSelectedHoverOverlayBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
     </Style>
 
