@@ -430,6 +430,15 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
+    <!-- Rounded controls inside search/filter panels -->
+    <Style Selector="Border.search-panel TextBox, Border.filter-panel TextBox">
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="Border.search-panel Button, Border.filter-panel Button">
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
     <Style Selector="Button.menu-icon-button">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
