@@ -17,6 +17,17 @@ Scorciatoie:
 ## 3) File
 * Apri cartella… — apri la cartella radice (Ctrl+O)
 * Aggiorna — rileggi e ricostruisci l’albero (F5)
+* Esporta su file:
+  * Esporta albero
+  * Esporta contenuto
+  * Esporta albero e contenuto
+
+Regole di formato:
+* Esporta albero — il formato dipende dal selettore ASCII/JSON.
+* Esporta contenuto — sempre formato testo del contenuto (il selettore ASCII/JSON non influisce).
+* Esporta albero e contenuto — il blocco albero segue il selettore ASCII/JSON, il blocco contenuto resta testuale.
+
+I file esportati vengono scritti in UTF-8 senza BOM.
 
 ## 4) Git
 Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Clone). L'app non tocca i tuoi file — lavora solo con la cache.
@@ -28,9 +39,26 @@ La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
 * Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
 
 ## 5) Copia
+### Selettore formato albero (ASCII/JSON)
+Il selettore definisce il formato di rappresentazione dell’albero per le operazioni in cui l’albero partecipa al risultato.
+
+* ASCII — albero testuale con rami.
+* JSON — albero strutturato in JSON.
+
+Il selettore influisce su:
+* Copia albero
+* Copia albero + contenuto
+* Esporta albero
+* Esporta albero e contenuto
+
+Il selettore non influisce su:
+* Copia contenuto
+* Esporta contenuto
+
 ### Copia albero
 Copia l’albero del progetto.
 Se ci sono nodi selezionati, l’albero è costruito dalla selezione; se la selezione è vuota o non valida, viene copiato l’albero completo.
+Il formato del risultato è definito dal selettore ASCII/JSON.
 Scorciatoie: Ctrl+Shift+C e Ctrl+Alt+C.
 
 ### Copia contenuto
@@ -44,8 +72,22 @@ Scorciatoia: Ctrl+Alt+V.
 ### Copia albero + contenuto
 Combina albero e contenuto:
 * albero dalla selezione; se la selezione è vuota o non valida, viene usato l’albero completo;
-* contenuto secondo le stesse regole di «Copia contenuto».
+* contenuto secondo le stesse regole di «Copia contenuto»;
+* il formato del blocco albero è definito dal selettore ASCII/JSON.
 Scorciatoia: Ctrl+Shift+V.
+
+### Rappresentazione JSON
+In modalità JSON viene usata una struttura compatta.
+
+Albero:
+* `rootPath` — percorso assoluto della radice.
+* `root` — nodo radice.
+* campi nodo: `name`, `path`, `dirs`, `files`, `accessDenied` (se necessario).
+
+Albero + contenuto:
+* `rootPath` — percorso assoluto della radice.
+* `tree` — albero JSON.
+* `content` — blocco testuale del contenuto file.
 
 ## 6) Visualizza
 ### Zoom
@@ -156,6 +198,8 @@ Il risultato dipende da:
 
 Se l’accesso è negato, il nodo è marcato Accesso negato.
 
+I contatori nella barra di stato vengono ricalcolati in base al formato corrente dell’albero (ASCII/JSON) per le operazioni che includono l’albero. Quando si cambia ASCII/JSON, i valori si aggiornano subito.
+
 ## 12) Icone
 Ordine di scelta:
 1) tipo nodo (cartella/file)
@@ -182,4 +226,5 @@ La lingua si seleziona dal menu Lingua.
 ## 16) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
+
 

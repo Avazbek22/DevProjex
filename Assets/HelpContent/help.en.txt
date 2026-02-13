@@ -17,6 +17,17 @@ Hotkeys:
 ## 3) File
 * Open folder… — open root folder (Ctrl+O)
 * Refresh — rescan and rebuild the tree (F5)
+* Export to file:
+  * Export tree
+  * Export content
+  * Export tree and content
+
+Format rules:
+* Export tree — format depends on the ASCII/JSON toggle.
+* Export content — always text content format (ASCII/JSON toggle does not apply).
+* Export tree and content — tree block follows the ASCII/JSON toggle, content block stays text.
+
+Export files are written in UTF-8 without BOM.
 
 ## 4) Git
 Git menu is available only for projects cloned via DevProjex (Git Clone). The app does not touch your files — it works only with the cache.
@@ -28,9 +39,26 @@ The cache is stored in the system temp folder. On Windows it is usually:
 * Get updates — updates only the current branch: fetch and reset to origin/<branch>.
 
 ## 5) Copy
+### Tree format toggle (ASCII/JSON)
+The toggle defines the tree representation format for operations where the tree is part of the output.
+
+* ASCII — text tree with branches.
+* JSON — structured tree in JSON.
+
+The toggle affects:
+* Copy tree
+* Copy tree + content
+* Export tree
+* Export tree and content
+
+The toggle does not affect:
+* Copy content
+* Export content
+
 ### Copy tree
 Copies the project tree.
 If there are checked nodes, the tree is built from selection; if the selection is empty or invalid, the full tree is copied.
+The result format is defined by the ASCII/JSON toggle.
 Hotkeys: Ctrl+Shift+C and Ctrl+Alt+C.
 
 ### Copy content
@@ -44,8 +72,22 @@ Hotkey: Ctrl+Alt+V.
 ### Copy tree + content
 Combines tree and content:
 * tree is built from selection; if selection is empty/invalid, the full tree is used;
-* content follows the same rules as “Copy content”.
+* content follows the same rules as “Copy content”;
+* tree block format is defined by the ASCII/JSON toggle.
 Hotkey: Ctrl+Shift+V.
+
+### JSON representation
+JSON mode uses a compact structure.
+
+Tree:
+* `rootPath` — absolute root path.
+* `root` — root node.
+* node fields: `name`, `path`, `dirs`, `files`, `accessDenied` (when needed).
+
+Tree + content:
+* `rootPath` — absolute root path.
+* `tree` — JSON tree.
+* `content` — text content block.
 
 ## 6) View
 ### Zoom
@@ -156,6 +198,8 @@ Result depends on:
 
 If access is denied, the node is marked Access denied.
 
+Status bar counters are recalculated using the current tree format (ASCII/JSON) for operations that include the tree. When switching ASCII/JSON, values update immediately.
+
 ## 12) Icons
 Icon selection order:
 1) node type (folder/file)
@@ -182,4 +226,5 @@ Language is selected via the Language menu.
 ## 16) Notes
 * By default, dark theme and transparency effects are enabled (if supported).
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.
+
 

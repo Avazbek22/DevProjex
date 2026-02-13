@@ -17,6 +17,17 @@ Raccourcis :
 ## 3) Fichier
 * Ouvrir le dossier… — ouvrir le dossier racine (Ctrl+O)
 * Actualiser — relire et reconstruire l’arborescence (F5)
+* Exporter vers un fichier :
+  * Exporter l’arborescence
+  * Exporter le contenu
+  * Exporter arborescence et contenu
+
+Règles de format :
+* Exporter l’arborescence — le format dépend du sélecteur ASCII/JSON.
+* Exporter le contenu — toujours au format texte du contenu (le sélecteur ASCII/JSON n’influence pas).
+* Exporter arborescence et contenu — le bloc arborescence suit le sélecteur ASCII/JSON, le bloc contenu reste textuel.
+
+Les fichiers exportés sont écrits en UTF-8 sans BOM.
 
 ## 4) Git
 Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git Clone). L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
@@ -28,9 +39,26 @@ Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’e
 * Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
 
 ## 5) Copier
+### Sélecteur de format de l’arborescence (ASCII/JSON)
+Le sélecteur définit le format de représentation de l’arborescence pour les opérations où l’arbre participe au résultat.
+
+* ASCII — arborescence textuelle avec branches.
+* JSON — arborescence structurée en JSON.
+
+Le sélecteur influence :
+* Copier l’arborescence
+* Copier l’arborescence + le contenu
+* Exporter l’arborescence
+* Exporter arborescence et contenu
+
+Le sélecteur n’influence pas :
+* Copier le contenu
+* Exporter le contenu
+
 ### Copier l’arborescence
 Copie l’arborescence du projet.
 S’il y a des nœuds cochés, l’arborescence est construite à partir de la sélection ; si la sélection est vide ou invalide, l’arborescence complète est copiée.
+Le format du résultat est défini par le sélecteur ASCII/JSON.
 Raccourcis : Ctrl+Shift+C et Ctrl+Alt+C.
 
 ### Copier le contenu
@@ -44,8 +72,22 @@ Raccourci : Ctrl+Alt+V.
 ### Copier l’arborescence + le contenu
 Combine arborescence et contenu :
 * arborescence depuis la sélection ; si la sélection est vide ou invalide, l’arborescence complète est utilisée ;
-* contenu selon les mêmes règles que « Copier le contenu ».
+* contenu selon les mêmes règles que « Copier le contenu » ;
+* le format du bloc arborescence est défini par le sélecteur ASCII/JSON.
 Raccourci : Ctrl+Shift+V.
+
+### Représentation JSON
+Le mode JSON utilise une structure compacte.
+
+Arborescence :
+* `rootPath` — chemin absolu de la racine.
+* `root` — nœud racine.
+* champs du nœud : `name`, `path`, `dirs`, `files`, `accessDenied` (si nécessaire).
+
+Arborescence + contenu :
+* `rootPath` — chemin absolu de la racine.
+* `tree` — arborescence JSON.
+* `content` — bloc texte du contenu des fichiers.
 
 ## 6) Affichage
 ### Zoom
@@ -148,13 +190,15 @@ Smart Ignore (s’il est activé) complète le filtrage dans les zones détecté
 Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’est pas pertinent, ces options sont masquées.
 Seules les règles de visibilité de base restent actives.
 ## 11) Construction de l’arbre
-Le résultat dépend de :
+Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
 * types de fichiers sélectionnés
 * règles d’exclusion
 * filtre actif
 
 Si l’accès est refusé, le nœud est marqué Accès refusé.
+
+Les compteurs de la barre d’état sont recalculés selon le format actuel de l’arborescence (ASCII/JSON) pour les opérations qui incluent l’arbre. Lors du basculement ASCII/JSON, les valeurs sont mises à jour immédiatement.
 
 ## 12) Icônes
 Ordre de sélection :
@@ -182,4 +226,5 @@ La langue se choisit via le menu Langue.
 ## 16) Notes
 * Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
+
 

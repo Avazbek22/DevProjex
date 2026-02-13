@@ -17,6 +17,17 @@ Tastenkürzel:
 ## 3) Datei
 * Ordner öffnen… — Wurzelordner öffnen (Ctrl+O)
 * Aktualisieren — Baum neu einlesen und aufbauen (F5)
+* In Datei exportieren:
+  * Baum exportieren
+  * Inhalt exportieren
+  * Baum und Inhalt exportieren
+
+Formatregeln:
+* Baum exportieren — Format hängt vom ASCII/JSON-Schalter ab.
+* Inhalt exportieren — immer Textformat des Inhalts (ASCII/JSON-Schalter wirkt hier nicht).
+* Baum und Inhalt exportieren — Baumblock folgt dem ASCII/JSON-Schalter, Inhaltsblock bleibt Text.
+
+Exportdateien werden in UTF-8 ohne BOM geschrieben.
 
 ## 4) Git
 Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
@@ -28,9 +39,26 @@ Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
 * Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>.
 
 ## 5) Kopieren
+### Baumformat-Schalter (ASCII/JSON)
+Der Schalter legt das Baumdarstellungsformat für Operationen fest, bei denen der Baum im Ergebnis enthalten ist.
+
+* ASCII — Textbaum mit Zweigen.
+* JSON — strukturierter Baum in JSON.
+
+Der Schalter beeinflusst:
+* Baum kopieren
+* Baum + Inhalt kopieren
+* Baum exportieren
+* Baum und Inhalt exportieren
+
+Der Schalter beeinflusst nicht:
+* Inhalt kopieren
+* Inhalt exportieren
+
 ### Baum kopieren
 Kopiert den Projektbaum.
 Wenn Knoten markiert sind, wird der Baum aus der Auswahl gebaut; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert.
+Das Ergebnisformat wird vom ASCII/JSON-Schalter bestimmt.
 Tastenkürzel: Ctrl+Shift+C und Ctrl+Alt+C.
 
 ### Inhalt kopieren
@@ -43,9 +71,23 @@ Tastenkürzel: Ctrl+Alt+V.
 
 ### Baum + Inhalt kopieren
 Kombiniert Baum und Inhalte:
-* Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert;
-* Inhalte nach denselben Regeln wie „Inhalt kopieren“.
+* Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum verwendet;
+* Inhalte nach denselben Regeln wie „Inhalt kopieren“;
+* das Format des Baumblocks wird vom ASCII/JSON-Schalter bestimmt.
 Tastenkürzel: Ctrl+Shift+V.
+
+### JSON-Darstellung
+Im JSON-Modus wird eine kompakte Struktur verwendet.
+
+Baum:
+* `rootPath` — absoluter Wurzelpfad.
+* `root` — Wurzelknoten.
+* Knotenfelder: `name`, `path`, `dirs`, `files`, `accessDenied` (bei Bedarf).
+
+Baum + Inhalt:
+* `rootPath` — absoluter Wurzelpfad.
+* `tree` — JSON-Baum.
+* `content` — Textblock mit Dateiinhalt.
 
 ## 6) Ansicht
 ### Zoom
@@ -156,6 +198,8 @@ Das Ergebnis hängt ab von:
 
 Wenn der Zugriff verweigert wird, wird der Knoten als Zugriff verweigert markiert.
 
+Die Zähler in der Statusleiste werden für Operationen mit Baum unter Berücksichtigung des aktuellen Baumformats (ASCII/JSON) neu berechnet. Beim Umschalten zwischen ASCII/JSON werden die Werte sofort aktualisiert.
+
 ## 12) Symbole
 Auswahlreihenfolge:
 1) Knotentyp (Ordner/Datei)
@@ -182,4 +226,5 @@ Die Sprache wird über das Sprache‑Menü gewählt.
 ## 16) Hinweise
 * Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.
+
 

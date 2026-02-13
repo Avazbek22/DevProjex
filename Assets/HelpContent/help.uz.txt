@@ -17,6 +17,17 @@ Issiq tugmalar:
 ## 3) Fayl
 * Jildni ochish… — ildiz papkani ochish (Ctrl+O)
 * Yangilash — daraxtni qayta o‘qish va qayta qurish (F5)
+* Faylga eksport:
+  * Daraxtni eksport qilish
+  * Mazmunni eksport qilish
+  * Daraxt va mazmunni eksport qilish
+
+Format qoidalari:
+* Daraxtni eksport qilish — format ASCII/JSON tumbleriga bog‘liq.
+* Mazmunni eksport qilish — har doim mazmunning matn formati (ASCII/JSON tumbleri ta’sir qilmaydi).
+* Daraxt va mazmunni eksport qilish — daraxt bloki ASCII/JSON tumbleriga bog‘liq, mazmun bloki matn bo‘lib qoladi.
+
+Eksport fayllari UTF-8 (BOMsiz) formatida yoziladi.
 
 ## 4) Git
 Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
@@ -28,9 +39,26 @@ Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
 * Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset.
 
 ## 5) Nusxa
+### Daraxt formati tumbleri (ASCII/JSON)
+Tumbler natijada daraxt ishtirok etadigan amallar uchun daraxt ko‘rinishi formatini belgilaydi.
+
+* ASCII — shoxlari bor matnli daraxt.
+* JSON — JSON formatidagi strukturali daraxt.
+
+Tumbler quyidagilarga ta’sir qiladi:
+* Daraxtni nusxalash
+* Daraxt + mazmunni nusxalash
+* Daraxtni eksport qilish
+* Daraxt va mazmunni eksport qilish
+
+Tumbler quyidagilarga ta’sir qilmaydi:
+* Mazmunni nusxalash
+* Mazmunni eksport qilish
+
 ### Daraxtni nusxalash
 Loyiha daraxtini nusxalaydi.
 Agar belgilangan tugunlar bo‘lsa, daraxt tanlov bo‘yicha quriladi; tanlov bo‘sh yoki yaroqsiz bo‘lsa, to‘liq daraxt nusxalanadi.
+Natija formati ASCII/JSON tumbleri bilan aniqlanadi.
 Tugmalar: Ctrl+Shift+C va Ctrl+Alt+C.
 
 ### Mazmunni nusxalash
@@ -44,8 +72,22 @@ Tugma: Ctrl+Alt+V.
 ### Daraxt + mazmunni nusxalash
 Daraxt va mazmunni birlashtiradi:
 * daraxt tanlov bo‘yicha; agar tanlov bo‘sh yoki yaroqsiz bo‘lsa — to‘liq daraxt;
-* mazmun «Mazmunni nusxalash» qoidalari bo‘yicha.
+* mazmun «Mazmunni nusxalash» qoidalari bo‘yicha;
+* daraxt blokining formati ASCII/JSON tumbleri bilan aniqlanadi.
 Tugma: Ctrl+Shift+V.
+
+### JSON ko‘rinishi
+JSON rejimida ixcham tuzilma ishlatiladi.
+
+Daraxt:
+* `rootPath` — ildizning absolyut yo‘li.
+* `root` — ildiz tugun.
+* tugun maydonlari: `name`, `path`, `dirs`, `files`, `accessDenied` (zarurat bo‘lsa).
+
+Daraxt + mazmun:
+* `rootPath` — ildizning absolyut yo‘li.
+* `tree` — JSON daraxt.
+* `content` — fayl mazmunining matn bloki.
 
 ## 6) Ko‘rinish
 ### Masshtab
@@ -156,6 +198,8 @@ Natija quyidagilarga bog‘liq:
 
 Agar ruxsat bo‘lmasa, tugun "Kirish taqiqlangan" deb belgilanadi.
 
+Status-bardagi hisoblagichlar daraxt qatnashadigan amallar uchun joriy daraxt formati (ASCII/JSON) asosida qayta hisoblanadi. ASCII/JSON almashtirilganda qiymatlar darhol yangilanadi.
+
 ## 12) Ikonkalar
 Ikonka tanlash tartibi:
 1) tugun turi (papka/fayl)
@@ -182,4 +226,5 @@ Til menyusi orqali tanlanadi.
 ## 16) Eslatmalar
 * Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.
+
 
