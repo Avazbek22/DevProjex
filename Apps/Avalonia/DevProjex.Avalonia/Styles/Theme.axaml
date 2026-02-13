@@ -899,10 +899,26 @@
         <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
     </Style>
 
+    <Style Selector="Button.segment-text-button.segment-selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
+    </Style>
+
+    <Style Selector="Button.segment-text-button.segment-selected TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
+    </Style>
+
     <!-- Segment text button: selected + hover -->
     <Style Selector="Button.segment-text-button.segment-selected:pointerover">
         <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
         <Setter Property="Background" Value="{DynamicResource SegmentSelectedHoverOverlayBrush}" />
+    </Style>
+
+    <Style Selector="Button.segment-text-button.segment-selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
+    </Style>
+
+    <Style Selector="Button.segment-text-button.segment-selected:pointerover TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryActionForegroundBrush}" />
     </Style>
 
     <!-- Segment control: disabled -->
