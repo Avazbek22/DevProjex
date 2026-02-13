@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:DevProjex.Avalonia.ViewModels"
         xmlns:views="using:DevProjex.Avalonia.Views"
+        xmlns:converters="using:DevProjex.Avalonia.Converters"
         x:Class="DevProjex.Avalonia.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
@@ -21,6 +22,14 @@
           <VirtualizingStackPanel />
         </ItemsPanelTemplate>
       </Setter>
+    </Style>
+    <!-- Fix for virtualization cache bug: the :empty pseudo-class may not update correctly
+         when VirtualizingStackPanel recycles TreeViewItem containers. We use Opacity binding
+         instead of IsVisible to hide the expander while preserving layout space for alignment. -->
+    <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron">
+      <Setter Property="Opacity" Value="{Binding DataContext.HasChildren,
+        RelativeSource={RelativeSource AncestorType=TreeViewItem},
+        Converter={x:Static converters:BoolToOpacityConverter.Instance}}" />
     </Style>
 
     <!-- Drop Zone Styles -->

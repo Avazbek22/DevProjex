@@ -19,7 +19,10 @@
       "Bash(dir \"C:\\\\Users\\\\Avazbek\\\\RiderProjects\\\\DevProjex\\\\Application\" /b)",
       "Bash(taskkill:*)",
       "Bash(timeout:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(dotnet clean:*)"
     ]
   }
 }

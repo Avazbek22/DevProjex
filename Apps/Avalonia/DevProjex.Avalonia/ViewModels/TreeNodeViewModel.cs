@@ -45,6 +45,12 @@ public sealed class TreeNodeViewModel : ViewModelBase
     public IList<TreeNodeViewModel> Children { get; }
     public IEnumerable<TreeNodeViewModel> ChildItemsSource => Children.Count > 0 ? Children : EmptyChildItems;
 
+    /// <summary>
+    /// Indicates whether this node has children. Used to control expander visibility
+    /// independently of VirtualizingStackPanel's cached :empty pseudo-class state.
+    /// </summary>
+    public bool HasChildren => Children.Count > 0;
+
     public IImage? Icon { get; set; }
 
     public InlineCollection? DisplayInlines => _displayInlines;
