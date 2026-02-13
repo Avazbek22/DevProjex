@@ -1136,6 +1136,7 @@ public partial class MainWindow : Window
         _searchBarAnimating = true;
 
         const double durationMs = 250.0;
+        const double islandSpacing = 4.0; // Gap between search bar and tree island
 
         // Get current values
         var startHeight = _searchBarContainer.Height;
@@ -1143,11 +1144,13 @@ public partial class MainWindow : Window
 
         var startY = _searchBarTransform.Y;
         var startOpacity = _searchBar.Opacity;
+        var startMarginBottom = _searchBarContainer.Margin.Bottom;
 
         // Target values
         var endHeight = show ? SearchBarHeight : 0.0;
         var endY = show ? 0.0 : -SearchBarHeight;
         var endOpacity = show ? 1.0 : 0.0;
+        var endMarginBottom = show ? islandSpacing : 0.0;
 
         var clock = Stopwatch.StartNew();
 
@@ -1160,6 +1163,10 @@ public partial class MainWindow : Window
             // Animate container height (this makes content below shift)
             _searchBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
 
+            // Animate margin for proper spacing between islands
+            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
+            _searchBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
+
             // Animate inner panel slide and fade
             _searchBarTransform.Y = startY + (endY - startY) * eased;
             _searchBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
@@ -1169,6 +1176,7 @@ public partial class MainWindow : Window
 
         // Ensure final values
         _searchBarContainer.Height = endHeight;
+        _searchBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
         _searchBarTransform.Y = endY;
         _searchBar.Opacity = endOpacity;
         _searchBarAnimating = false;
@@ -1182,6 +1190,7 @@ public partial class MainWindow : Window
         _filterBarAnimating = true;
 
         const double durationMs = 250.0;
+        const double islandSpacing = 4.0; // Gap between filter bar and tree island
 
         // Get current values
         var startHeight = _filterBarContainer.Height;
@@ -1189,11 +1198,13 @@ public partial class MainWindow : Window
 
         var startY = _filterBarTransform.Y;
         var startOpacity = _filterBar.Opacity;
+        var startMarginBottom = _filterBarContainer.Margin.Bottom;
 
         // Target values
         var endHeight = show ? FilterBarHeight : 0.0;
         var endY = show ? 0.0 : -FilterBarHeight;
         var endOpacity = show ? 1.0 : 0.0;
+        var endMarginBottom = show ? islandSpacing : 0.0;
 
         var clock = Stopwatch.StartNew();
 
@@ -1206,6 +1217,10 @@ public partial class MainWindow : Window
             // Animate container height (this makes content below shift)
             _filterBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
 
+            // Animate margin for proper spacing between islands
+            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
+            _filterBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
+
             // Animate inner panel slide and fade
             _filterBarTransform.Y = startY + (endY - startY) * eased;
             _filterBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
@@ -1215,6 +1230,7 @@ public partial class MainWindow : Window
 
         // Ensure final values
         _filterBarContainer.Height = endHeight;
+        _filterBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
         _filterBarTransform.Y = endY;
         _filterBar.Opacity = endOpacity;
         _filterBarAnimating = false;

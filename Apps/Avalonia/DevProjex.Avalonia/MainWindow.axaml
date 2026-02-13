@@ -169,38 +169,6 @@
                           GitGetUpdatesRequested="OnGitGetUpdates"
                           GitBranchSwitchRequested="OnGitBranchSwitch" />
 
-    <!-- Animated search bar container -->
-    <Border DockPanel.Dock="Top"
-            Name="SearchBarContainer"
-            ClipToBounds="True"
-            Height="0">
-      <views:SearchBarView Name="SearchBar"
-                           RenderTransformOrigin="50%,0%"
-                           SearchKeyDown="OnSearchKeyDown"
-                           SearchPrevRequested="OnSearchPrev"
-                           SearchNextRequested="OnSearchNext"
-                           SearchCloseRequested="OnSearchClose">
-        <views:SearchBarView.RenderTransform>
-          <TranslateTransform Y="0" />
-        </views:SearchBarView.RenderTransform>
-      </views:SearchBarView>
-    </Border>
-
-    <!-- Animated filter bar container -->
-    <Border DockPanel.Dock="Top"
-            Name="FilterBarContainer"
-            ClipToBounds="True"
-            Height="0">
-      <views:FilterBarView Name="FilterBar"
-                           RenderTransformOrigin="50%,0%"
-                           FilterKeyDown="OnFilterKeyDown"
-                           FilterCloseRequested="OnFilterClose">
-        <views:FilterBarView.RenderTransform>
-          <TranslateTransform Y="0" />
-        </views:FilterBarView.RenderTransform>
-      </views:FilterBarView>
-    </Border>
-
     <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
       <Grid ColumnDefinitions="Auto,*,Auto">
         <!-- Left: Tree metrics -->
@@ -433,10 +401,42 @@
       <Grid ColumnDefinitions="*,Auto"
             IsVisible="{Binding IsProjectLoaded}"
             Margin="4,3,4,3">
-        <Border Grid.Column="0"
-                Classes="island-panel content-island"
-                Margin="0,0,4,0">
-          <TreeView Name="ProjectTree"
+        <DockPanel Grid.Column="0" Margin="0,0,4,0">
+          <!-- Animated search bar container - only pushes tree down, not settings -->
+          <Border DockPanel.Dock="Top"
+                  Name="SearchBarContainer"
+                  ClipToBounds="True"
+                  Height="0">
+            <views:SearchBarView Name="SearchBar"
+                                 RenderTransformOrigin="50%,0%"
+                                 SearchKeyDown="OnSearchKeyDown"
+                                 SearchPrevRequested="OnSearchPrev"
+                                 SearchNextRequested="OnSearchNext"
+                                 SearchCloseRequested="OnSearchClose">
+              <views:SearchBarView.RenderTransform>
+                <TranslateTransform Y="0" />
+              </views:SearchBarView.RenderTransform>
+            </views:SearchBarView>
+          </Border>
+
+          <!-- Animated filter bar container - only pushes tree down, not settings -->
+          <Border DockPanel.Dock="Top"
+                  Name="FilterBarContainer"
+                  ClipToBounds="True"
+                  Height="0">
+            <views:FilterBarView Name="FilterBar"
+                                 RenderTransformOrigin="50%,0%"
+                                 FilterKeyDown="OnFilterKeyDown"
+                                 FilterCloseRequested="OnFilterClose">
+              <views:FilterBarView.RenderTransform>
+                <TranslateTransform Y="0" />
+              </views:FilterBarView.RenderTransform>
+            </views:FilterBarView>
+          </Border>
+
+          <!-- Tree content island -->
+          <Border Classes="island-panel content-island">
+            <TreeView Name="ProjectTree"
                     Grid.Column="0"
                     ItemsSource="{Binding TreeNodes}"
                     IsEnabled="{Binding IsProjectLoaded}"
@@ -483,8 +483,9 @@
               </Grid>
             </TreeDataTemplate>
           </TreeView.ItemTemplate>
-        </TreeView>
-        </Border>
+          </TreeView>
+          </Border>
+        </DockPanel>
 
         <!-- Animated settings panel container -->
         <Border Grid.Column="1"
