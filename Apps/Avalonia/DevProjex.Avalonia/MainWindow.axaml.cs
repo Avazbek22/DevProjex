@@ -92,6 +92,13 @@ public partial class MainWindow : Window
     private global::Avalonia.Threading.DispatcherTimer? _dropZoneFloatTimer;
     private readonly Stopwatch _dropZoneFloatClock = new();
 
+    // Settings panel animation
+    private Border? _settingsContainer;
+    private Border? _settingsIsland;
+    private TranslateTransform? _settingsTransform;
+    private bool _settingsAnimating;
+    private const double SettingsPanelWidth = 328.0; // 320 content + 8 margin
+
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
     private CancellationTokenSource? _metricsCalculationCts;
@@ -151,6 +158,8 @@ public partial class MainWindow : Window
         _searchBar = this.FindControl<SearchBarView>("SearchBar");
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
         _dropZoneIcon = this.FindControl<Viewbox>("DropZoneIcon");
+        _settingsContainer = this.FindControl<Border>("SettingsContainer");
+        _settingsIsland = this.FindControl<Border>("SettingsIsland");
 
         if (_dropZoneIcon is not null)
         {
@@ -158,6 +167,16 @@ public partial class MainWindow : Window
             _dropZoneIcon.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
             _dropZoneIcon.RenderTransform = _dropZoneIconTransform;
             EnsureDropZoneFloatAnimationStarted();
+        }
+
+        if (_settingsIsland is not null && _settingsContainer is not null)
+        {
+            _settingsTransform = new TranslateTransform();
+            _settingsIsland.RenderTransform = _settingsTransform;
+            // Start hidden (collapsed width, off-screen to the right)
+            _settingsContainer.Width = 0;
+            _settingsTransform.X = SettingsPanelWidth;
+            _settingsIsland.Opacity = 0;
         }
 
         if (_treeView is not null)
@@ -813,7 +832,57 @@ public partial class MainWindow : Window
     private void OnToggleSettings(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
-        _viewModel.SettingsVisible = !_viewModel.SettingsVisible;
+        if (_settingsAnimating) return;
+
+        var newVisible = !_viewModel.SettingsVisible;
+        _viewModel.SettingsVisible = newVisible;
+        AnimateSettingsPanel(newVisible);
+    }
+
+    private async void AnimateSettingsPanel(bool show)
+    {
+        if (_settingsIsland is null || _settingsTransform is null || _settingsContainer is null) return;
+        if (_settingsAnimating) return;
+
+        _settingsAnimating = true;
+
+        const double durationMs = 300.0;
+
+        // Get current values
+        var startWidth = _settingsContainer.Width;
+        if (double.IsNaN(startWidth)) startWidth = show ? 0 : SettingsPanelWidth;
+
+        var startX = _settingsTransform.X;
+        var startOpacity = _settingsIsland.Opacity;
+
+        // Target values
+        var endWidth = show ? SettingsPanelWidth : 0.0;
+        var endX = show ? 0.0 : SettingsPanelWidth;
+        var endOpacity = show ? 1.0 : 0.0;
+
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
+            // Cubic ease out: 1 - (1-t)^3
+            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+
+            // Animate container width (this makes tree expand/contract)
+            _settingsContainer.Width = startWidth + (endWidth - startWidth) * eased;
+
+            // Animate inner panel slide and fade
+            _settingsTransform.X = startX + (endX - startX) * eased;
+            _settingsIsland.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+            await Task.Delay(8); // ~120 FPS for smooth animation
+        }
+
+        // Ensure final values
+        _settingsContainer.Width = endWidth;
+        _settingsTransform.X = endX;
+        _settingsIsland.Opacity = endOpacity;
+        _settingsAnimating = false;
     }
 
     private void OnSetLightTheme(object? sender, RoutedEventArgs e)
@@ -1788,6 +1857,9 @@ public partial class MainWindow : Window
             _viewModel.IsProjectLoaded = true;
             _viewModel.SettingsVisible = true;
             _viewModel.SearchVisible = false;
+
+            // Animate settings panel in
+            AnimateSettingsPanel(true);
 
             // Set project source type based on how it was opened
             // If opened from dialog (File → Open), it's LocalFolder

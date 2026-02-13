@@ -7,7 +7,7 @@
   <UserControl.Resources>
     <converters:FontFamilyDisplayNameConverter x:Key="FontFamilyDisplayNameConverter" />
   </UserControl.Resources>
-  <Border Width="320" Classes="panel" BorderThickness="0" IsVisible="{Binding SettingsVisible}" IsEnabled="{Binding IsProjectLoaded}">
+  <Border Width="320" Classes="panel" BorderThickness="0" IsEnabled="{Binding IsProjectLoaded}">
     <Grid RowDefinitions="Auto,*,*,*">
       <!-- Font section - Auto height -->
       <StackPanel Grid.Row="0" Spacing="6">

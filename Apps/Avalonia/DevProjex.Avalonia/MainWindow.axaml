@@ -436,15 +436,24 @@
         </TreeView>
         </Border>
 
+        <!-- Animated settings panel container -->
         <Border Grid.Column="1"
-                Classes="island-panel settings-island"
-                IsVisible="{Binding SettingsVisible}">
-          <!-- Settings panel -->
-          <views:SettingsPanelView Name="SettingsPanel"
-                                   ApplySettingsRequested="OnApplySettings"
-                                   IgnoreAllChanged="OnIgnoreAllChanged"
-                                   ExtensionsAllChanged="OnExtensionsAllChanged"
-                                   RootAllChanged="OnRootAllChanged" />
+                Name="SettingsContainer"
+                ClipToBounds="True"
+                IsVisible="{Binding IsProjectLoaded}">
+          <Border Classes="island-panel settings-island"
+                  Name="SettingsIsland"
+                  RenderTransformOrigin="100%,50%">
+            <Border.RenderTransform>
+              <TranslateTransform X="0" />
+            </Border.RenderTransform>
+            <!-- Settings panel -->
+            <views:SettingsPanelView Name="SettingsPanel"
+                                     ApplySettingsRequested="OnApplySettings"
+                                     IgnoreAllChanged="OnIgnoreAllChanged"
+                                     ExtensionsAllChanged="OnExtensionsAllChanged"
+                                     RootAllChanged="OnRootAllChanged" />
+          </Border>
         </Border>
       </Grid>
 
