@@ -18,8 +18,8 @@ public enum ExportFormat
 
 public sealed class MainWindowViewModel : ViewModelBase
 {
-    public const string BaseTitle = "DevProjex v4.1";
-    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.1";
+    public const string BaseTitle = "DevProjex v4.5";
+    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.5";
 
     private readonly LocalizationService _localization;
     private readonly HelpContentProvider _helpContentProvider;
