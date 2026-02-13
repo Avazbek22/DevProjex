@@ -46,6 +46,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
             var result = await RunGitCommandAsync(null, "--version", cancellationToken);
             return result.ExitCode == 0 && result.Output.Contains("git version");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             // Git not installed or not in PATH
@@ -331,6 +335,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     return a.IsActive ? -1 : 1;
                 return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
             });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {

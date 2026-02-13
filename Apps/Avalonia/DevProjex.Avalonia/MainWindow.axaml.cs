@@ -47,6 +47,32 @@ public partial class MainWindow : Window
         GitSwitchBranch = 5
     }
 
+    private sealed record SelectionOptionSnapshot(string Name, bool IsChecked);
+
+    private sealed record IgnoreOptionSnapshot(IgnoreOptionId Id, string Label, bool IsChecked);
+
+    private sealed record ProjectLoadCancellationSnapshot(
+        bool HadLoadedProjectBefore,
+        string? Path,
+        string? ProjectDisplayName,
+        string? RepositoryUrl,
+        BuildTreeResult? Tree,
+        ProjectSourceType ProjectSourceType,
+        string CurrentBranch,
+        IReadOnlyList<GitBranch> GitBranches,
+        bool SettingsVisible,
+        bool SearchVisible,
+        bool FilterVisible,
+        bool StatusMetricsVisible,
+        string StatusTreeStatsText,
+        string StatusContentStatsText,
+        bool AllRootFoldersChecked,
+        bool AllExtensionsChecked,
+        bool AllIgnoreChecked,
+        IReadOnlyList<SelectionOptionSnapshot> RootFolders,
+        IReadOnlyList<SelectionOptionSnapshot> Extensions,
+        IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions);
+
     public MainWindow()
         : this(CommandLineOptions.Empty, AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty))
     {
@@ -137,6 +163,7 @@ public partial class MainWindow : Window
     private StatusOperationType _activeStatusOperationType;
     private Action? _activeStatusCancelAction;
     private bool _metricsCancellationRequestedByUser;
+    private ProjectLoadCancellationSnapshot? _activeProjectLoadCancellationSnapshot;
     private static readonly HashSet<string> MetricsWarmupBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
@@ -2293,6 +2320,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
+        var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
         var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = projectLoadCts.Token;
         _viewModel.StatusMetricsVisible = false;
@@ -2318,26 +2347,26 @@ public partial class MainWindow : Window
                 _viewModel.GitBranches.Clear();
                 _currentProjectDisplayName = null;
                 _currentRepositoryUrl = null;
-
-                // Clear cached repo path when opening from dialog (local folder)
-                // This ensures the previous Git clone cache gets cleaned up
-                if (_currentCachedRepoPath is not null)
-                {
-                    _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
-                    _currentCachedRepoPath = null;
-                }
             }
 
             UpdateTitle();
 
             await ReloadProjectAsync(cancellationToken);
+
+            // Clear cached repo path only after the new local project load has completed successfully.
+            if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))
+            {
+                _repoCacheService.DeleteRepositoryDirectory(cachedRepoPathToDeleteOnSuccess);
+                _currentCachedRepoPath = null;
+            }
+
+            _activeProjectLoadCancellationSnapshot = null;
             CompleteStatusOperation(statusOperationId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (IsStatusOperationActive(statusOperationId) && _viewModel.IsProjectLoaded)
+            if (IsStatusOperationActive(statusOperationId) && TryApplyActiveProjectLoadCancellationFallback())
             {
-                ResetToInitialProjectStateAfterCancellation();
                 _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
             }
 
@@ -2345,6 +2374,7 @@ public partial class MainWindow : Window
         }
         catch
         {
+            _activeProjectLoadCancellationSnapshot = null;
             CompleteStatusOperation(statusOperationId);
             throw;
         }
@@ -2507,18 +2537,6 @@ public partial class MainWindow : Window
             // Check if this operation was superseded by a newer one
             linkedToken.ThrowIfCancellationRequested();
 
-            // Clear references to old tree BEFORE replacing to allow GC
-            _searchCoordinator.ClearSearchState();
-            if (_treeView is not null)
-                _treeView.SelectedItem = null;
-
-            // Recursively clear old tree nodes to release memory (DisplayInlines, Children, Icons)
-            foreach (var node in _viewModel.TreeNodes)
-                node.ClearRecursive();
-            _viewModel.TreeNodes.Clear();
-
-            _currentTree = result;
-
             if (result.RootAccessDenied && TryElevateAndRestart(_currentPath))
                 return;
 
@@ -2537,6 +2555,17 @@ public partial class MainWindow : Window
 
             linkedToken.ThrowIfCancellationRequested();
 
+            // Swap trees only after the new root is fully materialized.
+            // This prevents losing the previously visible project on cancellation.
+            _searchCoordinator.ClearSearchState();
+            if (_treeView is not null)
+                _treeView.SelectedItem = null;
+
+            foreach (var node in _viewModel.TreeNodes)
+                node.ClearRecursive();
+            _viewModel.TreeNodes.Clear();
+
+            _currentTree = result;
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
 
@@ -2729,6 +2758,115 @@ public partial class MainWindow : Window
         _recalculateMetricsCts?.Cancel();
     }
 
+    private ProjectLoadCancellationSnapshot CaptureProjectLoadCancellationSnapshot()
+    {
+        var hadLoadedProjectBefore = _viewModel.IsProjectLoaded && !string.IsNullOrWhiteSpace(_currentPath);
+
+        return new ProjectLoadCancellationSnapshot(
+            HadLoadedProjectBefore: hadLoadedProjectBefore,
+            Path: _currentPath,
+            ProjectDisplayName: _currentProjectDisplayName,
+            RepositoryUrl: _currentRepositoryUrl,
+            Tree: _currentTree,
+            ProjectSourceType: _viewModel.ProjectSourceType,
+            CurrentBranch: _viewModel.CurrentBranch,
+            GitBranches: _viewModel.GitBranches.ToArray(),
+            SettingsVisible: _viewModel.SettingsVisible,
+            SearchVisible: _viewModel.SearchVisible,
+            FilterVisible: _viewModel.FilterVisible,
+            StatusMetricsVisible: _viewModel.StatusMetricsVisible,
+            StatusTreeStatsText: _viewModel.StatusTreeStatsText,
+            StatusContentStatsText: _viewModel.StatusContentStatsText,
+            AllRootFoldersChecked: _viewModel.AllRootFoldersChecked,
+            AllExtensionsChecked: _viewModel.AllExtensionsChecked,
+            AllIgnoreChecked: _viewModel.AllIgnoreChecked,
+            RootFolders: _viewModel.RootFolders
+                .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
+                .ToArray(),
+            Extensions: _viewModel.Extensions
+                .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
+                .ToArray(),
+            IgnoreOptions: _viewModel.IgnoreOptions
+                .Select(option => new IgnoreOptionSnapshot(option.Id, option.Label, option.IsChecked))
+                .ToArray());
+    }
+
+    private bool TryApplyActiveProjectLoadCancellationFallback()
+    {
+        var snapshot = _activeProjectLoadCancellationSnapshot;
+        if (snapshot is null)
+            return false;
+
+        _activeProjectLoadCancellationSnapshot = null;
+        ApplyProjectLoadCancellationFallback(snapshot);
+        return true;
+    }
+
+    private void ApplyProjectLoadCancellationFallback(ProjectLoadCancellationSnapshot snapshot)
+    {
+        var fallback = ProjectLoadCancellationFallbackResolver.Resolve(snapshot.HadLoadedProjectBefore);
+        if (fallback == ProjectLoadCancellationFallback.ResetToInitialState)
+        {
+            ResetToInitialProjectStateAfterCancellation();
+            return;
+        }
+
+        RestorePreviousProjectStateAfterCancellation(snapshot);
+    }
+
+    private void RestorePreviousProjectStateAfterCancellation(ProjectLoadCancellationSnapshot snapshot)
+    {
+        _currentPath = snapshot.Path;
+        _currentProjectDisplayName = snapshot.ProjectDisplayName;
+        _currentRepositoryUrl = snapshot.RepositoryUrl;
+        _currentTree = snapshot.Tree;
+
+        _viewModel.IsProjectLoaded = true;
+        _viewModel.SettingsVisible = snapshot.SettingsVisible;
+        _viewModel.SearchVisible = snapshot.SearchVisible;
+        _viewModel.FilterVisible = snapshot.FilterVisible;
+        _viewModel.StatusMetricsVisible = snapshot.StatusMetricsVisible;
+        _viewModel.StatusTreeStatsText = snapshot.StatusTreeStatsText;
+        _viewModel.StatusContentStatsText = snapshot.StatusContentStatsText;
+
+        _viewModel.ProjectSourceType = snapshot.ProjectSourceType;
+        _viewModel.CurrentBranch = snapshot.CurrentBranch;
+        _viewModel.GitBranches.Clear();
+        foreach (var branch in snapshot.GitBranches)
+            _viewModel.GitBranches.Add(branch);
+
+        _viewModel.RootFolders.Clear();
+        foreach (var option in snapshot.RootFolders)
+            _viewModel.RootFolders.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+
+        _viewModel.Extensions.Clear();
+        foreach (var option in snapshot.Extensions)
+            _viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+
+        _viewModel.IgnoreOptions.Clear();
+        foreach (var option in snapshot.IgnoreOptions)
+            _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, option.IsChecked));
+
+        _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
+        _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
+        _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
+
+        if (_viewModel.TreeNodes.Count == 0 && snapshot.Tree is not null && !string.IsNullOrWhiteSpace(snapshot.Path))
+        {
+            var displayName = !string.IsNullOrEmpty(snapshot.ProjectDisplayName)
+                ? snapshot.ProjectDisplayName
+                : GetDirectoryNameSafe(snapshot.Path);
+
+            var rootNode = BuildTreeViewModel(snapshot.Tree.Root, null);
+            rootNode.DisplayName = displayName;
+            rootNode.IsExpanded = true;
+            _viewModel.TreeNodes.Add(rootNode);
+        }
+
+        UpdateBranchMenu();
+        UpdateTitle();
+    }
+
     private static CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)
     {
         var cts = new CancellationTokenSource();
@@ -2749,6 +2887,7 @@ public partial class MainWindow : Window
 
     private void ResetToInitialProjectStateAfterCancellation()
     {
+        _activeProjectLoadCancellationSnapshot = null;
         CancelBackgroundMetricsCalculation();
         ClearPreviousProjectState();
 
@@ -2947,6 +3086,10 @@ public partial class MainWindow : Window
                     // If we get any response (even error status codes), it means we have connectivity
                     return true;
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch
                 {
                     // Try next host
@@ -2956,6 +3099,10 @@ public partial class MainWindow : Window
 
             // All hosts failed
             return false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -3393,8 +3540,8 @@ public partial class MainWindow : Window
 
         if (activeOperationType == StatusOperationType.LoadProject)
         {
-            ResetToInitialProjectStateAfterCancellation();
-            _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
+            if (TryApplyActiveProjectLoadCancellationFallback())
+                _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
         }
 
         CompleteStatusOperation(activeOperationId);
