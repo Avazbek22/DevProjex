@@ -1,4 +1,4 @@
-## 1) Nima va nima uchun
+﻿## 1) Nima va nima uchun
 DevProjex loyiha kontekstini tez tayyorlaydi: papka/fayl tuzilmasini ko‘rsatadi, elementlarni belgilash va daraxtni va/yoki fayl mazmunini buferga nusxalash imkonini beradi. Code review, qo‘llab‑quvvatlash, o‘qitish va loyiha tuzilmasini AI‑yordamchiga berish uchun qulay.
 
 Muhim: ilova faqat o‘qish rejimida ishlaydi va fayllarni o‘zgartirmaydi.
@@ -84,13 +84,69 @@ Har bir ro‘yxatda Barchasi tugmasi bor.
 
 Ctrl+P — panelni ko‘rsatish/yashirish.
 
-## 10) Ignore va Smart Ignore
-### Oddiy qoidalar
-Bin/obj, yashirin elementlar, nuqtali elementlar kabi shovqinlarni chiqarib tashlash.
+## 10) Ignorlash
+"Ignorlash" roʻyxati joriy yoʻl va tanlangan yuqori darajadagi papkalar asosida avtomatik shakllanadi.
 
-### Smart Ignore
-Qo‘shimcha aqlli istisnolar (VCS/IDE papkalari, tipik “junk” fayllar). Frontend qoidalari faqat mos belgilar topilganda yoqiladi (package/lock fayllari).
+Variantlar tartibi:
+* Smart ignore (mavjud bo‘lsa)
+* .gitignore dan foydalanish (kamida bitta `.gitignore` topilsa)
+* Yashirin papkalar
+* Yashirin fayllar
+* Boshida nuqtali papkalar
+* Boshida nuqtali fayllar
 
+".gitignore dan foydalanish" ostidagi chiziq Git/Smart qoidalarni asosiy ko‘rinish qoidalaridan ajratadi.
+
+### 10.1 Qoidalar qo‘llanadigan hudud
+Ilova ignore qoidalari ishlaydigan loyiha hududlarini (scope) tuzadi:
+* root (agar root’da `.gitignore` yoki loyiha belgisi bo‘lsa)
+* birinchi darajadagi papkalar
+* ichki loyiha papkalari
+
+Ichki loyiha hududlarini qidirish chuqurligi qat’iy: 2 daraja.
+
+### 10.2 ".gitignore dan foydalanish"
+* Yoqilgan: `.gitignore` qoidalari aniqlangan hududlarda qo‘llanadi.
+* O‘chirilgan: `.gitignore` qoidalari to‘liq o‘chiriladi.
+
+Ko‘p loyihali papkada bir loyiha `.gitignore` qoidasi o‘z hududidan tashqaridagi qo‘shni loyihalarga qo‘llanmaydi.
+
+### 10.3 "Smart ignore"
+* Faqat mos holatda ko‘rsatiladi.
+* Yoqilgan: build/tool artefaktlari qo‘shimcha yashiriladi.
+* O‘chirilgan: smart-qoidalar qo‘llanmaydi.
+
+### 10.4 Asosiy qoidalar
+Variantlar:
+* Yashirin papkalar
+* Yashirin fayllar
+* Boshida nuqtali papkalar
+* Boshida nuqtali fayllar
+
+Bu qoidalar `.gitignore` va Smart Ignore’dan mustaqil, faqat o‘z yoqib/o‘chirgichlari bilan ishlaydi.
+
+### 10.5 Ichki ishlash: odatiy holatlar
+1. Bitta loyiha, `.gitignore` bor.
+Odatda faqat ".gitignore dan foydalanish" ko‘rinadi.
+Yoqilganda, `.gitignore` va Smart Ignore birga ishlaydi.
+O‘chirilganda, ikkalasi ham o‘chadi.
+
+2. Bitta loyiha, `.gitignore` yo‘q.
+".gitignore dan foydalanish" ko‘rinmaydi.
+"Smart ignore" faqat mos bo‘lsa ko‘rinadi.
+
+3. Ko‘p loyihali workspace: bir qismida `.gitignore` bor, bir qismida yo‘q.
+".gitignore dan foydalanish" va "Smart ignore" ko‘rinadi.
+`.gitignore` o‘z hududida ishlaydi.
+Smart Ignore (yoqilgan bo‘lsa) aniqlangan hududlarda filtrlashni to‘ldiradi.
+
+4. Ko‘p loyihali workspace: barcha loyihalarda `.gitignore` bor.
+".gitignore dan foydalanish" ko‘rinadi.
+"Smart ignore" alohida variant sifatida ko‘rinmaydi.
+
+5. Mos qoidalarsiz papka.
+Agar `.gitignore` topilmasa va Smart Ignore mos bo‘lmasa, bu variantlar ko‘rsatilmaydi.
+Faqat asosiy ko‘rinish qoidalari qoladi.
 ## 11) Daraxt qanday quriladi
 Natija quyidagilarga bog‘liq:
 * tanlangan yuqori darajadagi jildlar
@@ -126,3 +182,4 @@ Til menyusi orqali tanlanadi.
 ## 16) Eslatmalar
 * Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.
+

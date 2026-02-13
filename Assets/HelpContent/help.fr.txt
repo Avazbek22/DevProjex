@@ -1,4 +1,4 @@
-## 1) Qu’est‑ce que c’est et pourquoi
+﻿## 1) Qu’est‑ce que c’est et pourquoi
 DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour code review, support, formation et partage de structure avec un assistant IA.
 
 Important : l’application est en lecture seule et ne modifie jamais les fichiers.
@@ -84,13 +84,69 @@ Chaque liste a un bouton Tous.
 
 Ctrl+P — afficher/masquer le panneau.
 
-## 10) Ignore et Smart Ignore
-### Règles classiques
-Exclut les artefacts et « bruits » courants (bin/obj, éléments cachés, éléments avec point, etc.).
+## 10) Ignorer
+La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
 
-### Smart Ignore
-Exclusions « intelligentes » (dossiers VCS/IDE, fichiers indésirables). Les règles frontend s’activent uniquement si des marqueurs sont détectés (fichiers package/lock).
+Ordre des options :
+* Smart ignore (si disponible)
+* Utiliser .gitignore (si au moins un `.gitignore` est trouvé)
+* Dossiers cachés
+* Fichiers cachés
+* Dossiers commençant par un point
+* Fichiers commençant par un point
 
+La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
+
+### 10.1 Portée des règles
+L’application construit des zones de projet (scopes) où les règles d’ignore sont appliquées :
+* racine (si la racine contient `.gitignore` ou un marqueur de projet)
+* dossiers du premier niveau
+* sous-dossiers de projet imbriqués
+
+La profondeur de recherche des zones de projet imbriquées est fixe : 2 niveaux.
+
+### 10.2 « Utiliser .gitignore »
+* Activé : les règles `.gitignore` sont appliquées dans les zones détectées.
+* Désactivé : les règles `.gitignore` sont entièrement désactivées.
+
+Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
+
+### 10.3 « Smart ignore »
+* Affiché uniquement lorsqu’il est pertinent.
+* Activé : les artefacts courants de build/outils sont masqués en plus.
+* Désactivé : les règles smart ne sont pas appliquées.
+
+### 10.4 Règles de base
+Options :
+* Dossiers cachés
+* Fichiers cachés
+* Dossiers commençant par un point
+* Fichiers commençant par un point
+
+Ces règles sont indépendantes de `.gitignore` et Smart Ignore et dépendent uniquement de leurs propres interrupteurs.
+
+### 10.5 Fonctionnement interne : cas typiques
+1. Projet unique avec `.gitignore`.
+En général, seule l’option « Utiliser .gitignore » est affichée.
+Quand elle est activée, `.gitignore` et Smart Ignore fonctionnent ensemble.
+Quand elle est désactivée, les deux sont désactivés.
+
+2. Projet unique sans `.gitignore`.
+« Utiliser .gitignore » n’est pas affiché.
+« Smart ignore » n’est affiché que s’il est pertinent.
+
+3. Espace multi-projets, certains projets ont `.gitignore`, d’autres non.
+« Utiliser .gitignore » et « Smart ignore » sont affichés.
+`.gitignore` agit dans sa propre zone.
+Smart Ignore (s’il est activé) complète le filtrage dans les zones détectées.
+
+4. Espace multi-projets, tous les projets ont `.gitignore`.
+« Utiliser .gitignore » est affiché.
+« Smart ignore » n’est pas affiché comme option séparée.
+
+5. Dossier sans règles pertinentes.
+Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’est pas pertinent, ces options sont masquées.
+Seules les règles de visibilité de base restent actives.
 ## 11) Construction de l’arbre
 Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
@@ -126,3 +182,4 @@ La langue se choisit via le menu Langue.
 ## 16) Notes
 * Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
+

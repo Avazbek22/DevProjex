@@ -1,4 +1,4 @@
-## 1) What it is and why
+﻿## 1) What it is and why
 DevProjex quickly prepares project context: shows the folder/file structure, lets you select items with checkboxes, and copy the tree and/or file contents to the clipboard. Useful for code review, support, learning, and sharing project structure with an AI assistant.
 
 Important: the app is read-only and never modifies files.
@@ -84,13 +84,69 @@ Each list has an All toggle.
 
 Ctrl+P — show/hide the panel.
 
-## 10) Ignore and Smart Ignore
-### Regular rules
-Exclude common artifacts and noise (e.g., bin/obj, hidden items, dot-items, etc.).
+## 10) Ignore
+The "Ignore" list is built automatically from the current path and selected top-level folders.
 
-### Smart Ignore
-Additional smart exclusions (e.g., VCS/IDE folders and typical junk files). Frontend rules activate only when related project markers are detected (package/lock files).
+Option order:
+* Smart ignore (when available)
+* Use .gitignore (when at least one `.gitignore` is found)
+* Hidden folders
+* Hidden files
+* Dot-prefixed folders
+* Dot-prefixed files
 
+The separator under "Use .gitignore" splits Git/Smart rules from basic visibility rules.
+
+### 10.1 Rule scope
+The app builds project scopes where ignore rules are applied:
+* root (if root has `.gitignore` or a project marker)
+* first-level folders
+* nested project subfolders
+
+Nested project scope discovery depth is fixed: 2 levels.
+
+### 10.2 "Use .gitignore"
+* Enabled: `.gitignore` rules are applied in detected scopes.
+* Disabled: `.gitignore` rules are fully disabled.
+
+For multi-project folders, one project's `.gitignore` is not applied to neighboring projects outside its scope.
+
+### 10.3 "Smart ignore"
+* Shown only when it is relevant.
+* Enabled: common build/tool artifacts are additionally hidden.
+* Disabled: smart rules are not applied.
+
+### 10.4 Basic rules
+Options:
+* Hidden folders
+* Hidden files
+* Dot-prefixed folders
+* Dot-prefixed files
+
+These rules are independent from `.gitignore` and Smart Ignore and work only by their own toggles.
+
+### 10.5 Internal behavior: common cases
+1. Single project with `.gitignore`.
+Usually only "Use .gitignore" is shown.
+When enabled, `.gitignore` and Smart Ignore work together.
+When disabled, both `.gitignore` and Smart Ignore are disabled.
+
+2. Single project without `.gitignore`.
+"Use .gitignore" is not shown.
+"Smart ignore" is shown only when relevant.
+
+3. Multi-project workspace, some projects have `.gitignore`, some do not.
+Both "Use .gitignore" and "Smart ignore" are shown.
+`.gitignore` works inside its own scopes.
+Smart Ignore (when enabled) complements filtering in detected scopes.
+
+4. Multi-project workspace, all projects have `.gitignore`.
+"Use .gitignore" is shown.
+"Smart ignore" is not shown as a separate option.
+
+5. Folder without relevant rules.
+If no `.gitignore` is found and Smart Ignore is not relevant, these options are hidden.
+Only basic visibility rules remain.
 ## 11) How the tree is built
 Result depends on:
 * selected Root folders
@@ -126,3 +182,4 @@ Language is selected via the Language menu.
 ## 16) Notes
 * By default, dark theme and transparency effects are enabled (if supported).
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.
+

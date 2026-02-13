@@ -1,4 +1,4 @@
-## 1) Cos’è e a cosa serve
+﻿## 1) Cos’è e a cosa serve
 DevProjex prepara rapidamente il contesto del progetto: mostra la struttura di cartelle/file, permette di selezionare gli elementi e copiare l’albero e/o il contenuto dei file negli appunti. Utile per code review, supporto, formazione e condivisione della struttura con un assistente AI.
 
 Importante: l’app è solo in lettura e non modifica i file.
@@ -84,13 +84,69 @@ Ogni lista ha il toggle Tutti.
 
 Ctrl+P — mostra/nascondi pannello.
 
-## 10) Ignore e Smart Ignore
-### Regole normali
-Escludi artefatti e “rumore” comuni (bin/obj, elementi nascosti, elementi con punto, ecc.).
+## 10) Ignora
+L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
 
-### Smart Ignore
-Esclusioni “intelligenti” (cartelle VCS/IDE e file spazzatura). Le regole frontend si attivano solo se sono rilevati indicatori (file package/lock).
+Ordine delle opzioni:
+* Smart ignore (se disponibile)
+* Usa .gitignore (se viene trovato almeno un `.gitignore`)
+* Cartelle nascoste
+* File nascosti
+* Cartelle con punto iniziale
+* File con punto iniziale
 
+La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
+
+### 10.1 Ambito delle regole
+L’app costruisce ambiti di progetto (scope) in cui applicare le regole di ignore:
+* radice (se la radice contiene `.gitignore` o un marker di progetto)
+* cartelle di primo livello
+* sottocartelle di progetto annidate
+
+La profondità di ricerca degli ambiti annidati è fissa: 2 livelli.
+
+### 10.2 « Usa .gitignore »
+* Attivo: le regole `.gitignore` sono applicate negli ambiti rilevati.
+* Disattivo: le regole `.gitignore` sono completamente disattivate.
+
+Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
+
+### 10.3 « Smart ignore »
+* Viene mostrato solo quando è pertinente.
+* Attivo: nasconde anche i tipici artefatti di build e strumenti.
+* Disattivo: le regole smart non vengono applicate.
+
+### 10.4 Regole base
+Opzioni:
+* Cartelle nascoste
+* File nascosti
+* Cartelle con punto iniziale
+* File con punto iniziale
+
+Queste regole sono indipendenti da `.gitignore` e Smart Ignore e dipendono solo dai rispettivi interruttori.
+
+### 10.5 Comportamento interno: casi tipici
+1. Progetto singolo con `.gitignore`.
+Di norma viene mostrato solo « Usa .gitignore ».
+Quando è attivo, `.gitignore` e Smart Ignore lavorano insieme.
+Quando è disattivo, entrambi vengono disattivati.
+
+2. Progetto singolo senza `.gitignore`.
+« Usa .gitignore » non viene mostrato.
+« Smart ignore » viene mostrato solo se pertinente.
+
+3. Workspace multi-progetto, alcuni progetti con `.gitignore`, altri senza.
+Vengono mostrati « Usa .gitignore » e « Smart ignore ».
+`.gitignore` opera nel proprio ambito.
+Smart Ignore (se attivo) completa il filtraggio negli ambiti rilevati.
+
+4. Workspace multi-progetto, tutti i progetti hanno `.gitignore`.
+Viene mostrato « Usa .gitignore ».
+« Smart ignore » non viene mostrato come opzione separata.
+
+5. Cartella senza regole pertinenti.
+Se non viene trovato `.gitignore` e Smart Ignore non è pertinente, queste opzioni non vengono mostrate.
+Restano solo le regole base di visibilità.
 ## 11) Come si costruisce l’albero
 Il risultato dipende da:
 * cartelle di primo livello selezionate
@@ -126,3 +182,4 @@ La lingua si seleziona dal menu Lingua.
 ## 16) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
+
