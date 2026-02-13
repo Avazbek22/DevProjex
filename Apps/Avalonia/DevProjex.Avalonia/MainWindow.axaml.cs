@@ -99,6 +99,18 @@ public partial class MainWindow : Window
     private bool _settingsAnimating;
     private const double SettingsPanelWidth = 328.0; // 320 content + 8 margin
 
+    // Search bar animation
+    private Border? _searchBarContainer;
+    private TranslateTransform? _searchBarTransform;
+    private bool _searchBarAnimating;
+    private const double SearchBarHeight = 46.0;
+
+    // Filter bar animation
+    private Border? _filterBarContainer;
+    private TranslateTransform? _filterBarTransform;
+    private bool _filterBarAnimating;
+    private const double FilterBarHeight = 46.0;
+
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
     private CancellationTokenSource? _metricsCalculationCts;
@@ -177,6 +189,30 @@ public partial class MainWindow : Window
             _settingsContainer.Width = 0;
             _settingsTransform.X = SettingsPanelWidth;
             _settingsIsland.Opacity = 0;
+        }
+
+        // Initialize search bar animation
+        _searchBarContainer = this.FindControl<Border>("SearchBarContainer");
+        if (_searchBarContainer is not null && _searchBar is not null)
+        {
+            _searchBarTransform = _searchBar.RenderTransform as TranslateTransform ?? new TranslateTransform();
+            _searchBar.RenderTransform = _searchBarTransform;
+            // Start hidden (collapsed height, off-screen to the top)
+            _searchBarContainer.Height = 0;
+            _searchBarTransform.Y = -SearchBarHeight;
+            _searchBar.Opacity = 0;
+        }
+
+        // Initialize filter bar animation
+        _filterBarContainer = this.FindControl<Border>("FilterBarContainer");
+        if (_filterBarContainer is not null && _filterBar is not null)
+        {
+            _filterBarTransform = _filterBar.RenderTransform as TranslateTransform ?? new TranslateTransform();
+            _filterBar.RenderTransform = _filterBarTransform;
+            // Start hidden (collapsed height, off-screen to the top)
+            _filterBarContainer.Height = 0;
+            _filterBarTransform.Y = -FilterBarHeight;
+            _filterBar.Opacity = 0;
         }
 
         if (_treeView is not null)
@@ -885,6 +921,98 @@ public partial class MainWindow : Window
         _settingsAnimating = false;
     }
 
+    private async void AnimateSearchBar(bool show)
+    {
+        if (_searchBar is null || _searchBarTransform is null || _searchBarContainer is null) return;
+        if (_searchBarAnimating) return;
+
+        _searchBarAnimating = true;
+
+        const double durationMs = 250.0;
+
+        // Get current values
+        var startHeight = _searchBarContainer.Height;
+        if (double.IsNaN(startHeight)) startHeight = show ? 0 : SearchBarHeight;
+
+        var startY = _searchBarTransform.Y;
+        var startOpacity = _searchBar.Opacity;
+
+        // Target values
+        var endHeight = show ? SearchBarHeight : 0.0;
+        var endY = show ? 0.0 : -SearchBarHeight;
+        var endOpacity = show ? 1.0 : 0.0;
+
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
+            // Cubic ease out: 1 - (1-t)^3
+            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+
+            // Animate container height (this makes content below shift)
+            _searchBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
+
+            // Animate inner panel slide and fade
+            _searchBarTransform.Y = startY + (endY - startY) * eased;
+            _searchBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+            await Task.Delay(8);
+        }
+
+        // Ensure final values
+        _searchBarContainer.Height = endHeight;
+        _searchBarTransform.Y = endY;
+        _searchBar.Opacity = endOpacity;
+        _searchBarAnimating = false;
+    }
+
+    private async void AnimateFilterBar(bool show)
+    {
+        if (_filterBar is null || _filterBarTransform is null || _filterBarContainer is null) return;
+        if (_filterBarAnimating) return;
+
+        _filterBarAnimating = true;
+
+        const double durationMs = 250.0;
+
+        // Get current values
+        var startHeight = _filterBarContainer.Height;
+        if (double.IsNaN(startHeight)) startHeight = show ? 0 : FilterBarHeight;
+
+        var startY = _filterBarTransform.Y;
+        var startOpacity = _filterBar.Opacity;
+
+        // Target values
+        var endHeight = show ? FilterBarHeight : 0.0;
+        var endY = show ? 0.0 : -FilterBarHeight;
+        var endOpacity = show ? 1.0 : 0.0;
+
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
+            // Cubic ease out: 1 - (1-t)^3
+            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+
+            // Animate container height (this makes content below shift)
+            _filterBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
+
+            // Animate inner panel slide and fade
+            _filterBarTransform.Y = startY + (endY - startY) * eased;
+            _filterBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+            await Task.Delay(8);
+        }
+
+        // Ensure final values
+        _filterBarContainer.Height = endHeight;
+        _filterBarTransform.Y = endY;
+        _filterBar.Opacity = endOpacity;
+        _filterBarAnimating = false;
+    }
+
     private void OnSetLightTheme(object? sender, RoutedEventArgs e)
     {
         var app = global::Avalonia.Application.Current;
@@ -1510,19 +1638,28 @@ public partial class MainWindow : Window
     private void ShowFilter()
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_filterBarAnimating) return;
 
         _viewModel.FilterVisible = true;
-        _filterBar?.FilterBoxControl?.Focus();
-        _filterBar?.FilterBoxControl?.SelectAll();
+        AnimateFilterBar(true);
+
+        // Focus after a brief delay to ensure animation has started
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _filterBar?.FilterBoxControl?.Focus();
+            _filterBar?.FilterBoxControl?.SelectAll();
+        }, global::Avalonia.Threading.DispatcherPriority.Background);
     }
 
     private void CloseFilter()
     {
         if (!_viewModel.FilterVisible) return;
+        if (_filterBarAnimating) return;
 
         _viewModel.FilterVisible = false;
         _viewModel.NameFilter = string.Empty;
         ApplyFilterRealtime();
+        AnimateFilterBar(false);
         _treeView?.Focus();
     }
 
@@ -1774,19 +1911,28 @@ public partial class MainWindow : Window
     private void ShowSearch()
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_searchBarAnimating) return;
 
         _viewModel.SearchVisible = true;
-        _searchBar?.SearchBoxControl?.Focus();
-        _searchBar?.SearchBoxControl?.SelectAll();
+        AnimateSearchBar(true);
+
+        // Focus after a brief delay to ensure animation has started
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _searchBar?.SearchBoxControl?.Focus();
+            _searchBar?.SearchBoxControl?.SelectAll();
+        }, global::Avalonia.Threading.DispatcherPriority.Background);
     }
 
     private void CloseSearch()
     {
         if (!_viewModel.SearchVisible) return;
+        if (_searchBarAnimating) return;
 
         _viewModel.SearchVisible = false;
         _viewModel.SearchQuery = string.Empty;
         _searchCoordinator.ClearSearchState();
+        AnimateSearchBar(false);
         _treeView?.Focus();
     }
 

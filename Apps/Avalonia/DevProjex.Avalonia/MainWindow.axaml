@@ -152,17 +152,37 @@
                           GitGetUpdatesRequested="OnGitGetUpdates"
                           GitBranchSwitchRequested="OnGitBranchSwitch" />
 
-    <views:SearchBarView DockPanel.Dock="Top"
-                         Name="SearchBar"
-                         SearchKeyDown="OnSearchKeyDown"
-                         SearchPrevRequested="OnSearchPrev"
-                         SearchNextRequested="OnSearchNext"
-                         SearchCloseRequested="OnSearchClose" />
+    <!-- Animated search bar container -->
+    <Border DockPanel.Dock="Top"
+            Name="SearchBarContainer"
+            ClipToBounds="True"
+            Height="0">
+      <views:SearchBarView Name="SearchBar"
+                           RenderTransformOrigin="50%,0%"
+                           SearchKeyDown="OnSearchKeyDown"
+                           SearchPrevRequested="OnSearchPrev"
+                           SearchNextRequested="OnSearchNext"
+                           SearchCloseRequested="OnSearchClose">
+        <views:SearchBarView.RenderTransform>
+          <TranslateTransform Y="0" />
+        </views:SearchBarView.RenderTransform>
+      </views:SearchBarView>
+    </Border>
 
-    <views:FilterBarView DockPanel.Dock="Top"
-                         Name="FilterBar"
-                         FilterKeyDown="OnFilterKeyDown"
-                         FilterCloseRequested="OnFilterClose" />
+    <!-- Animated filter bar container -->
+    <Border DockPanel.Dock="Top"
+            Name="FilterBarContainer"
+            ClipToBounds="True"
+            Height="0">
+      <views:FilterBarView Name="FilterBar"
+                           RenderTransformOrigin="50%,0%"
+                           FilterKeyDown="OnFilterKeyDown"
+                           FilterCloseRequested="OnFilterClose">
+        <views:FilterBarView.RenderTransform>
+          <TranslateTransform Y="0" />
+        </views:FilterBarView.RenderTransform>
+      </views:FilterBarView>
+    </Border>
 
     <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
       <Grid ColumnDefinitions="Auto,*,Auto">
