@@ -4,6 +4,10 @@ using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Avalonia.Services;
 
+/// <summary>
+/// Thread-safe LRU cache for file type icons.
+/// Supports concurrent access for parallel tree building operations.
+/// </summary>
 public sealed class IconCache
 {
     /// <summary>
@@ -21,6 +25,7 @@ public sealed class IconCache
     private readonly Dictionary<string, IImage> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _accessOrder = new();
     private readonly Dictionary<string, LinkedListNode<string>> _accessNodes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _lock = new();
 
     public IconCache(IIconStore iconStore)
     {
@@ -32,33 +37,39 @@ public sealed class IconCache
         if (string.IsNullOrWhiteSpace(key))
             return null;
 
-        if (_cache.TryGetValue(key, out var cached))
+        lock (_lock)
         {
-            // Move to end (most recently used)
-            if (_accessNodes.TryGetValue(key, out var node))
+            if (_cache.TryGetValue(key, out var cached))
             {
-                _accessOrder.Remove(node);
-                _accessOrder.AddLast(node);
+                // Move to end (most recently used)
+                if (_accessNodes.TryGetValue(key, out var node))
+                {
+                    _accessOrder.Remove(node);
+                    _accessOrder.AddLast(node);
+                }
+                return cached;
             }
-            return cached;
+
+            // LRU eviction: remove oldest entries when cache is full
+            if (_cache.Count >= MaxCacheSize)
+                EvictOldestUnsafe();
+
+            var bytes = _iconStore.GetIconBytes(key);
+            using var stream = new MemoryStream(bytes);
+            var bitmap = new Bitmap(stream);
+            _cache[key] = bitmap;
+
+            var newNode = _accessOrder.AddLast(key);
+            _accessNodes[key] = newNode;
+
+            return bitmap;
         }
-
-        // LRU eviction: remove oldest entries when cache is full
-        if (_cache.Count >= MaxCacheSize)
-            EvictOldest();
-
-        var bytes = _iconStore.GetIconBytes(key);
-        using var stream = new MemoryStream(bytes);
-        var bitmap = new Bitmap(stream);
-        _cache[key] = bitmap;
-
-        var newNode = _accessOrder.AddLast(key);
-        _accessNodes[key] = newNode;
-
-        return bitmap;
     }
 
-    private void EvictOldest()
+    /// <summary>
+    /// Evicts oldest entries. Must be called within lock.
+    /// </summary>
+    private void EvictOldestUnsafe()
     {
         var toEvict = Math.Min(EvictionCount, _cache.Count);
         for (int i = 0; i < toEvict && _accessOrder.First is not null; i++)
@@ -75,8 +86,11 @@ public sealed class IconCache
     /// </summary>
     public void Clear()
     {
-        _cache.Clear();
-        _accessOrder.Clear();
-        _accessNodes.Clear();
+        lock (_lock)
+        {
+            _cache.Clear();
+            _accessOrder.Clear();
+            _accessNodes.Clear();
+        }
     }
 }

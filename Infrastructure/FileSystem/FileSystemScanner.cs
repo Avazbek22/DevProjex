@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
@@ -6,6 +7,9 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class FileSystemScanner : IFileSystemScanner
 {
+	// Optimal parallelism for modern multi-core CPUs with NVMe SSDs
+	private static readonly int MaxParallelism = Math.Max(4, Environment.ProcessorCount);
+
 	public bool CanReadRoot(string rootPath)
 	{
 		try
@@ -25,22 +29,24 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 	public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules)
 	{
-		var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-		bool rootAccessDenied = false;
-		bool hadAccessDenied = false;
-
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
-			return new ScanResult<HashSet<string>>(exts, false, false);
+			return new ScanResult<HashSet<string>>(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
 
+		// Thread-safe collections for parallel scanning
+		var extensions = new ConcurrentBag<string>();
+		var directories = new ConcurrentBag<string>();
+		var rootAccessDenied = 0;
+		var hadAccessDenied = 0;
+
+		// First pass: collect all directories (single-threaded to avoid race conditions on initial scan)
 		var pending = new Stack<string>();
 		pending.Push(rootPath);
-
 		bool isFirst = true;
 
 		while (pending.Count > 0)
 		{
 			var dir = pending.Pop();
+			directories.Add(dir);
 
 			string[] subDirs;
 			try
@@ -49,8 +55,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 			}
 			catch (UnauthorizedAccessException)
 			{
-				hadAccessDenied = true;
-				if (isFirst) rootAccessDenied = true;
+				Interlocked.Exchange(ref hadAccessDenied, 1);
+				if (isFirst) Interlocked.Exchange(ref rootAccessDenied, 1);
 				continue;
 			}
 			catch
@@ -67,6 +73,14 @@ public sealed class FileSystemScanner : IFileSystemScanner
 				pending.Push(sd);
 			}
 
+			isFirst = false;
+		}
+
+		// Second pass: scan files in all directories in parallel
+		var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism };
+
+		Parallel.ForEach(directories, parallelOptions, dir =>
+		{
 			string[] files;
 			try
 			{
@@ -74,13 +88,12 @@ public sealed class FileSystemScanner : IFileSystemScanner
 			}
 			catch (UnauthorizedAccessException)
 			{
-				hadAccessDenied = true;
-				if (isFirst) rootAccessDenied = true;
-				continue;
+				Interlocked.Exchange(ref hadAccessDenied, 1);
+				return;
 			}
 			catch
 			{
-				continue;
+				return;
 			}
 
 			foreach (var file in files)
@@ -92,13 +105,13 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 				var ext = Path.GetExtension(name);
 				if (!string.IsNullOrWhiteSpace(ext))
-					exts.Add(ext);
+					extensions.Add(ext);
 			}
+		});
 
-			isFirst = false;
-		}
-
-		return new ScanResult<HashSet<string>>(exts, rootAccessDenied, hadAccessDenied);
+		// Convert to HashSet for deduplication
+		var uniqueExtensions = new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
+		return new ScanResult<HashSet<string>>(uniqueExtensions, rootAccessDenied == 1, hadAccessDenied == 1);
 	}
 
 	public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules)

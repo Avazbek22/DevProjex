@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Contracts;
 using DevProjex.Kernel.Models;
@@ -10,6 +12,9 @@ public sealed class ScanOptionsUseCase
 {
 	private readonly IFileSystemScanner _scanner;
 
+	// Optimal parallelism for modern multi-core CPUs (targeting developers with NVMe SSDs)
+	private static readonly int MaxParallelism = Math.Max(4, Environment.ProcessorCount);
+
 	public ScanOptionsUseCase(IFileSystemScanner scanner)
 	{
 		_scanner = scanner;
@@ -17,8 +22,14 @@ public sealed class ScanOptionsUseCase
 
 	public ScanOptionsResult Execute(ScanOptionsRequest request)
 	{
-		var extensions = _scanner.GetExtensions(request.RootPath, request.IgnoreRules);
-		var rootFolders = _scanner.GetRootFolderNames(request.RootPath, request.IgnoreRules);
+		// Run extensions and root folders scans in parallel for better performance
+		var extensionsTask = Task.Run(() => _scanner.GetExtensions(request.RootPath, request.IgnoreRules));
+		var rootFoldersTask = Task.Run(() => _scanner.GetRootFolderNames(request.RootPath, request.IgnoreRules));
+
+		Task.WaitAll(extensionsTask, rootFoldersTask);
+
+		var extensions = extensionsTask.Result;
+		var rootFolders = rootFoldersTask.Result;
 
 		return new ScanOptionsResult(
 			Extensions: extensions.Value.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList(),
@@ -32,7 +43,10 @@ public sealed class ScanOptionsUseCase
 		IReadOnlyCollection<string> rootFolders,
 		IgnoreRules ignoreRules)
 	{
-		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		// Thread-safe collection for parallel aggregation
+		var extensions = new ConcurrentBag<string>();
+		var rootAccessDenied = 0;
+		var hadAccessDenied = 0;
 
 		// Always scan root-level files, even when no subfolders are selected.
 		// This ensures folders containing only files (no subdirectories) work correctly.
@@ -40,23 +54,30 @@ public sealed class ScanOptionsUseCase
 		foreach (var ext in rootFiles.Value)
 			extensions.Add(ext);
 
-		bool rootAccessDenied = rootFiles.RootAccessDenied;
-		bool hadAccessDenied = rootFiles.HadAccessDenied;
+		if (rootFiles.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
+		if (rootFiles.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
 
-		// Scan extensions from selected subfolders
-		foreach (var folder in rootFolders)
+		// Scan extensions from selected subfolders in parallel
+		if (rootFolders.Count > 0)
 		{
-			var folderPath = Path.Combine(rootPath, folder);
-			var result = _scanner.GetExtensions(folderPath, ignoreRules);
+			var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism };
 
-			foreach (var ext in result.Value)
-				extensions.Add(ext);
+			Parallel.ForEach(rootFolders, parallelOptions, folder =>
+			{
+				var folderPath = Path.Combine(rootPath, folder);
+				var result = _scanner.GetExtensions(folderPath, ignoreRules);
 
-			rootAccessDenied |= result.RootAccessDenied;
-			hadAccessDenied |= result.HadAccessDenied;
+				foreach (var ext in result.Value)
+					extensions.Add(ext);
+
+				if (result.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
+				if (result.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
+			});
 		}
 
-		return new ScanResult<HashSet<string>>(extensions, rootAccessDenied, hadAccessDenied);
+		// Convert to HashSet for deduplication
+		var uniqueExtensions = new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
+		return new ScanResult<HashSet<string>>(uniqueExtensions, rootAccessDenied == 1, hadAccessDenied == 1);
 	}
 
 	public bool CanReadRoot(string rootPath) => _scanner.CanReadRoot(rootPath);

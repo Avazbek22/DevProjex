@@ -2211,19 +2211,20 @@ public partial class MainWindow : Window
             if (result.RootAccessDenied && TryElevateAndRestart(_currentPath))
                 return;
 
-            var root = BuildTreeViewModel(result.Root, null);
+            // Build ViewModel tree off the UI thread for better responsiveness.
+            // IconCache is now thread-safe, enabling parallel icon loading.
+            var displayName = !string.IsNullOrEmpty(_currentProjectDisplayName)
+                ? _currentProjectDisplayName
+                : GetDirectoryNameSafe(_currentPath!);
 
-            // Set root display name: use repository name for git clones, folder name for local
-            try
+            var root = await Task.Run(() =>
             {
-                root.DisplayName = !string.IsNullOrEmpty(_currentProjectDisplayName)
-                    ? _currentProjectDisplayName
-                    : new DirectoryInfo(_currentPath!).Name;
-            }
-            catch
-            {
-                // ignore
-            }
+                var node = BuildTreeViewModel(result.Root, null);
+                node.DisplayName = displayName;
+                return node;
+            }, cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
@@ -2281,6 +2282,21 @@ public partial class MainWindow : Window
         }
 
         return node;
+    }
+
+    /// <summary>
+    /// Safely gets directory name without throwing on invalid paths.
+    /// </summary>
+    private static string GetDirectoryNameSafe(string path)
+    {
+        try
+        {
+            return new DirectoryInfo(path).Name;
+        }
+        catch
+        {
+            return Path.GetFileName(path) ?? path;
+        }
     }
 
     private void UpdateTitle()
@@ -2687,11 +2703,11 @@ public partial class MainWindow : Window
             var processedCount = 0;
             var lastProgressPercent = 0;
 
-            // Process files in parallel for better performance
-            // Limit parallelism to avoid overwhelming the disk I/O
+            // Process files in parallel for better performance on modern multi-core CPUs with NVMe SSDs.
+            // Using full processor count as modern storage can handle high parallelism.
             var parallelOptions = new ParallelOptions
             {
-                MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2),
+                MaxDegreeOfParallelism = Math.Max(4, Environment.ProcessorCount),
                 CancellationToken = linkedCts.Token
             };
 
@@ -2771,6 +2787,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Recalculate both tree and content metrics based on current selection.
+    /// Calculations run in parallel on background threads for better performance.
     /// </summary>
     private void RecalculateMetricsAsync()
     {
@@ -2784,24 +2801,40 @@ public partial class MainWindow : Window
         if (treeRoot == null)
             return;
 
-        // Determine which nodes are selected (if any explicitly checked, use those; otherwise use all)
+        // Capture state for background calculation
         var hasAnyChecked = HasAnyCheckedNodes(treeRoot);
         var selectedPaths = hasAnyChecked
             ? GetCheckedPaths()
             : new HashSet<string>(PathComparer.Default);
+        var currentTree = _currentTree;
+        var currentPath = _currentPath;
 
-        // Calculate tree metrics from actual tree export output.
-        var treeMetrics = CalculateTreeMetrics(hasAnyChecked, selectedPaths);
-
-        // Calculate content metrics from actual content export format.
-        var contentMetrics = CalculateContentMetrics(hasAnyChecked, selectedPaths);
-
-        // Update UI on dispatcher thread
-        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        // Run calculations in parallel on background threads
+        Task.Run(() =>
         {
-            UpdateStatusBarMetrics(
-                treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
-                contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
+            if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
+            {
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
+                return;
+            }
+
+            // Calculate tree and content metrics in parallel
+            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths));
+            var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths));
+
+            Task.WaitAll(treeMetricsTask, contentMetricsTask);
+
+            var treeMetrics = treeMetricsTask.Result;
+            var contentMetrics = contentMetricsTask.Result;
+
+            // Update UI on dispatcher thread
+            global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                UpdateStatusBarMetrics(
+                    treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
+                    contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
+            });
         });
     }
 
