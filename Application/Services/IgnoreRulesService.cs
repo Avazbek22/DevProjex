@@ -22,8 +22,15 @@ public sealed class IgnoreRulesService
 	{
 		var useGitIgnore = selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 
-		// SmartIgnore (bin/obj, node_modules, etc.) follows UseGitIgnore setting.
-		// When user disables gitignore, they want to see ALL files including build artifacts.
+		var gitIgnoreMatcher = GitIgnoreMatcher.Empty;
+		if (useGitIgnore)
+		{
+			gitIgnoreMatcher = TryBuildGitIgnoreMatcher(rootPath);
+			useGitIgnore = !ReferenceEquals(gitIgnoreMatcher, GitIgnoreMatcher.Empty);
+		}
+
+		// SmartIgnore (bin/obj, node_modules, etc.) follows effective UseGitIgnore state.
+		// If .gitignore is missing/unavailable, both gitignore and smart-ignore must be disabled.
 		IReadOnlySet<string> smartFolders;
 		IReadOnlySet<string> smartFiles;
 		if (useGitIgnore)
@@ -36,13 +43,6 @@ public sealed class IgnoreRulesService
 		{
 			smartFolders = EmptyStringSet;
 			smartFiles = EmptyStringSet;
-		}
-
-		var gitIgnoreMatcher = GitIgnoreMatcher.Empty;
-		if (useGitIgnore)
-		{
-			gitIgnoreMatcher = TryBuildGitIgnoreMatcher(rootPath);
-			useGitIgnore = !ReferenceEquals(gitIgnoreMatcher, GitIgnoreMatcher.Empty);
 		}
 
 		return new IgnoreRules(

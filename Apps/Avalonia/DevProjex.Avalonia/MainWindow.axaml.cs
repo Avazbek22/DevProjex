@@ -117,6 +117,8 @@ public partial class MainWindow : Window
     private global::Avalonia.Threading.DispatcherTimer? _metricsDebounceTimer;
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _isBackgroundMetricsActive;
+    private long _statusOperationSequence;
+    private long _activeStatusOperationId;
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -722,16 +724,16 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
-        BeginStatusOperation(_viewModel.StatusOperationRefreshingProject, indeterminate: true);
+        var statusOperationId = BeginStatusOperation(_viewModel.StatusOperationRefreshingProject, indeterminate: true);
         try
         {
             await ReloadProjectAsync();
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -758,18 +760,17 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
-            CompleteStatusOperation();
             _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
 
     private async void OnCopyContent(object? sender, RoutedEventArgs e)
     {
+        long? statusOperationId = null;
         try
         {
             if (!EnsureTreeReady()) return;
@@ -793,28 +794,29 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
-            BeginStatusOperation("Preparing content...", indeterminate: true);
+            statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
             var content = await Task.Run(() => _contentExport.BuildAsync(files, CancellationToken.None));
             if (string.IsNullOrWhiteSpace(content))
             {
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
             await SetClipboardTextAsync(content);
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
 
     private async void OnCopyTreeAndContent(object? sender, RoutedEventArgs e)
     {
+        long? statusOperationId = null;
         try
         {
             if (!EnsureTreeReady()) return;
@@ -824,15 +826,15 @@ public partial class MainWindow : Window
 
             var selected = GetCheckedPaths();
             // Run file reading off UI thread
-            BeginStatusOperation("Building export...", indeterminate: true);
+            statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
             var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
             await SetClipboardTextAsync(content);
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -1395,13 +1397,14 @@ public partial class MainWindow : Window
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
 
+        long? statusOperationId = null;
         try
         {
             Cursor = new Cursor(StandardCursorType.Wait);
             var statusText = string.IsNullOrWhiteSpace(_viewModel.CurrentBranch)
                 ? _viewModel.StatusOperationGettingUpdates
                 : _localization.Format("Status.Operation.GettingUpdatesBranch", _viewModel.CurrentBranch);
-            BeginStatusOperation(statusText, indeterminate: true);
+            statusOperationId = BeginStatusOperation(statusText, indeterminate: true);
 
             var progress = new Progress<string>(status =>
             {
@@ -1418,7 +1421,7 @@ public partial class MainWindow : Window
 
             if (!success)
             {
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
                 await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
                 return;
             }
@@ -1431,17 +1434,17 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
             {
                 _toastService.Show(_localization["Toast.Git.NoUpdates"]);
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
             }
             else
             {
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
             }
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
         }
         finally
@@ -1457,11 +1460,12 @@ public partial class MainWindow : Window
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
 
+        long? statusOperationId = null;
         try
         {
             Cursor = new Cursor(StandardCursorType.Wait);
             var statusText = _localization.Format("Status.Operation.SwitchingBranch", branchName);
-            BeginStatusOperation(statusText, indeterminate: true);
+            statusOperationId = BeginStatusOperation(statusText, indeterminate: true);
 
             var progress = new Progress<string>(status =>
             {
@@ -1477,7 +1481,7 @@ public partial class MainWindow : Window
 
             if (!success)
             {
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
                 await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
                 return;
             }
@@ -1488,12 +1492,12 @@ public partial class MainWindow : Window
             // Refresh branches and tree
             await RefreshGitBranchesAsync(_currentPath);
             await ReloadProjectAsync();
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
         }
         finally
@@ -1996,7 +2000,7 @@ public partial class MainWindow : Window
         }
 
         _viewModel.StatusMetricsVisible = false;
-        BeginStatusOperation(_viewModel.StatusOperationLoadingProject, indeterminate: true);
+        var statusOperationId = BeginStatusOperation(_viewModel.StatusOperationLoadingProject, indeterminate: true);
         try
         {
             _currentPath = path;
@@ -2027,11 +2031,11 @@ public partial class MainWindow : Window
             UpdateTitle();
 
             await ReloadProjectAsync();
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
         }
         catch
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             throw;
         }
     }
@@ -2290,13 +2294,18 @@ public partial class MainWindow : Window
         return _ignoreRulesService.Build(rootPath, selected);
     }
 
-    private void BeginStatusOperation(string text, bool indeterminate = true)
+    private long BeginStatusOperation(string text, bool indeterminate = true)
     {
+        var operationId = Interlocked.Increment(ref _statusOperationSequence);
+        Interlocked.Exchange(ref _activeStatusOperationId, operationId);
+
         _viewModel.StatusOperationText = text;
         _viewModel.StatusBusy = true;
         _viewModel.StatusProgressIsIndeterminate = indeterminate;
         if (indeterminate)
             _viewModel.StatusProgressValue = 0;
+
+        return operationId;
     }
 
     private void UpdateStatusOperationText(string text)
@@ -2314,8 +2323,11 @@ public partial class MainWindow : Window
         _viewModel.StatusProgressValue = Math.Clamp(percent, 0, 100);
     }
 
-    private void CompleteStatusOperation()
+    private void CompleteStatusOperation(long? operationId = null)
     {
+        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
+            return;
+
         // If background metrics calculation is still active, don't fully hide progress
         if (_isBackgroundMetricsActive)
         {
@@ -2328,6 +2340,9 @@ public partial class MainWindow : Window
         _viewModel.StatusProgressIsIndeterminate = true;
         _viewModel.StatusProgressValue = 0;
     }
+
+    private bool IsStatusOperationActive(long operationId) =>
+        Interlocked.Read(ref _activeStatusOperationId) == operationId;
 
     /// <summary>
     /// Cancels any active background metrics calculation.
@@ -2533,10 +2548,14 @@ public partial class MainWindow : Window
     /// <summary>
     /// Cached file metrics for efficient real-time updates.
     /// </summary>
-    private sealed record FileMetricsData(long Size, int LineCount, int CharCount)
-    {
-        public int EstimatedTokens => (int)Math.Ceiling(CharCount / 4.0);
-    }
+    private sealed record FileMetricsData(
+        long Size,
+        int LineCount,
+        int CharCount,
+        bool IsEmpty,
+        bool IsWhitespaceOnly,
+        int TrailingNewlineChars,
+        int TrailingNewlineLineBreaks);
 
     /// <summary>
     /// Subscribe to checkbox change events for real-time metrics updates.
@@ -2586,12 +2605,11 @@ public partial class MainWindow : Window
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _metricsCalculationCts.Token);
 
         _isBackgroundMetricsActive = true;
+        var statusOperationId = BeginStatusOperation(_viewModel.StatusOperationCalculatingData, indeterminate: false);
         try
         {
-            UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
-            _viewModel.StatusBusy = true;
-            _viewModel.StatusProgressIsIndeterminate = false;
-            _viewModel.StatusProgressValue = 0;
+            if (IsStatusOperationActive(statusOperationId))
+                _viewModel.StatusProgressValue = 0;
 
             // Collect all file paths from tree
             var filePaths = new List<string>();
@@ -2613,7 +2631,7 @@ public partial class MainWindow : Window
                 _isBackgroundMetricsActive = false;
                 RecalculateMetricsAsync();
                 _viewModel.StatusMetricsVisible = true;
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
                 return;
             }
 
@@ -2648,7 +2666,11 @@ public partial class MainWindow : Window
                             _fileMetricsCache[filePath] = new FileMetricsData(
                                 metrics.SizeBytes,
                                 metrics.LineCount,
-                                metrics.CharCount);
+                                metrics.CharCount,
+                                metrics.IsEmpty,
+                                metrics.IsWhitespaceOnly,
+                                metrics.TrailingNewlineChars,
+                                metrics.TrailingNewlineLineBreaks);
                         }
                     }
 
@@ -2660,7 +2682,7 @@ public partial class MainWindow : Window
                         Interlocked.Exchange(ref lastProgressPercent, progressPercent);
                         await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                         {
-                            if (_isBackgroundMetricsActive)
+                            if (_isBackgroundMetricsActive && IsStatusOperationActive(statusOperationId))
                                 _viewModel.StatusProgressValue = progressPercent;
                         });
                     }
@@ -2678,10 +2700,11 @@ public partial class MainWindow : Window
 
             // Calculation completed successfully
             _isBackgroundMetricsActive = false;
-            _viewModel.StatusProgressValue = 100;
+            if (IsStatusOperationActive(statusOperationId))
+                _viewModel.StatusProgressValue = 100;
             RecalculateMetricsAsync();
             _viewModel.StatusMetricsVisible = true;
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
         }
         catch (OperationCanceledException)
         {
@@ -2692,7 +2715,7 @@ public partial class MainWindow : Window
                 RecalculateMetricsAsync();
                 _viewModel.StatusMetricsVisible = true;
             }
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
         }
     }
 
@@ -2713,12 +2736,15 @@ public partial class MainWindow : Window
 
         // Determine which nodes are selected (if any explicitly checked, use those; otherwise use all)
         var hasAnyChecked = HasAnyCheckedNodes(treeRoot);
+        var selectedPaths = hasAnyChecked
+            ? GetCheckedPaths()
+            : new HashSet<string>(PathComparer.Default);
 
-        // Calculate tree metrics (ASCII tree structure)
-        var treeMetrics = CalculateTreeMetrics(treeRoot, hasAnyChecked);
+        // Calculate tree metrics from actual tree export output.
+        var treeMetrics = CalculateTreeMetrics(hasAnyChecked, selectedPaths);
 
-        // Calculate content metrics (file contents)
-        var contentMetrics = CalculateContentMetrics(treeRoot, hasAnyChecked);
+        // Calculate content metrics from actual content export format.
+        var contentMetrics = CalculateContentMetrics(hasAnyChecked, selectedPaths);
 
         // Update UI on dispatcher thread
         global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -2747,143 +2773,60 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Calculate metrics for tree output based on selected format (ASCII or JSON).
-    /// Estimates lines, characters, and tokens for the tree structure text.
+    /// Calculates tree metrics from actual tree export output (ASCII path).
+    /// This keeps status metrics aligned with what users copy.
     /// </summary>
-    private (int Lines, int Chars, int Tokens) CalculateTreeMetrics(TreeNodeViewModel root, bool hasSelection)
+    private ExportOutputMetrics CalculateTreeMetrics(bool hasSelection, IReadOnlySet<string> selectedPaths)
     {
-        int lineCount = 0;
-        int charCount = 0;
+        if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
+            return ExportOutputMetrics.Empty;
 
-        var isJson = _viewModel.SelectedExportFormat == ExportFormat.Json;
+        var treeText = hasSelection && selectedPaths.Count > 0
+            ? _treeExport.BuildSelectedTree(_currentPath, _currentTree.Root, selectedPaths)
+            : _treeExport.BuildFullTree(_currentPath, _currentTree.Root);
 
-        // Count nodes that will be included in tree output
-        CountTreeNodes(root, hasSelection, ref lineCount, ref charCount, 0, true, isJson);
+        if (hasSelection && string.IsNullOrWhiteSpace(treeText))
+            treeText = _treeExport.BuildFullTree(_currentPath, _currentTree.Root);
 
-        if (isJson)
-        {
-            // JSON overhead: opening/closing braces, array brackets, etc.
-            // Estimate: ~20 chars for root structure + ~10 per node for JSON syntax
-            int nodeCount = lineCount;
-            charCount += 20 + (nodeCount * 10);
-            // JSON typically has more lines due to formatting
-            lineCount += nodeCount / 2;
-        }
-
-        // Token estimate: ~4 chars per token
-        int tokens = (int)Math.Ceiling(charCount / 4.0);
-
-        return (lineCount, charCount, tokens);
+        return ExportOutputMetricsCalculator.FromText(treeText);
     }
 
     /// <summary>
-    /// Recursively count tree nodes and estimate character count.
+    /// Calculates content metrics using the same text shaping rules as content export.
+    /// File I/O is avoided by using cached metrics prepared in background.
     /// </summary>
-    private void CountTreeNodes(TreeNodeViewModel node, bool hasSelection, ref int lineCount, ref int charCount, int depth, bool isRoot, bool isJson)
+    private ExportOutputMetrics CalculateContentMetrics(bool hasSelection, IReadOnlySet<string> selectedPaths)
     {
-        // If there's a selection, only count nodes that are checked or have checked descendants
-        if (hasSelection && node.IsChecked == false)
-            return;
+        if (_currentTree is null)
+            return ExportOutputMetrics.Empty;
 
-        // Each node is one line
-        lineCount++;
+        IEnumerable<string> filePaths = hasSelection
+            ? selectedPaths.Where(File.Exists)
+            : EnumerateFilePaths(_currentTree.Root);
 
-        if (isJson)
-        {
-            // JSON format: {"name": "filename", "type": "file", "children": [...]}
-            // Estimate: indent (depth * 2) + "name" key + value + type + structure chars
-            int indent = depth * 2;
-            int nameLen = node.DisplayName.Length;
-            // ~30 chars for JSON syntax per node + name length + indent
-            charCount += indent + nameLen + 30;
-        }
-        else
-        {
-            // ASCII tree format: "├── filename" or "└── filename"
-            // Estimate chars per line: prefix (depth * 4) + name + newline
-            int prefixLen = isRoot ? 0 : depth * 4;
-            charCount += prefixLen + node.DisplayName.Length + 1; // +1 for newline
-        }
-
-        // Recursively count children
-        foreach (var child in node.Children)
-        {
-            CountTreeNodes(child, hasSelection, ref lineCount, ref charCount, depth + 1, false, isJson);
-        }
-    }
-
-    /// <summary>
-    /// Calculate metrics for file content output.
-    /// Sums up metrics from cached file data for selected files.
-    /// Only counts files that are actually text (present in cache) - binary files are excluded.
-    /// </summary>
-    private (int Lines, int Chars, int Tokens) CalculateContentMetrics(TreeNodeViewModel root, bool hasSelection)
-    {
-        int totalLines = 0;
-        int totalChars = 0;
-        int textFileCount = 0;
-
-        // Collect file paths based on selection state
-        var filePaths = new List<string>();
-        CollectFilePaths(root, hasSelection, filePaths);
-
-        // Sum up metrics from cache - only text files are in cache (binary files are excluded)
+        var metricsInputs = new List<ContentFileMetrics>();
         lock (_metricsLock)
         {
-            foreach (var path in filePaths)
+            foreach (var path in filePaths
+                         .Distinct(PathComparer.Default)
+                         .OrderBy(path => path, PathComparer.Default))
             {
-                if (_fileMetricsCache.TryGetValue(path, out var metrics))
-                {
-                    totalLines += metrics.LineCount;
-                    totalChars += metrics.CharCount;
-                    textFileCount++;
-                }
-                // Binary files are not in cache, so they are automatically excluded
+                if (!_fileMetricsCache.TryGetValue(path, out var metrics))
+                    continue;
+
+                metricsInputs.Add(new ContentFileMetrics(
+                    Path: path,
+                    SizeBytes: metrics.Size,
+                    LineCount: metrics.LineCount,
+                    CharCount: metrics.CharCount,
+                    IsEmpty: metrics.IsEmpty,
+                    IsWhitespaceOnly: metrics.IsWhitespaceOnly,
+                    TrailingNewlineChars: metrics.TrailingNewlineChars,
+                    TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
             }
         }
 
-        // Add overhead for file path headers in output (e.g., "// path/to/file.cs" per file)
-        // Each file adds: separator line + path comment + blank line = ~3 lines, ~80 chars average
-        // Only count text files that will actually be exported
-        int headerOverhead = textFileCount * 3;
-        int headerCharOverhead = textFileCount * 80;
-        totalLines += headerOverhead;
-        totalChars += headerCharOverhead;
-
-        int tokens = (int)Math.Ceiling(totalChars / 4.0);
-
-        return (totalLines, totalChars, tokens);
-    }
-
-    /// <summary>
-    /// Collect file paths from tree based on selection state.
-    /// </summary>
-    private static void CollectFilePaths(TreeNodeViewModel node, bool hasSelection, List<string> filePaths)
-    {
-        // If there's a selection, only include checked files
-        if (hasSelection)
-        {
-            if (node.IsChecked == true && !node.Descriptor.IsDirectory)
-            {
-                filePaths.Add(node.FullPath);
-            }
-            else if (node.IsChecked != false) // null or true - has some checked descendants
-            {
-                foreach (var child in node.Children)
-                    CollectFilePaths(child, hasSelection, filePaths);
-            }
-        }
-        else
-        {
-            // No selection - include all files
-            if (!node.Descriptor.IsDirectory && !node.Descriptor.IsAccessDenied)
-            {
-                filePaths.Add(node.FullPath);
-            }
-
-            foreach (var child in node.Children)
-                CollectFilePaths(child, hasSelection, filePaths);
-        }
+        return ExportOutputMetricsCalculator.FromContentFiles(metricsInputs);
     }
 
     /// <summary>
@@ -2922,7 +2865,13 @@ public partial class MainWindow : Window
 
     private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)
     {
-        // Reserved for future cancellation support.
+        // Best-effort cancellation for operations that have cancellation tokens.
+        _refreshCts?.Cancel();
+        _gitCloneCts?.Cancel();
+        CancelBackgroundMetricsCalculation();
+
+        var activeOperationId = Interlocked.Read(ref _activeStatusOperationId);
+        CompleteStatusOperation(activeOperationId);
     }
 
     #endregion

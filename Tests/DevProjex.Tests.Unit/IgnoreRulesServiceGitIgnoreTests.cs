@@ -1,7 +1,9 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Models;
+using DevProjex.Tests.Unit.Helpers;
 using Xunit;
 
 namespace DevProjex.Tests.Unit;
@@ -21,6 +23,31 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 
 			Assert.False(rules.UseGitIgnore);
 			Assert.Same(GitIgnoreMatcher.Empty, rules.GitIgnoreMatcher);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void Build_WhenGitIgnoreMissing_DisablesSmartIgnoreEvenIfOptionSelected()
+	{
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"devprojex-tests-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempRoot);
+		try
+		{
+			var smartResult = new SmartIgnoreResult(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "bin", "obj" },
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Thumbs.db" });
+			var service = new IgnoreRulesService(new SmartIgnoreService(new[] { new StubSmartIgnoreRule(smartResult) }));
+
+			var rules = service.Build(tempRoot, new[] { IgnoreOptionId.UseGitIgnore });
+
+			Assert.False(rules.UseGitIgnore);
+			Assert.Same(GitIgnoreMatcher.Empty, rules.GitIgnoreMatcher);
+			Assert.Empty(rules.SmartIgnoredFolders);
+			Assert.Empty(rules.SmartIgnoredFiles);
 		}
 		finally
 		{

@@ -143,15 +143,24 @@ public sealed class GitIgnoreMatcher
         if (relativePath is null)
             return false;
 
+        // If the directory itself is ignored by an explicit directory rule (e.g. "bin/"),
+        // name-only negation (e.g. "!Directory.Build.rsp") cannot re-include descendants
+        // unless a path-based negation re-includes the directory chain.
+        var ignoredByDirectoryRule = IsIgnoredByDirectoryRule(relativePath, name);
+
         foreach (var rule in _rules)
         {
             if (!rule.IsNegation)
                 continue;
 
             // Name-only negation rules (like !keep.txt) can match files anywhere
-            // so we must traverse all ignored directories
+            // unless the parent directory is excluded by an explicit directory rule.
             if (rule.MatchByNameOnly)
-                return true;
+            {
+                if (!ignoredByDirectoryRule)
+                    return true;
+                continue;
+            }
 
             // Path-based negation rules with no static prefix (like !**/*.txt)
             // could match anywhere, so we must traverse
@@ -171,6 +180,21 @@ public sealed class GitIgnoreMatcher
 
             // Exact match
             if (string.Equals(rule.StaticPrefix, relativePath, _pathComparison))
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool IsIgnoredByDirectoryRule(string relativePath, string name)
+    {
+        foreach (var rule in _rules)
+        {
+            if (rule.IsNegation || !rule.DirectoryOnly)
+                continue;
+
+            var target = rule.MatchByNameOnly ? name : relativePath;
+            if (rule.Pattern.IsMatch(target))
                 return true;
         }
 

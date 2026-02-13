@@ -290,9 +290,18 @@ public sealed class GitIgnoreMatcherTests
 	}
 
 	[Fact]
-	public void ShouldTraverseIgnoredDirectory_ReturnsTrueForNameOnlyNegation()
+	public void ShouldTraverseIgnoredDirectory_ReturnsFalseForNameOnlyNegationWhenDirectoryIgnoredByExplicitRule()
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "build/", "!keep.txt" });
+
+		Assert.True(matcher.HasNegationRules);
+		Assert.False(matcher.ShouldTraverseIgnoredDirectory("/repo/build", "build"));
+	}
+
+	[Fact]
+	public void ShouldTraverseIgnoredDirectory_ReturnsTrueForNameOnlyNegationWhenIgnoredByContentPattern()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "**/build/*", "!keep.txt" });
 
 		Assert.True(matcher.HasNegationRules);
 		Assert.True(matcher.ShouldTraverseIgnoredDirectory("/repo/build", "build"));
@@ -305,6 +314,14 @@ public sealed class GitIgnoreMatcherTests
 
 		Assert.True(matcher.ShouldTraverseIgnoredDirectory("/repo/build", "build"));
 		Assert.False(matcher.ShouldTraverseIgnoredDirectory("/repo/other", "other"));
+	}
+
+	[Fact]
+	public void ShouldTraverseIgnoredDirectory_ReturnsFalseForDirectoryRuleWithNameOnlyNegation()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", new[] { "[Bb]in/", "!Directory.Build.rsp" });
+
+		Assert.False(matcher.ShouldTraverseIgnoredDirectory("/repo/src/bin", "bin"));
 	}
 
 	#endregion

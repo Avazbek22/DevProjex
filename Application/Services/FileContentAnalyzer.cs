@@ -132,7 +132,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 					LineCount: Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
 					CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
 					IsEmpty: false,
-					IsWhitespaceOnly: false);
+					IsWhitespaceOnly: false,
+					TrailingNewlineChars: 0,
+					TrailingNewlineLineBreaks: 0);
 			}
 
 			// Stream through file counting metrics without loading content into memory
@@ -201,7 +203,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 					CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
 					IsEmpty: false,
 					IsWhitespaceOnly: false,
-					IsEstimated: true);
+					IsEstimated: true,
+					TrailingNewlineChars: 0,
+					TrailingNewlineLineBreaks: 0);
 			}
 
 			// Read full content for export
@@ -271,6 +275,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			int lineCount = 1; // Start with 1 (file with no newlines = 1 line)
 			int charCount = 0;
 			bool hasNonWhitespace = false;
+			int trailingNewlineChars = 0;
+			int trailingNewlineLineBreaks = 0;
 
 			using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: StreamingBufferSize);
 
@@ -294,6 +300,18 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 					if (c == '\n')
 						lineCount++;
 
+					if (c is '\r' or '\n')
+					{
+						trailingNewlineChars++;
+						if (c == '\n')
+							trailingNewlineLineBreaks++;
+					}
+					else
+					{
+						trailingNewlineChars = 0;
+						trailingNewlineLineBreaks = 0;
+					}
+
 					if (!hasNonWhitespace && !char.IsWhiteSpace(c))
 						hasNonWhitespace = true;
 				}
@@ -308,7 +326,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				LineCount: lineCount,
 				CharCount: charCount,
 				IsEmpty: charCount == 0,
-				IsWhitespaceOnly: charCount > 0 && !hasNonWhitespace);
+				IsWhitespaceOnly: charCount > 0 && !hasNonWhitespace,
+				TrailingNewlineChars: trailingNewlineChars,
+				TrailingNewlineLineBreaks: trailingNewlineLineBreaks);
 		}
 		catch (OperationCanceledException)
 		{
@@ -342,6 +362,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 			bool isWhitespaceOnly = string.IsNullOrWhiteSpace(content);
 			int lineCount = content.Length == 0 ? 0 : 1 + CountNewlines(content);
+			var trailingInfo = GetTrailingNewlineInfo(content);
 
 			return new TextFileContent(
 				Content: content,
@@ -350,7 +371,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				CharCount: content.Length,
 				IsEmpty: content.Length == 0,
 				IsWhitespaceOnly: isWhitespaceOnly,
-				IsEstimated: false);
+				IsEstimated: false,
+				TrailingNewlineChars: trailingInfo.Chars,
+				TrailingNewlineLineBreaks: trailingInfo.LineBreaks);
 		}
 		catch (OperationCanceledException)
 		{
@@ -374,5 +397,24 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				count++;
 		}
 		return count;
+	}
+
+	private static (int Chars, int LineBreaks) GetTrailingNewlineInfo(string content)
+	{
+		int chars = 0;
+		int lineBreaks = 0;
+
+		for (int i = content.Length - 1; i >= 0; i--)
+		{
+			char c = content[i];
+			if (c is not ('\r' or '\n'))
+				break;
+
+			chars++;
+			if (c == '\n')
+				lineBreaks++;
+		}
+
+		return (chars, lineBreaks);
 	}
 }

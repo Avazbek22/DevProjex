@@ -62,7 +62,9 @@ public sealed record TextFileMetrics(
 	int LineCount,
 	int CharCount,
 	bool IsEmpty,
-	bool IsWhitespaceOnly);
+	bool IsWhitespaceOnly,
+	int TrailingNewlineChars = 0,
+	int TrailingNewlineLineBreaks = 0);
 
 /// <summary>
 /// Full text file content with metrics - content stored for export.
@@ -81,4 +83,6 @@ public sealed record TextFileContent(
 	int CharCount,
 	bool IsEmpty,
 	bool IsWhitespaceOnly,
-	bool IsEstimated = false);
+	bool IsEstimated = false,
+	int TrailingNewlineChars = 0,
+	int TrailingNewlineLineBreaks = 0);
