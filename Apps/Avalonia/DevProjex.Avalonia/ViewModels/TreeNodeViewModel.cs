@@ -9,6 +9,8 @@ namespace DevProjex.Avalonia.ViewModels;
 
 public sealed class TreeNodeViewModel : ViewModelBase
 {
+    private static readonly IReadOnlyList<TreeNodeViewModel> EmptyChildItems = Array.Empty<TreeNodeViewModel>();
+
     private bool? _isChecked = false;
     private bool _isExpanded;
     private bool _isSelected;
@@ -41,6 +43,7 @@ public sealed class TreeNodeViewModel : ViewModelBase
     public TreeNodeViewModel? Parent { get; private set; }
 
     public IList<TreeNodeViewModel> Children { get; }
+    public IEnumerable<TreeNodeViewModel> ChildItemsSource => Children.Count > 0 ? Children : EmptyChildItems;
 
     public IImage? Icon { get; set; }
 
@@ -165,6 +168,7 @@ public sealed class TreeNodeViewModel : ViewModelBase
         Children.Clear();
         if (Children is List<TreeNodeViewModel> list)
             list.TrimExcess();
+        RaisePropertyChanged(nameof(ChildItemsSource));
 
         // Clear UI-related objects
         _displayInlines?.Clear();

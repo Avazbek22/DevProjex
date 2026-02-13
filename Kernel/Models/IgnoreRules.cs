@@ -35,13 +35,17 @@ public sealed record IgnoreRules(
 		if (ScopedGitIgnoreMatchers.Count == 0)
 			return GitIgnoreMatcher;
 
+		ScopedGitIgnoreMatcher? bestMatch = null;
 		foreach (var scoped in ScopedGitIgnoreMatchers)
 		{
 			if (IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-				return scoped.Matcher;
+			{
+				if (bestMatch is null || scoped.ScopeRootPath.Length > bestMatch.ScopeRootPath.Length)
+					bestMatch = scoped;
+			}
 		}
 
-		return GitIgnoreMatcher.Empty;
+		return bestMatch?.Matcher ?? GitIgnoreMatcher.Empty;
 	}
 
 	public bool ShouldApplySmartIgnore(string fullPath)

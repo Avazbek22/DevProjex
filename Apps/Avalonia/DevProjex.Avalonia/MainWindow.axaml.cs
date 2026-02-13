@@ -2113,13 +2113,19 @@ public partial class MainWindow : Window
         if (_treeView is not null)
         {
             _treeView.SelectedItem = null;
+            var savedItemTemplate = _treeView.ItemTemplate;
+            _treeView.ItemTemplate = null;
             _treeView.ItemsSource = null;
+            _treeView.InvalidateMeasure();
+            _treeView.InvalidateArrange();
+            _treeView.InvalidateVisual();
+            _treeView.ItemTemplate = savedItemTemplate;
         }
 
         // Recursively clear all tree nodes to break circular references and release memory
         foreach (var node in _viewModel.TreeNodes)
             node.ClearRecursive();
-        _viewModel.TreeNodes.Clear();
+        _viewModel.ResetTreeNodes();
 
         // Reconnect ItemsSource
         if (_treeView is not null)

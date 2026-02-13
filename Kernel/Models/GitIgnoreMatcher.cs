@@ -104,7 +104,11 @@ public sealed class GitIgnoreMatcher
 
         foreach (var rule in _rules)
         {
-            var target = rule.MatchByNameOnly ? normalizedName : relativePath;
+            var target = rule.MatchByNameOnly
+                ? normalizedName
+                : rule.DirectoryOnly && isDirectory
+                    ? relativePath + "/"
+                    : relativePath;
             if (!rule.Pattern.IsMatch(target))
                 continue;
 
@@ -193,7 +197,7 @@ public sealed class GitIgnoreMatcher
             if (rule.IsNegation || !rule.DirectoryOnly)
                 continue;
 
-            var target = rule.MatchByNameOnly ? name : relativePath;
+            var target = rule.MatchByNameOnly ? name : relativePath + "/";
             if (rule.Pattern.IsMatch(target))
                 return true;
         }
@@ -217,7 +221,8 @@ public sealed class GitIgnoreMatcher
     private static string BuildPathRegex(string globRegex, bool anchored, bool directoryOnly)
     {
         var prefix = anchored ? "^" : "^(?:.*/)?";
-        var suffix = directoryOnly ? "(?:/.*)?$" : "$";
+        // Directory-only rules must match directories (or their descendants), not plain files.
+        var suffix = directoryOnly ? "/.*$" : "$";
         return $"{prefix}{globRegex}{suffix}";
     }
 

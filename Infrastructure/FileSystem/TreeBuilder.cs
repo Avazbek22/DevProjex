@@ -83,31 +83,36 @@ public sealed class TreeBuilder : ITreeBuilder
 
 				BuildChildren(dirNode, entry.FullName, options, isRoot: false, state);
 
-				// Determine if this directory should be included
-				bool shouldInclude;
-
+				// Keep full directory context when extension/ignore filters remove all files.
+				// Name filter remains strict to preserve intentional narrowing behavior.
 				if (hasNameFilter)
 				{
-					// With name filter: include if has matching children OR name matches filter
 					bool hasMatchingChildren = dirNode.Children.Count > 0;
 					bool matchesName = name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase);
-					shouldInclude = hasMatchingChildren || matchesName;
-				}
-				else if (isRoot)
-				{
-					// Root-level allowed folders: always include (user explicitly selected them)
-					// Even if empty, they provide context
-					shouldInclude = true;
+					if (hasMatchingChildren || matchesName)
+						children.Add(dirNode);
 				}
 				else
 				{
-					// Normal case: skip empty directories (they provide no value)
-					// But keep AccessDenied directories (user should know access was denied)
-					shouldInclude = dirNode.Children.Count > 0 || dirNode.IsAccessDenied;
-				}
+					// Keep empty directories hidden when gitignore effectively ignores their content
+					// (e.g. patterns like **/bin/* that may not ignore the directory entry itself).
+					if (dirNode.Children.Count == 0 &&
+					    !dirNode.IsAccessDenied &&
+					    IsEffectivelyGitIgnoredDirectory(entry, ignore))
+					{
+						continue;
+					}
 
-				if (shouldInclude)
+					// Keep ignored directories out of UI when traversal found no visible descendants.
+					if (IsTraversableGitIgnoredDirectory(entry, ignore) &&
+					    dirNode.Children.Count == 0 &&
+					    !dirNode.IsAccessDenied)
+					{
+						continue;
+					}
+
 					children.Add(dirNode);
+				}
 			}
 			else
 			{
@@ -188,6 +193,28 @@ public sealed class TreeBuilder : ITreeBuilder
 		}
 
 		return false;
+	}
+
+	private static bool IsTraversableGitIgnoredDirectory(FileSystemInfo entry, IgnoreRules rules)
+	{
+		var matcher = rules.ResolveGitIgnoreMatcher(entry.FullName);
+		return !ReferenceEquals(matcher, GitIgnoreMatcher.Empty) &&
+		       matcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name) &&
+		       matcher.ShouldTraverseIgnoredDirectory(entry.FullName, entry.Name);
+	}
+
+	private static bool IsEffectivelyGitIgnoredDirectory(FileSystemInfo entry, IgnoreRules rules)
+	{
+		var matcher = rules.ResolveGitIgnoreMatcher(entry.FullName);
+		if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty))
+			return false;
+
+		if (matcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name))
+			return true;
+
+		const string probeName = "__devprojex_ignore_probe__";
+		var probePath = Path.Combine(entry.FullName, probeName);
+		return matcher.IsIgnored(probePath, isDirectory: false, probeName);
 	}
 
 	private static bool ShouldSkipFile(FileSystemInfo entry, IgnoreRules rules)

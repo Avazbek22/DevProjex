@@ -436,7 +436,7 @@
             </ItemsPanelTemplate>
           </TreeView.ItemsPanel>
           <TreeView.ItemTemplate>
-            <TreeDataTemplate ItemsSource="{Binding Children}">
+            <TreeDataTemplate ItemsSource="{Binding ChildItemsSource}">
               <Grid ColumnDefinitions="Auto,*">
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />

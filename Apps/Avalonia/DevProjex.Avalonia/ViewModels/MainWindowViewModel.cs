@@ -93,11 +93,27 @@ public sealed class MainWindowViewModel : ViewModelBase
         RootFolders.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
     }
 
-    public ObservableCollection<TreeNodeViewModel> TreeNodes { get; } = new();
+    private ObservableCollection<TreeNodeViewModel> _treeNodes = new();
+
+    public ObservableCollection<TreeNodeViewModel> TreeNodes
+    {
+        get => _treeNodes;
+        private set
+        {
+            if (ReferenceEquals(_treeNodes, value)) return;
+            _treeNodes = value;
+            RaisePropertyChanged();
+        }
+    }
     public ObservableCollection<SelectionOptionViewModel> RootFolders { get; } = new();
     public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new();
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new();
     public ObservableCollection<FontFamily> FontFamilies { get; } = new();
+
+    public void ResetTreeNodes()
+    {
+        TreeNodes = new ObservableCollection<TreeNodeViewModel>();
+    }
 
     public string StatusTreeStatsText
     {
