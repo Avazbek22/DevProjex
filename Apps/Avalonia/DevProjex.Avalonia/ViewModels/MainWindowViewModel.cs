@@ -766,6 +766,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuFile { get; private set; } = string.Empty;
     public string MenuFileOpen { get; private set; } = string.Empty;
     public string MenuFileRefresh { get; private set; } = string.Empty;
+    public string MenuFileExport { get; private set; } = string.Empty;
+    public string MenuFileExportTree { get; private set; } = string.Empty;
+    public string MenuFileExportContent { get; private set; } = string.Empty;
+    public string MenuFileExportTreeAndContent { get; private set; } = string.Empty;
     public string MenuFileExit { get; private set; } = string.Empty;
     public string MenuCopy { get; private set; } = string.Empty;
     public string MenuCopyTree { get; private set; } = string.Empty;
@@ -876,6 +880,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuFile = _localization["Menu.File"];
         MenuFileOpen = _localization["Menu.File.Open"];
         MenuFileRefresh = _localization["Menu.File.Refresh"];
+        MenuFileExport = _localization["Menu.File.Export"];
+        MenuFileExportTree = _localization["Menu.File.Export.Tree"];
+        MenuFileExportContent = _localization["Menu.File.Export.Content"];
+        MenuFileExportTreeAndContent = _localization["Menu.File.Export.TreeAndContent"];
         MenuFileExit = _localization["Menu.File.Exit"];
         MenuCopy = _localization["Menu.Copy"];
         MenuCopyTree = _localization["Menu.Copy.Tree"];
@@ -983,6 +991,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuFile));
         RaisePropertyChanged(nameof(MenuFileOpen));
         RaisePropertyChanged(nameof(MenuFileRefresh));
+        RaisePropertyChanged(nameof(MenuFileExport));
+        RaisePropertyChanged(nameof(MenuFileExportTree));
+        RaisePropertyChanged(nameof(MenuFileExportContent));
+        RaisePropertyChanged(nameof(MenuFileExportTreeAndContent));
         RaisePropertyChanged(nameof(MenuFileExit));
         RaisePropertyChanged(nameof(MenuCopy));
         RaisePropertyChanged(nameof(MenuCopyTree));

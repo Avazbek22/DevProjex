@@ -1,7 +1,11 @@
-{
+﻿{
   "Menu.File": "Файл",
   "Menu.File.Open": "Кушодани ҷузвдон...",
   "Menu.File.Refresh": "Навсозӣ",
+  "Menu.File.Export": "Содирот ба файл",
+  "Menu.File.Export.Tree": "Содироти дарахт",
+  "Menu.File.Export.Content": "Содироти мундариҷа",
+  "Menu.File.Export.TreeAndContent": "Содироти дарахт ва мундариҷа",
   "Menu.File.Exit": "Баромад",
   "Menu.Copy": "Нусха",
   "Menu.Copy.Tree": "Нусхаи дарахт",
@@ -10,6 +14,9 @@
   "Toast.Copy.Tree": "Дарахт нусха шуд",
   "Toast.Copy.Content": "Мундариҷа нусха шуд",
   "Toast.Copy.TreeAndContent": "Дарахт ва мундариҷа нусха шуд",
+  "Toast.Export.Tree": "Дарахт ба файл содир шуд",
+  "Toast.Export.Content": "Мундариҷа ба файл содир шуд",
+  "Toast.Export.TreeAndContent": "Дарахт ва мундариҷа ба файл содир шуданд",
   "Toast.NoMatches": "Ҳеҷ мувофиқат нест",
   "Toast.Git.CloneSuccess": "Репозиторий клон шуд",
   "Toast.Git.CloneError": "Клонидани репозиторий ноком шуд",

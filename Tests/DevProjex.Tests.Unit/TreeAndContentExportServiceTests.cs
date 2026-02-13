@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
+using DevProjex.Kernel.Models;
 using DevProjex.Tests.Unit.Helpers;
 using Xunit;
 
@@ -210,5 +212,34 @@ public sealed class TreeAndContentExportServiceTests
 
 		Assert.Contains("root.txt:", result);
 		Assert.Contains("root content", result);
+	}
+
+	// Verifies JSON tree+content export wraps tree JSON and content text in a single JSON payload.
+	[Fact]
+	public void Build_WithJsonFormat_ReturnsStructuredJsonPayload()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("note.txt", "hello json");
+
+		var root = new TreeNodeDescriptor(
+			DisplayName: "root",
+			FullPath: temp.Path,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: new List<TreeNodeDescriptor>
+			{
+				new TreeNodeDescriptor("note.txt", file, false, false, "text", new List<TreeNodeDescriptor>())
+			});
+
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
+		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
+
+		using var doc = JsonDocument.Parse(result);
+		Assert.Equal(temp.Path, doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.True(doc.RootElement.TryGetProperty("tree", out var treeElement));
+		Assert.Equal("root", treeElement.GetProperty("name").GetString());
+		Assert.Equal(".", treeElement.GetProperty("path").GetString());
+		Assert.Contains("note.txt", doc.RootElement.GetProperty("content").GetString() ?? string.Empty);
 	}
 }

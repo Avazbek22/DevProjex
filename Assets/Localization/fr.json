@@ -1,7 +1,11 @@
-{
+﻿{
   "Menu.File": "Fichier",
   "Menu.File.Open": "Ouvrir le dossier...",
   "Menu.File.Refresh": "Actualiser",
+  "Menu.File.Export": "Exporter vers un fichier",
+  "Menu.File.Export.Tree": "Exporter l'arborescence",
+  "Menu.File.Export.Content": "Exporter le contenu",
+  "Menu.File.Export.TreeAndContent": "Exporter arborescence et contenu",
   "Menu.File.Exit": "Quitter",
   "Menu.Copy": "Copier",
   "Menu.Copy.Tree": "Copier l'arborescence",
@@ -10,6 +14,9 @@
   "Toast.Copy.Tree": "Arborescence copiée",
   "Toast.Copy.Content": "Contenu copié",
   "Toast.Copy.TreeAndContent": "Arborescence et contenu copiés",
+  "Toast.Export.Tree": "Arborescence exportée dans un fichier",
+  "Toast.Export.Content": "Contenu exporté dans un fichier",
+  "Toast.Export.TreeAndContent": "Arborescence et contenu exportés dans un fichier",
   "Toast.NoMatches": "Aucun résultat",
   "Toast.Git.CloneSuccess": "Dépôt cloné",
   "Toast.Git.CloneError": "Échec du clonage du dépôt",

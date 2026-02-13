@@ -21,6 +21,9 @@ public partial class TopMenuBarView : UserControl
 
     public event EventHandler<RoutedEventArgs>? OpenFolderRequested;
     public event EventHandler<RoutedEventArgs>? RefreshRequested;
+    public event EventHandler<RoutedEventArgs>? ExportTreeToFileRequested;
+    public event EventHandler<RoutedEventArgs>? ExportContentToFileRequested;
+    public event EventHandler<RoutedEventArgs>? ExportTreeAndContentToFileRequested;
     public event EventHandler<RoutedEventArgs>? ExitRequested;
     public event EventHandler<RoutedEventArgs>? CopyTreeRequested;
     public event EventHandler<RoutedEventArgs>? CopyContentRequested;
@@ -111,6 +114,13 @@ public partial class TopMenuBarView : UserControl
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => OpenFolderRequested?.Invoke(sender, e);
 
     private void OnRefresh(object? sender, RoutedEventArgs e) => RefreshRequested?.Invoke(sender, e);
+
+    private void OnExportTreeToFile(object? sender, RoutedEventArgs e) => ExportTreeToFileRequested?.Invoke(sender, e);
+
+    private void OnExportContentToFile(object? sender, RoutedEventArgs e) => ExportContentToFileRequested?.Invoke(sender, e);
+
+    private void OnExportTreeAndContentToFile(object? sender, RoutedEventArgs e)
+        => ExportTreeAndContentToFileRequested?.Invoke(sender, e);
 
     private void OnExit(object? sender, RoutedEventArgs e) => ExitRequested?.Invoke(sender, e);
 

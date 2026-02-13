@@ -10,6 +10,11 @@
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
+        <MenuItem Header="{Binding MenuFileExport}" IsEnabled="{Binding IsProjectLoaded}">
+          <MenuItem Header="{Binding MenuFileExportTree}" Click="OnExportTreeToFile" />
+          <MenuItem Header="{Binding MenuFileExportContent}" Click="OnExportContentToFile" />
+          <MenuItem Header="{Binding MenuFileExportTreeAndContent}" Click="OnExportTreeAndContentToFile" />
+        </MenuItem>
         <MenuItem Header="{Binding MenuFileExit}" Click="OnExit" />
       </MenuItem>
       <MenuItem Name="GitMenuItem" Header="Git">

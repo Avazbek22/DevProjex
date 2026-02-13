@@ -1,7 +1,11 @@
-{
+﻿{
   "Menu.File": "Fayl",
   "Menu.File.Open": "Jildni ochish...",
   "Menu.File.Refresh": "Yangilash",
+  "Menu.File.Export": "Faylga eksport",
+  "Menu.File.Export.Tree": "Daraxtni eksport qilish",
+  "Menu.File.Export.Content": "Kontentni eksport qilish",
+  "Menu.File.Export.TreeAndContent": "Daraxt va kontentni eksport qilish",
   "Menu.File.Exit": "Chiqish",
   "Menu.Copy": "Nusxa",
   "Menu.Copy.Tree": "Daraxtni nusxalash",
@@ -10,6 +14,9 @@
   "Toast.Copy.Tree": "Daraxt nusxalandi",
   "Toast.Copy.Content": "Mazmun nusxalandi",
   "Toast.Copy.TreeAndContent": "Daraxt va mazmun nusxalandi",
+  "Toast.Export.Tree": "Daraxt faylga eksport qilindi",
+  "Toast.Export.Content": "Kontent faylga eksport qilindi",
+  "Toast.Export.TreeAndContent": "Daraxt va kontent faylga eksport qilindi",
   "Toast.NoMatches": "Mos kelishlar topilmadi",
   "Toast.Git.CloneSuccess": "Repozitoriy klonlandi",
   "Toast.Git.CloneError": "Repozitoriyni klonlab bo‘lmadi",

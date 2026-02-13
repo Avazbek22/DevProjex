@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -117,6 +118,7 @@ public partial class MainWindow : Window
     private global::Avalonia.Threading.DispatcherTimer? _metricsDebounceTimer;
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _isBackgroundMetricsActive;
+    private int _metricsRecalcVersion;
     private long _statusOperationSequence;
     private long _activeStatusOperationId;
     private static readonly HashSet<string> MetricsWarmupBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -761,17 +763,8 @@ public partial class MainWindow : Window
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            string content;
-            if (selected.Count > 0)
-            {
-                content = _treeExport.BuildSelectedTree(_currentPath!, _currentTree!.Root, selected);
-                if (string.IsNullOrWhiteSpace(content))
-                    content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
-            }
-            else
-            {
-                content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
-            }
+            var format = GetCurrentTreeTextFormat();
+            var content = BuildTreeTextForSelection(selected, format);
 
             await SetClipboardTextAsync(content);
             _toastService.Show(_localization["Toast.Copy.Tree"]);
@@ -839,9 +832,11 @@ public partial class MainWindow : Window
             CancelBackgroundMetricsCalculation();
 
             var selected = GetCheckedPaths();
+            var format = GetCurrentTreeTextFormat();
             // Run file reading off UI thread
             statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
-            var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
+            var content = await Task.Run(() =>
+                _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, format, CancellationToken.None));
             await SetClipboardTextAsync(content);
             CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
@@ -851,6 +846,205 @@ public partial class MainWindow : Window
             CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private async void OnExportTreeToFile(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!EnsureTreeReady()) return;
+
+            var selected = GetCheckedPaths();
+            var format = GetCurrentTreeTextFormat();
+            var content = BuildTreeTextForSelection(selected, format);
+            var saveAsJson = format == TreeTextFormat.Json;
+
+            var saved = await TryExportTextToFileAsync(
+                content,
+                BuildSuggestedExportFileName("tree", saveAsJson),
+                _viewModel.MenuFileExportTree,
+                saveAsJson);
+
+            if (saved)
+                _toastService.Show(_localization["Toast.Export.Tree"]);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private async void OnExportContentToFile(object? sender, RoutedEventArgs e)
+    {
+        long? statusOperationId = null;
+        try
+        {
+            if (!EnsureTreeReady()) return;
+
+            CancelBackgroundMetricsCalculation();
+
+            var selected = GetCheckedPaths();
+            var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
+                .Distinct(PathComparer.Default)
+                .OrderBy(path => path, PathComparer.Default)
+                .ToList();
+
+            if (files.Count == 0)
+            {
+                if (selected.Count > 0)
+                    await ShowInfoAsync(_localization["Msg.NoCheckedFiles"]);
+                else
+                    await ShowInfoAsync(_localization["Msg.NoTextContent"]);
+                return;
+            }
+
+            statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
+            var content = await Task.Run(() => _contentExport.BuildAsync(files, CancellationToken.None));
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                CompleteStatusOperation(statusOperationId);
+                await ShowInfoAsync(_localization["Msg.NoTextContent"]);
+                return;
+            }
+
+            var saved = await TryExportTextToFileAsync(
+                content,
+                BuildSuggestedExportFileName("content", saveAsJson: false),
+                _viewModel.MenuFileExportContent,
+                saveAsJson: false);
+
+            CompleteStatusOperation(statusOperationId);
+            if (saved)
+                _toastService.Show(_localization["Toast.Export.Content"]);
+        }
+        catch (Exception ex)
+        {
+            CompleteStatusOperation(statusOperationId);
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private async void OnExportTreeAndContentToFile(object? sender, RoutedEventArgs e)
+    {
+        long? statusOperationId = null;
+        try
+        {
+            if (!EnsureTreeReady()) return;
+
+            CancelBackgroundMetricsCalculation();
+
+            var selected = GetCheckedPaths();
+            var format = GetCurrentTreeTextFormat();
+            var saveAsJson = format == TreeTextFormat.Json;
+
+            statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
+            var content = await Task.Run(() =>
+                _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, format, CancellationToken.None));
+
+            var saved = await TryExportTextToFileAsync(
+                content,
+                BuildSuggestedExportFileName("tree_content", saveAsJson),
+                _viewModel.MenuFileExportTreeAndContent,
+                saveAsJson);
+
+            CompleteStatusOperation(statusOperationId);
+            if (saved)
+                _toastService.Show(_localization["Toast.Export.TreeAndContent"]);
+        }
+        catch (Exception ex)
+        {
+            CompleteStatusOperation(statusOperationId);
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private TreeTextFormat GetCurrentTreeTextFormat()
+        => _viewModel.SelectedExportFormat == ExportFormat.Json
+            ? TreeTextFormat.Json
+            : TreeTextFormat.Ascii;
+
+    private string BuildTreeTextForSelection(IReadOnlySet<string> selectedPaths, TreeTextFormat format)
+    {
+        if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
+            return string.Empty;
+
+        var hasSelection = selectedPaths.Count > 0;
+        var treeText = hasSelection
+            ? _treeExport.BuildSelectedTree(_currentPath, _currentTree.Root, selectedPaths, format)
+            : _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format);
+
+        if (hasSelection && string.IsNullOrWhiteSpace(treeText))
+            treeText = _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format);
+
+        return treeText;
+    }
+
+    private async Task<bool> TryExportTextToFileAsync(
+        string content,
+        string suggestedFileName,
+        string dialogTitle,
+        bool saveAsJson)
+    {
+        if (StorageProvider is null || string.IsNullOrWhiteSpace(content))
+            return false;
+
+        var jsonFileType = new FilePickerFileType("JSON")
+        {
+            Patterns = new[] { "*.json" },
+            MimeTypes = new[] { "application/json" }
+        };
+
+        var textFileType = new FilePickerFileType("Text")
+        {
+            Patterns = new[] { "*.txt" },
+            MimeTypes = new[] { "text/plain" }
+        };
+
+        var options = new FilePickerSaveOptions
+        {
+            Title = dialogTitle,
+            SuggestedFileName = suggestedFileName,
+            ShowOverwritePrompt = true,
+            DefaultExtension = saveAsJson ? "json" : "txt",
+            FileTypeChoices = saveAsJson
+                ? new[] { jsonFileType, textFileType }
+                : new[] { textFileType, jsonFileType }
+        };
+
+        var file = await StorageProvider.SaveFilePickerAsync(options);
+        if (file is null)
+            return false;
+
+        await using var stream = await file.OpenWriteAsync();
+        if (stream.CanSeek)
+        {
+            stream.SetLength(0);
+            stream.Position = 0;
+        }
+
+        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        await writer.WriteAsync(content);
+        await writer.FlushAsync();
+
+        return true;
+    }
+
+    private string BuildSuggestedExportFileName(string suffix, bool saveAsJson)
+    {
+        var baseName = _currentProjectDisplayName;
+        if (string.IsNullOrWhiteSpace(baseName) && !string.IsNullOrWhiteSpace(_currentPath))
+            baseName = Path.GetFileName(_currentPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        if (string.IsNullOrWhiteSpace(baseName))
+            baseName = "devprojex";
+
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitized = new StringBuilder(baseName.Length);
+        foreach (var ch in baseName)
+            sanitized.Append(invalidChars.Contains(ch) ? '_' : ch);
+
+        var extension = saveAsJson ? "json" : "txt";
+        return $"{sanitized}_{suffix}.{extension}";
     }
 
     private void OnExpandAll(object? sender, RoutedEventArgs e) => ExpandCollapseTree(expand: true);
@@ -2797,6 +2991,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        var recalcVersion = Interlocked.Increment(ref _metricsRecalcVersion);
         var treeRoot = _viewModel.TreeNodes.FirstOrDefault();
         if (treeRoot == null)
             return;
@@ -2806,6 +3001,7 @@ public partial class MainWindow : Window
         var selectedPaths = hasAnyChecked
             ? GetCheckedPaths()
             : new HashSet<string>(PathComparer.Default);
+        var treeFormat = GetCurrentTreeTextFormat();
         var currentTree = _currentTree;
         var currentPath = _currentPath;
 
@@ -2820,7 +3016,7 @@ public partial class MainWindow : Window
             }
 
             // Calculate tree and content metrics in parallel
-            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths));
+            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat));
             var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths));
 
             Task.WaitAll(treeMetricsTask, contentMetricsTask);
@@ -2831,6 +3027,9 @@ public partial class MainWindow : Window
             // Update UI on dispatcher thread
             global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
+                if (recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
+                    return;
+
                 UpdateStatusBarMetrics(
                     treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
                     contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
@@ -2856,20 +3055,18 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Calculates tree metrics from actual tree export output (ASCII path).
-    /// This keeps status metrics aligned with what users copy.
+    /// Calculates tree metrics from actual tree export output in the currently selected format.
+    /// This keeps status metrics aligned with copy/export output.
     /// </summary>
-    private ExportOutputMetrics CalculateTreeMetrics(bool hasSelection, IReadOnlySet<string> selectedPaths)
+    private ExportOutputMetrics CalculateTreeMetrics(
+        bool hasSelection,
+        IReadOnlySet<string> selectedPaths,
+        TreeTextFormat format)
     {
         if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
             return ExportOutputMetrics.Empty;
 
-        var treeText = hasSelection && selectedPaths.Count > 0
-            ? _treeExport.BuildSelectedTree(_currentPath, _currentTree.Root, selectedPaths)
-            : _treeExport.BuildFullTree(_currentPath, _currentTree.Root);
-
-        if (hasSelection && string.IsNullOrWhiteSpace(treeText))
-            treeText = _treeExport.BuildFullTree(_currentPath, _currentTree.Root);
+        var treeText = BuildTreeTextForSelection(selectedPaths, format);
 
         return ExportOutputMetricsCalculator.FromText(treeText);
     }

@@ -1,7 +1,11 @@
-{
+﻿{
   "Menu.File": "Файл",
   "Menu.File.Open": "Открыть папку...",
   "Menu.File.Refresh": "Обновить",
+  "Menu.File.Export": "Экспорт в файл",
+  "Menu.File.Export.Tree": "Экспорт дерева",
+  "Menu.File.Export.Content": "Экспорт содержимого",
+  "Menu.File.Export.TreeAndContent": "Экспорт дерева и содержимого",
   "Menu.File.Exit": "Выход",
   "Menu.Copy": "Копирование",
   "Menu.Copy.Tree": "Скопировать дерево",
@@ -10,6 +14,9 @@
   "Toast.Copy.Tree": "Дерево скопировано",
   "Toast.Copy.Content": "Содержимое скопировано",
   "Toast.Copy.TreeAndContent": "Дерево и содержимое скопированы",
+  "Toast.Export.Tree": "Дерево экспортировано в файл",
+  "Toast.Export.Content": "Содержимое экспортировано в файл",
+  "Toast.Export.TreeAndContent": "Дерево и содержимое экспортированы в файл",
   "Toast.NoMatches": "Совпадений нет",
   "Toast.Git.CloneSuccess": "Репозиторий клонирован",
   "Toast.Git.CloneError": "Не удалось клонировать репозиторий",

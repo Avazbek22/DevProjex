@@ -1,7 +1,11 @@
-{
+﻿{
   "Menu.File": "File",
   "Menu.File.Open": "Apri cartella...",
   "Menu.File.Refresh": "Aggiorna",
+  "Menu.File.Export": "Esporta in file",
+  "Menu.File.Export.Tree": "Esporta albero",
+  "Menu.File.Export.Content": "Esporta contenuto",
+  "Menu.File.Export.TreeAndContent": "Esporta albero e contenuto",
   "Menu.File.Exit": "Esci",
   "Menu.Copy": "Copia",
   "Menu.Copy.Tree": "Copia albero",
@@ -10,6 +14,9 @@
   "Toast.Copy.Tree": "Albero copiato",
   "Toast.Copy.Content": "Contenuto copiato",
   "Toast.Copy.TreeAndContent": "Albero e contenuto copiati",
+  "Toast.Export.Tree": "Albero esportato nel file",
+  "Toast.Export.Content": "Contenuto esportato nel file",
+  "Toast.Export.TreeAndContent": "Albero e contenuto esportati nel file",
   "Toast.NoMatches": "Nessuna corrispondenza",
   "Toast.Git.CloneSuccess": "Repository clonato",
   "Toast.Git.CloneError": "Impossibile clonare il repository",

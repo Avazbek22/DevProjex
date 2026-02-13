@@ -1,7 +1,11 @@
-{
+﻿{
   "Menu.File": "File",
   "Menu.File.Open": "Open folder...",
   "Menu.File.Refresh": "Refresh",
+  "Menu.File.Export": "Export to file",
+  "Menu.File.Export.Tree": "Export tree",
+  "Menu.File.Export.Content": "Export content",
+  "Menu.File.Export.TreeAndContent": "Export tree and content",
   "Menu.File.Exit": "Exit",
   "Menu.Copy": "Copy",
   "Menu.Copy.Tree": "Copy tree",
@@ -10,6 +14,9 @@
   "Toast.Copy.Tree": "Tree copied",
   "Toast.Copy.Content": "Content copied",
   "Toast.Copy.TreeAndContent": "Tree and content copied",
+  "Toast.Export.Tree": "Tree exported to file",
+  "Toast.Export.Content": "Content exported to file",
+  "Toast.Export.TreeAndContent": "Tree and content exported to file",
   "Toast.NoMatches": "No matches found",
   "Toast.Git.CloneSuccess": "Repository cloned",
   "Toast.Git.CloneError": "Failed to clone repository",

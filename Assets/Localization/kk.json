@@ -1,7 +1,11 @@
-{
+﻿{
   "Menu.File": "Файл",
   "Menu.File.Open": "Қалтаны ашу...",
   "Menu.File.Refresh": "Жаңарту",
+  "Menu.File.Export": "Файлға экспорттау",
+  "Menu.File.Export.Tree": "Ағашты экспорттау",
+  "Menu.File.Export.Content": "Мазмұнды экспорттау",
+  "Menu.File.Export.TreeAndContent": "Ағаш пен мазмұнды экспорттау",
   "Menu.File.Exit": "Шығу",
   "Menu.Copy": "Көшіру",
   "Menu.Copy.Tree": "Ағашты көшіру",
@@ -10,6 +14,9 @@
   "Toast.Copy.Tree": "Ағаш көшірілді",
   "Toast.Copy.Content": "Мазмұн көшірілді",
   "Toast.Copy.TreeAndContent": "Ағаш пен мазмұны көшірілді",
+  "Toast.Export.Tree": "Ағаш файлға экспортталды",
+  "Toast.Export.Content": "Мазмұн файлға экспортталды",
+  "Toast.Export.TreeAndContent": "Ағаш пен мазмұн файлға экспортталды",
   "Toast.NoMatches": "Сәйкестік табылмады",
   "Toast.Git.CloneSuccess": "Репозиторий клонданды",
   "Toast.Git.CloneError": "Репозиторийді клондау мүмкін болмады",
