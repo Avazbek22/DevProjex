@@ -398,9 +398,9 @@ public partial class MainWindow : Window
         if (_dropZoneIconTransform is null)
             return;
 
-        //Folder's animaion parameters
-        const double periodSeconds = 2.0; // Animation speed
-        const double amplitudePx = 4.0; // Vertical distance
+        // Floating folder animation parameters.
+        const double periodSeconds = 1.7; // Slightly faster cycle while keeping smooth sine motion.
+        const double amplitudePx = 5.5; // Slightly larger travel distance.
         var phase = _dropZoneFloatClock.Elapsed.TotalSeconds / periodSeconds * 2 * Math.PI;
 
         // Symmetric sine motion makes the floating clearly visible.
