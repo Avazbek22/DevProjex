@@ -47,6 +47,10 @@ public sealed class IgnoreRulesService
 		".vcxproj"
 	};
 
+	// Prevent expensive directory fan-out when probing nested project scopes.
+	private const int NestedProjectProbeMaxDepth = 2;
+	private const int NestedProjectProbeMaxDirectoriesPerScope = 256;
+
 	public IgnoreRulesService(SmartIgnoreService smartIgnore)
 	{
 		_smartIgnore = smartIgnore;
@@ -324,22 +328,24 @@ public sealed class IgnoreRulesService
 		var candidates = scopedCandidates
 			.OrderBy(scope => scope.RootPath, PathComparer.Default)
 			.ToArray();
+		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates, maxDegree);
 
 		if (hasExplicitRootSelection)
 		{
-			var selectedScopes = new List<ProjectScope>(candidates.Length + (rootHasGitIgnore ? 1 : 0));
+			var selectedScopes = new List<ProjectScope>(expandedCandidates.Length + (rootHasGitIgnore ? 1 : 0));
 			if (rootHasGitIgnore)
 				selectedScopes.Add(new ProjectScope(
 					rootPath,
 					HasGitIgnore: true,
 					HasProjectMarker: rootHasProjectMarker,
 					LooksLikeProject: true));
-			selectedScopes.AddRange(candidates);
+			selectedScopes.AddRange(expandedCandidates);
 
 			return ProjectScanContext.FromScopes(selectedScopes);
 		}
 
-		var workspaceDetected = candidates.Count(scope => scope.LooksLikeProject) >= 2;
+		// Treat a parent folder with at least one discovered nested project as a scoped workspace.
+		var workspaceDetected = expandedCandidates.Any(scope => scope.LooksLikeProject);
 		if (!workspaceDetected)
 		{
 			return ProjectScanContext.FromScopes(new[]
@@ -352,16 +358,99 @@ public sealed class IgnoreRulesService
 			});
 		}
 
-		var scopes = new List<ProjectScope>(candidates.Length + (rootHasGitIgnore ? 1 : 0));
+		var scopes = new List<ProjectScope>(expandedCandidates.Length + (rootHasGitIgnore ? 1 : 0));
 		if (rootHasGitIgnore)
 			scopes.Add(new ProjectScope(
 				rootPath,
 				HasGitIgnore: true,
 				HasProjectMarker: rootHasProjectMarker,
 				LooksLikeProject: true));
-		scopes.AddRange(candidates);
+		scopes.AddRange(expandedCandidates);
 
 		return ProjectScanContext.FromScopes(scopes);
+	}
+
+	private static ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
+		IReadOnlyList<ProjectScope> candidates,
+		int maxDegree)
+	{
+		if (candidates.Count == 0)
+			return Array.Empty<ProjectScope>();
+
+		var allScopes = new ConcurrentBag<ProjectScope>();
+		var parallelDegree = Math.Min(4, Math.Max(1, maxDegree));
+
+		Parallel.ForEach(
+			candidates,
+			new ParallelOptions { MaxDegreeOfParallelism = parallelDegree },
+			candidate =>
+			{
+				allScopes.Add(candidate);
+				if (candidate.LooksLikeProject)
+					return;
+
+				foreach (var childPath in EnumerateDescendantDirectoriesSafe(
+					         candidate.RootPath,
+					         NestedProjectProbeMaxDepth,
+					         NestedProjectProbeMaxDirectoriesPerScope))
+				{
+					var hasGitIgnore = HasGitIgnoreFile(childPath);
+					var hasMarker = HasProjectMarker(childPath);
+					if (!hasGitIgnore && !hasMarker)
+						continue;
+
+					allScopes.Add(new ProjectScope(
+						childPath,
+						hasGitIgnore,
+						HasProjectMarker: hasMarker,
+						LooksLikeProject: true));
+				}
+			});
+
+		return allScopes
+			.DistinctBy(scope => scope.RootPath, PathStringComparer)
+			.OrderBy(scope => scope.RootPath, PathComparer.Default)
+			.ToArray();
+	}
+
+	private static IEnumerable<string> EnumerateDescendantDirectoriesSafe(
+		string rootPath,
+		int maxDepth,
+		int maxDirectories)
+	{
+		if (maxDepth <= 0 || maxDirectories <= 0)
+			yield break;
+
+		var queue = new Queue<(string Path, int Depth)>();
+		queue.Enqueue((rootPath, 0));
+		var discovered = 0;
+
+		while (queue.Count > 0 && discovered < maxDirectories)
+		{
+			var (currentPath, currentDepth) = queue.Dequeue();
+			if (currentDepth >= maxDepth)
+				continue;
+
+			IEnumerable<string> children;
+			try
+			{
+				children = Directory.EnumerateDirectories(currentPath, "*", SearchOption.TopDirectoryOnly);
+			}
+			catch
+			{
+				continue;
+			}
+
+			foreach (var childPath in children)
+			{
+				yield return childPath;
+				discovered++;
+				if (discovered >= maxDirectories)
+					yield break;
+
+				queue.Enqueue((childPath, currentDepth + 1));
+			}
+		}
 	}
 
 	private static List<string> ResolveCandidateDirectories(

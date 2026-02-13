@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
 using DevProjex.Tests.Integration.Helpers;
@@ -45,6 +46,49 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 			Assert.DoesNotContain(result.Root.Children, child => child.Name == "bin");
 		else
 			Assert.Contains(result.Root.Children, child => child.Name == "bin");
+	}
+
+	[Fact]
+	public void SelectedNestedFolder_WithSingleNestedDotNetProject_EnablesSmartIgnoreAndHidesBinObj()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Visual Studio 2019/America/America.sln", "");
+		temp.CreateFile("Visual Studio 2019/America/America/America.csproj", "<Project />");
+		temp.CreateFile("Visual Studio 2019/America/America/Program.cs", "class Program {}");
+		temp.CreateFile("Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
+		temp.CreateFile("Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
+
+		var smartService = new SmartIgnoreService(new ISmartIgnoreRule[]
+		{
+			new DotNetArtifactsIgnoreRule()
+		});
+		var rulesService = new IgnoreRulesService(smartService);
+
+		var availability = rulesService.GetIgnoreOptionsAvailability(temp.Path, new[] { "Visual Studio 2019" });
+		Assert.True(availability.IncludeSmartIgnore);
+
+		var rules = rulesService.Build(
+			temp.Path,
+			new[] { IgnoreOptionId.SmartIgnore },
+			selectedRootFolders: new[] { "Visual Studio 2019" });
+
+		Assert.True(rules.UseSmartIgnore);
+		Assert.Contains("bin", rules.SmartIgnoredFolders);
+		Assert.Contains("obj", rules.SmartIgnoredFolders);
+
+		var treeBuilder = new TreeBuilder();
+		var result = treeBuilder.Build(temp.Path, new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj", ".sln" },
+			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Visual Studio 2019" },
+			IgnoreRules: rules));
+
+		var vsFolder = result.Root.Children.Single(child => child.Name == "Visual Studio 2019");
+		var americaContainer = vsFolder.Children.Single(child => child.Name == "America");
+		var projectFolder = americaContainer.Children.Single(child => child.Name == "America");
+
+		Assert.DoesNotContain(projectFolder.Children, child => child.Name == "bin");
+		Assert.DoesNotContain(projectFolder.Children, child => child.Name == "obj");
+		Assert.Contains(projectFolder.Children, child => child.Name == "Program.cs");
 	}
 
 	[Theory]
