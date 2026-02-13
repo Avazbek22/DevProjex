@@ -29,7 +29,7 @@
         </ComboBox>
 
         <Button Content="{Binding SettingsApply}" Click="OnApplySettings" Margin="0,10,0,0"
-                Classes="primary-action" CornerRadius="8"/>
+                Classes="primary-action" CornerRadius="3"/>
       </StackPanel>
 
       <!-- Ignore section - equal star height -->
