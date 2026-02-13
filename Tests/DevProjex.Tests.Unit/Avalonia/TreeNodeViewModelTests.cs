@@ -302,6 +302,171 @@ public sealed class TreeNodeViewModelTests
         Assert.Equal(node, nodes[0]);
     }
 
+    #region HasChildren and ChildItemsSource Tests (Virtualization Fix)
+
+    [Fact]
+    public void HasChildren_ReturnsFalse_WhenNoChildren()
+    {
+        var node = CreateNode("Leaf");
+
+        Assert.False(node.HasChildren);
+    }
+
+    [Fact]
+    public void HasChildren_ReturnsTrue_WhenHasChildren()
+    {
+        var root = CreateTree();
+
+        Assert.True(root.HasChildren);
+    }
+
+    [Fact]
+    public void HasChildren_ReturnsTrue_WhenHasSingleChild()
+    {
+        var parent = CreateNode("Parent");
+        var child = new TreeNodeViewModel(CreateDescriptor("Child"), parent, null);
+        parent.Children.Add(child);
+
+        Assert.True(parent.HasChildren);
+    }
+
+    [Fact]
+    public void HasChildren_ReturnsFalse_AfterClearingChildren()
+    {
+        var root = CreateTree();
+        Assert.True(root.HasChildren);
+
+        root.Children.Clear();
+
+        Assert.False(root.HasChildren);
+    }
+
+    [Fact]
+    public void HasChildren_ReturnsTrue_AfterAddingChild()
+    {
+        var node = CreateNode("Node");
+        Assert.False(node.HasChildren);
+
+        node.Children.Add(new TreeNodeViewModel(CreateDescriptor("Child"), node, null));
+
+        Assert.True(node.HasChildren);
+    }
+
+    [Fact]
+    public void HasChildren_ConsistentWithChildrenCount()
+    {
+        var root = CreateTree();
+
+        Assert.Equal(root.Children.Count > 0, root.HasChildren);
+    }
+
+    [Fact]
+    public void ChildItemsSource_ReturnsChildren_WhenHasChildren()
+    {
+        var root = CreateTree();
+
+        var itemsSource = root.ChildItemsSource;
+
+        Assert.Equal(root.Children, itemsSource);
+    }
+
+    [Fact]
+    public void ChildItemsSource_ReturnsEmptyCollection_WhenNoChildren()
+    {
+        var leaf = CreateNode("Leaf");
+
+        var itemsSource = leaf.ChildItemsSource;
+
+        Assert.Empty(itemsSource);
+        Assert.NotSame(leaf.Children, itemsSource);
+    }
+
+    [Fact]
+    public void ChildItemsSource_ReturnsSameEmptyInstance_ForDifferentLeafNodes()
+    {
+        var leaf1 = CreateNode("Leaf1");
+        var leaf2 = CreateNode("Leaf2");
+
+        var source1 = leaf1.ChildItemsSource;
+        var source2 = leaf2.ChildItemsSource;
+
+        // Both should return the same static empty array instance
+        Assert.Same(source1, source2);
+    }
+
+    [Fact]
+    public void HasChildren_And_ChildItemsSource_AreConsistent()
+    {
+        var root = CreateTree();
+        var leaf = root.Children[0].Children[0];
+
+        // For node with children
+        Assert.True(root.HasChildren);
+        Assert.Same(root.Children, root.ChildItemsSource);
+
+        // For leaf node
+        Assert.False(leaf.HasChildren);
+        Assert.Empty(leaf.ChildItemsSource);
+    }
+
+    [Fact]
+    public void HasChildren_CorrectForDeepNesting()
+    {
+        var root = CreateTree();
+        var child = root.Children[0];
+        var leaf = child.Children[0];
+
+        Assert.True(root.HasChildren);      // Has 2 children
+        Assert.True(child.HasChildren);     // Has 1 child (Leaf)
+        Assert.False(leaf.HasChildren);     // No children
+    }
+
+    [Fact]
+    public void ClearRecursive_SetsHasChildrenToFalse()
+    {
+        var root = CreateTree();
+        Assert.True(root.HasChildren);
+
+        root.ClearRecursive();
+
+        Assert.False(root.HasChildren);
+        Assert.Empty(root.Children);
+    }
+
+    [Fact]
+    public void HasChildren_ForFile_IsFalse()
+    {
+        // Simulate a file node (no children, IsDirectory would be false in real scenario)
+        var fileDescriptor = new TreeNodeDescriptor("file.txt", @"C:\file.txt", false, false, "txt-icon", []);
+        var fileNode = new TreeNodeViewModel(fileDescriptor, null, null);
+
+        Assert.False(fileNode.HasChildren);
+    }
+
+    [Fact]
+    public void HasChildren_ForEmptyDirectory_IsFalse()
+    {
+        // Empty directory has no children
+        var dirDescriptor = new TreeNodeDescriptor("EmptyDir", @"C:\EmptyDir", true, false, "dir-icon", []);
+        var dirNode = new TreeNodeViewModel(dirDescriptor, null, null);
+
+        Assert.False(dirNode.HasChildren);
+    }
+
+    [Fact]
+    public void HasChildren_ForDirectoryWithFiles_IsTrue()
+    {
+        var dirDescriptor = new TreeNodeDescriptor("Dir", @"C:\Dir", true, false, "dir-icon", []);
+        var dirNode = new TreeNodeViewModel(dirDescriptor, null, null);
+
+        var fileDescriptor = new TreeNodeDescriptor("file.txt", @"C:\Dir\file.txt", false, false, "txt-icon", []);
+        dirNode.Children.Add(new TreeNodeViewModel(fileDescriptor, dirNode, null));
+
+        Assert.True(dirNode.HasChildren);
+    }
+
+    #endregion
+
     private static TreeNodeViewModel CreateNode(string name)
     {
         return new TreeNodeViewModel(CreateDescriptor(name), null, null);

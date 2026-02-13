@@ -22,7 +22,8 @@
       "Bash(powershell:*)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "Bash(dotnet clean:*)"
+      "Bash(dotnet clean:*)",
+      "Bash(git status:*)"
     ]
   }
 }
