@@ -53,7 +53,7 @@
   "Menu.Search": "Recherche",
   "Filter.ByName": "Filtrer par nom",
   "Filter.Tooltip": "Filtrer par nom (Ctrl+Shift+N)",
-  "CopyFormat.Tooltip": "Format de copie",
+  "CopyFormat.Tooltip": "Format de l'arborescence",
   "Menu.Options": "Options",
   "Menu.Options.TreeSettings": "Paramètres de l'arborescence",
   "Menu.Language": "Langue",

@@ -53,6 +53,7 @@ public partial class MainWindow : Window
     private readonly TreeExportService _treeExport;
     private readonly SelectedContentExportService _contentExport;
     private readonly TreeAndContentExportService _treeAndContentExport;
+    private readonly TextFileExportService _textFileExport;
     private readonly IToastService _toastService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
@@ -150,6 +151,7 @@ public partial class MainWindow : Window
         _treeExport = services.TreeExportService;
         _contentExport = services.ContentExportService;
         _treeAndContentExport = services.TreeAndContentExportService;
+        _textFileExport = services.TextFileExportService;
         _toastService = services.ToastService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
@@ -1016,15 +1018,7 @@ public partial class MainWindow : Window
             return false;
 
         await using var stream = await file.OpenWriteAsync();
-        if (stream.CanSeek)
-        {
-            stream.SetLength(0);
-            stream.Position = 0;
-        }
-
-        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        await writer.WriteAsync(content);
-        await writer.FlushAsync();
+        await _textFileExport.WriteAsync(stream, content);
 
         return true;
     }
