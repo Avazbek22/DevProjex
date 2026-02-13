@@ -248,8 +248,8 @@ public sealed class ThemeBrushCoordinator
         _currentMenuChildBrush = new SolidColorBrush(menuChildColor);
         UpdateResource("MenuChildPopupBrush", _currentMenuChildBrush);
 
-        var hoverColor = isDark ? Color.Parse("#3E4652") : Color.Parse("#DCE7F4");
-        var pressedColor = isDark ? Color.Parse("#4A5463") : Color.Parse("#CFDDF0");
+        var hoverColor = isDark ? Color.Parse("#343B46") : Color.Parse("#DCE7F4");
+        var pressedColor = isDark ? Color.Parse("#3B4452") : Color.Parse("#CFDDF0");
 
         _currentMenuHoverBrush = new SolidColorBrush(hoverColor);
         _currentMenuPressedBrush = new SolidColorBrush(pressedColor);
