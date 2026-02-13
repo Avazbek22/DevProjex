@@ -20,8 +20,24 @@ public sealed class IgnoreRulesService
 
 	public IgnoreRules Build(string rootPath, IReadOnlyCollection<IgnoreOptionId> selectedOptions)
 	{
-		var smart = _smartIgnore.Build(rootPath);
 		var useGitIgnore = selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
+
+		// SmartIgnore (bin/obj, node_modules, etc.) follows UseGitIgnore setting.
+		// When user disables gitignore, they want to see ALL files including build artifacts.
+		IReadOnlySet<string> smartFolders;
+		IReadOnlySet<string> smartFiles;
+		if (useGitIgnore)
+		{
+			var smart = _smartIgnore.Build(rootPath);
+			smartFolders = smart.FolderNames;
+			smartFiles = smart.FileNames;
+		}
+		else
+		{
+			smartFolders = EmptyStringSet;
+			smartFiles = EmptyStringSet;
+		}
+
 		var gitIgnoreMatcher = GitIgnoreMatcher.Empty;
 		if (useGitIgnore)
 		{
@@ -34,13 +50,16 @@ public sealed class IgnoreRulesService
 			IgnoreHiddenFiles: selectedOptions.Contains(IgnoreOptionId.HiddenFiles),
 			IgnoreDotFolders: selectedOptions.Contains(IgnoreOptionId.DotFolders),
 			IgnoreDotFiles: selectedOptions.Contains(IgnoreOptionId.DotFiles),
-			SmartIgnoredFolders: smart.FolderNames,
-			SmartIgnoredFiles: smart.FileNames)
+			SmartIgnoredFolders: smartFolders,
+			SmartIgnoredFiles: smartFiles)
 		{
 			UseGitIgnore = useGitIgnore,
 			GitIgnoreMatcher = gitIgnoreMatcher
 		};
 	}
+
+	private static readonly IReadOnlySet<string> EmptyStringSet =
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 	private static GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath)
 	{

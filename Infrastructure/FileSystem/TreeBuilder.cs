@@ -83,25 +83,31 @@ public sealed class TreeBuilder : ITreeBuilder
 
 				BuildChildren(dirNode, entry.FullName, options, isRoot: false, state);
 
-				// Skip empty directories - they provide no value in the tree
-				// This also handles ignored directories that were traversed for negation rules
-				// but ended up with no visible children
-				if (dirNode.Children.Count == 0 && !dirNode.IsAccessDenied)
-					continue;
+				// Determine if this directory should be included
+				bool shouldInclude;
 
-				// If name filter is active, only include directories that have matching children or match themselves
 				if (hasNameFilter)
 				{
+					// With name filter: include if has matching children OR name matches filter
 					bool hasMatchingChildren = dirNode.Children.Count > 0;
 					bool matchesName = name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase);
-
-					if (hasMatchingChildren || matchesName)
-						children.Add(dirNode);
+					shouldInclude = hasMatchingChildren || matchesName;
+				}
+				else if (isRoot)
+				{
+					// Root-level allowed folders: always include (user explicitly selected them)
+					// Even if empty, they provide context
+					shouldInclude = true;
 				}
 				else
 				{
-					children.Add(dirNode);
+					// Normal case: skip empty directories (they provide no value)
+					// But keep AccessDenied directories (user should know access was denied)
+					shouldInclude = dirNode.Children.Count > 0 || dirNode.IsAccessDenied;
 				}
+
+				if (shouldInclude)
+					children.Add(dirNode);
 			}
 			else
 			{

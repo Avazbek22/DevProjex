@@ -97,6 +97,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _metricsCalculationCts;
     private global::Avalonia.Threading.DispatcherTimer? _metricsDebounceTimer;
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
+    private volatile bool _isBackgroundMetricsActive;
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -718,6 +719,9 @@ public partial class MainWindow : Window
         {
             if (!EnsureTreeReady()) return;
 
+            // Cancel background metrics calculation - user wants immediate action
+            CancelBackgroundMetricsCalculation();
+
             var selected = GetCheckedPaths();
             var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
                 .Distinct(PathComparer.Default)
@@ -759,6 +763,9 @@ public partial class MainWindow : Window
         try
         {
             if (!EnsureTreeReady()) return;
+
+            // Cancel background metrics calculation - user wants immediate action
+            CancelBackgroundMetricsCalculation();
 
             var selected = GetCheckedPaths();
             // Run file reading off UI thread
@@ -2089,10 +2096,27 @@ public partial class MainWindow : Window
 
     private void CompleteStatusOperation()
     {
+        // If background metrics calculation is still active, don't fully hide progress
+        if (_isBackgroundMetricsActive)
+        {
+            UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
+            return;
+        }
+
         _viewModel.StatusOperationText = string.Empty;
         _viewModel.StatusBusy = false;
         _viewModel.StatusProgressIsIndeterminate = true;
         _viewModel.StatusProgressValue = 0;
+    }
+
+    /// <summary>
+    /// Cancels any active background metrics calculation.
+    /// Call this before starting user-initiated operations that need the status bar.
+    /// </summary>
+    private void CancelBackgroundMetricsCalculation()
+    {
+        _isBackgroundMetricsActive = false;
+        _metricsCalculationCts?.Cancel();
     }
 
 
@@ -2341,11 +2365,12 @@ public partial class MainWindow : Window
         _metricsCalculationCts = new CancellationTokenSource();
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _metricsCalculationCts.Token);
 
+        _isBackgroundMetricsActive = true;
         try
         {
             UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
             _viewModel.StatusBusy = true;
-            _viewModel.StatusProgressIsIndeterminate = true;
+            _viewModel.StatusProgressIsIndeterminate = false;
             _viewModel.StatusProgressValue = 0;
 
             // Collect all file paths from tree
@@ -2362,6 +2387,19 @@ public partial class MainWindow : Window
                 _fileMetricsCache.Clear();
             }
 
+            var totalFiles = filePaths.Count;
+            if (totalFiles == 0)
+            {
+                _isBackgroundMetricsActive = false;
+                RecalculateMetricsAsync();
+                _viewModel.StatusMetricsVisible = true;
+                CompleteStatusOperation();
+                return;
+            }
+
+            var processedCount = 0;
+            var lastProgressPercent = 0;
+
             // Process files in parallel for better performance
             // Limit parallelism to avoid overwhelming the disk I/O
             var parallelOptions = new ParallelOptions
@@ -2375,22 +2413,36 @@ public partial class MainWindow : Window
                 try
                 {
                     // GetTextFileMetricsAsync uses streaming - no full content in memory:
-                    // 1. Null-byte detection in first 512 bytes (fast binary check)
-                    // 2. Streams through file counting lines/chars without storing content
-                    // 3. Large files (>10MB) get estimated metrics
+                    // 1. Known binary extensions - instant skip (no I/O)
+                    // 2. Null-byte detection in first 512 bytes (fast binary check)
+                    // 3. Streams through file counting lines/chars without storing content
+                    // 4. Large files (>10MB) get estimated metrics
                     var metrics = await _fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
                         .ConfigureAwait(false);
 
                     // Skip binary files - they won't be exported
-                    if (metrics is null)
-                        return;
-
-                    lock (_metricsLock)
+                    if (metrics is not null)
                     {
-                        _fileMetricsCache[filePath] = new FileMetricsData(
-                            metrics.SizeBytes,
-                            metrics.LineCount,
-                            metrics.CharCount);
+                        lock (_metricsLock)
+                        {
+                            _fileMetricsCache[filePath] = new FileMetricsData(
+                                metrics.SizeBytes,
+                                metrics.LineCount,
+                                metrics.CharCount);
+                        }
+                    }
+
+                    // Update progress periodically (every 2%)
+                    var current = Interlocked.Increment(ref processedCount);
+                    var progressPercent = (int)(current * 100.0 / totalFiles);
+                    if (progressPercent >= lastProgressPercent + 2)
+                    {
+                        Interlocked.Exchange(ref lastProgressPercent, progressPercent);
+                        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            if (_isBackgroundMetricsActive)
+                                _viewModel.StatusProgressValue = progressPercent;
+                        });
                     }
                 }
                 catch (OperationCanceledException)
@@ -2400,17 +2452,27 @@ public partial class MainWindow : Window
                 catch
                 {
                     // Skip files that can't be read
+                    Interlocked.Increment(ref processedCount);
                 }
             });
 
-            // Initial metrics calculation after cache is ready
+            // Calculation completed successfully
+            _isBackgroundMetricsActive = false;
+            _viewModel.StatusProgressValue = 100;
             RecalculateMetricsAsync();
             _viewModel.StatusMetricsVisible = true;
+            CompleteStatusOperation();
         }
         catch (OperationCanceledException)
         {
-            // Cancelled, ignore
-            _viewModel.StatusMetricsVisible = false;
+            // Cancelled by user action - show partial results if available
+            _isBackgroundMetricsActive = false;
+            if (_fileMetricsCache.Count > 0)
+            {
+                RecalculateMetricsAsync();
+                _viewModel.StatusMetricsVisible = true;
+            }
+            CompleteStatusOperation();
         }
     }
 
