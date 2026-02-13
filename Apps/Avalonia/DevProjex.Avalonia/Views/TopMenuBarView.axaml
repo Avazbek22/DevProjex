@@ -105,8 +105,12 @@
             Click="OnToggleFilter"
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
-            ToolTip.Tip="{Binding FilterTooltip}"
             ToolTip.Placement="Left">
+      <ToolTip.Tip>
+        <ToolTip Loaded="OnToolTipLoaded">
+          <TextBlock Text="{Binding FilterTooltip}" />
+        </ToolTip>
+      </ToolTip.Tip>
       <Image Source="avares://DevProjex.Avalonia/IconPacks/Default/UIFilter.png"
              Width="24"
              Height="24"

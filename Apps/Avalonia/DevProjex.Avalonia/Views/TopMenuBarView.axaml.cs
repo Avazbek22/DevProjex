@@ -350,6 +350,14 @@ public partial class TopMenuBarView : UserControl
             SchedulePopupClamp(HelpDocsPopup, HelpDocsPopover);
     }
 
+    private void OnToolTipLoaded(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not ToolTip toolTip)
+            return;
+
+        ApplyToolTipBackdrop(toolTip);
+    }
+
     private void SchedulePopupClamp(Popup? popup, Control? popover)
     {
         if (popup is null || popover is null)
@@ -479,6 +487,49 @@ public partial class TopMenuBarView : UserControl
         catch
         {
             // Ignore: popup could have closed.
+        }
+    }
+
+    private void ApplyToolTipBackdrop(ToolTip toolTip)
+    {
+        if (toolTip.GetVisualRoot() is null)
+            return;
+
+        if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
+            return;
+
+        var host = TopLevel.GetTopLevel(this);
+        if (host is not null && ReferenceEquals(tooltipLevel, host))
+            return;
+
+        if (DataContext is not MainWindowViewModel viewModel)
+            return;
+
+        try
+        {
+            if (viewModel.HasAnyEffect)
+            {
+                tooltipLevel.TransparencyLevelHint = new[]
+                {
+                    WindowTransparencyLevel.AcrylicBlur,
+                    WindowTransparencyLevel.Blur,
+                    WindowTransparencyLevel.Transparent,
+                    WindowTransparencyLevel.None
+                };
+
+                tooltipLevel.Background = Brushes.Transparent;
+            }
+            else
+            {
+                tooltipLevel.TransparencyLevelHint = new[]
+                {
+                    WindowTransparencyLevel.None
+                };
+            }
+        }
+        catch
+        {
+            // Ignore: tooltip could have closed.
         }
     }
 }
