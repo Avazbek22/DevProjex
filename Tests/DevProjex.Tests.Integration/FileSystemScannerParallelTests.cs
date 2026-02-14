@@ -281,8 +281,10 @@ public sealed class FileSystemScannerParallelTests
 		var scanner = new FileSystemScanner();
 		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
 
-		// Only .cs has extension
-		Assert.Single(result.Value);
+		// Extensionless files are returned as named entries; regular files by extension.
+		Assert.Equal(3, result.Value.Count);
+		Assert.Contains("Makefile", result.Value);
+		Assert.Contains("Dockerfile", result.Value);
 		Assert.Contains(".cs", result.Value);
 	}
 
