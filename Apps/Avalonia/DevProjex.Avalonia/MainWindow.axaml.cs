@@ -1488,6 +1488,25 @@ public partial class MainWindow : Window
         });
     }
 
+    /// <summary>
+    /// Schedules background LOH compaction after heavy operations like Git updates or branch switches.
+    /// Runs in background to avoid blocking UI.
+    /// </summary>
+    private static void ScheduleBackgroundMemoryCleanup()
+    {
+        _ = Task.Run(async () =>
+        {
+            // Wait for UI to settle and references to be released
+            await Task.Delay(500);
+
+            // Compact LOH to return memory to OS
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        });
+    }
+
     private async void AnimateSettingsPanel(bool show)
     {
         if (_settingsIsland is null || _settingsTransform is null || _settingsContainer is null) return;
@@ -2117,6 +2136,8 @@ public partial class MainWindow : Window
             {
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
                 CompleteStatusOperation(statusOperationId);
+                // Clean up memory from old tree after successful update
+                ScheduleBackgroundMemoryCleanup();
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -2185,6 +2206,9 @@ public partial class MainWindow : Window
             await ReloadProjectAsync(cancellationToken);
             CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
+
+            // Clean up memory from old branch tree
+            ScheduleBackgroundMemoryCleanup();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -2746,6 +2770,7 @@ public partial class MainWindow : Window
 
         _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
         CancelPreviewRefresh();
+
         var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
         var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = projectLoadCts.Token;
@@ -2787,6 +2812,10 @@ public partial class MainWindow : Window
 
             _activeProjectLoadCancellationSnapshot = null;
             CompleteStatusOperation(statusOperationId);
+
+            // Clean up memory from previous project (old tree, strings, etc.)
+            // Must be AFTER loading new project so old references are replaced
+            ScheduleBackgroundMemoryCleanup();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -2900,7 +2929,9 @@ public partial class MainWindow : Window
 
         if (forceCompactingGc)
         {
-            // Use compacting collection only for explicit reset flows.
+            // Request LOH compaction - critical for returning memory to OS
+            // Large tree structures and file content strings go to LOH (>85KB)
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
