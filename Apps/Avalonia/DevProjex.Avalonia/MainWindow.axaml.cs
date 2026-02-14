@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1415,7 +1416,7 @@ public partial class MainWindow : Window
         _viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
     }
 
-    private void OpenPreviewMode()
+    private async void OpenPreviewMode()
     {
         if (!_viewModel.IsProjectLoaded)
             return;
@@ -1424,8 +1425,19 @@ public partial class MainWindow : Window
 
         ForceCloseSearchAndFilterForPreview();
 
-        _viewModel.IsPreviewMode = true;
+        // Step 1: Start preview bar animation (island slides down)
         AnimatePreviewBar(true);
+
+        // Step 2: Wait for animation to complete (250ms)
+        await Task.Delay(280);
+
+        // Step 3: Switch from tree to preview content area
+        _viewModel.IsPreviewMode = true;
+
+        // Step 4: Small delay for UI to update
+        await Task.Delay(50);
+
+        // Step 5: Start loading preview content
         SchedulePreviewRefresh(immediate: true);
     }
 
@@ -1453,20 +1465,26 @@ public partial class MainWindow : Window
         _viewModel.PreviewLineNumbers = "1";
 
         // Schedule aggressive garbage collection for large preview strings
-        // Large strings (>85KB) go to LOH (Gen2), requires full blocking collection
+        // Large strings (>85KB) go to LOH (Gen2), requires LOH compaction to return memory to OS
         _ = Task.Run(async () =>
         {
             // Wait for close animation (250ms) and UI updates to complete
-            await Task.Delay(300);
+            await Task.Delay(350);
 
-            // Force full blocking collection to release LOH strings
-            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            // Request LOH compaction on next GC - critical for returning memory to OS
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+
+            // Use Aggressive mode for maximum memory recovery
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
-            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
 
-            // Wait and collect again to ensure all generations are cleaned
-            await Task.Delay(200);
-            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            // Second cycle after finalizers have run
+            await Task.Delay(100);
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         });
     }
 
