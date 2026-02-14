@@ -548,29 +548,48 @@
               <Border IsVisible="{Binding IsPreviewMode}"
                       Background="Transparent">
                 <Grid>
-                  <ScrollViewer Margin="0,6,0,0"
-                                HorizontalScrollBarVisibility="Auto"
-                                VerticalScrollBarVisibility="Auto">
-                    <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,8">
-                      <Border Classes="preview-line-numbers">
-                        <TextBlock Text="{Binding PreviewLineNumbers}"
-                                   FontFamily="{Binding SelectedFontFamily}"
-                                   FontSize="{Binding TreeFontSize}"
-                                   Opacity="0.72"
-                                   Margin="0"
-                                   TextWrapping="NoWrap" />
-                      </Border>
-                      <Border Grid.Column="1"
-                              Padding="10,10,16,10">
-                        <TextBlock Text="{Binding PreviewText}"
-                                   FontFamily="{Binding SelectedFontFamily}"
-                                   FontSize="{Binding TreeFontSize}"
-                                   TextWrapping="NoWrap"
-                                   HorizontalAlignment="Left"
-                                   VerticalAlignment="Top" />
-                      </Border>
-                    </Grid>
-                  </ScrollViewer>
+                  <Grid Margin="0,6,0,0" ColumnDefinitions="Auto,*">
+                    <!-- Persistent line-number background that spans the full preview height -->
+                    <Border Grid.Column="0"
+                            Name="PreviewLineNumbersBackground"
+                            Classes="preview-line-numbers"
+                            Width="{Binding Bounds.Width, ElementName=PreviewLineNumbersHost}" />
+
+                    <!-- Main vertical scroll for both columns -->
+                    <ScrollViewer Grid.ColumnSpan="2"
+                                  Margin="0,0,0,8"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto">
+                      <Grid ColumnDefinitions="Auto,*">
+                        <!-- Line numbers remain fixed on horizontal scroll -->
+                        <Border Grid.Column="0"
+                                Name="PreviewLineNumbersHost"
+                                Background="Transparent"
+                                Padding="10,10,8,10">
+                          <TextBlock Text="{Binding PreviewLineNumbers}"
+                                     FontFamily="{Binding SelectedFontFamily}"
+                                     FontSize="{Binding TreeFontSize}"
+                                     Opacity="0.72"
+                                     Margin="0"
+                                     TextWrapping="NoWrap" />
+                        </Border>
+
+                        <!-- Horizontal scroll applies only to preview text -->
+                        <ScrollViewer Grid.Column="1"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Disabled">
+                          <Border Padding="10,10,16,10">
+                            <TextBlock Text="{Binding PreviewText}"
+                                       FontFamily="{Binding SelectedFontFamily}"
+                                       FontSize="{Binding TreeFontSize}"
+                                       TextWrapping="NoWrap"
+                                       HorizontalAlignment="Left"
+                                       VerticalAlignment="Top" />
+                          </Border>
+                        </ScrollViewer>
+                      </Grid>
+                    </ScrollViewer>
+                  </Grid>
                 </Grid>
               </Border>
             </Grid>
