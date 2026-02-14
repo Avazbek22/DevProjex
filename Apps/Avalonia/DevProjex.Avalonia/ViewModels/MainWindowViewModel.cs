@@ -17,6 +17,13 @@ public enum ExportFormat
     Json
 }
 
+public enum PreviewContentMode
+{
+    Tree,
+    Content,
+    TreeAndContent
+}
+
 public sealed class MainWindowViewModel : ViewModelBase
 {
     public const string BaseTitle = "DevProjex v4.5";
@@ -44,9 +51,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isCompactMode;
     private bool _filterVisible;
     private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
+    private PreviewContentMode _selectedPreviewContentMode = PreviewContentMode.Tree;
     private bool _isMicaEnabled;
     private bool _isAcrylicEnabled;
     private bool _isTransparentEnabled = true;
+    private bool _isPreviewMode;
+    private bool _isPreviewLoading;
+    private string _previewText = string.Empty;
+    private string _previewLineNumbers = "1";
 
     // Theme intensity sliders (0-100)
     // MaterialIntensity: single slider controlling overall effect (transparency, depth, material feel)
@@ -223,8 +235,26 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (_isProjectLoaded == value) return;
             _isProjectLoaded = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsSearchFilterAvailable));
         }
     }
+
+    public bool IsPreviewMode
+    {
+        get => _isPreviewMode;
+        set
+        {
+            if (_isPreviewMode == value) return;
+            _isPreviewMode = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsSearchFilterAvailable));
+            RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
+        }
+    }
+
+    public bool IsSearchFilterAvailable => _isProjectLoaded && !_isPreviewMode;
+
+    public bool AreFilterSettingsEnabled => !_isPreviewMode;
 
     public bool SettingsVisible
     {
@@ -337,6 +367,59 @@ public sealed class MainWindowViewModel : ViewModelBase
         set
         {
             if (value) SelectedExportFormat = ExportFormat.Json;
+        }
+    }
+
+    public PreviewContentMode SelectedPreviewContentMode
+    {
+        get => _selectedPreviewContentMode;
+        set
+        {
+            if (_selectedPreviewContentMode == value) return;
+            _selectedPreviewContentMode = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsPreviewTreeSelected));
+            RaisePropertyChanged(nameof(IsPreviewContentSelected));
+            RaisePropertyChanged(nameof(IsPreviewTreeAndContentSelected));
+        }
+    }
+
+    public bool IsPreviewTreeSelected => _selectedPreviewContentMode == PreviewContentMode.Tree;
+
+    public bool IsPreviewContentSelected => _selectedPreviewContentMode == PreviewContentMode.Content;
+
+    public bool IsPreviewTreeAndContentSelected => _selectedPreviewContentMode == PreviewContentMode.TreeAndContent;
+
+    public string PreviewText
+    {
+        get => _previewText;
+        set
+        {
+            if (_previewText == value) return;
+            _previewText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string PreviewLineNumbers
+    {
+        get => _previewLineNumbers;
+        set
+        {
+            if (_previewLineNumbers == value) return;
+            _previewLineNumbers = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public bool IsPreviewLoading
+    {
+        get => _isPreviewLoading;
+        set
+        {
+            if (_isPreviewLoading == value) return;
+            _isPreviewLoading = value;
+            RaisePropertyChanged();
         }
     }
 
@@ -831,6 +914,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string FilterByNamePlaceholder { get; private set; } = string.Empty;
     public string FilterTooltip { get; private set; } = string.Empty;
     public string CopyFormatTooltip { get; private set; } = string.Empty;
+    public string PreviewTooltip { get; private set; } = string.Empty;
+    public string PreviewModesLabel { get; private set; } = string.Empty;
+    public string PreviewModeTree { get; private set; } = string.Empty;
+    public string PreviewModeContent { get; private set; } = string.Empty;
+    public string PreviewModeTreeAndContent { get; private set; } = string.Empty;
+    public string PreviewLoadingText { get; private set; } = string.Empty;
+    public string PreviewNoDataText { get; private set; } = string.Empty;
 
     // StatusBar labels
     public string StatusTreeLabel { get; private set; } = string.Empty;
@@ -929,6 +1019,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
         CopyFormatTooltip = _localization["CopyFormat.Tooltip"];
+        PreviewTooltip = _localization["Preview.Tooltip"];
+        PreviewModesLabel = _localization["Preview.Modes.Label"];
+        PreviewModeTree = _localization["Preview.Mode.Tree"];
+        PreviewModeContent = _localization["Preview.Mode.Content"];
+        PreviewModeTreeAndContent = _localization["Preview.Mode.TreeAndContent"];
+        PreviewLoadingText = _localization["Preview.Loading"];
+        PreviewNoDataText = _localization["Preview.NoData"];
 
         // StatusBar labels
         StatusTreeLabel = _localization["Status.Tree.Label"];
@@ -1039,6 +1136,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(FilterByNamePlaceholder));
         RaisePropertyChanged(nameof(FilterTooltip));
         RaisePropertyChanged(nameof(CopyFormatTooltip));
+        RaisePropertyChanged(nameof(PreviewTooltip));
+        RaisePropertyChanged(nameof(PreviewModesLabel));
+        RaisePropertyChanged(nameof(PreviewModeTree));
+        RaisePropertyChanged(nameof(PreviewModeContent));
+        RaisePropertyChanged(nameof(PreviewModeTreeAndContent));
+        RaisePropertyChanged(nameof(PreviewLoadingText));
+        RaisePropertyChanged(nameof(PreviewNoDataText));
 
         // StatusBar labels
         RaisePropertyChanged(nameof(StatusTreeLabel));

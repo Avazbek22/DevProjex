@@ -63,6 +63,7 @@ public partial class MainWindow : Window
         bool SettingsVisible,
         bool SearchVisible,
         bool FilterVisible,
+        bool IsPreviewMode,
         bool StatusMetricsVisible,
         string StatusTreeStatsText,
         string StatusContentStatsText,
@@ -151,6 +152,19 @@ public partial class MainWindow : Window
     private bool _filterBarAnimating;
     private const double FilterBarHeight = 46.0;
 
+    // Preview bar animation
+    private Border? _previewBarContainer;
+    private Border? _previewBar;
+    private TranslateTransform? _previewBarTransform;
+    private bool _previewBarAnimating;
+    private const double PreviewBarHeight = 62.0;
+
+    // Preview generation
+    private CancellationTokenSource? _previewBuildCts;
+    private global::Avalonia.Threading.DispatcherTimer? _previewDebounceTimer;
+    private int _previewBuildVersion;
+    private volatile bool _previewRefreshRequested;
+
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
     private CancellationTokenSource? _metricsCalculationCts;
@@ -230,6 +244,8 @@ public partial class MainWindow : Window
         _topMenuBar = this.FindControl<TopMenuBarView>("TopMenuBar");
         _searchBar = this.FindControl<SearchBarView>("SearchBar");
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
+        _previewBarContainer = this.FindControl<Border>("PreviewBarContainer");
+        _previewBar = this.FindControl<Border>("PreviewBar");
         _dropZoneIcon = this.FindControl<Viewbox>("DropZoneIcon");
         _settingsContainer = this.FindControl<Border>("SettingsContainer");
         _settingsIsland = this.FindControl<Border>("SettingsIsland");
@@ -274,6 +290,15 @@ public partial class MainWindow : Window
             _filterBarContainer.Height = 0;
             _filterBarTransform.Y = -FilterBarHeight;
             _filterBar.Opacity = 0;
+        }
+
+        if (_previewBarContainer is not null && _previewBar is not null)
+        {
+            _previewBarTransform = _previewBar.RenderTransform as TranslateTransform ?? new TranslateTransform();
+            _previewBar.RenderTransform = _previewBarTransform;
+            _previewBarContainer.Height = 0;
+            _previewBarTransform.Y = -PreviewBarHeight;
+            _previewBar.Opacity = 0;
         }
 
         if (_treeView is not null)
@@ -334,7 +359,14 @@ public partial class MainWindow : Window
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
                 UpdateDropZoneFloatAnimationState();
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
+            {
                 RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
+                SchedulePreviewRefresh();
+            }
+            else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
+            {
+                SchedulePreviewRefresh(immediate: true);
+            }
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
 
@@ -373,6 +405,9 @@ public partial class MainWindow : Window
         _recalculateMetricsCts?.Cancel();
         _recalculateMetricsCts?.Dispose();
         _metricsDebounceTimer?.Stop();
+        _previewBuildCts?.Cancel();
+        _previewBuildCts?.Dispose();
+        _previewDebounceTimer?.Stop();
 
         // Dispose coordinators
         _searchCoordinator.Dispose();
@@ -750,6 +785,8 @@ public partial class MainWindow : Window
     {
         _viewModel.UpdateLocalization();
         RecalculateMetricsAsync(); // Update metrics text with new localization
+        if (_viewModel.IsPreviewMode)
+            SchedulePreviewRefresh(immediate: true);
         UpdateTitle();
 
         if (_currentPath is not null)
@@ -800,6 +837,7 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
+        CancelPreviewRefresh();
         var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = refreshCts.Token;
         var statusOperationId = BeginStatusOperation(
@@ -1054,6 +1092,175 @@ public partial class MainWindow : Window
         return treeText;
     }
 
+    private void SchedulePreviewRefresh(bool immediate = false)
+    {
+        _previewRefreshRequested = true;
+
+        if (!_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
+            return;
+
+        if (immediate)
+        {
+            _previewDebounceTimer?.Stop();
+            _ = RefreshPreviewAsync();
+            return;
+        }
+
+        if (_previewDebounceTimer is null)
+        {
+            _previewDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(80)
+            };
+            _previewDebounceTimer.Tick += OnPreviewDebounceTick;
+        }
+
+        _previewDebounceTimer.Stop();
+        _previewDebounceTimer.Start();
+    }
+
+    private void CancelPreviewRefresh()
+    {
+        _previewRefreshRequested = false;
+        _previewDebounceTimer?.Stop();
+        _previewBuildCts?.Cancel();
+        _viewModel.IsPreviewLoading = false;
+    }
+
+    private void OnPreviewDebounceTick(object? sender, EventArgs e)
+    {
+        _previewDebounceTimer?.Stop();
+        _ = RefreshPreviewAsync();
+    }
+
+    private async Task RefreshPreviewAsync()
+    {
+        if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
+            return;
+
+        if (!EnsureTreeReady())
+        {
+            ApplyPreviewText(_viewModel.PreviewNoDataText);
+            _previewRefreshRequested = false;
+            return;
+        }
+
+        var previewCts = ReplaceCancellationSource(ref _previewBuildCts);
+        var cancellationToken = previewCts.Token;
+        var buildVersion = Interlocked.Increment(ref _previewBuildVersion);
+        _viewModel.IsPreviewLoading = true;
+
+        try
+        {
+            var selectedPaths = GetCheckedPaths();
+            var selectedMode = _viewModel.SelectedPreviewContentMode;
+            var treeFormat = GetCurrentTreeTextFormat();
+            var hasSelection = selectedPaths.Count > 0;
+            var noCheckedFilesText = _localization["Msg.NoCheckedFilesShort"];
+            var noTextContentText = _localization["Msg.NoTextContent"];
+
+            string previewText;
+            if (selectedMode == PreviewContentMode.Tree)
+            {
+                previewText = await Task.Run(
+                    () => BuildTreeTextForSelection(selectedPaths, treeFormat),
+                    cancellationToken);
+            }
+            else if (selectedMode == PreviewContentMode.Content)
+            {
+                var files = (hasSelection ? selectedPaths.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
+                    .Distinct(PathComparer.Default)
+                    .OrderBy(path => path, PathComparer.Default)
+                    .ToList();
+
+                if (files.Count == 0)
+                    previewText = hasSelection ? noCheckedFilesText : noTextContentText;
+                else
+                    previewText = await _contentExport.BuildAsync(files, cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(previewText))
+                    previewText = noTextContentText;
+            }
+            else
+            {
+                previewText = await _treeAndContentExport.BuildAsync(
+                    _currentPath!,
+                    _currentTree!.Root,
+                    selectedPaths,
+                    treeFormat,
+                    cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (buildVersion != Volatile.Read(ref _previewBuildVersion))
+                return;
+
+            var effectivePreviewText = string.IsNullOrEmpty(previewText)
+                ? _viewModel.PreviewNoDataText
+                : previewText;
+            var lineNumbers = await Task.Run(
+                () => BuildPreviewLineNumbers(effectivePreviewText),
+                cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (buildVersion != Volatile.Read(ref _previewBuildVersion))
+                return;
+
+            ApplyPreviewText(effectivePreviewText, lineNumbers);
+            _previewRefreshRequested = false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Ignore stale preview builds.
+        }
+        catch (Exception ex)
+        {
+            if (buildVersion == Volatile.Read(ref _previewBuildVersion))
+                ApplyPreviewText(ex.Message);
+        }
+        finally
+        {
+            if (buildVersion == Volatile.Read(ref _previewBuildVersion))
+                _viewModel.IsPreviewLoading = false;
+            DisposeIfCurrent(ref _previewBuildCts, previewCts);
+        }
+    }
+
+    private void ApplyPreviewText(string text)
+    {
+        var effectiveText = string.IsNullOrEmpty(text)
+            ? _viewModel.PreviewNoDataText
+            : text;
+
+        ApplyPreviewText(effectiveText, BuildPreviewLineNumbers(effectiveText));
+    }
+
+    private void ApplyPreviewText(string text, string lineNumbers)
+    {
+        _viewModel.PreviewText = text;
+        _viewModel.PreviewLineNumbers = lineNumbers;
+    }
+
+    private static string BuildPreviewLineNumbers(string text)
+    {
+        var lineCount = 1;
+        foreach (var ch in text)
+        {
+            if (ch == '\n')
+                lineCount++;
+        }
+
+        var numbers = new StringBuilder(Math.Max(4, lineCount * 4));
+        for (var index = 1; index <= lineCount; index++)
+        {
+            numbers.Append(index);
+            if (index < lineCount)
+                numbers.AppendLine();
+        }
+
+        return numbers.ToString();
+    }
+
     private async Task<bool> TryExportTextToFileAsync(
         string content,
         string suggestedFileName,
@@ -1150,6 +1357,65 @@ public partial class MainWindow : Window
         var newVisible = !_viewModel.SettingsVisible;
         _viewModel.SettingsVisible = newVisible;
         AnimateSettingsPanel(newVisible);
+    }
+
+    private void OnTogglePreview(object? sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.IsProjectLoaded)
+            return;
+
+        if (_viewModel.IsPreviewMode)
+            ClosePreviewMode();
+        else
+            OpenPreviewMode();
+    }
+
+    private void OnPreviewClose(object? sender, RoutedEventArgs e)
+    {
+        ClosePreviewMode();
+    }
+
+    private void OnPreviewTreeModeClick(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.SelectedPreviewContentMode = PreviewContentMode.Tree;
+    }
+
+    private void OnPreviewContentModeClick(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+    }
+
+    private void OnPreviewTreeAndContentModeClick(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+    }
+
+    private void OpenPreviewMode()
+    {
+        if (!_viewModel.IsProjectLoaded)
+            return;
+        if (_previewBarAnimating)
+            return;
+
+        if (_viewModel.SearchVisible)
+            CloseSearch();
+        if (_viewModel.FilterVisible)
+            CloseFilter();
+
+        _viewModel.IsPreviewMode = true;
+        AnimatePreviewBar(true);
+        SchedulePreviewRefresh(immediate: true);
+    }
+
+    private void ClosePreviewMode()
+    {
+        if (_previewBarAnimating)
+            return;
+
+        _viewModel.IsPreviewMode = false;
+        AnimatePreviewBar(false);
+        CancelPreviewRefresh();
+        _treeView?.Focus();
     }
 
     private async void AnimateSettingsPanel(bool show)
@@ -1250,6 +1516,51 @@ public partial class MainWindow : Window
         _searchBarTransform.Y = endY;
         _searchBar.Opacity = endOpacity;
         _searchBarAnimating = false;
+    }
+
+    private async void AnimatePreviewBar(bool show)
+    {
+        if (_previewBar is null || _previewBarTransform is null || _previewBarContainer is null) return;
+        if (_previewBarAnimating) return;
+
+        _previewBarAnimating = true;
+
+        const double durationMs = 250.0;
+        const double islandSpacing = 4.0;
+
+        var startHeight = _previewBarContainer.Height;
+        if (double.IsNaN(startHeight)) startHeight = show ? 0 : PreviewBarHeight;
+
+        var startY = _previewBarTransform.Y;
+        var startOpacity = _previewBar.Opacity;
+        var startMarginBottom = _previewBarContainer.Margin.Bottom;
+
+        var endHeight = show ? PreviewBarHeight : 0.0;
+        var endY = show ? 0.0 : -PreviewBarHeight;
+        var endOpacity = show ? 1.0 : 0.0;
+        var endMarginBottom = show ? islandSpacing : 0.0;
+
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
+            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+
+            _previewBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
+            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
+            _previewBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
+            _previewBarTransform.Y = startY + (endY - startY) * eased;
+            _previewBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+            await Task.Delay(8);
+        }
+
+        _previewBarContainer.Height = endHeight;
+        _previewBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
+        _previewBarTransform.Y = endY;
+        _previewBar.Opacity = endOpacity;
+        _previewBarAnimating = false;
     }
 
     private async void AnimateFilterBar(bool show)
@@ -1922,6 +2233,7 @@ public partial class MainWindow : Window
     private void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_viewModel.IsPreviewMode) return;
 
         if (_viewModel.SearchVisible)
         {
@@ -1937,6 +2249,7 @@ public partial class MainWindow : Window
     private void OnToggleFilter(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_viewModel.IsPreviewMode) return;
 
         if (_viewModel.FilterVisible)
         {
@@ -1961,6 +2274,7 @@ public partial class MainWindow : Window
     private void ShowFilter()
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_viewModel.IsPreviewMode) return;
         if (_filterBarAnimating) return;
 
         _viewModel.FilterVisible = true;
@@ -2234,6 +2548,7 @@ public partial class MainWindow : Window
     private void ShowSearch()
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_viewModel.IsPreviewMode) return;
         if (_searchBarAnimating) return;
 
         _viewModel.SearchVisible = true;
@@ -2323,6 +2638,7 @@ public partial class MainWindow : Window
         }
 
         _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
+        CancelPreviewRefresh();
         var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
         var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = projectLoadCts.Token;
@@ -2468,6 +2784,9 @@ public partial class MainWindow : Window
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;
         _viewModel.StatusContentStatsText = string.Empty;
+        _viewModel.PreviewText = string.Empty;
+        _viewModel.PreviewLineNumbers = "1";
+        _viewModel.IsPreviewLoading = false;
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
@@ -2600,6 +2919,8 @@ public partial class MainWindow : Window
                 // For filter changes, just recalculate from existing cache
                 RecalculateMetricsAsync();
             }
+
+            SchedulePreviewRefresh(immediate: true);
 
             // Suggest GC to collect old tree objects after building new one
             // Using non-blocking mode to avoid UI freeze
@@ -2780,6 +3101,7 @@ public partial class MainWindow : Window
             SettingsVisible: _viewModel.SettingsVisible,
             SearchVisible: _viewModel.SearchVisible,
             FilterVisible: _viewModel.FilterVisible,
+            IsPreviewMode: _viewModel.IsPreviewMode,
             StatusMetricsVisible: _viewModel.StatusMetricsVisible,
             StatusTreeStatsText: _viewModel.StatusTreeStatsText,
             StatusContentStatsText: _viewModel.StatusContentStatsText,
@@ -2832,6 +3154,7 @@ public partial class MainWindow : Window
         _viewModel.SettingsVisible = snapshot.SettingsVisible;
         _viewModel.SearchVisible = snapshot.SearchVisible;
         _viewModel.FilterVisible = snapshot.FilterVisible;
+        _viewModel.IsPreviewMode = snapshot.IsPreviewMode;
         _viewModel.StatusMetricsVisible = snapshot.StatusMetricsVisible;
         _viewModel.StatusTreeStatsText = snapshot.StatusTreeStatsText;
         _viewModel.StatusContentStatsText = snapshot.StatusContentStatsText;
@@ -2897,6 +3220,7 @@ public partial class MainWindow : Window
     {
         _activeProjectLoadCancellationSnapshot = null;
         CancelBackgroundMetricsCalculation();
+        CancelPreviewRefresh();
         ClearPreviousProjectState();
 
         _currentPath = null;
@@ -2909,6 +3233,7 @@ public partial class MainWindow : Window
         _viewModel.SettingsVisible = false;
         _viewModel.SearchVisible = false;
         _viewModel.FilterVisible = false;
+        _viewModel.IsPreviewMode = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
         _viewModel.CurrentBranch = string.Empty;
@@ -3166,6 +3491,8 @@ public partial class MainWindow : Window
             RecalculateMetricsAsync();
         };
         _metricsDebounceTimer.Start();
+
+        SchedulePreviewRefresh();
     }
 
     /// <summary>

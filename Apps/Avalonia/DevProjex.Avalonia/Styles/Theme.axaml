@@ -479,6 +479,29 @@
         </Setter>
     </Style>
 
+    <Style Selector="Border.preview-panel">
+        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="Margin" Value="0,2,0,0" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <DoubleTransition Property="Opacity" Duration="0:0:0.2" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.preview-line-numbers">
+        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,1,0" />
+        <Setter Property="Padding" Value="10,10,8,10" />
+        <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+
 
     <!-- Rounded controls inside search/filter panels -->
     <Style Selector="Border.search-panel TextBox, Border.filter-panel TextBox">
@@ -929,6 +952,29 @@
     <!-- Segment control: disabled -->
     <Style Selector="Border.segmented-control:disabled">
         <Setter Property="Opacity" Value="0.5" />
+    </Style>
+
+    <Style Selector="Border.preview-segmented-control">
+        <Setter Property="Padding" Value="3" />
+    </Style>
+
+    <Style Selector="Border.preview-segment-thumb">
+        <Setter Property="Width" Value="150" />
+    </Style>
+
+    <Style Selector="Border.preview-segment-thumb.preview-segment-thumb-middle">
+        <Setter Property="RenderTransform" Value="translate(150px, 0px)" />
+    </Style>
+
+    <Style Selector="Border.preview-segment-thumb.preview-segment-thumb-right">
+        <Setter Property="RenderTransform" Value="translate(300px, 0px)" />
+    </Style>
+
+    <Style Selector="Button.preview-segment-button">
+        <Setter Property="Width" Value="150" />
+        <Setter Property="Padding" Value="0,8" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
 </Styles>

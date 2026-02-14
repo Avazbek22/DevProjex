@@ -4,9 +4,9 @@
              xmlns:views="using:DevProjex.Avalonia.Views"
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
              x:DataType="vm:MainWindowViewModel">
-  <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto" Margin="0">
+  <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
     <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
-    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="3" Margin="0">
+    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
@@ -44,7 +44,7 @@
           </MenuItem.Header>
         </MenuItem>
       </MenuItem>
-      <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSearch" />
+      <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchFilterAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />
       <MenuItem Header="{Binding MenuLanguage}">
         <MenuItem Header="Русский" Click="OnLangRu" />
@@ -106,8 +106,26 @@
 
     <Button Grid.Column="2"
             Classes="menu-icon-button"
-            Click="OnToggleFilter"
+            Click="OnTogglePreview"
             IsEnabled="{Binding IsProjectLoaded}"
+            IsVisible="{Binding IsProjectLoaded}"
+            ToolTip.Placement="Left">
+      <ToolTip.Tip>
+        <ToolTip Loaded="OnToolTipLoaded">
+          <TextBlock Text="{Binding PreviewTooltip}" />
+        </ToolTip>
+      </ToolTip.Tip>
+      <Path Width="22"
+            Height="22"
+            Stretch="Uniform"
+            Fill="{DynamicResource AppTextBrush}"
+            Data="M12,4.5 C7,4.5 2.73,7.61 1,12 C2.73,16.39 7,19.5 12,19.5 C17,19.5 21.27,16.39 23,12 C21.27,7.61 17,4.5 12,4.5 Z M12,17 C9.24,17 7,14.76 7,12 C7,9.24 9.24,7 12,7 C14.76,7 17,9.24 17,12 C17,14.76 14.76,17 12,17 Z M12,15 C13.66,15 15,13.66 15,12 C15,10.34 13.66,9 12,9 C10.34,9 9,10.34 9,12 C9,13.66 10.34,15 12,15 Z" />
+    </Button>
+
+    <Button Grid.Column="3"
+            Classes="menu-icon-button"
+            Click="OnToggleFilter"
+            IsEnabled="{Binding IsSearchFilterAvailable}"
             IsVisible="{Binding IsProjectLoaded}"
             ToolTip.Placement="Left">
       <ToolTip.Tip>

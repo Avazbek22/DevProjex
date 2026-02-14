@@ -36,6 +36,7 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? ToggleCompactModeRequested;
     public event EventHandler<RoutedEventArgs>? ToggleSearchRequested;
     public event EventHandler<RoutedEventArgs>? ToggleSettingsRequested;
+    public event EventHandler<RoutedEventArgs>? TogglePreviewRequested;
     public event EventHandler<RoutedEventArgs>? ToggleFilterRequested;
     public event EventHandler<RoutedEventArgs>? ThemeMenuClickRequested;
     public event EventHandler<RoutedEventArgs>? LanguageRuRequested;
@@ -147,6 +148,8 @@ public partial class TopMenuBarView : UserControl
     private void OnToggleSearch(object? sender, RoutedEventArgs e) => ToggleSearchRequested?.Invoke(sender, e);
 
     private void OnToggleSettings(object? sender, RoutedEventArgs e) => ToggleSettingsRequested?.Invoke(sender, e);
+
+    private void OnTogglePreview(object? sender, RoutedEventArgs e) => TogglePreviewRequested?.Invoke(sender, e);
 
     private void OnToggleFilter(object? sender, RoutedEventArgs e) => ToggleFilterRequested?.Invoke(sender, e);
 

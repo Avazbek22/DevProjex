@@ -143,6 +143,7 @@
                           ToggleCompactModeRequested="OnToggleCompactMode"
                           ToggleSearchRequested="OnToggleSearch"
                           ToggleSettingsRequested="OnToggleSettings"
+                          TogglePreviewRequested="OnTogglePreview"
                           ToggleFilterRequested="OnToggleFilter"
                           ThemeMenuClickRequested="OnThemeMenuClick"
                           HelpRequested="OnHelp"
@@ -435,56 +436,148 @@
             </views:FilterBarView>
           </Border>
 
+          <!-- Animated preview bar container -->
+          <Border DockPanel.Dock="Top"
+                  Name="PreviewBarContainer"
+                  ClipToBounds="True"
+                  Height="0">
+            <Border Name="PreviewBar"
+                    Classes="preview-panel"
+                    RenderTransformOrigin="50%,0%">
+              <Border.RenderTransform>
+                <TranslateTransform Y="0" />
+              </Border.RenderTransform>
+              <Grid ColumnDefinitions="Auto,*,Auto"
+                    Margin="12,8"
+                    VerticalAlignment="Center">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding PreviewModesLabel}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,0"
+                           FontWeight="SemiBold" />
+                <Border Grid.Column="1"
+                        Classes="segmented-control preview-segmented-control">
+                  <Panel>
+                    <Border Name="PreviewSegmentThumb"
+                            Classes="segment-thumb preview-segment-thumb"
+                            Classes.preview-segment-thumb-middle="{Binding IsPreviewContentSelected}"
+                            Classes.preview-segment-thumb-right="{Binding IsPreviewTreeAndContentSelected}" />
+
+                    <StackPanel Orientation="Horizontal">
+                      <Button Classes="segment-text-button preview-segment-button"
+                              Classes.segment-selected="{Binding IsPreviewTreeSelected}"
+                              Content="{Binding PreviewModeTree}"
+                              Click="OnPreviewTreeModeClick" />
+                      <Button Classes="segment-text-button preview-segment-button"
+                              Classes.segment-selected="{Binding IsPreviewContentSelected}"
+                              Content="{Binding PreviewModeContent}"
+                              Click="OnPreviewContentModeClick" />
+                      <Button Classes="segment-text-button preview-segment-button"
+                              Classes.segment-selected="{Binding IsPreviewTreeAndContentSelected}"
+                              Content="{Binding PreviewModeTreeAndContent}"
+                              Click="OnPreviewTreeAndContentModeClick" />
+                    </StackPanel>
+                  </Panel>
+                </Border>
+                <Button Grid.Column="2"
+                        Classes="menu-icon-button"
+                        Width="32"
+                        Height="32"
+                        Margin="12,0,0,0"
+                        Content="✕"
+                        Click="OnPreviewClose" />
+              </Grid>
+            </Border>
+          </Border>
+
           <!-- Tree content island -->
           <Border Classes="island-panel content-island">
-            <TreeView Name="ProjectTree"
-                    Grid.Column="0"
-                    ItemsSource="{Binding TreeNodes}"
-                    IsEnabled="{Binding IsProjectLoaded}"
-                    FontFamily="{Binding SelectedFontFamily}"
-                    FontSize="{Binding TreeFontSize}">
-          <TreeView.ItemsPanel>
-            <ItemsPanelTemplate>
-              <VirtualizingStackPanel />
-            </ItemsPanelTemplate>
-          </TreeView.ItemsPanel>
-          <TreeView.ItemTemplate>
-            <TreeDataTemplate ItemsSource="{Binding ChildItemsSource}">
-              <Grid ColumnDefinitions="Auto,*">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />
-                  <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="1"
-                            Orientation="Horizontal"
-                            Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
-                  <CheckBox IsThreeState="True"
-                            IsChecked="{Binding IsChecked, Mode=TwoWay}"
-                            VerticalAlignment="Center" />
-                  <Image Source="{Binding Icon}"
-                         Width="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                         Height="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                         Stretch="Uniform"
-                         VerticalAlignment="Center" />
-                  <TextBlock Text="{Binding DisplayName}"
-                             IsVisible="{Binding !HasHighlightedDisplay}"
-                             VerticalAlignment="Center"
-                             Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                             FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                             FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                             Foreground="{DynamicResource AppTextBrush}" />
-                  <TextBlock Inlines="{Binding DisplayInlines}"
-                             IsVisible="{Binding HasHighlightedDisplay}"
-                             VerticalAlignment="Center"
-                             Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                             FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                             FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                             Foreground="{DynamicResource AppTextBrush}" />
-                </StackPanel>
-              </Grid>
-            </TreeDataTemplate>
-          </TreeView.ItemTemplate>
-          </TreeView>
+            <Grid>
+              <TreeView Name="ProjectTree"
+                        Grid.Column="0"
+                        ItemsSource="{Binding TreeNodes}"
+                        IsEnabled="{Binding IsProjectLoaded}"
+                        IsVisible="{Binding !IsPreviewMode}"
+                        FontFamily="{Binding SelectedFontFamily}"
+                        FontSize="{Binding TreeFontSize}">
+                <TreeView.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <VirtualizingStackPanel />
+                  </ItemsPanelTemplate>
+                </TreeView.ItemsPanel>
+                <TreeView.ItemTemplate>
+                  <TreeDataTemplate ItemsSource="{Binding ChildItemsSource}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="1"
+                                  Orientation="Horizontal"
+                                  Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
+                        <CheckBox IsThreeState="True"
+                                  IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                  VerticalAlignment="Center" />
+                        <Image Source="{Binding Icon}"
+                               Width="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                               Height="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                               Stretch="Uniform"
+                               VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding DisplayName}"
+                                   IsVisible="{Binding !HasHighlightedDisplay}"
+                                   VerticalAlignment="Center"
+                                   Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   Foreground="{DynamicResource AppTextBrush}" />
+                        <TextBlock Inlines="{Binding DisplayInlines}"
+                                   IsVisible="{Binding HasHighlightedDisplay}"
+                                   VerticalAlignment="Center"
+                                   Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   Foreground="{DynamicResource AppTextBrush}" />
+                      </StackPanel>
+                    </Grid>
+                  </TreeDataTemplate>
+                </TreeView.ItemTemplate>
+              </TreeView>
+
+              <Border IsVisible="{Binding IsPreviewMode}"
+                      Background="Transparent">
+                <Grid RowDefinitions="Auto,*">
+                  <TextBlock Grid.Row="0"
+                             IsVisible="{Binding IsPreviewLoading}"
+                             Text="{Binding PreviewLoadingText}"
+                             Margin="12,10,12,0"
+                             Opacity="0.8" />
+                  <ScrollViewer Grid.Row="1"
+                                Margin="0,6,0,0"
+                                HorizontalScrollBarVisibility="Auto"
+                                VerticalScrollBarVisibility="Auto">
+                    <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,8">
+                      <Border Classes="preview-line-numbers">
+                        <TextBlock Text="{Binding PreviewLineNumbers}"
+                                   FontFamily="{Binding SelectedFontFamily}"
+                                   FontSize="{Binding TreeFontSize}"
+                                   Opacity="0.72"
+                                   Margin="0"
+                                   TextWrapping="NoWrap" />
+                      </Border>
+                      <Border Grid.Column="1"
+                              Padding="10,10,16,10">
+                        <TextBlock Text="{Binding PreviewText}"
+                                   FontFamily="{Binding SelectedFontFamily}"
+                                   FontSize="{Binding TreeFontSize}"
+                                   TextWrapping="NoWrap"
+                                   HorizontalAlignment="Left"
+                                   VerticalAlignment="Top" />
+                      </Border>
+                    </Grid>
+                  </ScrollViewer>
+                </Grid>
+              </Border>
+            </Grid>
           </Border>
         </DockPanel>
 
