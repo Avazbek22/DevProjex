@@ -58,7 +58,7 @@
   "Filter.ByName": "Nom bo'yicha filtr",
   "Filter.Tooltip": "Nom bo'yicha filtr (Ctrl+Shift+N)",
   "CopyFormat.Tooltip": "Daraxt formati",
-  "Preview.Tooltip": "Oldindan ko'rish rejimi",
+  "Preview.Tooltip": "Oldindan ko'rish rejimi (Ctrl+B)",
   "Preview.Modes.Label": "Uch rejim:",
   "Preview.Mode.Tree": "Daraxt",
   "Preview.Mode.Content": "Kontent",

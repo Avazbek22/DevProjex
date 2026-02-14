@@ -58,7 +58,7 @@
   "Filter.ByName": "Filtrer par nom",
   "Filter.Tooltip": "Filtrer par nom (Ctrl+Shift+N)",
   "CopyFormat.Tooltip": "Format de l'arborescence",
-  "Preview.Tooltip": "Mode aperçu",
+  "Preview.Tooltip": "Mode aperçu (Ctrl+B)",
   "Preview.Modes.Label": "Trois modes :",
   "Preview.Mode.Tree": "Arborescence",
   "Preview.Mode.Content": "Contenu",

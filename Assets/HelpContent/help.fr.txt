@@ -106,6 +106,7 @@ Modes disponibles :
 * Arborescence
 * Contenu
 * Arborescence et contenu
+Raccourci : Ctrl+B.
 
 L’aperçu utilise les mêmes règles que les opérations de copie/export :
 * si des nœuds sont cochés, le résultat est construit à partir de la sélection ;

@@ -106,6 +106,7 @@ Available modes:
 * Tree
 * Content
 * Tree and content
+Hotkey: Ctrl+B.
 
 Preview uses the same rules as copy/export operations:
 * if nodes are checked, the result is built from selection;

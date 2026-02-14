@@ -58,7 +58,7 @@
   "Filter.ByName": "Филтр бо ном",
   "Filter.Tooltip": "Филтр бо ном (Ctrl+Shift+N)",
   "CopyFormat.Tooltip": "Формати дарахт",
-  "Preview.Tooltip": "Режими пешнамоиш",
+  "Preview.Tooltip": "Режими пешнамоиш (Ctrl+B)",
   "Preview.Modes.Label": "Се режим:",
   "Preview.Mode.Tree": "Дарахт",
   "Preview.Mode.Content": "Мундариҷа",

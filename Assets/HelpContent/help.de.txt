@@ -106,6 +106,7 @@ Verfügbare Modi:
 * Baum
 * Inhalt
 * Baum und Inhalt
+Tastenkürzel: Ctrl+B.
 
 Die Vorschau verwendet dieselben Regeln wie Kopier-/Exportvorgänge:
 * wenn Knoten markiert sind, wird das Ergebnis aus der Auswahl aufgebaut;

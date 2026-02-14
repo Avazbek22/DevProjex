@@ -106,6 +106,7 @@ Mavjud rejimlar:
 * Daraxt
 * Mazmun
 * Daraxt va mazmun
+Tugma: Ctrl+B.
 
 Preview nusxalash/eksport amallari bilan bir xil qoidalardan foydalanadi:
 * agar tugunlar belgilangan bo‘lsa, natija tanlov asosida quriladi;

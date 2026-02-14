@@ -58,7 +58,7 @@
   "Filter.ByName": "Атау бойынша сүзгі",
   "Filter.Tooltip": "Атау бойынша сүзгі (Ctrl+Shift+N)",
   "CopyFormat.Tooltip": "Ағаш пішімі",
-  "Preview.Tooltip": "Алдын ала қарау режимі",
+  "Preview.Tooltip": "Алдын ала қарау режимі (Ctrl+B)",
   "Preview.Modes.Label": "Үш режим:",
   "Preview.Mode.Tree": "Ағаш",
   "Preview.Mode.Content": "Мазмұн",

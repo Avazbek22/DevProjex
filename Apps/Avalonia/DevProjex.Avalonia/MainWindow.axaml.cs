@@ -2631,6 +2631,14 @@ public partial class MainWindow : Window
         if (!_viewModel.IsProjectLoaded)
             return;
 
+        // Ctrl+B Preview mode toggle
+        if (mods == KeyModifiers.Control && e.Key == Key.B)
+        {
+            OnTogglePreview(this, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
         // Ctrl+P Options panel toggle
         if (mods == KeyModifiers.Control && e.Key == Key.P)
         {

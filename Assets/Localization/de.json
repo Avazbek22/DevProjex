@@ -58,7 +58,7 @@
   "Filter.ByName": "Nach Name filtern",
   "Filter.Tooltip": "Nach Name filtern (Ctrl+Shift+N)",
   "CopyFormat.Tooltip": "Baumformat",
-  "Preview.Tooltip": "Vorschaumodus",
+  "Preview.Tooltip": "Vorschaumodus (Ctrl+B)",
   "Preview.Modes.Label": "Drei Modi:",
   "Preview.Mode.Tree": "Baum",
   "Preview.Mode.Content": "Inhalt",

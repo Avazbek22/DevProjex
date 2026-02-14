@@ -106,6 +106,7 @@ Modalità disponibili:
 * Albero
 * Contenuto
 * Albero e contenuto
+Scorciatoia: Ctrl+B.
 
 L’anteprima usa le stesse regole delle operazioni di copia/esportazione:
 * se ci sono nodi selezionati, il risultato viene costruito dalla selezione;
