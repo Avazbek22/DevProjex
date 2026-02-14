@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
@@ -26,7 +27,7 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 	}
 
 	[Fact]
-	public void Build_Json_ContainsRootPathTreeAndContent()
+	public void Build_Json_ContainsJsonTreeAndTextContent()
 	{
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("notes.txt", "hello");
@@ -35,10 +36,15 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 
 		var export = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
 
-		using var doc = JsonDocument.Parse(export);
+		// JSON tree + separator + text content
+		var (jsonPart, contentPart) = SplitJsonAndContent(export);
+
+		using var doc = JsonDocument.Parse(jsonPart);
 		Assert.Equal(Path.GetFullPath(temp.Path), doc.RootElement.GetProperty("rootPath").GetString());
-		Assert.True(doc.RootElement.TryGetProperty("tree", out _));
-		Assert.True(doc.RootElement.TryGetProperty("content", out _));
+		Assert.True(doc.RootElement.TryGetProperty("root", out _));
+
+		Assert.Contains("notes.txt", contentPart);
+		Assert.Contains("hello", contentPart);
 	}
 
 	[Fact]
@@ -52,9 +58,11 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 
 		var export = service.Build(temp.Path, root, selected, TreeTextFormat.Json);
 
-		using var doc = JsonDocument.Parse(export);
-		Assert.Equal("notes.txt", doc.RootElement.GetProperty("tree").GetProperty("files")[0].GetString());
-		Assert.Contains(file, doc.RootElement.GetProperty("content").GetString() ?? string.Empty);
+		var (jsonPart, contentPart) = SplitJsonAndContent(export);
+
+		using var doc = JsonDocument.Parse(jsonPart);
+		Assert.Equal("notes.txt", doc.RootElement.GetProperty("root").GetProperty("files")[0].GetString());
+		Assert.Contains(file, contentPart);
 	}
 
 	[Fact]
@@ -84,9 +92,9 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 
 		var export = service.Build(temp.Path, root, selected, TreeTextFormat.Json);
 
+		// When no files selected, only tree JSON is returned (no content part)
 		using var doc = JsonDocument.Parse(export);
 		Assert.True(doc.RootElement.TryGetProperty("root", out _));
-		Assert.False(doc.RootElement.TryGetProperty("content", out _));
 	}
 
 	[Fact]
@@ -99,8 +107,20 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 
 		var export = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
 
-		using var doc = JsonDocument.Parse(export);
-		Assert.Contains("Привет, мир!", doc.RootElement.GetProperty("content").GetString() ?? string.Empty);
+		// Content is plain text after JSON tree
+		Assert.Contains("Привет, мир!", export);
+	}
+
+	private static (string JsonPart, string ContentPart) SplitJsonAndContent(string export)
+	{
+		// Find separator (NBSP = \u00A0) which separates JSON tree from text content
+		var separatorIndex = export.IndexOf("\u00A0", StringComparison.Ordinal);
+		if (separatorIndex < 0)
+			return (export, string.Empty);
+
+		var jsonPart = export[..separatorIndex].TrimEnd('\r', '\n');
+		var contentPart = export[separatorIndex..];
+		return (jsonPart, contentPart);
 	}
 
 	private static TreeAndContentExportService CreateService()

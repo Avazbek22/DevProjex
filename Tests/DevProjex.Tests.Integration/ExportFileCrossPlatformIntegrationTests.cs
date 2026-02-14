@@ -70,7 +70,7 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 	}
 
 	[Fact]
-	public async Task ExportJsonTreeAndContentToFile_WritesValidJsonPayload()
+	public async Task ExportJsonTreeAndContentToFile_WritesJsonTreeAndTextContent()
 	{
 		using var temp = new TemporaryDirectory();
 		var fixture = CreateSampleFixture(temp);
@@ -79,16 +79,26 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 			new SelectedContentExportService(new FileContentAnalyzer()));
 		var fileExport = new TextFileExportService();
 		var payload = treeAndContent.Build(temp.Path, fixture.Root, new HashSet<string>(), TreeTextFormat.Json);
-		var exportPath = Path.Combine(temp.Path, "tree_content.json");
+		var exportPath = Path.Combine(temp.Path, "tree_content.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
 			await fileExport.WriteAsync(stream, payload);
 
-		using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath, Encoding.UTF8));
+		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8);
+
+		// JSON tree + separator (NBSP lines) + text content
+		// Find separator (NBSP = \u00A0)
+		var separatorIndex = content.IndexOf("\u00A0", StringComparison.Ordinal);
+		Assert.True(separatorIndex > 0, "Separator not found");
+
+		var jsonPart = content[..separatorIndex].TrimEnd('\r', '\n');
+		var textPart = content[separatorIndex..];
+
+		using var doc = JsonDocument.Parse(jsonPart);
 		Assert.Equal(Path.GetFullPath(temp.Path), doc.RootElement.GetProperty("rootPath").GetString());
-		Assert.True(doc.RootElement.TryGetProperty("tree", out var tree));
+		Assert.True(doc.RootElement.TryGetProperty("root", out var tree));
 		Assert.Equal("Root", tree.GetProperty("name").GetString());
-		Assert.Contains("main.cs", doc.RootElement.GetProperty("content").GetString() ?? string.Empty);
+		Assert.Contains("main.cs", textPart);
 	}
 
 	[Fact]

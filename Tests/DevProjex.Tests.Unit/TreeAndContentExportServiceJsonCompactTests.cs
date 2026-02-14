@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using DevProjex.Application.Services;
@@ -35,13 +36,19 @@ public sealed class TreeAndContentExportServiceJsonCompactTests
 
 		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
 
-		using var doc = JsonDocument.Parse(result);
-		var tree = doc.RootElement.GetProperty("tree");
+		// JSON tree + separator + text content
+		var (jsonPart, contentPart) = SplitJsonAndContent(result);
+
+		using var doc = JsonDocument.Parse(jsonPart);
+		var tree = doc.RootElement.GetProperty("root");
 		Assert.Equal("root", tree.GetProperty("name").GetString());
 		Assert.Equal(".", tree.GetProperty("path").GetString());
 		Assert.True(tree.TryGetProperty("files", out _));
 		Assert.False(tree.TryGetProperty("fullPath", out _));
 		Assert.False(tree.TryGetProperty("children", out _));
+
+		// Content is plain text
+		Assert.Contains("a.txt", contentPart);
 	}
 
 	[Fact]
@@ -70,14 +77,16 @@ public sealed class TreeAndContentExportServiceJsonCompactTests
 
 		var result = service.Build(temp.Path, root, selected, TreeTextFormat.Json);
 
-		using var doc = JsonDocument.Parse(result);
-		var files = doc.RootElement.GetProperty("tree").GetProperty("files");
-		var content = doc.RootElement.GetProperty("content").GetString() ?? string.Empty;
+		// JSON tree + separator + text content
+		var (jsonPart, contentPart) = SplitJsonAndContent(result);
+
+		using var doc = JsonDocument.Parse(jsonPart);
+		var files = doc.RootElement.GetProperty("root").GetProperty("files");
 
 		Assert.Equal(1, files.GetArrayLength());
 		Assert.Equal("first.txt", files[0].GetString());
-		Assert.Contains(first, content);
-		Assert.DoesNotContain(second, content);
+		Assert.Contains(first, contentPart);
+		Assert.DoesNotContain(second, contentPart);
 	}
 
 	[Fact]
@@ -103,8 +112,19 @@ public sealed class TreeAndContentExportServiceJsonCompactTests
 
 		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
 
+		// Only JSON tree, no content (binary file)
 		using var doc = JsonDocument.Parse(result);
 		Assert.True(doc.RootElement.TryGetProperty("root", out _));
-		Assert.False(doc.RootElement.TryGetProperty("content", out _));
+	}
+
+	private static (string JsonPart, string ContentPart) SplitJsonAndContent(string export)
+	{
+		var separatorIndex = export.IndexOf("\u00A0", StringComparison.Ordinal);
+		if (separatorIndex < 0)
+			return (export, string.Empty);
+
+		var jsonPart = export[..separatorIndex].TrimEnd('\r', '\n');
+		var contentPart = export[separatorIndex..];
+		return (jsonPart, contentPart);
 	}
 }
