@@ -134,6 +134,10 @@ Rechts befinden sich Listen:
 
 Jede Liste hat einen Alle‑Schalter.
 
+Hinweis zu „Dateitypen“:
+* in dieser Liste werden nur Dateien mit Erweiterung angezeigt;
+* Dateien ohne Erweiterung werden hier nicht angezeigt und über eine separate Option in „Ignorieren“ gesteuert.
+
 Ctrl+P — Panel anzeigen/ausblenden.
 
 ## 10) Ignore
@@ -146,6 +150,7 @@ Reihenfolge der Optionen:
 * Versteckte Dateien
 * Ordner mit führendem Punkt
 * Dateien mit führendem Punkt
+* Dateien ohne Erweiterung (wird nur angezeigt, wenn solche Dateien erkannt wurden)
 
 Die Trennlinie unter „.gitignore verwenden“ trennt Git/Smart-Regeln von den grundlegenden Sichtbarkeitsregeln.
 
@@ -199,6 +204,15 @@ Smart Ignore (wenn aktiviert) ergänzt die Filterung in den gefundenen Bereichen
 5. Ordner ohne relevante Regeln.
 Wenn keine `.gitignore` gefunden wird und Smart Ignore nicht relevant ist, werden diese Punkte nicht angezeigt.
 Es bleiben nur die grundlegenden Sichtbarkeitsregeln.
+
+### 10.6 Dateien ohne Erweiterung
+Die Option „Dateien ohne Erweiterung“ steuert die Sichtbarkeit von Dateien ohne Erweiterung (zum Beispiel: `Dockerfile`, `Makefile`, `README`).
+
+Regeln:
+* die Option wird nur angezeigt, wenn solche Dateien im aktuellen Datensatz tatsächlich vorhanden sind;
+* wenn aktiviert, werden Dateien ohne Erweiterung aus dem Baum sowie aus Kopier-/Exportoperationen ausgeschlossen;
+* wenn deaktiviert, werden Dateien ohne Erweiterung in das Ergebnis aufgenommen;
+* die Liste „Dateitypen“ beeinflusst dieses Verhalten nicht.
 ## 11) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
 * ausgewählte Ordner der obersten Ebene
@@ -221,6 +235,10 @@ Format:
 
 Große Werte werden kompakt mit K/M angezeigt.
 
+Wichtig:
+* „Zeilen“ im Block „Baum“ ist die Anzahl der Zeilen in der finalen Baumdarstellung, nicht die Anzahl der Dateien auf dem Datenträger;
+* in diesen Wert fließen Ordner, Dateien und Service-Elemente des Baums ein (z. B. Knoten mit Zugriff verweigert).
+
 ### 11.2 Wie die Kennzahlen berechnet werden
 Baum-Kennzahlen:
 * werden aus der tatsächlichen Baum-Ausgabe berechnet, die von derselben Export-Pipeline erzeugt wird;
@@ -237,6 +255,7 @@ Neu berechnet wird:
 * nach dem Anwenden von Einstellungen (Ignore, Dateitypen, Root-Ordner);
 * bei Änderungen von Checkboxen im Baum (mit Debounce);
 * beim Umschalten ASCII/JSON (für Operationen mit Baum-Ausgabe).
+* wenn die Hintergrundberechnung abgebrochen wird, werden die Zähler auf 0 gesetzt, bis die nächste vollständige Neuberechnung abgeschlossen ist.
 
 ## 12) Symbole
 Auswahlreihenfolge:

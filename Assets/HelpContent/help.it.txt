@@ -134,6 +134,10 @@ Liste a destra:
 
 Ogni lista ha il toggle Tutti.
 
+Nota su « Tipi di file »:
+* in questa lista vengono mostrati solo file con estensione;
+* i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Ignora ».
+
 Ctrl+P — mostra/nascondi pannello.
 
 ## 10) Ignora
@@ -146,6 +150,7 @@ Ordine delle opzioni:
 * File nascosti
 * Cartelle con punto iniziale
 * File con punto iniziale
+* File senza estensione (mostrato solo se tali file vengono rilevati)
 
 La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
 
@@ -199,6 +204,15 @@ Viene mostrato « Usa .gitignore ».
 5. Cartella senza regole pertinenti.
 Se non viene trovato `.gitignore` e Smart Ignore non è pertinente, queste opzioni non vengono mostrate.
 Restano solo le regole base di visibilità.
+
+### 10.6 File senza estensione
+L’opzione « File senza estensione » controlla la visibilità dei file senza estensione (ad esempio: `Dockerfile`, `Makefile`, `README`).
+
+Regole:
+* l’opzione viene mostrata solo quando tali file sono realmente presenti nel set di dati corrente;
+* quando è attiva, i file senza estensione vengono esclusi dall’albero e dalle operazioni di copia/export;
+* quando è disattiva, i file senza estensione vengono inclusi nel risultato;
+* la lista « Tipi di file » non controlla questo comportamento.
 ## 11) Come vengono calcolati albero e metriche
 Il risultato dipende da:
 * cartelle di primo livello selezionate
@@ -221,6 +235,10 @@ Formato:
 
 I valori grandi sono mostrati in formato compatto (K/M).
 
+Importante:
+* « Righe » nel blocco « Albero » indica il numero di righe della rappresentazione finale dell’albero, non il numero di file su disco;
+* in questo valore rientrano cartelle, file ed elementi di servizio dell’albero (ad esempio nodi con accesso negato).
+
 ### 11.2 Come vengono calcolate le metriche
 Metriche albero:
 * sono calcolate dall’output reale dell’albero generato dalla stessa pipeline di export;
@@ -237,6 +255,7 @@ Il ricalcolo avviene:
 * dopo applicazione impostazioni (ignore, tipi file, cartelle root);
 * quando cambiano le checkbox nell’albero (con debounce);
 * quando si passa ASCII/JSON (per operazioni che usano l’albero).
+* quando il calcolo in background viene annullato, i contatori vengono impostati a 0 fino al successivo ricalcolo completato.
 
 ## 12) Icone
 Ordine di scelta:

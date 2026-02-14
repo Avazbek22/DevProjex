@@ -134,6 +134,10 @@ Listes à droite :
 
 Chaque liste a un bouton Tous.
 
+Remarque sur « Types de fichiers » :
+* cette liste affiche uniquement les fichiers avec extension ;
+* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Ignorer ».
+
 Ctrl+P — afficher/masquer le panneau.
 
 ## 10) Ignorer
@@ -146,6 +150,7 @@ Ordre des options :
 * Fichiers cachés
 * Dossiers commençant par un point
 * Fichiers commençant par un point
+* Fichiers sans extension (affiché uniquement si de tels fichiers sont détectés)
 
 La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
 
@@ -199,6 +204,15 @@ Smart Ignore (s’il est activé) complète le filtrage dans les zones détecté
 5. Dossier sans règles pertinentes.
 Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’est pas pertinent, ces options sont masquées.
 Seules les règles de visibilité de base restent actives.
+
+### 10.6 Fichiers sans extension
+L’option « Fichiers sans extension » contrôle l’affichage des fichiers sans extension (par exemple : `Dockerfile`, `Makefile`, `README`).
+
+Règles :
+* cette option est affichée uniquement si de tels fichiers existent réellement dans l’ensemble de données courant ;
+* lorsqu’elle est activée, les fichiers sans extension sont exclus de l’arbre et des opérations de copie/export ;
+* lorsqu’elle est désactivée, les fichiers sans extension sont inclus dans le résultat ;
+* la liste « Types de fichiers » n’influence pas ce mécanisme.
 ## 11) Comment l’arbre et les métriques sont calculés
 Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
@@ -221,6 +235,10 @@ Format :
 
 Les grandes valeurs sont affichées en format compact (K/M).
 
+Important :
+* « Lignes » dans le bloc « Arbre » correspond au nombre de lignes de la représentation finale de l’arborescence, et non au nombre de fichiers sur le disque ;
+* cette valeur inclut les dossiers, les fichiers et les éléments techniques de l’arbre (par exemple, les nœuds avec accès refusé).
+
 ### 11.2 Comment les métriques sont calculées
 Métriques de l’arbre :
 * sont calculées à partir de la sortie réelle de l’arbre générée par le même pipeline d’export ;
@@ -237,6 +255,7 @@ Le recalcul est effectué :
 * après application des paramètres (ignore, types de fichiers, dossiers racine) ;
 * lors des changements de cases à cocher dans l’arbre (avec debounce) ;
 * lors du basculement ASCII/JSON (pour les opérations utilisant l’arbre).
+* si le calcul en arrière-plan est annulé, les compteurs sont remis à 0 jusqu’au prochain recalcul terminé.
 
 ## 12) Icônes
 Ordre de sélection :

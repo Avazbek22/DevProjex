@@ -134,6 +134,10 @@ O‘ng tomonda ro‘yxatlar:
 
 Har bir ro‘yxatda Barchasi tugmasi bor.
 
+«Fayl turlari» bo‘yicha izoh:
+* bu ro‘yxatda faqat kengaytmali fayllar ko‘rsatiladi;
+* kengaytmasiz fayllar bu ro‘yxatga qo‘shilmaydi va «E’tiborsiz qoldirish» ichidagi alohida band orqali boshqariladi.
+
 Ctrl+P — panelni ko‘rsatish/yashirish.
 
 ## 10) Ignorlash
@@ -146,6 +150,7 @@ Variantlar tartibi:
 * Yashirin fayllar
 * Boshida nuqtali papkalar
 * Boshida nuqtali fayllar
+* Kengaytmasiz fayllar (faqat shunday fayllar aniqlanganda ko‘rsatiladi)
 
 ".gitignore dan foydalanish" ostidagi chiziq Git/Smart qoidalarni asosiy ko‘rinish qoidalaridan ajratadi.
 
@@ -199,6 +204,15 @@ Smart Ignore (yoqilgan bo‘lsa) aniqlangan hududlarda filtrlashni to‘ldiradi.
 5. Mos qoidalarsiz papka.
 Agar `.gitignore` topilmasa va Smart Ignore mos bo‘lmasa, bu variantlar ko‘rsatilmaydi.
 Faqat asosiy ko‘rinish qoidalari qoladi.
+
+### 10.6 Kengaytmasiz fayllar
+«Kengaytmasiz fayllar» bandi kengaytmasi yo‘q fayllar ko‘rinishini boshqaradi (masalan: `Dockerfile`, `Makefile`, `README`).
+
+Qoidalar:
+* band faqat joriy ma’lumotlar to‘plamida bunday fayllar haqiqatda mavjud bo‘lsa ko‘rsatiladi;
+* band yoqilganda, kengaytmasiz fayllar daraxtdan va nusxalash/eksport amallaridan chiqarib tashlanadi;
+* band o‘chirilganda, kengaytmasiz fayllar natijaga kiritiladi;
+* «Fayl turlari» ro‘yxati bu mexanizmga ta’sir qilmaydi.
 ## 11) Daraxt va metrikalar qanday hisoblanadi
 Natija quyidagilarga bog‘liq:
 * tanlangan yuqori darajadagi jildlar
@@ -221,6 +235,10 @@ Format:
 
 Katta qiymatlar qisqa formatda (K/M) ko‘rsatiladi.
 
+Muhim:
+* «Satrlar» («Daraxt» blokida) diskdagi fayllar soni emas, daraxtning yakuniy ko‘rinishidagi satrlar sonini bildiradi;
+* bu qiymatga papkalar, fayllar va daraxtning xizmat elementlari (masalan, kirish taqiqlangan tugunlar) kiradi.
+
 ### 11.2 Metrikalar qanday hisoblanadi
 Daraxt metrikalari:
 * aynan eksport pipeline’i yaratadigan real daraxt matni bo‘yicha hisoblanadi;
@@ -237,6 +255,7 @@ Qayta hisoblash quyidagi holatlarda bajariladi:
 * sozlamalar qo‘llangandan keyin (ignore, fayl turlari, root jildlar);
 * daraxtdagi checkboxlar o‘zgarganda (debounce bilan);
 * ASCII/JSON almashtirilganda (daraxt ishlatiladigan amallar uchun).
+* fon hisoblash bekor qilinsa, keyingi to‘liq yakunlangan qayta hisoblashgacha hisoblagichlar 0 ga o‘rnatiladi.
 
 ## 12) Ikonkalar
 Ikonka tanlash tartibi:
