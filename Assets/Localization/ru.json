@@ -152,6 +152,8 @@
   "Status.Operation.GettingUpdatesBranch": "Обновление {0}",
   "Status.Operation.SwitchingBranch": "Переключение ветки {0}",
   "Status.Operation.CalculatingData": "Подсчет данных",
+  "Status.Operation.PreparingPreview": "Подготовка превью",
+  "Toast.Operation.PreviewCanceled": "Подготовка превью отменена",
   "Status.Metric.Lines": "Строки: {0}",
   "Status.Metric.Chars": "Символы: {0}",
   "Status.Metric.Tokens": "~Токены: {0}",

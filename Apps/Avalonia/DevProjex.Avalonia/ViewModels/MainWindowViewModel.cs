@@ -938,6 +938,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string StatusOperationGettingUpdatesBranch { get; private set; } = string.Empty;
     public string StatusOperationSwitchingBranch { get; private set; } = string.Empty;
     public string StatusOperationCalculatingData { get; private set; } = string.Empty;
+    public string StatusOperationPreparingPreview { get; private set; } = string.Empty;
+    public string ToastPreviewCanceled { get; private set; } = string.Empty;
 
     // Git menu localization
     public string MenuGitClone { get; private set; } = string.Empty;
@@ -1043,6 +1045,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         StatusOperationGettingUpdatesBranch = _localization["Status.Operation.GettingUpdatesBranch"];
         StatusOperationSwitchingBranch = _localization["Status.Operation.SwitchingBranch"];
         StatusOperationCalculatingData = _localization["Status.Operation.CalculatingData"];
+        StatusOperationPreparingPreview = _localization["Status.Operation.PreparingPreview"];
+        ToastPreviewCanceled = _localization["Toast.Operation.PreviewCanceled"];
 
         // Git menu localization
         MenuGitClone = _localization["Menu.Git.Clone"];
@@ -1160,6 +1164,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(StatusOperationGettingUpdatesBranch));
         RaisePropertyChanged(nameof(StatusOperationSwitchingBranch));
         RaisePropertyChanged(nameof(StatusOperationCalculatingData));
+        RaisePropertyChanged(nameof(StatusOperationPreparingPreview));
+        RaisePropertyChanged(nameof(ToastPreviewCanceled));
 
         // Theme popover localization
         RaisePropertyChanged(nameof(MenuTheme));

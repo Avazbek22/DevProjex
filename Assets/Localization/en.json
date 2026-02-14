@@ -152,6 +152,8 @@
   "Status.Operation.GettingUpdatesBranch": "Updating {0}",
   "Status.Operation.SwitchingBranch": "Switching branch {0}",
   "Status.Operation.CalculatingData": "Calculating data",
+  "Status.Operation.PreparingPreview": "Preparing preview",
+  "Toast.Operation.PreviewCanceled": "Preview preparation canceled",
   "Status.Metric.Lines": "Lines: {0}",
   "Status.Metric.Chars": "Chars: {0}",
   "Status.Metric.Tokens": "~Tokens: {0}",

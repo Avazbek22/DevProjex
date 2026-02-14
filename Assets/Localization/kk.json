@@ -152,6 +152,8 @@
   "Status.Operation.GettingUpdatesBranch": "Жаңарту {0}",
   "Status.Operation.SwitchingBranch": "Тармақты ауыстыру {0}",
   "Status.Operation.CalculatingData": "Деректерді есептеу",
+  "Status.Operation.PreparingPreview": "Алдын ала қарау дайындалуда",
+  "Toast.Operation.PreviewCanceled": "Алдын ала қарауды дайындау тоқтатылды",
   "Status.Metric.Lines": "Жолдар: {0}",
   "Status.Metric.Chars": "Таңбалар: {0}",
   "Status.Metric.Tokens": "~Токендер: {0}",

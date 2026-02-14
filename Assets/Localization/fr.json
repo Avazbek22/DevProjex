@@ -152,6 +152,8 @@
   "Status.Operation.GettingUpdatesBranch": "Mise a jour {0}",
   "Status.Operation.SwitchingBranch": "Changement de branche {0}",
   "Status.Operation.CalculatingData": "Calcul des donnees",
+  "Status.Operation.PreparingPreview": "Préparation de l'aperçu",
+  "Toast.Operation.PreviewCanceled": "Préparation de l'aperçu annulée",
   "Status.Metric.Lines": "Lignes: {0}",
   "Status.Metric.Chars": "Caracteres: {0}",
   "Status.Metric.Tokens": "~Jetons: {0}",

@@ -448,18 +448,20 @@
                 <TranslateTransform Y="0" />
               </Border.RenderTransform>
               <Grid ColumnDefinitions="Auto,*,Auto"
-                    Margin="12,8"
+                    Margin="12,4"
                     VerticalAlignment="Center">
-                <TextBlock Grid.Column="0"
-                           Text="{Binding PreviewModesLabel}"
-                           VerticalAlignment="Center"
-                           Margin="0,0,12,0"
-                           FontWeight="SemiBold" />
+                <!-- Left spacer keeps segmented control visually centered against the close button. -->
+                <Border Grid.Column="0"
+                        Width="44"
+                        Background="Transparent" />
+
                 <Border Grid.Column="1"
                         Classes="segmented-control preview-segmented-control">
                   <Panel>
                     <Border Name="PreviewSegmentThumb"
                             Classes="segment-thumb preview-segment-thumb"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch"
                             Classes.preview-segment-thumb-middle="{Binding IsPreviewContentSelected}"
                             Classes.preview-segment-thumb-right="{Binding IsPreviewTreeAndContentSelected}" />
 

@@ -44,7 +44,8 @@ public partial class MainWindow : Window
         RefreshProject = 2,
         MetricsCalculation = 3,
         GitPullUpdates = 4,
-        GitSwitchBranch = 5
+        GitSwitchBranch = 5,
+        PreviewBuild = 6
     }
 
     private sealed record SelectionOptionSnapshot(string Name, bool IsChecked);
@@ -157,7 +158,7 @@ public partial class MainWindow : Window
     private Border? _previewBar;
     private TranslateTransform? _previewBarTransform;
     private bool _previewBarAnimating;
-    private const double PreviewBarHeight = 62.0;
+    private const double PreviewBarHeight = 46.0;
 
     // Preview generation
     private CancellationTokenSource? _previewBuildCts;
@@ -1150,6 +1151,16 @@ public partial class MainWindow : Window
         var buildVersion = Interlocked.Increment(ref _previewBuildVersion);
         _viewModel.IsPreviewLoading = true;
 
+        var operationId = BeginStatusOperation(
+            _viewModel.StatusOperationPreparingPreview,
+            indeterminate: true,
+            operationType: StatusOperationType.PreviewBuild,
+            cancelAction: () =>
+            {
+                previewCts.Cancel();
+                _toastService.Show(_viewModel.ToastPreviewCanceled);
+            });
+
         try
         {
             var selectedPaths = GetCheckedPaths();
@@ -1222,6 +1233,7 @@ public partial class MainWindow : Window
         {
             if (buildVersion == Volatile.Read(ref _previewBuildVersion))
                 _viewModel.IsPreviewLoading = false;
+            CompleteStatusOperation(operationId);
             DisposeIfCurrent(ref _previewBuildCts, previewCts);
         }
     }
@@ -1397,10 +1409,7 @@ public partial class MainWindow : Window
         if (_previewBarAnimating)
             return;
 
-        if (_viewModel.SearchVisible)
-            CloseSearch();
-        if (_viewModel.FilterVisible)
-            CloseFilter();
+        ForceCloseSearchAndFilterForPreview();
 
         _viewModel.IsPreviewMode = true;
         AnimatePreviewBar(true);
@@ -1415,7 +1424,14 @@ public partial class MainWindow : Window
         _viewModel.IsPreviewMode = false;
         AnimatePreviewBar(false);
         CancelPreviewRefresh();
+        ClearPreviewMemory();
         _treeView?.Focus();
+    }
+
+    private void ClearPreviewMemory()
+    {
+        _viewModel.PreviewText = string.Empty;
+        _viewModel.PreviewLineNumbers = "1";
     }
 
     private async void AnimateSettingsPanel(bool show)
@@ -2298,6 +2314,43 @@ public partial class MainWindow : Window
         ApplyFilterRealtime();
         AnimateFilterBar(false);
         _treeView?.Focus();
+    }
+
+    private void ForceCloseSearchAndFilterForPreview()
+    {
+        _viewModel.SearchVisible = false;
+        _viewModel.FilterVisible = false;
+        _viewModel.SearchQuery = string.Empty;
+        _viewModel.NameFilter = string.Empty;
+        _searchCoordinator.ClearSearchState();
+        ApplyFilterRealtime();
+
+        _searchBarAnimating = false;
+        _filterBarAnimating = false;
+
+        if (_searchBarContainer is not null)
+        {
+            _searchBarContainer.Height = 0;
+            _searchBarContainer.Margin = new Thickness(0);
+        }
+
+        if (_searchBarTransform is not null)
+            _searchBarTransform.Y = -SearchBarHeight;
+
+        if (_searchBar is not null)
+            _searchBar.Opacity = 0;
+
+        if (_filterBarContainer is not null)
+        {
+            _filterBarContainer.Height = 0;
+            _filterBarContainer.Margin = new Thickness(0);
+        }
+
+        if (_filterBarTransform is not null)
+            _filterBarTransform.Y = -FilterBarHeight;
+
+        if (_filterBar is not null)
+            _filterBar.Opacity = 0;
     }
 
     private void ApplyFilterRealtimeWithToken(CancellationToken cancellationToken)
@@ -3897,6 +3950,11 @@ public partial class MainWindow : Window
         {
             if (TryApplyActiveProjectLoadCancellationFallback())
                 _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
+        }
+
+        if (activeOperationType == StatusOperationType.PreviewBuild)
+        {
+            _previewBuildCts?.Cancel();
         }
 
         CompleteStatusOperation(activeOperationId);

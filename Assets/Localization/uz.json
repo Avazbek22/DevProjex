@@ -152,6 +152,8 @@
   "Status.Operation.GettingUpdatesBranch": "Yangilash {0}",
   "Status.Operation.SwitchingBranch": "Tarmoqni almashtirish {0}",
   "Status.Operation.CalculatingData": "Ma'lumotlarni hisoblash",
+  "Status.Operation.PreparingPreview": "Ko'rib chiqish tayyorlanmoqda",
+  "Toast.Operation.PreviewCanceled": "Ko'rib chiqish tayyorlash bekor qilindi",
   "Status.Metric.Lines": "Qatorlar: {0}",
   "Status.Metric.Chars": "Belgilar: {0}",
   "Status.Metric.Tokens": "~Tokenlar: {0}",

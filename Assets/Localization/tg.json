@@ -152,6 +152,8 @@
   "Status.Operation.GettingUpdatesBranch": "Навсозӣ {0}",
   "Status.Operation.SwitchingBranch": "Ивазкунии шоха {0}",
   "Status.Operation.CalculatingData": "Ҳисобкунии додаҳо",
+  "Status.Operation.PreparingPreview": "Пешнамоиш омода мешавад",
+  "Toast.Operation.PreviewCanceled": "Омодасозии пешнамоиш бекор карда шуд",
   "Status.Metric.Lines": "Сатрҳо: {0}",
   "Status.Metric.Chars": "Аломатҳо: {0}",
   "Status.Metric.Tokens": "~Токенҳо: {0}",
