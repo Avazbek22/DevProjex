@@ -547,14 +547,8 @@
 
               <Border IsVisible="{Binding IsPreviewMode}"
                       Background="Transparent">
-                <Grid RowDefinitions="Auto,*">
-                  <TextBlock Grid.Row="0"
-                             IsVisible="{Binding IsPreviewLoading}"
-                             Text="{Binding PreviewLoadingText}"
-                             Margin="12,10,12,0"
-                             Opacity="0.8" />
-                  <ScrollViewer Grid.Row="1"
-                                Margin="0,6,0,0"
+                <Grid>
+                  <ScrollViewer Margin="0,6,0,0"
                                 HorizontalScrollBarVisibility="Auto"
                                 VerticalScrollBarVisibility="Auto">
                     <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,8">

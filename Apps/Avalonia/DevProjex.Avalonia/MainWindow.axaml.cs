@@ -1153,6 +1153,40 @@ public partial class MainWindow : Window
         var buildVersion = Interlocked.Increment(ref _previewBuildVersion);
         _viewModel.IsPreviewLoading = true;
 
+        // Delayed progress bar: show only if operation takes > 300ms
+        long? operationId = null;
+        var progressBarShown = false;
+        var operationStart = Stopwatch.StartNew();
+
+        // Start delayed progress bar task
+        var progressBarTask = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(300, cancellationToken);
+                if (!cancellationToken.IsCancellationRequested && buildVersion == Volatile.Read(ref _previewBuildVersion))
+                {
+                    await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (buildVersion == Volatile.Read(ref _previewBuildVersion) && _viewModel.IsPreviewLoading)
+                        {
+                            operationId = BeginStatusOperation(
+                                _viewModel.StatusOperationPreparingPreview,
+                                indeterminate: true,
+                                operationType: StatusOperationType.PreviewBuild,
+                                cancelAction: () =>
+                                {
+                                    previewCts.Cancel();
+                                    _toastService.Show(_viewModel.ToastPreviewCanceled);
+                                });
+                            progressBarShown = true;
+                        }
+                    });
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, cancellationToken);
+
         try
         {
             // Capture state on UI thread before background work
@@ -1166,7 +1200,7 @@ public partial class MainWindow : Window
             var currentTreeRoot = _currentTree?.Root;
             var noDataText = _viewModel.PreviewNoDataText;
 
-            // Yield to UI thread to allow animations to start
+            // Yield to UI thread to allow thumb animation to start
             await Task.Yield();
 
             // Run all heavy work in background thread
@@ -1230,6 +1264,11 @@ public partial class MainWindow : Window
         {
             if (buildVersion == Volatile.Read(ref _previewBuildVersion))
                 _viewModel.IsPreviewLoading = false;
+
+            // Hide progress bar if it was shown
+            if (progressBarShown && operationId.HasValue)
+                CompleteStatusOperation(operationId.Value);
+
             DisposeIfCurrent(ref _previewBuildCts, previewCts);
         }
     }
@@ -1430,11 +1469,17 @@ public partial class MainWindow : Window
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineNumbers = "1";
 
-        // Request garbage collection for large preview strings
-        // Use Gen0 collection which is fast and non-blocking
+        // Schedule aggressive garbage collection for large preview strings
+        // Large strings go to LOH (Gen2), so we need full collection
         Task.Run(() =>
         {
-            GC.Collect(0, GCCollectionMode.Optimized, false);
+            // Small delay to let UI finish updates
+            Thread.Sleep(100);
+
+            // Full collection to release LOH strings
+            GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
         });
     }
 
@@ -3956,11 +4001,12 @@ public partial class MainWindow : Window
                 _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
         }
 
-        // Cancel preview build if in progress (not tracked by status operation)
-        if (_viewModel.IsPreviewLoading)
+        // Cancel preview build if in progress
+        if (_viewModel.IsPreviewLoading || activeOperationType == StatusOperationType.PreviewBuild)
         {
             _previewBuildCts?.Cancel();
             _viewModel.IsPreviewLoading = false;
+            _toastService.Show(_viewModel.ToastPreviewCanceled);
         }
 
         CompleteStatusOperation(activeOperationId);
