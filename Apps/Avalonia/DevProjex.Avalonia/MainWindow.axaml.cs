@@ -366,7 +366,12 @@ public partial class MainWindow : Window
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
             {
-                // Delay preview refresh to let thumb animation (200ms) play smoothly
+                // Clear content immediately to prevent jank from large text re-rendering
+                // while thumb animation plays
+                _viewModel.PreviewText = string.Empty;
+                _viewModel.PreviewLineNumbers = "1";
+
+                // Delay preview refresh to let thumb animation (250ms) complete
                 SchedulePreviewRefresh(immediate: false);
             }
         };
@@ -1112,8 +1117,8 @@ public partial class MainWindow : Window
         {
             _previewDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
             {
-                // 250ms delay allows thumb animation (200ms) to complete before loading
-                Interval = TimeSpan.FromMilliseconds(250)
+                // 350ms delay ensures thumb animation (250ms) completes fully before loading
+                Interval = TimeSpan.FromMilliseconds(350)
             };
             _previewDebounceTimer.Tick += OnPreviewDebounceTick;
         }
@@ -1153,39 +1158,16 @@ public partial class MainWindow : Window
         var buildVersion = Interlocked.Increment(ref _previewBuildVersion);
         _viewModel.IsPreviewLoading = true;
 
-        // Delayed progress bar: show only if operation takes > 300ms
-        long? operationId = null;
-        var progressBarShown = false;
-        var operationStart = Stopwatch.StartNew();
-
-        // Start delayed progress bar task
-        var progressBarTask = Task.Run(async () =>
-        {
-            try
+        // Show progress bar immediately with cancel support
+        var operationId = BeginStatusOperation(
+            _viewModel.StatusOperationPreparingPreview,
+            indeterminate: true,
+            operationType: StatusOperationType.PreviewBuild,
+            cancelAction: () =>
             {
-                await Task.Delay(300, cancellationToken);
-                if (!cancellationToken.IsCancellationRequested && buildVersion == Volatile.Read(ref _previewBuildVersion))
-                {
-                    await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        if (buildVersion == Volatile.Read(ref _previewBuildVersion) && _viewModel.IsPreviewLoading)
-                        {
-                            operationId = BeginStatusOperation(
-                                _viewModel.StatusOperationPreparingPreview,
-                                indeterminate: true,
-                                operationType: StatusOperationType.PreviewBuild,
-                                cancelAction: () =>
-                                {
-                                    previewCts.Cancel();
-                                    _toastService.Show(_viewModel.ToastPreviewCanceled);
-                                });
-                            progressBarShown = true;
-                        }
-                    });
-                }
-            }
-            catch (OperationCanceledException) { }
-        }, cancellationToken);
+                previewCts.Cancel();
+                _toastService.Show(_viewModel.ToastPreviewCanceled);
+            });
 
         try
         {
@@ -1199,9 +1181,6 @@ public partial class MainWindow : Window
             var currentPath = _currentPath;
             var currentTreeRoot = _currentTree?.Root;
             var noDataText = _viewModel.PreviewNoDataText;
-
-            // Yield to UI thread to allow thumb animation to start
-            await Task.Yield();
 
             // Run all heavy work in background thread
             var (previewText, lineNumbers) = await Task.Run(() =>
@@ -1265,9 +1244,8 @@ public partial class MainWindow : Window
             if (buildVersion == Volatile.Read(ref _previewBuildVersion))
                 _viewModel.IsPreviewLoading = false;
 
-            // Hide progress bar if it was shown
-            if (progressBarShown && operationId.HasValue)
-                CompleteStatusOperation(operationId.Value);
+            // Always hide progress bar
+            CompleteStatusOperation(operationId);
 
             DisposeIfCurrent(ref _previewBuildCts, previewCts);
         }
@@ -1465,21 +1443,30 @@ public partial class MainWindow : Window
 
     private void ClearPreviewMemory()
     {
-        // Clear preview data to free memory
+        // Force clear preview data by setting to different value first, then empty
+        // This ensures RaisePropertyChanged is called and binding releases reference
+        _viewModel.PreviewText = "\0"; // Temporary different value
+        _viewModel.PreviewLineNumbers = "\0";
+
+        // Now set to empty - binding will update
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineNumbers = "1";
 
         // Schedule aggressive garbage collection for large preview strings
-        // Large strings go to LOH (Gen2), so we need full collection
-        Task.Run(() =>
+        // Large strings (>85KB) go to LOH (Gen2), requires full blocking collection
+        _ = Task.Run(async () =>
         {
-            // Small delay to let UI finish updates
-            Thread.Sleep(100);
+            // Wait for close animation (250ms) and UI updates to complete
+            await Task.Delay(300);
 
-            // Full collection to release LOH strings
-            GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
+            // Force full blocking collection to release LOH strings
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
-            GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+            // Wait and collect again to ensure all generations are cleaned
+            await Task.Delay(200);
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         });
     }
 
@@ -1590,7 +1577,7 @@ public partial class MainWindow : Window
 
         _previewBarAnimating = true;
 
-        const double durationMs = 300.0;
+        const double durationMs = 250.0; // Same as SearchBar/FilterBar
         const double islandSpacing = 4.0;
 
         var startHeight = _previewBarContainer.Height;
