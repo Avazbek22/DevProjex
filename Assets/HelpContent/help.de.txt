@@ -23,9 +23,11 @@ Tastenkürzel:
   * Baum und Inhalt exportieren
 
 Formatregeln:
-* Baum exportieren — Format hängt vom ASCII/JSON-Schalter ab.
-* Inhalt exportieren — immer Textformat des Inhalts (ASCII/JSON-Schalter wirkt hier nicht).
-* Baum und Inhalt exportieren — Baumblock folgt dem ASCII/JSON-Schalter, Inhaltsblock bleibt Text.
+* Baum exportieren:
+  * ASCII -> nur `.txt`.
+  * JSON -> Standard `.json`, im Speichern-Dialog sind `.json` und `.txt` verfügbar.
+* Inhalt exportieren — immer Textformat des Inhalts, Datei `.txt` (ASCII/JSON-Schalter wirkt hier nicht).
+* Baum und Inhalt exportieren — immer Datei `.txt`; der ASCII/JSON-Schalter beeinflusst nur das Format des Baumblocks im Ergebnis.
 
 Exportdateien werden in UTF-8 ohne BOM geschrieben.
 
@@ -87,17 +89,17 @@ Kombiniert Baum und Inhalte:
 Tastenkürzel: Ctrl+Shift+V.
 
 ### JSON-Darstellung
-Im JSON-Modus wird eine kompakte Struktur verwendet.
+Im JSON-Modus wird eine kompakte Baumstruktur verwendet.
 
-Baum:
+Baum (Baum kopieren / Baum exportieren):
 * `rootPath` — absoluter Wurzelpfad.
 * `root` — Wurzelknoten.
 * Knotenfelder: `name`, `path`, `dirs`, `files`, `accessDenied` (bei Bedarf).
 
 Baum + Inhalt:
-* `rootPath` — absoluter Wurzelpfad.
-* `tree` — JSON-Baum.
-* `content` — Textblock mit Dateiinhalt.
+* JSON gilt für den Baumblock;
+* der Inhaltsblock bleibt Text;
+* Export erfolgt als `.txt`.
 
 ### Vorschaumodus
 Der Vorschaumodus wird über die Schaltfläche mit dem Auge in der oberen Leiste geöffnet und zeigt den finalen Text ohne Kopieren in die Zwischenablage und ohne Export in eine Datei.

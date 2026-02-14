@@ -23,9 +23,11 @@ Scorciatoie:
   * Esporta albero e contenuto
 
 Regole di formato:
-* Esporta albero — il formato dipende dal selettore ASCII/JSON.
-* Esporta contenuto — sempre formato testo del contenuto (il selettore ASCII/JSON non influisce).
-* Esporta albero e contenuto — il blocco albero segue il selettore ASCII/JSON, il blocco contenuto resta testuale.
+* Esporta albero:
+  * ASCII -> solo `.txt`.
+  * JSON -> predefinito `.json`, con `.json` e `.txt` disponibili nella finestra di salvataggio.
+* Esporta contenuto — sempre formato testo del contenuto, file `.txt` (il selettore ASCII/JSON non influisce).
+* Esporta albero e contenuto — sempre file `.txt`; il selettore ASCII/JSON influisce solo sul formato del blocco albero nel risultato.
 
 I file esportati vengono scritti in UTF-8 senza BOM.
 
@@ -87,17 +89,17 @@ Combina albero e contenuto:
 Scorciatoia: Ctrl+Shift+V.
 
 ### Rappresentazione JSON
-In modalità JSON viene usata una struttura compatta.
+In modalità JSON viene usata una struttura compatta dell’albero.
 
-Albero:
+Albero (Copia albero / Esporta albero):
 * `rootPath` — percorso assoluto della radice.
 * `root` — nodo radice.
 * campi nodo: `name`, `path`, `dirs`, `files`, `accessDenied` (se necessario).
 
 Albero + contenuto:
-* `rootPath` — percorso assoluto della radice.
-* `tree` — albero JSON.
-* `content` — blocco testuale del contenuto file.
+* JSON si applica al blocco albero;
+* il blocco contenuto resta testuale;
+* esportazione in `.txt`.
 
 ### Modalità anteprima
 La modalità anteprima si apre con il pulsante con l’icona a forma di occhio nella barra superiore e mostra il testo finale senza copiare negli appunti e senza esportare in un file.

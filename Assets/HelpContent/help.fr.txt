@@ -23,9 +23,11 @@ Raccourcis :
   * Exporter arborescence et contenu
 
 Règles de format :
-* Exporter l’arborescence — le format dépend du sélecteur ASCII/JSON.
-* Exporter le contenu — toujours au format texte du contenu (le sélecteur ASCII/JSON n’influence pas).
-* Exporter arborescence et contenu — le bloc arborescence suit le sélecteur ASCII/JSON, le bloc contenu reste textuel.
+* Exporter l’arborescence :
+  * ASCII -> uniquement `.txt`.
+  * JSON -> `.json` par défaut, avec `.json` et `.txt` disponibles dans la boîte de sauvegarde.
+* Exporter le contenu — toujours au format texte du contenu, fichier `.txt` (le sélecteur ASCII/JSON n’influence pas).
+* Exporter arborescence et contenu — toujours fichier `.txt` ; le sélecteur ASCII/JSON n’influence que le format du bloc arborescence dans le résultat.
 
 Les fichiers exportés sont écrits en UTF-8 sans BOM.
 
@@ -87,17 +89,17 @@ Combine arborescence et contenu :
 Raccourci : Ctrl+Shift+V.
 
 ### Représentation JSON
-Le mode JSON utilise une structure compacte.
+Le mode JSON utilise une structure compacte de l’arborescence.
 
-Arborescence :
+Arborescence (Copier l’arborescence / Exporter l’arborescence) :
 * `rootPath` — chemin absolu de la racine.
 * `root` — nœud racine.
 * champs du nœud : `name`, `path`, `dirs`, `files`, `accessDenied` (si nécessaire).
 
 Arborescence + contenu :
-* `rootPath` — chemin absolu de la racine.
-* `tree` — arborescence JSON.
-* `content` — bloc texte du contenu des fichiers.
+* JSON s’applique au bloc arborescence ;
+* le bloc contenu reste textuel ;
+* export en `.txt`.
 
 ### Mode aperçu
 Le mode aperçu s’ouvre avec le bouton en forme d’œil dans la barre supérieure et affiche le texte final sans copie dans le presse-papiers et sans export vers un fichier.

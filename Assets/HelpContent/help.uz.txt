@@ -23,9 +23,11 @@ Issiq tugmalar:
   * Daraxt va mazmunni eksport qilish
 
 Format qoidalari:
-* Daraxtni eksport qilish — format ASCII/JSON tumbleriga bog‘liq.
-* Mazmunni eksport qilish — har doim mazmunning matn formati (ASCII/JSON tumbleri ta’sir qilmaydi).
-* Daraxt va mazmunni eksport qilish — daraxt bloki ASCII/JSON tumbleriga bog‘liq, mazmun bloki matn bo‘lib qoladi.
+* Daraxtni eksport qilish:
+  * ASCII -> faqat `.txt`.
+  * JSON -> standart `.json`, saqlash oynasida `.json` va `.txt` mavjud.
+* Mazmunni eksport qilish — har doim mazmunning matn formati, `.txt` fayl (ASCII/JSON tumbleri ta’sir qilmaydi).
+* Daraxt va mazmunni eksport qilish — har doim `.txt` fayl; ASCII/JSON tumbleri faqat natijadagi daraxt blokining formatiga ta’sir qiladi.
 
 Eksport fayllari UTF-8 (BOMsiz) formatida yoziladi.
 
@@ -87,17 +89,17 @@ Daraxt va mazmunni birlashtiradi:
 Tugma: Ctrl+Shift+V.
 
 ### JSON ko‘rinishi
-JSON rejimida ixcham tuzilma ishlatiladi.
+JSON rejimida daraxtning ixcham tuzilmasi ishlatiladi.
 
-Daraxt:
+Daraxt (Daraxtni nusxalash / Daraxtni eksport qilish):
 * `rootPath` — ildizning absolyut yo‘li.
 * `root` — ildiz tugun.
 * tugun maydonlari: `name`, `path`, `dirs`, `files`, `accessDenied` (zarurat bo‘lsa).
 
 Daraxt + mazmun:
-* `rootPath` — ildizning absolyut yo‘li.
-* `tree` — JSON daraxt.
-* `content` — fayl mazmunining matn bloki.
+* JSON daraxt blokiga qo‘llanadi;
+* mazmun bloki matn bo‘lib qoladi;
+* eksport `.txt` formatida saqlanadi.
 
 ### Preview rejimi
 Preview rejimi yuqori paneldagi ko‘zcha ikonali tugma orqali ochiladi va yakuniy matnni clipboardga nusxalamasdan hamda faylga eksport qilmasdan ko‘rsatadi.

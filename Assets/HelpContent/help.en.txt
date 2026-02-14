@@ -23,9 +23,11 @@ Hotkeys:
   * Export tree and content
 
 Format rules:
-* Export tree — format depends on the ASCII/JSON toggle.
-* Export content — always text content format (ASCII/JSON toggle does not apply).
-* Export tree and content — tree block follows the ASCII/JSON toggle, content block stays text.
+* Export tree:
+  * ASCII -> `.txt` only.
+  * JSON -> default `.json`, with both `.json` and `.txt` available in Save dialog.
+* Export content — always text content format, `.txt` file (ASCII/JSON toggle does not apply).
+* Export tree and content — always `.txt` file; the ASCII/JSON toggle affects only the tree block format inside the result.
 
 Export files are written in UTF-8 without BOM.
 
@@ -87,17 +89,17 @@ Combines tree and content:
 Hotkey: Ctrl+Shift+V.
 
 ### JSON representation
-JSON mode uses a compact structure.
+JSON mode uses a compact tree structure.
 
-Tree:
+Tree (Copy tree / Export tree):
 * `rootPath` — absolute root path.
 * `root` — root node.
 * node fields: `name`, `path`, `dirs`, `files`, `accessDenied` (when needed).
 
 Tree + content:
-* `rootPath` — absolute root path.
-* `tree` — JSON tree.
-* `content` — text content block.
+* JSON applies to the tree block;
+* content block remains text;
+* exported as `.txt`.
 
 ### Preview mode
 Preview mode is opened with the eye icon button in the top bar and shows the final text without copying to clipboard and without exporting to a file.

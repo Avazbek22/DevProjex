@@ -989,7 +989,8 @@ public partial class MainWindow : Window
                 content,
                 BuildSuggestedExportFileName("tree", saveAsJson),
                 _viewModel.MenuFileExportTree,
-                saveAsJson);
+                useJsonDefaultExtension: saveAsJson,
+                allowBothExtensions: saveAsJson);
 
             if (saved)
                 _toastService.Show(_localization["Toast.Export.Tree"]);
@@ -1037,7 +1038,8 @@ public partial class MainWindow : Window
                 content,
                 BuildSuggestedExportFileName("content", saveAsJson: false),
                 _viewModel.MenuFileExportContent,
-                saveAsJson: false);
+                useJsonDefaultExtension: false,
+                allowBothExtensions: false);
 
             CompleteStatusOperation(statusOperationId);
             if (saved)
@@ -1061,7 +1063,7 @@ public partial class MainWindow : Window
 
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
-            var saveAsJson = format == TreeTextFormat.Json;
+            var saveAsJson = false;
 
             statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
             var content = await Task.Run(() =>
@@ -1071,7 +1073,8 @@ public partial class MainWindow : Window
                 content,
                 BuildSuggestedExportFileName("tree_content", saveAsJson),
                 _viewModel.MenuFileExportTreeAndContent,
-                saveAsJson);
+                useJsonDefaultExtension: false,
+                allowBothExtensions: false);
 
             CompleteStatusOperation(statusOperationId);
             if (saved)
@@ -1326,7 +1329,8 @@ public partial class MainWindow : Window
         string content,
         string suggestedFileName,
         string dialogTitle,
-        bool saveAsJson)
+        bool useJsonDefaultExtension,
+        bool allowBothExtensions)
     {
         if (StorageProvider is null || string.IsNullOrWhiteSpace(content))
             return false;
@@ -1348,10 +1352,14 @@ public partial class MainWindow : Window
             Title = dialogTitle,
             SuggestedFileName = suggestedFileName,
             ShowOverwritePrompt = true,
-            DefaultExtension = saveAsJson ? "json" : "txt",
-            FileTypeChoices = saveAsJson
+            // Tree export allows choosing both .json and .txt.
+            // Other export modes stay text-only for predictable output format.
+            DefaultExtension = useJsonDefaultExtension ? "json" : "txt",
+            FileTypeChoices = allowBothExtensions
                 ? new[] { jsonFileType, textFileType }
-                : new[] { textFileType, jsonFileType }
+                : useJsonDefaultExtension
+                    ? new[] { jsonFileType }
+                    : new[] { textFileType }
         };
 
         var file = await StorageProvider.SaveFilePickerAsync(options);
