@@ -2396,12 +2396,11 @@ public partial class MainWindow : Window
 
     private void ForceCloseSearchAndFilterForPreview()
     {
+        // Only hide search/filter islands visually for preview mode.
+        // Do not clear queries or re-apply filters here, otherwise tree selection state
+        // can be rebuilt and preview will diverge from copy/export behavior.
         _viewModel.SearchVisible = false;
         _viewModel.FilterVisible = false;
-        _viewModel.SearchQuery = string.Empty;
-        _viewModel.NameFilter = string.Empty;
-        _searchCoordinator.ClearSearchState();
-        ApplyFilterRealtime();
 
         _searchBarAnimating = false;
         _filterBarAnimating = false;
