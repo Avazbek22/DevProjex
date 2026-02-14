@@ -78,6 +78,7 @@
   "Settings.Ignore.HiddenFiles": "жасырын файлдар",
   "Settings.Ignore.DotFolders": "нүктемен басталатын қалталар",
   "Settings.Ignore.DotFiles": "нүктемен басталатын файлдар",
+  "Settings.Ignore.ExtensionlessFiles": "Кеңейтімсіз файлдар",
   "Settings.All": "Барлығы",
   "Settings.Ignore": "Елемеу:",
   "Settings.Extensions": "Файл түрлері:",

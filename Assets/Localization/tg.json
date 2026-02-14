@@ -78,6 +78,7 @@
   "Settings.Ignore.HiddenFiles": "файлҳои пинҳонӣ",
   "Settings.Ignore.DotFolders": "ҷузвдонҳои бо нуқта оғозшаванда",
   "Settings.Ignore.DotFiles": "файлҳои бо нуқта оғозшаванда",
+  "Settings.Ignore.ExtensionlessFiles": "Файлҳои бе васеъшавӣ",
   "Settings.All": "Ҳама",
   "Settings.Ignore": "Нодида гирифтан:",
   "Settings.Extensions": "Навъҳои файл:",

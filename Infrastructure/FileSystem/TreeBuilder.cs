@@ -125,12 +125,19 @@ public sealed class TreeBuilder : ITreeBuilder
 				if (ShouldSkipFile(entry, ignore))
 					continue;
 
-				if (options.AllowedExtensions.Count == 0)
-					continue;
+				if (IsExtensionlessFileName(name))
+				{
+					// Extensionless files are intentionally controlled only by ignore options.
+				}
+				else
+				{
+					if (options.AllowedExtensions.Count == 0)
+						continue;
 
-				var ext = Path.GetExtension(name);
-				if (!options.AllowedExtensions.Contains(ext))
-					continue;
+					var ext = Path.GetExtension(name);
+					if (!options.AllowedExtensions.Contains(ext))
+						continue;
+				}
 
 				// Apply name filter for files
 				if (hasNameFilter && !name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase))
@@ -236,6 +243,9 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.IgnoreDotFiles && entry.Name.StartsWith(".", StringComparison.Ordinal))
 			return true;
 
+		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(entry.Name))
+			return true;
+
 		if (rules.IgnoreHiddenFiles)
 		{
 			try
@@ -255,6 +265,15 @@ public sealed class TreeBuilder : ITreeBuilder
 		}
 
 		return false;
+	}
+
+	private static bool IsExtensionlessFileName(string fileName)
+	{
+		if (string.IsNullOrWhiteSpace(fileName))
+			return false;
+
+		var extension = Path.GetExtension(fileName);
+		return string.IsNullOrEmpty(extension) || extension == ".";
 	}
 
 	private sealed class BuildState

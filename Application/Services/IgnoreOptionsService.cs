@@ -39,6 +39,14 @@ public sealed class IgnoreOptionsService
 			new IgnoreOptionDescriptor(IgnoreOptionId.DotFiles, _localization["Settings.Ignore.DotFiles"], true)
 		});
 
+		if (availability.IncludeExtensionlessFiles)
+		{
+			options.Add(new IgnoreOptionDescriptor(
+				IgnoreOptionId.ExtensionlessFiles,
+				_localization["Settings.Ignore.ExtensionlessFiles"],
+				false));
+		}
+
 		return options;
 	}
 

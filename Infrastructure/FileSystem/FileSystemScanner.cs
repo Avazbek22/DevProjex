@@ -126,7 +126,9 @@ public sealed class FileSystemScanner : IFileSystemScanner
 					continue;
 
 				var ext = Path.GetExtension(name);
-				if (!string.IsNullOrWhiteSpace(ext))
+				if (IsExtensionlessFileName(name))
+					extensions.Add(name);
+				else if (!string.IsNullOrWhiteSpace(ext))
 					extensions.Add(ext);
 			}
 		});
@@ -175,7 +177,9 @@ public sealed class FileSystemScanner : IFileSystemScanner
 				continue;
 
 			var ext = Path.GetExtension(name);
-			if (!string.IsNullOrWhiteSpace(ext))
+			if (IsExtensionlessFileName(name))
+				exts.Add(name);
+			else if (!string.IsNullOrWhiteSpace(ext))
 				exts.Add(ext);
 		}
 
@@ -281,6 +285,9 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		if (rules.IgnoreDotFiles && name.StartsWith(".", StringComparison.Ordinal))
 			return true;
 
+		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(name))
+			return true;
+
 		if (rules.IgnoreHiddenFiles)
 		{
 			try
@@ -299,5 +306,14 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		}
 
 		return false;
+	}
+
+	private static bool IsExtensionlessFileName(string name)
+	{
+		if (string.IsNullOrWhiteSpace(name))
+			return false;
+
+		var extension = Path.GetExtension(name);
+		return string.IsNullOrEmpty(extension) || extension == ".";
 	}
 }

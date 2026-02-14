@@ -78,6 +78,7 @@
   "Settings.Ignore.HiddenFiles": "yashirin fayllar",
   "Settings.Ignore.DotFolders": "nuqta bilan boshlanuvchi jildlar",
   "Settings.Ignore.DotFiles": "nuqta bilan boshlanuvchi fayllar",
+  "Settings.Ignore.ExtensionlessFiles": "Kengaytmasiz fayllar",
   "Settings.All": "Barchasi",
   "Settings.Ignore": "E'tiborsiz qoldirish:",
   "Settings.Extensions": "Fayl turlari:",

@@ -78,6 +78,7 @@
   "Settings.Ignore.HiddenFiles": "file nascosti",
   "Settings.Ignore.DotFolders": "cartelle con punto iniziale",
   "Settings.Ignore.DotFiles": "file con punto iniziale",
+  "Settings.Ignore.ExtensionlessFiles": "File senza estensione",
   "Settings.All": "Tutti",
   "Settings.Ignore": "Ignora:",
   "Settings.Extensions": "Tipi di file:",

@@ -78,6 +78,7 @@
   "Settings.Ignore.HiddenFiles": "Hidden files",
   "Settings.Ignore.DotFolders": "dot folders",
   "Settings.Ignore.DotFiles": "dot files",
+  "Settings.Ignore.ExtensionlessFiles": "Files without extension",
   "Settings.All": "All",
   "Settings.Extensions": "File types:",
   "Settings.RootFolders": "Top-level folders:",

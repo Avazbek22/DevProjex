@@ -31,6 +31,7 @@ public sealed class SelectionSyncCoordinator
     private bool _ignoreSelectionInitialized;
     private HashSet<string> _extensionsSelectionCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _extensionsSelectionInitialized;
+    private bool _hasExtensionlessExtensionEntries;
     private string? _lastLoadedPath;
 
     private bool _suppressRootAllCheck;
@@ -226,12 +227,14 @@ public sealed class SelectionSyncCoordinator
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            var options = _filterSelectionService.BuildExtensionOptions(scan.Value, prev);
+            var hasExtensionlessEntries = scan.Value.Any(IsExtensionlessEntry);
+            var visibleExtensions = scan.Value.Where(entry => !IsExtensionlessEntry(entry)).ToList();
+            var options = _filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (version != _extensionScanVersion) return;
-                ApplyExtensionOptions(options);
+                ApplyExtensionOptions(options, hasExtensionlessEntries);
             });
         }, cancellationToken);
     }
@@ -334,6 +337,7 @@ public sealed class SelectionSyncCoordinator
         var selectedRoots = GetSelectedRootFolders();
         await PopulateIgnoreOptionsForRootSelectionAsync(selectedRoots, currentPath, cancellationToken);
         await PopulateExtensionsForRootSelectionAsync(currentPath, selectedRoots, cancellationToken);
+        await PopulateIgnoreOptionsForRootSelectionAsync(selectedRoots, currentPath, cancellationToken);
     }
 
     public async Task RefreshRootAndDependentsAsync(string currentPath, CancellationToken cancellationToken = default)
@@ -361,6 +365,7 @@ public sealed class SelectionSyncCoordinator
             var selectedRoots = GetSelectedRootFolders();
             await PopulateIgnoreOptionsForRootSelectionAsync(selectedRoots, currentPath, cancellationToken);
             await PopulateExtensionsForRootSelectionAsync(currentPath, selectedRoots, cancellationToken);
+            await PopulateIgnoreOptionsForRootSelectionAsync(selectedRoots, currentPath, cancellationToken);
         }
         finally
         {
@@ -381,6 +386,7 @@ public sealed class SelectionSyncCoordinator
         _extensionsSelectionCache.Clear();
         _extensionsSelectionCache.TrimExcess();
         _extensionsSelectionInitialized = false;
+        _hasExtensionlessExtensionEntries = false;
 
         // Clear ignore selection cache
         _ignoreSelectionCache.Clear();
@@ -443,7 +449,11 @@ public sealed class SelectionSyncCoordinator
 
         try
         {
-            return _getIgnoreOptionsAvailability(path, selectedRootFolders);
+            var availability = _getIgnoreOptionsAvailability(path, selectedRootFolders);
+            if (_hasExtensionlessExtensionEntries)
+                return availability with { IncludeExtensionlessFiles = true };
+
+            return availability;
         }
         catch
         {
@@ -509,13 +519,15 @@ public sealed class SelectionSyncCoordinator
 
     internal void ApplyExtensionScan(IReadOnlyCollection<string> extensions)
     {
+        var hasExtensionlessEntries = extensions.Any(IsExtensionlessEntry);
+        var visibleExtensions = extensions.Where(entry => !IsExtensionlessEntry(entry)).ToList();
         var prev = _extensionsSelectionCache.Count > 0
             ? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
                 StringComparer.OrdinalIgnoreCase);
 
-        var options = _filterSelectionService.BuildExtensionOptions(extensions, prev);
-        ApplyExtensionOptions(options);
+        var options = _filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
+        ApplyExtensionOptions(options, hasExtensionlessEntries);
     }
 
     public void UpdateIgnoreSelectionCache()
@@ -612,9 +624,12 @@ public sealed class SelectionSyncCoordinator
         }
     }
 
-    private void ApplyExtensionOptions(IReadOnlyList<SelectionOption> options)
+    private void ApplyExtensionOptions(IReadOnlyList<SelectionOption> options, bool hasExtensionlessEntries)
     {
         _viewModel.Extensions.Clear();
+        var keepExtensionlessAvailability = _viewModel.IgnoreOptions.Any(
+            option => option.Id == IgnoreOptionId.ExtensionlessFiles && option.IsChecked);
+        _hasExtensionlessExtensionEntries = keepExtensionlessAvailability || hasExtensionlessEntries;
 
         _suppressExtensionItemCheck = true;
         foreach (var option in options)
@@ -631,6 +646,15 @@ public sealed class SelectionSyncCoordinator
             _extensionsSelectionInitialized = true;
             UpdateExtensionsSelectionCache();
         }
+    }
+
+    private static bool IsExtensionlessEntry(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var extension = Path.GetExtension(value);
+        return string.IsNullOrEmpty(extension) || extension == ".";
     }
 
     private static void SetAllChecked<T>(
