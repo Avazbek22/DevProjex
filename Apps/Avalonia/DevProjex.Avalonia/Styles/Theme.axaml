@@ -517,22 +517,15 @@
         <Setter Property="Padding" Value="8,4" />
         <Setter Property="Margin" Value="0" />
         <Setter Property="VerticalAlignment" Value="Center" />
-        <Setter Property="RenderTransformOrigin" Value="50%,50%" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" Easing="CubicEaseOut" />
-            </Transitions>
-        </Setter>
+        <Setter Property="Transitions" Value="{x:Null}" />
     </Style>
 
     <Style Selector="Button.menu-icon-button:pointerover">
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
-        <Setter Property="RenderTransform" Value="scale(1.05)" />
     </Style>
 
     <Style Selector="Button.menu-icon-button:pressed">
-        <Setter Property="RenderTransform" Value="scale(0.95)" />
+        <Setter Property="Background" Value="{DynamicResource MenuPressedBrush}" />
     </Style>
 
     <Style Selector="StackPanel.settings-section">
