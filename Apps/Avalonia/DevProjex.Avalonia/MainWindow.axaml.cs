@@ -366,7 +366,8 @@ public partial class MainWindow : Window
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
             {
-                SchedulePreviewRefresh(immediate: true);
+                // Delay preview refresh to let thumb animation (200ms) play smoothly
+                SchedulePreviewRefresh(immediate: false);
             }
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
@@ -1111,7 +1112,8 @@ public partial class MainWindow : Window
         {
             _previewDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
             {
-                Interval = TimeSpan.FromMilliseconds(80)
+                // 250ms delay allows thumb animation (200ms) to complete before loading
+                Interval = TimeSpan.FromMilliseconds(250)
             };
             _previewDebounceTimer.Tick += OnPreviewDebounceTick;
         }
@@ -1151,73 +1153,68 @@ public partial class MainWindow : Window
         var buildVersion = Interlocked.Increment(ref _previewBuildVersion);
         _viewModel.IsPreviewLoading = true;
 
-        var operationId = BeginStatusOperation(
-            _viewModel.StatusOperationPreparingPreview,
-            indeterminate: true,
-            operationType: StatusOperationType.PreviewBuild,
-            cancelAction: () =>
-            {
-                previewCts.Cancel();
-                _toastService.Show(_viewModel.ToastPreviewCanceled);
-            });
-
         try
         {
+            // Capture state on UI thread before background work
             var selectedPaths = GetCheckedPaths();
             var selectedMode = _viewModel.SelectedPreviewContentMode;
             var treeFormat = GetCurrentTreeTextFormat();
             var hasSelection = selectedPaths.Count > 0;
             var noCheckedFilesText = _localization["Msg.NoCheckedFilesShort"];
             var noTextContentText = _localization["Msg.NoTextContent"];
+            var currentPath = _currentPath;
+            var currentTreeRoot = _currentTree?.Root;
+            var noDataText = _viewModel.PreviewNoDataText;
 
-            string previewText;
-            if (selectedMode == PreviewContentMode.Tree)
-            {
-                previewText = await Task.Run(
-                    () => BuildTreeTextForSelection(selectedPaths, treeFormat),
-                    cancellationToken);
-            }
-            else if (selectedMode == PreviewContentMode.Content)
-            {
-                var files = (hasSelection ? selectedPaths.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
-                    .Distinct(PathComparer.Default)
-                    .OrderBy(path => path, PathComparer.Default)
-                    .ToList();
+            // Yield to UI thread to allow animations to start
+            await Task.Yield();
 
-                if (files.Count == 0)
-                    previewText = hasSelection ? noCheckedFilesText : noTextContentText;
+            // Run all heavy work in background thread
+            var (previewText, lineNumbers) = await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string text;
+                if (selectedMode == PreviewContentMode.Tree)
+                {
+                    text = BuildTreeTextForSelection(selectedPaths, treeFormat);
+                }
+                else if (selectedMode == PreviewContentMode.Content)
+                {
+                    var files = (hasSelection
+                            ? selectedPaths.Where(File.Exists)
+                            : currentTreeRoot != null ? EnumerateFilePaths(currentTreeRoot) : Enumerable.Empty<string>())
+                        .Distinct(PathComparer.Default)
+                        .OrderBy(path => path, PathComparer.Default)
+                        .ToList();
+
+                    if (files.Count == 0)
+                        text = hasSelection ? noCheckedFilesText : noTextContentText;
+                    else
+                        text = _contentExport.BuildAsync(files, cancellationToken).GetAwaiter().GetResult();
+
+                    if (string.IsNullOrWhiteSpace(text))
+                        text = noTextContentText;
+                }
                 else
-                    previewText = await _contentExport.BuildAsync(files, cancellationToken);
+                {
+                    text = currentPath != null && currentTreeRoot != null
+                        ? _treeAndContentExport.BuildAsync(currentPath, currentTreeRoot, selectedPaths, treeFormat, cancellationToken).GetAwaiter().GetResult()
+                        : noTextContentText;
+                }
 
-                if (string.IsNullOrWhiteSpace(previewText))
-                    previewText = noTextContentText;
-            }
-            else
-            {
-                previewText = await _treeAndContentExport.BuildAsync(
-                    _currentPath!,
-                    _currentTree!.Root,
-                    selectedPaths,
-                    treeFormat,
-                    cancellationToken);
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            cancellationToken.ThrowIfCancellationRequested();
+                var effectiveText = string.IsNullOrEmpty(text) ? noDataText : text;
+                var numbers = BuildPreviewLineNumbers(effectiveText);
+
+                return (effectiveText, numbers);
+            }, cancellationToken);
+
             if (buildVersion != Volatile.Read(ref _previewBuildVersion))
                 return;
 
-            var effectivePreviewText = string.IsNullOrEmpty(previewText)
-                ? _viewModel.PreviewNoDataText
-                : previewText;
-            var lineNumbers = await Task.Run(
-                () => BuildPreviewLineNumbers(effectivePreviewText),
-                cancellationToken);
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (buildVersion != Volatile.Read(ref _previewBuildVersion))
-                return;
-
-            ApplyPreviewText(effectivePreviewText, lineNumbers);
+            ApplyPreviewText(previewText, lineNumbers);
             _previewRefreshRequested = false;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1233,7 +1230,6 @@ public partial class MainWindow : Window
         {
             if (buildVersion == Volatile.Read(ref _previewBuildVersion))
                 _viewModel.IsPreviewLoading = false;
-            CompleteStatusOperation(operationId);
             DisposeIfCurrent(ref _previewBuildCts, previewCts);
         }
     }
@@ -1430,8 +1426,16 @@ public partial class MainWindow : Window
 
     private void ClearPreviewMemory()
     {
+        // Clear preview data to free memory
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineNumbers = "1";
+
+        // Request garbage collection for large preview strings
+        // Use Gen0 collection which is fast and non-blocking
+        Task.Run(() =>
+        {
+            GC.Collect(0, GCCollectionMode.Optimized, false);
+        });
     }
 
     private async void AnimateSettingsPanel(bool show)
@@ -1541,7 +1545,7 @@ public partial class MainWindow : Window
 
         _previewBarAnimating = true;
 
-        const double durationMs = 250.0;
+        const double durationMs = 300.0;
         const double islandSpacing = 4.0;
 
         var startHeight = _previewBarContainer.Height;
@@ -3952,9 +3956,11 @@ public partial class MainWindow : Window
                 _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
         }
 
-        if (activeOperationType == StatusOperationType.PreviewBuild)
+        // Cancel preview build if in progress (not tracked by status operation)
+        if (_viewModel.IsPreviewLoading)
         {
             _previewBuildCts?.Cancel();
+            _viewModel.IsPreviewLoading = false;
         }
 
         CompleteStatusOperation(activeOperationId);
