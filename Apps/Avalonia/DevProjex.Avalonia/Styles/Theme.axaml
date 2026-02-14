@@ -60,6 +60,7 @@
     <SolidColorBrush x:Key="DropZoneArrowBrush" Color="{StaticResource DropZoneArrowColor}" />
     <SolidColorBrush x:Key="DropZoneKbdBrush" Color="{StaticResource DropZoneKbdColor}" />
     <SolidColorBrush x:Key="SegmentSelectedHoverOverlayBrush" Color="{StaticResource SegmentSelectedHoverOverlayColor}" />
+    <x:Double x:Key="PreviewIconOpacity">0.6</x:Double>
   </ResourceDictionary>
 
   <ResourceDictionary x:Key="Dark">
@@ -119,6 +120,7 @@
     <SolidColorBrush x:Key="DropZoneArrowBrush" Color="{StaticResource DropZoneArrowColor}" />
     <SolidColorBrush x:Key="DropZoneKbdBrush" Color="{StaticResource DropZoneKbdColor}" />
     <SolidColorBrush x:Key="SegmentSelectedHoverOverlayBrush" Color="{StaticResource SegmentSelectedHoverOverlayColor}" />
+    <x:Double x:Key="PreviewIconOpacity">1.0</x:Double>
   </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
@@ -988,6 +990,10 @@
 
     <Style Selector="Button.preview-close-button:pointerover">
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="Path.preview-icon">
+        <Setter Property="Opacity" Value="{DynamicResource PreviewIconOpacity}" />
     </Style>
 
 </Styles>
