@@ -122,6 +122,8 @@ public partial class MainWindow : Window
     private TopMenuBarView? _topMenuBar;
     private SearchBarView? _searchBar;
     private FilterBarView? _filterBar;
+    private ScrollViewer? _previewTextScrollViewer;
+    private ScrollViewer? _previewLineNumbersScrollViewer;
     private HashSet<string>? _filterExpansionSnapshot;
     private int _filterApplyVersion;
     private CancellationTokenSource? _projectOperationCts;
@@ -166,6 +168,7 @@ public partial class MainWindow : Window
     private global::Avalonia.Threading.DispatcherTimer? _previewDebounceTimer;
     private int _previewBuildVersion;
     private volatile bool _previewRefreshRequested;
+    private bool _previewScrollSyncActive;
 
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
@@ -248,6 +251,8 @@ public partial class MainWindow : Window
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
         _previewBarContainer = this.FindControl<Border>("PreviewBarContainer");
         _previewBar = this.FindControl<Border>("PreviewBar");
+        _previewTextScrollViewer = this.FindControl<ScrollViewer>("PreviewTextScrollViewer");
+        _previewLineNumbersScrollViewer = this.FindControl<ScrollViewer>("PreviewLineNumbersScrollViewer");
         _dropZoneIcon = this.FindControl<Viewbox>("DropZoneIcon");
         _settingsContainer = this.FindControl<Border>("SettingsContainer");
         _settingsIsland = this.FindControl<Border>("SettingsIsland");
@@ -1142,6 +1147,30 @@ public partial class MainWindow : Window
         _ = RefreshPreviewAsync();
     }
 
+    private void OnPreviewTextScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (_previewScrollSyncActive)
+            return;
+
+        if (sender is not ScrollViewer textScrollViewer || _previewLineNumbersScrollViewer is null)
+            return;
+
+        var targetY = textScrollViewer.Offset.Y;
+        var currentY = _previewLineNumbersScrollViewer.Offset.Y;
+        if (Math.Abs(currentY - targetY) < 0.1)
+            return;
+
+        try
+        {
+            _previewScrollSyncActive = true;
+            _previewLineNumbersScrollViewer.Offset = new Vector(0, targetY);
+        }
+        finally
+        {
+            _previewScrollSyncActive = false;
+        }
+    }
+
     private async Task RefreshPreviewAsync()
     {
         if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
@@ -1265,6 +1294,12 @@ public partial class MainWindow : Window
     {
         _viewModel.PreviewText = text;
         _viewModel.PreviewLineNumbers = lineNumbers;
+
+        // Reset both preview scroll viewers to top-left when content changes.
+        if (_previewTextScrollViewer is not null)
+            _previewTextScrollViewer.Offset = default;
+        if (_previewLineNumbersScrollViewer is not null)
+            _previewLineNumbersScrollViewer.Offset = default;
     }
 
     private static string BuildPreviewLineNumbers(string text)

@@ -986,4 +986,15 @@
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
+    <Style Selector="Button.preview-close-button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="Button.preview-close-button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
 </Styles>

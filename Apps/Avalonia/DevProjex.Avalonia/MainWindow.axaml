@@ -482,7 +482,7 @@
                   </Panel>
                 </Border>
                 <Button Grid.Column="2"
-                        Classes="menu-icon-button"
+                        Classes="menu-icon-button preview-close-button"
                         Width="32"
                         Height="32"
                         Margin="12,0,0,0"
@@ -550,20 +550,15 @@
                 <Grid>
                   <Grid Margin="0,6,0,0" ColumnDefinitions="Auto,*">
                     <!-- Persistent line-number background that spans the full preview height -->
-                    <Border Grid.Column="0"
-                            Name="PreviewLineNumbersBackground"
-                            Classes="preview-line-numbers"
-                            Width="{Binding Bounds.Width, ElementName=PreviewLineNumbersHost}" />
-
-                    <!-- Main vertical scroll for both columns -->
-                    <ScrollViewer Grid.ColumnSpan="2"
-                                  Margin="0,0,0,8"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                      <Grid ColumnDefinitions="Auto,*">
-                        <!-- Line numbers remain fixed on horizontal scroll -->
-                        <Border Grid.Column="0"
-                                Name="PreviewLineNumbersHost"
+                    <Grid Grid.Column="0">
+                      <Border Name="PreviewLineNumbersBackground"
+                              Classes="preview-line-numbers"
+                              Width="{Binding Bounds.Width, ElementName=PreviewLineNumbersHost}" />
+                      <ScrollViewer Name="PreviewLineNumbersScrollViewer"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Hidden"
+                                    IsHitTestVisible="False">
+                        <Border Name="PreviewLineNumbersHost"
                                 Background="Transparent"
                                 Padding="10,10,8,10">
                           <TextBlock Text="{Binding PreviewLineNumbers}"
@@ -573,21 +568,23 @@
                                      Margin="0"
                                      TextWrapping="NoWrap" />
                         </Border>
+                      </ScrollViewer>
+                    </Grid>
 
-                        <!-- Horizontal scroll applies only to preview text -->
-                        <ScrollViewer Grid.Column="1"
-                                      HorizontalScrollBarVisibility="Auto"
-                                      VerticalScrollBarVisibility="Disabled">
-                          <Border Padding="10,10,16,10">
-                            <TextBlock Text="{Binding PreviewText}"
-                                       FontFamily="{Binding SelectedFontFamily}"
-                                       FontSize="{Binding TreeFontSize}"
-                                       TextWrapping="NoWrap"
-                                       HorizontalAlignment="Left"
-                                       VerticalAlignment="Top" />
-                          </Border>
-                        </ScrollViewer>
-                      </Grid>
+                    <ScrollViewer Grid.Column="1"
+                                  Name="PreviewTextScrollViewer"
+                                  Margin="0,0,0,8"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto"
+                                  ScrollChanged="OnPreviewTextScrollChanged">
+                      <Border Padding="10,10,16,10">
+                        <TextBlock Text="{Binding PreviewText}"
+                                   FontFamily="{Binding SelectedFontFamily}"
+                                   FontSize="{Binding TreeFontSize}"
+                                   TextWrapping="NoWrap"
+                                   HorizontalAlignment="Left"
+                                   VerticalAlignment="Top" />
+                      </Border>
                     </ScrollViewer>
                   </Grid>
                 </Grid>
