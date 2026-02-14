@@ -99,6 +99,31 @@ Daraxt + mazmun:
 * `tree` — JSON daraxt.
 * `content` — fayl mazmunining matn bloki.
 
+### Preview rejimi
+Preview rejimi yuqori paneldagi ko‘zcha ikonali tugma orqali ochiladi va yakuniy matnni clipboardga nusxalamasdan hamda faylga eksport qilmasdan ko‘rsatadi.
+
+Mavjud rejimlar:
+* Daraxt
+* Mazmun
+* Daraxt va mazmun
+
+Preview nusxalash/eksport amallari bilan bir xil qoidalardan foydalanadi:
+* agar tugunlar belgilangan bo‘lsa, natija tanlov asosida quriladi;
+* agar tanlov bo‘sh yoki yaroqsiz bo‘lsa, to‘liq ma’lumotlar to‘plami ishlatiladi;
+* ignore qoidalari, filtrlar va fayl turi/papka tanlovi asosiy daraxtdagi kabi qo‘llanadi.
+
+Previewdagi daraxt formati ASCII/JSON tumbleriga bog‘liq:
+* «Daraxt» rejimida format to‘liq tumbler bilan aniqlanadi;
+* «Daraxt va mazmun» rejimida daraxt bloki tanlangan formatga mos bo‘ladi, mazmun bloki esa matn bo‘lib qoladi.
+
+Preview vaqtida:
+* satr raqamlari bilan matn maydoni ko‘rsatiladi;
+* ma’lumotlar faqat o‘qish uchun, tahrirlash mavjud emas;
+* previewni X tugmasi bilan yoki ko‘zcha ikonani qayta bosish orqali yopish mumkin.
+
+Eslatma:
+* katta loyihalarda preview yangilanishi asinxron bajariladi; qayta hisoblash paytida tayyorlash holati qisqa ko‘rinishi mumkin.
+
 ## 6) Ko‘rinish
 ### Masshtab
 * Ctrl++ / Ctrl+= — kattalashtirish

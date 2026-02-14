@@ -99,6 +99,31 @@ Albero + contenuto:
 * `tree` — albero JSON.
 * `content` — blocco testuale del contenuto file.
 
+### Modalità anteprima
+La modalità anteprima si apre con il pulsante con l’icona a forma di occhio nella barra superiore e mostra il testo finale senza copiare negli appunti e senza esportare in un file.
+
+Modalità disponibili:
+* Albero
+* Contenuto
+* Albero e contenuto
+
+L’anteprima usa le stesse regole delle operazioni di copia/esportazione:
+* se ci sono nodi selezionati, il risultato viene costruito dalla selezione;
+* se la selezione è vuota o non valida, viene usato il set completo dei dati;
+* regole di ignoramento, filtri e selezione di tipi file/cartelle vengono applicati come nell’albero principale.
+
+Il formato dell’albero in anteprima dipende dal selettore ASCII/JSON:
+* in modalità «Albero», il formato è definito interamente dal selettore;
+* in modalità «Albero e contenuto», il blocco albero segue il formato scelto, mentre il blocco contenuto resta testuale.
+
+Durante l’anteprima:
+* viene mostrata un’area di testo con numerazione righe;
+* i dati sono in sola lettura, la modifica non è disponibile;
+* l’anteprima può essere chiusa con il pulsante X o cliccando di nuovo sull’icona occhio.
+
+Nota:
+* per progetti grandi, l’aggiornamento dell’anteprima è asincrono; durante il ricalcolo può comparire brevemente lo stato di preparazione.
+
 ## 6) Visualizza
 ### Zoom
 * Ctrl++ / Ctrl+= — aumenta

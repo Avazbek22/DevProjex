@@ -99,6 +99,31 @@ Arborescence + contenu :
 * `tree` — arborescence JSON.
 * `content` — bloc texte du contenu des fichiers.
 
+### Mode aperçu
+Le mode aperçu s’ouvre avec le bouton en forme d’œil dans la barre supérieure et affiche le texte final sans copie dans le presse-papiers et sans export vers un fichier.
+
+Modes disponibles :
+* Arborescence
+* Contenu
+* Arborescence et contenu
+
+L’aperçu utilise les mêmes règles que les opérations de copie/export :
+* si des nœuds sont cochés, le résultat est construit à partir de la sélection ;
+* si la sélection est vide ou invalide, l’ensemble complet des données est utilisé ;
+* les règles d’ignorance, les filtres et la sélection des types de fichiers/dossiers s’appliquent comme dans l’arborescence principale.
+
+Le format de l’arborescence dans l’aperçu dépend du sélecteur ASCII/JSON :
+* en mode « Arborescence », le format est entièrement défini par le sélecteur ;
+* en mode « Arborescence et contenu », le bloc arborescence suit le format choisi, le bloc contenu reste textuel.
+
+Pendant l’aperçu :
+* une zone de texte avec numérotation des lignes est affichée ;
+* les données sont en lecture seule, l’édition n’est pas disponible ;
+* l’aperçu peut être fermé avec le bouton X ou par un nouveau clic sur l’icône œil.
+
+Remarque :
+* pour les grands projets, la mise à jour de l’aperçu est asynchrone ; pendant le recalcul, un statut de préparation peut apparaître brièvement.
+
 ## 6) Affichage
 ### Zoom
 * Ctrl++ / Ctrl+= — agrandir

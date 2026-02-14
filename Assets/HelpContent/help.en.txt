@@ -99,6 +99,31 @@ Tree + content:
 * `tree` — JSON tree.
 * `content` — text content block.
 
+### Preview mode
+Preview mode is opened with the eye icon button in the top bar and shows the final text without copying to clipboard and without exporting to a file.
+
+Available modes:
+* Tree
+* Content
+* Tree and content
+
+Preview uses the same rules as copy/export operations:
+* if nodes are checked, the result is built from selection;
+* if selection is empty or invalid, the full data set is used;
+* ignore rules, filters, and selected file types/folders are applied the same way as in the main tree.
+
+Tree format in preview depends on the ASCII/JSON toggle:
+* in "Tree" mode, the format is fully defined by the toggle;
+* in "Tree and content" mode, the tree block follows the selected format, while the content block remains text.
+
+During preview:
+* a text area with line numbers is shown;
+* data is read-only, editing is not available;
+* preview can be closed with the X button or by clicking the eye icon again.
+
+Note:
+* for large projects, preview updates run asynchronously; during recalculation, preparation status may appear briefly.
+
 ## 6) View
 ### Zoom
 * Ctrl++ / Ctrl+= — zoom in

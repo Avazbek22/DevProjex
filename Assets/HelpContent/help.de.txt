@@ -99,6 +99,31 @@ Baum + Inhalt:
 * `tree` — JSON-Baum.
 * `content` — Textblock mit Dateiinhalt.
 
+### Vorschaumodus
+Der Vorschaumodus wird über die Schaltfläche mit dem Auge in der oberen Leiste geöffnet und zeigt den finalen Text ohne Kopieren in die Zwischenablage und ohne Export in eine Datei.
+
+Verfügbare Modi:
+* Baum
+* Inhalt
+* Baum und Inhalt
+
+Die Vorschau verwendet dieselben Regeln wie Kopier-/Exportvorgänge:
+* wenn Knoten markiert sind, wird das Ergebnis aus der Auswahl aufgebaut;
+* wenn die Auswahl leer oder ungültig ist, wird der vollständige Datensatz verwendet;
+* Ignorierregeln, Filter sowie die Auswahl von Dateitypen/Ordnern werden wie im Hauptbaum angewendet.
+
+Das Baumformat in der Vorschau hängt vom ASCII/JSON-Schalter ab:
+* im Modus „Baum“ wird das Format vollständig durch den Schalter bestimmt;
+* im Modus „Baum und Inhalt“ folgt der Baumblock dem gewählten Format, der Inhaltsblock bleibt Text.
+
+Während der Vorschau:
+* wird ein Textbereich mit Zeilennummern angezeigt;
+* die Daten sind schreibgeschützt, Bearbeiten ist nicht verfügbar;
+* die Vorschau kann mit der X-Schaltfläche oder durch erneuten Klick auf das Auge geschlossen werden.
+
+Hinweis:
+* bei großen Projekten werden Vorschau-Updates asynchron ausgeführt; während der Neuberechnung kann kurz ein Vorbereitungsstatus erscheinen.
+
 ## 6) Ansicht
 ### Zoom
 * Ctrl++ / Ctrl+= — vergrößern
