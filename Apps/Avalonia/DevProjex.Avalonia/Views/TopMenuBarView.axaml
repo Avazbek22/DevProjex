@@ -115,7 +115,7 @@
           <TextBlock Text="{Binding FilterTooltip}" />
         </ToolTip>
       </ToolTip.Tip>
-      <Image Source="avares://DevProjex.Avalonia/IconPacks/Default/UIFilter.png"
+      <Image Source="avares://DevProjex/IconPacks/Default/UIFilter.png"
              Width="24"
              Height="24"
              Stretch="Uniform" />

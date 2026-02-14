@@ -6,7 +6,7 @@
         x:Class="DevProjex.Avalonia.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
-        Icon="avares://DevProjex.Avalonia/AppIcon/icon-256.png"
+        Icon="avares://DevProjex/AppIcon/icon-256.png"
         Width="1200" Height="800"
         MinWidth="800" MinHeight="600"
         TransparencyLevelHint="Mica, AcrylicBlur, Blur"
