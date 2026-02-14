@@ -69,6 +69,7 @@ public partial class MainWindow : Window
         bool AllRootFoldersChecked,
         bool AllExtensionsChecked,
         bool AllIgnoreChecked,
+        bool HasCompleteMetricsBaseline,
         IReadOnlyList<SelectionOptionSnapshot> RootFolders,
         IReadOnlyList<SelectionOptionSnapshot> Extensions,
         IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions);
@@ -163,6 +164,7 @@ public partial class MainWindow : Window
     private StatusOperationType _activeStatusOperationType;
     private Action? _activeStatusCancelAction;
     private bool _metricsCancellationRequestedByUser;
+    private volatile bool _hasCompleteMetricsBaseline;
     private ProjectLoadCancellationSnapshot? _activeProjectLoadCancellationSnapshot;
     private static readonly HashSet<string> MetricsWarmupBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -2462,6 +2464,7 @@ public partial class MainWindow : Window
 
         // Clear current tree descriptor reference (this is the second copy of the tree)
         _currentTree = null;
+        _hasCompleteMetricsBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;
         _viewModel.StatusContentStatsText = string.Empty;
@@ -2753,6 +2756,9 @@ public partial class MainWindow : Window
     /// </summary>
     private void CancelBackgroundMetricsCalculation()
     {
+        if (_isBackgroundMetricsActive)
+            _hasCompleteMetricsBaseline = false;
+
         _isBackgroundMetricsActive = false;
         _metricsCalculationCts?.Cancel();
         _recalculateMetricsCts?.Cancel();
@@ -2780,6 +2786,7 @@ public partial class MainWindow : Window
             AllRootFoldersChecked: _viewModel.AllRootFoldersChecked,
             AllExtensionsChecked: _viewModel.AllExtensionsChecked,
             AllIgnoreChecked: _viewModel.AllIgnoreChecked,
+            HasCompleteMetricsBaseline: _hasCompleteMetricsBaseline,
             RootFolders: _viewModel.RootFolders
                 .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
                 .ToArray(),
@@ -2850,6 +2857,7 @@ public partial class MainWindow : Window
         _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
         _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
         _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
+        _hasCompleteMetricsBaseline = snapshot.HasCompleteMetricsBaseline;
 
         if (_viewModel.TreeNodes.Count == 0 && snapshot.Tree is not null && !string.IsNullOrWhiteSpace(snapshot.Path))
         {
@@ -3173,6 +3181,7 @@ public partial class MainWindow : Window
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _metricsCalculationCts.Token);
 
         _metricsCancellationRequestedByUser = false;
+        _hasCompleteMetricsBaseline = false;
         _isBackgroundMetricsActive = true;
         var statusOperationId = BeginStatusOperation(
             _viewModel.StatusOperationCalculatingData,
@@ -3202,6 +3211,7 @@ public partial class MainWindow : Window
             if (totalFiles == 0)
             {
                 _isBackgroundMetricsActive = false;
+                _hasCompleteMetricsBaseline = true;
                 RecalculateMetricsAsync();
                 _viewModel.StatusMetricsVisible = true;
                 CompleteStatusOperation(statusOperationId);
@@ -3212,6 +3222,7 @@ public partial class MainWindow : Window
             if (filePaths.TrueForAll(IsDefinitelyBinaryByExtensionForMetricsWarmup))
             {
                 _isBackgroundMetricsActive = false;
+                _hasCompleteMetricsBaseline = true;
                 if (IsStatusOperationActive(statusOperationId))
                     _viewModel.StatusProgressValue = 100;
                 RecalculateMetricsAsync();
@@ -3286,6 +3297,7 @@ public partial class MainWindow : Window
 
             // Calculation completed successfully
             _isBackgroundMetricsActive = false;
+            _hasCompleteMetricsBaseline = true;
             if (IsStatusOperationActive(statusOperationId))
                 _viewModel.StatusProgressValue = 100;
             RecalculateMetricsAsync();
@@ -3296,6 +3308,7 @@ public partial class MainWindow : Window
         {
             // Show explicit fallback for user-initiated cancellation.
             _isBackgroundMetricsActive = false;
+            _hasCompleteMetricsBaseline = false;
             if (_metricsCancellationRequestedByUser)
             {
                 _metricsCancellationRequestedByUser = false;
@@ -3336,6 +3349,13 @@ public partial class MainWindow : Window
 
         // Capture state for background calculation
         var hasAnyChecked = HasAnyCheckedNodes(treeRoot);
+        var hasCompleteMetricsBaseline = _hasCompleteMetricsBaseline;
+        if (!ShouldProceedWithMetricsCalculation(hasAnyChecked, hasCompleteMetricsBaseline))
+        {
+            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+            return;
+        }
+
         var selectedPaths = hasAnyChecked
             ? GetCheckedPaths()
             : new HashSet<string>(PathComparer.Default);
@@ -3411,6 +3431,13 @@ public partial class MainWindow : Window
 
         return false;
     }
+
+    /// <summary>
+    /// Full metrics require a completed baseline calculation.
+    /// Selected metrics can be calculated independently.
+    /// </summary>
+    private static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
+        hasAnyCheckedNodes || hasCompleteMetricsBaseline;
 
     /// <summary>
     /// Calculates tree metrics from actual tree export output in the currently selected format.
@@ -3532,6 +3559,7 @@ public partial class MainWindow : Window
         if (activeOperationType == StatusOperationType.MetricsCalculation)
         {
             _metricsCancellationRequestedByUser = true;
+            _hasCompleteMetricsBaseline = false;
             CancelBackgroundMetricsCalculation();
             UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
             _viewModel.StatusMetricsVisible = _viewModel.IsProjectLoaded;

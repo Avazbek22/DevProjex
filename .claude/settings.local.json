@@ -23,7 +23,8 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "Bash(dotnet clean:*)",
-      "Bash(git status:*)"
+      "Bash(git status:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
