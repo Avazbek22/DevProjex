@@ -509,13 +509,14 @@
                 </TreeView.ItemsPanel>
                 <TreeView.ItemTemplate>
                   <TreeDataTemplate ItemsSource="{Binding ChildItemsSource}">
-                    <Grid ColumnDefinitions="Auto,*">
+                    <Grid ColumnDefinitions="Auto,*" Background="Transparent">
                       <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />
                         <ColumnDefinition Width="*" />
                       </Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="1"
                                   Orientation="Horizontal"
+                                  Background="Transparent"
                                   Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
                         <CheckBox IsThreeState="True"
                                   IsChecked="{Binding IsChecked, Mode=TwoWay}"

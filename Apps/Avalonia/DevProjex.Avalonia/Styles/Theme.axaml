@@ -575,6 +575,11 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
+    <!-- Highlight checkbox when hovering anywhere on tree row (only direct row, not parent items) -->
+    <Style Selector="TreeView Grid:pointerover CheckBox /template/ Border#NormalRectangle">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
     <Style Selector="CheckBox.list-item">
         <Setter Property="Margin" Value="0,1" />
     </Style>
