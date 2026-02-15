@@ -21,7 +21,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-          cache: true
 
       - name: Restore
         run: dotnet restore DevProjex.sln
@@ -31,4 +30,3 @@ jobs:
 
       - name: Test
         run: dotnet test DevProjex.sln -c Release --no-build --verbosity normal
-
