@@ -28,6 +28,7 @@ using ThemePresetDb = DevProjex.Infrastructure.ThemePresets.ThemePresetDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
 using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
 using ThemePresetEffect = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Contracts;
@@ -667,6 +668,7 @@ public partial class MainWindow : Window
         _viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
         ApplyEffectMode(effect);
         ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
+        ApplyViewSettings(_themePresetDb.ViewSettings);
         _wasThemePopoverOpen = _viewModel.ThemePopoverOpen;
     }
 
@@ -702,6 +704,22 @@ public partial class MainWindow : Window
         ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
     }
 
+    private void ApplyViewSettings(AppViewSettings settings)
+    {
+        _viewModel.IsCompactMode = settings.IsCompactMode;
+        _viewModel.IsTreeAnimationEnabled = settings.IsTreeAnimationEnabled;
+
+        if (_viewModel.IsCompactMode)
+            Classes.Add("compact-mode");
+        else
+            Classes.Remove("compact-mode");
+
+        if (_viewModel.IsTreeAnimationEnabled)
+            Classes.Add("tree-animation");
+        else
+            Classes.Remove("tree-animation");
+    }
+
     private void HandleThemePopoverStateChange()
     {
         if (_wasThemePopoverOpen && !_viewModel.ThemePopoverOpen)
@@ -731,6 +749,17 @@ public partial class MainWindow : Window
 
         _themePresetStore.SetPreset(_themePresetDb, theme, effect, preset);
         _themePresetDb.LastSelected = $"{theme}.{effect}";
+        _themePresetStore.Save(_themePresetDb);
+    }
+
+    private void SaveCurrentViewSettings()
+    {
+        _themePresetDb.ViewSettings = new AppViewSettings
+        {
+            IsCompactMode = _viewModel.IsCompactMode,
+            IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled
+        };
+
         _themePresetStore.Save(_themePresetDb);
     }
 
@@ -1795,6 +1824,8 @@ public partial class MainWindow : Window
             Classes.Add("compact-mode");
         else
             Classes.Remove("compact-mode");
+
+        SaveCurrentViewSettings();
     }
 
     private void OnToggleTreeAnimation(object? sender, RoutedEventArgs e)
@@ -1805,6 +1836,8 @@ public partial class MainWindow : Window
             Classes.Add("tree-animation");
         else
             Classes.Remove("tree-animation");
+
+        SaveCurrentViewSettings();
     }
 
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
@@ -1918,6 +1951,7 @@ public partial class MainWindow : Window
 
         // Apply default preset values to ViewModel
         ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
+        ApplyViewSettings(_themePresetDb.ViewSettings);
 
         // Refresh visual effects
         _themeBrushCoordinator.UpdateTransparencyEffect();

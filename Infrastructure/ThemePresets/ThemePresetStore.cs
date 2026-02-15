@@ -8,9 +8,9 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class ThemePresetStore
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
     private const string FolderName = "DevProjex";
-    private const string FileName = "theme-presets.json";
+    private const string FileName = "user-settings.json";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -105,6 +105,7 @@ public sealed class ThemePresetStore
     {
         db.SchemaVersion = CurrentSchemaVersion;
         db.Presets ??= new Dictionary<string, ThemePreset>();
+        db.ViewSettings ??= new AppViewSettings();
 
         foreach (var preset in CreateDefaultPresets())
         {
@@ -124,7 +125,12 @@ public sealed class ThemePresetStore
         {
             SchemaVersion = CurrentSchemaVersion,
             Presets = CreateDefaultPresets(),
-            LastSelected = GetKey(ThemeVariant.Dark, ThemeEffectMode.Transparent)
+            LastSelected = GetKey(ThemeVariant.Dark, ThemeEffectMode.Transparent),
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = false,
+                IsTreeAnimationEnabled = false
+            }
         };
 
         return db;
