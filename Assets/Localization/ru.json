@@ -58,7 +58,7 @@
   "Menu.Search": "Поиск",
   "Filter.ByName": "Фильтр по названию",
   "Filter.Tooltip": "Фильтр по названию (Ctrl+Shift+N)",
-  "CopyFormat.Tooltip": "Формат дедева",
+  "CopyFormat.Tooltip": "Формат дерева",
   "Preview.Tooltip": "Режим превью (Ctrl+B)",
   "Preview.Modes.Label": "Три способа:",
   "Preview.Mode.Tree": "Дерево",
