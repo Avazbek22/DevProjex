@@ -142,7 +142,7 @@ public sealed class ThemePresetStore
                 BlurRadius = 30,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
-                BorderStrength = 53.51437699680511
+                BorderStrength = 53.19488817891374
             },
             [GetKey(ThemeVariant.Light, ThemeEffectMode.Mica)] = new ThemePreset
             {
@@ -152,7 +152,7 @@ public sealed class ThemePresetStore
                 BlurRadius = 30,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
-                BorderStrength = 50.319488817891376
+                BorderStrength = 57.66773162939298
             },
             [GetKey(ThemeVariant.Light, ThemeEffectMode.Acrylic)] = new ThemePreset
             {
@@ -162,17 +162,17 @@ public sealed class ThemePresetStore
                 BlurRadius = 30,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
-                BorderStrength = 10.702875399361023
+                BorderStrength = 100
             },
             [GetKey(ThemeVariant.Dark, ThemeEffectMode.Transparent)] = new ThemePreset
             {
                 Theme = ThemeVariant.Dark,
                 Effect = ThemeEffectMode.Transparent,
-                MaterialIntensity = 52.23642172523962,
+                MaterialIntensity = 60.86261980830672,
                 BlurRadius = 29.233226837060705,
-                PanelContrast = 50,
+                PanelContrast = 51.59744408945688,
                 MenuChildIntensity = 0,
-                BorderStrength = 50
+                BorderStrength = 31.789137380191697
             },
             [GetKey(ThemeVariant.Dark, ThemeEffectMode.Mica)] = new ThemePreset
             {
@@ -182,7 +182,7 @@ public sealed class ThemePresetStore
                 BlurRadius = 30,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
-                BorderStrength = 50
+                BorderStrength = 35.94249201277955
             },
             [GetKey(ThemeVariant.Dark, ThemeEffectMode.Acrylic)] = new ThemePreset
             {
@@ -192,7 +192,7 @@ public sealed class ThemePresetStore
                 BlurRadius = 30,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
-                BorderStrength = 32.108626198083066
+                BorderStrength = 26.677316293929714
             }
         };
     }
