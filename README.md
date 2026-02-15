@@ -12,7 +12,10 @@ It’s designed for real projects where CLI output is noisy, IDE tools are unava
 
 ## Download 🚀
 
-**Latest release:**
+**Download from Microsoft Store:**
+👉 [Download from Microsoft Store](https://apps.microsoft.com/detail/9ndq3nq5m354?hl=en-EN&gl=EN)
+
+**Latest GitHub release:**
 👉 [https://github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
 
 Older versions are available on the Releases page.
