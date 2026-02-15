@@ -1,1 +1,1 @@
-Read-only desktop tool to inspect folders and Git repositories and share project structure.
+Build project context fast: preview, copy, and export tree/content in ASCII or JSON. Read-only and safe.

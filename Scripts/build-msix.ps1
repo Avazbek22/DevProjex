@@ -1,7 +1,8 @@
 param(
   [string]$Configuration = "ReleaseStore",
   [string]$Platform = "x64",
-  [string]$BundlePlatforms = "x64"
+  [string]$BundlePlatforms = "x64|arm64",
+  [bool]$CleanPackagingArtifacts = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,11 +15,34 @@ Write-Host "  Configuration: $Configuration"
 Write-Host "  Platform: $Platform"
 Write-Host "  Bundle platforms: $BundlePlatforms"
 
+if ($CleanPackagingArtifacts) {
+  Write-Host "Cleaning stale packaging artifacts..."
+
+  $cleanupPaths = @(
+    "publish\store",
+    "Packaging\Windows\DevProjex.Store\publish\store",
+    "Packaging\Windows\DevProjex.Store\BundleArtifacts",
+    "Packaging\Windows\DevProjex.Store\bin",
+    "Packaging\Windows\DevProjex.Store\obj"
+  )
+
+  foreach ($cleanupPath in $cleanupPaths) {
+    if (Test-Path $cleanupPath) {
+      Remove-Item -Path $cleanupPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 $desktopBridgeTargets = @(
+  "C:\BuildTools\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+  "C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+  "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+  "C:\Program Files (x86)\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
   "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
   "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
   "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
   "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+  "$env:ProgramFiles\Microsoft Visual Studio\18\Enterprise\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
   "$env:ProgramFiles(x86)\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
   "$env:ProgramFiles(x86)\Windows Kits\10\DesignTime\CommonConfiguration\Neutral\Microsoft.DesktopBridge.targets"
 )
@@ -104,8 +128,11 @@ if ($null -eq $desktopBridgeAvailable) {
 
 $msbuildCandidates = @(
   "C:\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+  "C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+  "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
   "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
-  "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+  "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+  "$env:ProgramFiles\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
 )
 $msbuildExe = $msbuildCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($null -eq $msbuildExe) {
@@ -114,10 +141,8 @@ if ($null -eq $msbuildExe) {
 }
 
 Write-Host "Restoring packages..."
-$restoreRid = "win-$Platform"
 dotnet restore "Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj" `
-  /p:Configuration=$Configuration `
-  /p:RuntimeIdentifier="$restoreRid"
+  /p:Configuration=$Configuration
 
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
@@ -152,12 +177,12 @@ $identity = $manifest.Package.Identity
 $publisherDisplay = $manifest.Package.Properties.PublisherDisplayName
 
 $artifact = @(
-  Get-ChildItem -Path publish\store -Recurse -File -Include *.msixbundle,*.msix -ErrorAction SilentlyContinue
-  Get-ChildItem -Path Packaging\Windows\DevProjex.Store\publish\store -Recurse -File -Include *.msixbundle,*.msix -ErrorAction SilentlyContinue
+  Get-ChildItem -Path publish\store -Recurse -File -Include *.msixupload,*.msixbundle,*.msix -ErrorAction SilentlyContinue
+  Get-ChildItem -Path Packaging\Windows\DevProjex.Store\publish\store -Recurse -File -Include *.msixupload,*.msixbundle,*.msix -ErrorAction SilentlyContinue
 ) | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
 if ($null -eq $artifact) {
-  Write-Host "MSIX artifact not found in publish\\store or Packaging\\Windows\\DevProjex.Store\\publish\\store"
+  Write-Host "Store artifact (.msixupload/.msixbundle/.msix) not found in publish\\store or Packaging\\Windows\\DevProjex.Store\\publish\\store"
   exit 1
 }
 
