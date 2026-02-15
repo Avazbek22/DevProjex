@@ -1579,6 +1579,25 @@ public partial class MainWindow : Window
         });
     }
 
+    private static async Task WaitForTreeRenderStabilizationAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Wait for two render passes so the tree has time to materialize and paint.
+        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+            static () => { },
+            global::Avalonia.Threading.DispatcherPriority.Render);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+            static () => { },
+            global::Avalonia.Threading.DispatcherPriority.Render);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Small buffer helps avoid visual contention with immediate post-load updates.
+        await Task.Delay(140, cancellationToken);
+    }
+
     private async void AnimateSettingsPanel(bool show)
     {
         if (_settingsIsland is null || _settingsTransform is null || _settingsContainer is null) return;
@@ -3141,7 +3160,11 @@ public partial class MainWindow : Window
                 // Animate settings panel BEFORE metrics calculation starts
                 // so user sees the panel immediately after tree renders
                 if (_viewModel.SettingsVisible && !_settingsAnimating)
-                    AnimateSettingsPanel(true);
+                {
+                    await WaitForTreeRenderStabilizationAsync(linkedToken);
+                    if (_viewModel.SettingsVisible && !_settingsAnimating)
+                        AnimateSettingsPanel(true);
+                }
 
                 UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
                 await InitializeFileMetricsCacheAsync(linkedToken);
