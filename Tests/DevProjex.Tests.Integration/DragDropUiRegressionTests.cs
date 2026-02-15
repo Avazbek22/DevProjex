@@ -16,13 +16,14 @@ public sealed class DragDropUiRegressionTests
         var file = Path.Combine(RepoRoot.Value, "Apps", "Avalonia", "DevProjex.Avalonia", "Views", "TopMenuBarView.axaml");
         var content = File.ReadAllText(file);
 
-        // Menu spans all 3 columns (menu items, format switcher, filter button)
-        Assert.Contains("Name=\"MainMenu\" Grid.Column=\"0\" Grid.ColumnSpan=\"3\"", content);
+        // Menu spans all 4 columns (menu items, format switcher, preview button, filter button)
+        Assert.Contains("Name=\"MainMenu\" Grid.Column=\"0\" Grid.ColumnSpan=\"4\"", content);
         // Format switcher in column 1
         Assert.Contains("Grid.Column=\"1\"", content);
         Assert.Contains("segmented-control", content);
-        // Filter button in column 2
+        // Preview button in column 2 and filter button in column 3
         Assert.Contains("Button Grid.Column=\"2\"", content);
+        Assert.Contains("Button Grid.Column=\"3\"", content);
         Assert.Contains("Classes=\"menu-icon-button\"", content);
     }
 

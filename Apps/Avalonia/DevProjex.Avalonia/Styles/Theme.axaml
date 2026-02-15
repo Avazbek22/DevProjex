@@ -60,6 +60,7 @@
     <SolidColorBrush x:Key="DropZoneArrowBrush" Color="{StaticResource DropZoneArrowColor}" />
     <SolidColorBrush x:Key="DropZoneKbdBrush" Color="{StaticResource DropZoneKbdColor}" />
     <SolidColorBrush x:Key="SegmentSelectedHoverOverlayBrush" Color="{StaticResource SegmentSelectedHoverOverlayColor}" />
+    <x:Double x:Key="PreviewIconOpacity">0.6</x:Double>
   </ResourceDictionary>
 
   <ResourceDictionary x:Key="Dark">
@@ -119,6 +120,7 @@
     <SolidColorBrush x:Key="DropZoneArrowBrush" Color="{StaticResource DropZoneArrowColor}" />
     <SolidColorBrush x:Key="DropZoneKbdBrush" Color="{StaticResource DropZoneKbdColor}" />
     <SolidColorBrush x:Key="SegmentSelectedHoverOverlayBrush" Color="{StaticResource SegmentSelectedHoverOverlayColor}" />
+    <x:Double x:Key="PreviewIconOpacity">1.0</x:Double>
   </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
@@ -479,6 +481,28 @@
         </Setter>
     </Style>
 
+    <Style Selector="Border.preview-panel">
+        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="Margin" Value="0,2,0,0" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <DoubleTransition Property="Opacity" Duration="0:0:0.2" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.preview-line-numbers">
+        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,1,0" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+
 
     <!-- Rounded controls inside search/filter panels -->
     <Style Selector="Border.search-panel TextBox, Border.filter-panel TextBox">
@@ -495,22 +519,15 @@
         <Setter Property="Padding" Value="8,4" />
         <Setter Property="Margin" Value="0" />
         <Setter Property="VerticalAlignment" Value="Center" />
-        <Setter Property="RenderTransformOrigin" Value="50%,50%" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" Easing="CubicEaseOut" />
-            </Transitions>
-        </Setter>
+        <Setter Property="Transitions" Value="{x:Null}" />
     </Style>
 
     <Style Selector="Button.menu-icon-button:pointerover">
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
-        <Setter Property="RenderTransform" Value="scale(1.05)" />
     </Style>
 
     <Style Selector="Button.menu-icon-button:pressed">
-        <Setter Property="RenderTransform" Value="scale(0.95)" />
+        <Setter Property="Background" Value="{DynamicResource MenuPressedBrush}" />
     </Style>
 
     <Style Selector="StackPanel.settings-section">
@@ -556,6 +573,39 @@
 
     <Style Selector="CheckBox:pointerover /template/ Border#NormalRectangle">
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <!-- Highlight checkbox when hovering anywhere on tree row (only direct row, not parent items) -->
+    <Style Selector="TreeView Grid:pointerover CheckBox /template/ Border#NormalRectangle">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <!-- Tree row content: smooth slide animation on hover (icon and text only, not checkbox) -->
+    <!-- Only active when tree-animation class is set on Window -->
+    <Style Selector="Window.tree-animation TreeView Grid > StackPanel > Image">
+        <Setter Property="RenderTransform" Value="translateX(0)" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.35" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Window.tree-animation TreeView Grid > StackPanel > TextBlock">
+        <Setter Property="RenderTransform" Value="translateX(0)" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.35" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Window.tree-animation TreeView Grid:pointerover > StackPanel > Image">
+        <Setter Property="RenderTransform" Value="translateX(3px)" />
+    </Style>
+
+    <Style Selector="Window.tree-animation TreeView Grid:pointerover > StackPanel > TextBlock">
+        <Setter Property="RenderTransform" Value="translateX(3px)" />
     </Style>
 
     <Style Selector="CheckBox.list-item">
@@ -929,6 +979,54 @@
     <!-- Segment control: disabled -->
     <Style Selector="Border.segmented-control:disabled">
         <Setter Property="Opacity" Value="0.5" />
+    </Style>
+
+    <Style Selector="Border.preview-segmented-control">
+        <Setter Property="Padding" Value="2" />
+        <Setter Property="Width" Value="544" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <Style Selector="Border.preview-segment-thumb">
+        <Setter Property="Width" Value="180" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.25" Easing="CubicEaseInOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.preview-segment-thumb.preview-segment-thumb-middle">
+        <Setter Property="RenderTransform" Value="translate(180px, 0px)" />
+    </Style>
+
+    <Style Selector="Border.preview-segment-thumb.preview-segment-thumb-right">
+        <Setter Property="RenderTransform" Value="translate(360px, 0px)" />
+    </Style>
+
+    <Style Selector="Button.preview-segment-button">
+        <Setter Property="Width" Value="180" />
+        <Setter Property="Padding" Value="0,5" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Button.preview-close-button">
+        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="Button.preview-close-button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="Path.preview-icon">
+        <Setter Property="Opacity" Value="{DynamicResource PreviewIconOpacity}" />
     </Style>
 
 </Styles>

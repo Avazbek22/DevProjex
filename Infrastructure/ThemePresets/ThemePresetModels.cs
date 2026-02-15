@@ -31,4 +31,11 @@ public sealed class ThemePresetDb
     public int SchemaVersion { get; set; }
     public Dictionary<string, ThemePreset> Presets { get; set; } = new();
     public string LastSelected { get; set; } = string.Empty;
+    public AppViewSettings ViewSettings { get; set; } = new();
+}
+
+public sealed record AppViewSettings
+{
+    public bool IsCompactMode { get; init; }
+    public bool IsTreeAnimationEnabled { get; init; }
 }

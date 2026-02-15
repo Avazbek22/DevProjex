@@ -98,6 +98,31 @@ public sealed class ThemePresetStoreTests
 	}
 
 	[Fact]
+	// Ensures view settings are persisted together with theme presets.
+	public void Save_And_Load_RoundTripsViewSettings()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+		var db = new ThemePresetDb
+		{
+			SchemaVersion = 99,
+			Presets = new Dictionary<string, ThemePreset>(),
+			LastSelected = "Dark.Transparent",
+			ViewSettings = new AppViewSettings
+			{
+				IsCompactMode = true,
+				IsTreeAnimationEnabled = true
+			}
+		};
+
+		store.Save(db);
+		var loaded = store.Load();
+
+		Assert.True(loaded.ViewSettings.IsCompactMode);
+		Assert.True(loaded.ViewSettings.IsTreeAnimationEnabled);
+	}
+
+	[Fact]
 	// Ensures missing preset combinations are filled during normalization.
 	public void Load_PartialPresetList_FillsMissingCombinations()
 	{
@@ -494,7 +519,7 @@ public sealed class ThemePresetStoreTests
 		var store = new ThemePresetStore();
 		var path = store.GetPath();
 
-		Assert.EndsWith(Path.Combine("DevProjex", "theme-presets.json"), path);
+		Assert.EndsWith(Path.Combine("DevProjex", "user-settings.json"), path);
 	}
 
 	[Theory]
@@ -724,6 +749,32 @@ public sealed class ThemePresetStoreTests
 				Assert.True(db.Presets.ContainsKey(key), $"Missing preset: {key}");
 			}
 		}
+	}
+
+	[Fact]
+	// Ensures ResetToDefaults always restores view toggles to default disabled state.
+	public void ResetToDefaults_DisablesViewTogglesByDefault()
+	{
+		using var scope = new AppDataScope();
+		var store = new ThemePresetStore();
+
+		var customDb = new ThemePresetDb
+		{
+			SchemaVersion = 1,
+			Presets = new Dictionary<string, ThemePreset>(),
+			LastSelected = "Dark.Transparent",
+			ViewSettings = new AppViewSettings
+			{
+				IsCompactMode = true,
+				IsTreeAnimationEnabled = true
+			}
+		};
+		store.Save(customDb);
+
+		var resetDb = store.ResetToDefaults();
+
+		Assert.False(resetDb.ViewSettings.IsCompactMode);
+		Assert.False(resetDb.ViewSettings.IsTreeAnimationEnabled);
 	}
 
 	[Fact]

@@ -214,9 +214,9 @@ public sealed class TreeAndContentExportServiceTests
 		Assert.Contains("root content", result);
 	}
 
-	// Verifies JSON tree+content export wraps tree JSON and content text in a single JSON payload.
+	// Verifies JSON tree+content export produces JSON tree followed by plain text content.
 	[Fact]
-	public void Build_WithJsonFormat_ReturnsStructuredJsonPayload()
+	public void Build_WithJsonFormat_ReturnsJsonTreeAndTextContent()
 	{
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("note.txt", "hello json");
@@ -235,11 +235,16 @@ public sealed class TreeAndContentExportServiceTests
 		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
 
-		using var doc = JsonDocument.Parse(result);
+		// JSON tree + separator (NBSP) + plain text content
+		var separatorIndex = result.IndexOf("\u00A0", StringComparison.Ordinal);
+		var jsonPart = result[..separatorIndex].TrimEnd('\r', '\n');
+		var contentPart = result[separatorIndex..];
+
+		using var doc = JsonDocument.Parse(jsonPart);
 		Assert.Equal(temp.Path, doc.RootElement.GetProperty("rootPath").GetString());
-		Assert.True(doc.RootElement.TryGetProperty("tree", out var treeElement));
+		Assert.True(doc.RootElement.TryGetProperty("root", out var treeElement));
 		Assert.Equal("root", treeElement.GetProperty("name").GetString());
 		Assert.Equal(".", treeElement.GetProperty("path").GetString());
-		Assert.Contains("note.txt", doc.RootElement.GetProperty("content").GetString() ?? string.Empty);
+		Assert.Contains("note.txt", contentPart);
 	}
 }
