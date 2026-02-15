@@ -298,7 +298,7 @@ Gli elementi [Beta] possono cambiare tra versioni.
 
 ## 15) Aiuto → Informazioni
 Apre un popover con info app e link al repository.
-Reimposta impostazioni (Aiuto → Reimposta impostazioni) riporta tema ed effetti ai valori predefiniti.
+Reimposta impostazioni (Aiuto → Reimposta impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
 * Esc — chiudi popover
 
 ## 16) Lingue
@@ -324,5 +324,4 @@ Pulsante X (annulla) nella barra di stato:
 ## 18) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
-
 

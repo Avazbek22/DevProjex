@@ -298,7 +298,7 @@ Einträge mit [Beta] können sich zwischen Versionen ändern.
 
 ## 15) Hilfe → Über
 Öffnet ein Popover mit App‑Info und Repository‑Link.
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt die Theme‑ und Effektwerte auf die Standardwerte zurück.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt nur visuelle UI‑Parameter zurück (Theme, Effekte, Kompaktmodus, Baumanimation) und ändert keine Projektdaten.
 * Esc — Popover schließen
 
 ## 16) Sprachen
@@ -324,5 +324,4 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 ## 18) Hinweise
 * Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.
-
 

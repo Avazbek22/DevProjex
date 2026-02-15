@@ -298,7 +298,7 @@ Tema popoveri quyilarni almashtiradi:
 
 ## 15) Yordam → Dastur haqida
 Ilova ma’lumoti va repozitoriy havolasi bilan popover ochadi.
-Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) tema va effekt sozlamalarini asl qiymatlarga qaytaradi.
+Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) faqat interfeysning vizual sozlamalarini tiklaydi (tema, effektlar, ixcham rejim, daraxt animatsiyasi) va loyiha ma’lumotlarini o‘zgartirmaydi.
 * Esc — popoverni yopish
 
 ## 16) Tillar
@@ -324,5 +324,4 @@ Status-bardagi X (bekor qilish) tugmasi:
 ## 18) Eslatmalar
 * Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.
-
 

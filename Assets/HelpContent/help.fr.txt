@@ -298,7 +298,7 @@ Les éléments [Beta] peuvent évoluer entre versions.
 
 ## 15) Aide → À propos
 Ouvre un popover avec les infos de l’app et un lien vers le dépôt.
-Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) remet les réglages de thème et d’effets aux valeurs par défaut.
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) réinitialise uniquement les paramètres visuels de l’interface (thème, effets, mode compact, animation de l'arborescence) et ne modifie pas les données du projet.
 * Esc — fermer le popover
 
 ## 16) Langues
@@ -324,5 +324,4 @@ Bouton X (annuler) dans la barre d’état :
 ## 18) Notes
 * Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
-
 

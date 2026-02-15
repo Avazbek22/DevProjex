@@ -298,7 +298,7 @@ Items marked [Beta] may change between versions.
 
 ## 15) Help → About
 Opens a popover with app info and repository link.
-Reset settings (Help → Reset settings) returns theme and effects settings to their default values.
+Reset settings (Help → Reset settings) resets only visual interface settings (theme, effects, Compact Mode, Tree animation) and does not modify project data.
 * Esc — close popover
 
 ## 16) Languages
@@ -324,5 +324,4 @@ X button (cancel) in the status bar:
 ## 18) Notes
 * By default, dark theme and transparency effects are enabled (if supported).
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.
-
 
