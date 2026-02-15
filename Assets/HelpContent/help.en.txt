@@ -1,4 +1,4 @@
-## 1) What it is and why
+﻿## 1) What it is and why
 DevProjex quickly prepares project context: shows the folder/file structure, lets you select items with checkboxes, and copy the tree and/or file contents to the clipboard. Useful for code review, support, learning, and sharing project structure with an AI assistant.
 
 Important: the app is read-only and never modifies files.
@@ -101,33 +101,26 @@ Tree + content:
 * content block remains text;
 * exported as `.txt`.
 
-### Preview mode
-Preview mode is opened with the eye icon button in the top bar and shows the final text without copying to clipboard and without exporting to a file.
+## 6) Preview mode
+Opened with the eye icon button in the top bar or with Ctrl+B.
+
+Shows the final result in read-only mode, without copying to clipboard and without exporting to file.
 
 Available modes:
 * Tree
 * Content
 * Tree and content
-Hotkey: Ctrl+B.
 
-Preview uses the same rules as copy/export operations:
-* if nodes are checked, the result is built from selection;
-* if selection is empty or invalid, the full data set is used;
-* ignore rules, filters, and selected file types/folders are applied the same way as in the main tree.
+The same rules as copy and export are applied:
+* checked nodes are respected;
+* if selection is empty, the full data set is used;
+* current ignore rules and selection options are applied.
 
-Tree format in preview depends on the ASCII/JSON toggle:
-* in "Tree" mode, the format is fully defined by the toggle;
-* in "Tree and content" mode, the tree block follows the selected format, while the content block remains text.
+When preview is open, search and filter are unavailable.
+In settings, only font change is available.
+Close: X button or click the eye icon again.
 
-During preview:
-* a text area with line numbers is shown;
-* data is read-only, editing is not available;
-* preview can be closed with the X button or by clicking the eye icon again.
-
-Note:
-* for large projects, preview updates run asynchronously; during recalculation, preparation status may appear briefly.
-
-## 6) View
+## 7) View
 ### Zoom
 * Ctrl++ / Ctrl+= — zoom in
 * Ctrl+- — zoom out
@@ -139,7 +132,7 @@ Range: 6–28, reset is 12.
 ### Compact Mode
 Makes the UI denser: smaller spacing in the tree and settings.
 
-## 7) Search (tree)
+## 8) Search (tree)
 Opens the search bar, highlights matches, and allows navigation.
 * Ctrl+F — show/hide
 * Enter — next result
@@ -148,12 +141,12 @@ Opens the search bar, highlights matches, and allows navigation.
 
 Search auto-expands only the needed branches; clearing the query collapses the tree (except root).
 
-## 8) Filter (by name)
+## 9) Filter (by name)
 Shows only nodes matching the filter string and their parents. Updates are debounced.
 * Ctrl+Shift+N — show/hide filter
 * Esc — close filter
 
-## 9) Options (settings panel)
+## 10) Options (settings panel)
 Lists on the right:
 * Font (tree font) — apply with Apply
 * Ignore options
@@ -168,7 +161,7 @@ Note about "Extensions":
 
 Ctrl+P — show/hide the panel.
 
-## 10) Ignore
+## 11) Ignore
 The "Ignore" list is built automatically from the current path and selected top-level folders.
 
 Option order:
@@ -182,7 +175,7 @@ Option order:
 
 The separator under "Use .gitignore" splits Git/Smart rules from basic visibility rules.
 
-### 10.1 Rule scope
+### 11.1 Rule scope
 The app builds project scopes where ignore rules are applied:
 * root (if root has `.gitignore` or a project marker)
 * first-level folders
@@ -190,18 +183,18 @@ The app builds project scopes where ignore rules are applied:
 
 Nested project scope discovery depth is fixed: 2 levels.
 
-### 10.2 "Use .gitignore"
+### 11.2 "Use .gitignore"
 * Enabled: `.gitignore` rules are applied in detected scopes.
 * Disabled: `.gitignore` rules are fully disabled.
 
 For multi-project folders, one project's `.gitignore` is not applied to neighboring projects outside its scope.
 
-### 10.3 "Smart ignore"
+### 11.3 "Smart ignore"
 * Shown only when it is relevant.
 * Enabled: common build/tool artifacts are additionally hidden.
 * Disabled: smart rules are not applied.
 
-### 10.4 Basic rules
+### 11.4 Basic rules
 Options:
 * Hidden folders
 * Hidden files
@@ -210,7 +203,7 @@ Options:
 
 These rules are independent from `.gitignore` and Smart Ignore and work only by their own toggles.
 
-### 10.5 Internal behavior: common cases
+### 11.5 Internal behavior: common cases
 1. Single project with `.gitignore`.
 Usually only "Use .gitignore" is shown.
 When enabled, `.gitignore` and Smart Ignore work together.
@@ -233,7 +226,7 @@ Smart Ignore (when enabled) complements filtering in detected scopes.
 If no `.gitignore` is found and Smart Ignore is not relevant, these options are hidden.
 Only basic visibility rules remain.
 
-### 10.6 Files without extension
+### 11.6 Files without extension
 The "Files without extension" option controls visibility of files without an extension (for example: `Dockerfile`, `Makefile`, `README`).
 
 Rules:
@@ -241,7 +234,7 @@ Rules:
 * when enabled, files without extension are excluded from the tree and from copy/export operations;
 * when disabled, files without extension are included in the result;
 * the "Extensions" list does not control this behavior.
-## 11) How the tree and metrics are calculated
+## 12) How the tree and metrics are calculated
 Result depends on:
 * selected Root folders
 * selected Extensions
@@ -251,7 +244,7 @@ Result depends on:
 
 If access is denied, the node is marked Access denied.
 
-### 11.1 What status bar counters show
+### 12.1 What status bar counters show
 The status bar has two blocks:
 * Tree — metrics of the tree text output;
 * Content — metrics of exported file content output.
@@ -267,7 +260,7 @@ Important:
 * "Lines" in the "Tree" block means the number of lines in the final tree representation, not the number of files on disk;
 * this value includes folders, files, and tree service elements (for example, access-denied nodes).
 
-### 11.2 How metrics are calculated
+### 12.2 How metrics are calculated
 Tree metrics:
 * are calculated from the actual tree output generated by the same export pipeline;
 * respect the current ASCII/JSON format.
@@ -277,7 +270,7 @@ Content metrics:
 * binary files are excluded;
 * empty and whitespace-only files are counted via service markers (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
-### 11.3 When counters update
+### 12.3 When counters update
 Recalculation runs:
 * after opening/refreshing a project;
 * after applying settings (ignore, extensions, root folders);
@@ -285,14 +278,14 @@ Recalculation runs:
 * when switching ASCII/JSON (for operations where tree output is used).
 * when background calculation is canceled, counters are set to 0 until the next completed recalculation.
 
-## 12) Icons
+## 13) Icons
 Icon selection order:
 1) node type (folder/file)
 2) exact name (if rule exists)
 3) extension
 4) otherwise — unknown
 
-## 13) Theme and effects
+## 14) Theme and effects
 Theme popover lets you switch:
 * light/dark theme
 * Transparent / Mica / Acrylic
@@ -300,15 +293,15 @@ Theme popover lets you switch:
 
 Items marked [Beta] may change between versions.
 
-## 14) Help → About
+## 15) Help → About
 Opens a popover with app info and repository link.
 Reset settings (Help → Reset settings) returns theme and effects settings to their default values.
 * Esc — close popover
 
-## 15) Languages
+## 16) Languages
 Language is selected via the Language menu.
 
-## 16) Progress bar and cancel
+## 17) Progress bar and cancel
 The center of the status bar shows the active operation and its progress.
 
 Progress modes:
@@ -325,7 +318,8 @@ X button (cancel) in the status bar:
 * stops background data calculation;
 * for operations without cancellation support, it stops status-bar indication, while the operation itself may still finish in background.
 
-## 17) Notes
+## 18) Notes
 * By default, dark theme and transparency effects are enabled (if supported).
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.
+
 

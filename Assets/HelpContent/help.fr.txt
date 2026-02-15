@@ -1,4 +1,4 @@
-## 1) Qu’est‑ce que c’est et pourquoi
+﻿## 1) Qu’est‑ce que c’est et pourquoi
 DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour code review, support, formation et partage de structure avec un assistant IA.
 
 Important : l’application est en lecture seule et ne modifie jamais les fichiers.
@@ -101,33 +101,26 @@ Arborescence + contenu :
 * le bloc contenu reste textuel ;
 * export en `.txt`.
 
-### Mode aperçu
-Le mode aperçu s’ouvre avec le bouton en forme d’œil dans la barre supérieure et affiche le texte final sans copie dans le presse-papiers et sans export vers un fichier.
+## 6) Mode aperçu
+S’ouvre avec le bouton icône œil dans la barre supérieure ou avec Ctrl+B.
+
+Affiche le résultat final en lecture seule, sans copie dans le presse-papiers et sans export vers un fichier.
 
 Modes disponibles :
 * Arborescence
 * Contenu
 * Arborescence et contenu
-Raccourci : Ctrl+B.
 
-L’aperçu utilise les mêmes règles que les opérations de copie/export :
-* si des nœuds sont cochés, le résultat est construit à partir de la sélection ;
-* si la sélection est vide ou invalide, l’ensemble complet des données est utilisé ;
-* les règles d’ignorance, les filtres et la sélection des types de fichiers/dossiers s’appliquent comme dans l’arborescence principale.
+Les mêmes règles que pour la copie et l’export sont appliquées :
+* les nœuds cochés sont pris en compte ;
+* si la sélection est vide, l’ensemble complet des données est utilisé ;
+* les règles d’ignorance et les paramètres de sélection actuels sont appliqués.
 
-Le format de l’arborescence dans l’aperçu dépend du sélecteur ASCII/JSON :
-* en mode « Arborescence », le format est entièrement défini par le sélecteur ;
-* en mode « Arborescence et contenu », le bloc arborescence suit le format choisi, le bloc contenu reste textuel.
+Quand l’aperçu est ouvert, la recherche et le filtre ne sont pas disponibles.
+Dans les options, seule la modification de la police est disponible.
+Fermeture : bouton X ou nouveau clic sur l’icône œil.
 
-Pendant l’aperçu :
-* une zone de texte avec numérotation des lignes est affichée ;
-* les données sont en lecture seule, l’édition n’est pas disponible ;
-* l’aperçu peut être fermé avec le bouton X ou par un nouveau clic sur l’icône œil.
-
-Remarque :
-* pour les grands projets, la mise à jour de l’aperçu est asynchrone ; pendant le recalcul, un statut de préparation peut apparaître brièvement.
-
-## 6) Affichage
+## 7) Affichage
 ### Zoom
 * Ctrl++ / Ctrl+= — agrandir
 * Ctrl+- — réduire
@@ -139,7 +132,7 @@ Plage : 6–28, reset : 12.
 ### Mode compact
 Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
 
-## 7) Recherche dans l’arbre
+## 8) Recherche dans l’arbre
 Ouvre la recherche, met en évidence les correspondances et permet la navigation.
 * Ctrl+F — afficher/masquer
 * Enter — résultat suivant
@@ -148,12 +141,12 @@ Ouvre la recherche, met en évidence les correspondances et permet la navigation
 
 La recherche n’ouvre que les branches nécessaires ; en effaçant la requête, l’arbre se replie (sauf la racine).
 
-## 8) Filtrer par nom
+## 9) Filtrer par nom
 Affiche uniquement les nœuds correspondant au filtre et leurs parents. Mise à jour avec délai (debounce).
 * Ctrl+Shift+N — afficher/masquer le filtre
 * Esc — fermer le filtre
 
-## 9) Options
+## 10) Options
 Listes à droite :
 * Police de l’arborescence — appliquer avec Appliquer
 * Ignorer
@@ -168,7 +161,7 @@ Remarque sur « Types de fichiers » :
 
 Ctrl+P — afficher/masquer le panneau.
 
-## 10) Ignorer
+## 11) Ignorer
 La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
 
 Ordre des options :
@@ -182,7 +175,7 @@ Ordre des options :
 
 La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
 
-### 10.1 Portée des règles
+### 11.1 Portée des règles
 L’application construit des zones de projet (scopes) où les règles d’ignore sont appliquées :
 * racine (si la racine contient `.gitignore` ou un marqueur de projet)
 * dossiers du premier niveau
@@ -190,18 +183,18 @@ L’application construit des zones de projet (scopes) où les règles d’ignor
 
 La profondeur de recherche des zones de projet imbriquées est fixe : 2 niveaux.
 
-### 10.2 « Utiliser .gitignore »
+### 11.2 « Utiliser .gitignore »
 * Activé : les règles `.gitignore` sont appliquées dans les zones détectées.
 * Désactivé : les règles `.gitignore` sont entièrement désactivées.
 
 Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
 
-### 10.3 « Smart ignore »
+### 11.3 « Smart ignore »
 * Affiché uniquement lorsqu’il est pertinent.
 * Activé : les artefacts courants de build/outils sont masqués en plus.
 * Désactivé : les règles smart ne sont pas appliquées.
 
-### 10.4 Règles de base
+### 11.4 Règles de base
 Options :
 * Dossiers cachés
 * Fichiers cachés
@@ -210,7 +203,7 @@ Options :
 
 Ces règles sont indépendantes de `.gitignore` et Smart Ignore et dépendent uniquement de leurs propres interrupteurs.
 
-### 10.5 Fonctionnement interne : cas typiques
+### 11.5 Fonctionnement interne : cas typiques
 1. Projet unique avec `.gitignore`.
 En général, seule l’option « Utiliser .gitignore » est affichée.
 Quand elle est activée, `.gitignore` et Smart Ignore fonctionnent ensemble.
@@ -233,7 +226,7 @@ Smart Ignore (s’il est activé) complète le filtrage dans les zones détecté
 Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’est pas pertinent, ces options sont masquées.
 Seules les règles de visibilité de base restent actives.
 
-### 10.6 Fichiers sans extension
+### 11.6 Fichiers sans extension
 L’option « Fichiers sans extension » contrôle l’affichage des fichiers sans extension (par exemple : `Dockerfile`, `Makefile`, `README`).
 
 Règles :
@@ -241,7 +234,7 @@ Règles :
 * lorsqu’elle est activée, les fichiers sans extension sont exclus de l’arbre et des opérations de copie/export ;
 * lorsqu’elle est désactivée, les fichiers sans extension sont inclus dans le résultat ;
 * la liste « Types de fichiers » n’influence pas ce mécanisme.
-## 11) Comment l’arbre et les métriques sont calculés
+## 12) Comment l’arbre et les métriques sont calculés
 Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
 * types de fichiers sélectionnés
@@ -251,7 +244,7 @@ Le résultat dépend de :
 
 Si l’accès est refusé, le nœud est marqué Accès refusé.
 
-### 11.1 Ce que montrent les compteurs de la barre d’état
+### 12.1 Ce que montrent les compteurs de la barre d’état
 La barre d’état contient deux blocs :
 * Arbre — métriques de la sortie texte de l’arborescence ;
 * Contenu — métriques de la sortie de contenu des fichiers.
@@ -267,7 +260,7 @@ Important :
 * « Lignes » dans le bloc « Arbre » correspond au nombre de lignes de la représentation finale de l’arborescence, et non au nombre de fichiers sur le disque ;
 * cette valeur inclut les dossiers, les fichiers et les éléments techniques de l’arbre (par exemple, les nœuds avec accès refusé).
 
-### 11.2 Comment les métriques sont calculées
+### 12.2 Comment les métriques sont calculées
 Métriques de l’arbre :
 * sont calculées à partir de la sortie réelle de l’arbre générée par le même pipeline d’export ;
 * respectent le format ASCII/JSON courant.
@@ -277,7 +270,7 @@ Métriques du contenu :
 * les fichiers binaires sont exclus ;
 * les fichiers vides et uniquement blancs sont comptés via des marqueurs de service (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
-### 11.3 Quand les compteurs sont mis à jour
+### 12.3 Quand les compteurs sont mis à jour
 Le recalcul est effectué :
 * après ouverture/actualisation d’un projet ;
 * après application des paramètres (ignore, types de fichiers, dossiers racine) ;
@@ -285,14 +278,14 @@ Le recalcul est effectué :
 * lors du basculement ASCII/JSON (pour les opérations utilisant l’arbre).
 * si le calcul en arrière-plan est annulé, les compteurs sont remis à 0 jusqu’au prochain recalcul terminé.
 
-## 12) Icônes
+## 13) Icônes
 Ordre de sélection :
 1) type de nœud (dossier/fichier)
 2) nom exact (s’il existe une règle)
 3) extension
 4) sinon — inconnu
 
-## 13) Thème et effets
+## 14) Thème et effets
 Le popover de thème permet :
 * thème clair/sombre
 * Transparent / Mica / Acrylic
@@ -300,15 +293,15 @@ Le popover de thème permet :
 
 Les éléments [Beta] peuvent évoluer entre versions.
 
-## 14) Aide → À propos
+## 15) Aide → À propos
 Ouvre un popover avec les infos de l’app et un lien vers le dépôt.
 Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) remet les réglages de thème et d’effets aux valeurs par défaut.
 * Esc — fermer le popover
 
-## 15) Langues
+## 16) Langues
 La langue se choisit via le menu Langue.
 
-## 16) Barre de progression et annulation
+## 17) Barre de progression et annulation
 La partie centrale de la barre d’état affiche l’opération active et sa progression.
 
 Modes de progression :
@@ -325,7 +318,8 @@ Bouton X (annuler) dans la barre d’état :
 * arrête le calcul de données en arrière-plan ;
 * pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
 
-## 17) Notes
+## 18) Notes
 * Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
+
 

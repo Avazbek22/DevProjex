@@ -1,4 +1,4 @@
-## 1) Cos’è e a cosa serve
+﻿## 1) Cos’è e a cosa serve
 DevProjex prepara rapidamente il contesto del progetto: mostra la struttura di cartelle/file, permette di selezionare gli elementi e copiare l’albero e/o il contenuto dei file negli appunti. Utile per code review, supporto, formazione e condivisione della struttura con un assistente AI.
 
 Importante: l’app è solo in lettura e non modifica i file.
@@ -101,33 +101,26 @@ Albero + contenuto:
 * il blocco contenuto resta testuale;
 * esportazione in `.txt`.
 
-### Modalità anteprima
-La modalità anteprima si apre con il pulsante con l’icona a forma di occhio nella barra superiore e mostra il testo finale senza copiare negli appunti e senza esportare in un file.
+## 6) Modalità anteprima
+Si apre con il pulsante con icona a forma di occhio nella barra superiore o con Ctrl+B.
+
+Mostra il risultato finale in sola lettura, senza copia negli appunti e senza esportazione su file.
 
 Modalità disponibili:
 * Albero
 * Contenuto
 * Albero e contenuto
-Scorciatoia: Ctrl+B.
 
-L’anteprima usa le stesse regole delle operazioni di copia/esportazione:
-* se ci sono nodi selezionati, il risultato viene costruito dalla selezione;
-* se la selezione è vuota o non valida, viene usato il set completo dei dati;
-* regole di ignoramento, filtri e selezione di tipi file/cartelle vengono applicati come nell’albero principale.
+Si applicano le stesse regole della copia e dell’esportazione:
+* i nodi selezionati vengono considerati;
+* se la selezione è vuota, viene usato il set completo dei dati;
+* vengono applicate le regole di ignoramento e i parametri di selezione correnti.
 
-Il formato dell’albero in anteprima dipende dal selettore ASCII/JSON:
-* in modalità «Albero», il formato è definito interamente dal selettore;
-* in modalità «Albero e contenuto», il blocco albero segue il formato scelto, mentre il blocco contenuto resta testuale.
+Quando l’anteprima è aperta, ricerca e filtro non sono disponibili.
+Nelle opzioni è disponibile solo la modifica del font.
+Chiusura: pulsante X oppure nuovo clic sull’icona occhio.
 
-Durante l’anteprima:
-* viene mostrata un’area di testo con numerazione righe;
-* i dati sono in sola lettura, la modifica non è disponibile;
-* l’anteprima può essere chiusa con il pulsante X o cliccando di nuovo sull’icona occhio.
-
-Nota:
-* per progetti grandi, l’aggiornamento dell’anteprima è asincrono; durante il ricalcolo può comparire brevemente lo stato di preparazione.
-
-## 6) Visualizza
+## 7) Visualizza
 ### Zoom
 * Ctrl++ / Ctrl+= — aumenta
 * Ctrl+- — riduci
@@ -139,7 +132,7 @@ Intervallo: 6–28, reset: 12.
 ### Modalità compatta
 Rende l’interfaccia più densa: spazi più piccoli nell’albero e nelle impostazioni.
 
-## 7) Ricerca nell’albero
+## 8) Ricerca nell’albero
 Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 * Ctrl+F — mostra/nascondi
 * Enter — risultato successivo
@@ -148,12 +141,12 @@ Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 
 La ricerca apre solo i rami necessari; svuotando la query l’albero si richiude (tranne la radice).
 
-## 8) Filtra per nome
+## 9) Filtra per nome
 Mostra solo i nodi che corrispondono al filtro e i loro genitori. Aggiornamento con debounce.
 * Ctrl+Shift+N — mostra/nascondi filtro
 * Esc — chiudi filtro
 
-## 9) Opzioni
+## 10) Opzioni
 Liste a destra:
 * Font albero — applica con Applica
 * Ignora
@@ -168,7 +161,7 @@ Nota su « Tipi di file »:
 
 Ctrl+P — mostra/nascondi pannello.
 
-## 10) Ignora
+## 11) Ignora
 L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
 
 Ordine delle opzioni:
@@ -182,7 +175,7 @@ Ordine delle opzioni:
 
 La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
 
-### 10.1 Ambito delle regole
+### 11.1 Ambito delle regole
 L’app costruisce ambiti di progetto (scope) in cui applicare le regole di ignore:
 * radice (se la radice contiene `.gitignore` o un marker di progetto)
 * cartelle di primo livello
@@ -190,18 +183,18 @@ L’app costruisce ambiti di progetto (scope) in cui applicare le regole di igno
 
 La profondità di ricerca degli ambiti annidati è fissa: 2 livelli.
 
-### 10.2 « Usa .gitignore »
+### 11.2 « Usa .gitignore »
 * Attivo: le regole `.gitignore` sono applicate negli ambiti rilevati.
 * Disattivo: le regole `.gitignore` sono completamente disattivate.
 
 Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
 
-### 10.3 « Smart ignore »
+### 11.3 « Smart ignore »
 * Viene mostrato solo quando è pertinente.
 * Attivo: nasconde anche i tipici artefatti di build e strumenti.
 * Disattivo: le regole smart non vengono applicate.
 
-### 10.4 Regole base
+### 11.4 Regole base
 Opzioni:
 * Cartelle nascoste
 * File nascosti
@@ -210,7 +203,7 @@ Opzioni:
 
 Queste regole sono indipendenti da `.gitignore` e Smart Ignore e dipendono solo dai rispettivi interruttori.
 
-### 10.5 Comportamento interno: casi tipici
+### 11.5 Comportamento interno: casi tipici
 1. Progetto singolo con `.gitignore`.
 Di norma viene mostrato solo « Usa .gitignore ».
 Quando è attivo, `.gitignore` e Smart Ignore lavorano insieme.
@@ -233,7 +226,7 @@ Viene mostrato « Usa .gitignore ».
 Se non viene trovato `.gitignore` e Smart Ignore non è pertinente, queste opzioni non vengono mostrate.
 Restano solo le regole base di visibilità.
 
-### 10.6 File senza estensione
+### 11.6 File senza estensione
 L’opzione « File senza estensione » controlla la visibilità dei file senza estensione (ad esempio: `Dockerfile`, `Makefile`, `README`).
 
 Regole:
@@ -241,7 +234,7 @@ Regole:
 * quando è attiva, i file senza estensione vengono esclusi dall’albero e dalle operazioni di copia/export;
 * quando è disattiva, i file senza estensione vengono inclusi nel risultato;
 * la lista « Tipi di file » non controlla questo comportamento.
-## 11) Come vengono calcolati albero e metriche
+## 12) Come vengono calcolati albero e metriche
 Il risultato dipende da:
 * cartelle di primo livello selezionate
 * tipi di file selezionati
@@ -251,7 +244,7 @@ Il risultato dipende da:
 
 Se l’accesso è negato, il nodo è marcato Accesso negato.
 
-### 11.1 Cosa mostrano i contatori nella barra di stato
+### 12.1 Cosa mostrano i contatori nella barra di stato
 La barra di stato contiene due blocchi:
 * Albero — metriche dell’output testuale dell’albero;
 * Contenuto — metriche dell’output contenuti file.
@@ -267,7 +260,7 @@ Importante:
 * « Righe » nel blocco « Albero » indica il numero di righe della rappresentazione finale dell’albero, non il numero di file su disco;
 * in questo valore rientrano cartelle, file ed elementi di servizio dell’albero (ad esempio nodi con accesso negato).
 
-### 11.2 Come vengono calcolate le metriche
+### 12.2 Come vengono calcolate le metriche
 Metriche albero:
 * sono calcolate dall’output reale dell’albero generato dalla stessa pipeline di export;
 * rispettano il formato ASCII/JSON corrente.
@@ -277,7 +270,7 @@ Metriche contenuto:
 * i file binari sono esclusi;
 * file vuoti e solo spazi sono conteggiati tramite marker di servizio (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
-### 11.3 Quando i contatori vengono aggiornati
+### 12.3 Quando i contatori vengono aggiornati
 Il ricalcolo avviene:
 * dopo apertura/aggiornamento progetto;
 * dopo applicazione impostazioni (ignore, tipi file, cartelle root);
@@ -285,14 +278,14 @@ Il ricalcolo avviene:
 * quando si passa ASCII/JSON (per operazioni che usano l’albero).
 * quando il calcolo in background viene annullato, i contatori vengono impostati a 0 fino al successivo ricalcolo completato.
 
-## 12) Icone
+## 13) Icone
 Ordine di scelta:
 1) tipo nodo (cartella/file)
 2) nome esatto (se esiste una regola)
 3) estensione
 4) altrimenti — sconosciuto
 
-## 13) Tema ed effetti
+## 14) Tema ed effetti
 Il popover del tema permette di scegliere:
 * tema chiaro/scuro
 * Trasparente / Mica / Acrylic
@@ -300,15 +293,15 @@ Il popover del tema permette di scegliere:
 
 Gli elementi [Beta] possono cambiare tra versioni.
 
-## 14) Aiuto → Informazioni
+## 15) Aiuto → Informazioni
 Apre un popover con info app e link al repository.
 Reimposta impostazioni (Aiuto → Reimposta impostazioni) riporta tema ed effetti ai valori predefiniti.
 * Esc — chiudi popover
 
-## 15) Lingue
+## 16) Lingue
 La lingua si seleziona dal menu Lingua.
 
-## 16) Barra di avanzamento e annullamento
+## 17) Barra di avanzamento e annullamento
 Nella parte centrale della barra di stato vengono mostrati operazione attiva e progresso.
 
 Modalità progresso:
@@ -325,7 +318,8 @@ Pulsante X (annulla) nella barra di stato:
 * interrompe il calcolo dati in background;
 * per operazioni senza supporto annullamento, ferma l’indicazione nella barra di stato, mentre l’operazione può comunque terminare in background.
 
-## 17) Note
+## 18) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
+
 
