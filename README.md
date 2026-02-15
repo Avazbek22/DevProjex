@@ -24,9 +24,10 @@ Older versions are available on the Releases page.
 
 ## App Screenshots 🖼️
 
-> <img width="1981" height="1267" alt="image" src="https://github.com/user-attachments/assets/41daf582-aa7f-4c79-8c3b-ea750d6132ac" />
-
-> <img width="2000" height="1276" alt="image" src="https://github.com/user-attachments/assets/49699c5f-f39d-4924-865e-317f83b506a2" />
+> <img width="1723" height="1183" alt="Снимок экрана 2026-02-15 132448" src="https://github.com/user-attachments/assets/a6752e4d-2616-42d4-85fd-cd541506f0cf" />
+> <img width="1696" height="1188" alt="Снимок экрана 2026-02-15 132511" src="https://github.com/user-attachments/assets/f09737e7-56ac-43d5-8fa7-95e3a36f76ab" />
+> <img width="1692" height="1175" alt="Снимок экрана 2026-02-15 132525" src="https://github.com/user-attachments/assets/99e7de19-8a23-4171-90ec-6f0441130e98" />
+> <img width="1715" height="1171" alt="Снимок экрана 2026-02-15 132558" src="https://github.com/user-attachments/assets/6812e8c5-bcaa-45d9-acfa-8a21d3084a03" />
 
 ---
 
