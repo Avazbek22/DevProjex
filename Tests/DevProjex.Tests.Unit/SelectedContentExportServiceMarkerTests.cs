@@ -16,7 +16,7 @@ public sealed class SelectedContentExportServiceMarkerTests
 		var whitespace = temp.CreateFile("space.txt", " \r\n\t");
 		var text = temp.CreateFile("text.txt", "Hello");
 
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 		var result = service.Build(new[] { whitespace, text, empty });
 
 		Assert.Contains($"{empty}:", result);
@@ -40,7 +40,7 @@ public sealed class SelectedContentExportServiceMarkerTests
 		var binary = temp.CreateBinaryFile("image.bin", new byte[] { 1, 2, 0, 3 });
 		var text = temp.CreateFile("note.txt", "text");
 
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 		var result = service.Build(new[] { binary, text });
 
 		Assert.DoesNotContain($"{binary}:", result);
@@ -55,7 +55,7 @@ public sealed class SelectedContentExportServiceMarkerTests
 		var content = " \t\r\n";
 		var file = temp.CreateFile("whitespace.txt", content);
 
-		var service = new SelectedContentExportService();
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
 		var result = service.Build(new[] { file });
 
 		var bytes = Encoding.UTF8.GetByteCount(content);

@@ -13,7 +13,18 @@
       "Bash(git check-ignore:*)",
       "Bash(timeout 8 dotnet run:*)",
       "Bash(timeout 6 dotnet run:*)",
-      "Bash(timeout 5 dotnet run:*)"
+      "Bash(timeout 5 dotnet run:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+      "Bash(dir \"C:\\\\Users\\\\Avazbek\\\\RiderProjects\\\\DevProjex\\\\Application\" /b)",
+      "Bash(taskkill:*)",
+      "Bash(timeout:*)",
+      "Bash(powershell:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(dotnet clean:*)",
+      "Bash(git status:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

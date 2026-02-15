@@ -1,6 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.IO;
+using DevProjex.Application.Services;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Kernel.Models;
 using DevProjex.Tests.Integration.Helpers;
 using Xunit;
@@ -120,7 +123,10 @@ public sealed class FileSystemScannerTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ignored" },
-			SmartIgnoredFiles: new HashSet<string>());
+			SmartIgnoredFiles: new HashSet<string>())
+		{
+			UseSmartIgnore = true
+		};
 
 		var result = scanner.GetExtensions(temp.Path, rules);
 
@@ -203,6 +209,67 @@ public sealed class FileSystemScannerTests
 
 		Assert.Contains(".txt", result.Value);
 		Assert.DoesNotContain(".log", result.Value);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void GetExtensions_SelectedParentFolderDepthTwo_DotNetProject_SmartIgnoreToggleControlsArtifactExtensions(bool useSmartIgnore)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/America.sln", "");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/Program.cs", "class Program {}");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
+
+		var smartService = new SmartIgnoreService(new DevProjex.Kernel.Abstractions.ISmartIgnoreRule[]
+		{
+			new DotNetArtifactsIgnoreRule()
+		});
+		var rulesService = new IgnoreRulesService(smartService);
+		var selectedOptions = useSmartIgnore
+			? new[] { IgnoreOptionId.SmartIgnore }
+			: Array.Empty<IgnoreOptionId>();
+		var rules = rulesService.Build(
+			temp.Path,
+			selectedOptions,
+			selectedRootFolders: new[] { "Documents" });
+
+		var scanner = new FileSystemScanner();
+		var result = scanner.GetExtensions(Path.Combine(temp.Path, "Documents"), rules);
+
+		Assert.Contains(".cs", result.Value);
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".exe"));
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".txt"));
+	}
+
+	[Fact]
+	public void GetExtensions_SelectedParentFolderDepthTwo_NestedGitIgnore_HidesArtifactExtensions()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Documents/Visual Studio 2019/America/.gitignore", "bin/\nobj/\n");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/America.csproj", "<Project />");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/Program.cs", "class Program {}");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
+		temp.CreateFile("Documents/Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
+
+		var smartService = new SmartIgnoreService(new DevProjex.Kernel.Abstractions.ISmartIgnoreRule[]
+		{
+			new DotNetArtifactsIgnoreRule()
+		});
+		var rulesService = new IgnoreRulesService(smartService);
+		var rules = rulesService.Build(
+			temp.Path,
+			new[] { IgnoreOptionId.UseGitIgnore },
+			selectedRootFolders: new[] { "Documents" });
+
+		var scanner = new FileSystemScanner();
+		var result = scanner.GetExtensions(Path.Combine(temp.Path, "Documents"), rules);
+
+		Assert.Contains(".cs", result.Value);
+		Assert.DoesNotContain(".exe", result.Value);
+		Assert.DoesNotContain(".txt", result.Value);
 	}
 }
 

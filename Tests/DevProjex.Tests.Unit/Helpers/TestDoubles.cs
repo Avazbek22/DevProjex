@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Contracts;
 using DevProjex.Kernel.Models;
@@ -36,13 +37,13 @@ internal sealed class StubFileSystemScanner : IFileSystemScanner
 
 	public bool CanReadRoot(string rootPath) => CanReadRootHandler(rootPath);
 
-	public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules) =>
+	public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default) =>
 		GetExtensionsHandler(rootPath, rules);
 
-	public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules) =>
+	public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default) =>
 		GetRootFileExtensionsHandler(rootPath, rules);
 
-	public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules) =>
+	public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default) =>
 		GetRootFolderNamesHandler(rootPath, rules);
 }
 
@@ -53,7 +54,7 @@ internal sealed class StubTreeBuilder : ITreeBuilder
 		false,
 		false);
 
-	public TreeBuildResult Build(string rootPath, TreeFilterOptions options) => Result;
+	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default) => Result;
 }
 
 internal sealed class StubIconMapper : IIconMapper

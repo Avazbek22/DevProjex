@@ -4,7 +4,7 @@
              x:Class="DevProjex.Avalonia.App">
     <Application.Styles>
         <FluentTheme />
-        <StyleInclude Source="avares://DevProjex.Avalonia/Styles/Theme.axaml" />
+        <StyleInclude Source="avares://DevProjex/Styles/Theme.axaml" />
     </Application.Styles>
 
     <Application.Resources>

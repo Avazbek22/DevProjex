@@ -15,9 +15,9 @@ public sealed class BuildTreeUseCase
 		_presenter = presenter;
 	}
 
-	public BuildTreeResult Execute(BuildTreeRequest request)
+	public BuildTreeResult Execute(BuildTreeRequest request, CancellationToken cancellationToken = default)
 	{
-		var result = _treeBuilder.Build(request.RootPath, request.Filter);
+		var result = _treeBuilder.Build(request.RootPath, request.Filter, cancellationToken);
 		var root = _presenter.Build(result.Root);
 
 		return new BuildTreeResult(root, result.RootAccessDenied, result.HadAccessDenied);

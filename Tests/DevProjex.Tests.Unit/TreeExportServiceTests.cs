@@ -1,6 +1,9 @@
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
+using DevProjex.Kernel.Models;
 using Xunit;
 
 namespace DevProjex.Tests.Unit;
@@ -285,5 +288,64 @@ public sealed class TreeExportServiceTests
 		var selected = new HashSet<string> { "/root" };
 
 		Assert.True(TreeExportService.HasSelectedDescendantOrSelf(node, selected));
+	}
+
+	// Verifies JSON export includes root metadata and nested children.
+	[Fact]
+	public void BuildFullTree_JsonFormat_ReturnsValidJson()
+	{
+		var root = new TreeNodeDescriptor(
+			DisplayName: "root",
+			FullPath: "/root",
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: new List<TreeNodeDescriptor>
+			{
+				new TreeNodeDescriptor("src", "/root/src", true, false, "folder", new List<TreeNodeDescriptor>
+				{
+					new TreeNodeDescriptor("main.cs", "/root/src/main.cs", false, false, "csharp", new List<TreeNodeDescriptor>())
+				})
+			});
+
+		var service = new TreeExportService();
+		var result = service.BuildFullTree("/root", root, TreeTextFormat.Json);
+
+		using var doc = JsonDocument.Parse(result);
+		Assert.Equal(Path.GetFullPath("/root"), doc.RootElement.GetProperty("rootPath").GetString());
+		var jsonRoot = doc.RootElement.GetProperty("root");
+		Assert.Equal("root", jsonRoot.GetProperty("name").GetString());
+		Assert.Equal(".", jsonRoot.GetProperty("path").GetString());
+		var dirs = jsonRoot.GetProperty("dirs");
+		Assert.Equal(1, dirs.GetArrayLength());
+		Assert.Equal("src", dirs[0].GetProperty("name").GetString());
+		Assert.Equal("src", dirs[0].GetProperty("path").GetString());
+		Assert.Equal("main.cs", dirs[0].GetProperty("files")[0].GetString());
+	}
+
+	// Verifies JSON selected export keeps only selected branch with ancestors.
+	[Fact]
+	public void BuildSelectedTree_JsonFormat_ReturnsFilteredTree()
+	{
+		var root = new TreeNodeDescriptor(
+			DisplayName: "root",
+			FullPath: "/root",
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: new List<TreeNodeDescriptor>
+			{
+				new TreeNodeDescriptor("keep.txt", "/root/keep.txt", false, false, "text", new List<TreeNodeDescriptor>()),
+				new TreeNodeDescriptor("skip.txt", "/root/skip.txt", false, false, "text", new List<TreeNodeDescriptor>())
+			});
+
+		var service = new TreeExportService();
+		var selected = new HashSet<string> { "/root/keep.txt" };
+		var result = service.BuildSelectedTree("/root", root, selected, TreeTextFormat.Json);
+
+		using var doc = JsonDocument.Parse(result);
+		var files = doc.RootElement.GetProperty("root").GetProperty("files");
+		Assert.Equal(1, files.GetArrayLength());
+		Assert.Equal("keep.txt", files[0].GetString());
 	}
 }

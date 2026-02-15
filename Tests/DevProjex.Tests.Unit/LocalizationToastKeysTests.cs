@@ -14,12 +14,16 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Copy.Tree",
 		"Toast.Copy.Content",
 		"Toast.Copy.TreeAndContent",
+		"Toast.Export.Tree",
+		"Toast.Export.Content",
+		"Toast.Export.TreeAndContent",
 		"Toast.NoMatches",
 		"Toast.Git.CloneSuccess",
 		"Toast.Git.CloneError",
 		"Toast.Git.UpdatesApplied",
 		"Toast.Git.NoUpdates",
 		"Toast.Git.BranchSwitched",
+		"Toast.Refresh.Success",
 		"Toast.Settings.Reset"
 	};
 

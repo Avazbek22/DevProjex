@@ -14,7 +14,11 @@ public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
 		"package.json",
 		"package-lock.json",
 		"pnpm-lock.yaml",
-		"yarn.lock"
+		"yarn.lock",
+		"bun.lockb",
+		"bun.lock",
+		"pnpm-workspace.yaml",
+		"npm-shrinkwrap.json"
 	};
 
 	private static readonly string[] FolderNames =
@@ -25,7 +29,16 @@ public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
 		".next",
 		".nuxt",
 		".turbo",
-		".svelte-kit"
+		".svelte-kit",
+		".angular",
+		"coverage",
+		".cache",
+		".parcel-cache",
+		".vite",
+		".output",
+		".astro",
+		"storybook-static",
+		"out"
 	};
 
 	public SmartIgnoreResult Evaluate(string rootPath)

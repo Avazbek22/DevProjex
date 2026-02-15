@@ -15,6 +15,7 @@ public sealed class ResourceStoreTests
 		var dict = catalog.Get(AppLanguage.En);
 
 		Assert.Contains("Settings.Ignore.UseGitIgnore", dict.Keys);
+		Assert.Contains("Settings.Ignore.SmartIgnore", dict.Keys);
 	}
 
 	// Verifies embedded icon store returns bytes for known keys.

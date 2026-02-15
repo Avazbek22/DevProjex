@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Media;
+using System.Collections.Specialized;
 using System.Collections.ObjectModel;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.ResourceStore;
@@ -7,10 +8,26 @@ using DevProjex.Kernel.Models;
 
 namespace DevProjex.Avalonia.ViewModels;
 
+/// <summary>
+/// Specifies the export format for copying content.
+/// </summary>
+public enum ExportFormat
+{
+    Ascii,
+    Json
+}
+
+public enum PreviewContentMode
+{
+    Tree,
+    Content,
+    TreeAndContent
+}
+
 public sealed class MainWindowViewModel : ViewModelBase
 {
-    public const string BaseTitle = "DevProjex v4.1";
-    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.1";
+    public const string BaseTitle = "DevProjex v4.5";
+    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.5";
 
     private readonly LocalizationService _localization;
     private readonly HelpContentProvider _helpContentProvider;
@@ -32,10 +49,17 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _allIgnoreChecked;
     private bool _isDarkTheme = true;
     private bool _isCompactMode;
+    private bool _isTreeAnimationEnabled;
     private bool _filterVisible;
+    private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
+    private PreviewContentMode _selectedPreviewContentMode = PreviewContentMode.Tree;
     private bool _isMicaEnabled;
     private bool _isAcrylicEnabled;
     private bool _isTransparentEnabled = true;
+    private bool _isPreviewMode;
+    private bool _isPreviewLoading;
+    private string _previewText = string.Empty;
+    private string _previewLineNumbers = "1";
 
     // Theme intensity sliders (0-100)
     // MaterialIntensity: single slider controlling overall effect (transparency, depth, material feel)
@@ -59,11 +83,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
     private double _aboutPopoverMaxHeight = 380;
-    private string _statusLineCountText = "Lines: 0";
-    private string _statusCharCountText = "Chars: 0";
-    private string _statusTokenEstimateText = "~Tokens: 0";
+    private string _statusTreeStatsText = string.Empty;
+    private string _statusContentStatsText = string.Empty;
     private string _statusOperationText = string.Empty;
     private bool _statusBusy;
+    private bool _statusMetricsVisible;
     private bool _statusProgressIsIndeterminate = true;
     private double _statusProgressValue;
 
@@ -81,43 +105,49 @@ public sealed class MainWindowViewModel : ViewModelBase
         IgnoreOptions.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
         Extensions.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
         RootFolders.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
+        ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
     }
 
-    public ObservableCollection<TreeNodeViewModel> TreeNodes { get; } = new();
+    private ObservableCollection<TreeNodeViewModel> _treeNodes = new();
+
+    public ObservableCollection<TreeNodeViewModel> TreeNodes
+    {
+        get => _treeNodes;
+        private set
+        {
+            if (ReferenceEquals(_treeNodes, value)) return;
+            _treeNodes = value;
+            RaisePropertyChanged();
+        }
+    }
     public ObservableCollection<SelectionOptionViewModel> RootFolders { get; } = new();
     public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new();
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new();
     public ObservableCollection<FontFamily> FontFamilies { get; } = new();
 
-    public string StatusLineCountText
+    public void ResetTreeNodes()
     {
-        get => _statusLineCountText;
+        TreeNodes = new ObservableCollection<TreeNodeViewModel>();
+    }
+
+    public string StatusTreeStatsText
+    {
+        get => _statusTreeStatsText;
         set
         {
-            if (_statusLineCountText == value) return;
-            _statusLineCountText = value;
+            if (_statusTreeStatsText == value) return;
+            _statusTreeStatsText = value;
             RaisePropertyChanged();
         }
     }
 
-    public string StatusCharCountText
+    public string StatusContentStatsText
     {
-        get => _statusCharCountText;
+        get => _statusContentStatsText;
         set
         {
-            if (_statusCharCountText == value) return;
-            _statusCharCountText = value;
-            RaisePropertyChanged();
-        }
-    }
-
-    public string StatusTokenEstimateText
-    {
-        get => _statusTokenEstimateText;
-        set
-        {
-            if (_statusTokenEstimateText == value) return;
-            _statusTokenEstimateText = value;
+            if (_statusContentStatsText == value) return;
+            _statusContentStatsText = value;
             RaisePropertyChanged();
         }
     }
@@ -176,6 +206,17 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public string StatusProgressPercentText => $"{Math.Clamp((int)Math.Round(_statusProgressValue), 0, 100)}%";
 
+    public bool StatusMetricsVisible
+    {
+        get => _statusMetricsVisible;
+        set
+        {
+            if (_statusMetricsVisible == value) return;
+            _statusMetricsVisible = value;
+            RaisePropertyChanged();
+        }
+    }
+
     public string Title
     {
         get => _title;
@@ -195,8 +236,26 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (_isProjectLoaded == value) return;
             _isProjectLoaded = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsSearchFilterAvailable));
         }
     }
+
+    public bool IsPreviewMode
+    {
+        get => _isPreviewMode;
+        set
+        {
+            if (_isPreviewMode == value) return;
+            _isPreviewMode = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsSearchFilterAvailable));
+            RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
+        }
+    }
+
+    public bool IsSearchFilterAvailable => _isProjectLoaded && !_isPreviewMode;
+
+    public bool AreFilterSettingsEnabled => !_isPreviewMode;
 
     public bool SettingsVisible
     {
@@ -270,6 +329,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    public bool IsTreeAnimationEnabled
+    {
+        get => _isTreeAnimationEnabled;
+        set
+        {
+            if (_isTreeAnimationEnabled == value) return;
+            _isTreeAnimationEnabled = value;
+            RaisePropertyChanged();
+        }
+    }
+
     public bool FilterVisible
     {
         get => _filterVisible;
@@ -277,6 +347,90 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (_filterVisible == value) return;
             _filterVisible = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public ExportFormat SelectedExportFormat
+    {
+        get => _selectedExportFormat;
+        set
+        {
+            if (_selectedExportFormat == value) return;
+            _selectedExportFormat = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsAsciiFormatSelected));
+            RaisePropertyChanged(nameof(IsJsonFormatSelected));
+        }
+    }
+
+    public bool IsAsciiFormatSelected
+    {
+        get => _selectedExportFormat == ExportFormat.Ascii;
+        set
+        {
+            if (value) SelectedExportFormat = ExportFormat.Ascii;
+        }
+    }
+
+    public bool IsJsonFormatSelected
+    {
+        get => _selectedExportFormat == ExportFormat.Json;
+        set
+        {
+            if (value) SelectedExportFormat = ExportFormat.Json;
+        }
+    }
+
+    public PreviewContentMode SelectedPreviewContentMode
+    {
+        get => _selectedPreviewContentMode;
+        set
+        {
+            if (_selectedPreviewContentMode == value) return;
+            _selectedPreviewContentMode = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsPreviewTreeSelected));
+            RaisePropertyChanged(nameof(IsPreviewContentSelected));
+            RaisePropertyChanged(nameof(IsPreviewTreeAndContentSelected));
+        }
+    }
+
+    public bool IsPreviewTreeSelected => _selectedPreviewContentMode == PreviewContentMode.Tree;
+
+    public bool IsPreviewContentSelected => _selectedPreviewContentMode == PreviewContentMode.Content;
+
+    public bool IsPreviewTreeAndContentSelected => _selectedPreviewContentMode == PreviewContentMode.TreeAndContent;
+
+    public string PreviewText
+    {
+        get => _previewText;
+        set
+        {
+            if (_previewText == value) return;
+            _previewText = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string PreviewLineNumbers
+    {
+        get => _previewLineNumbers;
+        set
+        {
+            if (_previewLineNumbers == value) return;
+            _previewLineNumbers = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public bool IsPreviewLoading
+    {
+        get => _isPreviewLoading;
+        set
+        {
+            if (_isPreviewLoading == value) return;
+            _isPreviewLoading = value;
             RaisePropertyChanged();
         }
     }
@@ -693,6 +847,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    public bool HasRootFolderOptions => RootFolders.Count > 0;
+
     public bool AllIgnoreChecked
     {
         get => _allIgnoreChecked;
@@ -707,12 +863,17 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuFile { get; private set; } = string.Empty;
     public string MenuFileOpen { get; private set; } = string.Empty;
     public string MenuFileRefresh { get; private set; } = string.Empty;
+    public string MenuFileExport { get; private set; } = string.Empty;
+    public string MenuFileExportTree { get; private set; } = string.Empty;
+    public string MenuFileExportContent { get; private set; } = string.Empty;
+    public string MenuFileExportTreeAndContent { get; private set; } = string.Empty;
     public string MenuFileExit { get; private set; } = string.Empty;
     public string MenuCopy { get; private set; } = string.Empty;
     public string MenuCopyTree { get; private set; } = string.Empty;
     public string MenuCopyContent { get; private set; } = string.Empty;
     public string MenuCopyTreeAndContent { get; private set; } = string.Empty;
     public ObservableCollection<ToastMessageViewModel> ToastItems { get; private set; } = new();
+    public bool HasToastItems => ToastItems.Count > 0;
     public string MenuView { get; private set; } = string.Empty;
     public string MenuViewExpandAll { get; private set; } = string.Empty;
     public string MenuViewCollapseAll { get; private set; } = string.Empty;
@@ -725,6 +886,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuViewMica { get; private set; } = string.Empty;
     public string MenuViewAcrylic { get; private set; } = string.Empty;
     public string MenuViewCompactMode { get; private set; } = string.Empty;
+    public string MenuViewTreeAnimation { get; private set; } = string.Empty;
     public string MenuOptions { get; private set; } = string.Empty;
     public string MenuOptionsTreeSettings { get; private set; } = string.Empty;
     public string MenuLanguage { get; private set; } = string.Empty;
@@ -764,6 +926,18 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuSearch { get; private set; } = string.Empty;
     public string FilterByNamePlaceholder { get; private set; } = string.Empty;
     public string FilterTooltip { get; private set; } = string.Empty;
+    public string CopyFormatTooltip { get; private set; } = string.Empty;
+    public string PreviewTooltip { get; private set; } = string.Empty;
+    public string PreviewModesLabel { get; private set; } = string.Empty;
+    public string PreviewModeTree { get; private set; } = string.Empty;
+    public string PreviewModeContent { get; private set; } = string.Empty;
+    public string PreviewModeTreeAndContent { get; private set; } = string.Empty;
+    public string PreviewLoadingText { get; private set; } = string.Empty;
+    public string PreviewNoDataText { get; private set; } = string.Empty;
+
+    // StatusBar labels
+    public string StatusTreeLabel { get; private set; } = string.Empty;
+    public string StatusContentLabel { get; private set; } = string.Empty;
 
     // Drop Zone localization
     public string DropZoneTitle { get; private set; } = string.Empty;
@@ -776,6 +950,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string StatusOperationGettingUpdates { get; private set; } = string.Empty;
     public string StatusOperationGettingUpdatesBranch { get; private set; } = string.Empty;
     public string StatusOperationSwitchingBranch { get; private set; } = string.Empty;
+    public string StatusOperationCalculatingData { get; private set; } = string.Empty;
+    public string StatusOperationPreparingPreview { get; private set; } = string.Empty;
+    public string ToastPreviewCanceled { get; private set; } = string.Empty;
 
     // Git menu localization
     public string MenuGitClone { get; private set; } = string.Empty;
@@ -811,6 +988,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuFile = _localization["Menu.File"];
         MenuFileOpen = _localization["Menu.File.Open"];
         MenuFileRefresh = _localization["Menu.File.Refresh"];
+        MenuFileExport = _localization["Menu.File.Export"];
+        MenuFileExportTree = _localization["Menu.File.Export.Tree"];
+        MenuFileExportContent = _localization["Menu.File.Export.Content"];
+        MenuFileExportTreeAndContent = _localization["Menu.File.Export.TreeAndContent"];
         MenuFileExit = _localization["Menu.File.Exit"];
         MenuCopy = _localization["Menu.Copy"];
         MenuCopyTree = _localization["Menu.Copy.Tree"];
@@ -828,6 +1009,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuViewMica = _localization["Menu.View.Mica"];
         MenuViewAcrylic = _localization["Menu.View.Acrylic"];
         MenuViewCompactMode = _localization["Menu.View.CompactMode"];
+        MenuViewTreeAnimation = _localization["Menu.View.TreeAnimation"];
         MenuOptions = _localization["Menu.Options"];
         MenuOptionsTreeSettings = _localization["Menu.Options.TreeSettings"];
         MenuLanguage = _localization["Menu.Language"];
@@ -852,6 +1034,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuSearch = _localization["Menu.Search"];
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
+        CopyFormatTooltip = _localization["CopyFormat.Tooltip"];
+        PreviewTooltip = _localization["Preview.Tooltip"];
+        PreviewModesLabel = _localization["Preview.Modes.Label"];
+        PreviewModeTree = _localization["Preview.Mode.Tree"];
+        PreviewModeContent = _localization["Preview.Mode.Content"];
+        PreviewModeTreeAndContent = _localization["Preview.Mode.TreeAndContent"];
+        PreviewLoadingText = _localization["Preview.Loading"];
+        PreviewNoDataText = _localization["Preview.NoData"];
+
+        // StatusBar labels
+        StatusTreeLabel = _localization["Status.Tree.Label"];
+        StatusContentLabel = _localization["Status.Content.Label"];
 
         // Drop Zone localization
         DropZoneTitle = _localization["DropZone.Title"];
@@ -864,6 +1058,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         StatusOperationGettingUpdates = _localization["Status.Operation.GettingUpdates"];
         StatusOperationGettingUpdatesBranch = _localization["Status.Operation.GettingUpdatesBranch"];
         StatusOperationSwitchingBranch = _localization["Status.Operation.SwitchingBranch"];
+        StatusOperationCalculatingData = _localization["Status.Operation.CalculatingData"];
+        StatusOperationPreparingPreview = _localization["Status.Operation.PreparingPreview"];
+        ToastPreviewCanceled = _localization["Toast.Operation.PreviewCanceled"];
 
         // Git menu localization
         MenuGitClone = _localization["Menu.Git.Clone"];
@@ -912,6 +1109,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuFile));
         RaisePropertyChanged(nameof(MenuFileOpen));
         RaisePropertyChanged(nameof(MenuFileRefresh));
+        RaisePropertyChanged(nameof(MenuFileExport));
+        RaisePropertyChanged(nameof(MenuFileExportTree));
+        RaisePropertyChanged(nameof(MenuFileExportContent));
+        RaisePropertyChanged(nameof(MenuFileExportTreeAndContent));
         RaisePropertyChanged(nameof(MenuFileExit));
         RaisePropertyChanged(nameof(MenuCopy));
         RaisePropertyChanged(nameof(MenuCopyTree));
@@ -929,6 +1130,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuViewMica));
         RaisePropertyChanged(nameof(MenuViewAcrylic));
         RaisePropertyChanged(nameof(MenuViewCompactMode));
+        RaisePropertyChanged(nameof(MenuViewTreeAnimation));
         RaisePropertyChanged(nameof(MenuOptions));
         RaisePropertyChanged(nameof(MenuOptionsTreeSettings));
         RaisePropertyChanged(nameof(MenuLanguage));
@@ -952,6 +1154,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuSearch));
         RaisePropertyChanged(nameof(FilterByNamePlaceholder));
         RaisePropertyChanged(nameof(FilterTooltip));
+        RaisePropertyChanged(nameof(CopyFormatTooltip));
+        RaisePropertyChanged(nameof(PreviewTooltip));
+        RaisePropertyChanged(nameof(PreviewModesLabel));
+        RaisePropertyChanged(nameof(PreviewModeTree));
+        RaisePropertyChanged(nameof(PreviewModeContent));
+        RaisePropertyChanged(nameof(PreviewModeTreeAndContent));
+        RaisePropertyChanged(nameof(PreviewLoadingText));
+        RaisePropertyChanged(nameof(PreviewNoDataText));
+
+        // StatusBar labels
+        RaisePropertyChanged(nameof(StatusTreeLabel));
+        RaisePropertyChanged(nameof(StatusContentLabel));
 
         // Drop Zone localization
         RaisePropertyChanged(nameof(DropZoneTitle));
@@ -964,6 +1178,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(StatusOperationGettingUpdates));
         RaisePropertyChanged(nameof(StatusOperationGettingUpdatesBranch));
         RaisePropertyChanged(nameof(StatusOperationSwitchingBranch));
+        RaisePropertyChanged(nameof(StatusOperationCalculatingData));
+        RaisePropertyChanged(nameof(StatusOperationPreparingPreview));
+        RaisePropertyChanged(nameof(ToastPreviewCanceled));
 
         // Theme popover localization
         RaisePropertyChanged(nameof(MenuTheme));
@@ -1006,9 +1223,18 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public void SetToastItems(ObservableCollection<ToastMessageViewModel> items)
     {
+        if (ReferenceEquals(ToastItems, items))
+            return;
+
+        ToastItems.CollectionChanged -= OnToastItemsCollectionChanged;
         ToastItems = items;
+        ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
         RaisePropertyChanged(nameof(ToastItems));
+        RaisePropertyChanged(nameof(HasToastItems));
     }
+
+    private void OnToastItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        RaisePropertyChanged(nameof(HasToastItems));
 
     /// <summary>
     /// Updates the "All" checkbox labels with item counts.
@@ -1027,5 +1253,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(SettingsAllIgnore));
         RaisePropertyChanged(nameof(SettingsAllExtensions));
         RaisePropertyChanged(nameof(SettingsAllRootFolders));
+        RaisePropertyChanged(nameof(HasRootFolderOptions));
     }
 }

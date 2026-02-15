@@ -18,7 +18,7 @@ public sealed class TreeAndContentExportServiceMarkerTests
 		var text = temp.CreateFile("note.txt", "Note");
 
 		var root = BuildTree(temp.Path, empty, whitespace, text);
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 
 		var output = service.Build(temp.Path, root, new HashSet<string>());
 
@@ -38,7 +38,7 @@ public sealed class TreeAndContentExportServiceMarkerTests
 		var text = temp.CreateFile("note.txt", "Note");
 
 		var root = BuildTree(temp.Path, empty, text);
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var selected = new HashSet<string> { empty };
 
 		var output = service.Build(temp.Path, root, selected);
@@ -56,7 +56,7 @@ public sealed class TreeAndContentExportServiceMarkerTests
 		var binary = temp.CreateBinaryFile("image.bin", new byte[] { 1, 2, 0, 3 });
 
 		var root = BuildTree(temp.Path, binary);
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var selected = new HashSet<string> { binary };
 
 		var output = service.Build(temp.Path, root, selected);

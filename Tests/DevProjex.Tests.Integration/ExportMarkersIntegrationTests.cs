@@ -25,7 +25,7 @@ public sealed class ExportMarkersIntegrationTests
 		var text = temp.CreateFile("note.txt", "Hello");
 
 		var root = BuildPresentedTree(temp.Path, ".json", ".txt", ".bin");
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 
 		var output = service.Build(temp.Path, root, new HashSet<string>());
 
@@ -46,7 +46,7 @@ public sealed class ExportMarkersIntegrationTests
 		var text = temp.CreateFile("note.txt", "Hello");
 
 		var root = BuildPresentedTree(temp.Path, ".json", ".txt");
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var selected = new HashSet<string> { empty };
 
 		var output = service.Build(temp.Path, root, selected);
@@ -64,7 +64,7 @@ public sealed class ExportMarkersIntegrationTests
 		File.WriteAllBytes(binary, new byte[] { 1, 2, 0, 3 });
 
 		var root = BuildPresentedTree(temp.Path, ".bin");
-		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService());
+		var service = new TreeAndContentExportService(new TreeExportService(), new SelectedContentExportService(new FileContentAnalyzer()));
 		var selected = new HashSet<string> { binary };
 
 		var output = service.Build(temp.Path, root, selected);

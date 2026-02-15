@@ -62,22 +62,6 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
-	public async Task PopulateExtensionsForRootSelectionAsync_EmptyRoots_ClearsExtensions()
-	{
-		var viewModel = CreateViewModel();
-		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
-		viewModel.Extensions.Add(new SelectionOptionViewModel(".md", true));
-		viewModel.AllExtensionsChecked = true;
-
-		var coordinator = CreateCoordinator(viewModel);
-
-		await coordinator.PopulateExtensionsForRootSelectionAsync("root", new List<string>());
-
-		Assert.Empty(viewModel.Extensions);
-		Assert.False(viewModel.AllExtensionsChecked);
-	}
-
-	[Fact]
 	public async Task PopulateExtensionsForRootSelectionAsync_EmptyPath_DoesNotChangeExtensions()
 	{
 		var viewModel = CreateViewModel();
@@ -206,18 +190,17 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
-	public void PopulateIgnoreOptionsForRootSelection_EmptyRoots_ClearsIgnoreOptionsAndAllFlag()
+	public void PopulateIgnoreOptionsForRootSelection_EmptyRoots_StillPopulatesIgnoreOptions()
 	{
+		// After Problem 1 fix: even with empty folder selection, we still scan root files
+		// so ignore options should be populated, not cleared
 		var viewModel = CreateViewModel();
-		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "hidden folders", true));
-		viewModel.AllIgnoreChecked = true;
-
 		var coordinator = CreateCoordinator(viewModel);
 
 		coordinator.PopulateIgnoreOptionsForRootSelection(Array.Empty<string>());
 
-		Assert.Empty(viewModel.IgnoreOptions);
-		Assert.False(viewModel.AllIgnoreChecked);
+		// Ignore options are populated for root-level files
+		Assert.NotEmpty(viewModel.IgnoreOptions);
 	}
 
 	[Fact]
@@ -336,6 +319,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
+				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",

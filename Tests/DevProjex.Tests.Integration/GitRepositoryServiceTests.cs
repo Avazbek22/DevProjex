@@ -538,10 +538,8 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        // For invalid path with cancelled token, should return empty gracefully
-        var branches = await _service.GetBranchesAsync(_tempDir!, cts.Token);
-
-        Assert.Empty(branches);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await _service.GetBranchesAsync(_tempDir!, cts.Token));
     }
 
     #endregion

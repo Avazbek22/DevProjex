@@ -1,4 +1,4 @@
-## 1) Was ist das und wozu
+﻿## 1) Was ist das und wozu
 DevProjex bereitet den Projektkontext schnell auf: zeigt die Ordner/Dateistruktur, erlaubt das Markieren von Elementen und das Kopieren des Baums und/oder von Dateiinhalten in die Zwischenablage. Nützlich für Code‑Reviews, Support, Schulung und das Teilen der Struktur mit einem KI‑Assistenten.
 
 Wichtig: Die App arbeitet nur lesend und ändert keine Dateien.
@@ -17,6 +17,29 @@ Tastenkürzel:
 ## 3) Datei
 * Ordner öffnen… — Wurzelordner öffnen (Ctrl+O)
 * Aktualisieren — Baum neu einlesen und aufbauen (F5)
+* In Datei exportieren:
+  * Baum exportieren
+  * Inhalt exportieren
+  * Baum und Inhalt exportieren
+
+Formatregeln:
+* Baum exportieren:
+  * ASCII -> nur `.txt`.
+  * JSON -> Standard `.json`, im Speichern-Dialog sind `.json` und `.txt` verfügbar.
+* Inhalt exportieren — immer Textformat des Inhalts, Datei `.txt` (ASCII/JSON-Schalter wirkt hier nicht).
+* Baum und Inhalt exportieren — immer Datei `.txt`; der ASCII/JSON-Schalter beeinflusst nur das Format des Baumblocks im Ergebnis.
+
+Exportdateien werden in UTF-8 ohne BOM geschrieben.
+
+### Drag & Drop
+Drag & Drop funktioniert im Startbereich (Drop Zone), wenn kein Projekt geladen ist.
+
+Regeln:
+* ein Ordner kann abgelegt werden;
+* eine Datei kann abgelegt werden — dann wird ihr enthaltender Ordner geöffnet;
+* bei mehreren abgelegten Objekten wird der erste passende lokale Pfad verwendet;
+* wenn ein Pfad nicht verfügbar ist oder nicht existiert, gelten dieselben Zugriffsprüfungen wie bei „Ordner öffnen…“;
+* nicht unterstützte oder nicht-lokale Objekte werden ignoriert.
 
 ## 4) Git
 Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
@@ -28,9 +51,26 @@ Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
 * Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>.
 
 ## 5) Kopieren
+### Baumformat-Schalter (ASCII/JSON)
+Der Schalter legt das Baumdarstellungsformat für Operationen fest, bei denen der Baum im Ergebnis enthalten ist.
+
+* ASCII — Textbaum mit Zweigen.
+* JSON — strukturierter Baum in JSON.
+
+Der Schalter beeinflusst:
+* Baum kopieren
+* Baum + Inhalt kopieren
+* Baum exportieren
+* Baum und Inhalt exportieren
+
+Der Schalter beeinflusst nicht:
+* Inhalt kopieren
+* Inhalt exportieren
+
 ### Baum kopieren
 Kopiert den Projektbaum.
 Wenn Knoten markiert sind, wird der Baum aus der Auswahl gebaut; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert.
+Das Ergebnisformat wird vom ASCII/JSON-Schalter bestimmt.
 Tastenkürzel: Ctrl+Shift+C und Ctrl+Alt+C.
 
 ### Inhalt kopieren
@@ -43,11 +83,44 @@ Tastenkürzel: Ctrl+Alt+V.
 
 ### Baum + Inhalt kopieren
 Kombiniert Baum und Inhalte:
-* Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert;
-* Inhalte nach denselben Regeln wie „Inhalt kopieren“.
+* Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum verwendet;
+* Inhalte nach denselben Regeln wie „Inhalt kopieren“;
+* das Format des Baumblocks wird vom ASCII/JSON-Schalter bestimmt.
 Tastenkürzel: Ctrl+Shift+V.
 
-## 6) Ansicht
+### JSON-Darstellung
+Im JSON-Modus wird eine kompakte Baumstruktur verwendet.
+
+Baum (Baum kopieren / Baum exportieren):
+* `rootPath` — absoluter Wurzelpfad.
+* `root` — Wurzelknoten.
+* Knotenfelder: `name`, `path`, `dirs`, `files`, `accessDenied` (bei Bedarf).
+
+Baum + Inhalt:
+* JSON gilt für den Baumblock;
+* der Inhaltsblock bleibt Text;
+* Export erfolgt als `.txt`.
+
+## 6) Vorschaumodus
+Wird über die Schaltfläche mit dem Auge in der oberen Leiste oder mit Ctrl+B geöffnet.
+
+Zeigt das Endergebnis im Nur-Lesen-Modus, ohne Kopieren in die Zwischenablage und ohne Export in eine Datei.
+
+Verfügbare Modi:
+* Baum
+* Inhalt
+* Baum und Inhalt
+
+Es gelten dieselben Regeln wie beim Kopieren und Exportieren:
+* markierte Knoten werden berücksichtigt;
+* wenn die Auswahl leer ist, wird der vollständige Datensatz verwendet;
+* aktuelle Ignorierregeln und Auswahlparameter werden angewendet.
+
+Bei geöffneter Vorschau sind Suche und Filter nicht verfügbar.
+In den Optionen ist nur die Schriftart änderbar.
+Schließen: X-Schaltfläche oder erneuter Klick auf das Auge.
+
+## 7) Ansicht
 ### Zoom
 * Ctrl++ / Ctrl+= — vergrößern
 * Ctrl+- — verkleinern
@@ -59,7 +132,10 @@ Bereich: 6–28, Reset: 12.
 ### Kompaktmodus
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
 
-## 7) Suche im Baum
+### Baumanimation
+Aktiviert eine sanfte Schiebe-Animation beim Überfahren von Baumzeilen.
+
+## 8) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
 * Ctrl+F — anzeigen/ausblenden
 * Enter — nächstes Ergebnis
@@ -68,12 +144,12 @@ Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellung
 
 Die Suche öffnet nur benötigte Zweige; beim Leeren der Suche wird der Baum eingeklappt (außer der Wurzel).
 
-## 8) Filter nach Namen
+## 9) Filter nach Namen
 Zeigt nur passende Knoten und ihre Eltern. Aktualisierung mit Verzögerung (Debounce).
 * Ctrl+Shift+N — Filter anzeigen/ausblenden
 * Esc — Filter schließen
 
-## 9) Optionen
+## 10) Optionen
 Rechts befinden sich Listen:
 * Baum‑Schrift — mit Anwenden bestätigen
 * Ignorieren
@@ -82,32 +158,137 @@ Rechts befinden sich Listen:
 
 Jede Liste hat einen Alle‑Schalter.
 
+Hinweis zu „Dateitypen“:
+* in dieser Liste werden nur Dateien mit Erweiterung angezeigt;
+* Dateien ohne Erweiterung werden hier nicht angezeigt und über eine separate Option in „Ignorieren“ gesteuert.
+
 Ctrl+P — Panel anzeigen/ausblenden.
 
-## 10) Ignore und Smart Ignore
-### Normale Regeln
-Ausschluss typischer Artefakte und „Rauschen“ (z. B. bin/obj, versteckte Elemente, Punkt‑Elemente).
+## 11) Ignore
+Die Liste „Ignorieren“ wird automatisch aus dem aktuellen Pfad und den ausgewählten Ordnern der obersten Ebene aufgebaut.
 
-### Smart Ignore
-Zusätzliche „smarte“ Ausschlüsse (VCS/IDE‑Ordner, typische Junk‑Dateien). Frontend‑Regeln aktivieren sich nur, wenn passende Marker gefunden werden (package/lock‑Dateien).
+Reihenfolge der Optionen:
+* Smart Ignore (wenn verfügbar)
+* .gitignore verwenden (wenn mindestens eine `.gitignore` gefunden wurde)
+* Versteckte Ordner
+* Versteckte Dateien
+* Ordner mit führendem Punkt
+* Dateien mit führendem Punkt
+* Dateien ohne Erweiterung (wird nur angezeigt, wenn solche Dateien erkannt wurden)
 
-## 11) Wie der Baum gebaut wird
+Die Trennlinie unter „.gitignore verwenden“ trennt Git/Smart-Regeln von den grundlegenden Sichtbarkeitsregeln.
+
+### 11.1 Geltungsbereich der Regeln
+Die Anwendung bildet Projektbereiche (Scopes), in denen die Ignore-Regeln gelten:
+* Wurzelordner (wenn im Root `.gitignore` oder ein Projektmarker vorhanden ist)
+* Ordner der ersten Ebene
+* verschachtelte Projekt-Unterordner
+
+Die Suchtiefe für verschachtelte Projektbereiche ist fest: 2 Ebenen.
+
+### 11.2 „.gitignore verwenden“
+* Aktiviert: `.gitignore`-Regeln werden in den gefundenen Bereichen angewendet.
+* Deaktiviert: `.gitignore`-Regeln werden vollständig abgeschaltet.
+
+Bei Ordnern mit mehreren Projekten gilt die `.gitignore` eines Projekts nicht für benachbarte Projekte außerhalb seines Bereichs.
+
+### 11.3 „Smart Ignore“
+* Wird nur angezeigt, wenn es sinnvoll ist.
+* Aktiviert: typische Build-/Tool-Artefakte werden zusätzlich ausgeblendet.
+* Deaktiviert: Smart-Regeln werden nicht angewendet.
+
+### 11.4 Grundregeln
+Optionen:
+* Versteckte Ordner
+* Versteckte Dateien
+* Ordner mit führendem Punkt
+* Dateien mit führendem Punkt
+
+Diese Regeln sind unabhängig von `.gitignore` und Smart Ignore und wirken nur über ihre eigenen Schalter.
+
+### 11.5 Internes Verhalten: typische Fälle
+1. Ein Projekt mit `.gitignore`.
+Meist wird nur „.gitignore verwenden“ angezeigt.
+Bei Aktivierung arbeiten `.gitignore` und Smart Ignore zusammen.
+Bei Deaktivierung werden beide abgeschaltet.
+
+2. Ein Projekt ohne `.gitignore`.
+„.gitignore verwenden“ wird nicht angezeigt.
+„Smart Ignore“ wird nur angezeigt, wenn es relevant ist.
+
+3. Mehrprojekt-Workspace: ein Teil mit `.gitignore`, ein Teil ohne.
+„.gitignore verwenden“ und „Smart Ignore“ werden angezeigt.
+`.gitignore` wirkt nur im eigenen Bereich.
+Smart Ignore (wenn aktiviert) ergänzt die Filterung in den gefundenen Bereichen.
+
+4. Mehrprojekt-Workspace: alle Projekte haben `.gitignore`.
+„.gitignore verwenden“ wird angezeigt.
+„Smart Ignore“ wird nicht als separater Punkt angezeigt.
+
+5. Ordner ohne relevante Regeln.
+Wenn keine `.gitignore` gefunden wird und Smart Ignore nicht relevant ist, werden diese Punkte nicht angezeigt.
+Es bleiben nur die grundlegenden Sichtbarkeitsregeln.
+
+### 11.6 Dateien ohne Erweiterung
+Die Option „Dateien ohne Erweiterung“ steuert die Sichtbarkeit von Dateien ohne Erweiterung (zum Beispiel: `Dockerfile`, `Makefile`, `README`).
+
+Regeln:
+* die Option wird nur angezeigt, wenn solche Dateien im aktuellen Datensatz tatsächlich vorhanden sind;
+* wenn aktiviert, werden Dateien ohne Erweiterung aus dem Baum sowie aus Kopier-/Exportoperationen ausgeschlossen;
+* wenn deaktiviert, werden Dateien ohne Erweiterung in das Ergebnis aufgenommen;
+* die Liste „Dateitypen“ beeinflusst dieses Verhalten nicht.
+## 12) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
 * ausgewählte Ordner der obersten Ebene
 * ausgewählte Dateitypen
 * Ignorier‑Regeln
 * aktivem Filter
+* markierten Knoten im Baum (für auswahlbasierte Operationen)
 
 Wenn der Zugriff verweigert wird, wird der Knoten als Zugriff verweigert markiert.
 
-## 12) Symbole
+### 12.1 Was die Zähler in der Statusleiste zeigen
+Die Statusleiste hat zwei Blöcke:
+* Baum — Kennzahlen der Baum-Textausgabe;
+* Inhalt — Kennzahlen der exportierten Dateiinhalte.
+
+Format:
+* Zeilen
+* Zeichen
+* ~Tokens (ungefähr)
+
+Große Werte werden kompakt mit K/M angezeigt.
+
+Wichtig:
+* „Zeilen“ im Block „Baum“ ist die Anzahl der Zeilen in der finalen Baumdarstellung, nicht die Anzahl der Dateien auf dem Datenträger;
+* in diesen Wert fließen Ordner, Dateien und Service-Elemente des Baums ein (z. B. Knoten mit Zugriff verweigert).
+
+### 12.2 Wie die Kennzahlen berechnet werden
+Baum-Kennzahlen:
+* werden aus der tatsächlichen Baum-Ausgabe berechnet, die von derselben Export-Pipeline erzeugt wird;
+* berücksichtigen das aktuelle ASCII/JSON-Format.
+
+Inhalt-Kennzahlen:
+* folgen denselben Regeln wie beim Kopieren/Exportieren von Inhalten;
+* Binärdateien werden ausgeschlossen;
+* leere und nur aus Leerraum bestehende Dateien werden über Servicemarker gezählt (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
+
+### 12.3 Wann die Zähler aktualisiert werden
+Neu berechnet wird:
+* nach dem Öffnen/Aktualisieren eines Projekts;
+* nach dem Anwenden von Einstellungen (Ignore, Dateitypen, Root-Ordner);
+* bei Änderungen von Checkboxen im Baum (mit Debounce);
+* beim Umschalten ASCII/JSON (für Operationen mit Baum-Ausgabe).
+* wenn die Hintergrundberechnung abgebrochen wird, werden die Zähler auf 0 gesetzt, bis die nächste vollständige Neuberechnung abgeschlossen ist.
+
+## 13) Symbole
 Auswahlreihenfolge:
 1) Knotentyp (Ordner/Datei)
 2) exakter Name (wenn eine Regel vorhanden ist)
 3) Erweiterung
 4) sonst — unbekannt
 
-## 13) Thema und Effekte
+## 14) Thema und Effekte
 Das Theme‑Popover ermöglicht:
 * helles/dunkles Theme
 * Transparent / Mica / Acrylic
@@ -115,14 +296,32 @@ Das Theme‑Popover ermöglicht:
 
 Einträge mit [Beta] können sich zwischen Versionen ändern.
 
-## 14) Hilfe → Über
+## 15) Hilfe → Über
 Öffnet ein Popover mit App‑Info und Repository‑Link.
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt die Theme‑ und Effektwerte auf die Standardwerte zurück.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt nur visuelle UI‑Parameter zurück (Theme, Effekte, Kompaktmodus, Baumanimation) und ändert keine Projektdaten.
 * Esc — Popover schließen
 
-## 15) Sprachen
+## 16) Sprachen
 Die Sprache wird über das Sprache‑Menü gewählt.
 
-## 16) Hinweise
+## 17) Fortschrittsbalken und Abbrechen
+In der Mitte der Statusleiste werden aktive Operation und Fortschritt angezeigt.
+
+Fortschrittsmodi:
+* Indeterminate — ohne Prozent (Dauer unbekannt).
+* Determinate — mit Prozent (0–100).
+
+Verhalten:
+* während der Hintergrundberechnung von Daten wird Prozentfortschritt angezeigt;
+* bei einigen Git-Operationen wird Prozent angezeigt, wenn die Fortschrittsquelle ihn liefert;
+* bei sehr schnellen Operationen kann der Fortschritt nur kurz sichtbar sein.
+
+X-Schaltfläche (Abbrechen) in der Statusleiste:
+* führt eine Best-Effort-Abbruchanforderung für Operationen mit Abbruchunterstützung aus;
+* stoppt die Hintergrundberechnung von Daten;
+* bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
+
+## 18) Hinweise
 * Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.
+

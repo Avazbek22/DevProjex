@@ -9,11 +9,21 @@ namespace DevProjex.Avalonia.ViewModels;
 
 public sealed class TreeNodeViewModel : ViewModelBase
 {
+    private static readonly IReadOnlyList<TreeNodeViewModel> EmptyChildItems = Array.Empty<TreeNodeViewModel>();
+
     private bool? _isChecked = false;
     private bool _isExpanded;
     private bool _isSelected;
     private string _displayName;
     private bool _isCurrentSearchMatch;
+    private InlineCollection? _displayInlines;
+    private bool _hasHighlightedDisplay;
+
+    /// <summary>
+    /// Raised when checkbox state changes. Used for real-time metrics updates.
+    /// Only fires on user-initiated changes (not cascading updates from parent/children).
+    /// </summary>
+    public static event EventHandler? GlobalCheckedChanged;
 
     public TreeNodeViewModel(
         TreeNodeDescriptor descriptor,
@@ -33,10 +43,28 @@ public sealed class TreeNodeViewModel : ViewModelBase
     public TreeNodeViewModel? Parent { get; private set; }
 
     public IList<TreeNodeViewModel> Children { get; }
+    public IEnumerable<TreeNodeViewModel> ChildItemsSource => Children.Count > 0 ? Children : EmptyChildItems;
+
+    /// <summary>
+    /// Indicates whether this node has children. Used to control expander visibility
+    /// independently of VirtualizingStackPanel's cached :empty pseudo-class state.
+    /// </summary>
+    public bool HasChildren => Children.Count > 0;
 
     public IImage? Icon { get; set; }
 
-    public InlineCollection DisplayInlines { get; } = new();
+    public InlineCollection? DisplayInlines => _displayInlines;
+
+    public bool HasHighlightedDisplay
+    {
+        get => _hasHighlightedDisplay;
+        private set
+        {
+            if (_hasHighlightedDisplay == value) return;
+            _hasHighlightedDisplay = value;
+            RaisePropertyChanged();
+        }
+    }
 
     public bool IsCurrentSearchMatch
     {
@@ -146,9 +174,12 @@ public sealed class TreeNodeViewModel : ViewModelBase
         Children.Clear();
         if (Children is List<TreeNodeViewModel> list)
             list.TrimExcess();
+        RaisePropertyChanged(nameof(ChildItemsSource));
 
         // Clear UI-related objects
-        DisplayInlines.Clear();
+        _displayInlines?.Clear();
+        _displayInlines = null;
+        _hasHighlightedDisplay = false;
         Icon = null;
 
         // Break circular references to help GC
@@ -163,14 +194,24 @@ public sealed class TreeNodeViewModel : ViewModelBase
         IBrush? normalForeground,
         IBrush? currentHighlightBackground)
     {
-        DisplayInlines.Clear();
-
         if (string.IsNullOrWhiteSpace(query))
         {
-            DisplayInlines.Add(new Run(DisplayName) { Foreground = normalForeground });
-            RaisePropertyChanged(nameof(DisplayInlines));
+            if (_displayInlines is { Count: > 0 })
+            {
+                _displayInlines.Clear();
+                RaisePropertyChanged(nameof(DisplayInlines));
+            }
+
+            HasHighlightedDisplay = false;
             return;
         }
+
+        var createdInlines = _displayInlines is null;
+        var inlines = _displayInlines ??= new InlineCollection();
+        inlines.Clear();
+
+        if (createdInlines)
+            RaisePropertyChanged(nameof(DisplayInlines));
 
         var startIndex = 0;
         while (startIndex < DisplayName.Length)
@@ -178,15 +219,15 @@ public sealed class TreeNodeViewModel : ViewModelBase
             var index = DisplayName.IndexOf(query, startIndex, StringComparison.OrdinalIgnoreCase);
             if (index < 0)
             {
-                DisplayInlines.Add(new Run(DisplayName[startIndex..]) { Foreground = normalForeground });
+                inlines.Add(new Run(DisplayName[startIndex..]) { Foreground = normalForeground });
                 break;
             }
 
             if (index > startIndex)
-                DisplayInlines.Add(new Run(DisplayName[startIndex..index]) { Foreground = normalForeground });
+                inlines.Add(new Run(DisplayName[startIndex..index]) { Foreground = normalForeground });
 
             var matchBackground = IsCurrentSearchMatch ? currentHighlightBackground : highlightBackground;
-            DisplayInlines.Add(new Run(DisplayName.Substring(index, query.Length))
+            inlines.Add(new Run(DisplayName.Substring(index, query.Length))
             {
                 Background = matchBackground,
                 Foreground = highlightForeground
@@ -195,9 +236,10 @@ public sealed class TreeNodeViewModel : ViewModelBase
             startIndex = index + query.Length;
         }
 
-        if (DisplayInlines.Count == 0)
-            DisplayInlines.Add(new Run(DisplayName) { Foreground = normalForeground });
+        if (inlines.Count == 0)
+            inlines.Add(new Run(DisplayName) { Foreground = normalForeground });
 
+        HasHighlightedDisplay = true;
         RaisePropertyChanged(nameof(DisplayInlines));
     }
 
@@ -213,7 +255,11 @@ public sealed class TreeNodeViewModel : ViewModelBase
         }
 
         if (updateParent)
+        {
             Parent?.UpdateCheckedFromChildren();
+            // Fire global event for metrics recalculation (only on user-initiated top-level change)
+            GlobalCheckedChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void UpdateCheckedFromChildren()

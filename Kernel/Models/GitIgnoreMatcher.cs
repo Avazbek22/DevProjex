@@ -46,10 +46,12 @@ public sealed class GitIgnoreMatcher
             if (line.Length == 0 || line.StartsWith('#'))
                 continue;
 
-            if (line.StartsWith(@"\#") || line.StartsWith(@"\!"))
+            var escapedSpecial = line.StartsWith(@"\#") || line.StartsWith(@"\!");
+            if (escapedSpecial)
                 line = line[1..];
 
-            var isNegation = line.StartsWith('!');
+            // Only treat as negation if not escaped
+            var isNegation = !escapedSpecial && line.StartsWith('!');
             if (isNegation)
             {
                 line = line[1..];
@@ -102,11 +104,35 @@ public sealed class GitIgnoreMatcher
 
         foreach (var rule in _rules)
         {
-            var target = rule.MatchByNameOnly ? normalizedName : relativePath;
+            var target = rule.MatchByNameOnly
+                ? normalizedName
+                : rule.DirectoryOnly && isDirectory
+                    ? relativePath + "/"
+                    : relativePath;
             if (!rule.Pattern.IsMatch(target))
                 continue;
 
             ignored = !rule.IsNegation;
+        }
+
+        // For directories: if not directly ignored, check if all contents would be ignored
+        // Pattern like **/bin/* ignores contents but not the directory itself
+        // For UI purposes, if all contents are ignored, the directory should be hidden too
+        // Skip this optimization if there are negation rules - they might un-ignore specific files
+        if (!ignored && isDirectory && !HasNegationRules)
+        {
+            var testChildPath = relativePath + "/_";
+            foreach (var rule in _rules)
+            {
+                if (rule.DirectoryOnly || rule.MatchByNameOnly)
+                    continue;
+
+                if (rule.Pattern.IsMatch(testChildPath))
+                {
+                    ignored = true;
+                    break;
+                }
+            }
         }
 
         return ignored;
@@ -121,27 +147,58 @@ public sealed class GitIgnoreMatcher
         if (relativePath is null)
             return false;
 
+        // If the directory itself is ignored by an explicit directory rule (e.g. "bin/"),
+        // name-only negation (e.g. "!Directory.Build.rsp") cannot re-include descendants
+        // unless a path-based negation re-includes the directory chain.
+        var ignoredByDirectoryRule = IsIgnoredByDirectoryRule(relativePath, name);
+
         foreach (var rule in _rules)
         {
             if (!rule.IsNegation)
                 continue;
 
+            // Name-only negation rules (like !keep.txt) can match files anywhere
+            // unless the parent directory is excluded by an explicit directory rule.
             if (rule.MatchByNameOnly)
-                return true;
+            {
+                if (!ignoredByDirectoryRule)
+                    return true;
+                continue;
+            }
 
+            // Path-based negation rules with no static prefix (like !**/*.txt)
+            // could match anywhere, so we must traverse
             if (rule.StaticPrefix.Length == 0)
                 return true;
 
             var rulePrefixWithSlash = $"{rule.StaticPrefix}/";
             var relativeWithSlash = $"{relativePath}/";
 
+            // Negation target is inside this directory
             if (rulePrefixWithSlash.StartsWith(relativeWithSlash, _pathComparison))
                 return true;
 
+            // This directory is inside the negation target path
             if (relativeWithSlash.StartsWith(rulePrefixWithSlash, _pathComparison))
                 return true;
 
+            // Exact match
             if (string.Equals(rule.StaticPrefix, relativePath, _pathComparison))
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool IsIgnoredByDirectoryRule(string relativePath, string name)
+    {
+        foreach (var rule in _rules)
+        {
+            if (rule.IsNegation || !rule.DirectoryOnly)
+                continue;
+
+            var target = rule.MatchByNameOnly ? name : relativePath + "/";
+            if (rule.Pattern.IsMatch(target))
                 return true;
         }
 
@@ -164,23 +221,59 @@ public sealed class GitIgnoreMatcher
     private static string BuildPathRegex(string globRegex, bool anchored, bool directoryOnly)
     {
         var prefix = anchored ? "^" : "^(?:.*/)?";
-        var suffix = directoryOnly ? "(?:/.*)?$" : "$";
+        // Directory-only rules must match directories (or their descendants), not plain files.
+        var suffix = directoryOnly ? "/.*$" : "$";
         return $"{prefix}{globRegex}{suffix}";
     }
 
     private static string GlobToRegex(string pattern)
     {
         var sb = new StringBuilder(pattern.Length * 2);
+        var inCharClass = false;
+
         for (var i = 0; i < pattern.Length; i++)
         {
             var current = pattern[i];
+
+            if (inCharClass)
+            {
+                // Inside character class - pass through most characters,
+                // but handle closing bracket and escape special regex chars
+                if (current == ']')
+                {
+                    sb.Append(']');
+                    inCharClass = false;
+                }
+                else if (current == '\\' && i + 1 < pattern.Length)
+                {
+                    // Escape sequence in character class
+                    sb.Append('\\').Append(pattern[++i]);
+                }
+                else
+                {
+                    sb.Append(current);
+                }
+                continue;
+            }
+
             switch (current)
             {
                 case '*':
                     if (i + 1 < pattern.Length && pattern[i + 1] == '*')
                     {
-                        sb.Append(".*");
-                        i++;
+                        // Check if ** is followed by /
+                        if (i + 2 < pattern.Length && pattern[i + 2] == '/')
+                        {
+                            // **/ means "zero or more directories"
+                            sb.Append("(?:.*/)?");
+                            i += 2; // Skip both * and /
+                        }
+                        else
+                        {
+                            // ** at end or not followed by / - match anything
+                            sb.Append(".*");
+                            i++;
+                        }
                     }
                     else
                     {
@@ -189,6 +282,11 @@ public sealed class GitIgnoreMatcher
                     break;
                 case '?':
                     sb.Append("[^/]");
+                    break;
+                case '[':
+                    // Start of character class - preserve it for regex
+                    sb.Append('[');
+                    inCharClass = true;
                     break;
                 case '.':
                 case '(':
@@ -199,7 +297,6 @@ public sealed class GitIgnoreMatcher
                 case '$':
                 case '{':
                 case '}':
-                case '[':
                 case ']':
                 case '\\':
                     sb.Append('\\').Append(current);

@@ -4,12 +4,17 @@
              xmlns:views="using:DevProjex.Avalonia.Views"
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
              x:DataType="vm:MainWindowViewModel">
-  <Grid Name="RootGrid" ColumnDefinitions="*,Auto" Margin="0">
-    <!-- Keep menu surface spanning both columns to avoid transparency seams near the filter button. -->
-    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="2" Margin="0">
+  <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
+    <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
+    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
+        <MenuItem Header="{Binding MenuFileExport}" IsEnabled="{Binding IsProjectLoaded}">
+          <MenuItem Header="{Binding MenuFileExportTree}" Click="OnExportTreeToFile" />
+          <MenuItem Header="{Binding MenuFileExportContent}" Click="OnExportContentToFile" />
+          <MenuItem Header="{Binding MenuFileExportTreeAndContent}" Click="OnExportTreeAndContentToFile" />
+        </MenuItem>
         <MenuItem Header="{Binding MenuFileExit}" Click="OnExit" />
       </MenuItem>
       <MenuItem Name="GitMenuItem" Header="Git">
@@ -38,8 +43,15 @@
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>
+        <MenuItem Click="OnToggleTreeAnimation">
+          <MenuItem.Header>
+            <CheckBox Content="{Binding MenuViewTreeAnimation}"
+                      IsChecked="{Binding IsTreeAnimationEnabled}"
+                      IsHitTestVisible="False"/>
+          </MenuItem.Header>
+        </MenuItem>
       </MenuItem>
-      <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSearch" />
+      <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchFilterAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />
       <MenuItem Header="{Binding MenuLanguage}">
         <MenuItem Header="Русский" Click="OnLangRu" />
@@ -59,14 +71,81 @@
         <MenuItem Header="{Binding MenuHelpResetSettings}" Click="OnResetSettings" />
       </MenuItem>
     </Menu>
-    <Button Grid.Column="1"
+
+    <!-- Format Switcher: Segmented Control (ASCII/JSON) with sliding thumb -->
+    <Border Grid.Column="1"
+            Classes="segmented-control"
+            IsEnabled="{Binding IsProjectLoaded}"
+            IsVisible="{Binding IsProjectLoaded}"
+            Margin="0,0,7,0"
+            ToolTip.ShowDelay="700"
+            ToolTip.Placement="Bottom">
+      <ToolTip.Tip>
+        <ToolTip Loaded="OnToolTipLoaded">
+          <TextBlock Text="{Binding CopyFormatTooltip}" />
+        </ToolTip>
+      </ToolTip.Tip>
+      <Panel>
+        <!-- Sliding thumb indicator - single element that moves -->
+        <Border Name="SegmentThumb"
+                Classes="segment-thumb"
+                Width="48"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Classes.segment-thumb-right="{Binding IsJsonFormatSelected}" />
+
+        <!-- Buttons container -->
+        <StackPanel Orientation="Horizontal">
+          <!-- ASCII button -->
+          <Button Classes="segment-text-button"
+                  Classes.segment-selected="{Binding IsAsciiFormatSelected}"
+                  Content="ASCII"
+                  Click="OnAsciiFormatClick" />
+
+          <!-- JSON button -->
+          <Button Classes="segment-text-button"
+                  Classes.segment-selected="{Binding IsJsonFormatSelected}"
+                  Content="JSON"
+                  Click="OnJsonFormatClick" />
+        </StackPanel>
+      </Panel>
+    </Border>
+
+    <Button Grid.Column="2"
+            Classes="menu-icon-button"
+            Click="OnTogglePreview"
+            IsEnabled="{Binding IsProjectLoaded}"
+            IsVisible="{Binding IsProjectLoaded}"
+            Margin="0,0,3,0"
+            ToolTip.ShowDelay="700"
+            ToolTip.Placement="Left">
+      <ToolTip.Tip>
+        <ToolTip Loaded="OnToolTipLoaded">
+          <TextBlock Text="{Binding PreviewTooltip}" />
+        </ToolTip>
+      </ToolTip.Tip>
+      <Path Classes="preview-icon"
+            Width="22"
+            Height="22"
+            Stretch="Uniform"
+            Fill="{DynamicResource AppTextBrush}"
+            RenderTransform="translate(0px, 3px)"
+            Data="M12,4.5 C7,4.5 2.73,7.61 1,12 C2.73,16.39 7,19.5 12,19.5 C17,19.5 21.27,16.39 23,12 C21.27,7.61 17,4.5 12,4.5 Z M12,17 C9.24,17 7,14.76 7,12 C7,9.24 9.24,7 12,7 C14.76,7 17,9.24 17,12 C17,14.76 14.76,17 12,17 Z M12,15 C13.66,15 15,13.66 15,12 C15,10.34 13.66,9 12,9 C10.34,9 9,10.34 9,12 C9,13.66 10.34,15 12,15 Z" />
+    </Button>
+
+    <Button Grid.Column="3"
             Classes="menu-icon-button"
             Click="OnToggleFilter"
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
-            ToolTip.Tip="{Binding FilterTooltip}"
+            ToolTip.ShowDelay="700"
             ToolTip.Placement="Left">
-      <Image Source="avares://DevProjex.Avalonia/IconPacks/Default/UIFilter.png"
+      <ToolTip.Tip>
+        <ToolTip Loaded="OnToolTipLoaded">
+          <TextBlock Text="{Binding FilterTooltip}" />
+        </ToolTip>
+      </ToolTip.Tip>
+      <Image Source="avares://DevProjex/IconPacks/Default/UIFilter.png"
              Width="24"
              Height="24"
              Stretch="Uniform" />

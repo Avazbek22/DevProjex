@@ -7,7 +7,11 @@
   <UserControl.Resources>
     <converters:FontFamilyDisplayNameConverter x:Key="FontFamilyDisplayNameConverter" />
   </UserControl.Resources>
-  <Border Width="320" Classes="panel" BorderThickness="0" IsVisible="{Binding SettingsVisible}" IsEnabled="{Binding IsProjectLoaded}">
+  <Border Width="320"
+          Classes="panel"
+          Background="Transparent"
+          BorderThickness="0"
+          IsEnabled="{Binding IsProjectLoaded}">
     <Grid RowDefinitions="Auto,*,*,*">
       <!-- Font section - Auto height -->
       <StackPanel Grid.Row="0" Spacing="6">
@@ -28,11 +32,12 @@
           </ComboBox.ItemTemplate>
         </ComboBox>
 
-        <Button Content="{Binding SettingsApply}" Click="OnApplySettings" Margin="0,10,0,0"/>
+        <Button Content="{Binding SettingsApply}" Click="OnApplySettings" Margin="0,10,0,0"
+                Classes="primary-action" CornerRadius="3"/>
       </StackPanel>
 
       <!-- Ignore section - equal star height -->
-      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,10,0,0">
+      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Grid.Row="0" ColumnDefinitions="*,8,Auto" Margin="0,0,0,6">
           <TextBlock Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
           <CheckBox Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"
@@ -69,7 +74,7 @@
       </Grid>
 
       <!-- Extensions section - equal star height -->
-      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0">
+      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Grid.Row="0" ColumnDefinitions="*,8,Auto" Margin="0,0,0,6">
           <TextBlock Classes="section-title" Grid.Column="0" Text="{Binding SettingsExtensions}" Margin="0" FontSize="15"/>
           <CheckBox Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllExtensions}"
@@ -97,11 +102,12 @@
       </Grid>
 
       <!-- RootFolders section - equal star height -->
-      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0">
+      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Grid.Row="0" ColumnDefinitions="*,8,Auto" Margin="0,0,0,6">
           <TextBlock Classes="section-title" Grid.Column="0" Text="{Binding SettingsRootFolders}" Margin="0" FontSize="15"/>
           <CheckBox Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"
                     IsChecked="{Binding AllRootFoldersChecked, Mode=TwoWay}"
+                    IsEnabled="{Binding HasRootFolderOptions}"
                     Checked="OnRootAllChanged" Unchecked="OnRootAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">

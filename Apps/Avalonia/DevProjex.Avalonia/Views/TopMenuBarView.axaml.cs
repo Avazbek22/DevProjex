@@ -21,6 +21,9 @@ public partial class TopMenuBarView : UserControl
 
     public event EventHandler<RoutedEventArgs>? OpenFolderRequested;
     public event EventHandler<RoutedEventArgs>? RefreshRequested;
+    public event EventHandler<RoutedEventArgs>? ExportTreeToFileRequested;
+    public event EventHandler<RoutedEventArgs>? ExportContentToFileRequested;
+    public event EventHandler<RoutedEventArgs>? ExportTreeAndContentToFileRequested;
     public event EventHandler<RoutedEventArgs>? ExitRequested;
     public event EventHandler<RoutedEventArgs>? CopyTreeRequested;
     public event EventHandler<RoutedEventArgs>? CopyContentRequested;
@@ -31,8 +34,10 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? ZoomOutRequested;
     public event EventHandler<RoutedEventArgs>? ZoomResetRequested;
     public event EventHandler<RoutedEventArgs>? ToggleCompactModeRequested;
+    public event EventHandler<RoutedEventArgs>? ToggleTreeAnimationRequested;
     public event EventHandler<RoutedEventArgs>? ToggleSearchRequested;
     public event EventHandler<RoutedEventArgs>? ToggleSettingsRequested;
+    public event EventHandler<RoutedEventArgs>? TogglePreviewRequested;
     public event EventHandler<RoutedEventArgs>? ToggleFilterRequested;
     public event EventHandler<RoutedEventArgs>? ThemeMenuClickRequested;
     public event EventHandler<RoutedEventArgs>? LanguageRuRequested;
@@ -112,6 +117,13 @@ public partial class TopMenuBarView : UserControl
 
     private void OnRefresh(object? sender, RoutedEventArgs e) => RefreshRequested?.Invoke(sender, e);
 
+    private void OnExportTreeToFile(object? sender, RoutedEventArgs e) => ExportTreeToFileRequested?.Invoke(sender, e);
+
+    private void OnExportContentToFile(object? sender, RoutedEventArgs e) => ExportContentToFileRequested?.Invoke(sender, e);
+
+    private void OnExportTreeAndContentToFile(object? sender, RoutedEventArgs e)
+        => ExportTreeAndContentToFileRequested?.Invoke(sender, e);
+
     private void OnExit(object? sender, RoutedEventArgs e) => ExitRequested?.Invoke(sender, e);
 
     private void OnCopyTree(object? sender, RoutedEventArgs e) => CopyTreeRequested?.Invoke(sender, e);
@@ -134,11 +146,40 @@ public partial class TopMenuBarView : UserControl
     private void OnToggleCompactMode(object? sender, RoutedEventArgs e)
         => ToggleCompactModeRequested?.Invoke(sender, e);
 
-    private void OnToggleSearch(object? sender, RoutedEventArgs e) => ToggleSearchRequested?.Invoke(sender, e);
+    private void OnToggleTreeAnimation(object? sender, RoutedEventArgs e)
+        => ToggleTreeAnimationRequested?.Invoke(sender, e);
 
     private void OnToggleSettings(object? sender, RoutedEventArgs e) => ToggleSettingsRequested?.Invoke(sender, e);
 
-    private void OnToggleFilter(object? sender, RoutedEventArgs e) => ToggleFilterRequested?.Invoke(sender, e);
+    private void OnTogglePreview(object? sender, RoutedEventArgs e) => TogglePreviewRequested?.Invoke(sender, e);
+
+    private void OnToggleSearch(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel { IsPreviewMode: true })
+            return;
+
+        ToggleSearchRequested?.Invoke(sender, e);
+    }
+
+    private void OnToggleFilter(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel { IsPreviewMode: true })
+            return;
+
+        ToggleFilterRequested?.Invoke(sender, e);
+    }
+
+    private void OnAsciiFormatClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.SelectedExportFormat = ExportFormat.Ascii;
+    }
+
+    private void OnJsonFormatClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.SelectedExportFormat = ExportFormat.Json;
+    }
 
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
         => ThemeMenuClickRequested?.Invoke(sender, e);
@@ -328,6 +369,14 @@ public partial class TopMenuBarView : UserControl
             SchedulePopupClamp(HelpDocsPopup, HelpDocsPopover);
     }
 
+    private void OnToolTipLoaded(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not ToolTip toolTip)
+            return;
+
+        ApplyToolTipBackdrop(toolTip);
+    }
+
     private void SchedulePopupClamp(Popup? popup, Control? popover)
     {
         if (popup is null || popover is null)
@@ -457,6 +506,49 @@ public partial class TopMenuBarView : UserControl
         catch
         {
             // Ignore: popup could have closed.
+        }
+    }
+
+    private void ApplyToolTipBackdrop(ToolTip toolTip)
+    {
+        if (toolTip.GetVisualRoot() is null)
+            return;
+
+        if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
+            return;
+
+        var host = TopLevel.GetTopLevel(this);
+        if (host is not null && ReferenceEquals(tooltipLevel, host))
+            return;
+
+        if (DataContext is not MainWindowViewModel viewModel)
+            return;
+
+        try
+        {
+            if (viewModel.HasAnyEffect)
+            {
+                tooltipLevel.TransparencyLevelHint = new[]
+                {
+                    WindowTransparencyLevel.AcrylicBlur,
+                    WindowTransparencyLevel.Blur,
+                    WindowTransparencyLevel.Transparent,
+                    WindowTransparencyLevel.None
+                };
+
+                tooltipLevel.Background = Brushes.Transparent;
+            }
+            else
+            {
+                tooltipLevel.TransparencyLevelHint = new[]
+                {
+                    WindowTransparencyLevel.None
+                };
+            }
+        }
+        catch
+        {
+            // Ignore: tooltip could have closed.
         }
     }
 }

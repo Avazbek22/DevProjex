@@ -21,6 +21,10 @@ public sealed class ThemeBrushCoordinator
 
     private SolidColorBrush _currentMenuBrush = new(Colors.Black);
     private SolidColorBrush _currentMenuChildBrush = new(Colors.Black);
+    private SolidColorBrush _currentMenuHoverBrush = new(Colors.Gray);
+    private SolidColorBrush _currentMenuPressedBrush = new(Colors.DimGray);
+    private SolidColorBrush _currentMenuChildHoverBrush = new(Colors.Gray);
+    private SolidColorBrush _currentMenuChildPressedBrush = new(Colors.DimGray);
     private SolidColorBrush _currentBorderBrush = new(Colors.Gray);
 
     public ThemeBrushCoordinator(Window window, MainWindowViewModel viewModel, Func<Menu?> menuProvider)
@@ -140,6 +144,8 @@ public sealed class ThemeBrushCoordinator
         byte borderAlpha;
         byte menuAlpha;
         byte menuChildAlpha = 255;
+        Color menuBase = panelBase;
+        Color menuChildBase = panelBase;
         if (!_viewModel.HasAnyEffect)
         {
             bgAlpha = 255;
@@ -206,9 +212,22 @@ public sealed class ThemeBrushCoordinator
             var maxPanelAlpha = Math.Max(60, bgAlpha - minAlphaGap);
             panelAlpha = (byte)Math.Clamp(panelAlpha, 60, maxPanelAlpha);
 
-            menuAlpha = (byte)Math.Clamp(panelAlpha + 28 + (contrast * 16), 120, 255);
-            var submenuDelta = 10 + (menuChild * 80);
-            menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 45, 255);
+            if (isDark)
+            {
+                menuAlpha = (byte)Math.Clamp(panelAlpha + 28 + (contrast * 16), 120, 255);
+                var submenuDelta = 10 + (menuChild * 80);
+                menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 45, 255);
+            }
+            else
+            {
+                // Light theme requires lower alpha and subtle cool tint to make blur/material visible.
+                menuAlpha = (byte)Math.Clamp(panelAlpha + 12 + (contrast * 8), 96, 215);
+                var submenuDelta = 12 + (menuChild * 72);
+                menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 72, 205);
+
+                menuBase = Color.Parse("#F8FBFF");
+                menuChildBase = Color.Parse("#F2F7FD");
+            }
         }
 
         borderAlpha = (byte)Math.Round(255 * borderStrength);
@@ -221,13 +240,26 @@ public sealed class ThemeBrushCoordinator
         var panelBrush = new SolidColorBrush(panelColor);
         UpdateResource("AppPanelBrush", panelBrush);
 
-        var menuColor = Color.FromArgb(menuAlpha, panelBase.R, panelBase.G, panelBase.B);
+        var menuColor = Color.FromArgb(menuAlpha, menuBase.R, menuBase.G, menuBase.B);
         _currentMenuBrush = new SolidColorBrush(menuColor);
         UpdateResource("MenuPopupBrush", _currentMenuBrush);
 
-        var menuChildColor = Color.FromArgb(menuChildAlpha, panelBase.R, panelBase.G, panelBase.B);
+        var menuChildColor = Color.FromArgb(menuChildAlpha, menuChildBase.R, menuChildBase.G, menuChildBase.B);
         _currentMenuChildBrush = new SolidColorBrush(menuChildColor);
         UpdateResource("MenuChildPopupBrush", _currentMenuChildBrush);
+
+        var hoverColor = isDark ? Color.Parse("#343B46") : Color.Parse("#DCE7F4");
+        var pressedColor = isDark ? Color.Parse("#3B4452") : Color.Parse("#CFDDF0");
+
+        _currentMenuHoverBrush = new SolidColorBrush(hoverColor);
+        _currentMenuPressedBrush = new SolidColorBrush(pressedColor);
+        _currentMenuChildHoverBrush = new SolidColorBrush(hoverColor);
+        _currentMenuChildPressedBrush = new SolidColorBrush(pressedColor);
+
+        UpdateResource("MenuHoverBrush", _currentMenuHoverBrush);
+        UpdateResource("MenuPressedBrush", _currentMenuPressedBrush);
+        UpdateResource("MenuChildHoverBrush", _currentMenuChildHoverBrush);
+        UpdateResource("MenuChildPressedBrush", _currentMenuChildPressedBrush);
 
         var borderBase = isDark ? Color.Parse("#505050") : Color.Parse("#C0C0C0");
         var borderColor = Color.FromArgb(borderAlpha, borderBase.R, borderBase.G, borderBase.B);
@@ -362,4 +394,5 @@ public sealed class ThemeBrushCoordinator
             // Ignore errors
         }
     }
+
 }

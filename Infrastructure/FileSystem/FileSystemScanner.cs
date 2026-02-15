@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
@@ -6,6 +7,9 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class FileSystemScanner : IFileSystemScanner
 {
+	// Optimal parallelism for modern multi-core CPUs with NVMe SSDs
+	private static readonly int MaxParallelism = Math.Max(4, Environment.ProcessorCount);
+
 	public bool CanReadRoot(string rootPath)
 	{
 		try
@@ -23,34 +27,44 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		}
 	}
 
-	public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules)
+	public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
 	{
-		var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-		bool rootAccessDenied = false;
-		bool hadAccessDenied = false;
+		cancellationToken.ThrowIfCancellationRequested();
 
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
-			return new ScanResult<HashSet<string>>(exts, false, false);
+			return new ScanResult<HashSet<string>>(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
 
+		// Thread-safe collections for parallel scanning
+		var extensions = new ConcurrentBag<string>();
+		var directories = new ConcurrentBag<string>();
+		var rootAccessDenied = 0;
+		var hadAccessDenied = 0;
+
+		// First pass: collect all directories (single-threaded to avoid race conditions on initial scan)
 		var pending = new Stack<string>();
 		pending.Push(rootPath);
-
 		bool isFirst = true;
 
 		while (pending.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+
 			var dir = pending.Pop();
+			directories.Add(dir);
 
 			string[] subDirs;
 			try
 			{
 				subDirs = Directory.GetDirectories(dir);
 			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
 			catch (UnauthorizedAccessException)
 			{
-				hadAccessDenied = true;
-				if (isFirst) rootAccessDenied = true;
+				Interlocked.Exchange(ref hadAccessDenied, 1);
+				if (isFirst) Interlocked.Exchange(ref rootAccessDenied, 1);
 				continue;
 			}
 			catch
@@ -60,6 +74,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 			foreach (var sd in subDirs)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
+
 				var dirName = Path.GetFileName(sd);
 				if (ShouldSkipDirectoryByName(dirName, sd, rules))
 					continue;
@@ -67,42 +83,65 @@ public sealed class FileSystemScanner : IFileSystemScanner
 				pending.Push(sd);
 			}
 
+			isFirst = false;
+		}
+
+		// Second pass: scan files in all directories in parallel
+		var parallelOptions = new ParallelOptions
+		{
+			MaxDegreeOfParallelism = MaxParallelism,
+			CancellationToken = cancellationToken
+		};
+
+		Parallel.ForEach(directories, parallelOptions, dir =>
+		{
+			parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
 			string[] files;
 			try
 			{
 				files = Directory.GetFiles(dir);
 			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
 			catch (UnauthorizedAccessException)
 			{
-				hadAccessDenied = true;
-				if (isFirst) rootAccessDenied = true;
-				continue;
+				Interlocked.Exchange(ref hadAccessDenied, 1);
+				return;
 			}
 			catch
 			{
-				continue;
+				return;
 			}
 
 			foreach (var file in files)
 			{
+				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
 				var name = Path.GetFileName(file);
 
 				if (ShouldSkipFileByName(name, file, rules))
 					continue;
 
 				var ext = Path.GetExtension(name);
-				if (!string.IsNullOrWhiteSpace(ext))
-					exts.Add(ext);
+				if (IsExtensionlessFileName(name))
+					extensions.Add(name);
+				else if (!string.IsNullOrWhiteSpace(ext))
+					extensions.Add(ext);
 			}
+		});
 
-			isFirst = false;
-		}
-
-		return new ScanResult<HashSet<string>>(exts, rootAccessDenied, hadAccessDenied);
+		// Convert to HashSet for deduplication
+		var uniqueExtensions = new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
+		return new ScanResult<HashSet<string>>(uniqueExtensions, rootAccessDenied == 1, hadAccessDenied == 1);
 	}
 
-	public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules)
+	public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
@@ -116,6 +155,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		{
 			files = Directory.GetFiles(rootPath);
 		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
 		catch (UnauthorizedAccessException)
 		{
 			return new ScanResult<HashSet<string>>(exts, true, true);
@@ -127,20 +170,26 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 		foreach (var file in files)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+
 			var name = Path.GetFileName(file);
 			if (ShouldSkipFileByName(name, file, rules))
 				continue;
 
 			var ext = Path.GetExtension(name);
-			if (!string.IsNullOrWhiteSpace(ext))
+			if (IsExtensionlessFileName(name))
+				exts.Add(name);
+			else if (!string.IsNullOrWhiteSpace(ext))
 				exts.Add(ext);
 		}
 
 		return new ScanResult<HashSet<string>>(exts, rootAccessDenied, hadAccessDenied);
 	}
 
-	public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules)
+	public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		var names = new List<string>();
 
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
@@ -150,6 +199,10 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		try
 		{
 			dirs = Directory.GetDirectories(rootPath);
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
 		}
 		catch (UnauthorizedAccessException)
 		{
@@ -162,6 +215,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 
 		foreach (var dir in dirs)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+
 			var dirName = Path.GetFileName(dir);
 			if (ShouldSkipDirectoryByName(dirName, dir, rules))
 				continue;
@@ -179,13 +234,15 @@ public sealed class FileSystemScanner : IFileSystemScanner
 	/// </summary>
 	private static bool ShouldSkipDirectoryByName(string name, string fullPath, IgnoreRules rules)
 	{
-		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(fullPath, isDirectory: true, name))
+		var matcher = rules.ResolveGitIgnoreMatcher(fullPath);
+		if (!ReferenceEquals(matcher, GitIgnoreMatcher.Empty) &&
+		    matcher.IsIgnored(fullPath, isDirectory: true, name))
 		{
-			if (!rules.GitIgnoreMatcher.ShouldTraverseIgnoredDirectory(fullPath, name))
+			if (!matcher.ShouldTraverseIgnoredDirectory(fullPath, name))
 				return true;
 		}
 
-		if (rules.SmartIgnoredFolders.Contains(name))
+		if (rules.ShouldApplySmartIgnore(fullPath) && rules.SmartIgnoredFolders.Contains(name))
 			return true;
 
 		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
@@ -217,13 +274,18 @@ public sealed class FileSystemScanner : IFileSystemScanner
 	/// </summary>
 	private static bool ShouldSkipFileByName(string name, string fullPath, IgnoreRules rules)
 	{
-		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(fullPath, isDirectory: false, name))
+		var matcher = rules.ResolveGitIgnoreMatcher(fullPath);
+		if (!ReferenceEquals(matcher, GitIgnoreMatcher.Empty) &&
+		    matcher.IsIgnored(fullPath, isDirectory: false, name))
 			return true;
 
-		if (rules.SmartIgnoredFiles.Contains(name))
+		if (rules.ShouldApplySmartIgnore(fullPath) && rules.SmartIgnoredFiles.Contains(name))
 			return true;
 
 		if (rules.IgnoreDotFiles && name.StartsWith(".", StringComparison.Ordinal))
+			return true;
+
+		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(name))
 			return true;
 
 		if (rules.IgnoreHiddenFiles)
@@ -244,5 +306,14 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		}
 
 		return false;
+	}
+
+	private static bool IsExtensionlessFileName(string name)
+	{
+		if (string.IsNullOrWhiteSpace(name))
+			return false;
+
+		var extension = Path.GetExtension(name);
+		return string.IsNullOrEmpty(extension) || extension == ".";
 	}
 }

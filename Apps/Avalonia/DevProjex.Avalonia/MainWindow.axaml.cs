@@ -4,11 +4,12 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -27,6 +28,7 @@ using ThemePresetDb = DevProjex.Infrastructure.ThemePresets.ThemePresetDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
 using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
 using ThemePresetEffect = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Contracts;
@@ -37,6 +39,45 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow : Window
 {
+    private enum StatusOperationType
+    {
+        None = 0,
+        LoadProject = 1,
+        RefreshProject = 2,
+        MetricsCalculation = 3,
+        GitPullUpdates = 4,
+        GitSwitchBranch = 5,
+        PreviewBuild = 6
+    }
+
+    private sealed record SelectionOptionSnapshot(string Name, bool IsChecked);
+
+    private sealed record IgnoreOptionSnapshot(IgnoreOptionId Id, string Label, bool IsChecked);
+
+    private sealed record ProjectLoadCancellationSnapshot(
+        bool HadLoadedProjectBefore,
+        string? Path,
+        string? ProjectDisplayName,
+        string? RepositoryUrl,
+        BuildTreeResult? Tree,
+        ProjectSourceType ProjectSourceType,
+        string CurrentBranch,
+        IReadOnlyList<GitBranch> GitBranches,
+        bool SettingsVisible,
+        bool SearchVisible,
+        bool FilterVisible,
+        bool IsPreviewMode,
+        bool StatusMetricsVisible,
+        string StatusTreeStatsText,
+        string StatusContentStatsText,
+        bool AllRootFoldersChecked,
+        bool AllExtensionsChecked,
+        bool AllIgnoreChecked,
+        bool HasCompleteMetricsBaseline,
+        IReadOnlyList<SelectionOptionSnapshot> RootFolders,
+        IReadOnlyList<SelectionOptionSnapshot> Extensions,
+        IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions);
+
     public MainWindow()
         : this(CommandLineOptions.Empty, AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty))
     {
@@ -52,6 +93,7 @@ public partial class MainWindow : Window
     private readonly TreeExportService _treeExport;
     private readonly SelectedContentExportService _contentExport;
     private readonly TreeAndContentExportService _treeAndContentExport;
+    private readonly TextFileExportService _textFileExport;
     private readonly IToastService _toastService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
@@ -59,6 +101,7 @@ public partial class MainWindow : Window
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
+    private readonly IFileContentAnalyzer _fileContentAnalyzer;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
@@ -80,19 +123,80 @@ public partial class MainWindow : Window
     private TopMenuBarView? _topMenuBar;
     private SearchBarView? _searchBar;
     private FilterBarView? _filterBar;
+    private ScrollViewer? _previewTextScrollViewer;
+    private ScrollViewer? _previewLineNumbersScrollViewer;
     private HashSet<string>? _filterExpansionSnapshot;
     private int _filterApplyVersion;
+    private CancellationTokenSource? _projectOperationCts;
     private CancellationTokenSource? _refreshCts;
     private CancellationTokenSource? _gitCloneCts;
+    private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private Viewbox? _dropZoneIcon;
     private TranslateTransform? _dropZoneIconTransform;
     private global::Avalonia.Threading.DispatcherTimer? _dropZoneFloatTimer;
     private readonly Stopwatch _dropZoneFloatClock = new();
-    private int _statusLineCount;
-    private int _statusCharCount;
-    private int _statusTokenEstimate;
+
+    // Settings panel animation
+    private Border? _settingsContainer;
+    private Border? _settingsIsland;
+    private TranslateTransform? _settingsTransform;
+    private bool _settingsAnimating;
+    private const double SettingsPanelWidth = 328.0; // 320 content + 8 margin
+
+    // Search bar animation
+    private Border? _searchBarContainer;
+    private TranslateTransform? _searchBarTransform;
+    private bool _searchBarAnimating;
+    private const double SearchBarHeight = 46.0;
+
+    // Filter bar animation
+    private Border? _filterBarContainer;
+    private TranslateTransform? _filterBarTransform;
+    private bool _filterBarAnimating;
+    private const double FilterBarHeight = 46.0;
+
+    // Preview bar animation
+    private Border? _previewBarContainer;
+    private Border? _previewBar;
+    private TranslateTransform? _previewBarTransform;
+    private bool _previewBarAnimating;
+    private const double PreviewBarHeight = 46.0;
+
+    // Preview generation
+    private CancellationTokenSource? _previewBuildCts;
+    private global::Avalonia.Threading.DispatcherTimer? _previewDebounceTimer;
+    private int _previewBuildVersion;
+    private volatile bool _previewRefreshRequested;
+    private bool _previewScrollSyncActive;
+
+    // Real-time metrics calculation
+    private readonly object _metricsLock = new();
+    private CancellationTokenSource? _metricsCalculationCts;
+    private global::Avalonia.Threading.DispatcherTimer? _metricsDebounceTimer;
+    private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
+    private volatile bool _isBackgroundMetricsActive;
+    private int _metricsRecalcVersion;
+    private CancellationTokenSource? _recalculateMetricsCts;
+    private long _statusOperationSequence;
+    private long _activeStatusOperationId;
+    private StatusOperationType _activeStatusOperationType;
+    private Action? _activeStatusCancelAction;
+    private bool _metricsCancellationRequestedByUser;
+    private volatile bool _hasCompleteMetricsBaseline;
+    private ProjectLoadCancellationSnapshot? _activeProjectLoadCancellationSnapshot;
+    private static readonly HashSet<string> MetricsWarmupBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
+        ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
+        ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
+        ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
+        ".exe", ".dll", ".so", ".dylib", ".pdb", ".ilk",
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".ttf", ".otf", ".woff", ".woff2", ".eot",
+        ".bin", ".dat", ".db", ".sqlite", ".mdb"
+    };
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -111,6 +215,7 @@ public partial class MainWindow : Window
         _treeExport = services.TreeExportService;
         _contentExport = services.ContentExportService;
         _treeAndContentExport = services.TreeAndContentExportService;
+        _textFileExport = services.TextFileExportService;
         _toastService = services.ToastService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
@@ -118,11 +223,12 @@ public partial class MainWindow : Window
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
+        _fileContentAnalyzer = services.FileContentAnalyzer;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _viewModel.SetToastItems(_toastService.Items);
         DataContext = _viewModel;
-        ApplyStatusMetricTexts();
+        SubscribeToMetricsUpdates();
 
         InitializeComponent();
 
@@ -144,7 +250,13 @@ public partial class MainWindow : Window
         _topMenuBar = this.FindControl<TopMenuBarView>("TopMenuBar");
         _searchBar = this.FindControl<SearchBarView>("SearchBar");
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
+        _previewBarContainer = this.FindControl<Border>("PreviewBarContainer");
+        _previewBar = this.FindControl<Border>("PreviewBar");
+        _previewTextScrollViewer = this.FindControl<ScrollViewer>("PreviewTextScrollViewer");
+        _previewLineNumbersScrollViewer = this.FindControl<ScrollViewer>("PreviewLineNumbersScrollViewer");
         _dropZoneIcon = this.FindControl<Viewbox>("DropZoneIcon");
+        _settingsContainer = this.FindControl<Border>("SettingsContainer");
+        _settingsIsland = this.FindControl<Border>("SettingsIsland");
 
         if (_dropZoneIcon is not null)
         {
@@ -152,6 +264,49 @@ public partial class MainWindow : Window
             _dropZoneIcon.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
             _dropZoneIcon.RenderTransform = _dropZoneIconTransform;
             EnsureDropZoneFloatAnimationStarted();
+        }
+
+        if (_settingsIsland is not null && _settingsContainer is not null)
+        {
+            _settingsTransform = new TranslateTransform();
+            _settingsIsland.RenderTransform = _settingsTransform;
+            // Start hidden (collapsed width, off-screen to the right)
+            _settingsContainer.Width = 0;
+            _settingsTransform.X = SettingsPanelWidth;
+            _settingsIsland.Opacity = 0;
+        }
+
+        // Initialize search bar animation
+        _searchBarContainer = this.FindControl<Border>("SearchBarContainer");
+        if (_searchBarContainer is not null && _searchBar is not null)
+        {
+            _searchBarTransform = _searchBar.RenderTransform as TranslateTransform ?? new TranslateTransform();
+            _searchBar.RenderTransform = _searchBarTransform;
+            // Start hidden (collapsed height, off-screen to the top)
+            _searchBarContainer.Height = 0;
+            _searchBarTransform.Y = -SearchBarHeight;
+            _searchBar.Opacity = 0;
+        }
+
+        // Initialize filter bar animation
+        _filterBarContainer = this.FindControl<Border>("FilterBarContainer");
+        if (_filterBarContainer is not null && _filterBar is not null)
+        {
+            _filterBarTransform = _filterBar.RenderTransform as TranslateTransform ?? new TranslateTransform();
+            _filterBar.RenderTransform = _filterBarTransform;
+            // Start hidden (collapsed height, off-screen to the top)
+            _filterBarContainer.Height = 0;
+            _filterBarTransform.Y = -FilterBarHeight;
+            _filterBar.Opacity = 0;
+        }
+
+        if (_previewBarContainer is not null && _previewBar is not null)
+        {
+            _previewBarTransform = _previewBar.RenderTransform as TranslateTransform ?? new TranslateTransform();
+            _previewBar.RenderTransform = _previewBarTransform;
+            _previewBarContainer.Height = 0;
+            _previewBarTransform.Y = -PreviewBarHeight;
+            _previewBar.Opacity = 0;
         }
 
         if (_treeView is not null)
@@ -169,6 +324,7 @@ public partial class MainWindow : Window
             _filterSelectionService,
             _ignoreOptionsService,
             BuildIgnoreRules,
+            GetIgnoreOptionsAvailability,
             TryElevateAndRestart,
             () => _currentPath);
 
@@ -210,6 +366,21 @@ public partial class MainWindow : Window
                 HandleThemePopoverStateChange();
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
                 UpdateDropZoneFloatAnimationState();
+            else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
+            {
+                RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
+                SchedulePreviewRefresh();
+            }
+            else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
+            {
+                // Clear content immediately to prevent jank from large text re-rendering
+                // while thumb animation plays
+                _viewModel.PreviewText = string.Empty;
+                _viewModel.PreviewLineNumbers = "1";
+
+                // Delay preview refresh to let thumb animation (250ms) complete
+                SchedulePreviewRefresh(immediate: false);
+            }
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
 
@@ -239,17 +410,34 @@ public partial class MainWindow : Window
         if (_viewModelPropertyChangedHandler is not null)
             _viewModel.PropertyChanged -= _viewModelPropertyChangedHandler;
 
+        // Unsubscribe from tree checkbox changes for metrics
+        UnsubscribeFromMetricsUpdates();
+
+        // Cancel metrics calculation
+        _metricsCalculationCts?.Cancel();
+        _metricsCalculationCts?.Dispose();
+        _recalculateMetricsCts?.Cancel();
+        _recalculateMetricsCts?.Dispose();
+        _metricsDebounceTimer?.Stop();
+        _previewBuildCts?.Cancel();
+        _previewBuildCts?.Dispose();
+        _previewDebounceTimer?.Stop();
+
         // Dispose coordinators
         _searchCoordinator.Dispose();
         _filterCoordinator.Dispose();
 
         // Cancel and dispose refresh token
+        _projectOperationCts?.Cancel();
+        _projectOperationCts?.Dispose();
         _refreshCts?.Cancel();
         _refreshCts?.Dispose();
 
         // Cancel and dispose git clone token
         _gitCloneCts?.Cancel();
         _gitCloneCts?.Dispose();
+        _gitOperationCts?.Cancel();
+        _gitOperationCts?.Dispose();
 
         // Clear icon cache to release memory
         _iconCache.Clear();
@@ -306,9 +494,9 @@ public partial class MainWindow : Window
         if (_dropZoneIconTransform is null)
             return;
 
-        //Folder's animaion parameters
-        const double periodSeconds = 2.0; // Animation speed
-        const double amplitudePx = 4.0; // Vertical distance
+        // Floating folder animation parameters.
+        const double periodSeconds = 1.7; // Slightly faster cycle while keeping smooth sine motion.
+        const double amplitudePx = 5.5; // Slightly larger travel distance.
         var phase = _dropZoneFloatClock.Elapsed.TotalSeconds / periodSeconds * 2 * Math.PI;
 
         // Symmetric sine motion makes the floating clearly visible.
@@ -361,6 +549,10 @@ public partial class MainWindow : Window
                     // Best effort - ignore errors
                 }
             });
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is handled by status operation fallback.
         }
         catch (Exception ex)
         {
@@ -476,6 +668,7 @@ public partial class MainWindow : Window
         _viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
         ApplyEffectMode(effect);
         ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
+        ApplyViewSettings(_themePresetDb.ViewSettings);
         _wasThemePopoverOpen = _viewModel.ThemePopoverOpen;
     }
 
@@ -511,6 +704,22 @@ public partial class MainWindow : Window
         ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
     }
 
+    private void ApplyViewSettings(AppViewSettings settings)
+    {
+        _viewModel.IsCompactMode = settings.IsCompactMode;
+        _viewModel.IsTreeAnimationEnabled = settings.IsTreeAnimationEnabled;
+
+        if (_viewModel.IsCompactMode)
+            Classes.Add("compact-mode");
+        else
+            Classes.Remove("compact-mode");
+
+        if (_viewModel.IsTreeAnimationEnabled)
+            Classes.Add("tree-animation");
+        else
+            Classes.Remove("tree-animation");
+    }
+
     private void HandleThemePopoverStateChange()
     {
         if (_wasThemePopoverOpen && !_viewModel.ThemePopoverOpen)
@@ -540,6 +749,17 @@ public partial class MainWindow : Window
 
         _themePresetStore.SetPreset(_themePresetDb, theme, effect, preset);
         _themePresetDb.LastSelected = $"{theme}.{effect}";
+        _themePresetStore.Save(_themePresetDb);
+    }
+
+    private void SaveCurrentViewSettings()
+    {
+        _themePresetDb.ViewSettings = new AppViewSettings
+        {
+            IsCompactMode = _viewModel.IsCompactMode,
+            IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled
+        };
+
         _themePresetStore.Save(_themePresetDb);
     }
 
@@ -606,12 +826,16 @@ public partial class MainWindow : Window
     private void ApplyLocalization()
     {
         _viewModel.UpdateLocalization();
-        ApplyStatusMetricTexts();
+        RecalculateMetricsAsync(); // Update metrics text with new localization
+        if (_viewModel.IsPreviewMode)
+            SchedulePreviewRefresh(immediate: true);
         UpdateTitle();
 
         if (_currentPath is not null)
         {
-            _selectionCoordinator.PopulateIgnoreOptionsForRootSelection(_selectionCoordinator.GetSelectedRootFolders(), _currentPath);
+            _ = _selectionCoordinator.PopulateIgnoreOptionsForRootSelectionAsync(
+                _selectionCoordinator.GetSelectedRootFolders(),
+                _currentPath);
         }
     }
 
@@ -643,6 +867,10 @@ public partial class MainWindow : Window
 
             await TryOpenFolderAsync(path, fromDialog: true);
         }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is handled by status operation fallback.
+        }
         catch (Exception ex)
         {
             await ShowErrorAsync(ex.Message);
@@ -651,16 +879,33 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
-        BeginStatusOperation(_viewModel.StatusOperationRefreshingProject, indeterminate: true);
+        CancelPreviewRefresh();
+        var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
+        var cancellationToken = refreshCts.Token;
+        var statusOperationId = BeginStatusOperation(
+            _viewModel.StatusOperationRefreshingProject,
+            indeterminate: true,
+            operationType: StatusOperationType.RefreshProject,
+            cancelAction: () => refreshCts.Cancel());
         try
         {
-            await ReloadProjectAsync();
-            CompleteStatusOperation();
+            await ReloadProjectAsync(cancellationToken);
+            CompleteStatusOperation(statusOperationId);
+            _toastService.Show(_localization["Toast.Refresh.Success"]);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            CompleteStatusOperation(statusOperationId);
+            _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(ex.Message);
+        }
+        finally
+        {
+            DisposeIfCurrent(ref _projectOperationCts, refreshCts);
         }
     }
 
@@ -673,35 +918,27 @@ public partial class MainWindow : Window
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            string content;
-            if (selected.Count > 0)
-            {
-                content = _treeExport.BuildSelectedTree(_currentPath!, _currentTree!.Root, selected);
-                if (string.IsNullOrWhiteSpace(content))
-                    content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
-            }
-            else
-            {
-                content = _treeExport.BuildFullTree(_currentPath!, _currentTree!.Root);
-            }
+            var format = GetCurrentTreeTextFormat();
+            var content = BuildTreeTextForSelection(selected, format);
 
             await SetClipboardTextAsync(content);
-            UpdateStatusMetricsFromContent(content);
-            CompleteStatusOperation();
             _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
     }
 
     private async void OnCopyContent(object? sender, RoutedEventArgs e)
     {
+        long? statusOperationId = null;
         try
         {
             if (!EnsureTreeReady()) return;
+
+            // Cancel background metrics calculation - user wants immediate action
+            CancelBackgroundMetricsCalculation();
 
             var selected = GetCheckedPaths();
             var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
@@ -719,47 +956,467 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
-            BeginStatusOperation("Preparing content...", indeterminate: true);
+            statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
             var content = await Task.Run(() => _contentExport.BuildAsync(files, CancellationToken.None));
             if (string.IsNullOrWhiteSpace(content))
             {
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
             await SetClipboardTextAsync(content);
-            UpdateStatusMetricsFromContent(content);
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
 
     private async void OnCopyTreeAndContent(object? sender, RoutedEventArgs e)
     {
+        long? statusOperationId = null;
+        try
+        {
+            if (!EnsureTreeReady()) return;
+
+            // Cancel background metrics calculation - user wants immediate action
+            CancelBackgroundMetricsCalculation();
+
+            var selected = GetCheckedPaths();
+            var format = GetCurrentTreeTextFormat();
+            // Run file reading off UI thread
+            statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
+            var content = await Task.Run(() =>
+                _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, format, CancellationToken.None));
+            await SetClipboardTextAsync(content);
+            CompleteStatusOperation(statusOperationId);
+            _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
+        }
+        catch (Exception ex)
+        {
+            CompleteStatusOperation(statusOperationId);
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private async void OnExportTreeToFile(object? sender, RoutedEventArgs e)
+    {
         try
         {
             if (!EnsureTreeReady()) return;
 
             var selected = GetCheckedPaths();
-            // Run file reading off UI thread
-            BeginStatusOperation("Building export...", indeterminate: true);
-            var content = await Task.Run(() => _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, CancellationToken.None));
-            await SetClipboardTextAsync(content);
-            UpdateStatusMetricsFromContent(content);
-            CompleteStatusOperation();
-            _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
+            var format = GetCurrentTreeTextFormat();
+            var content = BuildTreeTextForSelection(selected, format);
+            var saveAsJson = format == TreeTextFormat.Json;
+
+            var saved = await TryExportTextToFileAsync(
+                content,
+                BuildSuggestedExportFileName("tree", saveAsJson),
+                _viewModel.MenuFileExportTree,
+                useJsonDefaultExtension: saveAsJson,
+                allowBothExtensions: saveAsJson);
+
+            if (saved)
+                _toastService.Show(_localization["Toast.Export.Tree"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
             await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private async void OnExportContentToFile(object? sender, RoutedEventArgs e)
+    {
+        long? statusOperationId = null;
+        try
+        {
+            if (!EnsureTreeReady()) return;
+
+            CancelBackgroundMetricsCalculation();
+
+            var selected = GetCheckedPaths();
+            var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
+                .Distinct(PathComparer.Default)
+                .OrderBy(path => path, PathComparer.Default)
+                .ToList();
+
+            if (files.Count == 0)
+            {
+                if (selected.Count > 0)
+                    await ShowInfoAsync(_localization["Msg.NoCheckedFiles"]);
+                else
+                    await ShowInfoAsync(_localization["Msg.NoTextContent"]);
+                return;
+            }
+
+            statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
+            var content = await Task.Run(() => _contentExport.BuildAsync(files, CancellationToken.None));
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                CompleteStatusOperation(statusOperationId);
+                await ShowInfoAsync(_localization["Msg.NoTextContent"]);
+                return;
+            }
+
+            var saved = await TryExportTextToFileAsync(
+                content,
+                BuildSuggestedExportFileName("content", saveAsJson: false),
+                _viewModel.MenuFileExportContent,
+                useJsonDefaultExtension: false,
+                allowBothExtensions: false);
+
+            CompleteStatusOperation(statusOperationId);
+            if (saved)
+                _toastService.Show(_localization["Toast.Export.Content"]);
+        }
+        catch (Exception ex)
+        {
+            CompleteStatusOperation(statusOperationId);
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private async void OnExportTreeAndContentToFile(object? sender, RoutedEventArgs e)
+    {
+        long? statusOperationId = null;
+        try
+        {
+            if (!EnsureTreeReady()) return;
+
+            CancelBackgroundMetricsCalculation();
+
+            var selected = GetCheckedPaths();
+            var format = GetCurrentTreeTextFormat();
+            var saveAsJson = false;
+
+            statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
+            var content = await Task.Run(() =>
+                _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, format, CancellationToken.None));
+
+            var saved = await TryExportTextToFileAsync(
+                content,
+                BuildSuggestedExportFileName("tree_content", saveAsJson),
+                _viewModel.MenuFileExportTreeAndContent,
+                useJsonDefaultExtension: false,
+                allowBothExtensions: false);
+
+            CompleteStatusOperation(statusOperationId);
+            if (saved)
+                _toastService.Show(_localization["Toast.Export.TreeAndContent"]);
+        }
+        catch (Exception ex)
+        {
+            CompleteStatusOperation(statusOperationId);
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private TreeTextFormat GetCurrentTreeTextFormat()
+        => _viewModel.SelectedExportFormat == ExportFormat.Json
+            ? TreeTextFormat.Json
+            : TreeTextFormat.Ascii;
+
+    private string BuildTreeTextForSelection(IReadOnlySet<string> selectedPaths, TreeTextFormat format)
+    {
+        if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
+            return string.Empty;
+
+        var hasSelection = selectedPaths.Count > 0;
+        var treeText = hasSelection
+            ? _treeExport.BuildSelectedTree(_currentPath, _currentTree.Root, selectedPaths, format)
+            : _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format);
+
+        if (hasSelection && string.IsNullOrWhiteSpace(treeText))
+            treeText = _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format);
+
+        return treeText;
+    }
+
+    private void SchedulePreviewRefresh(bool immediate = false)
+    {
+        _previewRefreshRequested = true;
+
+        if (!_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
+            return;
+
+        if (immediate)
+        {
+            _previewDebounceTimer?.Stop();
+            _ = RefreshPreviewAsync();
+            return;
+        }
+
+        if (_previewDebounceTimer is null)
+        {
+            _previewDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
+            {
+                // 350ms delay ensures thumb animation (250ms) completes fully before loading
+                Interval = TimeSpan.FromMilliseconds(350)
+            };
+            _previewDebounceTimer.Tick += OnPreviewDebounceTick;
+        }
+
+        _previewDebounceTimer.Stop();
+        _previewDebounceTimer.Start();
+    }
+
+    private void CancelPreviewRefresh()
+    {
+        _previewRefreshRequested = false;
+        _previewDebounceTimer?.Stop();
+        _previewBuildCts?.Cancel();
+        _viewModel.IsPreviewLoading = false;
+    }
+
+    private void OnPreviewDebounceTick(object? sender, EventArgs e)
+    {
+        _previewDebounceTimer?.Stop();
+        _ = RefreshPreviewAsync();
+    }
+
+    private void OnPreviewTextScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (_previewScrollSyncActive)
+            return;
+
+        if (sender is not ScrollViewer textScrollViewer || _previewLineNumbersScrollViewer is null)
+            return;
+
+        var targetY = textScrollViewer.Offset.Y;
+        var currentY = _previewLineNumbersScrollViewer.Offset.Y;
+        if (Math.Abs(currentY - targetY) < 0.1)
+            return;
+
+        try
+        {
+            _previewScrollSyncActive = true;
+            _previewLineNumbersScrollViewer.Offset = new Vector(0, targetY);
+        }
+        finally
+        {
+            _previewScrollSyncActive = false;
+        }
+    }
+
+    private async Task RefreshPreviewAsync()
+    {
+        if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
+            return;
+
+        if (!EnsureTreeReady())
+        {
+            ApplyPreviewText(_viewModel.PreviewNoDataText);
+            _previewRefreshRequested = false;
+            return;
+        }
+
+        var previewCts = ReplaceCancellationSource(ref _previewBuildCts);
+        var cancellationToken = previewCts.Token;
+        var buildVersion = Interlocked.Increment(ref _previewBuildVersion);
+        _viewModel.IsPreviewLoading = true;
+
+        // Show progress bar immediately with cancel support
+        var operationId = BeginStatusOperation(
+            _viewModel.StatusOperationPreparingPreview,
+            indeterminate: true,
+            operationType: StatusOperationType.PreviewBuild,
+            cancelAction: () =>
+            {
+                previewCts.Cancel();
+                _toastService.Show(_viewModel.ToastPreviewCanceled);
+            });
+
+        try
+        {
+            // Capture state on UI thread before background work
+            var selectedPaths = GetCheckedPaths();
+            var selectedMode = _viewModel.SelectedPreviewContentMode;
+            var treeFormat = GetCurrentTreeTextFormat();
+            var hasSelection = selectedPaths.Count > 0;
+            var noCheckedFilesText = _localization["Msg.NoCheckedFilesShort"];
+            var noTextContentText = _localization["Msg.NoTextContent"];
+            var currentPath = _currentPath;
+            var currentTreeRoot = _currentTree?.Root;
+            var noDataText = _viewModel.PreviewNoDataText;
+
+            // Run all heavy work in background thread
+            var (previewText, lineNumbers) = await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string text;
+                if (selectedMode == PreviewContentMode.Tree)
+                {
+                    text = BuildTreeTextForSelection(selectedPaths, treeFormat);
+                }
+                else if (selectedMode == PreviewContentMode.Content)
+                {
+                    var files = (hasSelection
+                            ? selectedPaths.Where(File.Exists)
+                            : currentTreeRoot != null ? EnumerateFilePaths(currentTreeRoot) : Enumerable.Empty<string>())
+                        .Distinct(PathComparer.Default)
+                        .OrderBy(path => path, PathComparer.Default)
+                        .ToList();
+
+                    if (files.Count == 0)
+                        text = hasSelection ? noCheckedFilesText : noTextContentText;
+                    else
+                        text = _contentExport.BuildAsync(files, cancellationToken).GetAwaiter().GetResult();
+
+                    if (string.IsNullOrWhiteSpace(text))
+                        text = noTextContentText;
+                }
+                else
+                {
+                    text = currentPath != null && currentTreeRoot != null
+                        ? _treeAndContentExport.BuildAsync(currentPath, currentTreeRoot, selectedPaths, treeFormat, cancellationToken).GetAwaiter().GetResult()
+                        : noTextContentText;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var effectiveText = string.IsNullOrEmpty(text) ? noDataText : text;
+                var numbers = BuildPreviewLineNumbers(effectiveText);
+
+                return (effectiveText, numbers);
+            }, cancellationToken);
+
+            if (buildVersion != Volatile.Read(ref _previewBuildVersion))
+                return;
+
+            ApplyPreviewText(previewText, lineNumbers);
+            _previewRefreshRequested = false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Ignore stale preview builds.
+        }
+        catch (Exception ex)
+        {
+            if (buildVersion == Volatile.Read(ref _previewBuildVersion))
+                ApplyPreviewText(ex.Message);
+        }
+        finally
+        {
+            if (buildVersion == Volatile.Read(ref _previewBuildVersion))
+                _viewModel.IsPreviewLoading = false;
+
+            // Always hide progress bar
+            CompleteStatusOperation(operationId);
+
+            DisposeIfCurrent(ref _previewBuildCts, previewCts);
+        }
+    }
+
+    private void ApplyPreviewText(string text)
+    {
+        var effectiveText = string.IsNullOrEmpty(text)
+            ? _viewModel.PreviewNoDataText
+            : text;
+
+        ApplyPreviewText(effectiveText, BuildPreviewLineNumbers(effectiveText));
+    }
+
+    private void ApplyPreviewText(string text, string lineNumbers)
+    {
+        _viewModel.PreviewText = text;
+        _viewModel.PreviewLineNumbers = lineNumbers;
+
+        // Reset both preview scroll viewers to top-left when content changes.
+        if (_previewTextScrollViewer is not null)
+            _previewTextScrollViewer.Offset = default;
+        if (_previewLineNumbersScrollViewer is not null)
+            _previewLineNumbersScrollViewer.Offset = default;
+    }
+
+    private static string BuildPreviewLineNumbers(string text)
+    {
+        var lineCount = 1;
+        foreach (var ch in text)
+        {
+            if (ch == '\n')
+                lineCount++;
+        }
+
+        var numbers = new StringBuilder(Math.Max(4, lineCount * 4));
+        for (var index = 1; index <= lineCount; index++)
+        {
+            numbers.Append(index);
+            if (index < lineCount)
+                numbers.AppendLine();
+        }
+
+        return numbers.ToString();
+    }
+
+    private async Task<bool> TryExportTextToFileAsync(
+        string content,
+        string suggestedFileName,
+        string dialogTitle,
+        bool useJsonDefaultExtension,
+        bool allowBothExtensions)
+    {
+        if (StorageProvider is null || string.IsNullOrWhiteSpace(content))
+            return false;
+
+        var jsonFileType = new FilePickerFileType("JSON")
+        {
+            Patterns = new[] { "*.json" },
+            MimeTypes = new[] { "application/json" }
+        };
+
+        var textFileType = new FilePickerFileType("Text")
+        {
+            Patterns = new[] { "*.txt" },
+            MimeTypes = new[] { "text/plain" }
+        };
+
+        var options = new FilePickerSaveOptions
+        {
+            Title = dialogTitle,
+            SuggestedFileName = suggestedFileName,
+            ShowOverwritePrompt = true,
+            // Tree export allows choosing both .json and .txt.
+            // Other export modes stay text-only for predictable output format.
+            DefaultExtension = useJsonDefaultExtension ? "json" : "txt",
+            FileTypeChoices = allowBothExtensions
+                ? new[] { jsonFileType, textFileType }
+                : useJsonDefaultExtension
+                    ? new[] { jsonFileType }
+                    : new[] { textFileType }
+        };
+
+        var file = await StorageProvider.SaveFilePickerAsync(options);
+        if (file is null)
+            return false;
+
+        await using var stream = await file.OpenWriteAsync();
+        await _textFileExport.WriteAsync(stream, content);
+
+        return true;
+    }
+
+    private string BuildSuggestedExportFileName(string suffix, bool saveAsJson)
+    {
+        var baseName = _currentProjectDisplayName;
+        if (string.IsNullOrWhiteSpace(baseName) && !string.IsNullOrWhiteSpace(_currentPath))
+            baseName = Path.GetFileName(_currentPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        if (string.IsNullOrWhiteSpace(baseName))
+            baseName = "devprojex";
+
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitized = new StringBuilder(baseName.Length);
+        foreach (var ch in baseName)
+            sanitized.Append(invalidChars.Contains(ch) ? '_' : ch);
+
+        var extension = saveAsJson ? "json" : "txt";
+        return $"{sanitized}_{suffix}.{extension}";
     }
 
     private void OnExpandAll(object? sender, RoutedEventArgs e) => ExpandCollapseTree(expand: true);
@@ -793,7 +1450,351 @@ public partial class MainWindow : Window
     private void OnToggleSettings(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
-        _viewModel.SettingsVisible = !_viewModel.SettingsVisible;
+        if (_settingsAnimating) return;
+
+        var newVisible = !_viewModel.SettingsVisible;
+        _viewModel.SettingsVisible = newVisible;
+        AnimateSettingsPanel(newVisible);
+    }
+
+    private void OnTogglePreview(object? sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.IsProjectLoaded)
+            return;
+
+        if (_viewModel.IsPreviewMode)
+            ClosePreviewMode();
+        else
+            OpenPreviewMode();
+    }
+
+    private void OnPreviewClose(object? sender, RoutedEventArgs e)
+    {
+        ClosePreviewMode();
+    }
+
+    private void OnPreviewTreeModeClick(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.SelectedPreviewContentMode = PreviewContentMode.Tree;
+    }
+
+    private void OnPreviewContentModeClick(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+    }
+
+    private void OnPreviewTreeAndContentModeClick(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+    }
+
+    private async void OpenPreviewMode()
+    {
+        if (!_viewModel.IsProjectLoaded)
+            return;
+        if (_previewBarAnimating)
+            return;
+
+        ForceCloseSearchAndFilterForPreview();
+
+        // Step 1: Start preview bar animation (island slides down)
+        AnimatePreviewBar(true);
+
+        // Step 2: Wait for animation to complete (250ms)
+        await Task.Delay(280);
+
+        // Step 3: Switch from tree to preview content area
+        _viewModel.IsPreviewMode = true;
+
+        // Step 4: Small delay for UI to update
+        await Task.Delay(50);
+
+        // Step 5: Start loading preview content
+        SchedulePreviewRefresh(immediate: true);
+    }
+
+    private void ClosePreviewMode()
+    {
+        if (_previewBarAnimating)
+            return;
+
+        _viewModel.IsPreviewMode = false;
+        AnimatePreviewBar(false);
+        CancelPreviewRefresh();
+        ClearPreviewMemory();
+        _treeView?.Focus();
+    }
+
+    private void ClearPreviewMemory()
+    {
+        // Force clear preview data by setting to different value first, then empty
+        // This ensures RaisePropertyChanged is called and binding releases reference
+        _viewModel.PreviewText = "\0"; // Temporary different value
+        _viewModel.PreviewLineNumbers = "\0";
+
+        // Now set to empty - binding will update
+        _viewModel.PreviewText = string.Empty;
+        _viewModel.PreviewLineNumbers = "1";
+
+        // Schedule aggressive garbage collection for large preview strings
+        // Large strings (>85KB) go to LOH (Gen2), requires LOH compaction to return memory to OS
+        _ = Task.Run(async () =>
+        {
+            // Wait for close animation (250ms) and UI updates to complete
+            await Task.Delay(350);
+
+            // Request LOH compaction on next GC - critical for returning memory to OS
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+
+            // Use Aggressive mode for maximum memory recovery
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+            // Second cycle after finalizers have run
+            await Task.Delay(100);
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        });
+    }
+
+    /// <summary>
+    /// Schedules background LOH compaction after heavy operations like Git updates or branch switches.
+    /// Runs in background to avoid blocking UI.
+    /// </summary>
+    private static void ScheduleBackgroundMemoryCleanup()
+    {
+        _ = Task.Run(async () =>
+        {
+            // Wait for UI to settle and references to be released
+            await Task.Delay(500);
+
+            // Compact LOH to return memory to OS
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        });
+    }
+
+    private static async Task WaitForTreeRenderStabilizationAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Wait for two render passes so the tree has time to materialize and paint.
+        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+            static () => { },
+            global::Avalonia.Threading.DispatcherPriority.Render);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+            static () => { },
+            global::Avalonia.Threading.DispatcherPriority.Render);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Small buffer helps avoid visual contention with immediate post-load updates.
+        await Task.Delay(140, cancellationToken);
+    }
+
+    private async void AnimateSettingsPanel(bool show)
+    {
+        if (_settingsIsland is null || _settingsTransform is null || _settingsContainer is null) return;
+        if (_settingsAnimating) return;
+
+        _settingsAnimating = true;
+
+        const double durationMs = 300.0;
+
+        // Get current values
+        var startWidth = _settingsContainer.Width;
+        if (double.IsNaN(startWidth)) startWidth = show ? 0 : SettingsPanelWidth;
+
+        var startX = _settingsTransform.X;
+        var startOpacity = _settingsIsland.Opacity;
+
+        // Target values
+        var endWidth = show ? SettingsPanelWidth : 0.0;
+        var endX = show ? 0.0 : SettingsPanelWidth;
+        var endOpacity = show ? 1.0 : 0.0;
+
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
+            // Cubic ease out: 1 - (1-t)^3
+            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+
+            // Animate container width (this makes tree expand/contract)
+            _settingsContainer.Width = startWidth + (endWidth - startWidth) * eased;
+
+            // Animate inner panel slide and fade
+            _settingsTransform.X = startX + (endX - startX) * eased;
+            _settingsIsland.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+            await Task.Delay(8); // ~120 FPS for smooth animation
+        }
+
+        // Ensure final values
+        _settingsContainer.Width = endWidth;
+        _settingsTransform.X = endX;
+        _settingsIsland.Opacity = endOpacity;
+        _settingsAnimating = false;
+    }
+
+    private async void AnimateSearchBar(bool show)
+    {
+        if (_searchBar is null || _searchBarTransform is null || _searchBarContainer is null) return;
+        if (_searchBarAnimating) return;
+
+        _searchBarAnimating = true;
+
+        const double durationMs = 250.0;
+        const double islandSpacing = 4.0; // Gap between search bar and tree island
+
+        // Get current values
+        var startHeight = _searchBarContainer.Height;
+        if (double.IsNaN(startHeight)) startHeight = show ? 0 : SearchBarHeight;
+
+        var startY = _searchBarTransform.Y;
+        var startOpacity = _searchBar.Opacity;
+        var startMarginBottom = _searchBarContainer.Margin.Bottom;
+
+        // Target values
+        var endHeight = show ? SearchBarHeight : 0.0;
+        var endY = show ? 0.0 : -SearchBarHeight;
+        var endOpacity = show ? 1.0 : 0.0;
+        var endMarginBottom = show ? islandSpacing : 0.0;
+
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
+            // Cubic ease out: 1 - (1-t)^3
+            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+
+            // Animate container height (this makes content below shift)
+            _searchBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
+
+            // Animate margin for proper spacing between islands
+            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
+            _searchBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
+
+            // Animate inner panel slide and fade
+            _searchBarTransform.Y = startY + (endY - startY) * eased;
+            _searchBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+            await Task.Delay(8);
+        }
+
+        // Ensure final values
+        _searchBarContainer.Height = endHeight;
+        _searchBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
+        _searchBarTransform.Y = endY;
+        _searchBar.Opacity = endOpacity;
+        _searchBarAnimating = false;
+    }
+
+    private async void AnimatePreviewBar(bool show)
+    {
+        if (_previewBar is null || _previewBarTransform is null || _previewBarContainer is null) return;
+        if (_previewBarAnimating) return;
+
+        _previewBarAnimating = true;
+
+        const double durationMs = 250.0; // Same as SearchBar/FilterBar
+        const double islandSpacing = 4.0;
+
+        var startHeight = _previewBarContainer.Height;
+        if (double.IsNaN(startHeight)) startHeight = show ? 0 : PreviewBarHeight;
+
+        var startY = _previewBarTransform.Y;
+        var startOpacity = _previewBar.Opacity;
+        var startMarginBottom = _previewBarContainer.Margin.Bottom;
+
+        var endHeight = show ? PreviewBarHeight : 0.0;
+        var endY = show ? 0.0 : -PreviewBarHeight;
+        var endOpacity = show ? 1.0 : 0.0;
+        var endMarginBottom = show ? islandSpacing : 0.0;
+
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
+            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+
+            _previewBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
+            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
+            _previewBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
+            _previewBarTransform.Y = startY + (endY - startY) * eased;
+            _previewBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+            await Task.Delay(8);
+        }
+
+        _previewBarContainer.Height = endHeight;
+        _previewBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
+        _previewBarTransform.Y = endY;
+        _previewBar.Opacity = endOpacity;
+        _previewBarAnimating = false;
+    }
+
+    private async void AnimateFilterBar(bool show)
+    {
+        if (_filterBar is null || _filterBarTransform is null || _filterBarContainer is null) return;
+        if (_filterBarAnimating) return;
+
+        _filterBarAnimating = true;
+
+        const double durationMs = 250.0;
+        const double islandSpacing = 4.0; // Gap between filter bar and tree island
+
+        // Get current values
+        var startHeight = _filterBarContainer.Height;
+        if (double.IsNaN(startHeight)) startHeight = show ? 0 : FilterBarHeight;
+
+        var startY = _filterBarTransform.Y;
+        var startOpacity = _filterBar.Opacity;
+        var startMarginBottom = _filterBarContainer.Margin.Bottom;
+
+        // Target values
+        var endHeight = show ? FilterBarHeight : 0.0;
+        var endY = show ? 0.0 : -FilterBarHeight;
+        var endOpacity = show ? 1.0 : 0.0;
+        var endMarginBottom = show ? islandSpacing : 0.0;
+
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
+            // Cubic ease out: 1 - (1-t)^3
+            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+
+            // Animate container height (this makes content below shift)
+            _filterBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
+
+            // Animate margin for proper spacing between islands
+            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
+            _filterBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
+
+            // Animate inner panel slide and fade
+            _filterBarTransform.Y = startY + (endY - startY) * eased;
+            _filterBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+            await Task.Delay(8);
+        }
+
+        // Ensure final values
+        _filterBarContainer.Height = endHeight;
+        _filterBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
+        _filterBarTransform.Y = endY;
+        _filterBar.Opacity = endOpacity;
+        _filterBarAnimating = false;
     }
 
     private void OnSetLightTheme(object? sender, RoutedEventArgs e)
@@ -842,6 +1843,20 @@ public partial class MainWindow : Window
             Classes.Add("compact-mode");
         else
             Classes.Remove("compact-mode");
+
+        SaveCurrentViewSettings();
+    }
+
+    private void OnToggleTreeAnimation(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.IsTreeAnimationEnabled = !_viewModel.IsTreeAnimationEnabled;
+
+        if (_viewModel.IsTreeAnimationEnabled)
+            Classes.Add("tree-animation");
+        else
+            Classes.Remove("tree-animation");
+
+        SaveCurrentViewSettings();
     }
 
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
@@ -955,6 +1970,7 @@ public partial class MainWindow : Window
 
         // Apply default preset values to ViewModel
         ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
+        ApplyViewSettings(_themePresetDb.ViewSettings);
 
         // Refresh visual effects
         _themeBrushCoordinator.UpdateTransparencyEffect();
@@ -1178,13 +2194,19 @@ public partial class MainWindow : Window
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
 
+        var gitCts = ReplaceCancellationSource(ref _gitOperationCts);
+        var cancellationToken = gitCts.Token;
+        long? statusOperationId = null;
         try
         {
-            Cursor = new Cursor(StandardCursorType.Wait);
             var statusText = string.IsNullOrWhiteSpace(_viewModel.CurrentBranch)
                 ? _viewModel.StatusOperationGettingUpdates
                 : _localization.Format("Status.Operation.GettingUpdatesBranch", _viewModel.CurrentBranch);
-            BeginStatusOperation(statusText, indeterminate: true);
+            statusOperationId = BeginStatusOperation(
+                statusText,
+                indeterminate: true,
+                operationType: StatusOperationType.GitPullUpdates,
+                cancelAction: () => gitCts.Cancel());
 
             var progress = new Progress<string>(status =>
             {
@@ -1196,40 +2218,47 @@ public partial class MainWindow : Window
                         UpdateStatusOperationText(statusText);
                 });
             });
-            var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath);
-            var success = await _gitService.PullUpdatesAsync(_currentPath, progress);
+            var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
+            var success = await _gitService.PullUpdatesAsync(_currentPath, progress, cancellationToken);
 
             if (!success)
             {
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
                 await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
                 return;
             }
 
             // Refresh branches and tree
-            await RefreshGitBranchesAsync(_currentPath);
-            await ReloadProjectAsync();
+            await RefreshGitBranchesAsync(_currentPath, cancellationToken);
+            await ReloadProjectAsync(cancellationToken);
 
-            var afterHash = await _gitService.GetHeadCommitAsync(_currentPath);
+            var afterHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
             {
                 _toastService.Show(_localization["Toast.Git.NoUpdates"]);
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
             }
             else
             {
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
+                // Clean up memory from old tree after successful update
+                ScheduleBackgroundMemoryCleanup();
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            CompleteStatusOperation(statusOperationId);
+            _toastService.Show(_localization["Toast.Operation.GitCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
         }
         finally
         {
-            Cursor = new Cursor(StandardCursorType.Arrow);
+            DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
 
         e.Handled = true;
@@ -1240,11 +2269,17 @@ public partial class MainWindow : Window
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
 
+        var gitCts = ReplaceCancellationSource(ref _gitOperationCts);
+        var cancellationToken = gitCts.Token;
+        long? statusOperationId = null;
         try
         {
-            Cursor = new Cursor(StandardCursorType.Wait);
             var statusText = _localization.Format("Status.Operation.SwitchingBranch", branchName);
-            BeginStatusOperation(statusText, indeterminate: true);
+            statusOperationId = BeginStatusOperation(
+                statusText,
+                indeterminate: true,
+                operationType: StatusOperationType.GitSwitchBranch,
+                cancelAction: () => gitCts.Cancel());
 
             var progress = new Progress<string>(status =>
             {
@@ -1256,11 +2291,15 @@ public partial class MainWindow : Window
                         UpdateStatusOperationText(statusText);
                 });
             });
-            var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress);
+            var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress, cancellationToken);
+
+            // A lightweight retry helps recover from transient remote/network hiccups.
+            if (!success)
+                success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress: null, cancellationToken);
 
             if (!success)
             {
-                CompleteStatusOperation();
+                CompleteStatusOperation(statusOperationId);
                 await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
                 return;
             }
@@ -1269,27 +2308,35 @@ public partial class MainWindow : Window
             UpdateTitle();
 
             // Refresh branches and tree
-            await RefreshGitBranchesAsync(_currentPath);
-            await ReloadProjectAsync();
-            CompleteStatusOperation();
+            await RefreshGitBranchesAsync(_currentPath, cancellationToken);
+            await ReloadProjectAsync(cancellationToken);
+            CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
+
+            // Clean up memory from old branch tree
+            ScheduleBackgroundMemoryCleanup();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            CompleteStatusOperation(statusOperationId);
+            _toastService.Show(_localization["Toast.Operation.GitCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation();
+            CompleteStatusOperation(statusOperationId);
             await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
         }
         finally
         {
-            Cursor = new Cursor(StandardCursorType.Arrow);
+            DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
     }
 
-    private async Task RefreshGitBranchesAsync(string repositoryPath)
+    private async Task RefreshGitBranchesAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
         try
         {
-            var branches = await _gitService.GetBranchesAsync(repositoryPath);
+            var branches = await _gitService.GetBranchesAsync(repositoryPath, cancellationToken);
 
             _viewModel.GitBranches.Clear();
             foreach (var branch in branches)
@@ -1297,6 +2344,10 @@ public partial class MainWindow : Window
 
             // Update branch menu
             UpdateBranchMenu();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
@@ -1382,6 +2433,7 @@ public partial class MainWindow : Window
     private void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_viewModel.IsPreviewMode) return;
 
         if (_viewModel.SearchVisible)
         {
@@ -1397,6 +2449,7 @@ public partial class MainWindow : Window
     private void OnToggleFilter(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_viewModel.IsPreviewMode) return;
 
         if (_viewModel.FilterVisible)
         {
@@ -1421,20 +2474,66 @@ public partial class MainWindow : Window
     private void ShowFilter()
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_viewModel.IsPreviewMode) return;
+        if (_filterBarAnimating) return;
 
         _viewModel.FilterVisible = true;
-        _filterBar?.FilterBoxControl?.Focus();
-        _filterBar?.FilterBoxControl?.SelectAll();
+        AnimateFilterBar(true);
+
+        // Focus after a brief delay to ensure animation has started
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _filterBar?.FilterBoxControl?.Focus();
+            _filterBar?.FilterBoxControl?.SelectAll();
+        }, global::Avalonia.Threading.DispatcherPriority.Background);
     }
 
     private void CloseFilter()
     {
         if (!_viewModel.FilterVisible) return;
+        if (_filterBarAnimating) return;
 
         _viewModel.FilterVisible = false;
         _viewModel.NameFilter = string.Empty;
         ApplyFilterRealtime();
+        AnimateFilterBar(false);
         _treeView?.Focus();
+    }
+
+    private void ForceCloseSearchAndFilterForPreview()
+    {
+        // Only hide search/filter islands visually for preview mode.
+        // Do not clear queries or re-apply filters here, otherwise tree selection state
+        // can be rebuilt and preview will diverge from copy/export behavior.
+        _viewModel.SearchVisible = false;
+        _viewModel.FilterVisible = false;
+
+        _searchBarAnimating = false;
+        _filterBarAnimating = false;
+
+        if (_searchBarContainer is not null)
+        {
+            _searchBarContainer.Height = 0;
+            _searchBarContainer.Margin = new Thickness(0);
+        }
+
+        if (_searchBarTransform is not null)
+            _searchBarTransform.Y = -SearchBarHeight;
+
+        if (_searchBar is not null)
+            _searchBar.Opacity = 0;
+
+        if (_filterBarContainer is not null)
+        {
+            _filterBarContainer.Height = 0;
+            _filterBarContainer.Margin = new Thickness(0);
+        }
+
+        if (_filterBarTransform is not null)
+            _filterBarTransform.Y = -FilterBarHeight;
+
+        if (_filterBar is not null)
+            _filterBar.Opacity = 0;
     }
 
     private void ApplyFilterRealtimeWithToken(CancellationToken cancellationToken)
@@ -1603,6 +2702,14 @@ public partial class MainWindow : Window
         if (!_viewModel.IsProjectLoaded)
             return;
 
+        // Ctrl+B Preview mode toggle
+        if (mods == KeyModifiers.Control && e.Key == Key.B)
+        {
+            OnTogglePreview(this, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
         // Ctrl+P Options panel toggle
         if (mods == KeyModifiers.Control && e.Key == Key.P)
         {
@@ -1685,19 +2792,29 @@ public partial class MainWindow : Window
     private void ShowSearch()
     {
         if (!_viewModel.IsProjectLoaded) return;
+        if (_viewModel.IsPreviewMode) return;
+        if (_searchBarAnimating) return;
 
         _viewModel.SearchVisible = true;
-        _searchBar?.SearchBoxControl?.Focus();
-        _searchBar?.SearchBoxControl?.SelectAll();
+        AnimateSearchBar(true);
+
+        // Focus after a brief delay to ensure animation has started
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _searchBar?.SearchBoxControl?.Focus();
+            _searchBar?.SearchBoxControl?.SelectAll();
+        }, global::Avalonia.Threading.DispatcherPriority.Background);
     }
 
     private void CloseSearch()
     {
         if (!_viewModel.SearchVisible) return;
+        if (_searchBarAnimating) return;
 
         _viewModel.SearchVisible = false;
         _viewModel.SearchQuery = string.Empty;
         _searchCoordinator.ClearSearchState();
+        AnimateSearchBar(false);
         _treeView?.Focus();
     }
 
@@ -1736,6 +2853,10 @@ public partial class MainWindow : Window
 
             await RefreshTreeAsync();
         }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is handled by status operation fallback.
+        }
         catch (Exception ex)
         {
             await ShowErrorAsync(ex.Message);
@@ -1760,7 +2881,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        BeginStatusOperation(_viewModel.StatusOperationLoadingProject, indeterminate: true);
+        _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
+        CancelPreviewRefresh();
+
+        var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
+        var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
+        var cancellationToken = projectLoadCts.Token;
+        _viewModel.StatusMetricsVisible = false;
+        var statusOperationId = BeginStatusOperation(
+            _viewModel.StatusOperationLoadingProject,
+            indeterminate: true,
+            operationType: StatusOperationType.LoadProject,
+            cancelAction: () => projectLoadCts.Cancel());
         try
         {
             _currentPath = path;
@@ -1778,25 +2910,44 @@ public partial class MainWindow : Window
                 _viewModel.GitBranches.Clear();
                 _currentProjectDisplayName = null;
                 _currentRepositoryUrl = null;
-
-                // Clear cached repo path when opening from dialog (local folder)
-                // This ensures the previous Git clone cache gets cleaned up
-                if (_currentCachedRepoPath is not null)
-                {
-                    _repoCacheService.DeleteRepositoryDirectory(_currentCachedRepoPath);
-                    _currentCachedRepoPath = null;
-                }
             }
 
             UpdateTitle();
 
-            await ReloadProjectAsync();
-            CompleteStatusOperation();
+            await ReloadProjectAsync(cancellationToken);
+
+            // Clear cached repo path only after the new local project load has completed successfully.
+            if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))
+            {
+                _repoCacheService.DeleteRepositoryDirectory(cachedRepoPathToDeleteOnSuccess);
+                _currentCachedRepoPath = null;
+            }
+
+            _activeProjectLoadCancellationSnapshot = null;
+            CompleteStatusOperation(statusOperationId);
+
+            // Clean up memory from previous project (old tree, strings, etc.)
+            // Must be AFTER loading new project so old references are replaced
+            ScheduleBackgroundMemoryCleanup();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (IsStatusOperationActive(statusOperationId) && TryApplyActiveProjectLoadCancellationFallback())
+            {
+                _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
+            }
+
+            CompleteStatusOperation(statusOperationId);
         }
         catch
         {
-            CompleteStatusOperation();
+            _activeProjectLoadCancellationSnapshot = null;
+            CompleteStatusOperation(statusOperationId);
             throw;
+        }
+        finally
+        {
+            DisposeIfCurrent(ref _projectOperationCts, projectLoadCts);
         }
     }
 
@@ -1830,22 +2981,21 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private async Task ReloadProjectAsync()
+    private async Task ReloadProjectAsync(CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
-
-        // Clear old state before loading new project to release memory
-        ClearPreviousProjectState();
+        cancellationToken.ThrowIfCancellationRequested();
 
         // Keep root/extension scans sequenced to avoid inconsistent UI states.
-        await _selectionCoordinator.RefreshRootAndDependentsAsync(_currentPath);
-        await RefreshTreeAsync();
+        await _selectionCoordinator.RefreshRootAndDependentsAsync(_currentPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await RefreshTreeAsync(cancellationToken: cancellationToken);
     }
 
     /// <summary>
     /// Clears state from previous project to release memory before loading a new one.
     /// </summary>
-    private void ClearPreviousProjectState()
+    private void ClearPreviousProjectState(bool forceCompactingGc = false)
     {
         // Clear search state first (holds references to TreeNodeViewModel)
         _searchCoordinator.ClearSearchState();
@@ -1859,13 +3009,19 @@ public partial class MainWindow : Window
         if (_treeView is not null)
         {
             _treeView.SelectedItem = null;
+            var savedItemTemplate = _treeView.ItemTemplate;
+            _treeView.ItemTemplate = null;
             _treeView.ItemsSource = null;
+            _treeView.InvalidateMeasure();
+            _treeView.InvalidateArrange();
+            _treeView.InvalidateVisual();
+            _treeView.ItemTemplate = savedItemTemplate;
         }
 
         // Recursively clear all tree nodes to break circular references and release memory
         foreach (var node in _viewModel.TreeNodes)
             node.ClearRecursive();
-        _viewModel.TreeNodes.Clear();
+        _viewModel.ResetTreeNodes();
 
         // Reconnect ItemsSource
         if (_treeView is not null)
@@ -1873,36 +3029,56 @@ public partial class MainWindow : Window
 
         // Clear current tree descriptor reference (this is the second copy of the tree)
         _currentTree = null;
+        _hasCompleteMetricsBaseline = false;
+        _viewModel.StatusMetricsVisible = false;
+        _viewModel.StatusTreeStatsText = string.Empty;
+        _viewModel.StatusContentStatsText = string.Empty;
+        _viewModel.PreviewText = string.Empty;
+        _viewModel.PreviewLineNumbers = "1";
+        _viewModel.IsPreviewLoading = false;
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
 
-        // Force GC to collect released objects immediately
-        // This is intentional - user expects memory to drop when switching projects
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        if (forceCompactingGc)
+        {
+            // Request LOH compaction - critical for returning memory to OS
+            // Large tree structures and file content strings go to LOH (>85KB)
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        }
+        else
+        {
+            // Avoid blocking the UI thread for routine state transitions.
+            GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+        }
     }
 
-    private async Task RefreshTreeAsync(bool interactiveFilter = false)
+    private async Task RefreshTreeAsync(bool interactiveFilter = false, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
+        cancellationToken.ThrowIfCancellationRequested();
 
         using var _ = PerformanceMetrics.Measure("RefreshTreeAsync");
 
         // Cancel any previous refresh operation to avoid race conditions
-        var cts = new CancellationTokenSource();
-        var previousRefreshCts = Interlocked.Exchange(ref _refreshCts, cts);
+        var refreshCts = new CancellationTokenSource();
+        var previousRefreshCts = Interlocked.Exchange(ref _refreshCts, refreshCts);
         previousRefreshCts?.Cancel();
         previousRefreshCts?.Dispose();
-        var cancellationToken = cts.Token;
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(refreshCts.Token, cancellationToken);
+        var linkedToken = linkedCts.Token;
 
         var allowedExt = new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
             StringComparer.OrdinalIgnoreCase);
         var allowedRoot = new HashSet<string>(_viewModel.RootFolders.Where(o => o.IsChecked).Select(o => o.Name),
             StringComparer.OrdinalIgnoreCase);
 
-        var ignoreRules = BuildIgnoreRules(_currentPath);
+        var selectedIgnoreOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
+        var ignoreRules = BuildIgnoreRules(_currentPath, selectedIgnoreOptions, allowedRoot);
 
         var nameFilter = string.IsNullOrWhiteSpace(_viewModel.NameFilter) ? null : _viewModel.NameFilter.Trim();
 
@@ -1912,8 +3088,13 @@ public partial class MainWindow : Window
             IgnoreRules: ignoreRules,
             NameFilter: nameFilter);
 
+        var waitCursorActive = false;
         if (!interactiveFilter)
+        {
+            _viewModel.StatusMetricsVisible = false;
             Cursor = new Cursor(StandardCursorType.Wait);
+            waitCursorActive = true;
+        }
         try
         {
             BuildTreeResult result;
@@ -1921,41 +3102,43 @@ public partial class MainWindow : Window
             // Build the tree off the UI thread to keep the window responsive on large folders.
             using (PerformanceMetrics.Measure("BuildTree"))
             {
-                result = await Task.Run(() => _buildTree.Execute(new BuildTreeRequest(_currentPath, options)), cancellationToken);
+                result = await Task.Run(
+                    () => _buildTree.Execute(new BuildTreeRequest(_currentPath, options), linkedToken),
+                    linkedToken);
             }
 
             // Check if this operation was superseded by a newer one
-            cancellationToken.ThrowIfCancellationRequested();
+            linkedToken.ThrowIfCancellationRequested();
 
-            // Clear references to old tree BEFORE replacing to allow GC
+            if (result.RootAccessDenied && TryElevateAndRestart(_currentPath))
+                return;
+
+            // Build ViewModel tree off the UI thread for better responsiveness.
+            // IconCache is now thread-safe, enabling parallel icon loading.
+            var displayName = !string.IsNullOrEmpty(_currentProjectDisplayName)
+                ? _currentProjectDisplayName
+                : GetDirectoryNameSafe(_currentPath!);
+
+            var root = await Task.Run(() =>
+            {
+                var node = BuildTreeViewModel(result.Root, null);
+                node.DisplayName = displayName;
+                return node;
+            }, linkedToken);
+
+            linkedToken.ThrowIfCancellationRequested();
+
+            // Swap trees only after the new root is fully materialized.
+            // This prevents losing the previously visible project on cancellation.
             _searchCoordinator.ClearSearchState();
             if (_treeView is not null)
                 _treeView.SelectedItem = null;
 
-            // Recursively clear old tree nodes to release memory (DisplayInlines, Children, Icons)
             foreach (var node in _viewModel.TreeNodes)
                 node.ClearRecursive();
             _viewModel.TreeNodes.Clear();
 
             _currentTree = result;
-
-            if (result.RootAccessDenied && TryElevateAndRestart(_currentPath))
-                return;
-
-            var root = BuildTreeViewModel(result.Root, null);
-
-            // Set root display name: use repository name for git clones, folder name for local
-            try
-            {
-                root.DisplayName = !string.IsNullOrEmpty(_currentProjectDisplayName)
-                    ? _currentProjectDisplayName
-                    : new DirectoryInfo(_currentPath!).Name;
-            }
-            catch
-            {
-                // ignore
-            }
-
             _viewModel.TreeNodes.Add(root);
             root.IsExpanded = true;
 
@@ -1964,6 +3147,36 @@ public partial class MainWindow : Window
 
             _searchCoordinator.UpdateSearchMatches();
 
+            // Initialize file metrics cache in background for real-time status bar updates
+            // Only do full scan on initial load, not on interactive filter changes
+            if (!interactiveFilter)
+            {
+                if (waitCursorActive)
+                {
+                    Cursor = new Cursor(StandardCursorType.Arrow);
+                    waitCursorActive = false;
+                }
+
+                // Animate settings panel BEFORE metrics calculation starts
+                // so user sees the panel immediately after tree renders
+                if (_viewModel.SettingsVisible && !_settingsAnimating)
+                {
+                    await WaitForTreeRenderStabilizationAsync(linkedToken);
+                    if (_viewModel.SettingsVisible && !_settingsAnimating)
+                        AnimateSettingsPanel(true);
+                }
+
+                UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
+                await InitializeFileMetricsCacheAsync(linkedToken);
+            }
+            else
+            {
+                // For filter changes, just recalculate from existing cache
+                RecalculateMetricsAsync();
+            }
+
+            SchedulePreviewRefresh(immediate: true);
+
             // Suggest GC to collect old tree objects after building new one
             // Using non-blocking mode to avoid UI freeze
             if (!interactiveFilter)
@@ -1971,8 +3184,10 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (!interactiveFilter)
+            if (!interactiveFilter && waitCursorActive)
                 Cursor = new Cursor(StandardCursorType.Arrow);
+
+            DisposeIfCurrent(ref _refreshCts, refreshCts);
         }
     }
 
@@ -1988,6 +3203,21 @@ public partial class MainWindow : Window
         }
 
         return node;
+    }
+
+    /// <summary>
+    /// Safely gets directory name without throwing on invalid paths.
+    /// </summary>
+    private static string GetDirectoryNameSafe(string path)
+    {
+        try
+        {
+            return new DirectoryInfo(path).Name;
+        }
+        catch
+        {
+            return Path.GetFileName(path) ?? path;
+        }
     }
 
     private void UpdateTitle()
@@ -2016,19 +3246,46 @@ public partial class MainWindow : Window
         }
     }
 
+    private IgnoreRules BuildIgnoreRules(
+        string rootPath,
+        IReadOnlyCollection<IgnoreOptionId> selectedOptions,
+        IReadOnlyCollection<string>? selectedRootFolders)
+    {
+        return _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+    }
+
+    private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
+        string rootPath,
+        IReadOnlyCollection<string> selectedRootFolders)
+    {
+        return _ignoreRulesService.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
+    }
+
     private IgnoreRules BuildIgnoreRules(string rootPath)
     {
         var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
-        return _ignoreRulesService.Build(rootPath, selected);
+        var selectedRoots = _selectionCoordinator.GetSelectedRootFolders();
+        return BuildIgnoreRules(rootPath, selected, selectedRoots);
     }
 
-    private void BeginStatusOperation(string text, bool indeterminate = true)
+    private long BeginStatusOperation(
+        string text,
+        bool indeterminate = true,
+        StatusOperationType operationType = StatusOperationType.None,
+        Action? cancelAction = null)
     {
+        var operationId = Interlocked.Increment(ref _statusOperationSequence);
+        Interlocked.Exchange(ref _activeStatusOperationId, operationId);
+        _activeStatusOperationType = operationType;
+        _activeStatusCancelAction = cancelAction;
+
         _viewModel.StatusOperationText = text;
         _viewModel.StatusBusy = true;
         _viewModel.StatusProgressIsIndeterminate = indeterminate;
         if (indeterminate)
             _viewModel.StatusProgressValue = 0;
+
+        return operationId;
     }
 
     private void UpdateStatusOperationText(string text)
@@ -2046,44 +3303,205 @@ public partial class MainWindow : Window
         _viewModel.StatusProgressValue = Math.Clamp(percent, 0, 100);
     }
 
-    private void CompleteStatusOperation()
+    private void CompleteStatusOperation(long? operationId = null)
     {
+        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
+            return;
+
+        // If background metrics calculation is still active, don't fully hide progress
+        if (_isBackgroundMetricsActive)
+        {
+            UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
+            return;
+        }
+
         _viewModel.StatusOperationText = string.Empty;
         _viewModel.StatusBusy = false;
         _viewModel.StatusProgressIsIndeterminate = true;
         _viewModel.StatusProgressValue = 0;
+        _activeStatusOperationType = StatusOperationType.None;
+        _activeStatusCancelAction = null;
     }
 
-    private void UpdateStatusMetricsFromContent(string content)
+    private bool IsStatusOperationActive(long operationId) =>
+        Interlocked.Read(ref _activeStatusOperationId) == operationId;
+
+    /// <summary>
+    /// Cancels any active background metrics calculation.
+    /// Call this before starting user-initiated operations that need the status bar.
+    /// </summary>
+    private void CancelBackgroundMetricsCalculation()
     {
-        if (string.IsNullOrEmpty(content))
+        if (_isBackgroundMetricsActive)
+            _hasCompleteMetricsBaseline = false;
+
+        _isBackgroundMetricsActive = false;
+        _metricsCalculationCts?.Cancel();
+        _recalculateMetricsCts?.Cancel();
+    }
+
+    private ProjectLoadCancellationSnapshot CaptureProjectLoadCancellationSnapshot()
+    {
+        var hadLoadedProjectBefore = _viewModel.IsProjectLoaded && !string.IsNullOrWhiteSpace(_currentPath);
+
+        return new ProjectLoadCancellationSnapshot(
+            HadLoadedProjectBefore: hadLoadedProjectBefore,
+            Path: _currentPath,
+            ProjectDisplayName: _currentProjectDisplayName,
+            RepositoryUrl: _currentRepositoryUrl,
+            Tree: _currentTree,
+            ProjectSourceType: _viewModel.ProjectSourceType,
+            CurrentBranch: _viewModel.CurrentBranch,
+            GitBranches: _viewModel.GitBranches.ToArray(),
+            SettingsVisible: _viewModel.SettingsVisible,
+            SearchVisible: _viewModel.SearchVisible,
+            FilterVisible: _viewModel.FilterVisible,
+            IsPreviewMode: _viewModel.IsPreviewMode,
+            StatusMetricsVisible: _viewModel.StatusMetricsVisible,
+            StatusTreeStatsText: _viewModel.StatusTreeStatsText,
+            StatusContentStatsText: _viewModel.StatusContentStatsText,
+            AllRootFoldersChecked: _viewModel.AllRootFoldersChecked,
+            AllExtensionsChecked: _viewModel.AllExtensionsChecked,
+            AllIgnoreChecked: _viewModel.AllIgnoreChecked,
+            HasCompleteMetricsBaseline: _hasCompleteMetricsBaseline,
+            RootFolders: _viewModel.RootFolders
+                .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
+                .ToArray(),
+            Extensions: _viewModel.Extensions
+                .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
+                .ToArray(),
+            IgnoreOptions: _viewModel.IgnoreOptions
+                .Select(option => new IgnoreOptionSnapshot(option.Id, option.Label, option.IsChecked))
+                .ToArray());
+    }
+
+    private bool TryApplyActiveProjectLoadCancellationFallback()
+    {
+        var snapshot = _activeProjectLoadCancellationSnapshot;
+        if (snapshot is null)
+            return false;
+
+        _activeProjectLoadCancellationSnapshot = null;
+        ApplyProjectLoadCancellationFallback(snapshot);
+        return true;
+    }
+
+    private void ApplyProjectLoadCancellationFallback(ProjectLoadCancellationSnapshot snapshot)
+    {
+        var fallback = ProjectLoadCancellationFallbackResolver.Resolve(snapshot.HadLoadedProjectBefore);
+        if (fallback == ProjectLoadCancellationFallback.ResetToInitialState)
         {
-            _statusLineCount = 0;
-            _statusCharCount = 0;
-            _statusTokenEstimate = 0;
-            ApplyStatusMetricTexts();
+            ResetToInitialProjectStateAfterCancellation();
             return;
         }
 
-        var lineCount = 1;
-        for (var i = 0; i < content.Length; i++)
+        RestorePreviousProjectStateAfterCancellation(snapshot);
+    }
+
+    private void RestorePreviousProjectStateAfterCancellation(ProjectLoadCancellationSnapshot snapshot)
+    {
+        _currentPath = snapshot.Path;
+        _currentProjectDisplayName = snapshot.ProjectDisplayName;
+        _currentRepositoryUrl = snapshot.RepositoryUrl;
+        _currentTree = snapshot.Tree;
+
+        _viewModel.IsProjectLoaded = true;
+        _viewModel.SettingsVisible = snapshot.SettingsVisible;
+        _viewModel.SearchVisible = snapshot.SearchVisible;
+        _viewModel.FilterVisible = snapshot.FilterVisible;
+        _viewModel.IsPreviewMode = snapshot.IsPreviewMode;
+        _viewModel.StatusMetricsVisible = snapshot.StatusMetricsVisible;
+        _viewModel.StatusTreeStatsText = snapshot.StatusTreeStatsText;
+        _viewModel.StatusContentStatsText = snapshot.StatusContentStatsText;
+
+        _viewModel.ProjectSourceType = snapshot.ProjectSourceType;
+        _viewModel.CurrentBranch = snapshot.CurrentBranch;
+        _viewModel.GitBranches.Clear();
+        foreach (var branch in snapshot.GitBranches)
+            _viewModel.GitBranches.Add(branch);
+
+        _viewModel.RootFolders.Clear();
+        foreach (var option in snapshot.RootFolders)
+            _viewModel.RootFolders.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+
+        _viewModel.Extensions.Clear();
+        foreach (var option in snapshot.Extensions)
+            _viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+
+        _viewModel.IgnoreOptions.Clear();
+        foreach (var option in snapshot.IgnoreOptions)
+            _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, option.IsChecked));
+
+        _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
+        _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
+        _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
+        _hasCompleteMetricsBaseline = snapshot.HasCompleteMetricsBaseline;
+
+        if (_viewModel.TreeNodes.Count == 0 && snapshot.Tree is not null && !string.IsNullOrWhiteSpace(snapshot.Path))
         {
-            if (content[i] == '\n')
-                lineCount++;
+            var displayName = !string.IsNullOrEmpty(snapshot.ProjectDisplayName)
+                ? snapshot.ProjectDisplayName
+                : GetDirectoryNameSafe(snapshot.Path);
+
+            var rootNode = BuildTreeViewModel(snapshot.Tree.Root, null);
+            rootNode.DisplayName = displayName;
+            rootNode.IsExpanded = true;
+            _viewModel.TreeNodes.Add(rootNode);
         }
 
-        _statusLineCount = lineCount;
-        _statusCharCount = content.Length;
-        _statusTokenEstimate = (int)Math.Ceiling(_statusCharCount / 4.0);
-        ApplyStatusMetricTexts();
+        UpdateBranchMenu();
+        UpdateTitle();
     }
 
-    private void ApplyStatusMetricTexts()
+    private static CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)
     {
-        _viewModel.StatusLineCountText = _localization.Format("Status.Metric.Lines", _statusLineCount);
-        _viewModel.StatusCharCountText = _localization.Format("Status.Metric.Chars", _statusCharCount);
-        _viewModel.StatusTokenEstimateText = _localization.Format("Status.Metric.Tokens", _statusTokenEstimate);
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref target, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts;
     }
+
+    private static void DisposeIfCurrent(ref CancellationTokenSource? target, CancellationTokenSource candidate)
+    {
+        var observed = Interlocked.CompareExchange(ref target, null, candidate);
+        if (ReferenceEquals(observed, candidate))
+        {
+            candidate.Dispose();
+        }
+    }
+
+    private void ResetToInitialProjectStateAfterCancellation()
+    {
+        _activeProjectLoadCancellationSnapshot = null;
+        CancelBackgroundMetricsCalculation();
+        CancelPreviewRefresh();
+        ClearPreviousProjectState();
+
+        _currentPath = null;
+        _currentTree = null;
+        _currentProjectDisplayName = null;
+        _currentRepositoryUrl = null;
+        _filterExpansionSnapshot = null;
+
+        _viewModel.IsProjectLoaded = false;
+        _viewModel.SettingsVisible = false;
+        _viewModel.SearchVisible = false;
+        _viewModel.FilterVisible = false;
+        _viewModel.IsPreviewMode = false;
+        _viewModel.StatusMetricsVisible = false;
+        _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
+        _viewModel.CurrentBranch = string.Empty;
+        _viewModel.GitBranches.Clear();
+        _viewModel.RootFolders.Clear();
+        _viewModel.Extensions.Clear();
+        _viewModel.IgnoreOptions.Clear();
+        UpdateBranchMenu();
+
+        UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+        UpdateTitle();
+    }
+
 
     private static bool TryParseTrailingPercent(string status, out double percent)
     {
@@ -2256,6 +3674,10 @@ public partial class MainWindow : Window
                     // If we get any response (even error status codes), it means we have connectivity
                     return true;
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch
                 {
                     // Try next host
@@ -2266,11 +3688,483 @@ public partial class MainWindow : Window
             // All hosts failed
             return false;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             // If exception occurs, assume no internet
             return false;
         }
     }
+
+    #region Real-time Status Metrics
+
+    /// <summary>
+    /// Cached file metrics for efficient real-time updates.
+    /// </summary>
+    private sealed record FileMetricsData(
+        long Size,
+        int LineCount,
+        int CharCount,
+        bool IsEmpty,
+        bool IsWhitespaceOnly,
+        int TrailingNewlineChars,
+        int TrailingNewlineLineBreaks);
+
+    /// <summary>
+    /// Subscribe to checkbox change events for real-time metrics updates.
+    /// </summary>
+    private void SubscribeToMetricsUpdates()
+    {
+        TreeNodeViewModel.GlobalCheckedChanged += OnTreeNodeCheckedChanged;
+    }
+
+    /// <summary>
+    /// Unsubscribe from checkbox change events.
+    /// </summary>
+    private void UnsubscribeFromMetricsUpdates()
+    {
+        TreeNodeViewModel.GlobalCheckedChanged -= OnTreeNodeCheckedChanged;
+    }
+
+    /// <summary>
+    /// Handle checkbox change with debouncing to avoid excessive recalculations.
+    /// </summary>
+    private void OnTreeNodeCheckedChanged(object? sender, EventArgs e)
+    {
+        // Debounce rapid checkbox changes (e.g., when selecting parent node)
+        _metricsDebounceTimer?.Stop();
+        _metricsDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(50)
+        };
+        _metricsDebounceTimer.Tick += (_, _) =>
+        {
+            _metricsDebounceTimer.Stop();
+            RecalculateMetricsAsync();
+        };
+        _metricsDebounceTimer.Start();
+
+        SchedulePreviewRefresh();
+    }
+
+    /// <summary>
+    /// Initialize file metrics cache after tree is built.
+    /// Scans all files in parallel using IFileContentAnalyzer as single source of truth.
+    /// Binary files are skipped via extension check (fast) or null-byte detection.
+    /// </summary>
+    private async Task InitializeFileMetricsCacheAsync(CancellationToken cancellationToken)
+    {
+        // Cancel any previous calculation
+        _metricsCalculationCts?.Cancel();
+        _metricsCalculationCts = new CancellationTokenSource();
+        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _metricsCalculationCts.Token);
+
+        _metricsCancellationRequestedByUser = false;
+        _hasCompleteMetricsBaseline = false;
+        _isBackgroundMetricsActive = true;
+        var statusOperationId = BeginStatusOperation(
+            _viewModel.StatusOperationCalculatingData,
+            indeterminate: false,
+            operationType: StatusOperationType.MetricsCalculation,
+            cancelAction: CancelBackgroundMetricsCalculation);
+        try
+        {
+            if (IsStatusOperationActive(statusOperationId))
+                _viewModel.StatusProgressValue = 0;
+
+            // Collect all file paths from tree
+            var filePaths = new List<string>();
+            foreach (var node in _viewModel.TreeNodes.SelectMany(n => n.Flatten()))
+            {
+                if (!node.Descriptor.IsDirectory && !node.Descriptor.IsAccessDenied)
+                    filePaths.Add(node.FullPath);
+            }
+
+            // Clear cache before scanning
+            lock (_metricsLock)
+            {
+                _fileMetricsCache.Clear();
+            }
+
+            var totalFiles = filePaths.Count;
+            if (totalFiles == 0)
+            {
+                _isBackgroundMetricsActive = false;
+                _hasCompleteMetricsBaseline = true;
+                RecalculateMetricsAsync();
+                _viewModel.StatusMetricsVisible = true;
+                CompleteStatusOperation(statusOperationId);
+                return;
+            }
+
+            // Skip warmup scan for obvious binary-only datasets (e.g. screenshot folders).
+            if (filePaths.TrueForAll(IsDefinitelyBinaryByExtensionForMetricsWarmup))
+            {
+                _isBackgroundMetricsActive = false;
+                _hasCompleteMetricsBaseline = true;
+                if (IsStatusOperationActive(statusOperationId))
+                    _viewModel.StatusProgressValue = 100;
+                RecalculateMetricsAsync();
+                _viewModel.StatusMetricsVisible = true;
+                CompleteStatusOperation(statusOperationId);
+                return;
+            }
+
+            var processedCount = 0;
+            var lastProgressPercent = 0;
+
+            // Process files in parallel for better performance on modern multi-core CPUs with NVMe SSDs.
+            // Using full processor count as modern storage can handle high parallelism.
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Max(4, Environment.ProcessorCount),
+                CancellationToken = linkedCts.Token
+            };
+
+            await Parallel.ForEachAsync(filePaths, parallelOptions, async (filePath, ct) =>
+            {
+                try
+                {
+                    // GetTextFileMetricsAsync uses streaming - no full content in memory:
+                    // 1. Known binary extensions - instant skip (no I/O)
+                    // 2. Null-byte detection in first 512 bytes (fast binary check)
+                    // 3. Streams through file counting lines/chars without storing content
+                    // 4. Large files (>10MB) get estimated metrics
+                    var metrics = await _fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
+                        .ConfigureAwait(false);
+
+                    // Skip binary files - they won't be exported
+                    if (metrics is not null)
+                    {
+                        lock (_metricsLock)
+                        {
+                            _fileMetricsCache[filePath] = new FileMetricsData(
+                                metrics.SizeBytes,
+                                metrics.LineCount,
+                                metrics.CharCount,
+                                metrics.IsEmpty,
+                                metrics.IsWhitespaceOnly,
+                                metrics.TrailingNewlineChars,
+                                metrics.TrailingNewlineLineBreaks);
+                        }
+                    }
+
+                    // Update progress periodically (every 5%) to reduce UI dispatch pressure.
+                    var current = Interlocked.Increment(ref processedCount);
+                    var progressPercent = (int)(current * 100.0 / totalFiles);
+                    var observed = Volatile.Read(ref lastProgressPercent);
+                    if (progressPercent >= observed + 5 &&
+                        Interlocked.CompareExchange(ref lastProgressPercent, progressPercent, observed) == observed)
+                    {
+                        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            if (_isBackgroundMetricsActive && IsStatusOperationActive(statusOperationId))
+                                _viewModel.StatusProgressValue = progressPercent;
+                        });
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Skip files that can't be read
+                    Interlocked.Increment(ref processedCount);
+                }
+            });
+
+            // Calculation completed successfully
+            _isBackgroundMetricsActive = false;
+            _hasCompleteMetricsBaseline = true;
+            if (IsStatusOperationActive(statusOperationId))
+                _viewModel.StatusProgressValue = 100;
+            RecalculateMetricsAsync();
+            _viewModel.StatusMetricsVisible = true;
+            CompleteStatusOperation(statusOperationId);
+        }
+        catch (OperationCanceledException)
+        {
+            // Show explicit fallback for user-initiated cancellation.
+            _isBackgroundMetricsActive = false;
+            _hasCompleteMetricsBaseline = false;
+            if (_metricsCancellationRequestedByUser)
+            {
+                _metricsCancellationRequestedByUser = false;
+                UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+                _viewModel.StatusMetricsVisible = true;
+            }
+            else if (_fileMetricsCache.Count > 0)
+            {
+                RecalculateMetricsAsync();
+                _viewModel.StatusMetricsVisible = true;
+            }
+            CompleteStatusOperation(statusOperationId);
+        }
+    }
+
+    /// <summary>
+    /// Recalculate both tree and content metrics based on current selection.
+    /// Calculations run in parallel on background threads for better performance.
+    /// Cancels any previous calculation to avoid stale updates and wasted CPU.
+    /// </summary>
+    private void RecalculateMetricsAsync()
+    {
+        if (!_viewModel.IsProjectLoaded || _viewModel.TreeNodes.Count == 0)
+        {
+            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+            return;
+        }
+
+        // Cancel previous calculation to avoid wasted CPU and stale updates
+        _recalculateMetricsCts?.Cancel();
+        _recalculateMetricsCts = new CancellationTokenSource();
+        var token = _recalculateMetricsCts.Token;
+
+        var recalcVersion = Interlocked.Increment(ref _metricsRecalcVersion);
+        var treeRoot = _viewModel.TreeNodes.FirstOrDefault();
+        if (treeRoot == null)
+            return;
+
+        // Capture state for background calculation
+        var hasAnyChecked = HasAnyCheckedNodes(treeRoot);
+        var hasCompleteMetricsBaseline = _hasCompleteMetricsBaseline;
+        if (!ShouldProceedWithMetricsCalculation(hasAnyChecked, hasCompleteMetricsBaseline))
+        {
+            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+            return;
+        }
+
+        var selectedPaths = hasAnyChecked
+            ? GetCheckedPaths()
+            : new HashSet<string>(PathComparer.Default);
+        var treeFormat = GetCurrentTreeTextFormat();
+        var currentTree = _currentTree;
+        var currentPath = _currentPath;
+
+        // Run calculations in parallel on background threads
+        Task.Run(() =>
+        {
+            // Early exit if cancelled before starting
+            if (token.IsCancellationRequested)
+                return;
+
+            if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
+            {
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
+                return;
+            }
+
+            // Check cancellation before starting heavy calculations
+            if (token.IsCancellationRequested)
+                return;
+
+            // Calculate tree and content metrics in parallel
+            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
+            var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
+
+            try
+            {
+                Task.WaitAll([treeMetricsTask, contentMetricsTask], token);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // Calculation was cancelled, exit gracefully
+            }
+
+            // Check cancellation after calculations complete
+            if (token.IsCancellationRequested)
+                return;
+
+            var treeMetrics = treeMetricsTask.Result;
+            var contentMetrics = contentMetricsTask.Result;
+
+            // Update UI on dispatcher thread
+            global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                // Double-check: version must match AND not cancelled
+                if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
+                    return;
+
+                UpdateStatusBarMetrics(
+                    treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
+                    contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
+            });
+        }, token);
+    }
+
+    /// <summary>
+    /// Check if any node in the tree is explicitly checked.
+    /// </summary>
+    private static bool HasAnyCheckedNodes(TreeNodeViewModel root)
+    {
+        if (root.IsChecked == true)
+            return true;
+
+        foreach (var child in root.Children)
+        {
+            if (HasAnyCheckedNodes(child))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Full metrics require a completed baseline calculation.
+    /// Selected metrics can be calculated independently.
+    /// </summary>
+    private static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
+        hasAnyCheckedNodes || hasCompleteMetricsBaseline;
+
+    /// <summary>
+    /// Calculates tree metrics from actual tree export output in the currently selected format.
+    /// This keeps status metrics aligned with copy/export output.
+    /// </summary>
+    private ExportOutputMetrics CalculateTreeMetrics(
+        bool hasSelection,
+        IReadOnlySet<string> selectedPaths,
+        TreeTextFormat format)
+    {
+        if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
+            return ExportOutputMetrics.Empty;
+
+        var treeText = BuildTreeTextForSelection(selectedPaths, format);
+
+        return ExportOutputMetricsCalculator.FromText(treeText);
+    }
+
+    /// <summary>
+    /// Calculates content metrics using the same text shaping rules as content export.
+    /// File I/O is avoided by using cached metrics prepared in background.
+    /// </summary>
+    private ExportOutputMetrics CalculateContentMetrics(bool hasSelection, IReadOnlySet<string> selectedPaths)
+    {
+        if (_currentTree is null)
+            return ExportOutputMetrics.Empty;
+
+        IEnumerable<string> filePaths = hasSelection
+            ? selectedPaths.Where(File.Exists)
+            : EnumerateFilePaths(_currentTree.Root);
+
+        var metricsInputs = new List<ContentFileMetrics>();
+        lock (_metricsLock)
+        {
+            foreach (var path in filePaths
+                         .Distinct(PathComparer.Default)
+                         .OrderBy(path => path, PathComparer.Default))
+            {
+                if (!_fileMetricsCache.TryGetValue(path, out var metrics))
+                    continue;
+
+                metricsInputs.Add(new ContentFileMetrics(
+                    Path: path,
+                    SizeBytes: metrics.Size,
+                    LineCount: metrics.LineCount,
+                    CharCount: metrics.CharCount,
+                    IsEmpty: metrics.IsEmpty,
+                    IsWhitespaceOnly: metrics.IsWhitespaceOnly,
+                    TrailingNewlineChars: metrics.TrailingNewlineChars,
+                    TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+            }
+        }
+
+        return ExportOutputMetricsCalculator.FromContentFiles(metricsInputs);
+    }
+
+    /// <summary>
+    /// Update status bar with calculated metrics.
+    /// </summary>
+    private void UpdateStatusBarMetrics(
+        int treeLines, int treeChars, int treeTokens,
+        int contentLines, int contentChars, int contentTokens)
+    {
+        // Format: [Lines: X | Chars: X | ~Tokens: X]
+        var linesLabel = _localization.Format("Status.Metric.Lines", "{0}");
+        var charsLabel = _localization.Format("Status.Metric.Chars", "{0}");
+        var tokensLabel = _localization.Format("Status.Metric.Tokens", "{0}");
+
+        // Extract format pattern (e.g., "Lines: {0}" -> "Lines:")
+        var linesPrefix = linesLabel.Replace("{0}", "").Trim();
+        var charsPrefix = charsLabel.Replace("{0}", "").Trim();
+        var tokensPrefix = tokensLabel.Replace("{0}", "").Trim();
+
+        _viewModel.StatusTreeStatsText = $"[{linesPrefix} {FormatNumber(treeLines)} | {charsPrefix} {FormatNumber(treeChars)} | {tokensPrefix} {FormatNumber(treeTokens)}]";
+        _viewModel.StatusContentStatsText = $"[{linesPrefix} {FormatNumber(contentLines)} | {charsPrefix} {FormatNumber(contentChars)} | {tokensPrefix} {FormatNumber(contentTokens)}]";
+    }
+
+    /// <summary>
+    /// Format large numbers with K/M suffixes for readability.
+    /// </summary>
+    private static string FormatNumber(int value)
+    {
+        return value switch
+        {
+            >= 1_000_000 => $"{value / 1_000_000.0:F1}M",
+            >= 10_000 => $"{value / 1_000.0:F1}K",
+            _ => value.ToString("N0")
+        };
+    }
+
+    private static bool IsDefinitelyBinaryByExtensionForMetricsWarmup(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return !string.IsNullOrWhiteSpace(extension) && MetricsWarmupBinaryExtensions.Contains(extension);
+    }
+
+    private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)
+    {
+        var activeOperationId = Interlocked.Read(ref _activeStatusOperationId);
+        var activeOperationType = _activeStatusOperationType;
+        var cancelAction = _activeStatusCancelAction;
+
+        // Primary cancellation path for the currently visible status operation.
+        try
+        {
+            cancelAction?.Invoke();
+        }
+        catch
+        {
+            // Ignore cancellation callback errors and continue with fallback logic.
+        }
+
+        // Secondary cancellation path for legacy/background operations.
+        _projectOperationCts?.Cancel();
+        _refreshCts?.Cancel();
+        _gitCloneCts?.Cancel();
+        _gitOperationCts?.Cancel();
+
+        if (activeOperationType == StatusOperationType.MetricsCalculation)
+        {
+            _metricsCancellationRequestedByUser = true;
+            _hasCompleteMetricsBaseline = false;
+            CancelBackgroundMetricsCalculation();
+            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+            _viewModel.StatusMetricsVisible = _viewModel.IsProjectLoaded;
+            _toastService.Show(_localization["Toast.Operation.MetricsCanceled"]);
+        }
+
+        if (activeOperationType == StatusOperationType.LoadProject)
+        {
+            if (TryApplyActiveProjectLoadCancellationFallback())
+                _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
+        }
+
+        // Cancel preview build if in progress
+        if (_viewModel.IsPreviewLoading || activeOperationType == StatusOperationType.PreviewBuild)
+        {
+            _previewBuildCts?.Cancel();
+            _viewModel.IsPreviewLoading = false;
+            _toastService.Show(_viewModel.ToastPreviewCanceled);
+        }
+
+        CompleteStatusOperation(activeOperationId);
+    }
+
+    #endregion
 
 }

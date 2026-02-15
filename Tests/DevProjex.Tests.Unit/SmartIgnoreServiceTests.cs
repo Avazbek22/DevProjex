@@ -66,4 +66,30 @@ public sealed class SmartIgnoreServiceTests
 		Assert.Single(result.FolderNames);
 		Assert.Single(result.FileNames);
 	}
+
+	[Fact]
+	public void Build_IgnoresFaultyRule_AndContinuesWithHealthyRules()
+	{
+		var rules = new ISmartIgnoreRule[]
+		{
+			new ThrowingSmartIgnoreRule(),
+			new StubSmartIgnoreRule(new SmartIgnoreResult(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "bin" },
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Thumbs.db" }))
+		};
+
+		var service = new SmartIgnoreService(rules);
+		var result = service.Build("/root");
+
+		Assert.Contains("bin", result.FolderNames);
+		Assert.Contains("Thumbs.db", result.FileNames);
+	}
+
+	private sealed class ThrowingSmartIgnoreRule : ISmartIgnoreRule
+	{
+		public SmartIgnoreResult Evaluate(string rootPath)
+		{
+			throw new UnauthorizedAccessException("Access denied.");
+		}
+	}
 }

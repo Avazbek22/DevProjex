@@ -46,6 +46,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
             var result = await RunGitCommandAsync(null, "--version", cancellationToken);
             return result.ExitCode == 0 && result.Output.Contains("git version");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             // Git not installed or not in PATH
@@ -332,6 +336,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
             });
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             // Return empty list on error - UI will show no branches available
@@ -386,7 +394,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
             // Step 1: Tell git to track this branch from remote
             // CRITICAL for shallow clones: shallow clone only tracks the default branch
             // Without this, fetch won't know about the branch we want
-            await RunGitCommandAsync(
+            var setBranchesResult = await RunGitCommandAsync(
                 repositoryPath,
                 $"remote set-branches --add origin \"{branchName}\"",
                 cancellationToken);
@@ -401,10 +409,18 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 $"fetch origin \"{branchName}\" --depth 1",
                 cancellationToken);
 
-            if (fetchResult.ExitCode != 0)
+            if (fetchResult.ExitCode != 0 || setBranchesResult.ExitCode != 0)
             {
-                // Fetch failed - branch might not exist on remote or network error
-                return false;
+                // Fallback: refresh all remote heads in shallow mode.
+                // This improves compatibility for repositories where direct branch fetch
+                // may fail due remote config/state mismatch.
+                var fallbackFetchResult = await RunGitCommandAsync(
+                    repositoryPath,
+                    "fetch origin \"+refs/heads/*:refs/remotes/origin/*\" --depth 1",
+                    cancellationToken);
+
+                if (fallbackFetchResult.ExitCode != 0)
+                    return false;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -419,7 +435,16 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 $"checkout -B \"{branchName}\" \"origin/{branchName}\"",
                 cancellationToken);
 
-            return createBranchResult.ExitCode == 0;
+            if (createBranchResult.ExitCode == 0)
+                return true;
+
+            // Last fallback: if branch already exists locally now, try direct checkout again.
+            var finalCheckoutResult = await RunGitCommandAsync(
+                repositoryPath,
+                $"checkout \"{branchName}\"",
+                cancellationToken);
+
+            return finalCheckoutResult.ExitCode == 0;
         }
         catch (OperationCanceledException)
         {

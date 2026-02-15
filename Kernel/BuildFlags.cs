@@ -3,7 +3,8 @@ namespace DevProjex.Kernel;
 public static class BuildFlags
 {
 	// Build-time switch for Store builds where auto-elevation is not allowed.
-	public const bool AllowElevation =
+	// Property form avoids compile-time dead-code warnings in callers.
+	public static bool AllowElevation =>
 #if DEVPROJEX_STORE
 		false;
 #else

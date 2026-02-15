@@ -6,7 +6,7 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class TreeBuilder : ITreeBuilder
 {
-	public TreeBuildResult Build(string rootPath, TreeFilterOptions options)
+	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
 		var state = new BuildState();
 
@@ -23,7 +23,8 @@ public sealed class TreeBuilder : ITreeBuilder
 			path: rootPath,
 			options: options,
 			isRoot: true,
-			state: state);
+			state: state,
+			cancellationToken: cancellationToken);
 
 		return new TreeBuildResult(root, state.RootAccessDenied, state.HadAccessDenied);
 	}
@@ -33,8 +34,11 @@ public sealed class TreeBuilder : ITreeBuilder
 		string path,
 		TreeFilterOptions options,
 		bool isRoot,
-		BuildState state)
+		BuildState state,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		FileSystemInfo[] entries;
 		try
 		{
@@ -61,6 +65,8 @@ public sealed class TreeBuilder : ITreeBuilder
 
 		foreach (var entry in entries)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+
 			var name = entry.Name;
 			bool isDir = IsDirectory(entry);
 
@@ -81,19 +87,36 @@ public sealed class TreeBuilder : ITreeBuilder
 					isAccessDenied: false,
 					children: new List<FileSystemNode>());
 
-				BuildChildren(dirNode, entry.FullName, options, isRoot: false, state);
+				BuildChildren(dirNode, entry.FullName, options, isRoot: false, state, cancellationToken);
 
-				// If name filter is active, only include directories that have matching children or match themselves
+				// Keep full directory context when extension/ignore filters remove all files.
+				// Name filter remains strict to preserve intentional narrowing behavior.
 				if (hasNameFilter)
 				{
 					bool hasMatchingChildren = dirNode.Children.Count > 0;
 					bool matchesName = name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase);
-
 					if (hasMatchingChildren || matchesName)
 						children.Add(dirNode);
 				}
 				else
 				{
+					// Keep empty directories hidden when gitignore effectively ignores their content
+					// (e.g. patterns like **/bin/* that may not ignore the directory entry itself).
+					if (dirNode.Children.Count == 0 &&
+					    !dirNode.IsAccessDenied &&
+					    IsEffectivelyGitIgnoredDirectory(entry, ignore))
+					{
+						continue;
+					}
+
+					// Keep ignored directories out of UI when traversal found no visible descendants.
+					if (IsTraversableGitIgnoredDirectory(entry, ignore) &&
+					    dirNode.Children.Count == 0 &&
+					    !dirNode.IsAccessDenied)
+					{
+						continue;
+					}
+
 					children.Add(dirNode);
 				}
 			}
@@ -102,12 +125,19 @@ public sealed class TreeBuilder : ITreeBuilder
 				if (ShouldSkipFile(entry, ignore))
 					continue;
 
-				if (options.AllowedExtensions.Count == 0)
-					continue;
+				if (IsExtensionlessFileName(name))
+				{
+					// Extensionless files are intentionally controlled only by ignore options.
+				}
+				else
+				{
+					if (options.AllowedExtensions.Count == 0)
+						continue;
 
-				var ext = Path.GetExtension(name);
-				if (!options.AllowedExtensions.Contains(ext))
-					continue;
+					var ext = Path.GetExtension(name);
+					if (!options.AllowedExtensions.Contains(ext))
+						continue;
+				}
 
 				// Apply name filter for files
 				if (hasNameFilter && !name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase))
@@ -143,13 +173,15 @@ public sealed class TreeBuilder : ITreeBuilder
 
 	private static bool ShouldSkipDirectory(FileSystemInfo entry, IgnoreRules rules)
 	{
-		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name))
+		var matcher = rules.ResolveGitIgnoreMatcher(entry.FullName);
+		if (!ReferenceEquals(matcher, GitIgnoreMatcher.Empty) &&
+		    matcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name))
 		{
-			if (!rules.GitIgnoreMatcher.ShouldTraverseIgnoredDirectory(entry.FullName, entry.Name))
+			if (!matcher.ShouldTraverseIgnoredDirectory(entry.FullName, entry.Name))
 				return true;
 		}
 
-		if (rules.SmartIgnoredFolders.Contains(entry.Name))
+		if (rules.ShouldApplySmartIgnore(entry.FullName) && rules.SmartIgnoredFolders.Contains(entry.Name))
 			return true;
 
 		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
@@ -176,15 +208,42 @@ public sealed class TreeBuilder : ITreeBuilder
 		return false;
 	}
 
-	private static bool ShouldSkipFile(FileSystemInfo entry, IgnoreRules rules)
+	private static bool IsTraversableGitIgnoredDirectory(FileSystemInfo entry, IgnoreRules rules)
 	{
-		if (rules.UseGitIgnore && rules.GitIgnoreMatcher.IsIgnored(entry.FullName, isDirectory: false, entry.Name))
+		var matcher = rules.ResolveGitIgnoreMatcher(entry.FullName);
+		return !ReferenceEquals(matcher, GitIgnoreMatcher.Empty) &&
+		       matcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name) &&
+		       matcher.ShouldTraverseIgnoredDirectory(entry.FullName, entry.Name);
+	}
+
+	private static bool IsEffectivelyGitIgnoredDirectory(FileSystemInfo entry, IgnoreRules rules)
+	{
+		var matcher = rules.ResolveGitIgnoreMatcher(entry.FullName);
+		if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty))
+			return false;
+
+		if (matcher.IsIgnored(entry.FullName, isDirectory: true, entry.Name))
 			return true;
 
-		if (rules.SmartIgnoredFiles.Contains(entry.Name))
+		const string probeName = "__devprojex_ignore_probe__";
+		var probePath = Path.Combine(entry.FullName, probeName);
+		return matcher.IsIgnored(probePath, isDirectory: false, probeName);
+	}
+
+	private static bool ShouldSkipFile(FileSystemInfo entry, IgnoreRules rules)
+	{
+		var matcher = rules.ResolveGitIgnoreMatcher(entry.FullName);
+		if (!ReferenceEquals(matcher, GitIgnoreMatcher.Empty) &&
+		    matcher.IsIgnored(entry.FullName, isDirectory: false, entry.Name))
+			return true;
+
+		if (rules.ShouldApplySmartIgnore(entry.FullName) && rules.SmartIgnoredFiles.Contains(entry.Name))
 			return true;
 
 		if (rules.IgnoreDotFiles && entry.Name.StartsWith(".", StringComparison.Ordinal))
+			return true;
+
+		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(entry.Name))
 			return true;
 
 		if (rules.IgnoreHiddenFiles)
@@ -206,6 +265,15 @@ public sealed class TreeBuilder : ITreeBuilder
 		}
 
 		return false;
+	}
+
+	private static bool IsExtensionlessFileName(string fileName)
+	{
+		if (string.IsNullOrWhiteSpace(fileName))
+			return false;
+
+		var extension = Path.GetExtension(fileName);
+		return string.IsNullOrEmpty(extension) || extension == ".";
 	}
 
 	private sealed class BuildState

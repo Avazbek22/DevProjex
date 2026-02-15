@@ -13,7 +13,7 @@
         Background="Transparent"
         SystemDecorations="None"
         TransparencyLevelHint="AcrylicBlur, Blur, None"
-        Icon="avares://DevProjex.Avalonia/AppIcon/icon-256.png">
+        Icon="avares://DevProjex/AppIcon/icon-256.png">
   <Window.Styles>
     <Style Selector="Border.clone-window-card">
       <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />

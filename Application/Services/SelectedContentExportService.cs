@@ -1,8 +1,13 @@
 using System.Text;
 using DevProjex.Kernel;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Application.Services;
 
+/// <summary>
+/// Builds clipboard-friendly text export from selected file contents.
+/// Uses IFileContentAnalyzer as the single source of truth for text detection.
+/// </summary>
 public sealed class SelectedContentExportService
 {
 	private const string ClipboardBlankLine = "\u00A0"; // NBSP: looks empty but won't collapse on paste
@@ -10,7 +15,15 @@ public sealed class SelectedContentExportService
 	private const string WhitespaceMarkerPrefix = "[Whitespace, ";
 	private const string WhitespaceMarkerSuffix = " bytes]";
 
-	public string Build(IEnumerable<string> filePaths) => BuildAsync(filePaths, CancellationToken.None).GetAwaiter().GetResult();
+	private readonly IFileContentAnalyzer _contentAnalyzer;
+
+	public SelectedContentExportService(IFileContentAnalyzer contentAnalyzer)
+	{
+		_contentAnalyzer = contentAnalyzer;
+	}
+
+	public string Build(IEnumerable<string> filePaths) =>
+		BuildAsync(filePaths, CancellationToken.None).GetAwaiter().GetResult();
 
 	public async Task<string> BuildAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken)
 	{
@@ -30,8 +43,10 @@ public sealed class SelectedContentExportService
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
-			var (result, text, sizeBytes) = await TryReadFileTextForClipboardAsync(file, cancellationToken).ConfigureAwait(false);
-			if (result == ContentReadResult.None)
+			var content = await _contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
+
+			// Skip binary files (null result)
+			if (content is null)
 				continue;
 
 			if (anyWritten)
@@ -45,81 +60,24 @@ public sealed class SelectedContentExportService
 			sb.AppendLine($"{file}:");
 			AppendClipboardBlankLine(sb);
 
-			switch (result)
+			if (content.IsEmpty)
 			{
-				case ContentReadResult.Empty:
-					sb.AppendLine(NoContentMarker);
-					break;
-				case ContentReadResult.Whitespace:
-					sb.AppendLine($"{WhitespaceMarkerPrefix}{sizeBytes}{WhitespaceMarkerSuffix}");
-					break;
-				default:
-					sb.AppendLine(text);
-					break;
+				sb.AppendLine(NoContentMarker);
+			}
+			else if (content.IsWhitespaceOnly)
+			{
+				sb.AppendLine($"{WhitespaceMarkerPrefix}{content.SizeBytes}{WhitespaceMarkerSuffix}");
+			}
+			else
+			{
+				// Trim trailing newlines for clipboard-friendly output
+				var text = content.Content.TrimEnd('\r', '\n');
+				sb.AppendLine(text);
 			}
 		}
 
 		return anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
 	}
 
-	private static async Task<(ContentReadResult Result, string Text, long SizeBytes)> TryReadFileTextForClipboardAsync(string path, CancellationToken cancellationToken)
-	{
-		try
-		{
-			if (!File.Exists(path))
-				return (ContentReadResult.None, string.Empty, 0);
-
-			var fi = new FileInfo(path);
-			var sizeBytes = fi.Length;
-			if (sizeBytes == 0)
-				return (ContentReadResult.Empty, string.Empty, 0);
-
-			// Check for binary content (first 8KB)
-			await using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 4096, useAsync: true))
-			{
-				int toRead = (int)Math.Min(8192, fs.Length);
-				var buffer = new byte[toRead];
-				int read = await fs.ReadAsync(buffer.AsMemory(0, toRead), cancellationToken).ConfigureAwait(false);
-
-				for (int i = 0; i < read; i++)
-				{
-					if (buffer[i] == 0)
-						return (ContentReadResult.None, string.Empty, sizeBytes);
-				}
-			}
-
-			string raw;
-			using (var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
-				raw = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-
-			if (string.IsNullOrWhiteSpace(raw))
-				return (ContentReadResult.Whitespace, string.Empty, sizeBytes);
-
-			if (raw.IndexOf('\0') >= 0)
-				return (ContentReadResult.None, string.Empty, sizeBytes);
-
-			var text = raw.TrimEnd('\r', '\n');
-			return string.IsNullOrWhiteSpace(text)
-				? (ContentReadResult.Whitespace, string.Empty, sizeBytes)
-				: (ContentReadResult.Text, text, sizeBytes);
-		}
-		catch (OperationCanceledException)
-		{
-			throw;
-		}
-		catch
-		{
-			return (ContentReadResult.None, string.Empty, 0);
-		}
-	}
-
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
-
-	private enum ContentReadResult
-	{
-		None,
-		Text,
-		Empty,
-		Whitespace
-	}
 }
