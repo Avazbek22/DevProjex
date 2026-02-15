@@ -1,34 +1,51 @@
-Field,en-us
-ProductTitle,DevProjex
-ShortDescription,Visual project context builder for humans and AI. Copy tree, code, or both — instantly.
-Description,"Need to share project structure with a colleague? Preparing context for ChatGPT or Copilot? Explaining architecture in a code review?
+Field,en-us,ru-ru
+ProductTitle,DevProjex,DevProjex
+ShortDescription,Build project context fast: preview copy and export tree/content in ASCII or JSON. Read-only and safe.,Быстро собирайте контекст проекта: превью копирование и экспорт дерева/содержимого в ASCII или JSON. Только чтение и безопасность.
+Description,"Need to share project context quickly?
 
-DevProjex builds a clean, visual tree of any folder or repository. Select what matters with checkboxes, and copy it to clipboard — as an ASCII tree, file contents, or both combined.
+DevProjex builds a clean visual tree for any folder or repository and helps you prepare exactly the output you need.
 
 What you get:
-
-- Three copy modes — tree only, content only, or tree + content. Selection-aware or full export.
-- Smart filtering — Built-in ignore rules for node_modules, build outputs, IDE configs. Customize as needed.
-- Git support — Clone repos by URL, switch branches, fetch updates — all in a safe local cache.
-- Search & filter — Find files fast in large codebases.
-- 8 languages — English, Russian, Spanish, and more.
+- Preview mode before copy/export
+- Copy or export: Tree, Content, Tree + Content
+- ASCII/JSON tree format toggle
+- Smart Ignore + .gitignore scopes for mixed workspaces
+- Git support: clone, switch branches, get updates in local cache
+- Search and filter for large codebases
+- Live status bar metrics (lines, chars, ~tokens)
+- Progress bar with operation cancel support
+- 8 in-app languages
 
 Built for trust:
+- Read-only by design (never modifies your files)
+- No telemetry, no cloud, no account required
+- Source-available on GitHub
 
-- Read-only by design — DevProjex never modifies your files, never commits, never pushes.
-- No telemetry, no cloud, no account required.
+Works with any project type and any stack.","Нужно быстро подготовить контекст проекта?
 
-Source-available on GitHub:
-https://github.com/Avazbek22/DevProjex
+DevProjex строит наглядное дерево любой папки или репозитория и помогает получить именно тот результат, который нужен.
 
-Inspect every line of code. Report issues. Contribute if you'd like.
+Что доступно:
+- Режим превью перед копированием/экспортом
+- Копирование и экспорт: Дерево, Содержимое, Дерево + Содержимое
+- Переключатель формата дерева ASCII/JSON
+- Smart Ignore + .gitignore с корректными областями для смешанных рабочих папок
+- Git-поддержка: клонирование, переключение веток, получение обновлений в локальный кэш
+- Поиск и фильтрация для больших проектов
+- Живые метрики в статус-баре (строки, символы, ~токены)
+- Прогресс-бар с поддержкой отмены операций
+- 8 языков интерфейса
 
-Works on any project — not tied to a specific language or IDE.
-Made with .NET 10 and Avalonia UI."
-SearchTerms,git;repository;project;folder;tree;code;developer;context;AI;clipboard;source-available
-CopyrightAndTrademarkInfo,
-AdditionalLicenseTerms,
-DevelopedBy,
-PrivacyPolicyUrl,
-WebsiteUrl,https://github.com/Avazbek22/DevProjex
-SupportContactInfo,
+Создано для доверия:
+- Только чтение (файлы не изменяются)
+- Без телеметрии, без облака, без аккаунтов
+- Исходный код доступен на GitHub
+
+Работает с любыми типами проектов и стэков."
+SearchTerms,project context;folder tree;ascii json;preview mode;clipboard export;git viewer;developer tools,контекст проекта;дерево папок;ascii json;режим превью;экспорт в буфер;git просмотр;инструменты разработчика
+CopyrightAndTrademarkInfo,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov
+AdditionalLicenseTerms,,
+DevelopedBy,Avazbek Olimov,Avazbek Olimov
+PrivacyPolicyUrl,https://github.com/Avazbek22/DevProjex/blob/main/Packaging/Windows/StoreListing/privacy-policy.md,https://github.com/Avazbek22/DevProjex/blob/main/Packaging/Windows/StoreListing/privacy-policy.md
+WebsiteUrl,https://github.com/Avazbek22/DevProjex,https://github.com/Avazbek22/DevProjex
+SupportContactInfo,avazbekolimov722@gmail.com,avazbekolimov722@gmail.com

@@ -32,8 +32,12 @@
     <AppxManifest Include="Package.appxmanifest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PRIResource Include="Strings\**\*.resw" />
+  </ItemGroup>
+
   <Import Project="$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props" Condition="Exists('$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props')" />
-  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props" Condition="Exists('$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props')" />
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props" Condition="Exists('$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props') and !Exists('$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.props')" />
   <Import Project="$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets" Condition="Exists('$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets')" />
-  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets" Condition="Exists('$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets')" />
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets" Condition="Exists('$(MSBuildExtensionsPath32)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets') and !Exists('$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets')" />
 </Project>
