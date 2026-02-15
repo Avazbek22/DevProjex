@@ -130,9 +130,12 @@ Chiusura: pulsante X oppure nuovo clic sull’icona occhio.
 Intervallo: 6–28, reset: 12.
 
 ### Modalità compatta
-Rende l’interfaccia più densa: spazi più piccoli nell’albero e nelle impostazioni.
+Rende l'interfaccia più densa: spazi più piccoli nell'albero e nelle impostazioni.
 
-## 8) Ricerca nell’albero
+### Animazione albero
+Attiva un'animazione di scorrimento fluido quando si passa il mouse sulle righe dell'albero.
+
+## 8) Ricerca nell'albero
 Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 * Ctrl+F — mostra/nascondi
 * Enter — risultato successivo

@@ -1797,6 +1797,16 @@ public partial class MainWindow : Window
             Classes.Remove("compact-mode");
     }
 
+    private void OnToggleTreeAnimation(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.IsTreeAnimationEnabled = !_viewModel.IsTreeAnimationEnabled;
+
+        if (_viewModel.IsTreeAnimationEnabled)
+            Classes.Add("tree-animation");
+        else
+            Classes.Remove("tree-animation");
+    }
+
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {
         _viewModel.ThemePopoverOpen = !_viewModel.ThemePopoverOpen;

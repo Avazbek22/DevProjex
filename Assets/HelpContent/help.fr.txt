@@ -132,7 +132,10 @@ Plage : 6–28, reset : 12.
 ### Mode compact
 Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
 
-## 8) Recherche dans l’arbre
+### Animation de l'arborescence
+Active une animation de glissement fluide au survol des lignes de l'arborescence.
+
+## 8) Recherche dans l'arbre
 Ouvre la recherche, met en évidence les correspondances et permet la navigation.
 * Ctrl+F — afficher/masquer
 * Enter — résultat suivant

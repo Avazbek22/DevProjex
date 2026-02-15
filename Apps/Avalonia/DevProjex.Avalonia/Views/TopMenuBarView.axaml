@@ -43,6 +43,13 @@
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>
+        <MenuItem Click="OnToggleTreeAnimation">
+          <MenuItem.Header>
+            <CheckBox Content="{Binding MenuViewTreeAnimation}"
+                      IsChecked="{Binding IsTreeAnimationEnabled}"
+                      IsHitTestVisible="False"/>
+          </MenuItem.Header>
+        </MenuItem>
       </MenuItem>
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchFilterAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />

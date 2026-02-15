@@ -141,6 +141,7 @@
                           ZoomOutRequested="OnZoomOut"
                           ZoomResetRequested="OnZoomReset"
                           ToggleCompactModeRequested="OnToggleCompactMode"
+                          ToggleTreeAnimationRequested="OnToggleTreeAnimation"
                           ToggleSearchRequested="OnToggleSearch"
                           ToggleSettingsRequested="OnToggleSettings"
                           TogglePreviewRequested="OnTogglePreview"

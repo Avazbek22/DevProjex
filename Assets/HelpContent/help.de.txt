@@ -132,6 +132,9 @@ Bereich: 6–28, Reset: 12.
 ### Kompaktmodus
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
 
+### Baumanimation
+Aktiviert eine sanfte Schiebe-Animation beim Überfahren von Baumzeilen.
+
 ## 8) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
 * Ctrl+F — anzeigen/ausblenden

@@ -580,6 +580,34 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
+    <!-- Tree row content: smooth slide animation on hover (icon and text only, not checkbox) -->
+    <!-- Only active when tree-animation class is set on Window -->
+    <Style Selector="Window.tree-animation TreeView Grid > StackPanel > Image">
+        <Setter Property="RenderTransform" Value="translateX(0)" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.35" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Window.tree-animation TreeView Grid > StackPanel > TextBlock">
+        <Setter Property="RenderTransform" Value="translateX(0)" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.35" Easing="CubicEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Window.tree-animation TreeView Grid:pointerover > StackPanel > Image">
+        <Setter Property="RenderTransform" Value="translateX(3px)" />
+    </Style>
+
+    <Style Selector="Window.tree-animation TreeView Grid:pointerover > StackPanel > TextBlock">
+        <Setter Property="RenderTransform" Value="translateX(3px)" />
+    </Style>
+
     <Style Selector="CheckBox.list-item">
         <Setter Property="Margin" Value="0,1" />
     </Style>

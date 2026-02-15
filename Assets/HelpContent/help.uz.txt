@@ -132,7 +132,10 @@ Oraliq: 6–28, tiklash — 12.
 ### Ixcham rejim
 Interfeysni zichroq qiladi: daraxt va sozlamalarda oraliqlar kichikroq.
 
-## 8) Daraxt bo‘yicha qidiruv
+### Daraxt animatsiyasi
+Daraxt qatorlarini kursorga tutganda silliq siljish animatsiyasini yoqadi.
+
+## 8) Daraxt bo'yicha qidiruv
 Qidiruv panelini ochadi, mosliklarni yoritadi va navigatsiya qiladi.
 * Ctrl+F — ko‘rsatish/yashirish
 * Enter — keyingi

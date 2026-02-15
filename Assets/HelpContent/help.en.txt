@@ -132,6 +132,9 @@ Range: 6–28, reset is 12.
 ### Compact Mode
 Makes the UI denser: smaller spacing in the tree and settings.
 
+### Tree animation
+Enables smooth slide animation when hovering over tree rows.
+
 ## 8) Search (tree)
 Opens the search bar, highlights matches, and allows navigation.
 * Ctrl+F — show/hide
