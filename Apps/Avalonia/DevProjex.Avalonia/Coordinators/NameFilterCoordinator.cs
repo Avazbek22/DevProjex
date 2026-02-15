@@ -18,24 +18,26 @@ public sealed class NameFilterCoordinator : IDisposable
         {
             AutoReset = false
         };
-        _filterDebounceTimer.Elapsed += (_, _) =>
-        {
-            CancellationToken token;
-            lock (_ctsLock)
-            {
-                // Cancel previous operation
-                _filterCts?.Cancel();
-                _filterCts?.Dispose();
-                _filterCts = new CancellationTokenSource();
-                token = _filterCts.Token;
-            }
+        _filterDebounceTimer.Elapsed += OnFilterDebounceTimerElapsed;
+    }
 
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (!token.IsCancellationRequested)
-                    _applyFilterRealtime(token);
-            });
-        };
+    private void OnFilterDebounceTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    {
+        CancellationToken token;
+        lock (_ctsLock)
+        {
+            // Cancel previous operation
+            _filterCts?.Cancel();
+            _filterCts?.Dispose();
+            _filterCts = new CancellationTokenSource();
+            token = _filterCts.Token;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!token.IsCancellationRequested)
+                _applyFilterRealtime(token);
+        });
     }
 
     public void OnNameFilterChanged()
@@ -58,6 +60,7 @@ public sealed class NameFilterCoordinator : IDisposable
     public void Dispose()
     {
         _filterDebounceTimer.Stop();
+        _filterDebounceTimer.Elapsed -= OnFilterDebounceTimerElapsed;
         _filterDebounceTimer.Dispose();
         lock (_ctsLock)
         {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -15,9 +16,21 @@ using DevProjex.Kernel.Models;
 
 namespace DevProjex.Avalonia.Coordinators;
 
-public sealed class SelectionSyncCoordinator
+public sealed class SelectionSyncCoordinator : IDisposable
 {
     private readonly MainWindowViewModel _viewModel;
+
+    // Store collection references for proper cleanup
+    private ObservableCollection<SelectionOptionViewModel>? _hookedRootFolders;
+    private ObservableCollection<SelectionOptionViewModel>? _hookedExtensions;
+    private ObservableCollection<IgnoreOptionViewModel>? _hookedIgnoreOptions;
+
+    // Named handlers for proper unsubscription
+    private NotifyCollectionChangedEventHandler? _rootFoldersCollectionChangedHandler;
+    private NotifyCollectionChangedEventHandler? _extensionsCollectionChangedHandler;
+    private NotifyCollectionChangedEventHandler? _ignoreOptionsCollectionChangedHandler;
+
+    private bool _disposed;
     private readonly ScanOptionsUseCase _scanOptions;
     private readonly FilterOptionSelectionService _filterSelectionService;
     private readonly IgnoreOptionsService _ignoreOptionsService;
@@ -89,12 +102,36 @@ public sealed class SelectionSyncCoordinator
 
     public void HookOptionListeners(ObservableCollection<SelectionOptionViewModel> options)
     {
+        // Track which collection this is for proper cleanup
+        if (_hookedRootFolders is null)
+        {
+            _hookedRootFolders = options;
+            _rootFoldersCollectionChangedHandler = CreateSelectionCollectionChangedHandler(options);
+        }
+        else if (_hookedExtensions is null)
+        {
+            _hookedExtensions = options;
+            _extensionsCollectionChangedHandler = CreateSelectionCollectionChangedHandler(options);
+        }
+
         // Subscribe to existing items
         foreach (var item in options)
             item.CheckedChanged += OnOptionCheckedChanged;
 
+        // Get the appropriate handler
+        var handler = ReferenceEquals(options, _hookedRootFolders)
+            ? _rootFoldersCollectionChangedHandler
+            : _extensionsCollectionChangedHandler;
+
         // Handle collection changes - properly unsubscribe old and subscribe new
-        options.CollectionChanged += (_, e) =>
+        if (handler is not null)
+            options.CollectionChanged += handler;
+    }
+
+    private NotifyCollectionChangedEventHandler CreateSelectionCollectionChangedHandler(
+        ObservableCollection<SelectionOptionViewModel> options)
+    {
+        return (_, e) =>
         {
             // Unsubscribe from removed items
             if (e.OldItems is not null)
@@ -122,12 +159,14 @@ public sealed class SelectionSyncCoordinator
 
     public void HookIgnoreListeners(ObservableCollection<IgnoreOptionViewModel> options)
     {
+        _hookedIgnoreOptions = options;
+
         // Subscribe to existing items
         foreach (var item in options)
             item.CheckedChanged += OnIgnoreCheckedChanged;
 
-        // Handle collection changes - properly unsubscribe old and subscribe new
-        options.CollectionChanged += (_, e) =>
+        // Create named handler for proper cleanup
+        _ignoreOptionsCollectionChangedHandler = (_, e) =>
         {
             // Unsubscribe from removed items
             if (e.OldItems is not null)
@@ -151,6 +190,9 @@ public sealed class SelectionSyncCoordinator
                     item.CheckedChanged += OnIgnoreCheckedChanged;
             }
         };
+
+        // Handle collection changes - properly unsubscribe old and subscribe new
+        options.CollectionChanged += _ignoreOptionsCollectionChangedHandler;
     }
 
     public void HandleRootAllChanged(bool isChecked, string? currentPath)
@@ -703,5 +745,35 @@ public sealed class SelectionSyncCoordinator
         {
             // Log or handle if needed; suppressed to not crash UI
         }
+    }
+
+    /// <summary>
+    /// Disposes all event subscriptions and releases resources to prevent memory leaks.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        // Unsubscribe from collection change events
+        if (_hookedRootFolders is not null && _rootFoldersCollectionChangedHandler is not null)
+            _hookedRootFolders.CollectionChanged -= _rootFoldersCollectionChangedHandler;
+
+        if (_hookedExtensions is not null && _extensionsCollectionChangedHandler is not null)
+            _hookedExtensions.CollectionChanged -= _extensionsCollectionChangedHandler;
+
+        if (_hookedIgnoreOptions is not null && _ignoreOptionsCollectionChangedHandler is not null)
+            _hookedIgnoreOptions.CollectionChanged -= _ignoreOptionsCollectionChangedHandler;
+
+        // Unsubscribe from all individual item events
+        UnsubscribeFromOptionItems();
+
+        // Clear caches
+        _ignoreSelectionCache.Clear();
+        _extensionsSelectionCache.Clear();
+        _ignoreOptions = Array.Empty<IgnoreOptionDescriptor>();
+
+        // Dispose the semaphore
+        _refreshLock.Dispose();
     }
 }

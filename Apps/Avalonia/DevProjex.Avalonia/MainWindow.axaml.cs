@@ -418,14 +418,28 @@ public partial class MainWindow : Window
         _metricsCalculationCts?.Dispose();
         _recalculateMetricsCts?.Cancel();
         _recalculateMetricsCts?.Dispose();
-        _metricsDebounceTimer?.Stop();
+        // Properly clean up debounce timers
+        if (_metricsDebounceTimer is not null)
+        {
+            _metricsDebounceTimer.Stop();
+            _metricsDebounceTimer.Tick -= OnMetricsDebounceTimerTick;
+        }
+
         _previewBuildCts?.Cancel();
         _previewBuildCts?.Dispose();
-        _previewDebounceTimer?.Stop();
+        if (_previewDebounceTimer is not null)
+        {
+            _previewDebounceTimer.Stop();
+            _previewDebounceTimer.Tick -= OnPreviewDebounceTick;
+        }
 
         // Dispose coordinators
         _searchCoordinator.Dispose();
         _filterCoordinator.Dispose();
+        _selectionCoordinator.Dispose();
+
+        // Dispose ViewModel to clean up collection event handlers
+        _viewModel.Dispose();
 
         // Cancel and dispose refresh token
         _projectOperationCts?.Cancel();
@@ -439,12 +453,18 @@ public partial class MainWindow : Window
         _gitOperationCts?.Cancel();
         _gitOperationCts?.Dispose();
 
-        // Clear icon cache to release memory
-        _iconCache.Clear();
+        // Dispose icon cache to release bitmap resources
+        _iconCache.Dispose();
 
-        // Clear tree references
+        // Clear tree references and release memory
+        foreach (var node in _viewModel.TreeNodes)
+            node.ClearRecursive();
+        _viewModel.TreeNodes.Clear();
         _currentTree = null;
         _filterExpansionSnapshot = null;
+
+        // Clear file metrics cache
+        ClearFileMetricsCache(trimLargeCapacity: true);
 
         // Clean up repository cache on exit
         _repoCacheService.ClearAllCache();
@@ -2022,9 +2042,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        _gitCloneCts?.Cancel();
-        _gitCloneCts = new CancellationTokenSource();
-        var cancellationToken = _gitCloneCts.Token;
+        var gitCloneCts = ReplaceCancellationSource(ref _gitCloneCts);
+        var cancellationToken = gitCloneCts.Token;
 
         _viewModel.GitCloneInProgress = true;
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
@@ -2164,6 +2183,7 @@ public partial class MainWindow : Window
         finally
         {
             _viewModel.GitCloneInProgress = false;
+            DisposeIfCurrent(ref _gitCloneCts, gitCloneCts);
         }
 
         e.Handled = true;
@@ -2361,6 +2381,8 @@ public partial class MainWindow : Window
         if (branchMenuItem is null)
             return;
 
+        // Clear old items - they will be garbage collected since they have no external references
+        // and we're using a named handler method instead of lambda captures
         branchMenuItem.Items.Clear();
 
         foreach (var branch in _viewModel.GitBranches)
@@ -2371,14 +2393,17 @@ public partial class MainWindow : Window
                 Tag = branch.Name
             };
 
-            item.Click += (_, _) =>
-            {
-                if (item.Tag is string name)
-                    _topMenuBar?.OnGitBranchSwitch(name);
-            };
+            // Use named handler to avoid closure capture memory leaks
+            item.Click += OnBranchMenuItemClick;
 
             branchMenuItem.Items.Add(item);
         }
+    }
+
+    private void OnBranchMenuItemClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string name })
+            _topMenuBar?.OnGitBranchSwitch(name);
     }
 
     #endregion
@@ -3022,6 +3047,7 @@ public partial class MainWindow : Window
         foreach (var node in _viewModel.TreeNodes)
             node.ClearRecursive();
         _viewModel.ResetTreeNodes();
+        ClearFileMetricsCache(trimLargeCapacity: true);
 
         // Reconnect ItemsSource
         if (_treeView is not null)
@@ -3735,19 +3761,29 @@ public partial class MainWindow : Window
     private void OnTreeNodeCheckedChanged(object? sender, EventArgs e)
     {
         // Debounce rapid checkbox changes (e.g., when selecting parent node)
-        _metricsDebounceTimer?.Stop();
-        _metricsDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
+        // Reuse existing timer to prevent memory leaks from accumulating timer instances
+        if (_metricsDebounceTimer is null)
         {
-            Interval = TimeSpan.FromMilliseconds(50)
-        };
-        _metricsDebounceTimer.Tick += (_, _) =>
-        {
-            _metricsDebounceTimer.Stop();
-            RecalculateMetricsAsync();
-        };
+            _metricsDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(50)
+            };
+            _metricsDebounceTimer.Tick += OnMetricsDebounceTimerTick;
+        }
+
+        _metricsDebounceTimer.Stop();
         _metricsDebounceTimer.Start();
 
         SchedulePreviewRefresh();
+    }
+
+    /// <summary>
+    /// Handler for metrics debounce timer tick. Separated to avoid lambda capture leaks.
+    /// </summary>
+    private void OnMetricsDebounceTimerTick(object? sender, EventArgs e)
+    {
+        _metricsDebounceTimer?.Stop();
+        RecalculateMetricsAsync();
     }
 
     /// <summary>
@@ -3758,9 +3794,8 @@ public partial class MainWindow : Window
     private async Task InitializeFileMetricsCacheAsync(CancellationToken cancellationToken)
     {
         // Cancel any previous calculation
-        _metricsCalculationCts?.Cancel();
-        _metricsCalculationCts = new CancellationTokenSource();
-        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _metricsCalculationCts.Token);
+        var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, metricsCts.Token);
 
         _metricsCancellationRequestedByUser = false;
         _hasCompleteMetricsBaseline = false;
@@ -3784,10 +3819,7 @@ public partial class MainWindow : Window
             }
 
             // Clear cache before scanning
-            lock (_metricsLock)
-            {
-                _fileMetricsCache.Clear();
-            }
+            ClearFileMetricsCache(trimLargeCapacity: true);
 
             var totalFiles = filePaths.Count;
             if (totalFiles == 0)
@@ -3891,18 +3923,25 @@ public partial class MainWindow : Window
             // Show explicit fallback for user-initiated cancellation.
             _isBackgroundMetricsActive = false;
             _hasCompleteMetricsBaseline = false;
+            var hasCachedMetrics = false;
+            lock (_metricsLock)
+                hasCachedMetrics = _fileMetricsCache.Count > 0;
             if (_metricsCancellationRequestedByUser)
             {
                 _metricsCancellationRequestedByUser = false;
                 UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
                 _viewModel.StatusMetricsVisible = true;
             }
-            else if (_fileMetricsCache.Count > 0)
+            else if (hasCachedMetrics)
             {
                 RecalculateMetricsAsync();
                 _viewModel.StatusMetricsVisible = true;
             }
             CompleteStatusOperation(statusOperationId);
+        }
+        finally
+        {
+            DisposeIfCurrent(ref _metricsCalculationCts, metricsCts);
         }
     }
 
@@ -3920,9 +3959,8 @@ public partial class MainWindow : Window
         }
 
         // Cancel previous calculation to avoid wasted CPU and stale updates
-        _recalculateMetricsCts?.Cancel();
-        _recalculateMetricsCts = new CancellationTokenSource();
-        var token = _recalculateMetricsCts.Token;
+        var recalcCts = ReplaceCancellationSource(ref _recalculateMetricsCts);
+        var token = recalcCts.Token;
 
         var recalcVersion = Interlocked.Increment(ref _metricsRecalcVersion);
         var treeRoot = _viewModel.TreeNodes.FirstOrDefault();
@@ -3946,55 +3984,73 @@ public partial class MainWindow : Window
         var currentPath = _currentPath;
 
         // Run calculations in parallel on background threads
-        Task.Run(() =>
+        _ = Task.Run(() =>
         {
-            // Early exit if cancelled before starting
-            if (token.IsCancellationRequested)
-                return;
-
-            if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
-            {
-                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                    UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
-                return;
-            }
-
-            // Check cancellation before starting heavy calculations
-            if (token.IsCancellationRequested)
-                return;
-
-            // Calculate tree and content metrics in parallel
-            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-            var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
-
             try
             {
-                Task.WaitAll([treeMetricsTask, contentMetricsTask], token);
-            }
-            catch (OperationCanceledException)
-            {
-                return; // Calculation was cancelled, exit gracefully
-            }
-
-            // Check cancellation after calculations complete
-            if (token.IsCancellationRequested)
-                return;
-
-            var treeMetrics = treeMetricsTask.Result;
-            var contentMetrics = contentMetricsTask.Result;
-
-            // Update UI on dispatcher thread
-            global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                // Double-check: version must match AND not cancelled
-                if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
+                // Early exit if cancelled before starting
+                if (token.IsCancellationRequested)
                     return;
 
-                UpdateStatusBarMetrics(
-                    treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
-                    contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
-            });
+                if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
+                {
+                    global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
+                    return;
+                }
+
+                // Check cancellation before starting heavy calculations
+                if (token.IsCancellationRequested)
+                    return;
+
+                // Calculate tree and content metrics in parallel
+                var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
+                var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
+
+                try
+                {
+                    Task.WaitAll([treeMetricsTask, contentMetricsTask], token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return; // Calculation was cancelled, exit gracefully
+                }
+
+                // Check cancellation after calculations complete
+                if (token.IsCancellationRequested)
+                    return;
+
+                var treeMetrics = treeMetricsTask.Result;
+                var contentMetrics = contentMetricsTask.Result;
+
+                // Update UI on dispatcher thread
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    // Double-check: version must match AND not cancelled
+                    if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
+                        return;
+
+                    UpdateStatusBarMetrics(
+                        treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
+                        contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
+                });
+            }
+            finally
+            {
+                DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
+            }
         }, token);
+    }
+
+    private void ClearFileMetricsCache(bool trimLargeCapacity)
+    {
+        lock (_metricsLock)
+        {
+            var shouldTrim = trimLargeCapacity && _fileMetricsCache.Count > 4096;
+            _fileMetricsCache.Clear();
+            if (shouldTrim)
+                _fileMetricsCache.TrimExcess();
+        }
     }
 
     /// <summary>

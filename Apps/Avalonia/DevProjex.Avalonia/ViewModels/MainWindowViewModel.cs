@@ -24,13 +24,19 @@ public enum PreviewContentMode
     TreeAndContent
 }
 
-public sealed class MainWindowViewModel : ViewModelBase
+public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     public const string BaseTitle = "DevProjex v4.5";
     public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.5";
 
     private readonly LocalizationService _localization;
     private readonly HelpContentProvider _helpContentProvider;
+
+    // Event handler delegates for proper cleanup
+    private readonly NotifyCollectionChangedEventHandler _ignoreOptionsChangedHandler;
+    private readonly NotifyCollectionChangedEventHandler _extensionsChangedHandler;
+    private readonly NotifyCollectionChangedEventHandler _rootFoldersChangedHandler;
+    private bool _disposed;
 
     private string _title;
     private bool _isProjectLoaded;
@@ -101,10 +107,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         _allIgnoreChecked = true;
         UpdateLocalization();
 
+        // Create named handlers for proper cleanup
+        _ignoreOptionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
+        _extensionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
+        _rootFoldersChangedHandler = (_, _) => UpdateAllCheckboxLabels();
+
         // Subscribe to collection changes to update "All" checkbox labels with counts
-        IgnoreOptions.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
-        Extensions.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
-        RootFolders.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
+        IgnoreOptions.CollectionChanged += _ignoreOptionsChangedHandler;
+        Extensions.CollectionChanged += _extensionsChangedHandler;
+        RootFolders.CollectionChanged += _rootFoldersChangedHandler;
         ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
     }
 
@@ -1254,5 +1265,33 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(SettingsAllExtensions));
         RaisePropertyChanged(nameof(SettingsAllRootFolders));
         RaisePropertyChanged(nameof(HasRootFolderOptions));
+    }
+
+    /// <summary>
+    /// Cleans up event subscriptions and resources to prevent memory leaks.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        // Unsubscribe from collection change events
+        IgnoreOptions.CollectionChanged -= _ignoreOptionsChangedHandler;
+        Extensions.CollectionChanged -= _extensionsChangedHandler;
+        RootFolders.CollectionChanged -= _rootFoldersChangedHandler;
+        ToastItems.CollectionChanged -= OnToastItemsCollectionChanged;
+
+        // Clear collections to release references
+        TreeNodes.Clear();
+        IgnoreOptions.Clear();
+        Extensions.Clear();
+        RootFolders.Clear();
+        FontFamilies.Clear();
+        GitBranches.Clear();
+        ToastItems.Clear();
+
+        // Clear large strings
+        _previewText = string.Empty;
+        _previewLineNumbers = string.Empty;
     }
 }

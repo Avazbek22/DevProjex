@@ -39,23 +39,25 @@ public sealed class TreeSearchCoordinator : IDisposable
         {
             AutoReset = false
         };
-        _searchDebounceTimer.Elapsed += (_, _) =>
-        {
-            CancellationToken token;
-            lock (_searchCtsLock)
-            {
-                _searchCts?.Cancel();
-                _searchCts?.Dispose();
-                _searchCts = new CancellationTokenSource();
-                token = _searchCts.Token;
-            }
+        _searchDebounceTimer.Elapsed += OnSearchDebounceTimerElapsed;
+    }
 
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (!token.IsCancellationRequested)
-                    UpdateSearchMatches();
-            }, DispatcherPriority.Background);
-        };
+    private void OnSearchDebounceTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    {
+        CancellationToken token;
+        lock (_searchCtsLock)
+        {
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+            _searchCts = new CancellationTokenSource();
+            token = _searchCts.Token;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!token.IsCancellationRequested)
+                UpdateSearchMatches();
+        }, DispatcherPriority.Background);
     }
 
     public void OnSearchQueryChanged()
@@ -128,6 +130,7 @@ public sealed class TreeSearchCoordinator : IDisposable
     public void Dispose()
     {
         _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Elapsed -= OnSearchDebounceTimerElapsed;
         _searchDebounceTimer.Dispose();
         lock (_searchCtsLock)
         {
@@ -135,6 +138,17 @@ public sealed class TreeSearchCoordinator : IDisposable
             _searchCts?.Dispose();
             _searchCts = null;
         }
+
+        // Clear search state to release references
+        _searchMatches.Clear();
+        _searchMatches.TrimExcess();
+        _currentSearchMatch = null;
+
+        // Clear cached brushes
+        _cachedHighlightBackground = null;
+        _cachedHighlightForeground = null;
+        _cachedNormalForeground = null;
+        _cachedCurrentBackground = null;
     }
 
     public void Navigate(int step)
