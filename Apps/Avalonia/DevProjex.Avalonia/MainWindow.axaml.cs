@@ -179,6 +179,7 @@ public partial class MainWindow : Window
     private int _previewMemoryCleanupVersion;
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
+    private double? _previewEntryFontSize;
 
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
@@ -1466,7 +1467,21 @@ public partial class MainWindow : Window
 
     private void OnZoomOut(object? sender, RoutedEventArgs e) => AdjustTreeFontSize(-1);
 
-    private void OnZoomReset(object? sender, RoutedEventArgs e) => _viewModel.TreeFontSize = 12;
+    private void OnZoomReset(object? sender, RoutedEventArgs e)
+    {
+        const double defaultResetFontSize = 12;
+        const double minFontSize = 6;
+        const double previewResetDelta = 1;
+
+        if (_viewModel.IsPreviewMode && _previewEntryFontSize.HasValue)
+        {
+            var previewResetSize = Math.Max(minFontSize, _previewEntryFontSize.Value - previewResetDelta);
+            _viewModel.TreeFontSize = previewResetSize;
+            return;
+        }
+
+        _viewModel.TreeFontSize = defaultResetFontSize;
+    }
 
     private void AdjustTreeFontSize(double delta)
     {
@@ -1526,6 +1541,7 @@ public partial class MainWindow : Window
 
         _restoreSearchAfterPreview = _viewModel.SearchVisible;
         _restoreFilterAfterPreview = _viewModel.FilterVisible;
+        _previewEntryFontSize = _viewModel.TreeFontSize;
         ForceCloseSearchAndFilterForPreview();
 
         // Animate preview panel open and wait until transition settles.
@@ -1551,6 +1567,7 @@ public partial class MainWindow : Window
         await AnimatePreviewBarAsync(show: false);
 
         _viewModel.IsPreviewMode = false;
+        _previewEntryFontSize = null;
         RestoreSearchAndFilterAfterPreview();
         ClearPreviewMemory();
         SchedulePreviewMemoryCleanup();

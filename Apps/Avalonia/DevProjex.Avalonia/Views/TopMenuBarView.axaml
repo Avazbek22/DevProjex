@@ -35,15 +35,15 @@
         <MenuItem Header="{Binding MenuViewZoomIn}" Click="OnZoomIn" />
         <MenuItem Header="{Binding MenuViewZoomOut}" Click="OnZoomOut" />
         <MenuItem Header="{Binding MenuViewZoomReset}" Click="OnZoomReset" />
-        <Separator />
-        <MenuItem Click="OnToggleCompactMode">
+        <Separator IsVisible="{Binding !IsPreviewMode}" />
+        <MenuItem Click="OnToggleCompactMode" IsVisible="{Binding !IsPreviewMode}">
           <MenuItem.Header>
             <CheckBox Content="{Binding MenuViewCompactMode}"
                       IsChecked="{Binding IsCompactMode}"
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>
-        <MenuItem Click="OnToggleTreeAnimation">
+        <MenuItem Click="OnToggleTreeAnimation" IsVisible="{Binding !IsPreviewMode}">
           <MenuItem.Header>
             <CheckBox Content="{Binding MenuViewTreeAnimation}"
                       IsChecked="{Binding IsTreeAnimationEnabled}"
