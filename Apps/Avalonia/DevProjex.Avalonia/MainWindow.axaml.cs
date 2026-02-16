@@ -582,6 +582,10 @@ public partial class MainWindow : Window
             _viewModel.HelpPopoverOpen = false;
         if (_viewModel.HelpDocsPopoverOpen)
             _viewModel.HelpDocsPopoverOpen = false;
+
+        // App lost focus — ideal time to compact the heap and return pages to the OS.
+        // Runs on a background thread so the deactivation handler returns instantly.
+        ScheduleBackgroundMemoryCleanup();
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -1586,29 +1590,35 @@ public partial class MainWindow : Window
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineNumbers = "1";
 
-        // Preview strings can be large (potentially LOH-sized). Force immediate collection
-        // because the user explicitly closed preview and expects memory to drop.
+        // Preview strings are often LOH-sized (>85 KB for any non-trivial project).
+        // Request LOH compaction so the large char[] / string blocks are truly freed,
+        // then return physical pages to the OS so Task Manager reflects the drop.
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
         GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(1, GCCollectionMode.Forced, blocking: false);
+        TrimNativeWorkingSet();
     }
 
     /// <summary>
-    /// Aggressive memory cleanup for user-triggered operations (project switch, git ops).
-    /// Blocking is acceptable here because the user already expects a state transition.
-    /// NOTE: Do NOT call this from idle/background timers — only from explicit user actions.
+    /// Aggressive memory cleanup for user-triggered operations (project switch, git ops,
+    /// preview close, search/filter close, window deactivation).
+    /// Compacts LOH and returns physical pages to the OS.
+    /// NOTE: Call only from explicit user actions — never from background timers.
     /// </summary>
     private static void ForceMemoryCleanup()
     {
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
         GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(1, GCCollectionMode.Forced, blocking: false);
+        TrimNativeWorkingSet();
     }
 
     /// <summary>
     /// Schedules aggressive memory cleanup on a background thread after heavy operations
-    /// (project load, git branch switch, git pull). The delay lets finalizers and
-    /// UI thread finish releasing references before the collection sweep.
+    /// (project load, git branch switch, git pull, search/filter close, deactivation).
+    /// The delay lets finalizers and UI thread finish releasing references before sweep.
     /// </summary>
     private static void ScheduleBackgroundMemoryCleanup()
     {
@@ -1618,6 +1628,28 @@ public partial class MainWindow : Window
             ForceMemoryCleanup();
         });
     }
+
+    /// <summary>
+    /// Returns unused physical memory pages to the OS.
+    /// On Windows calls SetProcessWorkingSetSize; other platforms are a no-op
+    /// because their kernels reclaim pages more aggressively by default.
+    /// </summary>
+    private static void TrimNativeWorkingSet()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            using var proc = Process.GetCurrentProcess();
+            SetProcessWorkingSetSize(proc.Handle, -1, -1);
+        }
+        catch
+        {
+            // Ignore — not critical, may fail in sandboxed / store environments.
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool SetProcessWorkingSetSize(IntPtr process, nint minWorkingSetSize, nint maxWorkingSetSize);
 
     private static async Task WaitForTreeRenderStabilizationAsync(CancellationToken cancellationToken)
     {
@@ -2545,8 +2577,9 @@ public partial class MainWindow : Window
         AnimateFilterBar(false);
         _treeView?.Focus();
 
-        // Release filter-related intermediary objects after tree rebuild
-        GC.Collect(1, GCCollectionMode.Forced, blocking: false);
+        // Aggressively release filter-related objects after tree rebuild
+        // and trim working set on a background thread.
+        ScheduleBackgroundMemoryCleanup();
     }
 
     private void ForceCloseSearchAndFilterForPreview()
@@ -2873,8 +2906,9 @@ public partial class MainWindow : Window
         AnimateSearchBar(false);
         _treeView?.Focus();
 
-        // Release search highlight objects (InlineCollections, Run instances)
-        GC.Collect(1, GCCollectionMode.Forced, blocking: false);
+        // Aggressively release search highlight objects (InlineCollections, Run instances)
+        // and trim working set on a background thread.
+        ScheduleBackgroundMemoryCleanup();
     }
 
     private void OnRootAllChanged(object? sender, RoutedEventArgs e)
@@ -3113,6 +3147,7 @@ public partial class MainWindow : Window
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
             GC.Collect(1, GCCollectionMode.Forced, blocking: false);
+            TrimNativeWorkingSet();
         }
         else
         {
