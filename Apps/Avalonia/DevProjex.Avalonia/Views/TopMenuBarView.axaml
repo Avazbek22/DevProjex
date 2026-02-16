@@ -155,7 +155,7 @@
     <Popup Name="ThemePopup"
            IsOpen="{Binding ThemePopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
-           PlacementMode="Bottom"
+           Placement="Bottom"
            PlacementTarget="{Binding #ThemeMenuItem}">
       <views:ThemePopoverView Name="ThemePopover" />
     </Popup>
@@ -165,7 +165,7 @@
            IsOpen="{Binding HelpPopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
            PlacementConstraintAdjustment="All"
-           PlacementMode="Bottom"
+           Placement="Bottom"
            PlacementTarget="{Binding #HelpMenuItem}">
       <views:AboutPopoverView Name="HelpPopover" />
     </Popup>
@@ -175,7 +175,7 @@
            IsOpen="{Binding HelpDocsPopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
            PlacementConstraintAdjustment="All"
-           PlacementMode="Bottom"
+           Placement="Bottom"
            PlacementTarget="{Binding #HelpMenuItem}">
       <views:HelpPopoverView Name="HelpDocsPopover" />
     </Popup>

@@ -507,7 +507,8 @@
                   </ItemsPanelTemplate>
                 </TreeView.ItemsPanel>
                 <TreeView.ItemTemplate>
-                  <TreeDataTemplate ItemsSource="{Binding ChildItemsSource}">
+                  <TreeDataTemplate x:DataType="vm:TreeNodeViewModel"
+                                    ItemsSource="{CompiledBinding ChildItemsSource}">
                     <Grid ColumnDefinitions="Auto,*" Background="Transparent">
                       <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />
@@ -518,21 +519,21 @@
                                   Background="Transparent"
                                   Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
                         <CheckBox IsThreeState="True"
-                                  IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                  IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
                                   VerticalAlignment="Center" />
-                        <Image Source="{Binding Icon}"
+                        <Image Source="{CompiledBinding Icon}"
                                Width="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                Height="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                Stretch="Uniform"
                                VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding DisplayName}"
+                        <TextBlock Text="{CompiledBinding DisplayName}"
                                    IsVisible="{Binding !HasHighlightedDisplay}"
                                    VerticalAlignment="Center"
                                    Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                    FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                    FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                    Foreground="{DynamicResource AppTextBrush}" />
-                        <TextBlock Inlines="{Binding DisplayInlines}"
+                        <TextBlock Inlines="{CompiledBinding DisplayInlines}"
                                    IsVisible="{Binding HasHighlightedDisplay}"
                                    VerticalAlignment="Center"
                                    Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"

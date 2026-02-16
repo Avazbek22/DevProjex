@@ -10,6 +10,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -146,18 +148,21 @@ public partial class MainWindow : Window
     private TranslateTransform? _settingsTransform;
     private bool _settingsAnimating;
     private const double SettingsPanelWidth = 328.0; // 320 content + 8 margin
+    private static readonly TimeSpan SettingsPanelAnimationDuration = TimeSpan.FromMilliseconds(300);
 
     // Search bar animation
     private Border? _searchBarContainer;
     private TranslateTransform? _searchBarTransform;
     private bool _searchBarAnimating;
     private const double SearchBarHeight = 46.0;
+    private static readonly TimeSpan SearchBarAnimationDuration = TimeSpan.FromMilliseconds(250);
 
     // Filter bar animation
     private Border? _filterBarContainer;
     private TranslateTransform? _filterBarTransform;
     private bool _filterBarAnimating;
     private const double FilterBarHeight = 46.0;
+    private static readonly TimeSpan FilterBarAnimationDuration = TimeSpan.FromMilliseconds(250);
 
     // Preview bar animation
     private Border? _previewBarContainer;
@@ -165,6 +170,8 @@ public partial class MainWindow : Window
     private TranslateTransform? _previewBarTransform;
     private bool _previewBarAnimating;
     private const double PreviewBarHeight = 46.0;
+    private static readonly TimeSpan PreviewBarAnimationDuration = TimeSpan.FromMilliseconds(250);
+    private const double PanelIslandSpacing = 4.0;
 
     // Preview generation
     private CancellationTokenSource? _previewBuildCts;
@@ -632,8 +639,7 @@ public partial class MainWindow : Window
 
     private void OnDropZoneDragEnter(object? sender, DragEventArgs e)
     {
-        var hasFolder = e.Data.GetDataFormats().Any(f =>
-            f == DataFormats.Files);
+        var hasFolder = e.DataTransfer.Contains(DataFormat.File);
 
         e.DragEffects = hasFolder ? DragDropEffects.Copy : DragDropEffects.None;
 
@@ -663,7 +669,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var files = e.Data.GetFiles();
+            var files = e.DataTransfer.TryGetFiles();
             if (files is null) return;
 
             var folder = files
@@ -1676,44 +1682,18 @@ public partial class MainWindow : Window
         if (_settingsAnimating) return;
 
         _settingsAnimating = true;
-
-        const double durationMs = 300.0;
-
-        // Get current values
-        var startWidth = _settingsContainer.Width;
-        if (double.IsNaN(startWidth)) startWidth = show ? 0 : SettingsPanelWidth;
-
-        var startX = _settingsTransform.X;
-        var startOpacity = _settingsIsland.Opacity;
-
-        // Target values
-        var endWidth = show ? SettingsPanelWidth : 0.0;
-        var endX = show ? 0.0 : SettingsPanelWidth;
-        var endOpacity = show ? 1.0 : 0.0;
-
-        var clock = Stopwatch.StartNew();
-
-        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        try
         {
-            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
-            // Cubic ease out: 1 - (1-t)^3
-            var eased = 1.0 - Math.Pow(1.0 - t, 3);
-
-            // Animate container width (this makes tree expand/contract)
-            _settingsContainer.Width = startWidth + (endWidth - startWidth) * eased;
-
-            // Animate inner panel slide and fade
-            _settingsTransform.X = startX + (endX - startX) * eased;
-            _settingsIsland.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
-
-            await Task.Delay(8); // ~120 FPS for smooth animation
+            EnsureSettingsPanelTransitions();
+            _settingsContainer.Width = show ? SettingsPanelWidth : 0.0;
+            _settingsTransform.X = show ? 0.0 : SettingsPanelWidth;
+            _settingsIsland.Opacity = show ? 1.0 : 0.0;
+            await WaitForPanelAnimationAsync(SettingsPanelAnimationDuration);
         }
-
-        // Ensure final values
-        _settingsContainer.Width = endWidth;
-        _settingsTransform.X = endX;
-        _settingsIsland.Opacity = endOpacity;
-        _settingsAnimating = false;
+        finally
+        {
+            _settingsAnimating = false;
+        }
     }
 
     private async void AnimateSearchBar(bool show)
@@ -1722,52 +1702,19 @@ public partial class MainWindow : Window
         if (_searchBarAnimating) return;
 
         _searchBarAnimating = true;
-
-        const double durationMs = 250.0;
-        const double islandSpacing = 4.0; // Gap between search bar and tree island
-
-        // Get current values
-        var startHeight = _searchBarContainer.Height;
-        if (double.IsNaN(startHeight)) startHeight = show ? 0 : SearchBarHeight;
-
-        var startY = _searchBarTransform.Y;
-        var startOpacity = _searchBar.Opacity;
-        var startMarginBottom = _searchBarContainer.Margin.Bottom;
-
-        // Target values
-        var endHeight = show ? SearchBarHeight : 0.0;
-        var endY = show ? 0.0 : -SearchBarHeight;
-        var endOpacity = show ? 1.0 : 0.0;
-        var endMarginBottom = show ? islandSpacing : 0.0;
-
-        var clock = Stopwatch.StartNew();
-
-        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        try
         {
-            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
-            // Cubic ease out: 1 - (1-t)^3
-            var eased = 1.0 - Math.Pow(1.0 - t, 3);
-
-            // Animate container height (this makes content below shift)
-            _searchBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
-
-            // Animate margin for proper spacing between islands
-            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
-            _searchBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
-
-            // Animate inner panel slide and fade
-            _searchBarTransform.Y = startY + (endY - startY) * eased;
-            _searchBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
-
-            await Task.Delay(8);
+            EnsureSearchBarTransitions();
+            _searchBarContainer.Height = show ? SearchBarHeight : 0.0;
+            _searchBarContainer.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0.0);
+            _searchBarTransform.Y = show ? 0.0 : -SearchBarHeight;
+            _searchBar.Opacity = show ? 1.0 : 0.0;
+            await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
         }
-
-        // Ensure final values
-        _searchBarContainer.Height = endHeight;
-        _searchBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
-        _searchBarTransform.Y = endY;
-        _searchBar.Opacity = endOpacity;
-        _searchBarAnimating = false;
+        finally
+        {
+            _searchBarAnimating = false;
+        }
     }
 
     private async void AnimatePreviewBar(bool show)
@@ -1776,43 +1723,19 @@ public partial class MainWindow : Window
         if (_previewBarAnimating) return;
 
         _previewBarAnimating = true;
-
-        const double durationMs = 250.0; // Same as SearchBar/FilterBar
-        const double islandSpacing = 4.0;
-
-        var startHeight = _previewBarContainer.Height;
-        if (double.IsNaN(startHeight)) startHeight = show ? 0 : PreviewBarHeight;
-
-        var startY = _previewBarTransform.Y;
-        var startOpacity = _previewBar.Opacity;
-        var startMarginBottom = _previewBarContainer.Margin.Bottom;
-
-        var endHeight = show ? PreviewBarHeight : 0.0;
-        var endY = show ? 0.0 : -PreviewBarHeight;
-        var endOpacity = show ? 1.0 : 0.0;
-        var endMarginBottom = show ? islandSpacing : 0.0;
-
-        var clock = Stopwatch.StartNew();
-
-        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        try
         {
-            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
-            var eased = 1.0 - Math.Pow(1.0 - t, 3);
-
-            _previewBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
-            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
-            _previewBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
-            _previewBarTransform.Y = startY + (endY - startY) * eased;
-            _previewBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
-
-            await Task.Delay(8);
+            EnsurePreviewBarTransitions();
+            _previewBarContainer.Height = show ? PreviewBarHeight : 0.0;
+            _previewBarContainer.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0.0);
+            _previewBarTransform.Y = show ? 0.0 : -PreviewBarHeight;
+            _previewBar.Opacity = show ? 1.0 : 0.0;
+            await WaitForPanelAnimationAsync(PreviewBarAnimationDuration);
         }
-
-        _previewBarContainer.Height = endHeight;
-        _previewBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
-        _previewBarTransform.Y = endY;
-        _previewBar.Opacity = endOpacity;
-        _previewBarAnimating = false;
+        finally
+        {
+            _previewBarAnimating = false;
+        }
     }
 
     private async void AnimateFilterBar(bool show)
@@ -1821,52 +1744,211 @@ public partial class MainWindow : Window
         if (_filterBarAnimating) return;
 
         _filterBarAnimating = true;
-
-        const double durationMs = 250.0;
-        const double islandSpacing = 4.0; // Gap between filter bar and tree island
-
-        // Get current values
-        var startHeight = _filterBarContainer.Height;
-        if (double.IsNaN(startHeight)) startHeight = show ? 0 : FilterBarHeight;
-
-        var startY = _filterBarTransform.Y;
-        var startOpacity = _filterBar.Opacity;
-        var startMarginBottom = _filterBarContainer.Margin.Bottom;
-
-        // Target values
-        var endHeight = show ? FilterBarHeight : 0.0;
-        var endY = show ? 0.0 : -FilterBarHeight;
-        var endOpacity = show ? 1.0 : 0.0;
-        var endMarginBottom = show ? islandSpacing : 0.0;
-
-        var clock = Stopwatch.StartNew();
-
-        while (clock.Elapsed.TotalMilliseconds < durationMs)
+        try
         {
-            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / durationMs);
-            // Cubic ease out: 1 - (1-t)^3
-            var eased = 1.0 - Math.Pow(1.0 - t, 3);
+            EnsureFilterBarTransitions();
+            _filterBarContainer.Height = show ? FilterBarHeight : 0.0;
+            _filterBarContainer.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0.0);
+            _filterBarTransform.Y = show ? 0.0 : -FilterBarHeight;
+            _filterBar.Opacity = show ? 1.0 : 0.0;
+            await WaitForPanelAnimationAsync(FilterBarAnimationDuration);
+        }
+        finally
+        {
+            _filterBarAnimating = false;
+        }
+    }
 
-            // Animate container height (this makes content below shift)
-            _filterBarContainer.Height = startHeight + (endHeight - startHeight) * eased;
-
-            // Animate margin for proper spacing between islands
-            var currentMarginBottom = startMarginBottom + (endMarginBottom - startMarginBottom) * eased;
-            _filterBarContainer.Margin = new Thickness(0, 0, 0, currentMarginBottom);
-
-            // Animate inner panel slide and fade
-            _filterBarTransform.Y = startY + (endY - startY) * eased;
-            _filterBar.Opacity = startOpacity + (endOpacity - startOpacity) * eased;
-
-            await Task.Delay(8);
+    private void EnsureSettingsPanelTransitions()
+    {
+        if (_settingsContainer is { } settingsContainer && settingsContainer.Transitions is null)
+        {
+            settingsContainer.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = WidthProperty,
+                    Duration = SettingsPanelAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
         }
 
-        // Ensure final values
-        _filterBarContainer.Height = endHeight;
-        _filterBarContainer.Margin = new Thickness(0, 0, 0, endMarginBottom);
-        _filterBarTransform.Y = endY;
-        _filterBar.Opacity = endOpacity;
-        _filterBarAnimating = false;
+        if (_settingsIsland is { } settingsIsland && settingsIsland.Transitions is null)
+        {
+            settingsIsland.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = OpacityProperty,
+                    Duration = SettingsPanelAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+
+        if (_settingsTransform is { } settingsTransform && settingsTransform.Transitions is null)
+        {
+            settingsTransform.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = TranslateTransform.XProperty,
+                    Duration = SettingsPanelAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+    }
+
+    private void EnsureSearchBarTransitions()
+    {
+        if (_searchBarContainer is { } searchBarContainer && searchBarContainer.Transitions is null)
+        {
+            searchBarContainer.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = HeightProperty,
+                    Duration = SearchBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                },
+                new ThicknessTransition
+                {
+                    Property = MarginProperty,
+                    Duration = SearchBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+
+        if (_searchBar is { } searchBar && searchBar.Transitions is null)
+        {
+            searchBar.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = OpacityProperty,
+                    Duration = SearchBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+
+        if (_searchBarTransform is { } searchBarTransform && searchBarTransform.Transitions is null)
+        {
+            searchBarTransform.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = TranslateTransform.YProperty,
+                    Duration = SearchBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+    }
+
+    private void EnsurePreviewBarTransitions()
+    {
+        if (_previewBarContainer is { } previewBarContainer && previewBarContainer.Transitions is null)
+        {
+            previewBarContainer.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = HeightProperty,
+                    Duration = PreviewBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                },
+                new ThicknessTransition
+                {
+                    Property = MarginProperty,
+                    Duration = PreviewBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+
+        if (_previewBar is { } previewBar && previewBar.Transitions is null)
+        {
+            previewBar.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = OpacityProperty,
+                    Duration = PreviewBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+
+        if (_previewBarTransform is { } previewBarTransform && previewBarTransform.Transitions is null)
+        {
+            previewBarTransform.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = TranslateTransform.YProperty,
+                    Duration = PreviewBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+    }
+
+    private void EnsureFilterBarTransitions()
+    {
+        if (_filterBarContainer is { } filterBarContainer && filterBarContainer.Transitions is null)
+        {
+            filterBarContainer.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = HeightProperty,
+                    Duration = FilterBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                },
+                new ThicknessTransition
+                {
+                    Property = MarginProperty,
+                    Duration = FilterBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+
+        if (_filterBar is { } filterBar && filterBar.Transitions is null)
+        {
+            filterBar.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = OpacityProperty,
+                    Duration = FilterBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+
+        if (_filterBarTransform is { } filterBarTransform && filterBarTransform.Transitions is null)
+        {
+            filterBarTransform.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = TranslateTransform.YProperty,
+                    Duration = FilterBarAnimationDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ];
+        }
+    }
+
+    private static Task WaitForPanelAnimationAsync(TimeSpan duration)
+    {
+        // A tiny safety buffer ensures state flags reset after the transition settles.
+        return Task.Delay(duration + TimeSpan.FromMilliseconds(24));
     }
 
     private void OnSetLightTheme(object? sender, RoutedEventArgs e)

@@ -3,11 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Threading;
-using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.VisualTree;
 using DevProjex.Application.Services;
 using DevProjex.Avalonia.ViewModels;
 
@@ -21,8 +20,10 @@ public sealed class TreeSearchCoordinator : IDisposable
     private readonly object _searchCtsLock = new();
     private CancellationTokenSource? _searchCts;
     private readonly List<TreeNodeViewModel> _searchMatches = new();
+    private readonly HashSet<TreeNodeViewModel> _activeHighlightNodes = new();
     private int _searchMatchIndex = -1;
     private TreeNodeViewModel? _currentSearchMatch;
+    private string? _activeHighlightQuery;
 
     // Cached brushes to avoid creating new objects for each node
     private IBrush? _cachedHighlightBackground;
@@ -81,14 +82,13 @@ public sealed class TreeSearchCoordinator : IDisposable
             return;
         }
 
-        UpdateHighlights(query);
-
         _searchMatches.AddRange(TreeSearchEngine.CollectMatches(
             _viewModel.TreeNodes,
             query,
             node => node.DisplayName,
             node => node.Children,
             StringComparison.OrdinalIgnoreCase));
+        ApplySearchHighlightDiff(query);
 
         TreeSearchEngine.ApplySmartExpandForSearch(
             _viewModel.TreeNodes,
@@ -119,6 +119,7 @@ public sealed class TreeSearchCoordinator : IDisposable
         // Clear current match reference first
         _currentSearchMatch = null;
         _searchMatchIndex = -1;
+        ClearActiveHighlights();
 
         // Clear and trim the matches list
         _searchMatches.Clear();
@@ -142,7 +143,9 @@ public sealed class TreeSearchCoordinator : IDisposable
         // Clear search state to release references
         _searchMatches.Clear();
         _searchMatches.TrimExcess();
+        _activeHighlightNodes.Clear();
         _currentSearchMatch = null;
+        _activeHighlightQuery = null;
 
         // Clear cached brushes
         _cachedHighlightBackground = null;
@@ -180,11 +183,13 @@ public sealed class TreeSearchCoordinator : IDisposable
 
     private void BringNodeIntoView(TreeNodeViewModel node)
     {
-        var item = _treeView.GetLogicalDescendants()
-            .OfType<TreeViewItem>()
-            .FirstOrDefault(container => ReferenceEquals(container.DataContext, node));
+        if (TryBringNodeIntoView(node))
+            return;
 
-        item?.BringIntoView();
+        // Retry after render pass: container might be materialized after expansion.
+        Dispatcher.UIThread.Post(
+            () => _ = TryBringNodeIntoView(node),
+            DispatcherPriority.Render);
     }
 
     private void SelectTreeNode(TreeNodeViewModel node)
@@ -237,6 +242,12 @@ public sealed class TreeSearchCoordinator : IDisposable
 
     private void ClearHighlightsIfNeeded()
     {
+        if (_activeHighlightNodes.Count > 0)
+        {
+            ClearActiveHighlights();
+            return;
+        }
+
         var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
 
         TreeNodeViewModel.ForEachDescendant(_viewModel.TreeNodes, node =>
@@ -246,6 +257,71 @@ public sealed class TreeSearchCoordinator : IDisposable
 
             node.UpdateSearchHighlight(null, highlightBackground, highlightForeground, normalForeground, currentBackground);
         });
+    }
+
+    private void ApplySearchHighlightDiff(string query)
+    {
+        var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
+        var nextHighlights = new HashSet<TreeNodeViewModel>(_searchMatches);
+        var queryChanged = !string.Equals(_activeHighlightQuery, query, StringComparison.Ordinal);
+
+        foreach (var node in _activeHighlightNodes)
+        {
+            if (nextHighlights.Contains(node))
+                continue;
+
+            node.IsCurrentSearchMatch = false;
+            node.UpdateSearchHighlight(null, highlightBackground, highlightForeground, normalForeground, currentBackground);
+        }
+
+        foreach (var node in nextHighlights)
+        {
+            if (queryChanged || !_activeHighlightNodes.Contains(node))
+            {
+                node.UpdateSearchHighlight(query, highlightBackground, highlightForeground, normalForeground, currentBackground);
+            }
+        }
+
+        _activeHighlightNodes.Clear();
+        foreach (var node in nextHighlights)
+            _activeHighlightNodes.Add(node);
+
+        _activeHighlightQuery = query;
+    }
+
+    private void ClearActiveHighlights()
+    {
+        if (_activeHighlightNodes.Count == 0)
+            return;
+
+        var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
+        foreach (var node in _activeHighlightNodes)
+        {
+            node.IsCurrentSearchMatch = false;
+            node.UpdateSearchHighlight(null, highlightBackground, highlightForeground, normalForeground, currentBackground);
+        }
+
+        _activeHighlightNodes.Clear();
+        _activeHighlightQuery = null;
+    }
+
+    private bool TryBringNodeIntoView(TreeNodeViewModel node)
+    {
+        if (_treeView.ContainerFromItem(node) is TreeViewItem directContainer)
+        {
+            directContainer.BringIntoView();
+            return true;
+        }
+
+        var descendantContainer = _treeView.FindDescendantOfType<TreeViewItem>(
+            includeSelf: false,
+            visual => ReferenceEquals(visual.DataContext, node));
+
+        if (descendantContainer is null)
+            return false;
+
+        descendantContainer.BringIntoView();
+        return true;
     }
 
     private (IBrush highlightBackground, IBrush highlightForeground, IBrush normalForeground, IBrush currentBackground)
