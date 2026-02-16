@@ -133,6 +133,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
+    private Border? _dropZoneContainer;
     private Viewbox? _dropZoneIcon;
     private TranslateTransform? _dropZoneIconTransform;
     private global::Avalonia.Threading.DispatcherTimer? _dropZoneFloatTimer;
@@ -237,12 +238,14 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         // Setup drag & drop for the drop zone
-        var dropZone = this.FindControl<Border>("DropZoneContainer");
-        if (dropZone is not null)
+        _dropZoneContainer = this.FindControl<Border>("DropZoneContainer");
+        if (_dropZoneContainer is not null)
         {
-            dropZone.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
-            dropZone.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
-            dropZone.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
+            _dropZoneContainer.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            _dropZoneContainer.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
+            _dropZoneContainer.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
+            // Start with animation class since no project is loaded initially
+            _dropZoneContainer.Classes.Add("drop-zone-animating");
         }
 
         InitializeThemePresets();
@@ -348,14 +351,18 @@ public partial class MainWindow : Window
             app.ActualThemeVariantChanged += _themeChangedHandler;
         }
 
-        // Initialize idle memory cleanup timer (runs every 30 seconds)
+        // Initialize idle memory cleanup timer (runs every 45 seconds when window is active)
         // Performs aggressive GC + working set trim when user is inactive
-        _idleMemoryCleanupTimer = new System.Timers.Timer(30_000) { AutoReset = true };
+        _idleMemoryCleanupTimer = new System.Timers.Timer(45_000) { AutoReset = true };
         _idleMemoryCleanupTimer.Elapsed += OnIdleMemoryCleanupTimerElapsed;
         _idleMemoryCleanupTimer.Start();
 
-        // Track user activity for idle detection
-        Activated += (_, _) => _lastUserActivity = DateTime.UtcNow;
+        // Track user activity for idle detection + restart timer when window becomes active
+        Activated += (_, _) =>
+        {
+            _lastUserActivity = DateTime.UtcNow;
+            _idleMemoryCleanupTimer?.Start(); // Resume timer when window is active again
+        };
         PointerMoved += (_, _) => _lastUserActivity = DateTime.UtcNow;
         PointerPressed += (_, _) => _lastUserActivity = DateTime.UtcNow;
         KeyDown += (_, _) => _lastUserActivity = DateTime.UtcNow;
@@ -527,9 +534,13 @@ public partial class MainWindow : Window
             _dropZoneFloatTimer?.Stop();
             if (_dropZoneIconTransform is not null)
                 _dropZoneIconTransform.Y = 0;
+            // Remove animation class to stop XAML animation (saves CPU)
+            _dropZoneContainer?.Classes.Remove("drop-zone-animating");
             return;
         }
 
+        // Add animation class to enable XAML animation
+        _dropZoneContainer?.Classes.Add("drop-zone-animating");
         EnsureDropZoneFloatAnimationStarted();
     }
 
@@ -571,8 +582,10 @@ public partial class MainWindow : Window
         if (_viewModel.HelpDocsPopoverOpen)
             _viewModel.HelpDocsPopoverOpen = false;
 
-        // Trigger background memory cleanup when window loses focus
-        // This helps reclaim memory when user switches to another application
+        // Stop periodic timer when window is inactive (saves CPU)
+        _idleMemoryCleanupTimer?.Stop();
+
+        // Do one final cleanup when losing focus, then stop
         if (_viewModel.IsProjectLoaded)
             ScheduleBackgroundMemoryCleanup();
     }
