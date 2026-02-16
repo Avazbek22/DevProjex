@@ -184,12 +184,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(StatusProgressVisible));
             RaisePropertyChanged(nameof(StatusProgressPercentVisible));
+            // Also update IsIndeterminate since it depends on StatusBusy
+            // This stops the indeterminate animation when progress bar is hidden
+            RaisePropertyChanged(nameof(StatusProgressIsIndeterminate));
         }
     }
 
     public bool StatusProgressIsIndeterminate
     {
-        get => _statusProgressIsIndeterminate;
+        // Only return true when also visible - prevents animation running when hidden
+        get => _statusProgressIsIndeterminate && _statusBusy;
         set
         {
             if (_statusProgressIsIndeterminate == value) return;
