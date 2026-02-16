@@ -175,6 +175,10 @@ public partial class MainWindow : Window
     private readonly object _metricsLock = new();
     private CancellationTokenSource? _metricsCalculationCts;
     private global::Avalonia.Threading.DispatcherTimer? _metricsDebounceTimer;
+
+    // Idle memory cleanup - aggressive GC when app is idle with project loaded
+    private System.Timers.Timer? _idleMemoryCleanupTimer;
+    private DateTime _lastUserActivity = DateTime.UtcNow;
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _isBackgroundMetricsActive;
     private int _metricsRecalcVersion;
@@ -344,6 +348,18 @@ public partial class MainWindow : Window
             app.ActualThemeVariantChanged += _themeChangedHandler;
         }
 
+        // Initialize idle memory cleanup timer (runs every 30 seconds)
+        // Performs aggressive GC + working set trim when user is inactive
+        _idleMemoryCleanupTimer = new System.Timers.Timer(30_000) { AutoReset = true };
+        _idleMemoryCleanupTimer.Elapsed += OnIdleMemoryCleanupTimerElapsed;
+        _idleMemoryCleanupTimer.Start();
+
+        // Track user activity for idle detection
+        Activated += (_, _) => _lastUserActivity = DateTime.UtcNow;
+        PointerMoved += (_, _) => _lastUserActivity = DateTime.UtcNow;
+        PointerPressed += (_, _) => _lastUserActivity = DateTime.UtcNow;
+        KeyDown += (_, _) => _lastUserActivity = DateTime.UtcNow;
+
         InitializeFonts();
         _selectionCoordinator.HookOptionListeners(_viewModel.RootFolders);
         _selectionCoordinator.HookOptionListeners(_viewModel.Extensions);
@@ -478,6 +494,14 @@ public partial class MainWindow : Window
             _dropZoneFloatTimer.Stop();
             _dropZoneFloatTimer.Tick -= OnDropZoneFloatTick;
         }
+
+        // Dispose idle memory cleanup timer
+        if (_idleMemoryCleanupTimer is not null)
+        {
+            _idleMemoryCleanupTimer.Stop();
+            _idleMemoryCleanupTimer.Elapsed -= OnIdleMemoryCleanupTimerElapsed;
+            _idleMemoryCleanupTimer.Dispose();
+        }
     }
 
     private void EnsureDropZoneFloatAnimationStarted()
@@ -546,6 +570,11 @@ public partial class MainWindow : Window
             _viewModel.HelpPopoverOpen = false;
         if (_viewModel.HelpDocsPopoverOpen)
             _viewModel.HelpDocsPopoverOpen = false;
+
+        // Trigger background memory cleanup when window loses focus
+        // This helps reclaim memory when user switches to another application
+        if (_viewModel.IsProjectLoaded)
+            ScheduleBackgroundMemoryCleanup();
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -1581,7 +1610,60 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Schedules background LOH compaction after heavy operations like Git updates or branch switches.
+    /// Periodic idle memory cleanup. Runs every 60 seconds to reclaim memory
+    /// that accumulates from Avalonia render loop and .NET runtime allocations.
+    /// </summary>
+    private void OnIdleMemoryCleanupTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    {
+        // Only run cleanup when a project is loaded (otherwise nothing to clean)
+        if (!_viewModel.IsProjectLoaded)
+            return;
+
+        // Check if user has been inactive for at least 15 seconds
+        var idleTime = DateTime.UtcNow - _lastUserActivity;
+        if (idleTime.TotalSeconds < 15)
+            return;
+
+        // Aggressive cleanup when user is inactive
+        ForceMemoryCleanup();
+    }
+
+    /// <summary>
+    /// Forces aggressive garbage collection AND returns memory to OS.
+    /// .NET normally keeps memory for future allocations - this forces release.
+    /// </summary>
+    private static void ForceMemoryCleanup()
+    {
+        // Step 1: Aggressive GC with LOH compaction
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+        // Step 2: Force .NET to return memory to OS (not just mark as free)
+        // This is the key - without this, .NET keeps freed memory for reuse
+        if (OperatingSystem.IsWindows())
+        {
+            // On Windows: trim working set to force memory back to OS
+            try
+            {
+                SetProcessWorkingSetSize(
+                    System.Diagnostics.Process.GetCurrentProcess().Handle,
+                    -1, -1);
+            }
+            catch
+            {
+                // Ignore if fails (permission issues)
+            }
+        }
+    }
+
+    // Windows API to trim process working set (returns memory to OS)
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetProcessWorkingSetSize(IntPtr hProcess, nint dwMinimumWorkingSetSize, nint dwMaximumWorkingSetSize);
+
+    /// <summary>
+    /// Schedules background memory cleanup after heavy operations.
     /// Runs in background to avoid blocking UI.
     /// </summary>
     private static void ScheduleBackgroundMemoryCleanup()
@@ -1590,12 +1672,7 @@ public partial class MainWindow : Window
         {
             // Wait for UI to settle and references to be released
             await Task.Delay(500);
-
-            // Compact LOH to return memory to OS
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            ForceMemoryCleanup();
         });
     }
 
@@ -2908,6 +2985,11 @@ public partial class MainWindow : Window
 
         _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
         CancelPreviewRefresh();
+
+        // Clear previous project state BEFORE loading new one to release memory early
+        // This is critical when switching between large projects
+        if (_viewModel.IsProjectLoaded)
+            ClearPreviousProjectState(forceCompactingGc: true);
 
         var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
         var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
