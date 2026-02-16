@@ -1,7 +1,10 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Models;
 
@@ -97,10 +100,11 @@ public sealed class IgnoreRulesService
 			var smart = BuildScopedSmartIgnore(context.Scopes);
 			smartFolders = smart.FolderNames;
 			smartFiles = smart.FileNames;
-			smartScopeRoots = context.Scopes
-				.Select(scope => scope.RootPath)
-				.Distinct(PathStringComparer)
-				.ToArray();
+			// Use HashSet for O(1) deduplication
+			var uniqueRoots = new HashSet<string>(PathStringComparer);
+			foreach (var scope in context.Scopes)
+				uniqueRoots.Add(scope.RootPath);
+			smartScopeRoots = uniqueRoots.ToArray();
 		}
 		else
 		{
@@ -161,14 +165,12 @@ public sealed class IgnoreRulesService
 
 	private bool HasRelevantSmartIgnoreCandidates(ProjectScanContext context)
 	{
-		var scopesToCheck = context.Scopes
-			.Where(scope => !scope.HasGitIgnore)
-			.ToArray();
-		if (scopesToCheck.Length == 0)
-			return false;
-
-		foreach (var scope in scopesToCheck)
+		// Direct iteration avoids allocation - early return on first match
+		foreach (var scope in context.Scopes)
 		{
+			if (scope.HasGitIgnore)
+				continue;
+
 			if (scope.HasProjectMarker || HasSmartCandidatesInRootEntries(scope.RootPath))
 				return true;
 		}
@@ -224,12 +226,19 @@ public sealed class IgnoreRulesService
 
 	private IEnumerable<ScopedGitIgnoreMatcher> BuildScopedGitIgnoreMatchers(IReadOnlyList<ProjectScope> scopes)
 	{
-		var scopesWithGitIgnore = scopes
-			.Where(scope => scope.HasGitIgnore)
-			.OrderBy(scope => scope.RootPath, PathComparer.Default)
-			.ToArray();
-		if (scopesWithGitIgnore.Length == 0)
+		// Filter and collect in single pass
+		var scopesWithGitIgnore = new List<ProjectScope>();
+		foreach (var scope in scopes)
+		{
+			if (scope.HasGitIgnore)
+				scopesWithGitIgnore.Add(scope);
+		}
+
+		if (scopesWithGitIgnore.Count == 0)
 			yield break;
+
+		// Sort in-place
+		scopesWithGitIgnore.Sort((a, b) => PathComparer.Default.Compare(a.RootPath, b.RootPath));
 
 		foreach (var scope in scopesWithGitIgnore)
 		{
@@ -272,21 +281,41 @@ public sealed class IgnoreRulesService
 		return context;
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static string BuildScopeCacheKey(string rootPath, IReadOnlyCollection<string>? selectedRootFolders)
 	{
 		if (selectedRootFolders is null || selectedRootFolders.Count == 0)
 			return rootPath;
 
-		var sorted = selectedRootFolders
-			.Where(name => !string.IsNullOrWhiteSpace(name))
-			.Select(name => name.Trim())
-			.Distinct(PathStringComparer)
-			.OrderBy(name => name, PathStringComparer)
-			.ToArray();
+		// Use HashSet for deduplication, then sort in-place
+		var uniqueNames = new HashSet<string>(PathStringComparer);
+		foreach (var name in selectedRootFolders)
+		{
+			if (!string.IsNullOrWhiteSpace(name))
+				uniqueNames.Add(name.Trim());
+		}
 
-		return sorted.Length == 0
-			? rootPath
-			: $"{rootPath}::{string.Join("|", sorted)}";
+		if (uniqueNames.Count == 0)
+			return rootPath;
+
+		// Convert to list and sort in-place to avoid LINQ allocation
+		var sorted = new List<string>(uniqueNames);
+		sorted.Sort(PathStringComparer);
+
+		// Pre-calculate capacity for StringBuilder
+		var capacity = rootPath.Length + 2; // "::"
+		foreach (var name in sorted)
+			capacity += name.Length + 1; // "|"
+
+		var sb = new StringBuilder(capacity);
+		sb.Append(rootPath).Append("::");
+		for (var i = 0; i < sorted.Count; i++)
+		{
+			if (i > 0) sb.Append('|');
+			sb.Append(sorted[i]);
+		}
+
+		return sb.ToString();
 	}
 
 	private static ProjectScanContext BuildProjectScanContext(
@@ -326,9 +355,10 @@ public sealed class IgnoreRulesService
 					LooksLikeProject: hasGitIgnore || hasMarker));
 			});
 
-		var candidates = scopedCandidates
-			.OrderBy(scope => scope.RootPath, PathComparer.Default)
-			.ToArray();
+		// Convert to list and sort in-place
+		var candidatesList = new List<ProjectScope>(scopedCandidates);
+		candidatesList.Sort((a, b) => PathComparer.Default.Compare(a.RootPath, b.RootPath));
+		var candidates = candidatesList.ToArray();
 		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates, maxDegree);
 
 		if (hasExplicitRootSelection)
@@ -346,7 +376,15 @@ public sealed class IgnoreRulesService
 		}
 
 		// Treat a parent folder with at least one discovered nested project as a scoped workspace.
-		var workspaceDetected = expandedCandidates.Any(scope => scope.LooksLikeProject);
+		var workspaceDetected = false;
+		foreach (var scope in expandedCandidates)
+		{
+			if (scope.LooksLikeProject)
+			{
+				workspaceDetected = true;
+				break;
+			}
+		}
 		if (!workspaceDetected)
 		{
 			return ProjectScanContext.FromScopes(new[]
@@ -408,10 +446,18 @@ public sealed class IgnoreRulesService
 				}
 			});
 
-		return allScopes
-			.DistinctBy(scope => scope.RootPath, PathStringComparer)
-			.OrderBy(scope => scope.RootPath, PathComparer.Default)
-			.ToArray();
+		// Use Dictionary for O(1) deduplication
+		var uniqueScopes = new Dictionary<string, ProjectScope>(PathStringComparer);
+		foreach (var scope in allScopes)
+		{
+			if (!uniqueScopes.ContainsKey(scope.RootPath))
+				uniqueScopes[scope.RootPath] = scope;
+		}
+
+		// Convert to list and sort in-place
+		var result = new List<ProjectScope>(uniqueScopes.Values);
+		result.Sort((a, b) => PathComparer.Default.Compare(a.RootPath, b.RootPath));
+		return result.ToArray();
 	}
 
 	private static IEnumerable<string> EnumerateDescendantDirectoriesSafe(
@@ -460,7 +506,8 @@ public sealed class IgnoreRulesService
 		string rootPath,
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
-		var candidates = new List<string>();
+		// Use HashSet for O(1) deduplication
+		var uniqueCandidates = new HashSet<string>(PathStringComparer);
 
 		if (selectedRootFolders is not null && selectedRootFolders.Count > 0)
 		{
@@ -471,14 +518,15 @@ public sealed class IgnoreRulesService
 
 				var fullPath = Path.Combine(rootPath, folderName);
 				if (Directory.Exists(fullPath))
-					candidates.Add(Path.GetFullPath(fullPath));
+					uniqueCandidates.Add(Path.GetFullPath(fullPath));
 			}
 		}
 		else
 		{
 			try
 			{
-				candidates.AddRange(Directory.GetDirectories(rootPath));
+				foreach (var dir in Directory.GetDirectories(rootPath))
+					uniqueCandidates.Add(dir);
 			}
 			catch
 			{
@@ -486,10 +534,10 @@ public sealed class IgnoreRulesService
 			}
 		}
 
-		return candidates
-			.Distinct(PathStringComparer)
-			.OrderBy(path => path, PathComparer.Default)
-			.ToList();
+		// Convert to list and sort in-place
+		var candidates = new List<string>(uniqueCandidates);
+		candidates.Sort(PathComparer.Default);
+		return candidates;
 	}
 
 	private static bool HasGitIgnoreFile(string directoryPath)
@@ -602,21 +650,43 @@ public sealed class IgnoreRulesService
 
 		public static ProjectScanContext FromScopes(IEnumerable<ProjectScope> scopes)
 		{
-			var normalizedScopes = scopes
-				.Select(scope => scope with { RootPath = Path.GetFullPath(scope.RootPath) })
-				.DistinctBy(scope => scope.RootPath, PathStringComparer)
-				.OrderBy(scope => scope.RootPath, PathComparer.Default)
-				.ToArray();
+			// Use Dictionary for O(1) deduplication by RootPath
+			var uniqueScopes = new Dictionary<string, ProjectScope>(PathStringComparer);
+			foreach (var scope in scopes)
+			{
+				var normalizedPath = Path.GetFullPath(scope.RootPath);
+				// First occurrence wins (matches DistinctBy behavior)
+				if (!uniqueScopes.ContainsKey(normalizedPath))
+					uniqueScopes[normalizedPath] = scope with { RootPath = normalizedPath };
+			}
 
-			if (normalizedScopes.Length == 0)
+			if (uniqueScopes.Count == 0)
 				return Empty;
 
-			var hasAnyGitIgnore = normalizedScopes.Any(scope => scope.HasGitIgnore);
-			var hasAnyWithoutGitIgnore = normalizedScopes.Any(scope => !scope.HasGitIgnore);
-			var isSingleScopeWithGitIgnore = normalizedScopes.Length == 1 && normalizedScopes[0].HasGitIgnore;
+			// Convert to list and sort in-place
+			var normalizedScopes = new List<ProjectScope>(uniqueScopes.Values);
+			normalizedScopes.Sort((a, b) => PathComparer.Default.Compare(a.RootPath, b.RootPath));
+			var scopesArray = normalizedScopes.ToArray();
+
+			// Compute flags in single pass
+			var hasAnyGitIgnore = false;
+			var hasAnyWithoutGitIgnore = false;
+			foreach (var scope in scopesArray)
+			{
+				if (scope.HasGitIgnore)
+					hasAnyGitIgnore = true;
+				else
+					hasAnyWithoutGitIgnore = true;
+
+				// Early exit if both flags are set
+				if (hasAnyGitIgnore && hasAnyWithoutGitIgnore)
+					break;
+			}
+
+			var isSingleScopeWithGitIgnore = scopesArray.Length == 1 && scopesArray[0].HasGitIgnore;
 
 			return new ProjectScanContext(
-				Scopes: normalizedScopes,
+				Scopes: scopesArray,
 				IsSingleScopeWithGitIgnore: isSingleScopeWithGitIgnore,
 				HasAnyGitIgnore: hasAnyGitIgnore,
 				HasAnyWithoutGitIgnore: hasAnyWithoutGitIgnore);

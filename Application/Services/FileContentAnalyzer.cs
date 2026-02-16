@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using DevProjex.Kernel.Abstractions;
 
@@ -264,12 +266,14 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 	/// <summary>
 	/// Counts lines and characters by streaming through file.
-	/// Does NOT load full content into memory - only uses a small buffer.
+	/// Does NOT load full content into memory - uses ArrayPool for zero-allocation streaming.
 	/// </summary>
 	private static TextFileMetrics? CountMetricsStreaming(string path, long sizeBytes, CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
+		// Rent buffer from pool to avoid allocation per file
+		char[] buffer = ArrayPool<char>.Shared.Rent(StreamingBufferSize);
 		try
 		{
 			int lineCount = 1; // Start with 1 (file with no newlines = 1 line)
@@ -280,16 +284,17 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 			using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: StreamingBufferSize);
 
-			var buffer = new char[StreamingBufferSize];
 			int charsRead;
 
-			while ((charsRead = reader.Read(buffer, 0, buffer.Length)) > 0)
+			while ((charsRead = reader.Read(buffer, 0, StreamingBufferSize)) > 0)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
-				for (int i = 0; i < charsRead; i++)
+				// Use Span for faster iteration without bounds checking
+				var span = buffer.AsSpan(0, charsRead);
+				for (int i = 0; i < span.Length; i++)
 				{
-					char c = buffer[i];
+					char c = span[i];
 
 					// Null byte in content = binary file (edge case after first 512 bytes)
 					if (c == '\0')
@@ -337,6 +342,11 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		catch
 		{
 			return null;
+		}
+		finally
+		{
+			// Always return buffer to pool
+			ArrayPool<char>.Shared.Return(buffer);
 		}
 	}
 

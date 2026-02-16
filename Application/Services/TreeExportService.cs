@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -14,6 +15,12 @@ public sealed class TreeExportService
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
 	};
+
+	// Pre-allocated indent segments to avoid string allocation in recursive tree rendering
+	private const string IndentPipe = "│   ";
+	private const string IndentSpace = "    ";
+	private const string BranchMiddle = "├── ";
+	private const string BranchLast = "└── ";
 
 	public string BuildFullTree(string rootPath, TreeNodeDescriptor root)
 		=> BuildFullTree(rootPath, root, TreeTextFormat.Ascii);
@@ -73,16 +80,23 @@ public sealed class TreeExportService
 
 	private static void AppendAscii(TreeNodeDescriptor node, string indent, StringBuilder sb)
 	{
-		for (int i = 0; i < node.Children.Count; i++)
+		var childCount = node.Children.Count;
+		for (int i = 0; i < childCount; i++)
 		{
 			var child = node.Children[i];
-			bool last = i == node.Children.Count - 1;
+			bool last = i == childCount - 1;
 
-			sb.Append(indent).Append(last ? "└── " : "├── ").AppendLine(child.DisplayName);
+			sb.Append(indent).Append(last ? BranchLast : BranchMiddle).AppendLine(child.DisplayName);
 
 			if (child.Children.Count > 0)
 			{
-				var nextIndent = string.Concat(indent, last ? "    " : "│   ");
+				// Build indent in StringBuilder directly to avoid string allocation
+				var indentLength = indent.Length;
+				var nextIndent = string.Create(indentLength + 4, (indent, last), static (span, state) =>
+				{
+					state.indent.AsSpan().CopyTo(span);
+					(state.last ? IndentSpace : IndentPipe).AsSpan().CopyTo(span[state.indent.Length..]);
+				});
 				AppendAscii(child, nextIndent, sb);
 			}
 		}
@@ -107,11 +121,17 @@ public sealed class TreeExportService
 			currentIndex++;
 			bool last = currentIndex == visibleCount;
 
-			sb.Append(indent).Append(last ? "└── " : "├── ").AppendLine(child.DisplayName);
+			sb.Append(indent).Append(last ? BranchLast : BranchMiddle).AppendLine(child.DisplayName);
 
 			if (child.Children.Count > 0)
 			{
-				var nextIndent = string.Concat(indent, last ? "    " : "│   ");
+				// Build indent using string.Create to avoid intermediate allocations
+				var indentLength = indent.Length;
+				var nextIndent = string.Create(indentLength + 4, (indent, last), static (span, state) =>
+				{
+					state.indent.AsSpan().CopyTo(span);
+					(state.last ? IndentSpace : IndentPipe).AsSpan().CopyTo(span[state.indent.Length..]);
+				});
 				AppendSelectedAscii(child, selectedPaths, nextIndent, sb);
 			}
 		}

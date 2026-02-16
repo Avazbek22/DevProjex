@@ -1,6 +1,7 @@
+using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Linq;
 
 namespace DevProjex.Kernel.Models;
 
@@ -9,19 +10,24 @@ public sealed class GitIgnoreMatcher
     private readonly string _normalizedRootPath;
     private readonly IReadOnlyList<Rule> _rules;
     private readonly StringComparison _pathComparison;
+    private readonly bool _hasNegationRules;
 
-    public static GitIgnoreMatcher Empty { get; } = new(string.Empty, Array.Empty<Rule>());
+    // Pre-compiled search values for SIMD-optimized character lookup
+    private static readonly SearchValues<char> GlobSpecialChars = SearchValues.Create("*?[");
 
-    private GitIgnoreMatcher(string normalizedRootPath, IReadOnlyList<Rule> rules)
+    public static GitIgnoreMatcher Empty { get; } = new(string.Empty, Array.Empty<Rule>(), false);
+
+    private GitIgnoreMatcher(string normalizedRootPath, IReadOnlyList<Rule> rules, bool hasNegationRules)
     {
         _normalizedRootPath = normalizedRootPath;
         _rules = rules;
+        _hasNegationRules = hasNegationRules;
         _pathComparison = OperatingSystem.IsLinux()
             ? StringComparison.Ordinal
             : StringComparison.OrdinalIgnoreCase;
     }
 
-    public bool HasNegationRules => _rules.Any(static rule => rule.IsNegation);
+    public bool HasNegationRules => _hasNegationRules;
 
     public static GitIgnoreMatcher Build(string rootPath, IEnumerable<string> lines)
     {
@@ -90,7 +96,18 @@ public sealed class GitIgnoreMatcher
                 ComputeStaticPrefix(line)));
         }
 
-        return new GitIgnoreMatcher(normalizedRoot, rules);
+        // Precompute hasNegationRules to avoid repeated enumeration
+        var hasNegation = false;
+        foreach (var rule in rules)
+        {
+            if (rule.IsNegation)
+            {
+                hasNegation = true;
+                break;
+            }
+        }
+
+        return new GitIgnoreMatcher(normalizedRoot, rules, hasNegation);
     }
 
     public bool IsIgnored(string fullPath, bool isDirectory, string name)
@@ -228,12 +245,14 @@ public sealed class GitIgnoreMatcher
 
     private static string GlobToRegex(string pattern)
     {
+        // Pre-size StringBuilder based on typical expansion factor
         var sb = new StringBuilder(pattern.Length * 2);
+        var span = pattern.AsSpan();
         var inCharClass = false;
 
-        for (var i = 0; i < pattern.Length; i++)
+        for (var i = 0; i < span.Length; i++)
         {
-            var current = pattern[i];
+            var current = span[i];
 
             if (inCharClass)
             {
@@ -244,10 +263,10 @@ public sealed class GitIgnoreMatcher
                     sb.Append(']');
                     inCharClass = false;
                 }
-                else if (current == '\\' && i + 1 < pattern.Length)
+                else if (current == '\\' && i + 1 < span.Length)
                 {
                     // Escape sequence in character class
-                    sb.Append('\\').Append(pattern[++i]);
+                    sb.Append('\\').Append(span[++i]);
                 }
                 else
                 {
@@ -259,10 +278,10 @@ public sealed class GitIgnoreMatcher
             switch (current)
             {
                 case '*':
-                    if (i + 1 < pattern.Length && pattern[i + 1] == '*')
+                    if (i + 1 < span.Length && span[i + 1] == '*')
                     {
                         // Check if ** is followed by /
-                        if (i + 2 < pattern.Length && pattern[i + 2] == '/')
+                        if (i + 2 < span.Length && span[i + 2] == '/')
                         {
                             // **/ means "zero or more directories"
                             sb.Append("(?:.*/)?");
@@ -310,15 +329,26 @@ public sealed class GitIgnoreMatcher
         return sb.ToString();
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string ComputeStaticPrefix(string pattern)
     {
-        var idx = pattern.IndexOfAny(['*', '?', '[']);
+        // Use SIMD-optimized search for glob special characters
+        var span = pattern.AsSpan();
+        var idx = span.IndexOfAny(GlobSpecialChars);
         var prefix = idx < 0 ? pattern : pattern[..idx];
         return prefix.Trim('/');
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string NormalizePath(string path)
-        => path.Replace('\\', '/');
+    {
+        // Fast path: check if normalization is needed using Span
+        var span = path.AsSpan();
+        if (!span.Contains('\\'))
+            return path;
+
+        return path.Replace('\\', '/');
+    }
 
     private sealed record Rule(
         Regex Pattern,

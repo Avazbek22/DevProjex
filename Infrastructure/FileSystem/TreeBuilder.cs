@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.CompilerServices;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
 
@@ -6,6 +7,9 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class TreeBuilder : ITreeBuilder
 {
+	// Pre-allocated comparer instance to avoid allocation per sort
+	private static readonly FileSystemInfoComparer EntryComparer = new();
+
 	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
 		var state = new BuildState();
@@ -42,11 +46,9 @@ public sealed class TreeBuilder : ITreeBuilder
 		FileSystemInfo[] entries;
 		try
 		{
-			entries = new DirectoryInfo(path)
-				.GetFileSystemInfos()
-				.OrderBy(fi => !IsDirectory(fi))
-				.ThenBy(fi => fi.Name, StringComparer.OrdinalIgnoreCase)
-				.ToArray();
+			// Get entries and sort in-place - avoids LINQ allocations
+			entries = new DirectoryInfo(path).GetFileSystemInfos();
+			Array.Sort(entries, EntryComparer);
 		}
 		catch (UnauthorizedAccessException)
 		{
@@ -280,5 +282,44 @@ public sealed class TreeBuilder : ITreeBuilder
 	{
 		public bool RootAccessDenied { get; set; }
 		public bool HadAccessDenied { get; set; }
+	}
+
+	/// <summary>
+	/// High-performance comparer for FileSystemInfo entries.
+	/// Sorts directories before files, then by name (case-insensitive).
+	/// Uses inlined checks to avoid virtual method overhead.
+	/// </summary>
+	private sealed class FileSystemInfoComparer : IComparer<FileSystemInfo>
+	{
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public int Compare(FileSystemInfo? x, FileSystemInfo? y)
+		{
+			if (ReferenceEquals(x, y)) return 0;
+			if (x is null) return -1;
+			if (y is null) return 1;
+
+			// Directories first (inlined attribute check)
+			bool xIsDir = IsDirectoryFast(x);
+			bool yIsDir = IsDirectoryFast(y);
+
+			if (xIsDir != yIsDir)
+				return xIsDir ? -1 : 1;
+
+			// Then by name, case-insensitive ordinal (fastest string comparison)
+			return string.Compare(x.Name, y.Name, StringComparison.OrdinalIgnoreCase);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		private static bool IsDirectoryFast(FileSystemInfo entry)
+		{
+			try
+			{
+				return (entry.Attributes & FileAttributes.Directory) != 0;
+			}
+			catch
+			{
+				return false;
+			}
+		}
 	}
 }

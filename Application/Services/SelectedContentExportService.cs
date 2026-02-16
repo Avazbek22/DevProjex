@@ -27,14 +27,20 @@ public sealed class SelectedContentExportService
 
 	public async Task<string> BuildAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken)
 	{
-		var files = filePaths
-			.Where(p => !string.IsNullOrWhiteSpace(p))
-			.Distinct(PathComparer.Default)
-			.OrderBy(p => p, PathComparer.Default)
-			.ToList();
+		// Use HashSet for O(1) deduplication
+		var uniqueFiles = new HashSet<string>(PathComparer.Default);
+		foreach (var path in filePaths)
+		{
+			if (!string.IsNullOrWhiteSpace(path))
+				uniqueFiles.Add(path);
+		}
 
-		if (files.Count == 0)
+		if (uniqueFiles.Count == 0)
 			return string.Empty;
+
+		// Convert to list and sort in-place
+		var files = new List<string>(uniqueFiles);
+		files.Sort(PathComparer.Default);
 
 		var sb = new StringBuilder();
 		bool anyWritten = false;

@@ -1,6 +1,7 @@
 using System;
+using System.Buffers;
 using System.IO;
-using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using DevProjex.Kernel.Abstractions;
 
@@ -13,6 +14,10 @@ public sealed class RepoCacheService : IRepoCacheService
 {
 	private const string AppFolderName = "DevProjex";
 	private const string CacheFolderName = "RepoCache";
+
+	// Pre-compiled search values for O(1) invalid character lookup (uses SIMD when available)
+	private static readonly SearchValues<char> InvalidFileNameChars =
+		SearchValues.Create("<>:\"/\\|?*");
 
 	public string CacheRootPath { get; }
 
@@ -146,21 +151,29 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static string SanitizeFileName(string name)
 	{
 		if (string.IsNullOrWhiteSpace(name))
 			return "repo";
 
-		// Cross-platform invalid characters for file/folder names
-		// Windows: < > : " / \ | ? *
-		// Linux/macOS: /
-		// We remove all Windows invalid chars for maximum compatibility
-		var invalidChars = new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' };
+		// Use string.Create for zero-allocation string building when possible
+		var span = name.AsSpan();
 
-		var sanitized = new StringBuilder(name.Length);
-		foreach (var c in name)
+		// Fast path: check if sanitization is needed using SIMD-optimized search
+		if (!span.ContainsAny(InvalidFileNameChars) && !ContainsControlChars(span))
 		{
-			if (!invalidChars.Contains(c) && !char.IsControl(c))
+			var trimmed = name.Trim();
+			if (string.IsNullOrWhiteSpace(trimmed))
+				return "repo";
+			return trimmed.Length > 100 ? trimmed[..100] : trimmed;
+		}
+
+		// Slow path: need to filter characters
+		var sanitized = new StringBuilder(name.Length);
+		foreach (var c in span)
+		{
+			if (!InvalidFileNameChars.Contains(c) && !char.IsControl(c))
 				sanitized.Append(c);
 		}
 
@@ -172,5 +185,16 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		// Limit length to avoid path too long issues (keep it reasonable)
 		return result.Length > 100 ? result[..100] : result;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static bool ContainsControlChars(ReadOnlySpan<char> span)
+	{
+		foreach (var c in span)
+		{
+			if (char.IsControl(c))
+				return true;
+		}
+		return false;
 	}
 }

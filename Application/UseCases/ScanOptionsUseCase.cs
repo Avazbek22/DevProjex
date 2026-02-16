@@ -33,9 +33,16 @@ public sealed class ScanOptionsUseCase
 		var extensions = extensionsTask.Result;
 		var rootFolders = rootFoldersTask.Result;
 
+		// Convert to List and sort in-place - avoids LINQ intermediate allocations
+		var extensionsList = extensions.Value.ToList();
+		extensionsList.Sort(StringComparer.OrdinalIgnoreCase);
+
+		var rootFoldersList = rootFolders.Value.ToList();
+		rootFoldersList.Sort(StringComparer.OrdinalIgnoreCase);
+
 		return new ScanOptionsResult(
-			Extensions: extensions.Value.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList(),
-			RootFolders: rootFolders.Value.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList(),
+			Extensions: extensionsList,
+			RootFolders: rootFoldersList,
 			RootAccessDenied: extensions.RootAccessDenied || rootFolders.RootAccessDenied,
 			HadAccessDenied: extensions.HadAccessDenied || rootFolders.HadAccessDenied);
 	}

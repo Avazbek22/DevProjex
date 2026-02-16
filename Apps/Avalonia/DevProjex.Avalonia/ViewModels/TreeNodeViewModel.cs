@@ -267,8 +267,21 @@ public sealed class TreeNodeViewModel : ViewModelBase
         if (Children.Count == 0)
             return;
 
-        bool allChecked = Children.All(child => child.IsChecked == true);
-        bool anyChecked = Children.Any(child => child.IsChecked != false);
+        // Single pass through children instead of two LINQ enumerations
+        var allChecked = true;
+        var anyChecked = false;
+        foreach (var child in Children)
+        {
+            if (child.IsChecked != true)
+                allChecked = false;
+            if (child.IsChecked != false)
+                anyChecked = true;
+
+            // Early exit: if we know result is indeterminate, stop checking
+            if (!allChecked && anyChecked)
+                break;
+        }
+
         bool? next = allChecked ? true : anyChecked ? null : false;
 
         if (_isChecked != next)

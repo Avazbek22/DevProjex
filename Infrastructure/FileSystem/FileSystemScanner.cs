@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO;
+using System.Runtime.CompilerServices;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
 
@@ -308,12 +309,21 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		return false;
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static bool IsExtensionlessFileName(string name)
 	{
 		if (string.IsNullOrWhiteSpace(name))
 			return false;
 
-		var extension = Path.GetExtension(name);
-		return string.IsNullOrEmpty(extension) || extension == ".";
+		// Use Span to find extension without allocation
+		var span = name.AsSpan();
+		var dotIndex = span.LastIndexOf('.');
+
+		// No dot found or dot is first char (like .gitignore)
+		if (dotIndex <= 0)
+			return dotIndex != 0;
+
+		// Dot is at the end (like "file.")
+		return dotIndex == span.Length - 1;
 	}
 }
