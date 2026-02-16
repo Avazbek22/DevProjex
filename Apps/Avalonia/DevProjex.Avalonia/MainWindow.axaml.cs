@@ -1525,19 +1525,17 @@ public partial class MainWindow : Window
         _restoreFilterAfterPreview = _viewModel.FilterVisible;
         ForceCloseSearchAndFilterForPreview();
 
-        // Step 1: Start preview bar animation (island slides down)
-        AnimatePreviewBar(true);
+        // Animate preview panel open and wait until transition settles.
+        await AnimatePreviewBarAsync(show: true);
 
-        // Step 2: Wait for animation to complete (250ms)
-        await Task.Delay(280);
-
-        // Step 3: Switch from tree to preview content area
+        // Switch from tree view to preview host only after panel is fully opened.
         _viewModel.IsPreviewMode = true;
 
-        // Step 4: Small delay for UI to update
-        await Task.Delay(50);
+        // Wait for render passes instead of hard-coded delays to keep animation
+        // smooth across different refresh rates and GPU speeds.
+        await WaitForPreviewRenderPassesAsync();
 
-        // Step 5: Start loading preview content
+        // Start loading preview content after preview host is painted.
         SchedulePreviewRefresh(immediate: true);
     }
 
@@ -1547,8 +1545,7 @@ public partial class MainWindow : Window
             return;
 
         CancelPreviewRefresh();
-        AnimatePreviewBar(false);
-        await WaitForPanelAnimationAsync(PreviewBarAnimationDuration);
+        await AnimatePreviewBarAsync(show: false);
 
         _viewModel.IsPreviewMode = false;
         RestoreSearchAndFilterAfterPreview();
@@ -1738,7 +1735,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void AnimatePreviewBar(bool show)
+    private async Task AnimatePreviewBarAsync(bool show)
     {
         if (_previewBar is null || _previewBarTransform is null || _previewBarContainer is null) return;
         if (_previewBarAnimating) return;
@@ -1757,6 +1754,17 @@ public partial class MainWindow : Window
         {
             _previewBarAnimating = false;
         }
+    }
+
+    private static async Task WaitForPreviewRenderPassesAsync()
+    {
+        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+            static () => { },
+            global::Avalonia.Threading.DispatcherPriority.Render);
+
+        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+            static () => { },
+            global::Avalonia.Threading.DispatcherPriority.Render);
     }
 
     private async void AnimateFilterBar(bool show)
