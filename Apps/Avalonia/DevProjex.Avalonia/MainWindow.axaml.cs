@@ -175,6 +175,8 @@ public partial class MainWindow : Window
     private int _previewBuildVersion;
     private volatile bool _previewRefreshRequested;
     private bool _previewScrollSyncActive;
+    private CancellationTokenSource? _previewMemoryCleanupCts;
+    private int _previewMemoryCleanupVersion;
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
 
@@ -455,6 +457,8 @@ public partial class MainWindow : Window
             _previewDebounceTimer.Stop();
             _previewDebounceTimer.Tick -= OnPreviewDebounceTick;
         }
+        _previewMemoryCleanupCts?.Cancel();
+        _previewMemoryCleanupCts?.Dispose();
 
         // Dispose coordinators
         _searchCoordinator.Dispose();
@@ -1227,6 +1231,7 @@ public partial class MainWindow : Window
         {
             ApplyPreviewText(_viewModel.PreviewNoDataText);
             _previewRefreshRequested = false;
+            SchedulePreviewMemoryCleanup();
             return;
         }
 
@@ -1306,6 +1311,7 @@ public partial class MainWindow : Window
 
             ApplyPreviewText(previewText, lineNumbers);
             _previewRefreshRequested = false;
+            SchedulePreviewMemoryCleanup();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1314,7 +1320,10 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             if (buildVersion == Volatile.Read(ref _previewBuildVersion))
+            {
                 ApplyPreviewText(ex.Message);
+                SchedulePreviewMemoryCleanup();
+            }
         }
         finally
         {
@@ -1530,16 +1539,19 @@ public partial class MainWindow : Window
         SchedulePreviewRefresh(immediate: true);
     }
 
-    private void ClosePreviewMode()
+    private async void ClosePreviewMode()
     {
         if (_previewBarAnimating)
             return;
 
-        _viewModel.IsPreviewMode = false;
-        AnimatePreviewBar(false);
-        RestoreSearchAndFilterAfterPreview();
         CancelPreviewRefresh();
+        AnimatePreviewBar(false);
+        await WaitForPanelAnimationAsync(PreviewBarAnimationDuration);
+
+        _viewModel.IsPreviewMode = false;
+        RestoreSearchAndFilterAfterPreview();
         ClearPreviewMemory();
+        SchedulePreviewMemoryCleanup();
         _treeView?.Focus();
     }
 
@@ -1559,15 +1571,6 @@ public partial class MainWindow : Window
     {
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineNumbers = "1";
-
-        // Preview strings are often LOH-sized (>85 KB for any non-trivial project).
-        // Request LOH compaction so the large char[] / string blocks are truly freed,
-        // then return physical pages to the OS so Task Manager reflects the drop.
-        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(1, GCCollectionMode.Forced, blocking: false);
-        TrimNativeWorkingSet();
     }
 
     /// <summary>
@@ -1597,6 +1600,54 @@ public partial class MainWindow : Window
             await Task.Delay(400);
             ForceMemoryCleanup();
         });
+    }
+
+    /// <summary>
+    /// Schedules aggressive cleanup specifically for preview rendering completion.
+    /// Multiple rapid requests are coalesced into one cleanup run.
+    /// </summary>
+    private void SchedulePreviewMemoryCleanup()
+    {
+        var cleanupCts = ReplaceCancellationSource(ref _previewMemoryCleanupCts);
+        var cleanupVersion = Interlocked.Increment(ref _previewMemoryCleanupVersion);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Wait for text updates to be painted before forcing collection.
+                await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                    static () => { },
+                    global::Avalonia.Threading.DispatcherPriority.Render);
+                cleanupCts.Token.ThrowIfCancellationRequested();
+
+                if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
+                    return;
+
+                await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                    static () => { },
+                    global::Avalonia.Threading.DispatcherPriority.Render);
+                cleanupCts.Token.ThrowIfCancellationRequested();
+
+                if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
+                    return;
+
+                // Keep a tiny buffer so panel/tree transitions settle first.
+                await Task.Delay(140, cleanupCts.Token);
+                if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
+                    return;
+
+                ForceMemoryCleanup();
+            }
+            catch (OperationCanceledException)
+            {
+                // Ignore canceled coalesced cleanup requests.
+            }
+            finally
+            {
+                DisposeIfCurrent(ref _previewMemoryCleanupCts, cleanupCts);
+            }
+        }, cleanupCts.Token);
     }
 
     /// <summary>
@@ -2614,21 +2665,35 @@ public partial class MainWindow : Window
         }, global::Avalonia.Threading.DispatcherPriority.Background);
     }
 
-    private void CloseFilter()
+    private async void CloseFilter()
     {
         if (!_viewModel.FilterVisible) return;
         if (_filterBarAnimating) return;
 
         _viewModel.FilterVisible = false;
-        _viewModel.NameFilter = string.Empty;
-        _filterCoordinator.CancelPending();
-        ApplyFilterRealtime();
         AnimateFilterBar(false);
         _treeView?.Focus();
 
-        // Aggressively release filter-related objects after tree rebuild
-        // and trim working set on a background thread.
-        ScheduleBackgroundMemoryCleanup();
+        // Let close animation complete first to avoid concurrent UI + tree rebuild pressure.
+        await WaitForPanelAnimationAsync(FilterBarAnimationDuration);
+
+        // If filter was reopened during animation, keep current query/state intact.
+        if (_viewModel.FilterVisible)
+            return;
+
+        if (!string.IsNullOrEmpty(_viewModel.NameFilter))
+        {
+            _viewModel.NameFilter = string.Empty;
+            _filterCoordinator.CancelPending();
+            _ = ApplyFilterRealtimeAsync(CancellationToken.None);
+
+            // Release stale filtered snapshots after rebuild is queued.
+            ScheduleBackgroundMemoryCleanup();
+        }
+        else
+        {
+            _filterCoordinator.CancelPending();
+        }
     }
 
     private void ForceCloseSearchAndFilterForPreview()
@@ -3149,6 +3214,9 @@ public partial class MainWindow : Window
     {
         _restoreSearchAfterPreview = false;
         _restoreFilterAfterPreview = false;
+        _previewMemoryCleanupCts?.Cancel();
+        _previewMemoryCleanupCts?.Dispose();
+        _previewMemoryCleanupCts = null;
 
         // Clear search state first (holds references to TreeNodeViewModel)
         _searchCoordinator.ClearSearchState();
