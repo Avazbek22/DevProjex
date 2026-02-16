@@ -17,11 +17,6 @@
       <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
       <Setter Property="Padding"
               Value="{Binding DataContext.TreeItemPadding, RelativeSource={RelativeSource AncestorType=TreeView}}" />
-      <Setter Property="ItemsPanel">
-        <ItemsPanelTemplate>
-          <VirtualizingStackPanel />
-        </ItemsPanelTemplate>
-      </Setter>
     </Style>
     <!-- Fix for virtualization cache bug: the :empty pseudo-class may not update correctly
          when VirtualizingStackPanel recycles TreeViewItem containers. We use Opacity binding
@@ -508,7 +503,7 @@
                         FontSize="{Binding TreeFontSize}">
                 <TreeView.ItemsPanel>
                   <ItemsPanelTemplate>
-                    <VirtualizingStackPanel />
+                    <VirtualizingStackPanel CacheLength="2" />
                   </ItemsPanelTemplate>
                 </TreeView.ItemsPanel>
                 <TreeView.ItemTemplate>
