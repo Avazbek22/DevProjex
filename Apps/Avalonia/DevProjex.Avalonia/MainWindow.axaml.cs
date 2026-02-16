@@ -287,6 +287,7 @@ public partial class MainWindow : Window
             _searchBar.RenderTransform = _searchBarTransform;
             // Start hidden (collapsed height, off-screen to the top)
             _searchBarContainer.Height = 0;
+            _searchBarContainer.IsVisible = false;
             _searchBarTransform.Y = -SearchBarHeight;
             _searchBar.Opacity = 0;
         }
@@ -299,6 +300,7 @@ public partial class MainWindow : Window
             _filterBar.RenderTransform = _filterBarTransform;
             // Start hidden (collapsed height, off-screen to the top)
             _filterBarContainer.Height = 0;
+            _filterBarContainer.IsVisible = false;
             _filterBarTransform.Y = -FilterBarHeight;
             _filterBar.Opacity = 0;
         }
@@ -1720,11 +1722,15 @@ public partial class MainWindow : Window
         try
         {
             EnsureSearchBarTransitions();
+            if (show)
+                _searchBarContainer.IsVisible = true;
             _searchBarContainer.Height = show ? SearchBarHeight : 0.0;
             _searchBarContainer.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0.0);
             _searchBarTransform.Y = show ? 0.0 : -SearchBarHeight;
             _searchBar.Opacity = show ? 1.0 : 0.0;
             await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
+            if (!show && !_viewModel.SearchVisible)
+                _searchBarContainer.IsVisible = false;
         }
         finally
         {
@@ -1762,11 +1768,15 @@ public partial class MainWindow : Window
         try
         {
             EnsureFilterBarTransitions();
+            if (show)
+                _filterBarContainer.IsVisible = true;
             _filterBarContainer.Height = show ? FilterBarHeight : 0.0;
             _filterBarContainer.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0.0);
             _filterBarTransform.Y = show ? 0.0 : -FilterBarHeight;
             _filterBar.Opacity = show ? 1.0 : 0.0;
             await WaitForPanelAnimationAsync(FilterBarAnimationDuration);
+            if (!show && !_viewModel.FilterVisible)
+                _filterBarContainer.IsVisible = false;
         }
         finally
         {
@@ -2657,12 +2667,7 @@ public partial class MainWindow : Window
         if (!focusInput)
             return;
 
-        // Focus after a brief delay to ensure animation has started
-        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            _filterBar?.FilterBoxControl?.Focus();
-            _filterBar?.FilterBoxControl?.SelectAll();
-        }, global::Avalonia.Threading.DispatcherPriority.Background);
+        _ = FocusFilterBoxAfterOpenAnimationAsync();
     }
 
     private async void CloseFilter()
@@ -2714,6 +2719,7 @@ public partial class MainWindow : Window
         {
             _searchBarContainer.Height = 0;
             _searchBarContainer.Margin = new Thickness(0);
+            _searchBarContainer.IsVisible = false;
         }
 
         if (_searchBarTransform is not null)
@@ -2726,6 +2732,7 @@ public partial class MainWindow : Window
         {
             _filterBarContainer.Height = 0;
             _filterBarContainer.Margin = new Thickness(0);
+            _filterBarContainer.IsVisible = false;
         }
 
         if (_filterBarTransform is not null)
@@ -3000,11 +3007,32 @@ public partial class MainWindow : Window
         if (!focusInput)
             return;
 
-        // Focus after a brief delay to ensure animation has started
-        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        _ = FocusSearchBoxAfterOpenAnimationAsync();
+    }
+
+    private async Task FocusSearchBoxAfterOpenAnimationAsync()
+    {
+        await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
+        if (!_viewModel.SearchVisible || _viewModel.IsPreviewMode)
+            return;
+
+        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
             _searchBar?.SearchBoxControl?.Focus();
             _searchBar?.SearchBoxControl?.SelectAll();
+        }, global::Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private async Task FocusFilterBoxAfterOpenAnimationAsync()
+    {
+        await WaitForPanelAnimationAsync(FilterBarAnimationDuration);
+        if (!_viewModel.FilterVisible || _viewModel.IsPreviewMode)
+            return;
+
+        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _filterBar?.FilterBoxControl?.Focus();
+            _filterBar?.FilterBoxControl?.SelectAll();
         }, global::Avalonia.Threading.DispatcherPriority.Background);
     }
 

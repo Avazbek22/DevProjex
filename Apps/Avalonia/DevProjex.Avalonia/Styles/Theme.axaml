@@ -507,6 +507,8 @@
     <!-- Rounded controls inside search/filter panels -->
     <Style Selector="Border.search-panel TextBox, Border.filter-panel TextBox">
         <Setter Property="CornerRadius" Value="6" />
+        <!-- Prevent adorner-layer bleed while panel slides in/out under clipping. -->
+        <Setter Property="FocusAdorner" Value="{x:Null}" />
     </Style>
 
     <Style Selector="Border.search-panel Button, Border.filter-panel Button">
