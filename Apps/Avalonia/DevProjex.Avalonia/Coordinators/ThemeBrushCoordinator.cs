@@ -13,12 +13,13 @@ using DevProjex.Avalonia.ViewModels;
 
 namespace DevProjex.Avalonia.Coordinators;
 
-public sealed class ThemeBrushCoordinator
+public sealed class ThemeBrushCoordinator : IDisposable
 {
     private readonly Window _window;
     private readonly MainWindowViewModel _viewModel;
     private readonly Func<Menu?> _menuProvider;
 
+    // Reusable brushes - mutate Color instead of allocating new instances
     private SolidColorBrush _currentMenuBrush = new(Colors.Black);
     private SolidColorBrush _currentMenuChildBrush = new(Colors.Black);
     private SolidColorBrush _currentMenuHoverBrush = new(Colors.Gray);
@@ -26,6 +27,9 @@ public sealed class ThemeBrushCoordinator
     private SolidColorBrush _currentMenuChildHoverBrush = new(Colors.Gray);
     private SolidColorBrush _currentMenuChildPressedBrush = new(Colors.DimGray);
     private SolidColorBrush _currentBorderBrush = new(Colors.Gray);
+    private SolidColorBrush? _backgroundBrush;
+    private SolidColorBrush? _panelBrush;
+    private SolidColorBrush? _accentBrush;
 
     public ThemeBrushCoordinator(Window window, MainWindowViewModel viewModel, Func<Menu?> menuProvider)
     {
@@ -232,29 +236,32 @@ public sealed class ThemeBrushCoordinator
 
         borderAlpha = (byte)Math.Round(255 * borderStrength);
 
+        // Mutate existing brush colors instead of allocating new instances
         var bgColor = Color.FromArgb(bgAlpha, bgBase.R, bgBase.G, bgBase.B);
-        var backgroundBrush = new SolidColorBrush(bgColor);
-        UpdateResource("AppBackgroundBrush", backgroundBrush);
+        _backgroundBrush ??= new SolidColorBrush(bgColor);
+        _backgroundBrush.Color = bgColor;
+        UpdateResource("AppBackgroundBrush", _backgroundBrush);
 
         var panelColor = Color.FromArgb(panelAlpha, panelBase.R, panelBase.G, panelBase.B);
-        var panelBrush = new SolidColorBrush(panelColor);
-        UpdateResource("AppPanelBrush", panelBrush);
+        _panelBrush ??= new SolidColorBrush(panelColor);
+        _panelBrush.Color = panelColor;
+        UpdateResource("AppPanelBrush", _panelBrush);
 
         var menuColor = Color.FromArgb(menuAlpha, menuBase.R, menuBase.G, menuBase.B);
-        _currentMenuBrush = new SolidColorBrush(menuColor);
+        _currentMenuBrush.Color = menuColor;
         UpdateResource("MenuPopupBrush", _currentMenuBrush);
 
         var menuChildColor = Color.FromArgb(menuChildAlpha, menuChildBase.R, menuChildBase.G, menuChildBase.B);
-        _currentMenuChildBrush = new SolidColorBrush(menuChildColor);
+        _currentMenuChildBrush.Color = menuChildColor;
         UpdateResource("MenuChildPopupBrush", _currentMenuChildBrush);
 
         var hoverColor = isDark ? Color.Parse("#343B46") : Color.Parse("#DCE7F4");
         var pressedColor = isDark ? Color.Parse("#3B4452") : Color.Parse("#CFDDF0");
 
-        _currentMenuHoverBrush = new SolidColorBrush(hoverColor);
-        _currentMenuPressedBrush = new SolidColorBrush(pressedColor);
-        _currentMenuChildHoverBrush = new SolidColorBrush(hoverColor);
-        _currentMenuChildPressedBrush = new SolidColorBrush(pressedColor);
+        _currentMenuHoverBrush.Color = hoverColor;
+        _currentMenuPressedBrush.Color = pressedColor;
+        _currentMenuChildHoverBrush.Color = hoverColor;
+        _currentMenuChildPressedBrush.Color = pressedColor;
 
         UpdateResource("MenuHoverBrush", _currentMenuHoverBrush);
         UpdateResource("MenuPressedBrush", _currentMenuPressedBrush);
@@ -263,11 +270,13 @@ public sealed class ThemeBrushCoordinator
 
         var borderBase = isDark ? Color.Parse("#505050") : Color.Parse("#C0C0C0");
         var borderColor = Color.FromArgb(borderAlpha, borderBase.R, borderBase.G, borderBase.B);
-        _currentBorderBrush = new SolidColorBrush(borderColor);
+        _currentBorderBrush.Color = borderColor;
         UpdateResource("AppBorderBrush", _currentBorderBrush);
 
         var accentColor = isDark ? Color.Parse("#2D8CFF") : Color.Parse("#0078D4");
-        UpdateResource("AppAccentBrush", new SolidColorBrush(accentColor));
+        _accentBrush ??= new SolidColorBrush(accentColor);
+        _accentBrush.Color = accentColor;
+        UpdateResource("AppAccentBrush", _accentBrush);
 
         ApplyMenuBrushesDirect();
     }
@@ -395,4 +404,11 @@ public sealed class ThemeBrushCoordinator
         }
     }
 
+    public void Dispose()
+    {
+        // Null out brush references to break any resource dictionary ties
+        _backgroundBrush = null;
+        _panelBrush = null;
+        _accentBrush = null;
+    }
 }

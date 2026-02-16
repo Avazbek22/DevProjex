@@ -19,6 +19,7 @@ public partial class HelpPopoverView : UserControl
     {
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += OnDataContextChanged;
+        DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -166,6 +167,15 @@ public partial class HelpPopoverView : UserControl
 
         Grid.SetColumn(grid.Children[1], 1);
         return grid;
+    }
+
+    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (_boundViewModel is not null)
+        {
+            _boundViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _boundViewModel = null;
+        }
     }
 
     private StackPanel? GetBodyPanel() => this.FindControl<StackPanel>("BodyPanel");

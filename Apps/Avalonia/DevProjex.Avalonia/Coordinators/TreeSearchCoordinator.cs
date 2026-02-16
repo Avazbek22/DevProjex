@@ -110,8 +110,8 @@ public sealed class TreeSearchCoordinator : IDisposable
     public void UpdateHighlights(string? query)
     {
         var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
-        foreach (var node in _viewModel.TreeNodes.SelectMany(n => n.Flatten()))
-            node.UpdateSearchHighlight(query, highlightBackground, highlightForeground, normalForeground, currentBackground);
+        TreeNodeViewModel.ForEachDescendant(_viewModel.TreeNodes, node =>
+            node.UpdateSearchHighlight(query, highlightBackground, highlightForeground, normalForeground, currentBackground));
     }
 
     public void ClearSearchState()
@@ -239,13 +239,13 @@ public sealed class TreeSearchCoordinator : IDisposable
     {
         var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
 
-        foreach (var node in _viewModel.TreeNodes.SelectMany(n => n.Flatten()))
+        TreeNodeViewModel.ForEachDescendant(_viewModel.TreeNodes, node =>
         {
             if (!node.HasHighlightedDisplay && !node.IsCurrentSearchMatch)
-                continue;
+                return;
 
             node.UpdateSearchHighlight(null, highlightBackground, highlightForeground, normalForeground, currentBackground);
-        }
+        });
     }
 
     private (IBrush highlightBackground, IBrush highlightForeground, IBrush normalForeground, IBrush currentBackground)

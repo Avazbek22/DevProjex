@@ -4,7 +4,7 @@ using DevProjex.Avalonia.ViewModels;
 
 namespace DevProjex.Avalonia.Services;
 
-public sealed class ToastService : IToastService
+public sealed class ToastService : IToastService, IDisposable
 {
 	private const int MaxToasts = 3;
 	private static readonly TimeSpan DisplayDuration = TimeSpan.FromSeconds(2);
@@ -80,5 +80,17 @@ public sealed class ToastService : IToastService
 		}
 
 		Items.Remove(toast);
+	}
+
+	public void Dispose()
+	{
+		foreach (var cts in _dismissTokens.Values)
+		{
+			cts.Cancel();
+			cts.Dispose();
+		}
+
+		_dismissTokens.Clear();
+		Items.Clear();
 	}
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Frozen;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -177,9 +178,6 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _metricsCalculationCts;
     private global::Avalonia.Threading.DispatcherTimer? _metricsDebounceTimer;
 
-    // Idle memory cleanup - aggressive GC when app is idle with project loaded
-    private System.Timers.Timer? _idleMemoryCleanupTimer;
-    private DateTime _lastUserActivity = DateTime.UtcNow;
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _isBackgroundMetricsActive;
     private int _metricsRecalcVersion;
@@ -191,7 +189,7 @@ public partial class MainWindow : Window
     private bool _metricsCancellationRequestedByUser;
     private volatile bool _hasCompleteMetricsBaseline;
     private ProjectLoadCancellationSnapshot? _activeProjectLoadCancellationSnapshot;
-    private static readonly HashSet<string> MetricsWarmupBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly FrozenSet<string> MetricsWarmupBinaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
         ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
@@ -201,7 +199,7 @@ public partial class MainWindow : Window
         ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
         ".ttf", ".otf", ".woff", ".woff2", ".eot",
         ".bin", ".dat", ".db", ".sqlite", ".mdb"
-    };
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -351,22 +349,6 @@ public partial class MainWindow : Window
             app.ActualThemeVariantChanged += _themeChangedHandler;
         }
 
-        // Initialize idle memory cleanup timer (runs every 45 seconds when window is active)
-        // Performs aggressive GC + working set trim when user is inactive
-        _idleMemoryCleanupTimer = new System.Timers.Timer(45_000) { AutoReset = true };
-        _idleMemoryCleanupTimer.Elapsed += OnIdleMemoryCleanupTimerElapsed;
-        _idleMemoryCleanupTimer.Start();
-
-        // Track user activity for idle detection + restart timer when window becomes active
-        Activated += (_, _) =>
-        {
-            _lastUserActivity = DateTime.UtcNow;
-            _idleMemoryCleanupTimer?.Start(); // Resume timer when window is active again
-        };
-        PointerMoved += (_, _) => _lastUserActivity = DateTime.UtcNow;
-        PointerPressed += (_, _) => _lastUserActivity = DateTime.UtcNow;
-        KeyDown += (_, _) => _lastUserActivity = DateTime.UtcNow;
-
         InitializeFonts();
         _selectionCoordinator.HookOptionListeners(_viewModel.RootFolders);
         _selectionCoordinator.HookOptionListeners(_viewModel.Extensions);
@@ -436,6 +418,28 @@ public partial class MainWindow : Window
         // Unsubscribe from tree checkbox changes for metrics
         UnsubscribeFromMetricsUpdates();
 
+        // Unsubscribe from DragDrop events
+        if (_dropZoneContainer is not null)
+        {
+            _dropZoneContainer.RemoveHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            _dropZoneContainer.RemoveHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
+            _dropZoneContainer.RemoveHandler(DragDrop.DropEvent, OnDropZoneDrop);
+        }
+
+        // Unsubscribe from tree pointer events
+        if (_treeView is not null)
+            _treeView.PointerEntered -= OnTreePointerEntered;
+
+        // Unsubscribe from tunneled/bubbled events
+        RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
+        RemoveHandler(KeyDownEvent, OnKeyDown);
+        RemoveHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened);
+
+        // Unsubscribe from window lifecycle events
+        Opened -= OnOpened;
+        Closed -= OnWindowClosed;
+        Deactivated -= OnDeactivated;
+
         // Cancel metrics calculation
         _metricsCalculationCts?.Cancel();
         _metricsCalculationCts?.Dispose();
@@ -460,6 +464,7 @@ public partial class MainWindow : Window
         _searchCoordinator.Dispose();
         _filterCoordinator.Dispose();
         _selectionCoordinator.Dispose();
+        _themeBrushCoordinator.Dispose();
 
         // Dispose ViewModel to clean up collection event handlers
         _viewModel.Dispose();
@@ -479,6 +484,10 @@ public partial class MainWindow : Window
         // Dispose icon cache to release bitmap resources
         _iconCache.Dispose();
 
+        // Dispose toast service to cancel pending dismiss timers
+        if (_toastService is IDisposable toastDisposable)
+            toastDisposable.Dispose();
+
         // Clear tree references and release memory
         foreach (var node in _viewModel.TreeNodes)
             node.ClearRecursive();
@@ -487,7 +496,7 @@ public partial class MainWindow : Window
         _filterExpansionSnapshot = null;
 
         // Clear file metrics cache
-        ClearFileMetricsCache(trimLargeCapacity: true);
+        ClearFileMetricsCache(trimCapacity: true);
 
         // Clean up repository cache on exit
         _repoCacheService.ClearAllCache();
@@ -500,14 +509,6 @@ public partial class MainWindow : Window
         {
             _dropZoneFloatTimer.Stop();
             _dropZoneFloatTimer.Tick -= OnDropZoneFloatTick;
-        }
-
-        // Dispose idle memory cleanup timer
-        if (_idleMemoryCleanupTimer is not null)
-        {
-            _idleMemoryCleanupTimer.Stop();
-            _idleMemoryCleanupTimer.Elapsed -= OnIdleMemoryCleanupTimerElapsed;
-            _idleMemoryCleanupTimer.Dispose();
         }
     }
 
@@ -581,13 +582,6 @@ public partial class MainWindow : Window
             _viewModel.HelpPopoverOpen = false;
         if (_viewModel.HelpDocsPopoverOpen)
             _viewModel.HelpDocsPopoverOpen = false;
-
-        // Stop periodic timer when window is inactive (saves CPU)
-        _idleMemoryCleanupTimer?.Stop();
-
-        // Do one final cleanup when losing focus, then stop
-        if (_viewModel.IsProjectLoaded)
-            ScheduleBackgroundMemoryCleanup();
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -1589,102 +1583,38 @@ public partial class MainWindow : Window
 
     private void ClearPreviewMemory()
     {
-        // Force clear preview data by setting to different value first, then empty
-        // This ensures RaisePropertyChanged is called and binding releases reference
-        _viewModel.PreviewText = "\0"; // Temporary different value
-        _viewModel.PreviewLineNumbers = "\0";
-
-        // Now set to empty - binding will update
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineNumbers = "1";
 
-        // Schedule aggressive garbage collection for large preview strings
-        // Large strings (>85KB) go to LOH (Gen2), requires LOH compaction to return memory to OS
-        _ = Task.Run(async () =>
-        {
-            // Wait for close animation (250ms) and UI updates to complete
-            await Task.Delay(350);
-
-            // Request LOH compaction on next GC - critical for returning memory to OS
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-
-            // Use Aggressive mode for maximum memory recovery
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-
-            // Second cycle after finalizers have run
-            await Task.Delay(100);
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-        });
+        // Preview strings can be large (potentially LOH-sized). Force immediate collection
+        // because the user explicitly closed preview and expects memory to drop.
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(1, GCCollectionMode.Forced, blocking: false);
     }
 
     /// <summary>
-    /// Periodic idle memory cleanup. Runs every 60 seconds to reclaim memory
-    /// that accumulates from Avalonia render loop and .NET runtime allocations.
-    /// </summary>
-    private void OnIdleMemoryCleanupTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
-    {
-        // Only run cleanup when a project is loaded (otherwise nothing to clean)
-        if (!_viewModel.IsProjectLoaded)
-            return;
-
-        // Check if user has been inactive for at least 15 seconds
-        var idleTime = DateTime.UtcNow - _lastUserActivity;
-        if (idleTime.TotalSeconds < 15)
-            return;
-
-        // Aggressive cleanup when user is inactive
-        ForceMemoryCleanup();
-    }
-
-    /// <summary>
-    /// Forces aggressive garbage collection AND returns memory to OS.
-    /// .NET normally keeps memory for future allocations - this forces release.
+    /// Aggressive memory cleanup for user-triggered operations (project switch, git ops).
+    /// Blocking is acceptable here because the user already expects a state transition.
+    /// NOTE: Do NOT call this from idle/background timers — only from explicit user actions.
     /// </summary>
     private static void ForceMemoryCleanup()
     {
-        // Step 1: Aggressive GC with LOH compaction
-        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-
-        // Step 2: Force .NET to return memory to OS (not just mark as free)
-        // This is the key - without this, .NET keeps freed memory for reuse
-        if (OperatingSystem.IsWindows())
-        {
-            // On Windows: trim working set to force memory back to OS
-            try
-            {
-                SetProcessWorkingSetSize(
-                    System.Diagnostics.Process.GetCurrentProcess().Handle,
-                    -1, -1);
-            }
-            catch
-            {
-                // Ignore if fails (permission issues)
-            }
-        }
+        GC.Collect(1, GCCollectionMode.Forced, blocking: false);
     }
 
-    // Windows API to trim process working set (returns memory to OS)
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetProcessWorkingSetSize(IntPtr hProcess, nint dwMinimumWorkingSetSize, nint dwMaximumWorkingSetSize);
-
     /// <summary>
-    /// Schedules background memory cleanup after heavy operations.
-    /// Runs in background to avoid blocking UI.
+    /// Schedules aggressive memory cleanup on a background thread after heavy operations
+    /// (project load, git branch switch, git pull). The delay lets finalizers and
+    /// UI thread finish releasing references before the collection sweep.
     /// </summary>
     private static void ScheduleBackgroundMemoryCleanup()
     {
         _ = Task.Run(async () =>
         {
-            // Wait for UI to settle and references to be released
-            await Task.Delay(500);
+            await Task.Delay(400);
             ForceMemoryCleanup();
         });
     }
@@ -2610,9 +2540,13 @@ public partial class MainWindow : Window
 
         _viewModel.FilterVisible = false;
         _viewModel.NameFilter = string.Empty;
+        _filterCoordinator.CancelPending();
         ApplyFilterRealtime();
         AnimateFilterBar(false);
         _treeView?.Focus();
+
+        // Release filter-related intermediary objects after tree rebuild
+        GC.Collect(1, GCCollectionMode.Forced, blocking: false);
     }
 
     private void ForceCloseSearchAndFilterForPreview()
@@ -2625,6 +2559,9 @@ public partial class MainWindow : Window
 
         _searchBarAnimating = false;
         _filterBarAnimating = false;
+
+        // Cancel any pending debounce operations to avoid wasted background work
+        _filterCoordinator.CancelPending();
 
         if (_searchBarContainer is not null)
         {
@@ -2928,9 +2865,16 @@ public partial class MainWindow : Window
 
         _viewModel.SearchVisible = false;
         _viewModel.SearchQuery = string.Empty;
+
+        // Clear highlights immediately instead of waiting for 120ms debounce,
+        // so InlineCollection/Run objects become collectable right away.
+        _searchCoordinator.UpdateHighlights(null);
         _searchCoordinator.ClearSearchState();
         AnimateSearchBar(false);
         _treeView?.Focus();
+
+        // Release search highlight objects (InlineCollections, Run instances)
+        GC.Collect(1, GCCollectionMode.Forced, blocking: false);
     }
 
     private void OnRootAllChanged(object? sender, RoutedEventArgs e)
@@ -3142,7 +3086,7 @@ public partial class MainWindow : Window
         foreach (var node in _viewModel.TreeNodes)
             node.ClearRecursive();
         _viewModel.ResetTreeNodes();
-        ClearFileMetricsCache(trimLargeCapacity: true);
+        ClearFileMetricsCache(trimCapacity: true);
 
         // Reconnect ItemsSource
         if (_treeView is not null)
@@ -3163,17 +3107,17 @@ public partial class MainWindow : Window
 
         if (forceCompactingGc)
         {
-            // Request LOH compaction - critical for returning memory to OS
-            // Large tree structures and file content strings go to LOH (>85KB)
+            // Full compacting collection — user is switching projects and expects memory
+            // from the old tree (view models, icons, metrics cache) to be freed immediately.
             GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.Collect(1, GCCollectionMode.Forced, blocking: false);
         }
         else
         {
-            // Avoid blocking the UI thread for routine state transitions.
-            GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+            // Non-switching state reset (e.g. reload) — still force collection but skip compaction.
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true);
         }
     }
 
@@ -3298,10 +3242,10 @@ public partial class MainWindow : Window
 
             SchedulePreviewRefresh(immediate: true);
 
-            // Suggest GC to collect old tree objects after building new one
-            // Using non-blocking mode to avoid UI freeze
+            // Collect old tree objects after building the new one.
+            // Full-load refreshes warrant a forced sweep; interactive filter changes skip GC entirely.
             if (!interactiveFilter)
-                GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+                GC.Collect(2, GCCollectionMode.Forced, blocking: false);
         }
         finally
         {
@@ -3695,17 +3639,19 @@ public partial class MainWindow : Window
 
     private HashSet<string> CaptureExpandedNodes()
     {
-        return _viewModel.TreeNodes
-            .SelectMany(node => node.Flatten())
-            .Where(node => node.IsExpanded)
-            .Select(node => node.FullPath)
-            .ToHashSet(PathComparer.Default);
+        var result = new HashSet<string>(PathComparer.Default);
+        TreeNodeViewModel.ForEachDescendant(_viewModel.TreeNodes, node =>
+        {
+            if (node.IsExpanded)
+                result.Add(node.FullPath);
+        });
+        return result;
     }
 
     private void RestoreExpandedNodes(HashSet<string> expandedPaths)
     {
-        foreach (var node in _viewModel.TreeNodes.SelectMany(item => item.Flatten()))
-            node.IsExpanded = expandedPaths.Contains(node.FullPath);
+        TreeNodeViewModel.ForEachDescendant(_viewModel.TreeNodes, node =>
+            node.IsExpanded = expandedPaths.Contains(node.FullPath));
 
         if (_viewModel.TreeNodes.FirstOrDefault() is { } root && !root.IsExpanded)
             root.IsExpanded = true;
@@ -3907,14 +3853,14 @@ public partial class MainWindow : Window
 
             // Collect all file paths from tree
             var filePaths = new List<string>();
-            foreach (var node in _viewModel.TreeNodes.SelectMany(n => n.Flatten()))
+            TreeNodeViewModel.ForEachDescendant(_viewModel.TreeNodes, node =>
             {
                 if (!node.Descriptor.IsDirectory && !node.Descriptor.IsAccessDenied)
                     filePaths.Add(node.FullPath);
-            }
+            });
 
             // Clear cache before scanning
-            ClearFileMetricsCache(trimLargeCapacity: true);
+            ClearFileMetricsCache(trimCapacity: true);
 
             var totalFiles = filePaths.Count;
             if (totalFiles == 0)
@@ -4137,13 +4083,12 @@ public partial class MainWindow : Window
         }, token);
     }
 
-    private void ClearFileMetricsCache(bool trimLargeCapacity)
+    private void ClearFileMetricsCache(bool trimCapacity)
     {
         lock (_metricsLock)
         {
-            var shouldTrim = trimLargeCapacity && _fileMetricsCache.Count > 4096;
             _fileMetricsCache.Clear();
-            if (shouldTrim)
+            if (trimCapacity)
                 _fileMetricsCache.TrimExcess();
         }
     }

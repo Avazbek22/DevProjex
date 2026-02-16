@@ -134,13 +134,40 @@ public sealed class TreeNodeViewModel : ViewModelBase
             child.SetExpandedRecursive(expanded);
     }
 
+    /// <summary>
+    /// Enumerates this node and all descendants using a stack-based approach.
+    /// Avoids recursive yield return which creates O(N) state machine objects.
+    /// </summary>
     public IEnumerable<TreeNodeViewModel> Flatten()
     {
-        yield return this;
-        foreach (var child in Children)
+        var stack = new Stack<TreeNodeViewModel>();
+        stack.Push(this);
+        while (stack.Count > 0)
         {
-            foreach (var descendant in child.Flatten())
-                yield return descendant;
+            var current = stack.Pop();
+            yield return current;
+            var children = current.Children;
+            for (var i = children.Count - 1; i >= 0; i--)
+                stack.Push(children[i]);
+        }
+    }
+
+    /// <summary>
+    /// Traverses all descendants of the given roots without allocating an IEnumerable.
+    /// Use this in hot paths where Flatten() + SelectMany overhead is undesirable.
+    /// </summary>
+    public static void ForEachDescendant(IList<TreeNodeViewModel> roots, Action<TreeNodeViewModel> action)
+    {
+        var stack = new Stack<TreeNodeViewModel>();
+        for (var i = roots.Count - 1; i >= 0; i--)
+            stack.Push(roots[i]);
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            action(current);
+            var children = current.Children;
+            for (var j = children.Count - 1; j >= 0; j--)
+                stack.Push(children[j]);
         }
     }
 
