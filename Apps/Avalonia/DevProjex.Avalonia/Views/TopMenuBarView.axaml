@@ -30,8 +30,8 @@
         <MenuItem Header="{Binding MenuCopyTreeAndContent}" Click="OnCopyTreeAndContent" />
       </MenuItem>
       <MenuItem Header="{Binding MenuView}" IsEnabled="{Binding IsProjectLoaded}">
-        <MenuItem Header="{Binding MenuViewExpandAll}" Click="OnExpandAll" />
-        <MenuItem Header="{Binding MenuViewCollapseAll}" Click="OnCollapseAll" />
+        <MenuItem Header="{Binding MenuViewExpandAll}" Click="OnExpandAll" IsVisible="{Binding !IsPreviewMode}" />
+        <MenuItem Header="{Binding MenuViewCollapseAll}" Click="OnCollapseAll" IsVisible="{Binding !IsPreviewMode}" />
         <MenuItem Header="{Binding MenuViewZoomIn}" Click="OnZoomIn" />
         <MenuItem Header="{Binding MenuViewZoomOut}" Click="OnZoomOut" />
         <MenuItem Header="{Binding MenuViewZoomReset}" Click="OnZoomReset" />

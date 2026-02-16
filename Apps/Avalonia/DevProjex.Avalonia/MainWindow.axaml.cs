@@ -1451,6 +1451,9 @@ public partial class MainWindow : Window
 
     private void ExpandCollapseTree(bool expand)
     {
+        if (_viewModel.IsPreviewMode)
+            return;
+
         foreach (var node in _viewModel.TreeNodes)
         {
             node.SetExpandedRecursive(expand);
@@ -2935,7 +2938,8 @@ public partial class MainWindow : Window
         // Ctrl+E Expand All
         if (mods == KeyModifiers.Control && e.Key == Key.E)
         {
-            ExpandCollapseTree(expand: true);
+            if (!_viewModel.IsPreviewMode)
+                ExpandCollapseTree(expand: true);
             e.Handled = true;
             return;
         }
@@ -2943,7 +2947,8 @@ public partial class MainWindow : Window
         // Ctrl+W Collapse All
         if (mods == KeyModifiers.Control && e.Key == Key.W)
         {
-            ExpandCollapseTree(expand: false);
+            if (!_viewModel.IsPreviewMode)
+                ExpandCollapseTree(expand: false);
             e.Handled = true;
             return;
         }
@@ -2985,14 +2990,14 @@ public partial class MainWindow : Window
 
     private void OnWindowPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if (!TreeZoomWheelHandler.TryGetZoomStep(e.KeyModifiers, e.Delta, IsPointerOverTree(e.Source), out var step))
+        if (!TreeZoomWheelHandler.TryGetZoomStep(e.KeyModifiers, e.Delta, IsPointerOverZoomSurface(e.Source), out var step))
             return;
 
         AdjustTreeFontSize(step);
         e.Handled = true;
     }
 
-    private bool IsPointerOverTree(object? source)
+    private bool IsPointerOverZoomSurface(object? source)
     {
         if (_treeView is null)
             return false;
@@ -3000,7 +3005,20 @@ public partial class MainWindow : Window
         if (ReferenceEquals(source, _treeView))
             return true;
 
-        return source is Visual visual && visual.GetVisualAncestors().Contains(_treeView);
+        if (source is not Visual visual)
+            return false;
+
+        var ancestors = visual.GetVisualAncestors().ToList();
+
+        if (ancestors.Contains(_treeView))
+            return true;
+
+        if (_viewModel.IsPreviewMode && _previewTextScrollViewer is not null && ancestors.Contains(_previewTextScrollViewer))
+            return true;
+
+        return _viewModel.IsPreviewMode &&
+               _previewLineNumbersScrollViewer is not null &&
+               ancestors.Contains(_previewLineNumbersScrollViewer);
     }
 
     private void ShowSearch(bool focusInput = true)

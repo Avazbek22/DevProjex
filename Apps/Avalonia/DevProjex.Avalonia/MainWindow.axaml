@@ -619,8 +619,7 @@
                     <Grid Grid.Column="0">
                       <Border Name="PreviewLineNumbersBackground"
                               Classes="preview-line-numbers"
-                              Margin="0,-6,0,0"
-                              Width="{Binding Bounds.Width, ElementName=PreviewLineNumbersHost}" />
+                              Margin="0,-6,0,0" />
                       <ScrollViewer Name="PreviewLineNumbersScrollViewer"
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Hidden"
