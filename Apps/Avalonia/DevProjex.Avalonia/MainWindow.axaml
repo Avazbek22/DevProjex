@@ -48,6 +48,46 @@
       </Style.Animations>
     </Style>
 
+    <Style Selector="Viewbox.drop-zone-icon">
+      <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+      <Setter Property="RenderTransform">
+        <TranslateTransform Y="0" />
+      </Setter>
+    </Style>
+    <Style Selector="Border.drop-zone-animating Viewbox.drop-zone-icon">
+      <Style.Animations>
+        <Animation Duration="0:0:1.7" IterationCount="INFINITE">
+          <KeyFrame Cue="0%">
+            <Setter Property="TranslateTransform.Y" Value="0" />
+          </KeyFrame>
+          <KeyFrame Cue="12.5%">
+            <Setter Property="TranslateTransform.Y" Value="3.89" />
+          </KeyFrame>
+          <KeyFrame Cue="25%">
+            <Setter Property="TranslateTransform.Y" Value="5.5" />
+          </KeyFrame>
+          <KeyFrame Cue="37.5%">
+            <Setter Property="TranslateTransform.Y" Value="3.89" />
+          </KeyFrame>
+          <KeyFrame Cue="50%">
+            <Setter Property="TranslateTransform.Y" Value="0" />
+          </KeyFrame>
+          <KeyFrame Cue="62.5%">
+            <Setter Property="TranslateTransform.Y" Value="-3.89" />
+          </KeyFrame>
+          <KeyFrame Cue="75%">
+            <Setter Property="TranslateTransform.Y" Value="-5.5" />
+          </KeyFrame>
+          <KeyFrame Cue="87.5%">
+            <Setter Property="TranslateTransform.Y" Value="-3.89" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="TranslateTransform.Y" Value="0" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
     <Style Selector="Border.drop-zone-outer:pointerover Rectangle.drop-zone-border">
       <Setter Property="StrokeThickness" Value="3" />
       <Setter Property="Margin" Value="-1.5" />
@@ -295,6 +335,7 @@
                     ClipToBounds="False">
               <!-- Folder icon with floating animation -->
               <Viewbox Name="DropZoneIcon"
+                       Classes="drop-zone-icon"
                        Width="128"
                        Height="128"
                        VerticalAlignment="Bottom">

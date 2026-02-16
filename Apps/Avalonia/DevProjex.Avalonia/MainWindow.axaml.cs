@@ -137,10 +137,6 @@ public partial class MainWindow : Window
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private Border? _dropZoneContainer;
-    private Viewbox? _dropZoneIcon;
-    private TranslateTransform? _dropZoneIconTransform;
-    private global::Avalonia.Threading.DispatcherTimer? _dropZoneFloatTimer;
-    private readonly Stopwatch _dropZoneFloatClock = new();
 
     // Settings panel animation
     private Border? _settingsContainer;
@@ -179,6 +175,8 @@ public partial class MainWindow : Window
     private int _previewBuildVersion;
     private volatile bool _previewRefreshRequested;
     private bool _previewScrollSyncActive;
+    private bool _restoreSearchAfterPreview;
+    private bool _restoreFilterAfterPreview;
 
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
@@ -266,17 +264,8 @@ public partial class MainWindow : Window
         _previewBar = this.FindControl<Border>("PreviewBar");
         _previewTextScrollViewer = this.FindControl<ScrollViewer>("PreviewTextScrollViewer");
         _previewLineNumbersScrollViewer = this.FindControl<ScrollViewer>("PreviewLineNumbersScrollViewer");
-        _dropZoneIcon = this.FindControl<Viewbox>("DropZoneIcon");
         _settingsContainer = this.FindControl<Border>("SettingsContainer");
         _settingsIsland = this.FindControl<Border>("SettingsIsland");
-
-        if (_dropZoneIcon is not null)
-        {
-            _dropZoneIconTransform = new TranslateTransform();
-            _dropZoneIcon.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
-            _dropZoneIcon.RenderTransform = _dropZoneIconTransform;
-            EnsureDropZoneFloatAnimationStarted();
-        }
 
         if (_settingsIsland is not null && _settingsContainer is not null)
         {
@@ -511,59 +500,19 @@ public partial class MainWindow : Window
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
             disposable.Dispose();
-
-        if (_dropZoneFloatTimer is not null)
-        {
-            _dropZoneFloatTimer.Stop();
-            _dropZoneFloatTimer.Tick -= OnDropZoneFloatTick;
-        }
-    }
-
-    private void EnsureDropZoneFloatAnimationStarted()
-    {
-        if (_dropZoneIcon is null || _dropZoneIconTransform is null)
-            return;
-
-        _dropZoneFloatTimer ??= new global::Avalonia.Threading.DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(16)
-        };
-        _dropZoneFloatTimer.Tick -= OnDropZoneFloatTick;
-        _dropZoneFloatTimer.Tick += OnDropZoneFloatTick;
-
-        _dropZoneFloatClock.Restart();
-        _dropZoneFloatTimer.Start();
     }
 
     private void UpdateDropZoneFloatAnimationState()
     {
         if (_viewModel.IsProjectLoaded)
         {
-            _dropZoneFloatTimer?.Stop();
-            if (_dropZoneIconTransform is not null)
-                _dropZoneIconTransform.Y = 0;
-            // Remove animation class to stop XAML animation (saves CPU)
+            // Remove animation class to stop drop-zone animations when project is loaded.
             _dropZoneContainer?.Classes.Remove("drop-zone-animating");
             return;
         }
 
-        // Add animation class to enable XAML animation
+        // Add animation class to enable drop-zone animations.
         _dropZoneContainer?.Classes.Add("drop-zone-animating");
-        EnsureDropZoneFloatAnimationStarted();
-    }
-
-    private void OnDropZoneFloatTick(object? sender, EventArgs e)
-    {
-        if (_dropZoneIconTransform is null)
-            return;
-
-        // Floating folder animation parameters.
-        const double periodSeconds = 1.7; // Slightly faster cycle while keeping smooth sine motion.
-        const double amplitudePx = 5.5; // Slightly larger travel distance.
-        var phase = _dropZoneFloatClock.Elapsed.TotalSeconds / periodSeconds * 2 * Math.PI;
-
-        // Symmetric sine motion makes the floating clearly visible.
-        _dropZoneIconTransform.Y = Math.Sin(phase) * amplitudePx;
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
@@ -1561,6 +1510,8 @@ public partial class MainWindow : Window
         if (_previewBarAnimating)
             return;
 
+        _restoreSearchAfterPreview = _viewModel.SearchVisible;
+        _restoreFilterAfterPreview = _viewModel.FilterVisible;
         ForceCloseSearchAndFilterForPreview();
 
         // Step 1: Start preview bar animation (island slides down)
@@ -1586,9 +1537,22 @@ public partial class MainWindow : Window
 
         _viewModel.IsPreviewMode = false;
         AnimatePreviewBar(false);
+        RestoreSearchAndFilterAfterPreview();
         CancelPreviewRefresh();
         ClearPreviewMemory();
         _treeView?.Focus();
+    }
+
+    private void RestoreSearchAndFilterAfterPreview()
+    {
+        if (_restoreSearchAfterPreview && !_viewModel.SearchVisible)
+            ShowSearch(focusInput: false);
+
+        if (_restoreFilterAfterPreview && !_viewModel.FilterVisible)
+            ShowFilter(focusInput: false);
+
+        _restoreSearchAfterPreview = false;
+        _restoreFilterAfterPreview = false;
     }
 
     private void ClearPreviewMemory()
@@ -2630,7 +2594,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowFilter()
+    private void ShowFilter(bool focusInput = true)
     {
         if (!_viewModel.IsProjectLoaded) return;
         if (_viewModel.IsPreviewMode) return;
@@ -2638,6 +2602,9 @@ public partial class MainWindow : Window
 
         _viewModel.FilterVisible = true;
         AnimateFilterBar(true);
+
+        if (!focusInput)
+            return;
 
         // Focus after a brief delay to ensure animation has started
         global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -2956,7 +2923,7 @@ public partial class MainWindow : Window
         return source is Visual visual && visual.GetVisualAncestors().Contains(_treeView);
     }
 
-    private void ShowSearch()
+    private void ShowSearch(bool focusInput = true)
     {
         if (!_viewModel.IsProjectLoaded) return;
         if (_viewModel.IsPreviewMode) return;
@@ -2964,6 +2931,9 @@ public partial class MainWindow : Window
 
         _viewModel.SearchVisible = true;
         AnimateSearchBar(true);
+
+        if (!focusInput)
+            return;
 
         // Focus after a brief delay to ensure animation has started
         global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -3177,6 +3147,9 @@ public partial class MainWindow : Window
     /// </summary>
     private void ClearPreviousProjectState(bool forceCompactingGc = false)
     {
+        _restoreSearchAfterPreview = false;
+        _restoreFilterAfterPreview = false;
+
         // Clear search state first (holds references to TreeNodeViewModel)
         _searchCoordinator.ClearSearchState();
 
