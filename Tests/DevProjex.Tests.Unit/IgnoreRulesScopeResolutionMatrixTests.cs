@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using DevProjex.Kernel.Models;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class IgnoreRulesScopeResolutionMatrixTests

@@ -1,6 +1,3 @@
-using System;
-using System.IO;
-
 namespace DevProjex.Tests.Integration.Performance;
 
 internal static class LocalPerformanceSettings

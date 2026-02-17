@@ -1,15 +1,7 @@
-using System;
-using System.Linq;
-using Avalonia;
-using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
-using Avalonia.Interactivity;
-using Avalonia.Media;
 using Avalonia.LogicalTree;
-using Avalonia.Threading;
-using Avalonia.VisualTree;
 using Avalonia.Styling;
-using DevProjex.Avalonia.ViewModels;
+using Avalonia.VisualTree;
 
 namespace DevProjex.Avalonia.Coordinators;
 

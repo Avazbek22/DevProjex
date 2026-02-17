@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Input;
 using DevProjex.Avalonia.Services;
-using Xunit;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 

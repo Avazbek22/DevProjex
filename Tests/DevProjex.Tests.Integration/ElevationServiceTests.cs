@@ -1,6 +1,4 @@
-using System;
 using DevProjex.Infrastructure.Elevation;
-using Xunit;
 
 namespace DevProjex.Tests.Integration;
 
@@ -23,6 +21,6 @@ public sealed class ElevationServiceTests
 		var service = new ElevationService();
 
 		if (!OperatingSystem.IsWindows())
-			Assert.False(service.TryRelaunchAsAdministrator(Kernel.Models.CommandLineOptions.Empty));
+			Assert.False(service.TryRelaunchAsAdministrator(CommandLineOptions.Empty));
 	}
 }

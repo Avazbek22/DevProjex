@@ -1,12 +1,5 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using DevProjex.Infrastructure.Git;
-using DevProjex.Kernel.Models;
 using DevProjex.Tests.Integration.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Integration;
 
@@ -211,7 +204,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
         var url = "https://github.com/test/repo";
 
         var dir1 = _cacheService.CreateRepositoryDirectory(url);
-        System.Threading.Thread.Sleep(10); // Ensure different timestamp
+        Thread.Sleep(10); // Ensure different timestamp
         var dir2 = _cacheService.CreateRepositoryDirectory(url);
 
         Assert.NotEqual(dir1, dir2);
@@ -456,7 +449,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var targetDir = _tempDir.CreateDirectory("progress-test");
-        var progressReports = new System.Collections.Generic.List<string>();
+        var progressReports = new List<string>();
         var progress = new Progress<string>(msg => progressReports.Add(msg));
 
         var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress);
@@ -485,7 +478,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
         if (targetBranch == null)
             return;
 
-        var progressReports = new System.Collections.Generic.List<string>();
+        var progressReports = new List<string>();
         var progress = new Progress<string>(msg => progressReports.Add(msg));
 
         await _service.SwitchBranchAsync(repoPath, targetBranch, progress);

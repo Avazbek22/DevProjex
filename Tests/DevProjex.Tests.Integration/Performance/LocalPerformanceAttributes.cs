@@ -1,5 +1,3 @@
-using Xunit;
-
 namespace DevProjex.Tests.Integration.Performance;
 
 internal sealed class LocalPerformanceFactAttribute : FactAttribute

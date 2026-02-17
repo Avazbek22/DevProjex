@@ -1,7 +1,3 @@
-using System;
-using Avalonia.Controls;
-using Avalonia.Interactivity;
-
 namespace DevProjex.Avalonia.Views;
 
 public partial class ThemePopoverView : UserControl

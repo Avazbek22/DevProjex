@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using DevProjex.Application.Services;
-using DevProjex.Kernel.Models;
-using Xunit;
+﻿using DevProjex.Application.Services;
 
 namespace DevProjex.Tests.Unit;
 

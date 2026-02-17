@@ -1,6 +1,3 @@
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Application.Services;
 
 public sealed class LocalizationService

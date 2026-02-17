@@ -1,8 +1,6 @@
-using System;
 using System.Globalization;
 using Avalonia.Controls;
 using DevProjex.Avalonia.Converters;
-using Xunit;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 

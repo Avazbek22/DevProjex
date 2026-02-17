@@ -1,11 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Diagnostics;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Tests.Integration.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Integration;
 
@@ -337,7 +332,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
         var repoPath = _tempDir.CreateDirectory("empty-current");
 
         // Create empty git repo using Process
-        var psi = new System.Diagnostics.ProcessStartInfo
+        var psi = new ProcessStartInfo
         {
             FileName = "git",
             Arguments = $"init \"{repoPath}\"",
@@ -347,7 +342,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
             RedirectStandardError = true
         };
 
-        using var process = System.Diagnostics.Process.Start(psi);
+        using var process = Process.Start(psi);
         await process!.WaitForExitAsync();
 
         var currentBranch = await _service.GetCurrentBranchAsync(repoPath);

@@ -1,6 +1,4 @@
 using System.Collections.ObjectModel;
-using Avalonia.Threading;
-using DevProjex.Avalonia.ViewModels;
 
 namespace DevProjex.Avalonia.Services;
 

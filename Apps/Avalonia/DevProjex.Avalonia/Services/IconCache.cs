@@ -1,5 +1,3 @@
-using System;
-using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using DevProjex.Kernel.Abstractions;
 

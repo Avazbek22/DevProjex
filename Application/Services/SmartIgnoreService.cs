@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
-using System.Linq;
-
 namespace DevProjex.Application.Services;
 
 public sealed class SmartIgnoreService

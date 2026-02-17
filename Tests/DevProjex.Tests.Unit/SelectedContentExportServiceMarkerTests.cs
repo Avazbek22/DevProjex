@@ -1,8 +1,6 @@
-using System;
 using System.Text;
 using DevProjex.Application.Services;
 using DevProjex.Tests.Unit.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 

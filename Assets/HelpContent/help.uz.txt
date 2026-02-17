@@ -47,7 +47,7 @@ Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Il
 Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
 `%TEMP%\DevProjex\RepoCache`
 
-* Tarmoq — masofaviy tarmoqlar ro‘yxatini ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
+* Tarmoq — mavjud tarmoqlar ro‘yxatini faol tarmoq belgisi bilan ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar tarmoq lokalda bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
 * Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset.
 
 ## 5) Nusxa
@@ -125,9 +125,9 @@ Yopish: X tugmasi yoki ko‘zcha ikonani qayta bosish.
 * Ctrl++ / Ctrl+= — kattalashtirish
 * Ctrl+- — kichraytirish
 * Ctrl+0 — tiklash
-* Ctrl + g‘ildirak — silliq zoom
+* Ctrl + g‘ildirak daraxtda va prevyu rejimida — silliq zoom
 
-Oraliq: 6–28, tiklash — 12.
+Oraliq: 6–28, tiklash — 15.
 
 ### Ixcham rejim
 Interfeysni zichroq qiladi: daraxt va sozlamalarda oraliqlar kichikroq.
@@ -324,4 +324,3 @@ Status-bardagi X (bekor qilish) tugmasi:
 ## 18) Eslatmalar
 * Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.
-

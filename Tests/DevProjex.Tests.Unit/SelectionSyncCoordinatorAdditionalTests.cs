@@ -1,16 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using DevProjex.Application.Services;
+﻿using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.ViewModels;
 using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Kernel.Models;
 using DevProjex.Tests.Unit.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 

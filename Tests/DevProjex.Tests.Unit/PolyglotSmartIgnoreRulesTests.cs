@@ -1,7 +1,5 @@
-using System;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Tests.Unit.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 

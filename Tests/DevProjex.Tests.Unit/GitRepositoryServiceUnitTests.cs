@@ -1,7 +1,4 @@
-using System;
-using System.IO;
 using DevProjex.Infrastructure.Git;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 

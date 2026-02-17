@@ -1,14 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text;
 using DevProjex.Application.Services;
-using DevProjex.Kernel;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
 using DevProjex.Tests.Integration.Helpers;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevProjex.Tests.Integration.Performance;

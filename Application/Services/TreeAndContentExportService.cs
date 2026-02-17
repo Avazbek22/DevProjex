@@ -1,7 +1,4 @@
-using System.IO;
 using System.Text;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Application.Services;
 

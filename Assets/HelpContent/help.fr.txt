@@ -47,7 +47,7 @@ Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git C
 Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’est généralement :
 `%TEMP%\DevProjex\RepoCache`
 
-* Branche — affiche la liste des branches distantes ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement est hors ligne (sans mise à jour). Sinon, elle est récupérée (fetch) et créée localement.
+* Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
 * Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
 
 ## 5) Copier
@@ -125,9 +125,9 @@ Fermeture : bouton X ou nouveau clic sur l’icône œil.
 * Ctrl++ / Ctrl+= — agrandir
 * Ctrl+- — réduire
 * Ctrl+0 — réinitialiser
-* Ctrl + molette sur l’arbre — zoom fluide
+* Ctrl + molette sur l’arbre et en mode aperçu — zoom fluide
 
-Plage : 6–28, reset : 12.
+Plage : 6–28, reset : 15.
 
 ### Mode compact
 Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
@@ -324,4 +324,3 @@ Bouton X (annuler) dans la barre d’état :
 ## 18) Notes
 * Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
-

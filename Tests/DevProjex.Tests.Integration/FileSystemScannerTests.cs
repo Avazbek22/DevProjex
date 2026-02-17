@@ -1,12 +1,8 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.SmartIgnore;
-using DevProjex.Kernel.Models;
+using DevProjex.Kernel.Abstractions;
 using DevProjex.Tests.Integration.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Integration;
 
@@ -223,7 +219,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("Documents/Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
 		temp.CreateFile("Documents/Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
 
-		var smartService = new SmartIgnoreService(new DevProjex.Kernel.Abstractions.ISmartIgnoreRule[]
+		var smartService = new SmartIgnoreService(new ISmartIgnoreRule[]
 		{
 			new DotNetArtifactsIgnoreRule()
 		});
@@ -254,7 +250,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("Documents/Visual Studio 2019/America/America/bin/Debug/America.exe", "binary");
 		temp.CreateFile("Documents/Visual Studio 2019/America/America/obj/Debug/cache.txt", "cache");
 
-		var smartService = new SmartIgnoreService(new DevProjex.Kernel.Abstractions.ISmartIgnoreRule[]
+		var smartService = new SmartIgnoreService(new ISmartIgnoreRule[]
 		{
 			new DotNetArtifactsIgnoreRule()
 		});

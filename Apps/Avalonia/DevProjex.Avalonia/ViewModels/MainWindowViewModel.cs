@@ -1,7 +1,5 @@
-using Avalonia;
-using Avalonia.Media;
-using System.Collections.Specialized;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Models;
@@ -26,8 +24,10 @@ public enum PreviewContentMode
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    public const string BaseTitle = "DevProjex v4.5";
-    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.5";
+    public const string BaseTitle = "DevProjex v4.5.1";
+    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.5.1";
+    public const double DefaultTreeFontSize = 15;
+    public const double DefaultPreviewFontSize = 15;
 
     private readonly LocalizationService _localization;
     private readonly HelpContentProvider _helpContentProvider;
@@ -48,7 +48,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private FontFamily? _selectedFontFamily;
     private FontFamily? _pendingFontFamily;
 
-    private double _treeFontSize = 15;
+    private double _treeFontSize = DefaultTreeFontSize;
+    private double _previewFontSize = DefaultPreviewFontSize;
 
     private bool _allExtensionsChecked;
     private bool _allRootFoldersChecked;
@@ -65,7 +66,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isPreviewMode;
     private bool _isPreviewLoading;
     private string _previewText = string.Empty;
-    private string _previewLineNumbers = "1";
+    private int _previewLineCount = 1;
 
     // Theme intensity sliders (0-100)
     // MaterialIntensity: single slider controlling overall effect (transparency, depth, material feel)
@@ -428,13 +429,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string PreviewLineNumbers
+    public int PreviewLineCount
     {
-        get => _previewLineNumbers;
+        get => _previewLineCount;
         set
         {
-            if (_previewLineNumbers == value) return;
-            _previewLineNumbers = value;
+            var normalized = Math.Max(1, value);
+            if (_previewLineCount == normalized) return;
+            _previewLineCount = normalized;
             RaisePropertyChanged();
         }
     }
@@ -817,6 +819,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _treeFontSize = value;
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(TreeIconSize));
+        }
+    }
+
+    public double PreviewFontSize
+    {
+        get => _previewFontSize;
+        set
+        {
+            if (Math.Abs(_previewFontSize - value) < 0.1) return;
+            _previewFontSize = value;
+            RaisePropertyChanged();
         }
     }
 
@@ -1296,6 +1309,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Clear large strings
         _previewText = string.Empty;
-        _previewLineNumbers = string.Empty;
+        _previewLineCount = 1;
     }
 }

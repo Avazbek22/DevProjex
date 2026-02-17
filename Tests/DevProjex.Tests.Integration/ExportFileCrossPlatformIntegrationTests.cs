@@ -1,16 +1,8 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using DevProjex.Application.Services;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
 using DevProjex.Tests.Integration.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Integration;
 
@@ -526,7 +518,7 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var root = new TreeNodeDescriptor("Root", temp.Path, true, false, "folder", children);
 
 		var treeExport = new TreeExportService();
-		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		var stopwatch = Stopwatch.StartNew();
 		var json = treeExport.BuildFullTree(temp.Path, root, TreeTextFormat.Json);
 		stopwatch.Stop();
 

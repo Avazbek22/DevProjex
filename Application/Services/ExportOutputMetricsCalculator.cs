@@ -24,15 +24,23 @@ public static class ExportOutputMetricsCalculator
 
 	public static ExportOutputMetrics FromContentFiles(IEnumerable<ContentFileMetrics> files)
 	{
-		var ordered = files
-			.Where(static item => !string.IsNullOrWhiteSpace(item.Path))
-			.GroupBy(item => item.Path, PathComparer.Default)
-			.Select(group => group.First())
-			.OrderBy(item => item.Path, PathComparer.Default)
-			.ToList();
+		var uniquePaths = new HashSet<string>(PathComparer.Default);
+		var ordered = new List<ContentFileMetrics>();
+		foreach (var file in files)
+		{
+			if (string.IsNullOrWhiteSpace(file.Path))
+				continue;
+
+			if (!uniquePaths.Add(file.Path))
+				continue;
+
+			ordered.Add(file);
+		}
 
 		if (ordered.Count == 0)
 			return ExportOutputMetrics.Empty;
+
+		ordered.Sort(static (left, right) => PathComparer.Default.Compare(left.Path, right.Path));
 
 		var newLineChars = Environment.NewLine.Length;
 		int chars = 0;
@@ -109,7 +117,7 @@ public static class ExportOutputMetricsCalculator
 		text.Length > 0 && (text[^1] == '\n' || text[^1] == '\r');
 }
 
-public sealed record ContentFileMetrics(
+public readonly record struct ContentFileMetrics(
 	string Path,
 	long SizeBytes,
 	int LineCount,
@@ -119,7 +127,7 @@ public sealed record ContentFileMetrics(
 	int TrailingNewlineChars,
 	int TrailingNewlineLineBreaks);
 
-public sealed record ExportOutputMetrics(int Lines, int Chars, int Tokens)
+public readonly record struct ExportOutputMetrics(int Lines, int Chars, int Tokens)
 {
 	public static ExportOutputMetrics Empty { get; } = new(0, 0, 0);
 }

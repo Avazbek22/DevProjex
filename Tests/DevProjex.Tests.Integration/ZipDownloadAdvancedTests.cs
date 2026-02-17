@@ -1,12 +1,5 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using DevProjex.Infrastructure.Git;
-using DevProjex.Kernel.Models;
 using DevProjex.Tests.Integration.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Integration;
 
@@ -162,7 +155,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Test that progress callback receives updates
         var targetDir = _tempDir.CreateDirectory("progress-zip");
-        var progressReports = new System.Collections.Generic.List<string>();
+        var progressReports = new List<string>();
         var progress = new Progress<string>(msg => progressReports.Add(msg));
 
         var result = await _zipService.DownloadAndExtractAsync(

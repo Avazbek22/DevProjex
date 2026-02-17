@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Reflection;
 using System.Text.Json;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
+using DevProjex.Assets;
 
 namespace DevProjex.Infrastructure.ResourceStore;
 
@@ -42,7 +37,7 @@ public sealed class IconMapper : IIconMapper
 
 	private static IconMapping LoadMapping()
 	{
-		var assembly = typeof(DevProjex.Assets.Marker).Assembly;
+		var assembly = typeof(Marker).Assembly;
 		var resourceName = "DevProjex.Assets.IconPacks.Configuration.mapping.json";
 		using var stream = assembly.GetManifestResourceStream(resourceName)
 			?? throw new InvalidOperationException($"Icon mapping not found: {resourceName}");
