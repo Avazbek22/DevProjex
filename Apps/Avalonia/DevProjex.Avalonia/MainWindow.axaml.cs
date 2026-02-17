@@ -2280,15 +2280,15 @@ public partial class MainWindow : Window
                         return;
                     }
 
-                    // If status is just a percentage, append it to current operation message
+                    // Keep localized phase labels and append numeric progress only.
+                    // Raw git stderr lines (e.g. "Cloning into ...") are not shown in UI.
                     if (status.EndsWith('%') && status.Length <= 4 && !string.IsNullOrEmpty(currentOperation))
                     {
                         _viewModel.GitCloneStatus = $"{currentOperation} {status}";
                     }
-                    else
+                    else if (!string.IsNullOrEmpty(currentOperation))
                     {
-                        // Git output or other dynamic message (contains progress info with %)
-                        _viewModel.GitCloneStatus = status;
+                        _viewModel.GitCloneStatus = currentOperation;
                     }
                 });
             });
