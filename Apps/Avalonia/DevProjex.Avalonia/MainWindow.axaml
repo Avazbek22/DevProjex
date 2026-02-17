@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:DevProjex.Avalonia.ViewModels"
         xmlns:views="using:DevProjex.Avalonia.Views"
+        xmlns:controls="using:DevProjex.Avalonia.Controls"
         xmlns:converters="using:DevProjex.Avalonia.Converters"
         x:Class="DevProjex.Avalonia.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -620,21 +621,17 @@
                       <Border Name="PreviewLineNumbersBackground"
                               Classes="preview-line-numbers"
                               Margin="0,-6,0,0" />
-                      <ScrollViewer Name="PreviewLineNumbersScrollViewer"
-                                    HorizontalScrollBarVisibility="Disabled"
-                                    VerticalScrollBarVisibility="Hidden"
-                                    IsHitTestVisible="False">
-                        <Border Name="PreviewLineNumbersHost"
-                                Background="Transparent"
-                                Padding="10,10,8,10">
-                          <TextBlock Text="{Binding PreviewLineNumbers}"
-                                     FontFamily="{Binding SelectedFontFamily}"
-                                     FontSize="{Binding PreviewFontSize}"
-                                     Opacity="0.72"
-                                     Margin="0"
-                                     TextWrapping="NoWrap" />
-                        </Border>
-                      </ScrollViewer>
+                      <controls:VirtualizedLineNumbersControl Name="PreviewLineNumbersControl"
+                                                              IsHitTestVisible="False"
+                                                              VerticalAlignment="Stretch"
+                                                              LineCount="{Binding PreviewLineCount}"
+                                                              NumberFontFamily="{Binding SelectedFontFamily}"
+                                                              NumberFontSize="{Binding PreviewFontSize}"
+                                                              NumberBrush="{DynamicResource AppTextBrush}"
+                                                              Opacity="0.72"
+                                                              TopPadding="10"
+                                                              LeftPadding="10"
+                                                              RightPadding="8" />
                     </Grid>
 
                     <ScrollViewer Grid.Column="1"

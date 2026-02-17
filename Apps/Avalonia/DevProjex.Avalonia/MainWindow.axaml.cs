@@ -22,6 +22,7 @@ using Avalonia.VisualTree;
 using DevProjex.Application;
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
+using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
@@ -56,6 +57,19 @@ public partial class MainWindow : Window
     private sealed record SelectionOptionSnapshot(string Name, bool IsChecked);
 
     private sealed record IgnoreOptionSnapshot(IgnoreOptionId Id, string Label, bool IsChecked);
+
+    private sealed record PreviewCacheKey(
+        string? ProjectPath,
+        int TreeIdentity,
+        PreviewContentMode Mode,
+        TreeTextFormat TreeFormat,
+        int SelectedCount,
+        int SelectedHash);
+
+    private sealed record PreviewCacheEntry(
+        PreviewCacheKey Key,
+        string Text,
+        int LineCount);
 
     private sealed record ProjectLoadCancellationSnapshot(
         bool HadLoadedProjectBefore,
@@ -127,7 +141,7 @@ public partial class MainWindow : Window
     private SearchBarView? _searchBar;
     private FilterBarView? _filterBar;
     private ScrollViewer? _previewTextScrollViewer;
-    private ScrollViewer? _previewLineNumbersScrollViewer;
+    private VirtualizedLineNumbersControl? _previewLineNumbersControl;
     private HashSet<string>? _filterExpansionSnapshot;
     private int _filterApplyVersion;
     private CancellationTokenSource? _projectOperationCts;
@@ -177,6 +191,7 @@ public partial class MainWindow : Window
     private bool _previewScrollSyncActive;
     private CancellationTokenSource? _previewMemoryCleanupCts;
     private int _previewMemoryCleanupVersion;
+    private PreviewCacheEntry? _previewCacheEntry;
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
     private bool _previewFontInitialized;
@@ -266,7 +281,7 @@ public partial class MainWindow : Window
         _previewBarContainer = this.FindControl<Border>("PreviewBarContainer");
         _previewBar = this.FindControl<Border>("PreviewBar");
         _previewTextScrollViewer = this.FindControl<ScrollViewer>("PreviewTextScrollViewer");
-        _previewLineNumbersScrollViewer = this.FindControl<ScrollViewer>("PreviewLineNumbersScrollViewer");
+        _previewLineNumbersControl = this.FindControl<VirtualizedLineNumbersControl>("PreviewLineNumbersControl");
         _settingsContainer = this.FindControl<Border>("SettingsContainer");
         _settingsIsland = this.FindControl<Border>("SettingsIsland");
 
@@ -375,6 +390,7 @@ public partial class MainWindow : Window
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
             {
                 RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
+                InvalidatePreviewCache();
                 SchedulePreviewRefresh();
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
@@ -382,7 +398,8 @@ public partial class MainWindow : Window
                 // Clear content immediately to prevent jank from large text re-rendering
                 // while thumb animation plays
                 _viewModel.PreviewText = string.Empty;
-                _viewModel.PreviewLineNumbers = "1";
+                _viewModel.PreviewLineCount = 1;
+                InvalidatePreviewCache();
 
                 // Delay preview refresh to let thumb animation (250ms) complete
                 SchedulePreviewRefresh(immediate: false);
@@ -1206,18 +1223,18 @@ public partial class MainWindow : Window
         if (_previewScrollSyncActive)
             return;
 
-        if (sender is not ScrollViewer textScrollViewer || _previewLineNumbersScrollViewer is null)
+        if (sender is not ScrollViewer textScrollViewer || _previewLineNumbersControl is null)
             return;
 
         var targetY = textScrollViewer.Offset.Y;
-        var currentY = _previewLineNumbersScrollViewer.Offset.Y;
+        var currentY = _previewLineNumbersControl.VerticalOffset;
         if (Math.Abs(currentY - targetY) < 0.1)
             return;
 
         try
         {
             _previewScrollSyncActive = true;
-            _previewLineNumbersScrollViewer.Offset = new Vector(0, targetY);
+            _previewLineNumbersControl.VerticalOffset = targetY;
         }
         finally
         {
@@ -1234,7 +1251,7 @@ public partial class MainWindow : Window
         {
             ApplyPreviewText(_viewModel.PreviewNoDataText);
             _previewRefreshRequested = false;
-            SchedulePreviewMemoryCleanup();
+            SchedulePreviewMemoryCleanup(force: false);
             return;
         }
 
@@ -1266,9 +1283,28 @@ public partial class MainWindow : Window
             var currentPath = _currentPath;
             var currentTreeRoot = _currentTree?.Root;
             var noDataText = _viewModel.PreviewNoDataText;
+            var previewKey = BuildPreviewCacheKey(
+                projectPath: currentPath,
+                treeRoot: currentTreeRoot,
+                mode: selectedMode,
+                treeFormat: treeFormat,
+                selectedPaths: selectedPaths);
+
+            if (TryGetCachedPreview(previewKey, out var cachedPreview))
+            {
+                if (buildVersion == Volatile.Read(ref _previewBuildVersion))
+                {
+                    ApplyPreviewText(cachedPreview.Text, cachedPreview.LineCount);
+                    _previewRefreshRequested = false;
+                    SchedulePreviewMemoryCleanup(
+                        force: ShouldForcePreviewMemoryCleanup(cachedPreview.Text.Length, cachedPreview.LineCount));
+                }
+
+                return;
+            }
 
             // Run all heavy work in background thread
-            var (previewText, lineNumbers) = await Task.Run(() =>
+            var (previewText, lineCount) = await Task.Run(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -1279,12 +1315,10 @@ public partial class MainWindow : Window
                 }
                 else if (selectedMode == PreviewContentMode.Content)
                 {
-                    var files = (hasSelection
-                            ? selectedPaths.Where(File.Exists)
-                            : currentTreeRoot != null ? EnumerateFilePaths(currentTreeRoot) : Enumerable.Empty<string>())
-                        .Distinct(PathComparer.Default)
-                        .OrderBy(path => path, PathComparer.Default)
-                        .ToList();
+                    var files = CollectOrderedPreviewFiles(
+                        selectedPaths: selectedPaths,
+                        hasSelection: hasSelection,
+                        treeRoot: currentTreeRoot);
 
                     if (files.Count == 0)
                         text = hasSelection ? noCheckedFilesText : noTextContentText;
@@ -1304,17 +1338,18 @@ public partial class MainWindow : Window
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var effectiveText = string.IsNullOrEmpty(text) ? noDataText : text;
-                var numbers = BuildPreviewLineNumbers(effectiveText);
+                var lines = CountPreviewLines(effectiveText);
 
-                return (effectiveText, numbers);
+                return (effectiveText, lines);
             }, cancellationToken);
 
             if (buildVersion != Volatile.Read(ref _previewBuildVersion))
                 return;
 
-            ApplyPreviewText(previewText, lineNumbers);
+            CachePreview(previewKey, previewText, lineCount);
+            ApplyPreviewText(previewText, lineCount);
             _previewRefreshRequested = false;
-            SchedulePreviewMemoryCleanup();
+            SchedulePreviewMemoryCleanup(force: ShouldForcePreviewMemoryCleanup(previewText.Length, lineCount));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1325,7 +1360,7 @@ public partial class MainWindow : Window
             if (buildVersion == Volatile.Read(ref _previewBuildVersion))
             {
                 ApplyPreviewText(ex.Message);
-                SchedulePreviewMemoryCleanup();
+                SchedulePreviewMemoryCleanup(force: false);
             }
         }
         finally
@@ -1346,22 +1381,22 @@ public partial class MainWindow : Window
             ? _viewModel.PreviewNoDataText
             : text;
 
-        ApplyPreviewText(effectiveText, BuildPreviewLineNumbers(effectiveText));
+        ApplyPreviewText(effectiveText, CountPreviewLines(effectiveText));
     }
 
-    private void ApplyPreviewText(string text, string lineNumbers)
+    private void ApplyPreviewText(string text, int lineCount)
     {
         _viewModel.PreviewText = text;
-        _viewModel.PreviewLineNumbers = lineNumbers;
+        _viewModel.PreviewLineCount = Math.Max(1, lineCount);
 
         // Reset both preview scroll viewers to top-left when content changes.
         if (_previewTextScrollViewer is not null)
             _previewTextScrollViewer.Offset = default;
-        if (_previewLineNumbersScrollViewer is not null)
-            _previewLineNumbersScrollViewer.Offset = default;
+        if (_previewLineNumbersControl is not null)
+            _previewLineNumbersControl.VerticalOffset = 0;
     }
 
-    private static string BuildPreviewLineNumbers(string text)
+    private static int CountPreviewLines(string text)
     {
         var lineCount = 1;
         foreach (var ch in text)
@@ -1370,15 +1405,98 @@ public partial class MainWindow : Window
                 lineCount++;
         }
 
-        var numbers = new StringBuilder(Math.Max(4, lineCount * 4));
-        for (var index = 1; index <= lineCount; index++)
+        return lineCount;
+    }
+
+    private static List<string> CollectOrderedPreviewFiles(
+        IReadOnlySet<string> selectedPaths,
+        bool hasSelection,
+        TreeNodeDescriptor? treeRoot)
+    {
+        var uniqueFiles = new HashSet<string>(PathComparer.Default);
+
+        if (hasSelection)
         {
-            numbers.Append(index);
-            if (index < lineCount)
-                numbers.AppendLine();
+            foreach (var path in selectedPaths)
+            {
+                if (File.Exists(path))
+                    uniqueFiles.Add(path);
+            }
+        }
+        else if (treeRoot is not null)
+        {
+            foreach (var path in EnumerateFilePaths(treeRoot))
+                uniqueFiles.Add(path);
         }
 
-        return numbers.ToString();
+        var files = new List<string>(uniqueFiles.Count);
+        files.AddRange(uniqueFiles);
+        files.Sort(PathComparer.Default);
+        return files;
+    }
+
+    private static PreviewCacheKey BuildPreviewCacheKey(
+        string? projectPath,
+        TreeNodeDescriptor? treeRoot,
+        PreviewContentMode mode,
+        TreeTextFormat treeFormat,
+        IReadOnlySet<string> selectedPaths)
+    {
+        return new PreviewCacheKey(
+            ProjectPath: projectPath,
+            TreeIdentity: treeRoot is null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(treeRoot),
+            Mode: mode,
+            TreeFormat: treeFormat,
+            SelectedCount: selectedPaths.Count,
+            SelectedHash: BuildPathSetHash(selectedPaths));
+    }
+
+    private static int BuildPathSetHash(IReadOnlySet<string> selectedPaths)
+    {
+        if (selectedPaths.Count == 0)
+            return 0;
+
+        var ordered = new List<string>(selectedPaths.Count);
+        ordered.AddRange(selectedPaths);
+        ordered.Sort(PathComparer.Default);
+
+        var hash = new HashCode();
+        foreach (var path in ordered)
+            hash.Add(path, StringComparer.OrdinalIgnoreCase);
+
+        return hash.ToHashCode();
+    }
+
+    private bool TryGetCachedPreview(PreviewCacheKey key, out PreviewCacheEntry cached)
+    {
+        if (_previewCacheEntry is not null && _previewCacheEntry.Key == key)
+        {
+            cached = _previewCacheEntry;
+            return true;
+        }
+
+        cached = null!;
+        return false;
+    }
+
+    private void CachePreview(PreviewCacheKey key, string text, int lineCount)
+    {
+        _previewCacheEntry = new PreviewCacheEntry(
+            Key: key,
+            Text: text,
+            LineCount: Math.Max(1, lineCount));
+    }
+
+    private void InvalidatePreviewCache()
+    {
+        _previewCacheEntry = null;
+    }
+
+    private static bool ShouldForcePreviewMemoryCleanup(int textLength, int lineCount)
+    {
+        const int heavyTextThreshold = 1_500_000;
+        const int heavyLineThreshold = 35_000;
+        return textLength >= heavyTextThreshold || lineCount >= heavyLineThreshold;
     }
 
     private async Task<bool> TryExportTextToFileAsync(
@@ -1576,7 +1694,7 @@ public partial class MainWindow : Window
         _viewModel.IsPreviewMode = false;
         RestoreSearchAndFilterAfterPreview();
         ClearPreviewMemory();
-        SchedulePreviewMemoryCleanup();
+        SchedulePreviewMemoryCleanup(force: true);
         _treeView?.Focus();
     }
 
@@ -1595,7 +1713,8 @@ public partial class MainWindow : Window
     private void ClearPreviewMemory()
     {
         _viewModel.PreviewText = string.Empty;
-        _viewModel.PreviewLineNumbers = "1";
+        _viewModel.PreviewLineCount = 1;
+        InvalidatePreviewCache();
     }
 
     /// <summary>
@@ -1631,8 +1750,11 @@ public partial class MainWindow : Window
     /// Schedules aggressive cleanup specifically for preview rendering completion.
     /// Multiple rapid requests are coalesced into one cleanup run.
     /// </summary>
-    private void SchedulePreviewMemoryCleanup()
+    private void SchedulePreviewMemoryCleanup(bool force)
     {
+        if (!force)
+            return;
+
         var cleanupCts = ReplaceCancellationSource(ref _previewMemoryCleanupCts);
         var cleanupVersion = Interlocked.Increment(ref _previewMemoryCleanupVersion);
 
@@ -3033,7 +3155,7 @@ public partial class MainWindow : Window
             if (_previewTextScrollViewer is not null && ReferenceEquals(source, _previewTextScrollViewer))
                 return true;
 
-            if (_previewLineNumbersScrollViewer is not null && ReferenceEquals(source, _previewLineNumbersScrollViewer))
+            if (_previewLineNumbersControl is not null && ReferenceEquals(source, _previewLineNumbersControl))
                 return true;
         }
 
@@ -3051,7 +3173,7 @@ public partial class MainWindow : Window
             if (_previewTextScrollViewer is not null && ReferenceEquals(ancestor, _previewTextScrollViewer))
                 return true;
 
-            if (_previewLineNumbersScrollViewer is not null && ReferenceEquals(ancestor, _previewLineNumbersScrollViewer))
+            if (_previewLineNumbersControl is not null && ReferenceEquals(ancestor, _previewLineNumbersControl))
                 return true;
         }
 
@@ -3347,8 +3469,9 @@ public partial class MainWindow : Window
         _viewModel.StatusTreeStatsText = string.Empty;
         _viewModel.StatusContentStatsText = string.Empty;
         _viewModel.PreviewText = string.Empty;
-        _viewModel.PreviewLineNumbers = "1";
+        _viewModel.PreviewLineCount = 1;
         _viewModel.IsPreviewLoading = false;
+        InvalidatePreviewCache();
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
@@ -4064,6 +4187,7 @@ public partial class MainWindow : Window
         _metricsDebounceTimer.Stop();
         _metricsDebounceTimer.Start();
 
+        InvalidatePreviewCache();
         SchedulePreviewRefresh();
     }
 

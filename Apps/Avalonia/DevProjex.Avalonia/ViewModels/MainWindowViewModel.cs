@@ -68,7 +68,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isPreviewMode;
     private bool _isPreviewLoading;
     private string _previewText = string.Empty;
-    private string _previewLineNumbers = "1";
+    private int _previewLineCount = 1;
 
     // Theme intensity sliders (0-100)
     // MaterialIntensity: single slider controlling overall effect (transparency, depth, material feel)
@@ -431,13 +431,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string PreviewLineNumbers
+    public int PreviewLineCount
     {
-        get => _previewLineNumbers;
+        get => _previewLineCount;
         set
         {
-            if (_previewLineNumbers == value) return;
-            _previewLineNumbers = value;
+            var normalized = Math.Max(1, value);
+            if (_previewLineCount == normalized) return;
+            _previewLineCount = normalized;
             RaisePropertyChanged();
         }
     }
@@ -1310,6 +1311,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Clear large strings
         _previewText = string.Empty;
-        _previewLineNumbers = string.Empty;
+        _previewLineCount = 1;
     }
 }
