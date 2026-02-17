@@ -1,27 +1,26 @@
-using System;
-using System.Threading;
-using Avalonia.Threading;
+using System.Timers;
+using Timer = System.Timers.Timer;
 
 namespace DevProjex.Avalonia.Coordinators;
 
 public sealed class NameFilterCoordinator : IDisposable
 {
     private readonly Action<CancellationToken> _applyFilterRealtime;
-    private readonly System.Timers.Timer _filterDebounceTimer;
+    private readonly Timer _filterDebounceTimer;
     private CancellationTokenSource? _filterCts;
     private readonly object _ctsLock = new();
 
     public NameFilterCoordinator(Action<CancellationToken> applyFilterRealtime)
     {
         _applyFilterRealtime = applyFilterRealtime;
-        _filterDebounceTimer = new System.Timers.Timer(280)
+        _filterDebounceTimer = new Timer(280)
         {
             AutoReset = false
         };
         _filterDebounceTimer.Elapsed += OnFilterDebounceTimerElapsed;
     }
 
-    private void OnFilterDebounceTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    private void OnFilterDebounceTimerElapsed(object? sender, ElapsedEventArgs e)
     {
         CancellationToken token;
         lock (_ctsLock)

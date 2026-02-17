@@ -1,7 +1,3 @@
-using System;
-using System.IO;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class GitRepositoryServiceSwitchFallbackStructureTests

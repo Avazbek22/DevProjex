@@ -1,11 +1,6 @@
-using System;
 using System.Diagnostics;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Tests.Integration.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Integration;
 

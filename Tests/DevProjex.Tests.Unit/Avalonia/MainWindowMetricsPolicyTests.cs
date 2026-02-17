@@ -1,6 +1,5 @@
 using System.Reflection;
 using DevProjex.Avalonia;
-using Xunit;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 

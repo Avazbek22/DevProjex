@@ -1,15 +1,8 @@
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-using Avalonia.Threading;
-using DevProjex.Application.Services;
 using DevProjex.Application.Models;
+using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
-using DevProjex.Avalonia.ViewModels;
 using DevProjex.Kernel.Contracts;
 using DevProjex.Kernel.Models;
 
@@ -147,7 +140,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
             }
 
             // Handle Reset action (Clear)
-            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+            if (e.Action == NotifyCollectionChangedAction.Reset)
             {
                 // Re-subscribe to all current items after reset
                 foreach (var item in options)
@@ -182,7 +175,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
             }
 
             // Handle Reset action (Clear)
-            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+            if (e.Action == NotifyCollectionChangedAction.Reset)
             {
                 // Re-subscribe to all current items after reset
                 foreach (var item in options)

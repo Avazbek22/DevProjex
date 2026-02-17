@@ -1,14 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using DevProjex.Application.Services;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
 using DevProjex.Tests.Unit.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 
@@ -24,7 +16,7 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 
 		var export = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Ascii);
 
-		var separator = $"\u00A0{System.Environment.NewLine}\u00A0{System.Environment.NewLine}";
+		var separator = $"\u00A0{Environment.NewLine}\u00A0{Environment.NewLine}";
 		Assert.Contains(separator, export);
 	}
 

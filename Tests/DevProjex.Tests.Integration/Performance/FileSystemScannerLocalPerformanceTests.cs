@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Kernel.Models;
 using DevProjex.Tests.Integration.Helpers;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevProjex.Tests.Integration.Performance;

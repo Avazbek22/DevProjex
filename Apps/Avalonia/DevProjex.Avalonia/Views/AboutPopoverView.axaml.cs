@@ -1,6 +1,3 @@
-using System;
-using Avalonia.Controls;
-using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 
 namespace DevProjex.Avalonia.Views;

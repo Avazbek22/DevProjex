@@ -1,13 +1,6 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using DevProjex.Application.UseCases;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
 using DevProjex.Tests.Unit.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 
@@ -121,7 +114,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 				new HashSet<string>(), false, false),
 			GetExtensionsHandler = (path, _) =>
 			{
-				var folderName = System.IO.Path.GetFileName(path);
+				var folderName = Path.GetFileName(path);
 				var ext = extensionsByPath.GetValueOrDefault(folderName, ".txt");
 				return new ScanResult<HashSet<string>>(
 					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ext },

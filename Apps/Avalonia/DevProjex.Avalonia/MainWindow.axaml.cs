@@ -1,21 +1,13 @@
-using System;
 using System.Collections.Frozen;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO;
-using System.Linq;
 using System.Runtime;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
-using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Interactivity;
-using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -26,18 +18,16 @@ using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
-using DevProjex.Avalonia.ViewModels;
+using DevProjex.Kernel;
+using DevProjex.Kernel.Abstractions;
+using DevProjex.Kernel.Contracts;
+using DevProjex.Kernel.Models;
 using ThemePresetStore = DevProjex.Infrastructure.ThemePresets.ThemePresetStore;
 using ThemePresetDb = DevProjex.Infrastructure.ThemePresets.ThemePresetDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
 using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
 using ThemePresetEffect = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
-using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Avalonia;
 
@@ -190,7 +180,7 @@ public partial class MainWindow : Window
 
     // Preview generation
     private CancellationTokenSource? _previewBuildCts;
-    private global::Avalonia.Threading.DispatcherTimer? _previewDebounceTimer;
+    private DispatcherTimer? _previewDebounceTimer;
     private int _previewBuildVersion;
     private volatile bool _previewRefreshRequested;
     private bool _previewScrollSyncActive;
@@ -204,7 +194,7 @@ public partial class MainWindow : Window
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
     private CancellationTokenSource? _metricsCalculationCts;
-    private global::Avalonia.Threading.DispatcherTimer? _metricsDebounceTimer;
+    private DispatcherTimer? _metricsDebounceTimer;
 
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _isBackgroundMetricsActive;
@@ -548,9 +538,9 @@ public partial class MainWindow : Window
     private void OnThemeChanged(object? sender, EventArgs e)
     {
         // Defer update to let theme resources settle first
-        global::Avalonia.Threading.Dispatcher.UIThread.Post(
+        Dispatcher.UIThread.Post(
             () => _searchCoordinator.RefreshThemeHighlights(),
-            global::Avalonia.Threading.DispatcherPriority.Background);
+            DispatcherPriority.Background);
     }
 
     private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
@@ -1192,7 +1182,7 @@ public partial class MainWindow : Window
 
         if (_previewDebounceTimer is null)
         {
-            _previewDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
+            _previewDebounceTimer = new DispatcherTimer
             {
                 // 350ms delay ensures thumb animation (250ms) completes fully before loading
                 Interval = TimeSpan.FromMilliseconds(350)
@@ -1454,7 +1444,7 @@ public partial class MainWindow : Window
     {
         return new PreviewCacheKey(
             ProjectPath: projectPath,
-            TreeIdentity: treeRoot is null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(treeRoot),
+            TreeIdentity: treeRoot is null ? 0 : RuntimeHelpers.GetHashCode(treeRoot),
             Mode: mode,
             TreeFormat: treeFormat,
             SelectedCount: selectedPaths.Count,
@@ -1776,17 +1766,17 @@ public partial class MainWindow : Window
             try
             {
                 // Wait for text updates to be painted before forcing collection.
-                await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                await Dispatcher.UIThread.InvokeAsync(
                     static () => { },
-                    global::Avalonia.Threading.DispatcherPriority.Render);
+                    DispatcherPriority.Render);
                 cleanupCts.Token.ThrowIfCancellationRequested();
 
                 if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
                     return;
 
-                await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                await Dispatcher.UIThread.InvokeAsync(
                     static () => { },
-                    global::Avalonia.Threading.DispatcherPriority.Render);
+                    DispatcherPriority.Render);
                 cleanupCts.Token.ThrowIfCancellationRequested();
 
                 if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
@@ -1829,7 +1819,7 @@ public partial class MainWindow : Window
         }
     }
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    [DllImport("kernel32.dll")]
     private static extern bool SetProcessWorkingSetSize(IntPtr process, nint minWorkingSetSize, nint maxWorkingSetSize);
 
     private static async Task WaitForTreeRenderStabilizationAsync(CancellationToken cancellationToken)
@@ -1837,14 +1827,14 @@ public partial class MainWindow : Window
         cancellationToken.ThrowIfCancellationRequested();
 
         // Wait for two render passes so the tree has time to materialize and paint.
-        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+        await Dispatcher.UIThread.InvokeAsync(
             static () => { },
-            global::Avalonia.Threading.DispatcherPriority.Render);
+            DispatcherPriority.Render);
         cancellationToken.ThrowIfCancellationRequested();
 
-        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+        await Dispatcher.UIThread.InvokeAsync(
             static () => { },
-            global::Avalonia.Threading.DispatcherPriority.Render);
+            DispatcherPriority.Render);
         cancellationToken.ThrowIfCancellationRequested();
 
         // Small buffer helps avoid visual contention with immediate post-load updates.
@@ -1919,13 +1909,13 @@ public partial class MainWindow : Window
 
     private static async Task WaitForPreviewRenderPassesAsync()
     {
-        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+        await Dispatcher.UIThread.InvokeAsync(
             static () => { },
-            global::Avalonia.Threading.DispatcherPriority.Render);
+            DispatcherPriority.Render);
 
-        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+        await Dispatcher.UIThread.InvokeAsync(
             static () => { },
-            global::Avalonia.Threading.DispatcherPriority.Render);
+            DispatcherPriority.Render);
     }
 
     private async void AnimateFilterBar(bool show)
@@ -2405,7 +2395,7 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                Dispatcher.UIThread.Post(() =>
                 {
                     // Handle phase transition markers
                     if (status == "::EXTRACTING::")
@@ -2558,7 +2548,7 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                Dispatcher.UIThread.Post(() =>
                 {
                     if (TryParseTrailingPercent(status, out var percent))
                         UpdateStatusOperationProgress(percent, statusText, statusOperationId);
@@ -2631,7 +2621,7 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                Dispatcher.UIThread.Post(() =>
                 {
                     if (TryParseTrailingPercent(status, out var percent))
                         UpdateStatusOperationProgress(percent, statusText, statusOperationId);
@@ -3226,11 +3216,11 @@ public partial class MainWindow : Window
         if (!_viewModel.SearchVisible || _viewModel.IsPreviewMode)
             return;
 
-        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        await Dispatcher.UIThread.InvokeAsync(() =>
         {
             _searchBar?.SearchBoxControl?.Focus();
             _searchBar?.SearchBoxControl?.SelectAll();
-        }, global::Avalonia.Threading.DispatcherPriority.Background);
+        }, DispatcherPriority.Background);
     }
 
     private async Task FocusFilterBoxAfterOpenAnimationAsync()
@@ -3239,11 +3229,11 @@ public partial class MainWindow : Window
         if (!_viewModel.FilterVisible || _viewModel.IsPreviewMode)
             return;
 
-        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        await Dispatcher.UIThread.InvokeAsync(() =>
         {
             _filterBar?.FilterBoxControl?.Focus();
             _filterBar?.FilterBoxControl?.SelectAll();
-        }, global::Avalonia.Threading.DispatcherPriority.Background);
+        }, DispatcherPriority.Background);
     }
 
     private void CloseSearch()
@@ -4018,7 +4008,7 @@ public partial class MainWindow : Window
 
     private async Task SetClipboardTextAsync(string content)
     {
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        var clipboard = GetTopLevel(this)?.Clipboard;
 
         if (clipboard != null)
             await clipboard.SetTextAsync(content);
@@ -4195,7 +4185,7 @@ public partial class MainWindow : Window
                 "https://www.cloudflare.com"
             };
 
-            using var httpClient = new System.Net.Http.HttpClient
+            using var httpClient = new HttpClient
             {
                 Timeout = TimeSpan.FromSeconds(5)
             };
@@ -4205,7 +4195,7 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    using var response = await httpClient.GetAsync(host, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    using var response = await httpClient.GetAsync(host, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                     // If we get any response (even error status codes), it means we have connectivity
                     return true;
                 }
@@ -4273,7 +4263,7 @@ public partial class MainWindow : Window
         // Reuse existing timer to prevent memory leaks from accumulating timer instances
         if (_metricsDebounceTimer is null)
         {
-            _metricsDebounceTimer = new global::Avalonia.Threading.DispatcherTimer
+            _metricsDebounceTimer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromMilliseconds(50)
             };
@@ -4401,7 +4391,7 @@ public partial class MainWindow : Window
                     if (progressPercent >= observed + 5 &&
                         Interlocked.CompareExchange(ref lastProgressPercent, progressPercent, observed) == observed)
                     {
-                        await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                        await Dispatcher.UIThread.InvokeAsync(() =>
                         {
                             if (_isBackgroundMetricsActive && IsStatusOperationActive(statusOperationId))
                                 _viewModel.StatusProgressValue = progressPercent;
@@ -4527,7 +4517,7 @@ public partial class MainWindow : Window
 
             if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
             {
-                await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                await Dispatcher.UIThread.InvokeAsync(
                     () => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
                 return;
             }
@@ -4557,7 +4547,7 @@ public partial class MainWindow : Window
             var contentMetrics = contentMetricsTask.Result;
 
             // Update UI on dispatcher thread.
-            await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 // Double-check: version must match AND not cancelled.
                 if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))

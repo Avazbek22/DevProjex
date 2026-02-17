@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Tests.Integration.Performance;
 
 public enum PerfIgnoreProfile

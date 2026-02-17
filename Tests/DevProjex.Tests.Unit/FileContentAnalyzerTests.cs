@@ -1,12 +1,7 @@
-using System;
-using System.IO;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Tests.Unit.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 

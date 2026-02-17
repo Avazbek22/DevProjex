@@ -1,11 +1,6 @@
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
 using DevProjex.Application.Services;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
-using Xunit;
+using Xunit.Sdk;
 
 namespace DevProjex.Tests.Unit;
 
@@ -148,15 +143,15 @@ public sealed class TreeExportServiceJsonCompactTests
 	private static JsonElement FindDirByName(JsonElement node, string name)
 	{
 		if (!node.TryGetProperty("dirs", out var dirs))
-			throw new Xunit.Sdk.XunitException($"dirs not found when searching for '{name}'.");
+			throw new XunitException($"dirs not found when searching for '{name}'.");
 
 		foreach (var candidate in dirs.EnumerateArray())
 		{
-			if (string.Equals(candidate.GetProperty("name").GetString(), name, System.StringComparison.Ordinal))
+			if (string.Equals(candidate.GetProperty("name").GetString(), name, StringComparison.Ordinal))
 				return candidate;
 		}
 
-		throw new Xunit.Sdk.XunitException($"Directory '{name}' not found.");
+		throw new XunitException($"Directory '{name}' not found.");
 	}
 
 	private static (

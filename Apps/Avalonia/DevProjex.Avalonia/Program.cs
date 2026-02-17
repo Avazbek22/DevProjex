@@ -1,5 +1,3 @@
-using Avalonia;
-
 namespace DevProjex.Avalonia;
 
 internal static class Program

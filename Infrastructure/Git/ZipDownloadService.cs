@@ -1,12 +1,6 @@
-using System;
-using System.IO;
 using System.IO.Compression;
-using System.Net.Http;
+using System.Net;
 using System.Text.RegularExpressions;
-using System.Threading;
-using System.Threading.Tasks;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.Git;
 
@@ -53,13 +47,13 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
         try
         {
             // Download ZIP - try main branch first, then master if 404
-            System.Net.Http.HttpResponseMessage? response = null;
+            HttpResponseMessage? response = null;
             try
             {
                 response = await _httpClient.GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
                 // If 404 and we tried "main", try "master"
-                if (response.StatusCode == System.Net.HttpStatusCode.NotFound && branch == "main")
+                if (response.StatusCode == HttpStatusCode.NotFound && branch == "main")
                 {
                     response.Dispose();
 

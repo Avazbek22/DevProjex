@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Text;
-using System.Linq;
-using DevProjex.Kernel.Models;
+using DevProjex.Assets;
 
 namespace DevProjex.Infrastructure.ResourceStore;
 
@@ -22,7 +21,7 @@ public sealed class HelpContentProvider
 
     private static IReadOnlyDictionary<AppLanguage, string> LoadAll()
     {
-        var assembly = typeof(DevProjex.Assets.Marker).Assembly;
+        var assembly = typeof(Marker).Assembly;
         return new Dictionary<AppLanguage, string>
         {
             [AppLanguage.Ru] = Load(assembly, "ru"),

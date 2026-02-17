@@ -1,7 +1,3 @@
-using System;
-using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 
 namespace DevProjex.Avalonia.Views;
@@ -20,11 +16,11 @@ public partial class GitCloneWindow : Window
         // Focus URL textbox when window opens
         Opened += (_, _) =>
         {
-            global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            Dispatcher.UIThread.Post(() =>
             {
                 _urlTextBox?.Focus();
                 _urlTextBox?.SelectAll();
-            }, global::Avalonia.Threading.DispatcherPriority.Input);
+            }, DispatcherPriority.Input);
         };
     }
 

@@ -1,7 +1,5 @@
-using Avalonia;
-using Avalonia.Media;
-using System.Collections.Specialized;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Models;

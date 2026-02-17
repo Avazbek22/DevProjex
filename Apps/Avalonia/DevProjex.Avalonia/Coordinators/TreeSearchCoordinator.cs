@@ -1,14 +1,8 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using Avalonia.Controls;
-using Avalonia.Threading;
-using Avalonia.Media;
+using System.Timers;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using DevProjex.Application.Services;
-using DevProjex.Avalonia.ViewModels;
+using Timer = System.Timers.Timer;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -16,7 +10,7 @@ public sealed class TreeSearchCoordinator : IDisposable
 {
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeView _treeView;
-    private readonly System.Timers.Timer _searchDebounceTimer;
+    private readonly Timer _searchDebounceTimer;
     private readonly object _searchCtsLock = new();
     private CancellationTokenSource? _searchCts;
     private readonly List<TreeNodeViewModel> _searchMatches = new();
@@ -36,14 +30,14 @@ public sealed class TreeSearchCoordinator : IDisposable
     {
         _viewModel = viewModel;
         _treeView = treeView;
-        _searchDebounceTimer = new System.Timers.Timer(120)
+        _searchDebounceTimer = new Timer(120)
         {
             AutoReset = false
         };
         _searchDebounceTimer.Elapsed += OnSearchDebounceTimerElapsed;
     }
 
-    private void OnSearchDebounceTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    private void OnSearchDebounceTimerElapsed(object? sender, ElapsedEventArgs e)
     {
         CancellationToken token;
         lock (_searchCtsLock)

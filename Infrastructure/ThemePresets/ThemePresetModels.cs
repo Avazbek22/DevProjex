@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace DevProjex.Infrastructure.ThemePresets;
 
 public enum ThemeEffectMode

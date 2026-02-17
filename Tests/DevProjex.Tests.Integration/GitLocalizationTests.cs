@@ -1,11 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
-using DevProjex.Infrastructure;
-using DevProjex.Kernel.Models;
-using Xunit;
 
 namespace DevProjex.Tests.Integration;
 

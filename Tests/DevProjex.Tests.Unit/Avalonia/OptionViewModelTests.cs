@@ -1,7 +1,4 @@
-﻿using System.Collections.Generic;
-using DevProjex.Avalonia.ViewModels;
-using DevProjex.Kernel.Models;
-using Xunit;
+﻿using DevProjex.Avalonia.ViewModels;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 

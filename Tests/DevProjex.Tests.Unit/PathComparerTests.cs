@@ -1,7 +1,3 @@
-using System;
-using DevProjex.Kernel;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class PathComparerTests

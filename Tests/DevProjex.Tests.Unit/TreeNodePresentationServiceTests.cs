@@ -1,8 +1,6 @@
-using System.Collections.Generic;
 using DevProjex.Application.Services;
-using DevProjex.Kernel.Models;
+using DevProjex.Kernel.Abstractions;
 using DevProjex.Tests.Unit.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 
@@ -181,7 +179,7 @@ public sealed class TreeNodePresentationServiceTests
 		Assert.True(result.Children[0].IsDirectory);
 	}
 
-	private sealed class TestIconMapper : DevProjex.Kernel.Abstractions.IIconMapper
+	private sealed class TestIconMapper : IIconMapper
 	{
 		public string GetIconKey(FileSystemNode node)
 		{

@@ -1,8 +1,5 @@
-using System;
-using System.Linq;
 using DevProjex.Application.Services;
 using DevProjex.Tests.Unit.Helpers;
-using Xunit;
 
 namespace DevProjex.Tests.Unit;
 
@@ -15,7 +12,7 @@ public sealed class SelectedContentExportServiceTests
 		using var temp = new TemporaryDirectory();
 		var empty = temp.CreateFile("empty.txt", string.Empty);
 		var valid = temp.CreateFile("note.txt", "hello");
-		var missing = System.IO.Path.Combine(temp.Path, "missing.txt");
+		var missing = Path.Combine(temp.Path, "missing.txt");
 
 		var service = new SelectedContentExportService(new FileContentAnalyzer());
 		var result = service.Build(new[] { missing, empty, valid });

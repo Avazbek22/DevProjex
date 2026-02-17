@@ -1,9 +1,6 @@
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Application.Services;
 

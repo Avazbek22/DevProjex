@@ -1,8 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using Xunit;
+using System.Text.RegularExpressions;
 
 namespace DevProjex.Tests.Unit;
 
@@ -293,7 +289,7 @@ public sealed class AppIconValidationTests
     [InlineData("Title=\"My App\"", false, null)]
     public void XamlIconAttribute_ParsesCorrectly(string xaml, bool expectedHasIcon, string? expectedValue)
     {
-        var match = System.Text.RegularExpressions.Regex.Match(xaml, @"Icon\s*=\s*[""']([^""']+)[""']");
+        var match = Regex.Match(xaml, @"Icon\s*=\s*[""']([^""']+)[""']");
         var hasIcon = match.Success;
         var value = hasIcon ? match.Groups[1].Value : null;
 

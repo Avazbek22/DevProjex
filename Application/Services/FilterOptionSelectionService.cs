@@ -1,8 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using DevProjex.Application.Models;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Application.Services;
 

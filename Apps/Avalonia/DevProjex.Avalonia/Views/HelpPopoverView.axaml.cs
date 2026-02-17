@@ -1,12 +1,6 @@
-using System;
 using System.ComponentModel;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
-using Avalonia.Media;
-using DevProjex.Avalonia.ViewModels;
 
 namespace DevProjex.Avalonia.Views;
 
