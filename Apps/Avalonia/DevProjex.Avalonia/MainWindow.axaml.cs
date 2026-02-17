@@ -986,10 +986,7 @@ public partial class MainWindow : Window
             CancelBackgroundMetricsCalculation();
 
             var selected = GetCheckedPaths();
-            var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
-                .Distinct(PathComparer.Default)
-                .OrderBy(path => path, PathComparer.Default)
-                .ToList();
+            var files = BuildOrderedUniqueFilePaths(selected);
 
             if (files.Count == 0)
             {
@@ -1085,10 +1082,7 @@ public partial class MainWindow : Window
             CancelBackgroundMetricsCalculation();
 
             var selected = GetCheckedPaths();
-            var files = (selected.Count > 0 ? selected.Where(File.Exists) : EnumerateFilePaths(_currentTree!.Root))
-                .Distinct(PathComparer.Default)
-                .OrderBy(path => path, PathComparer.Default)
-                .ToList();
+            var files = BuildOrderedUniqueFilePaths(selected);
 
             if (files.Count == 0)
             {
@@ -3530,10 +3524,8 @@ public partial class MainWindow : Window
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(refreshCts.Token, cancellationToken);
         var linkedToken = linkedCts.Token;
 
-        var allowedExt = new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
-            StringComparer.OrdinalIgnoreCase);
-        var allowedRoot = new HashSet<string>(_viewModel.RootFolders.Where(o => o.IsChecked).Select(o => o.Name),
-            StringComparer.OrdinalIgnoreCase);
+        var allowedExt = CollectCheckedOptionNames(_viewModel.Extensions);
+        var allowedRoot = CollectCheckedOptionNames(_viewModel.RootFolders);
 
         var selectedIgnoreOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
         var ignoreRules = BuildIgnoreRules(_currentPath, selectedIgnoreOptions, allowedRoot);
@@ -4033,12 +4025,50 @@ public partial class MainWindow : Window
 
     private bool EnsureTreeReady() => _currentTree is not null && !string.IsNullOrWhiteSpace(_currentPath);
 
+    private static HashSet<string> CollectCheckedOptionNames(IEnumerable<SelectionOptionViewModel> options)
+    {
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in options)
+        {
+            if (option.IsChecked)
+                selected.Add(option.Name);
+        }
+
+        return selected;
+    }
+
     private HashSet<string> GetCheckedPaths()
     {
         var selected = new HashSet<string>(PathComparer.Default);
         foreach (var node in _viewModel.TreeNodes)
             CollectChecked(node, selected);
         return selected;
+    }
+
+    private List<string> BuildOrderedUniqueFilePaths(IReadOnlySet<string> selectedPaths)
+    {
+        var uniquePaths = new HashSet<string>(PathComparer.Default);
+        if (selectedPaths.Count > 0)
+        {
+            foreach (var path in selectedPaths)
+            {
+                if (File.Exists(path))
+                    uniquePaths.Add(path);
+            }
+        }
+        else if (_currentTree is not null)
+        {
+            foreach (var path in EnumerateFilePaths(_currentTree.Root))
+                uniquePaths.Add(path);
+        }
+
+        if (uniquePaths.Count == 0)
+            return [];
+
+        var ordered = new List<string>(uniquePaths.Count);
+        ordered.AddRange(uniquePaths);
+        ordered.Sort(PathComparer.Default);
+        return ordered;
     }
 
     private static IEnumerable<string> EnumerateFilePaths(TreeNodeDescriptor node)
@@ -4435,7 +4465,10 @@ public partial class MainWindow : Window
         var recalcVersion = Interlocked.Increment(ref _metricsRecalcVersion);
         var treeRoot = _viewModel.TreeNodes.FirstOrDefault();
         if (treeRoot == null)
+        {
+            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
             return;
+        }
 
         // Capture state for background calculation
         var hasAnyChecked = HasAnyCheckedNodes(treeRoot);
@@ -4443,6 +4476,7 @@ public partial class MainWindow : Window
         if (!ShouldProceedWithMetricsCalculation(hasAnyChecked, hasCompleteMetricsBaseline))
         {
             UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
             return;
         }
 
@@ -4453,63 +4487,85 @@ public partial class MainWindow : Window
         var currentTree = _currentTree;
         var currentPath = _currentPath;
 
-        // Run calculations in parallel on background threads
-        _ = Task.Run(() =>
+        // Run calculations in parallel on background threads without blocking waits.
+        _ = RecalculateMetricsCoreAsync(
+            recalcCts,
+            token,
+            recalcVersion,
+            hasAnyChecked,
+            selectedPaths,
+            treeFormat,
+            currentTree,
+            currentPath);
+    }
+
+    private async Task RecalculateMetricsCoreAsync(
+        CancellationTokenSource recalcCts,
+        CancellationToken token,
+        int recalcVersion,
+        bool hasAnyChecked,
+        IReadOnlySet<string> selectedPaths,
+        TreeTextFormat treeFormat,
+        BuildTreeResult? currentTree,
+        string? currentPath)
+    {
+        try
         {
+            // Early exit if cancelled before starting.
+            if (token.IsCancellationRequested)
+                return;
+
+            if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
+            {
+                await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                    () => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
+                return;
+            }
+
+            // Check cancellation before starting heavy calculations.
+            if (token.IsCancellationRequested)
+                return;
+
+            // Calculate tree and content metrics in parallel.
+            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
+            var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
+
             try
             {
-                // Early exit if cancelled before starting
-                if (token.IsCancellationRequested)
-                    return;
-
-                if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
-                {
-                    global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
-                    return;
-                }
-
-                // Check cancellation before starting heavy calculations
-                if (token.IsCancellationRequested)
-                    return;
-
-                // Calculate tree and content metrics in parallel
-                var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-                var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
-
-                try
-                {
-                    Task.WaitAll([treeMetricsTask, contentMetricsTask], token);
-                }
-                catch (OperationCanceledException)
-                {
-                    return; // Calculation was cancelled, exit gracefully
-                }
-
-                // Check cancellation after calculations complete
-                if (token.IsCancellationRequested)
-                    return;
-
-                var treeMetrics = treeMetricsTask.Result;
-                var contentMetrics = contentMetricsTask.Result;
-
-                // Update UI on dispatcher thread
-                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                {
-                    // Double-check: version must match AND not cancelled
-                    if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
-                        return;
-
-                    UpdateStatusBarMetrics(
-                        treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
-                        contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
-                });
+                await Task.WhenAll(treeMetricsTask, contentMetricsTask).ConfigureAwait(false);
             }
-            finally
+            catch (OperationCanceledException)
             {
-                DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
+                return;
             }
-        }, token);
+
+            // Check cancellation after calculations complete.
+            if (token.IsCancellationRequested)
+                return;
+
+            var treeMetrics = treeMetricsTask.Result;
+            var contentMetrics = contentMetricsTask.Result;
+
+            // Update UI on dispatcher thread.
+            await global::Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                // Double-check: version must match AND not cancelled.
+                if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
+                    return;
+
+                UpdateStatusBarMetrics(
+                    treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
+                    contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when a newer recalculation supersedes the current one.
+        }
+        finally
+        {
+            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
+        }
     }
 
     private void ClearFileMetricsCache(bool trimCapacity)

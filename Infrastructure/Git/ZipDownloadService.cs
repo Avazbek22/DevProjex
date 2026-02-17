@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -115,24 +114,22 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
             using (var archive = ZipFile.OpenRead(tempZipPath))
             {
-                // GitHub ZIPs have a root folder like "repo-main/"
-                // We need to extract contents without that root folder
-                var entries = archive.Entries.ToList();
-                var rootFolder = entries
-                    .Select(e => e.FullName.Split('/')[0])
-                    .FirstOrDefault(n => !string.IsNullOrEmpty(n));
-
-                var totalEntries = entries.Count;
+                // GitHub ZIPs usually have a root folder like "repo-main/".
+                // Detect it once and strip it from extracted paths.
+                string? rootFolder = null;
+                var totalEntries = archive.Entries.Count;
                 var processedEntries = 0;
 
-                foreach (var entry in entries)
+                foreach (var entry in archive.Entries)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var entryPath = entry.FullName;
+                    if (string.IsNullOrEmpty(rootFolder))
+                        rootFolder = TryGetTopLevelFolder(entryPath);
 
                     // Remove root folder from path
-                    if (rootFolder is not null && entryPath.StartsWith(rootFolder + "/"))
+                    if (!string.IsNullOrEmpty(rootFolder) && StartsWithFolderPrefix(entryPath, rootFolder))
                         entryPath = entryPath[(rootFolder.Length + 1)..];
 
                     if (string.IsNullOrEmpty(entryPath))
@@ -155,7 +152,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                     }
 
                     processedEntries++;
-                    if (processedEntries % 50 == 0)
+                    if (totalEntries > 0 && processedEntries % 50 == 0)
                     {
                         var percent = (int)(processedEntries * 100 / totalEntries);
                         // Report only percentage - caller shows localized "Extracting..." message
@@ -284,4 +281,22 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
     [GeneratedRegex(@"^https?://(?:www\.)?github\.com/(?<owner>[^/]+)/(?<repo>[^/]+)/?", RegexOptions.IgnoreCase)]
     private static partial Regex GitHubUrlPattern();
+
+    private static string? TryGetTopLevelFolder(string entryPath)
+    {
+        if (string.IsNullOrEmpty(entryPath))
+            return null;
+
+        var slashIndex = entryPath.IndexOf('/');
+        return slashIndex > 0 ? entryPath[..slashIndex] : null;
+    }
+
+    private static bool StartsWithFolderPrefix(string value, string folderName)
+    {
+        if (value.Length < folderName.Length + 1)
+            return false;
+
+        return value.StartsWith(folderName, StringComparison.Ordinal) &&
+               value[folderName.Length] == '/';
+    }
 }

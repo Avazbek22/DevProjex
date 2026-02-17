@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.CompilerServices;
 using DevProjex.Kernel.Abstractions;
@@ -35,9 +34,8 @@ public sealed class FileSystemScanner : IFileSystemScanner
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 			return new ScanResult<HashSet<string>>(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
 
-		// Thread-safe collections for parallel scanning
-		var extensions = new ConcurrentBag<string>();
-		var directories = new ConcurrentBag<string>();
+		// Directory discovery is single-threaded; keep it allocation-light.
+		var directories = new List<string>(capacity: 256);
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
 
@@ -94,48 +92,63 @@ public sealed class FileSystemScanner : IFileSystemScanner
 			CancellationToken = cancellationToken
 		};
 
-		Parallel.ForEach(directories, parallelOptions, dir =>
-		{
-			parallelOptions.CancellationToken.ThrowIfCancellationRequested();
-
-			string[] files;
-			try
-			{
-				files = Directory.GetFiles(dir);
-			}
-			catch (OperationCanceledException)
-			{
-				throw;
-			}
-			catch (UnauthorizedAccessException)
-			{
-				Interlocked.Exchange(ref hadAccessDenied, 1);
-				return;
-			}
-			catch
-			{
-				return;
-			}
-
-			foreach (var file in files)
+		var uniqueExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var mergeLock = new object();
+		Parallel.ForEach(
+			directories,
+			parallelOptions,
+			() => new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			(dir, _, localExtensions) =>
 			{
 				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
-				var name = Path.GetFileName(file);
+				string[] files;
+				try
+				{
+					files = Directory.GetFiles(dir);
+				}
+				catch (OperationCanceledException)
+				{
+					throw;
+				}
+				catch (UnauthorizedAccessException)
+				{
+					Interlocked.Exchange(ref hadAccessDenied, 1);
+					return localExtensions;
+				}
+				catch
+				{
+					return localExtensions;
+				}
 
-				if (ShouldSkipFileByName(name, file, rules))
-					continue;
+				foreach (var file in files)
+				{
+					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
-				var ext = Path.GetExtension(name);
-				if (IsExtensionlessFileName(name))
-					extensions.Add(name);
-				else if (!string.IsNullOrWhiteSpace(ext))
-					extensions.Add(ext);
-			}
-		});
+					var name = Path.GetFileName(file);
+					if (ShouldSkipFileByName(name, file, rules))
+						continue;
 
-		// Convert to HashSet for deduplication
-		var uniqueExtensions = new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
+					var ext = Path.GetExtension(name);
+					if (IsExtensionlessFileName(name))
+						localExtensions.Add(name);
+					else if (!string.IsNullOrWhiteSpace(ext))
+						localExtensions.Add(ext);
+				}
+
+				return localExtensions;
+			},
+			localExtensions =>
+			{
+				if (localExtensions.Count == 0)
+					return;
+
+				lock (mergeLock)
+				{
+					uniqueExtensions.UnionWith(localExtensions);
+				}
+			});
+
 		return new ScanResult<HashSet<string>>(uniqueExtensions, rootAccessDenied == 1, hadAccessDenied == 1);
 	}
 

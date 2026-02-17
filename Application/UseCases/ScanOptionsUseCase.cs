@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Threading.Tasks;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Contracts;
 using DevProjex.Kernel.Models;
@@ -24,20 +22,26 @@ public sealed class ScanOptionsUseCase
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		// Run extensions and root folders scans in parallel for better performance
-		var extensionsTask = Task.Run(() => _scanner.GetExtensions(request.RootPath, request.IgnoreRules, cancellationToken), cancellationToken);
-		var rootFoldersTask = Task.Run(() => _scanner.GetRootFolderNames(request.RootPath, request.IgnoreRules, cancellationToken), cancellationToken);
+		ScanResult<HashSet<string>>? extensions = null;
+		ScanResult<List<string>>? rootFolders = null;
 
-		Task.WaitAll([extensionsTask, rootFoldersTask], cancellationToken);
+		Parallel.Invoke(
+			new ParallelOptions
+			{
+				MaxDegreeOfParallelism = 2,
+				CancellationToken = cancellationToken
+			},
+			() => extensions = _scanner.GetExtensions(request.RootPath, request.IgnoreRules, cancellationToken),
+			() => rootFolders = _scanner.GetRootFolderNames(request.RootPath, request.IgnoreRules, cancellationToken));
 
-		var extensions = extensionsTask.Result;
-		var rootFolders = rootFoldersTask.Result;
+		if (extensions is null || rootFolders is null)
+			throw new InvalidOperationException("Scan results were not produced.");
 
 		// Convert to List and sort in-place - avoids LINQ intermediate allocations
-		var extensionsList = extensions.Value.ToList();
+		var extensionsList = new List<string>(extensions.Value);
 		extensionsList.Sort(StringComparer.OrdinalIgnoreCase);
 
-		var rootFoldersList = rootFolders.Value.ToList();
+		var rootFoldersList = new List<string>(rootFolders.Value);
 		rootFoldersList.Sort(StringComparer.OrdinalIgnoreCase);
 
 		return new ScanOptionsResult(
@@ -55,8 +59,8 @@ public sealed class ScanOptionsUseCase
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		// Thread-safe collection for parallel aggregation
-		var extensions = new ConcurrentBag<string>();
+		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var mergeLock = new object();
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
 
@@ -78,24 +82,38 @@ public sealed class ScanOptionsUseCase
 				CancellationToken = cancellationToken
 			};
 
-			Parallel.ForEach(rootFolders, parallelOptions, folder =>
-			{
-				cancellationToken.ThrowIfCancellationRequested();
+			Parallel.ForEach(
+				rootFolders,
+				parallelOptions,
+				() => new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+				(folder, _, localExtensions) =>
+				{
+					cancellationToken.ThrowIfCancellationRequested();
 
-				var folderPath = Path.Combine(rootPath, folder);
-				var result = _scanner.GetExtensions(folderPath, ignoreRules, cancellationToken);
+					var folderPath = Path.Combine(rootPath, folder);
+					var result = _scanner.GetExtensions(folderPath, ignoreRules, cancellationToken);
 
-				foreach (var ext in result.Value)
-					extensions.Add(ext);
+					foreach (var ext in result.Value)
+						localExtensions.Add(ext);
 
-				if (result.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
-				if (result.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
-			});
+					if (result.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
+					if (result.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
+
+					return localExtensions;
+				},
+				localExtensions =>
+				{
+					if (localExtensions.Count == 0)
+						return;
+
+					lock (mergeLock)
+					{
+						extensions.UnionWith(localExtensions);
+					}
+				});
 		}
 
-		// Convert to HashSet for deduplication
-		var uniqueExtensions = new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
-		return new ScanResult<HashSet<string>>(uniqueExtensions, rootAccessDenied == 1, hadAccessDenied == 1);
+		return new ScanResult<HashSet<string>>(extensions, rootAccessDenied == 1, hadAccessDenied == 1);
 	}
 
 	public bool CanReadRoot(string rootPath) => _scanner.CanReadRoot(rootPath);

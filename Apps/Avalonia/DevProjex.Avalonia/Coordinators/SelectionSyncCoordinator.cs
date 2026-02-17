@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -248,8 +247,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
 
         var prev = _extensionsSelectionCache.Count > 0
             ? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
-            : new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
-                StringComparer.OrdinalIgnoreCase);
+            : CollectCheckedSelectionNames(_viewModel.Extensions);
 
         // Always scan extensions, even when rootFolders.Count == 0.
         // ScanOptionsUseCase.GetExtensionsForRootFolders will include root-level files.
@@ -269,8 +267,8 @@ public sealed class SelectionSyncCoordinator : IDisposable
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            var hasExtensionlessEntries = scan.Value.Any(IsExtensionlessEntry);
-            var visibleExtensions = scan.Value.Where(entry => !IsExtensionlessEntry(entry)).ToList();
+            var visibleExtensions = new List<string>(scan.Value.Count);
+            var hasExtensionlessEntries = SplitExtensions(scan.Value, visibleExtensions);
             var options = _filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -286,8 +284,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
         if (string.IsNullOrEmpty(path)) return Task.CompletedTask;
         var version = Interlocked.Increment(ref _rootScanVersion);
 
-        var prev = new HashSet<string>(_viewModel.RootFolders.Where(o => o.IsChecked).Select(o => o.Name),
-            StringComparer.OrdinalIgnoreCase);
+        var prev = CollectCheckedSelectionNames(_viewModel.RootFolders);
 
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
         var ignoreRules = _buildIgnoreRules(path, selectedIgnoreOptions, null);
@@ -366,7 +363,14 @@ public sealed class SelectionSyncCoordinator : IDisposable
 
     public IReadOnlyCollection<string> GetSelectedRootFolders()
     {
-        return _viewModel.RootFolders.Where(o => o.IsChecked).Select(o => o.Name).ToList();
+        var selected = new List<string>(_viewModel.RootFolders.Count);
+        foreach (var option in _viewModel.RootFolders)
+        {
+            if (option.IsChecked)
+                selected.Add(option.Name);
+        }
+
+        return selected;
     }
 
     public async Task UpdateLiveOptionsFromRootSelectionAsync(
@@ -460,10 +464,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
         if (_ignoreOptions.Count == 0 || _viewModel.IgnoreOptions.Count == 0)
             return _ignoreSelectionCache;
 
-        var selected = _viewModel.IgnoreOptions
-            .Where(o => o.IsChecked)
-            .Select(o => o.Id)
-            .ToHashSet();
+        var selected = CollectCheckedIgnoreIds(_viewModel.IgnoreOptions);
 
         _ignoreSelectionCache = selected;
         return selected;
@@ -478,8 +479,14 @@ public sealed class SelectionSyncCoordinator : IDisposable
         var selectedRoots = GetSelectedRootFolders();
         var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots);
         _ignoreOptions = _ignoreOptionsService.GetOptions(availability);
-        _ignoreSelectionCache = new HashSet<IgnoreOptionId>(
-            _ignoreOptions.Where(option => option.DefaultChecked).Select(option => option.Id));
+        var selected = new HashSet<IgnoreOptionId>();
+        foreach (var option in _ignoreOptions)
+        {
+            if (option.DefaultChecked)
+                selected.Add(option.Id);
+        }
+
+        _ignoreSelectionCache = selected;
     }
 
     private IgnoreOptionsAvailability ResolveIgnoreOptionsAvailability(
@@ -554,19 +561,16 @@ public sealed class SelectionSyncCoordinator : IDisposable
             return;
 
         _extensionsSelectionInitialized = true;
-        _extensionsSelectionCache = new HashSet<string>(
-            _viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
-            StringComparer.OrdinalIgnoreCase);
+        _extensionsSelectionCache = CollectCheckedSelectionNames(_viewModel.Extensions);
     }
 
     internal void ApplyExtensionScan(IReadOnlyCollection<string> extensions)
     {
-        var hasExtensionlessEntries = extensions.Any(IsExtensionlessEntry);
-        var visibleExtensions = extensions.Where(entry => !IsExtensionlessEntry(entry)).ToList();
+        var visibleExtensions = new List<string>(extensions.Count);
+        var hasExtensionlessEntries = SplitExtensions(extensions, visibleExtensions);
         var prev = _extensionsSelectionCache.Count > 0
             ? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
-            : new HashSet<string>(_viewModel.Extensions.Where(o => o.IsChecked).Select(o => o.Name),
-                StringComparer.OrdinalIgnoreCase);
+            : CollectCheckedSelectionNames(_viewModel.Extensions);
 
         var options = _filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
         ApplyExtensionOptions(options, hasExtensionlessEntries);
@@ -577,8 +581,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
         if (_ignoreOptions.Count == 0 || _viewModel.IgnoreOptions.Count == 0)
             return;
 
-        _ignoreSelectionCache = new HashSet<IgnoreOptionId>(
-            _viewModel.IgnoreOptions.Where(o => o.IsChecked).Select(o => o.Id));
+        _ignoreSelectionCache = CollectCheckedIgnoreIds(_viewModel.IgnoreOptions);
     }
 
     public void SyncIgnoreAllCheckbox()
@@ -669,8 +672,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
     private void ApplyExtensionOptions(IReadOnlyList<SelectionOption> options, bool hasExtensionlessEntries)
     {
         _viewModel.Extensions.Clear();
-        var keepExtensionlessAvailability = _viewModel.IgnoreOptions.Any(
-            option => option.Id == IgnoreOptionId.ExtensionlessFiles && option.IsChecked);
+        var keepExtensionlessAvailability = IsExtensionlessIgnoreEnabled();
         _hasExtensionlessExtensionEntries = keepExtensionlessAvailability || hasExtensionlessEntries;
 
         _suppressExtensionItemCheck = true;
@@ -688,6 +690,58 @@ public sealed class SelectionSyncCoordinator : IDisposable
             _extensionsSelectionInitialized = true;
             UpdateExtensionsSelectionCache();
         }
+    }
+
+    private static HashSet<string> CollectCheckedSelectionNames(IEnumerable<SelectionOptionViewModel> options)
+    {
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in options)
+        {
+            if (option.IsChecked)
+                selected.Add(option.Name);
+        }
+
+        return selected;
+    }
+
+    private static HashSet<IgnoreOptionId> CollectCheckedIgnoreIds(IEnumerable<IgnoreOptionViewModel> options)
+    {
+        var selected = new HashSet<IgnoreOptionId>();
+        foreach (var option in options)
+        {
+            if (option.IsChecked)
+                selected.Add(option.Id);
+        }
+
+        return selected;
+    }
+
+    private static bool SplitExtensions(IReadOnlyCollection<string> source, ICollection<string> visibleExtensions)
+    {
+        var hasExtensionlessEntries = false;
+        foreach (var entry in source)
+        {
+            if (IsExtensionlessEntry(entry))
+            {
+                hasExtensionlessEntries = true;
+                continue;
+            }
+
+            visibleExtensions.Add(entry);
+        }
+
+        return hasExtensionlessEntries;
+    }
+
+    private bool IsExtensionlessIgnoreEnabled()
+    {
+        foreach (var option in _viewModel.IgnoreOptions)
+        {
+            if (option.Id == IgnoreOptionId.ExtensionlessFiles && option.IsChecked)
+                return true;
+        }
+
+        return false;
     }
 
     private static bool IsExtensionlessEntry(string value)
