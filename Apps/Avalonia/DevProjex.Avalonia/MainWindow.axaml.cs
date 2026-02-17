@@ -1679,6 +1679,9 @@ public partial class MainWindow : Window
         // smooth across different refresh rates and GPU speeds.
         await WaitForPreviewRenderPassesAsync();
 
+        // Move keyboard focus from hidden search/filter text boxes to preview surface.
+        FocusPreviewSurface();
+
         // Start loading preview content after preview host is painted.
         SchedulePreviewRefresh(immediate: true);
     }
@@ -2869,6 +2872,7 @@ public partial class MainWindow : Window
         _filterBarAnimating = false;
 
         // Cancel any pending debounce operations to avoid wasted background work
+        _searchCoordinator.CancelPending();
         _filterCoordinator.CancelPending();
 
         if (_searchBarContainer is not null)
@@ -2896,6 +2900,17 @@ public partial class MainWindow : Window
 
         if (_filterBar is not null)
             _filterBar.Opacity = 0;
+    }
+
+    private void FocusPreviewSurface()
+    {
+        if (_previewTextScrollViewer is not null && _previewTextScrollViewer.Focusable)
+        {
+            _previewTextScrollViewer.Focus();
+            return;
+        }
+
+        _treeView?.Focus();
     }
 
     private void ApplyFilterRealtimeWithToken(CancellationToken cancellationToken)

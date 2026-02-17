@@ -67,6 +67,18 @@ public sealed class TreeSearchCoordinator : IDisposable
         _searchDebounceTimer.Start();
     }
 
+    /// <summary>
+    /// Cancels any pending debounced search update.
+    /// </summary>
+    public void CancelPending()
+    {
+        _searchDebounceTimer.Stop();
+        lock (_searchCtsLock)
+        {
+            _searchCts?.Cancel();
+        }
+    }
+
     public void UpdateSearchMatches()
     {
         _searchMatches.Clear();
