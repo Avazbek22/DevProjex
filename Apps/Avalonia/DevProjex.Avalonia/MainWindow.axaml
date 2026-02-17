@@ -13,16 +13,16 @@
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TreeViewItem">
-      <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
-      <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+      <Setter Property="IsExpanded" Value="{ReflectionBinding IsExpanded, Mode=TwoWay}" />
+      <Setter Property="IsSelected" Value="{ReflectionBinding IsSelected, Mode=TwoWay}" />
       <Setter Property="Padding"
-              Value="{Binding DataContext.TreeItemPadding, RelativeSource={RelativeSource AncestorType=TreeView}}" />
+              Value="{ReflectionBinding DataContext.TreeItemPadding, RelativeSource={RelativeSource AncestorType=TreeView}}" />
     </Style>
     <!-- Fix for virtualization cache bug: the :empty pseudo-class may not update correctly
          when VirtualizingStackPanel recycles TreeViewItem containers. We use Opacity binding
          instead of IsVisible to hide the expander while preserving layout space for alignment. -->
     <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron">
-      <Setter Property="Opacity" Value="{Binding DataContext.HasChildren,
+      <Setter Property="Opacity" Value="{ReflectionBinding DataContext.HasChildren,
         RelativeSource={RelativeSource AncestorType=TreeViewItem},
         Converter={x:Static converters:BoolToOpacityConverter.Instance}}" />
     </Style>
@@ -582,28 +582,28 @@
                       <StackPanel Grid.Column="1"
                                   Orientation="Horizontal"
                                   Background="Transparent"
-                                  Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
+                                  Spacing="{ReflectionBinding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
                         <CheckBox IsThreeState="True"
                                   IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
                                   VerticalAlignment="Center" />
                         <Image Source="{CompiledBinding Icon}"
-                               Width="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                               Height="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                               Width="{ReflectionBinding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                               Height="{ReflectionBinding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                Stretch="Uniform"
                                VerticalAlignment="Center" />
                         <TextBlock Text="{CompiledBinding DisplayName}"
                                    IsVisible="{Binding !HasHighlightedDisplay}"
                                    VerticalAlignment="Center"
-                                   Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                   FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                   FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   Margin="{ReflectionBinding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontFamily="{ReflectionBinding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontSize="{ReflectionBinding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                    Foreground="{DynamicResource AppTextBrush}" />
                         <TextBlock Inlines="{CompiledBinding DisplayInlines}"
                                    IsVisible="{Binding HasHighlightedDisplay}"
                                    VerticalAlignment="Center"
-                                   Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                   FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                   FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   Margin="{ReflectionBinding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontFamily="{ReflectionBinding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontSize="{ReflectionBinding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                    Foreground="{DynamicResource AppTextBrush}" />
                       </StackPanel>
                     </Grid>

@@ -3022,20 +3022,34 @@ public partial class MainWindow : Window
         if (ReferenceEquals(source, _treeView))
             return true;
 
+        if (_viewModel.IsPreviewMode)
+        {
+            if (_previewTextScrollViewer is not null && ReferenceEquals(source, _previewTextScrollViewer))
+                return true;
+
+            if (_previewLineNumbersScrollViewer is not null && ReferenceEquals(source, _previewLineNumbersScrollViewer))
+                return true;
+        }
+
         if (source is not Visual visual)
             return false;
 
-        var ancestors = visual.GetVisualAncestors().ToList();
+        foreach (var ancestor in visual.GetVisualAncestors())
+        {
+            if (ReferenceEquals(ancestor, _treeView))
+                return true;
 
-        if (ancestors.Contains(_treeView))
-            return true;
+            if (!_viewModel.IsPreviewMode)
+                continue;
 
-        if (_viewModel.IsPreviewMode && _previewTextScrollViewer is not null && ancestors.Contains(_previewTextScrollViewer))
-            return true;
+            if (_previewTextScrollViewer is not null && ReferenceEquals(ancestor, _previewTextScrollViewer))
+                return true;
 
-        return _viewModel.IsPreviewMode &&
-               _previewLineNumbersScrollViewer is not null &&
-               ancestors.Contains(_previewLineNumbersScrollViewer);
+            if (_previewLineNumbersScrollViewer is not null && ReferenceEquals(ancestor, _previewLineNumbersScrollViewer))
+                return true;
+        }
+
+        return false;
     }
 
     private void ShowSearch(bool focusInput = true)
@@ -4000,7 +4014,7 @@ public partial class MainWindow : Window
     /// <summary>
     /// Cached file metrics for efficient real-time updates.
     /// </summary>
-    private sealed record FileMetricsData(
+    private readonly record struct FileMetricsData(
         long Size,
         int LineCount,
         int CharCount,
@@ -4372,16 +4386,32 @@ public partial class MainWindow : Window
         if (_currentTree is null)
             return ExportOutputMetrics.Empty;
 
-        IEnumerable<string> filePaths = hasSelection
-            ? selectedPaths.Where(File.Exists)
-            : EnumerateFilePaths(_currentTree.Root);
+        var uniquePaths = new HashSet<string>(PathComparer.Default);
+        if (hasSelection)
+        {
+            foreach (var path in selectedPaths)
+            {
+                if (File.Exists(path))
+                    uniquePaths.Add(path);
+            }
+        }
+        else
+        {
+            foreach (var path in EnumerateFilePaths(_currentTree.Root))
+                uniquePaths.Add(path);
+        }
 
-        var metricsInputs = new List<ContentFileMetrics>();
+        if (uniquePaths.Count == 0)
+            return ExportOutputMetrics.Empty;
+
+        var orderedPaths = new List<string>(uniquePaths.Count);
+        orderedPaths.AddRange(uniquePaths);
+        orderedPaths.Sort(PathComparer.Default);
+
+        var metricsInputs = new List<ContentFileMetrics>(orderedPaths.Count);
         lock (_metricsLock)
         {
-            foreach (var path in filePaths
-                         .Distinct(PathComparer.Default)
-                         .OrderBy(path => path, PathComparer.Default))
+            foreach (var path in orderedPaths)
             {
                 if (!_fileMetricsCache.TryGetValue(path, out var metrics))
                     continue;
