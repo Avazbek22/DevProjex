@@ -47,7 +47,7 @@ Git menu is available only for projects cloned via DevProjex (Git Clone). The ap
 The cache is stored in the system temp folder. On Windows it is usually:
 `%TEMP%\DevProjex\RepoCache`
 
-* Branch — shows the list of remote branches; switching updates the tree to the selected branch. If the branch already exists locally, switching is offline (no update). If it does not exist locally, it is fetched and created.
+* Branch — shows the list of available branches with the active one marked; switching updates the tree to the selected branch. If the branch already exists locally, switching is offline (no update). If it does not exist locally, it is fetched and created.
 * Get updates — updates only the current branch: fetch and reset to origin/<branch>.
 
 ## 5) Copy
@@ -125,9 +125,9 @@ Close: X button or click the eye icon again.
 * Ctrl++ / Ctrl+= — zoom in
 * Ctrl+- — zoom out
 * Ctrl+0 — reset
-* Ctrl + mouse wheel over the tree — smooth zoom
+* Ctrl + mouse wheel over the tree and in preview mode — smooth zoom
 
-Range: 6–28, reset is 12.
+Range: 6–28, reset is 15.
 
 ### Compact Mode
 Makes the UI denser: smaller spacing in the tree and settings.
@@ -324,4 +324,3 @@ X button (cancel) in the status bar:
 ## 18) Notes
 * By default, dark theme and transparency effects are enabled (if supported).
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.
-

@@ -47,7 +47,7 @@ Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Cl
 La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
 `%TEMP%\DevProjex\RepoCache`
 
-* Branch — mostra l’elenco dei branch remoti; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste, viene scaricato (fetch) e creato localmente.
+* Branch — mostra l’elenco dei branch disponibili con indicazione di quello attivo; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste in locale, viene scaricato (fetch) e creato localmente.
 * Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
 
 ## 5) Copia
@@ -125,9 +125,9 @@ Chiusura: pulsante X oppure nuovo clic sull’icona occhio.
 * Ctrl++ / Ctrl+= — aumenta
 * Ctrl+- — riduci
 * Ctrl+0 — reset
-* Ctrl + rotellina sul tree — zoom fluido
+* Ctrl + rotellina sul tree e in modalità anteprima — zoom fluido
 
-Intervallo: 6–28, reset: 12.
+Intervallo: 6–28, reset: 15.
 
 ### Modalità compatta
 Rende l'interfaccia più densa: spazi più piccoli nell'albero e nelle impostazioni.
@@ -324,4 +324,3 @@ Pulsante X (annulla) nella barra di stato:
 ## 18) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
-

@@ -47,7 +47,7 @@ Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wu
 Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
 `%TEMP%\DevProjex\RepoCache`
 
-* Branch — zeigt die Liste der Remote‑Branches; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn nicht, wird sie per fetch geladen und lokal erstellt.
+* Branch — zeigt die Liste verfügbarer Branches mit Markierung der aktiven Branch; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn sie lokal noch nicht existiert, wird sie per fetch geladen und lokal erstellt.
 * Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>.
 
 ## 5) Kopieren
@@ -125,9 +125,9 @@ Schließen: X-Schaltfläche oder erneuter Klick auf das Auge.
 * Ctrl++ / Ctrl+= — vergrößern
 * Ctrl+- — verkleinern
 * Ctrl+0 — zurücksetzen
-* Ctrl + Mausrad über dem Baum — weiches Zoomen
+* Ctrl + Mausrad über dem Baum und im Vorschaumodus — weiches Zoomen
 
-Bereich: 6–28, Reset: 12.
+Bereich: 6–28, Reset: 15.
 
 ### Kompaktmodus
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
@@ -324,4 +324,3 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 ## 18) Hinweise
 * Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.
-

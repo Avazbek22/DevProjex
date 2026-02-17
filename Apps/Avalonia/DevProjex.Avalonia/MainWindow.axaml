@@ -38,7 +38,7 @@
     </Style>
     <Style Selector="Border.drop-zone-animating Rectangle.drop-zone-border">
       <Style.Animations>
-        <Animation Duration="0:0:0.8" IterationCount="INFINITE">
+        <Animation Duration="0:0:0.8" IterationCount="INFINITE" Easing="LinearEasing">
           <KeyFrame Cue="0%">
             <Setter Property="StrokeDashOffset" Value="0" />
           </KeyFrame>
@@ -57,7 +57,7 @@
     </Style>
     <Style Selector="Border.drop-zone-animating Viewbox.drop-zone-icon">
       <Style.Animations>
-        <Animation Duration="0:0:2.2" IterationCount="INFINITE">
+        <Animation Duration="0:0:2.1" IterationCount="INFINITE">
           <KeyFrame Cue="0%">
             <Setter Property="TranslateTransform.Y" Value="5" />
           </KeyFrame>

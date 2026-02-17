@@ -2642,13 +2642,14 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // Reload tree first so branch/title state is only updated after full success.
+            // This keeps UI stable if reload fails or gets cancelled mid-flight.
+            await ReloadProjectAsync(cancellationToken);
+            await RefreshGitBranchesAsync(_currentPath, cancellationToken);
+            CompleteStatusOperation(statusOperationId);
+
             _viewModel.CurrentBranch = branchName;
             UpdateTitle();
-
-            // Refresh branches and tree
-            await RefreshGitBranchesAsync(_currentPath, cancellationToken);
-            await ReloadProjectAsync(cancellationToken);
-            CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
 
             // Clean up memory from old branch tree
