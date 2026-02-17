@@ -1226,6 +1226,9 @@ public partial class MainWindow : Window
         if (sender is not ScrollViewer textScrollViewer || _previewLineNumbersControl is null)
             return;
 
+        _previewLineNumbersControl.ExtentHeight = Math.Max(0, textScrollViewer.Extent.Height);
+        _previewLineNumbersControl.ViewportHeight = Math.Max(0, textScrollViewer.Viewport.Height);
+
         var targetY = textScrollViewer.Offset.Y;
         var currentY = _previewLineNumbersControl.VerticalOffset;
         if (Math.Abs(currentY - targetY) < 0.1)
@@ -1393,7 +1396,14 @@ public partial class MainWindow : Window
         if (_previewTextScrollViewer is not null)
             _previewTextScrollViewer.Offset = default;
         if (_previewLineNumbersControl is not null)
+        {
             _previewLineNumbersControl.VerticalOffset = 0;
+            if (_previewTextScrollViewer is not null)
+            {
+                _previewLineNumbersControl.ExtentHeight = Math.Max(0, _previewTextScrollViewer.Extent.Height);
+                _previewLineNumbersControl.ViewportHeight = Math.Max(0, _previewTextScrollViewer.Viewport.Height);
+            }
+        }
     }
 
     private static int CountPreviewLines(string text)

@@ -630,6 +630,7 @@
                                                               NumberBrush="{DynamicResource AppTextBrush}"
                                                               Opacity="0.72"
                                                               TopPadding="10"
+                                                              BottomPadding="10"
                                                               LeftPadding="10"
                                                               RightPadding="8" />
                     </Grid>

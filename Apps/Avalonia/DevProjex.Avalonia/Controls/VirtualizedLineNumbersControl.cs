@@ -21,11 +21,20 @@ public sealed class VirtualizedLineNumbersControl : Control
     public static readonly StyledProperty<double> TopPaddingProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, double>(nameof(TopPadding), 10.0);
 
+    public static readonly StyledProperty<double> BottomPaddingProperty =
+        AvaloniaProperty.Register<VirtualizedLineNumbersControl, double>(nameof(BottomPadding), 10.0);
+
     public static readonly StyledProperty<double> LeftPaddingProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, double>(nameof(LeftPadding), 10.0);
 
     public static readonly StyledProperty<double> RightPaddingProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, double>(nameof(RightPadding), 8.0);
+
+    public static readonly StyledProperty<double> ExtentHeightProperty =
+        AvaloniaProperty.Register<VirtualizedLineNumbersControl, double>(nameof(ExtentHeight));
+
+    public static readonly StyledProperty<double> ViewportHeightProperty =
+        AvaloniaProperty.Register<VirtualizedLineNumbersControl, double>(nameof(ViewportHeight));
 
     public static readonly StyledProperty<FontFamily?> NumberFontFamilyProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, FontFamily?>(
@@ -44,8 +53,11 @@ public sealed class VirtualizedLineNumbersControl : Control
             LineCountProperty,
             VerticalOffsetProperty,
             TopPaddingProperty,
+            BottomPaddingProperty,
             LeftPaddingProperty,
             RightPaddingProperty,
+            ExtentHeightProperty,
+            ViewportHeightProperty,
             NumberFontFamilyProperty,
             NumberFontSizeProperty,
             NumberBrushProperty);
@@ -82,6 +94,12 @@ public sealed class VirtualizedLineNumbersControl : Control
         set => SetValue(LeftPaddingProperty, value);
     }
 
+    public double BottomPadding
+    {
+        get => GetValue(BottomPaddingProperty);
+        set => SetValue(BottomPaddingProperty, value);
+    }
+
     public double RightPadding
     {
         get => GetValue(RightPaddingProperty);
@@ -106,6 +124,18 @@ public sealed class VirtualizedLineNumbersControl : Control
         set => SetValue(NumberBrushProperty, value);
     }
 
+    public double ExtentHeight
+    {
+        get => GetValue(ExtentHeightProperty);
+        set => SetValue(ExtentHeightProperty, value);
+    }
+
+    public double ViewportHeight
+    {
+        get => GetValue(ViewportHeightProperty);
+        set => SetValue(ViewportHeightProperty, value);
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var width = CalculateRequiredWidth();
@@ -123,18 +153,23 @@ public sealed class VirtualizedLineNumbersControl : Control
             return;
 
         var typeface = new Typeface(NumberFontFamily ?? FontFamily.Default, FontStyle.Normal, FontWeight.Normal);
-        var sample = BuildFormattedText("8", typeface);
-        var lineHeight = Math.Max(1.0, sample.Height);
+        var lineHeight = ResolveLineHeight(totalLines, typeface);
+        if (lineHeight <= 0)
+            return;
+
         var viewportTop = Math.Max(0, VerticalOffset);
-        var viewportBottom = viewportTop + Bounds.Height;
+        var viewportHeight = ViewportHeight > 0 ? ViewportHeight : Bounds.Height;
         var contentTop = TopPadding;
 
         var firstVisibleLine = Math.Max(1, (int)Math.Floor((viewportTop - contentTop) / lineHeight) + 1);
-        var lastVisibleLine = Math.Min(totalLines, (int)Math.Ceiling((viewportBottom - contentTop) / lineHeight) + 1);
+        var visibleLineCount = Math.Max(1, (int)Math.Ceiling(viewportHeight / lineHeight));
+        var lastVisibleLine = Math.Min(totalLines, firstVisibleLine + visibleLineCount - 1);
 
         const int renderBuffer = 3;
         firstVisibleLine = Math.Max(1, firstVisibleLine - renderBuffer);
         lastVisibleLine = Math.Min(totalLines, lastVisibleLine + renderBuffer);
+        if (firstVisibleLine > totalLines)
+            firstVisibleLine = totalLines;
         if (lastVisibleLine < firstVisibleLine)
             return;
 
@@ -171,5 +206,25 @@ public sealed class VirtualizedLineNumbersControl : Control
             typeface,
             NumberFontSize,
             NumberBrush ?? Brushes.Gray);
+    }
+
+    private double ResolveLineHeight(int totalLines, Typeface typeface)
+    {
+        // Prefer deriving line height from actual scroll extent to avoid cumulative drift
+        // on very large previews.
+        if (ExtentHeight > 0 && totalLines > 0)
+        {
+            var verticalPadding = Math.Max(0, TopPadding) + Math.Max(0, BottomPadding);
+            var textHeight = ExtentHeight - verticalPadding;
+            if (textHeight > 0)
+            {
+                var extentLineHeight = textHeight / totalLines;
+                if (extentLineHeight > 0.25)
+                    return extentLineHeight;
+            }
+        }
+
+        var sample = BuildFormattedText("8", typeface);
+        return Math.Max(1.0, sample.Height);
     }
 }
