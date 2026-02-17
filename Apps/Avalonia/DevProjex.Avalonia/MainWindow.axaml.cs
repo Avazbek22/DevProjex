@@ -71,6 +71,11 @@ public partial class MainWindow : Window
         string Text,
         int LineCount);
 
+    private readonly record struct StatusOperationSnapshot(
+        long OperationId,
+        StatusOperationType OperationType,
+        Action? CancelAction);
+
     private sealed record ProjectLoadCancellationSnapshot(
         bool HadLoadedProjectBefore,
         string? Path,
@@ -206,6 +211,7 @@ public partial class MainWindow : Window
     private int _metricsRecalcVersion;
     private CancellationTokenSource? _recalculateMetricsCts;
     private long _statusOperationSequence;
+    private readonly object _statusOperationLock = new();
     private long _activeStatusOperationId;
     private StatusOperationType _activeStatusOperationType;
     private Action? _activeStatusCancelAction;
@@ -2551,9 +2557,9 @@ public partial class MainWindow : Window
                 global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
                     if (TryParseTrailingPercent(status, out var percent))
-                        UpdateStatusOperationProgress(percent, statusText);
+                        UpdateStatusOperationProgress(percent, statusText, statusOperationId);
                     else
-                        UpdateStatusOperationText(statusText);
+                        UpdateStatusOperationText(statusText, statusOperationId);
                 });
             });
             var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
@@ -2624,9 +2630,9 @@ public partial class MainWindow : Window
                 global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
                     if (TryParseTrailingPercent(status, out var percent))
-                        UpdateStatusOperationProgress(percent, statusText);
+                        UpdateStatusOperationProgress(percent, statusText, statusOperationId);
                     else
-                        UpdateStatusOperationText(statusText);
+                        UpdateStatusOperationText(statusText, statusOperationId);
                 });
             });
             var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress, cancellationToken);
@@ -3727,26 +3733,35 @@ public partial class MainWindow : Window
         Action? cancelAction = null)
     {
         var operationId = Interlocked.Increment(ref _statusOperationSequence);
-        Interlocked.Exchange(ref _activeStatusOperationId, operationId);
-        _activeStatusOperationType = operationType;
-        _activeStatusCancelAction = cancelAction;
+
+        lock (_statusOperationLock)
+        {
+            _activeStatusOperationId = operationId;
+            _activeStatusOperationType = operationType;
+            _activeStatusCancelAction = cancelAction;
+        }
 
         _viewModel.StatusOperationText = text;
         _viewModel.StatusBusy = true;
         _viewModel.StatusProgressIsIndeterminate = indeterminate;
-        if (indeterminate)
-            _viewModel.StatusProgressValue = 0;
+        _viewModel.StatusProgressValue = 0;
 
         return operationId;
     }
 
-    private void UpdateStatusOperationText(string text)
+    private void UpdateStatusOperationText(string text, long? operationId = null)
     {
+        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
+            return;
+
         _viewModel.StatusOperationText = text;
     }
 
-    private void UpdateStatusOperationProgress(double percent, string? text = null)
+    private void UpdateStatusOperationProgress(double percent, string? text = null, long? operationId = null)
     {
+        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
+            return;
+
         if (!string.IsNullOrWhiteSpace(text))
             _viewModel.StatusOperationText = text;
 
@@ -3760,23 +3775,49 @@ public partial class MainWindow : Window
         if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
             return;
 
-        // If background metrics calculation is still active, don't fully hide progress
-        if (_isBackgroundMetricsActive)
+        StatusOperationType activeOperationType;
+        lock (_statusOperationLock)
+            activeOperationType = _activeStatusOperationType;
+
+        // Keep progress visible only for the active metrics operation.
+        if (_isBackgroundMetricsActive && activeOperationType == StatusOperationType.MetricsCalculation)
         {
             UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
             return;
+        }
+
+        lock (_statusOperationLock)
+        {
+            if (operationId.HasValue && _activeStatusOperationId != operationId.Value)
+                return;
+
+            _activeStatusOperationId = 0;
+            _activeStatusOperationType = StatusOperationType.None;
+            _activeStatusCancelAction = null;
         }
 
         _viewModel.StatusOperationText = string.Empty;
         _viewModel.StatusBusy = false;
         _viewModel.StatusProgressIsIndeterminate = true;
         _viewModel.StatusProgressValue = 0;
-        _activeStatusOperationType = StatusOperationType.None;
-        _activeStatusCancelAction = null;
     }
 
-    private bool IsStatusOperationActive(long operationId) =>
-        Interlocked.Read(ref _activeStatusOperationId) == operationId;
+    private bool IsStatusOperationActive(long operationId)
+    {
+        lock (_statusOperationLock)
+            return _activeStatusOperationId == operationId;
+    }
+
+    private StatusOperationSnapshot GetActiveStatusOperationSnapshot()
+    {
+        lock (_statusOperationLock)
+        {
+            return new StatusOperationSnapshot(
+                _activeStatusOperationId,
+                _activeStatusOperationType,
+                _activeStatusCancelAction);
+        }
+    }
 
     /// <summary>
     /// Cancels any active background metrics calculation.
@@ -4618,14 +4659,14 @@ public partial class MainWindow : Window
 
     private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)
     {
-        var activeOperationId = Interlocked.Read(ref _activeStatusOperationId);
-        var activeOperationType = _activeStatusOperationType;
-        var cancelAction = _activeStatusCancelAction;
+        var activeOperation = GetActiveStatusOperationSnapshot();
+        var activeOperationId = activeOperation.OperationId;
+        var activeOperationType = activeOperation.OperationType;
 
         // Primary cancellation path for the currently visible status operation.
         try
         {
-            cancelAction?.Invoke();
+            activeOperation.CancelAction?.Invoke();
         }
         catch
         {
