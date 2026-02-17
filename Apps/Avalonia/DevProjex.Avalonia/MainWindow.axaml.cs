@@ -179,7 +179,7 @@ public partial class MainWindow : Window
     private int _previewMemoryCleanupVersion;
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
-    private double? _previewEntryFontSize;
+    private bool _previewFontInitialized;
 
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
@@ -1463,32 +1463,35 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnZoomIn(object? sender, RoutedEventArgs e) => AdjustTreeFontSize(1);
+    private void OnZoomIn(object? sender, RoutedEventArgs e) => AdjustZoomFontSize(1);
 
-    private void OnZoomOut(object? sender, RoutedEventArgs e) => AdjustTreeFontSize(-1);
+    private void OnZoomOut(object? sender, RoutedEventArgs e) => AdjustZoomFontSize(-1);
 
     private void OnZoomReset(object? sender, RoutedEventArgs e)
     {
-        const double defaultResetFontSize = 12;
-        const double minFontSize = 6;
-        const double previewResetDelta = 1;
-
-        if (_viewModel.IsPreviewMode && _previewEntryFontSize.HasValue)
+        if (_viewModel.IsPreviewMode)
         {
-            var previewResetSize = Math.Max(minFontSize, _previewEntryFontSize.Value - previewResetDelta);
-            _viewModel.TreeFontSize = previewResetSize;
+            _viewModel.PreviewFontSize = MainWindowViewModel.DefaultPreviewFontSize;
             return;
         }
 
-        _viewModel.TreeFontSize = defaultResetFontSize;
+        _viewModel.TreeFontSize = MainWindowViewModel.DefaultTreeFontSize;
     }
 
-    private void AdjustTreeFontSize(double delta)
+    private void AdjustZoomFontSize(double delta)
     {
         const double min = 6;
         const double max = 28;
-        var next = Math.Clamp(_viewModel.TreeFontSize + delta, min, max);
-        _viewModel.TreeFontSize = next;
+
+        if (_viewModel.IsPreviewMode)
+        {
+            var nextPreview = Math.Clamp(_viewModel.PreviewFontSize + delta, min, max);
+            _viewModel.PreviewFontSize = nextPreview;
+            return;
+        }
+
+        var nextTree = Math.Clamp(_viewModel.TreeFontSize + delta, min, max);
+        _viewModel.TreeFontSize = nextTree;
     }
 
     private void OnToggleSettings(object? sender, RoutedEventArgs e)
@@ -1541,7 +1544,11 @@ public partial class MainWindow : Window
 
         _restoreSearchAfterPreview = _viewModel.SearchVisible;
         _restoreFilterAfterPreview = _viewModel.FilterVisible;
-        _previewEntryFontSize = _viewModel.TreeFontSize;
+        if (!_previewFontInitialized)
+        {
+            _viewModel.PreviewFontSize = _viewModel.TreeFontSize;
+            _previewFontInitialized = true;
+        }
         ForceCloseSearchAndFilterForPreview();
 
         // Animate preview panel open and wait until transition settles.
@@ -1567,7 +1574,6 @@ public partial class MainWindow : Window
         await AnimatePreviewBarAsync(show: false);
 
         _viewModel.IsPreviewMode = false;
-        _previewEntryFontSize = null;
         RestoreSearchAndFilterAfterPreview();
         ClearPreviewMemory();
         SchedulePreviewMemoryCleanup();
@@ -2914,14 +2920,14 @@ public partial class MainWindow : Window
         // Zoom hotkeys (in WinForms they work even without a loaded project)
         if (mods == KeyModifiers.Control && (e.Key == Key.OemPlus || e.Key == Key.Add))
         {
-            AdjustTreeFontSize(1);
+            AdjustZoomFontSize(1);
             e.Handled = true;
             return;
         }
 
         if (mods == KeyModifiers.Control && (e.Key == Key.OemMinus || e.Key == Key.Subtract))
         {
-            AdjustTreeFontSize(-1);
+            AdjustZoomFontSize(-1);
             e.Handled = true;
             return;
         }
@@ -3010,7 +3016,7 @@ public partial class MainWindow : Window
         if (!TreeZoomWheelHandler.TryGetZoomStep(e.KeyModifiers, e.Delta, IsPointerOverZoomSurface(e.Source), out var step))
             return;
 
-        AdjustTreeFontSize(step);
+        AdjustZoomFontSize(step);
         e.Handled = true;
     }
 

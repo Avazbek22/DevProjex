@@ -629,7 +629,7 @@
                                 Padding="10,10,8,10">
                           <TextBlock Text="{Binding PreviewLineNumbers}"
                                      FontFamily="{Binding SelectedFontFamily}"
-                                     FontSize="{Binding TreeFontSize}"
+                                     FontSize="{Binding PreviewFontSize}"
                                      Opacity="0.72"
                                      Margin="0"
                                      TextWrapping="NoWrap" />
@@ -646,7 +646,7 @@
                       <Border Padding="10,10,16,10">
                         <TextBlock Text="{Binding PreviewText}"
                                    FontFamily="{Binding SelectedFontFamily}"
-                                   FontSize="{Binding TreeFontSize}"
+                                   FontSize="{Binding PreviewFontSize}"
                                    TextWrapping="NoWrap"
                                    HorizontalAlignment="Left"
                                    VerticalAlignment="Top" />

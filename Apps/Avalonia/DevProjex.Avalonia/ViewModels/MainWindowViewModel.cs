@@ -28,6 +28,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     public const string BaseTitle = "DevProjex v4.5";
     public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.5";
+    public const double DefaultTreeFontSize = 15;
+    public const double DefaultPreviewFontSize = 15;
 
     private readonly LocalizationService _localization;
     private readonly HelpContentProvider _helpContentProvider;
@@ -48,7 +50,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private FontFamily? _selectedFontFamily;
     private FontFamily? _pendingFontFamily;
 
-    private double _treeFontSize = 15;
+    private double _treeFontSize = DefaultTreeFontSize;
+    private double _previewFontSize = DefaultPreviewFontSize;
 
     private bool _allExtensionsChecked;
     private bool _allRootFoldersChecked;
@@ -817,6 +820,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _treeFontSize = value;
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(TreeIconSize));
+        }
+    }
+
+    public double PreviewFontSize
+    {
+        get => _previewFontSize;
+        set
+        {
+            if (Math.Abs(_previewFontSize - value) < 0.1) return;
+            _previewFontSize = value;
+            RaisePropertyChanged();
         }
     }
 
