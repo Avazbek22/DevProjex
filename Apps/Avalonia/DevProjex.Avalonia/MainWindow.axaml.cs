@@ -173,9 +173,17 @@ public partial class MainWindow : Window
     private Border? _previewBarContainer;
     private Border? _previewBar;
     private TranslateTransform? _previewBarTransform;
+    private Grid? _previewSegmentGrid;
+    private Border? _previewSegmentThumb;
+    private TranslateTransform? _previewSegmentThumbTransform;
+    private Button? _previewTreeModeButton;
+    private Button? _previewContentModeButton;
+    private Button? _previewTreeAndContentModeButton;
     private bool _previewBarAnimating;
     private const double PreviewBarHeight = 46.0;
     private static readonly TimeSpan PreviewBarAnimationDuration = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan PreviewSegmentThumbAnimationDuration = TimeSpan.FromMilliseconds(220);
+    private static readonly TimeSpan PreviewRenderAfterSwitchDelay = TimeSpan.FromMilliseconds(320);
     private const double PanelIslandSpacing = 4.0;
 
     // Preview generation
@@ -187,6 +195,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _previewMemoryCleanupCts;
     private int _previewMemoryCleanupVersion;
     private PreviewCacheEntry? _previewCacheEntry;
+    private DateTime _lastPreviewModeSwitchUtc;
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
     private bool _previewFontInitialized;
@@ -284,6 +293,11 @@ public partial class MainWindow : Window
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
         _previewBarContainer = this.FindControl<Border>("PreviewBarContainer");
         _previewBar = this.FindControl<Border>("PreviewBar");
+        _previewSegmentGrid = this.FindControl<Grid>("PreviewSegmentGrid");
+        _previewSegmentThumb = this.FindControl<Border>("PreviewSegmentThumb");
+        _previewTreeModeButton = this.FindControl<Button>("PreviewTreeModeButton");
+        _previewContentModeButton = this.FindControl<Button>("PreviewContentModeButton");
+        _previewTreeAndContentModeButton = this.FindControl<Button>("PreviewTreeAndContentModeButton");
         _previewTextScrollViewer = this.FindControl<ScrollViewer>("PreviewTextScrollViewer");
         _previewLineNumbersControl = this.FindControl<VirtualizedLineNumbersControl>("PreviewLineNumbersControl");
         _settingsContainer = this.FindControl<Border>("SettingsContainer");
@@ -332,6 +346,13 @@ public partial class MainWindow : Window
             _previewBarContainer.Height = 0;
             _previewBarTransform.Y = -PreviewBarHeight;
             _previewBar.Opacity = 0;
+        }
+
+        if (_previewSegmentThumb is not null)
+        {
+            _previewSegmentThumbTransform = new TranslateTransform();
+            _previewSegmentThumb.RenderTransform = _previewSegmentThumbTransform;
+            EnsurePreviewSegmentThumbTransitions();
         }
 
         if (_treeView is not null)
@@ -399,17 +420,25 @@ public partial class MainWindow : Window
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
             {
+                // Invalidate any in-flight preview build so stale content cannot render
+                // before thumb animation completes.
+                Interlocked.Increment(ref _previewBuildVersion);
+                _previewBuildCts?.Cancel();
+                _lastPreviewModeSwitchUtc = DateTime.UtcNow;
+
                 // Clear content immediately to prevent jank from large text re-rendering
                 // while thumb animation plays
                 _viewModel.PreviewText = string.Empty;
                 _viewModel.PreviewLineCount = 1;
                 InvalidatePreviewCache();
+                UpdatePreviewSegmentThumbPosition(animate: true);
 
                 // Delay preview refresh to let thumb animation (250ms) complete
                 SchedulePreviewRefresh(immediate: false);
             }
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
+        UpdatePreviewSegmentThumbPosition(animate: false);
 
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
 
@@ -561,6 +590,8 @@ public partial class MainWindow : Window
             _viewModel.UpdateHelpPopoverMaxSize(rect.Size);
             if (_hasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
                 RenderStatusBarMetrics();
+            if (_viewModel.IsPreviewMode)
+                UpdatePreviewSegmentThumbPosition(animate: false);
         }
     }
 
@@ -1252,6 +1283,25 @@ public partial class MainWindow : Window
         if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
             return;
 
+        if (_lastPreviewModeSwitchUtc != default)
+        {
+            var elapsed = DateTime.UtcNow - _lastPreviewModeSwitchUtc;
+            if (elapsed < PreviewRenderAfterSwitchDelay)
+            {
+                try
+                {
+                    await Task.Delay(PreviewRenderAfterSwitchDelay - elapsed);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+
+        if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
+            return;
+
         if (!EnsureTreeReady())
         {
             ApplyPreviewText(_viewModel.PreviewNoDataText);
@@ -1665,6 +1715,69 @@ public partial class MainWindow : Window
         _viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
     }
 
+    private void EnsurePreviewSegmentThumbTransitions()
+    {
+        if (_previewSegmentThumbTransform is null || _previewSegmentThumbTransform.Transitions is not null)
+            return;
+
+        _previewSegmentThumbTransform.Transitions = new Transitions
+        {
+            new DoubleTransition
+            {
+                Property = TranslateTransform.XProperty,
+                Duration = PreviewSegmentThumbAnimationDuration,
+                Easing = new CubicEaseInOut()
+            }
+        };
+    }
+
+    private void UpdatePreviewSegmentThumbPosition(bool animate)
+    {
+        if (_previewSegmentThumb is null || _previewSegmentThumbTransform is null)
+            return;
+        if (!TryGetPreviewSegmentTarget(out var targetX, out var targetWidth))
+            return;
+
+        _previewSegmentThumb.Width = targetWidth;
+
+        if (!animate)
+        {
+            var cachedTransitions = _previewSegmentThumbTransform.Transitions;
+            _previewSegmentThumbTransform.Transitions = null;
+            _previewSegmentThumbTransform.X = targetX;
+            _previewSegmentThumbTransform.Transitions = cachedTransitions;
+            EnsurePreviewSegmentThumbTransitions();
+            return;
+        }
+
+        EnsurePreviewSegmentThumbTransitions();
+        _previewSegmentThumbTransform.X = targetX;
+    }
+
+    private bool TryGetPreviewSegmentTarget(out double targetX, out double targetWidth)
+    {
+        targetX = 0;
+        targetWidth = 0;
+
+        var selectedButton = GetSelectedPreviewModeButton();
+        if (selectedButton is null)
+            return false;
+
+        targetWidth = selectedButton.Bounds.Width;
+        targetX = selectedButton.Bounds.X;
+        return targetWidth > 0;
+    }
+
+    private Button? GetSelectedPreviewModeButton()
+    {
+        return _viewModel.SelectedPreviewContentMode switch
+        {
+            PreviewContentMode.Tree => _previewTreeModeButton,
+            PreviewContentMode.Content => _previewContentModeButton,
+            _ => _previewTreeAndContentModeButton
+        };
+    }
+
     private async void OpenPreviewMode()
     {
         if (!_viewModel.IsProjectLoaded)
@@ -1680,9 +1793,11 @@ public partial class MainWindow : Window
             _previewFontInitialized = true;
         }
         ForceCloseSearchAndFilterForPreview();
+        UpdatePreviewSegmentThumbPosition(animate: false);
 
         // Animate preview panel open and wait until transition settles.
         await AnimatePreviewBarAsync(show: true);
+        UpdatePreviewSegmentThumbPosition(animate: false);
 
         // Switch from tree view to preview host only after panel is fully opened.
         _viewModel.IsPreviewMode = true;

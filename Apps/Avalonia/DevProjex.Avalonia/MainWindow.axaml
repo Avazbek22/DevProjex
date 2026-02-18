@@ -517,40 +517,45 @@
                     VerticalAlignment="Center">
                 <!-- Left spacer keeps segmented control visually centered against the close button. -->
                 <Border Grid.Column="0"
-                        Width="44"
+                        Width="37"
                         Background="Transparent" />
 
                 <Border Grid.Column="1"
+                        Name="PreviewSegmentedControl"
                         Classes="segmented-control preview-segmented-control">
-                  <Panel>
+                  <Grid Name="PreviewSegmentGrid"
+                        ColumnDefinitions="1.15*,1.15*,1.6*">
                     <Border Name="PreviewSegmentThumb"
+                            Grid.Column="0"
                             Classes="segment-thumb preview-segment-thumb"
                             HorizontalAlignment="Left"
-                            VerticalAlignment="Stretch"
-                            Classes.preview-segment-thumb-middle="{Binding IsPreviewContentSelected}"
-                            Classes.preview-segment-thumb-right="{Binding IsPreviewTreeAndContentSelected}" />
+                            VerticalAlignment="Stretch" />
 
-                    <StackPanel Orientation="Horizontal">
-                      <Button Classes="segment-text-button preview-segment-button"
-                              Classes.segment-selected="{Binding IsPreviewTreeSelected}"
-                              Content="{Binding PreviewModeTree}"
-                              Click="OnPreviewTreeModeClick" />
-                      <Button Classes="segment-text-button preview-segment-button"
-                              Classes.segment-selected="{Binding IsPreviewContentSelected}"
-                              Content="{Binding PreviewModeContent}"
-                              Click="OnPreviewContentModeClick" />
-                      <Button Classes="segment-text-button preview-segment-button"
-                              Classes.segment-selected="{Binding IsPreviewTreeAndContentSelected}"
-                              Content="{Binding PreviewModeTreeAndContent}"
-                              Click="OnPreviewTreeAndContentModeClick" />
-                    </StackPanel>
-                  </Panel>
+                    <Button Grid.Column="0"
+                            Name="PreviewTreeModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewTreeSelected}"
+                            Content="{Binding PreviewModeTree}"
+                            Click="OnPreviewTreeModeClick" />
+                    <Button Grid.Column="1"
+                            Name="PreviewContentModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewContentSelected}"
+                            Content="{Binding PreviewModeContent}"
+                            Click="OnPreviewContentModeClick" />
+                    <Button Grid.Column="2"
+                            Name="PreviewTreeAndContentModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewTreeAndContentSelected}"
+                            Content="{Binding PreviewModeTreeAndContent}"
+                            Click="OnPreviewTreeAndContentModeClick" />
+                  </Grid>
                 </Border>
                 <Button Grid.Column="2"
                         Classes="menu-icon-button preview-close-button"
                         Width="32"
                         Height="32"
-                        Margin="12,0,0,0"
+                        Margin="5,0,0,0"
                         Content="✕"
                         Click="OnPreviewClose" />
               </Grid>
