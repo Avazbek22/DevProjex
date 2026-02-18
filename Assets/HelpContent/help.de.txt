@@ -92,7 +92,9 @@ Tastenkürzel: Ctrl+Shift+V.
 Im JSON-Modus wird eine kompakte Baumstruktur verwendet.
 
 Baum (Baum kopieren / Baum exportieren):
-* `rootPath` — absoluter Wurzelpfad.
+* `rootPath` — Wurzelpfad im aktuellen Ausgabeformat:
+  * für einen lokalen Ordner — absoluter lokaler Pfad;
+  * für ein Git-Projekt — Repository-URL.
 * `root` — Wurzelknoten.
 * Knotenfelder: `name`, `path`, `dirs`, `files`, `accessDenied` (bei Bedarf).
 

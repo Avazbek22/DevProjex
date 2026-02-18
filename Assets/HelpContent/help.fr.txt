@@ -92,7 +92,9 @@ Raccourci : Ctrl+Shift+V.
 Le mode JSON utilise une structure compacte de l’arborescence.
 
 Arborescence (Copier l’arborescence / Exporter l’arborescence) :
-* `rootPath` — chemin absolu de la racine.
+* `rootPath` — chemin racine dans le format de sortie actuel :
+  * pour un dossier local — chemin local absolu ;
+  * pour un projet Git — URL du dépôt.
 * `root` — nœud racine.
 * champs du nœud : `name`, `path`, `dirs`, `files`, `accessDenied` (si nécessaire).
 

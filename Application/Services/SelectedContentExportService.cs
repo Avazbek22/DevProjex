@@ -22,9 +22,18 @@ public sealed class SelectedContentExportService
 	}
 
 	public string Build(IEnumerable<string> filePaths) =>
-		BuildAsync(filePaths, CancellationToken.None).GetAwaiter().GetResult();
+		Build(filePaths, displayPathMapper: null);
+
+	public string Build(IEnumerable<string> filePaths, Func<string, string>? displayPathMapper) =>
+		BuildAsync(filePaths, CancellationToken.None, displayPathMapper).GetAwaiter().GetResult();
 
 	public async Task<string> BuildAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken)
+		=> await BuildAsync(filePaths, cancellationToken, displayPathMapper: null).ConfigureAwait(false);
+
+	public async Task<string> BuildAsync(
+		IEnumerable<string> filePaths,
+		CancellationToken cancellationToken,
+		Func<string, string>? displayPathMapper)
 	{
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
@@ -62,7 +71,8 @@ public sealed class SelectedContentExportService
 
 			anyWritten = true;
 
-			sb.AppendLine($"{file}:");
+			var displayPath = MapDisplayPath(file, displayPathMapper);
+			sb.AppendLine($"{displayPath}:");
 			AppendClipboardBlankLine(sb);
 
 			if (content.IsEmpty)
@@ -82,6 +92,22 @@ public sealed class SelectedContentExportService
 		}
 
 		return anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
+	}
+
+	private static string MapDisplayPath(string filePath, Func<string, string>? displayPathMapper)
+	{
+		if (displayPathMapper is null)
+			return filePath;
+
+		try
+		{
+			var mapped = displayPathMapper(filePath);
+			return string.IsNullOrWhiteSpace(mapped) ? filePath : mapped;
+		}
+		catch
+		{
+			return filePath;
+		}
 	}
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);

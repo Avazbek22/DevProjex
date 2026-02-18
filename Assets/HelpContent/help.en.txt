@@ -92,7 +92,9 @@ Hotkey: Ctrl+Shift+V.
 JSON mode uses a compact tree structure.
 
 Tree (Copy tree / Export tree):
-* `rootPath` — absolute root path.
+* `rootPath` — root path in the current output format:
+  * for a local folder — absolute local path;
+  * for a Git project — repository URL.
 * `root` — root node.
 * node fields: `name`, `path`, `dirs`, `files`, `accessDenied` (when needed).
 
