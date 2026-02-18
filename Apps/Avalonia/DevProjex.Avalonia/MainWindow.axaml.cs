@@ -159,6 +159,7 @@ public partial class MainWindow : Window
     private Border? _searchBarContainer;
     private TranslateTransform? _searchBarTransform;
     private bool _searchBarAnimating;
+    private bool _searchBarClosePending;
     private const double SearchBarHeight = 46.0;
     private static readonly TimeSpan SearchBarAnimationDuration = TimeSpan.FromMilliseconds(250);
 
@@ -166,6 +167,7 @@ public partial class MainWindow : Window
     private Border? _filterBarContainer;
     private TranslateTransform? _filterBarTransform;
     private bool _filterBarAnimating;
+    private bool _filterBarClosePending;
     private const double FilterBarHeight = 46.0;
     private static readonly TimeSpan FilterBarAnimationDuration = TimeSpan.FromMilliseconds(250);
 
@@ -201,6 +203,7 @@ public partial class MainWindow : Window
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
     private bool _previewFontInitialized;
+    private int _suppressSearchFilterRealtimeDepth;
 
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
@@ -400,9 +403,17 @@ public partial class MainWindow : Window
         _viewModelPropertyChangedHandler = (_, args) =>
         {
             if (args.PropertyName == nameof(MainWindowViewModel.SearchQuery))
+            {
+                if (Volatile.Read(ref _suppressSearchFilterRealtimeDepth) > 0)
+                    return;
                 _searchCoordinator.OnSearchQueryChanged();
+            }
             else if (args.PropertyName == nameof(MainWindowViewModel.NameFilter))
+            {
+                if (Volatile.Read(ref _suppressSearchFilterRealtimeDepth) > 0)
+                    return;
                 _filterCoordinator.OnNameFilterChanged();
+            }
             else if (args.PropertyName is nameof(MainWindowViewModel.MaterialIntensity)
                      or nameof(MainWindowViewModel.PanelContrast)
                      or nameof(MainWindowViewModel.BorderStrength)
@@ -2040,6 +2051,12 @@ public partial class MainWindow : Window
         finally
         {
             _searchBarAnimating = false;
+
+            if (_searchBarClosePending && !_viewModel.SearchVisible)
+            {
+                _searchBarClosePending = false;
+                AnimateSearchBar(false);
+            }
         }
     }
 
@@ -2097,6 +2114,12 @@ public partial class MainWindow : Window
         finally
         {
             _filterBarAnimating = false;
+
+            if (_filterBarClosePending && !_viewModel.FilterVisible)
+            {
+                _filterBarClosePending = false;
+                AnimateFilterBar(false);
+            }
         }
     }
 
@@ -2995,11 +3018,14 @@ public partial class MainWindow : Window
 
     private async void CloseFilter()
     {
-        if (!_viewModel.FilterVisible) return;
-        if (_filterBarAnimating) return;
+        if (!IsFilterBarEffectivelyVisible()) return;
 
         _viewModel.FilterVisible = false;
-        AnimateFilterBar(false);
+
+        if (_filterBarAnimating)
+            _filterBarClosePending = true;
+        else
+            AnimateFilterBar(false);
         _treeView?.Focus();
 
         // Let close animation complete first to avoid concurrent UI + tree rebuild pressure.
@@ -3402,22 +3428,131 @@ public partial class MainWindow : Window
 
     private void CloseSearch()
     {
-        if (!_viewModel.SearchVisible) return;
-        if (_searchBarAnimating) return;
+        if (!IsSearchBarEffectivelyVisible())
+            return;
 
         _viewModel.SearchVisible = false;
         _viewModel.SearchQuery = string.Empty;
 
         // Clear highlights immediately instead of waiting for 120ms debounce,
         // so InlineCollection/Run objects become collectable right away.
+        _searchCoordinator.CancelPending();
         _searchCoordinator.UpdateHighlights(null);
         _searchCoordinator.ClearSearchState();
-        AnimateSearchBar(false);
+        if (_searchBarAnimating)
+            _searchBarClosePending = true;
+        else
+            AnimateSearchBar(false);
         _treeView?.Focus();
 
         // Aggressively release search highlight objects (InlineCollections, Run instances)
         // and trim working set on a background thread.
         ScheduleBackgroundMemoryCleanup();
+    }
+
+    private bool IsSearchBarEffectivelyVisible()
+    {
+        if (_viewModel.SearchVisible)
+            return true;
+
+        if (_searchBarContainer?.IsVisible == true)
+            return true;
+
+        return _searchBarContainer?.Bounds.Height > 0.5;
+    }
+
+    private bool IsFilterBarEffectivelyVisible()
+    {
+        if (_viewModel.FilterVisible)
+            return true;
+
+        if (_filterBarContainer?.IsVisible == true)
+            return true;
+
+        return _filterBarContainer?.Bounds.Height > 0.5;
+    }
+
+    private void ForceHideSearchBarVisualState()
+    {
+        if (_searchBarContainer is not null)
+        {
+            _searchBarContainer.Height = 0;
+            _searchBarContainer.Margin = new Thickness(0);
+            _searchBarContainer.IsVisible = false;
+        }
+
+        if (_searchBarTransform is not null)
+            _searchBarTransform.Y = -SearchBarHeight;
+
+        if (_searchBar is not null)
+            _searchBar.Opacity = 0;
+    }
+
+    private void ForceHideFilterBarVisualState()
+    {
+        if (_filterBarContainer is not null)
+        {
+            _filterBarContainer.Height = 0;
+            _filterBarContainer.Margin = new Thickness(0);
+            _filterBarContainer.IsVisible = false;
+        }
+
+        if (_filterBarTransform is not null)
+            _filterBarTransform.Y = -FilterBarHeight;
+
+        if (_filterBar is not null)
+            _filterBar.Opacity = 0;
+    }
+
+    private async Task PrepareSearchAndFilterForProjectLoadAsync()
+    {
+        var hadVisibleSearch = IsSearchBarEffectivelyVisible();
+        var hadVisibleFilter = IsFilterBarEffectivelyVisible();
+
+        Interlocked.Increment(ref _suppressSearchFilterRealtimeDepth);
+        try
+        {
+            _viewModel.SearchVisible = false;
+            _viewModel.FilterVisible = false;
+
+            _searchBarClosePending = false;
+            _filterBarClosePending = false;
+
+            if (hadVisibleSearch && !_searchBarAnimating)
+                AnimateSearchBar(false);
+
+            if (hadVisibleFilter && !_filterBarAnimating)
+                AnimateFilterBar(false);
+
+            if (hadVisibleSearch || hadVisibleFilter)
+                await WaitForPanelAnimationAsync(SearchBarAnimationDuration > FilterBarAnimationDuration
+                    ? SearchBarAnimationDuration
+                    : FilterBarAnimationDuration);
+
+            _searchCoordinator.CancelPending();
+            _filterCoordinator.CancelPending();
+
+            if (!string.IsNullOrEmpty(_viewModel.SearchQuery))
+                _viewModel.SearchQuery = string.Empty;
+            if (!string.IsNullOrEmpty(_viewModel.NameFilter))
+                _viewModel.NameFilter = string.Empty;
+
+            // Cancel once more after resetting queries to eliminate any stale queued work.
+            _searchCoordinator.CancelPending();
+            _filterCoordinator.CancelPending();
+
+            _searchCoordinator.UpdateHighlights(null);
+            _searchCoordinator.ClearSearchState();
+            _filterExpansionSnapshot = null;
+            Interlocked.Increment(ref _filterApplyVersion);
+
+            ForceHideSearchBarVisualState();
+            ForceHideFilterBarVisualState();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _suppressSearchFilterRealtimeDepth);
+        }
     }
 
     private void OnRootAllChanged(object? sender, RoutedEventArgs e)
@@ -3484,6 +3619,7 @@ public partial class MainWindow : Window
         }
 
         _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
+        await PrepareSearchAndFilterForProjectLoadAsync();
         CancelPreviewRefresh();
 
         // Clear previous project state BEFORE loading new one to release memory early
