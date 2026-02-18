@@ -9,7 +9,7 @@
         Title="{Binding Title}"
         Icon="avares://DevProjex/AppIcon/icon-256.png"
         Width="1200" Height="800"
-        MinWidth="800" MinHeight="600"
+        MinWidth="850" MinHeight="600"
         TransparencyLevelHint="Mica, AcrylicBlur, Blur"
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>

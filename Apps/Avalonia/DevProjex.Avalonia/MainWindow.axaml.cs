@@ -199,6 +199,14 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _isBackgroundMetricsActive;
     private int _metricsRecalcVersion;
+    private const double CompactStatusMetricsThresholdWidth = 1050;
+    private int _lastStatusTreeLines;
+    private int _lastStatusTreeChars;
+    private int _lastStatusTreeTokens;
+    private int _lastStatusContentLines;
+    private int _lastStatusContentChars;
+    private int _lastStatusContentTokens;
+    private bool _hasStatusMetricsSnapshot;
     private CancellationTokenSource? _recalculateMetricsCts;
     private long _statusOperationSequence;
     private readonly object _statusOperationLock = new();
@@ -549,7 +557,11 @@ public partial class MainWindow : Window
             return;
 
         if (e.NewValue is Rect rect)
+        {
             _viewModel.UpdateHelpPopoverMaxSize(rect.Size);
+            if (_hasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+                RenderStatusBarMetrics();
+        }
     }
 
     private void OnDeactivated(object? sender, EventArgs e)
@@ -4681,6 +4693,18 @@ public partial class MainWindow : Window
         int treeLines, int treeChars, int treeTokens,
         int contentLines, int contentChars, int contentTokens)
     {
+        _lastStatusTreeLines = treeLines;
+        _lastStatusTreeChars = treeChars;
+        _lastStatusTreeTokens = treeTokens;
+        _lastStatusContentLines = contentLines;
+        _lastStatusContentChars = contentChars;
+        _lastStatusContentTokens = contentTokens;
+        _hasStatusMetricsSnapshot = true;
+        RenderStatusBarMetrics();
+    }
+
+    private void RenderStatusBarMetrics()
+    {
         // Format: [Lines: X | Chars: X | ~Tokens: X]
         var linesLabel = _localization.Format("Status.Metric.Lines", "{0}");
         var charsLabel = _localization.Format("Status.Metric.Chars", "{0}");
@@ -4691,8 +4715,16 @@ public partial class MainWindow : Window
         var charsPrefix = charsLabel.Replace("{0}", "").Trim();
         var tokensPrefix = tokensLabel.Replace("{0}", "").Trim();
 
-        _viewModel.StatusTreeStatsText = $"[{linesPrefix} {FormatNumber(treeLines)} | {charsPrefix} {FormatNumber(treeChars)} | {tokensPrefix} {FormatNumber(treeTokens)}]";
-        _viewModel.StatusContentStatsText = $"[{linesPrefix} {FormatNumber(contentLines)} | {charsPrefix} {FormatNumber(contentChars)} | {tokensPrefix} {FormatNumber(contentTokens)}]";
+        var useCompactMetrics = Bounds.Width > 0 && Bounds.Width <= CompactStatusMetricsThresholdWidth;
+        if (useCompactMetrics)
+        {
+            _viewModel.StatusTreeStatsText = $"[{linesPrefix} {FormatNumber(_lastStatusTreeLines)}]";
+            _viewModel.StatusContentStatsText = $"[{linesPrefix} {FormatNumber(_lastStatusContentLines)}]";
+            return;
+        }
+
+        _viewModel.StatusTreeStatsText = $"[{linesPrefix} {FormatNumber(_lastStatusTreeLines)} | {charsPrefix} {FormatNumber(_lastStatusTreeChars)} | {tokensPrefix} {FormatNumber(_lastStatusTreeTokens)}]";
+        _viewModel.StatusContentStatsText = $"[{linesPrefix} {FormatNumber(_lastStatusContentLines)} | {charsPrefix} {FormatNumber(_lastStatusContentChars)} | {tokensPrefix} {FormatNumber(_lastStatusContentTokens)}]";
     }
 
     /// <summary>
