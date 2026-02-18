@@ -144,10 +144,18 @@ Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 
 La ricerca apre solo i rami necessari; svuotando la query l’albero si richiude (tranne la radice).
 
+Limitazioni:
+* all’apertura della ricerca, il filtro si chiude automaticamente;
+* in modalità anteprima, la ricerca non è disponibile.
+
 ## 9) Filtra per nome
 Mostra solo i nodi che corrispondono al filtro e i loro genitori. Aggiornamento con debounce.
 * Ctrl+Shift+N — mostra/nascondi filtro
 * Esc — chiudi filtro
+
+Limitazioni:
+* all’apertura del filtro, la ricerca si chiude automaticamente;
+* in modalità anteprima, il filtro non è disponibile.
 
 ## 10) Opzioni
 Liste a destra:

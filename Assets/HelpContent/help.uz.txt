@@ -144,10 +144,18 @@ Qidiruv panelini ochadi, mosliklarni yoritadi va navigatsiya qiladi.
 
 Qidiruv faqat kerakli shoxlarni ochadi; so‘rov tozalansa, daraxt yig‘iladi (ildizdan tashqari).
 
+Cheklovlar:
+* qidiruv ochilganda, filtr avtomatik yopiladi;
+* preview rejimida qidiruv mavjud emas.
+
 ## 9) Nom bo‘yicha filtr
 Filtr satriga mos tugunlar va ularning ota‑onalarini ko‘rsatadi. Yangilanish kechikish bilan.
 * Ctrl+Shift+N — filtrni ko‘rsatish/yashirish
 * Esc — filtrni yopish
+
+Cheklovlar:
+* filtr ochilganda, qidiruv avtomatik yopiladi;
+* preview rejimida filtr mavjud emas.
 
 ## 10) Sozlamalar
 O‘ng tomonda ro‘yxatlar:
