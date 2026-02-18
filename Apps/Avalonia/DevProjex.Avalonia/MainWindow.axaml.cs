@@ -197,6 +197,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _previewModeSwitchCts;
     private int _previewModeSwitchVersion;
     private bool _previewModeSwitchInProgress;
+    private bool _clearPreviewBeforeNextRefresh;
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
     private bool _previewFontInitialized;
@@ -1232,6 +1233,7 @@ public partial class MainWindow : Window
         _previewRefreshRequested = false;
         _previewDebounceTimer?.Stop();
         _previewBuildCts?.Cancel();
+        _clearPreviewBeforeNextRefresh = false;
         _viewModel.IsPreviewLoading = false;
     }
 
@@ -1272,6 +1274,8 @@ public partial class MainWindow : Window
     {
         if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
             return;
+        if (_previewModeSwitchInProgress)
+            return;
 
         if (!EnsureTreeReady())
         {
@@ -1299,6 +1303,15 @@ public partial class MainWindow : Window
 
         try
         {
+            if (_clearPreviewBeforeNextRefresh)
+            {
+                // Keep old content visible during thumb animation and clear it only
+                // after preview progress becomes visible for a smoother sequence.
+                _viewModel.PreviewText = string.Empty;
+                _viewModel.PreviewLineCount = 1;
+                _clearPreviewBeforeNextRefresh = false;
+            }
+
             // Capture state on UI thread before background work
             var selectedPaths = GetCheckedPaths();
             var selectedMode = _viewModel.SelectedPreviewContentMode;
@@ -1701,11 +1714,6 @@ public partial class MainWindow : Window
             CancelPreviewRefresh();
             Interlocked.Increment(ref _previewBuildVersion);
 
-            // Clear content while thumb animation is running to avoid visual jank.
-            _viewModel.PreviewText = string.Empty;
-            _viewModel.PreviewLineCount = 1;
-            InvalidatePreviewCache();
-
             _viewModel.SelectedPreviewContentMode = targetMode;
             UpdatePreviewSegmentThumbPosition(animate: true);
 
@@ -1715,6 +1723,11 @@ public partial class MainWindow : Window
             if (switchVersion != Volatile.Read(ref _previewModeSwitchVersion))
                 return;
 
+            // Mark completion before scheduling refresh to avoid a race where
+            // RefreshPreviewAsync exits early while switch is still in-progress.
+            _previewModeSwitchInProgress = false;
+            // Clear preview only when refresh actually starts (after progress is shown).
+            _clearPreviewBeforeNextRefresh = true;
             SchedulePreviewRefresh(immediate: true);
         }
         catch (OperationCanceledException)
