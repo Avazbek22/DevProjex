@@ -183,7 +183,6 @@ public partial class MainWindow : Window
     private const double PreviewBarHeight = 46.0;
     private static readonly TimeSpan PreviewBarAnimationDuration = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan PreviewSegmentThumbAnimationDuration = TimeSpan.FromMilliseconds(220);
-    private static readonly TimeSpan PreviewRenderAfterSwitchDelay = TimeSpan.FromMilliseconds(320);
     private const double PanelIslandSpacing = 4.0;
 
     // Preview generation
@@ -195,7 +194,9 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _previewMemoryCleanupCts;
     private int _previewMemoryCleanupVersion;
     private PreviewCacheEntry? _previewCacheEntry;
-    private DateTime _lastPreviewModeSwitchUtc;
+    private CancellationTokenSource? _previewModeSwitchCts;
+    private int _previewModeSwitchVersion;
+    private bool _previewModeSwitchInProgress;
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
     private bool _previewFontInitialized;
@@ -420,21 +421,8 @@ public partial class MainWindow : Window
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
             {
-                // Invalidate any in-flight preview build so stale content cannot render
-                // before thumb animation completes.
-                Interlocked.Increment(ref _previewBuildVersion);
-                _previewBuildCts?.Cancel();
-                _lastPreviewModeSwitchUtc = DateTime.UtcNow;
-
-                // Clear content immediately to prevent jank from large text re-rendering
-                // while thumb animation plays
-                _viewModel.PreviewText = string.Empty;
-                _viewModel.PreviewLineCount = 1;
-                InvalidatePreviewCache();
-                UpdatePreviewSegmentThumbPosition(animate: true);
-
-                // Delay preview refresh to let thumb animation (250ms) complete
-                SchedulePreviewRefresh(immediate: false);
+                if (!_previewModeSwitchInProgress)
+                    UpdatePreviewSegmentThumbPosition(animate: false);
             }
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
@@ -512,6 +500,8 @@ public partial class MainWindow : Window
         }
         _previewMemoryCleanupCts?.Cancel();
         _previewMemoryCleanupCts?.Dispose();
+        _previewModeSwitchCts?.Cancel();
+        _previewModeSwitchCts?.Dispose();
 
         // Dispose coordinators
         _searchCoordinator.Dispose();
@@ -590,7 +580,7 @@ public partial class MainWindow : Window
             _viewModel.UpdateHelpPopoverMaxSize(rect.Size);
             if (_hasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
                 RenderStatusBarMetrics();
-            if (_viewModel.IsPreviewMode)
+            if (_viewModel.IsPreviewMode && !_previewModeSwitchInProgress)
                 UpdatePreviewSegmentThumbPosition(animate: false);
         }
     }
@@ -1283,25 +1273,6 @@ public partial class MainWindow : Window
         if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
             return;
 
-        if (_lastPreviewModeSwitchUtc != default)
-        {
-            var elapsed = DateTime.UtcNow - _lastPreviewModeSwitchUtc;
-            if (elapsed < PreviewRenderAfterSwitchDelay)
-            {
-                try
-                {
-                    await Task.Delay(PreviewRenderAfterSwitchDelay - elapsed);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-            }
-        }
-
-        if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
-            return;
-
         if (!EnsureTreeReady())
         {
             ApplyPreviewText(_viewModel.PreviewNoDataText);
@@ -1700,19 +1671,63 @@ public partial class MainWindow : Window
         ClosePreviewMode();
     }
 
-    private void OnPreviewTreeModeClick(object? sender, RoutedEventArgs e)
+    private async void OnPreviewTreeModeClick(object? sender, RoutedEventArgs e)
     {
-        _viewModel.SelectedPreviewContentMode = PreviewContentMode.Tree;
+        await SwitchPreviewModeAsync(PreviewContentMode.Tree);
     }
 
-    private void OnPreviewContentModeClick(object? sender, RoutedEventArgs e)
+    private async void OnPreviewContentModeClick(object? sender, RoutedEventArgs e)
     {
-        _viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+        await SwitchPreviewModeAsync(PreviewContentMode.Content);
     }
 
-    private void OnPreviewTreeAndContentModeClick(object? sender, RoutedEventArgs e)
+    private async void OnPreviewTreeAndContentModeClick(object? sender, RoutedEventArgs e)
     {
-        _viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+        await SwitchPreviewModeAsync(PreviewContentMode.TreeAndContent);
+    }
+
+    private async Task SwitchPreviewModeAsync(PreviewContentMode targetMode)
+    {
+        if (_viewModel.SelectedPreviewContentMode == targetMode)
+            return;
+
+        var switchCts = ReplaceCancellationSource(ref _previewModeSwitchCts);
+        var switchVersion = Interlocked.Increment(ref _previewModeSwitchVersion);
+        _previewModeSwitchInProgress = true;
+
+        try
+        {
+            // Cancel any in-flight preview work so stale content cannot render.
+            CancelPreviewRefresh();
+            Interlocked.Increment(ref _previewBuildVersion);
+
+            // Clear content while thumb animation is running to avoid visual jank.
+            _viewModel.PreviewText = string.Empty;
+            _viewModel.PreviewLineCount = 1;
+            InvalidatePreviewCache();
+
+            _viewModel.SelectedPreviewContentMode = targetMode;
+            UpdatePreviewSegmentThumbPosition(animate: true);
+
+            // Wait for thumb transition completion before rebuilding preview.
+            await WaitForPanelAnimationAsync(PreviewSegmentThumbAnimationDuration, switchCts.Token);
+
+            if (switchVersion != Volatile.Read(ref _previewModeSwitchVersion))
+                return;
+
+            SchedulePreviewRefresh(immediate: true);
+        }
+        catch (OperationCanceledException)
+        {
+            // Ignore canceled stale switch operations.
+        }
+        finally
+        {
+            if (switchVersion == Volatile.Read(ref _previewModeSwitchVersion))
+                _previewModeSwitchInProgress = false;
+
+            DisposeIfCurrent(ref _previewModeSwitchCts, switchCts);
+        }
     }
 
     private void EnsurePreviewSegmentThumbTransitions()
@@ -1818,6 +1833,8 @@ public partial class MainWindow : Window
         if (_previewBarAnimating)
             return;
 
+        _previewModeSwitchCts?.Cancel();
+        _previewModeSwitchInProgress = false;
         CancelPreviewRefresh();
         await AnimatePreviewBarAsync(show: false);
 
@@ -2260,6 +2277,12 @@ public partial class MainWindow : Window
     {
         // A tiny safety buffer ensures state flags reset after the transition settles.
         return Task.Delay(duration + TimeSpan.FromMilliseconds(24));
+    }
+
+    private static Task WaitForPanelAnimationAsync(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        // A tiny safety buffer ensures state flags reset after the transition settles.
+        return Task.Delay(duration + TimeSpan.FromMilliseconds(24), cancellationToken);
     }
 
     private void OnSetLightTheme(object? sender, RoutedEventArgs e)
