@@ -1889,9 +1889,9 @@ public partial class MainWindow : Window
     {
         // Restore only one tool to keep search/filter behavior predictable.
         if (_restoreSearchAfterPreview && !_viewModel.SearchVisible)
-            ShowSearch(focusInput: true);
+            ShowSearch(focusInput: true, selectAllOnFocus: false);
         else if (_restoreFilterAfterPreview && !_viewModel.FilterVisible)
-            ShowFilter(focusInput: true);
+            ShowFilter(focusInput: true, selectAllOnFocus: false);
 
         _restoreSearchAfterPreview = false;
         _restoreFilterAfterPreview = false;
@@ -3043,7 +3043,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowFilter(bool focusInput = true)
+    private void ShowFilter(bool focusInput = true, bool selectAllOnFocus = true)
     {
         if (!_viewModel.IsProjectLoaded) return;
         if (_viewModel.IsPreviewMode) return;
@@ -3055,7 +3055,7 @@ public partial class MainWindow : Window
         if (!focusInput)
             return;
 
-        _ = FocusFilterBoxAfterOpenAnimationAsync();
+        _ = FocusFilterBoxAfterOpenAnimationAsync(selectAllOnFocus);
     }
 
     private async Task CloseFilterAsync(bool focusTree = true)
@@ -3502,7 +3502,7 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Background);
     }
 
-    private void ShowSearch(bool focusInput = true)
+    private void ShowSearch(bool focusInput = true, bool selectAllOnFocus = true)
     {
         if (!_viewModel.IsProjectLoaded) return;
         if (_viewModel.IsPreviewMode) return;
@@ -3514,10 +3514,10 @@ public partial class MainWindow : Window
         if (!focusInput)
             return;
 
-        _ = FocusSearchBoxAfterOpenAnimationAsync();
+        _ = FocusSearchBoxAfterOpenAnimationAsync(selectAllOnFocus);
     }
 
-    private async Task FocusSearchBoxAfterOpenAnimationAsync()
+    private async Task FocusSearchBoxAfterOpenAnimationAsync(bool selectAllOnFocus)
     {
         await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
         if (!_viewModel.SearchVisible || _viewModel.IsPreviewMode)
@@ -3525,12 +3525,11 @@ public partial class MainWindow : Window
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            _searchBar?.SearchBoxControl?.Focus();
-            _searchBar?.SearchBoxControl?.SelectAll();
+            FocusInputTextBox(_searchBar?.SearchBoxControl, selectAllOnFocus);
         }, DispatcherPriority.Background);
     }
 
-    private async Task FocusFilterBoxAfterOpenAnimationAsync()
+    private async Task FocusFilterBoxAfterOpenAnimationAsync(bool selectAllOnFocus)
     {
         await WaitForPanelAnimationAsync(FilterBarAnimationDuration);
         if (!_viewModel.FilterVisible || _viewModel.IsPreviewMode)
@@ -3538,9 +3537,33 @@ public partial class MainWindow : Window
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            _filterBar?.FilterBoxControl?.Focus();
-            _filterBar?.FilterBoxControl?.SelectAll();
+            FocusInputTextBox(_filterBar?.FilterBoxControl, selectAllOnFocus);
         }, DispatcherPriority.Background);
+    }
+
+    private void FocusInputTextBox(TextBox? textBox, bool selectAllOnFocus)
+    {
+        if (textBox is null)
+            return;
+
+        textBox.Focus();
+        if (selectAllOnFocus)
+        {
+            textBox.SelectAll();
+            return;
+        }
+
+        // Keep text editable after preview restore: place caret to the end without selecting text.
+        PlaceCaretAtTextEnd(textBox);
+        _ = Dispatcher.UIThread.InvokeAsync(() => PlaceCaretAtTextEnd(textBox), DispatcherPriority.Input);
+    }
+
+    private static void PlaceCaretAtTextEnd(TextBox textBox)
+    {
+        var end = textBox.Text?.Length ?? 0;
+        textBox.SelectionStart = end;
+        textBox.SelectionEnd = end;
+        textBox.CaretIndex = end;
     }
 
     private async Task CloseSearchAsync(bool focusTree = true, bool waitForAnimation = false)
