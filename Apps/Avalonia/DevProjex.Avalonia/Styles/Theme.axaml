@@ -162,6 +162,26 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
+    <!-- Suppress focus/hover border while search/filter panel is animating.
+         Target both specific and generic template borders because part names differ across themes. -->
+    <Style Selector="TextBox.suppress-accent,
+                     TextBox.suppress-accent:focus,
+                     TextBox.suppress-accent:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <Style Selector="TextBox.suppress-accent /template/ Border#PART_BorderElement,
+                     TextBox.suppress-accent:focus /template/ Border#PART_BorderElement,
+                     TextBox.suppress-accent:pointerover /template/ Border#PART_BorderElement,
+                     TextBox.suppress-accent /template/ Border,
+                     TextBox.suppress-accent:focus /template/ Border,
+                     TextBox.suppress-accent:pointerover /template/ Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
     <Style Selector="ComboBox">
         <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />

@@ -67,6 +67,20 @@ public sealed class LoadCancellationWorkflowIntegrationTests
         Assert.True(clearOldTreeIndex > buildRootIndex, "Old tree must be cleared only after new root is built.");
     }
 
+    [Fact]
+    public void MainWindow_RestorePreviousProjectStateAfterCancellation_SynchronizesSearchAndFilterVisualState()
+    {
+        var content = ReadMainWindowCode();
+        var restoreStart = content.IndexOf("private void RestorePreviousProjectStateAfterCancellation(", StringComparison.Ordinal);
+        var restoreEnd = content.IndexOf("private static CancellationTokenSource ReplaceCancellationSource(", StringComparison.Ordinal);
+
+        Assert.True(restoreStart >= 0, "RestorePreviousProjectStateAfterCancellation method not found.");
+        Assert.True(restoreEnd > restoreStart, "RestorePreviousProjectStateAfterCancellation boundary not found.");
+
+        var restoreBody = content.Substring(restoreStart, restoreEnd - restoreStart);
+        Assert.Contains("SyncSearchAndFilterVisualStateFromFlags();", restoreBody);
+    }
+
     private static string ReadMainWindowCode()
     {
         var repoRoot = FindRepositoryRoot();
