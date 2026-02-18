@@ -22,13 +22,19 @@ public sealed class TreeExportService
 	public string BuildFullTree(string rootPath, TreeNodeDescriptor root)
 		=> BuildFullTree(rootPath, root, TreeTextFormat.Ascii);
 
-	public string BuildFullTree(string rootPath, TreeNodeDescriptor root, TreeTextFormat format)
+	public string BuildFullTree(
+		string rootPath,
+		TreeNodeDescriptor root,
+		TreeTextFormat format,
+		string? displayRootPath = null)
 	{
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
+
 		if (format == TreeTextFormat.Json)
-			return BuildFullTreeJson(rootPath, root);
+			return BuildFullTreeJson(rootPath, outputRootPath, root);
 
 		var sb = new StringBuilder();
-		sb.Append(rootPath).AppendLine(":");
+		sb.Append(outputRootPath).AppendLine(":");
 		sb.AppendLine();
 
 		sb.Append("├── ").AppendLine(root.DisplayName);
@@ -44,16 +50,19 @@ public sealed class TreeExportService
 		string rootPath,
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths,
-		TreeTextFormat format)
+		TreeTextFormat format,
+		string? displayRootPath = null)
 	{
 		if (!HasSelectedDescendantOrSelf(root, selectedPaths))
 			return string.Empty;
 
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
+
 		if (format == TreeTextFormat.Json)
-			return BuildSelectedTreeJson(rootPath, root, selectedPaths);
+			return BuildSelectedTreeJson(rootPath, outputRootPath, root, selectedPaths);
 
 		var sb = new StringBuilder();
-		sb.Append(rootPath).AppendLine(":");
+		sb.Append(outputRootPath).AppendLine(":");
 		sb.AppendLine();
 
 		sb.Append("├── ").AppendLine(root.DisplayName);
@@ -134,28 +143,29 @@ public sealed class TreeExportService
 		}
 	}
 
-	private static string BuildFullTreeJson(string rootPath, TreeNodeDescriptor root)
+	private static string BuildFullTreeJson(string localRootPath, string displayRootPath, TreeNodeDescriptor root)
 	{
-		var normalizedRootPath = Path.GetFullPath(rootPath);
+		var normalizedRootPath = Path.GetFullPath(localRootPath);
 		var payload = new TreeJsonExportDocument(
-			RootPath: normalizedRootPath,
+			RootPath: displayRootPath,
 			Root: BuildJsonNode(normalizedRootPath, root));
 
 		return JsonSerializer.Serialize(payload, JsonOptions);
 	}
 
 	private static string BuildSelectedTreeJson(
-		string rootPath,
+		string localRootPath,
+		string displayRootPath,
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths)
 	{
-		var normalizedRootPath = Path.GetFullPath(rootPath);
+		var normalizedRootPath = Path.GetFullPath(localRootPath);
 		var selectedRoot = BuildSelectedJsonNode(normalizedRootPath, root, selectedPaths);
 		if (selectedRoot is null)
 			return string.Empty;
 
 		var payload = new TreeJsonExportDocument(
-			RootPath: normalizedRootPath,
+			RootPath: displayRootPath,
 			Root: selectedRoot);
 
 		return JsonSerializer.Serialize(payload, JsonOptions);

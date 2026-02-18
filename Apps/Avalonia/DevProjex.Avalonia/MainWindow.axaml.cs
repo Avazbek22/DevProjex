@@ -105,6 +105,7 @@ public partial class MainWindow : Window
     private readonly TreeExportService _treeExport;
     private readonly SelectedContentExportService _contentExport;
     private readonly TreeAndContentExportService _treeAndContentExport;
+    private readonly RepositoryWebPathPresentationService _repositoryWebPathPresentationService;
     private readonly TextFileExportService _textFileExport;
     private readonly IToastService _toastService;
     private readonly IconCache _iconCache;
@@ -264,6 +265,7 @@ public partial class MainWindow : Window
         _treeExport = services.TreeExportService;
         _contentExport = services.ContentExportService;
         _treeAndContentExport = services.TreeAndContentExportService;
+        _repositoryWebPathPresentationService = services.RepositoryWebPathPresentationService;
         _textFileExport = services.TextFileExportService;
         _toastService = services.ToastService;
         _iconCache = new IconCache(services.IconStore);
@@ -1048,7 +1050,11 @@ public partial class MainWindow : Window
 
             // Run file reading off UI thread
             statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
-            var content = await Task.Run(() => _contentExport.BuildAsync(files, CancellationToken.None));
+            var pathPresentation = CreateExportPathPresentation();
+            var content = await Task.Run(() => _contentExport.BuildAsync(
+                files,
+                CancellationToken.None,
+                pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
                 CompleteStatusOperation(statusOperationId);
@@ -1079,10 +1085,17 @@ public partial class MainWindow : Window
 
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
+            var pathPresentation = CreateExportPathPresentation();
             // Run file reading off UI thread
             statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
             var content = await Task.Run(() =>
-                _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, format, CancellationToken.None));
+                _treeAndContentExport.BuildAsync(
+                    _currentPath!,
+                    _currentTree!.Root,
+                    selected,
+                    format,
+                    CancellationToken.None,
+                    pathPresentation));
             await SetClipboardTextAsync(content);
             CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
@@ -1143,7 +1156,11 @@ public partial class MainWindow : Window
             }
 
             statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
-            var content = await Task.Run(() => _contentExport.BuildAsync(files, CancellationToken.None));
+            var pathPresentation = CreateExportPathPresentation();
+            var content = await Task.Run(() => _contentExport.BuildAsync(
+                files,
+                CancellationToken.None,
+                pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
                 CompleteStatusOperation(statusOperationId);
@@ -1181,10 +1198,17 @@ public partial class MainWindow : Window
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
             var saveAsJson = false;
+            var pathPresentation = CreateExportPathPresentation();
 
             statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
             var content = await Task.Run(() =>
-                _treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, format, CancellationToken.None));
+                _treeAndContentExport.BuildAsync(
+                    _currentPath!,
+                    _currentTree!.Root,
+                    selected,
+                    format,
+                    CancellationToken.None,
+                    pathPresentation));
 
             var saved = await TryExportTextToFileAsync(
                 content,
@@ -1214,15 +1238,31 @@ public partial class MainWindow : Window
         if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
             return string.Empty;
 
+        var pathPresentation = CreateExportPathPresentation();
+        var displayRootPath = pathPresentation?.DisplayRootPath;
         var hasSelection = selectedPaths.Count > 0;
         var treeText = hasSelection
-            ? _treeExport.BuildSelectedTree(_currentPath, _currentTree.Root, selectedPaths, format)
-            : _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format);
+            ? _treeExport.BuildSelectedTree(_currentPath, _currentTree.Root, selectedPaths, format, displayRootPath)
+            : _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format, displayRootPath);
 
         if (hasSelection && string.IsNullOrWhiteSpace(treeText))
-            treeText = _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format);
+            treeText = _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format, displayRootPath);
 
         return treeText;
+    }
+
+    private ExportPathPresentation? CreateExportPathPresentation()
+    {
+        if (!_viewModel.IsGitMode)
+            return null;
+
+        if (string.IsNullOrWhiteSpace(_currentPath) || string.IsNullOrWhiteSpace(_currentRepositoryUrl))
+            return null;
+
+        return _repositoryWebPathPresentationService.TryCreate(
+            _currentPath,
+            _currentRepositoryUrl,
+            _viewModel.CurrentBranch);
     }
 
     private void SchedulePreviewRefresh(bool immediate = false)
@@ -1347,6 +1387,7 @@ public partial class MainWindow : Window
             var currentPath = _currentPath;
             var currentTreeRoot = _currentTree?.Root;
             var noDataText = _viewModel.PreviewNoDataText;
+            var pathPresentation = CreateExportPathPresentation();
             var previewKey = BuildPreviewCacheKey(
                 projectPath: currentPath,
                 treeRoot: currentTreeRoot,
@@ -1387,7 +1428,10 @@ public partial class MainWindow : Window
                     if (files.Count == 0)
                         text = hasSelection ? noCheckedFilesText : noTextContentText;
                     else
-                        text = _contentExport.BuildAsync(files, cancellationToken).GetAwaiter().GetResult();
+                        text = _contentExport.BuildAsync(
+                            files,
+                            cancellationToken,
+                            pathPresentation?.MapFilePath).GetAwaiter().GetResult();
 
                     if (string.IsNullOrWhiteSpace(text))
                         text = noTextContentText;
@@ -1395,7 +1439,13 @@ public partial class MainWindow : Window
                 else
                 {
                     text = currentPath != null && currentTreeRoot != null
-                        ? _treeAndContentExport.BuildAsync(currentPath, currentTreeRoot, selectedPaths, treeFormat, cancellationToken).GetAwaiter().GetResult()
+                        ? _treeAndContentExport.BuildAsync(
+                            currentPath,
+                            currentTreeRoot,
+                            selectedPaths,
+                            treeFormat,
+                            cancellationToken,
+                            pathPresentation).GetAwaiter().GetResult()
                         : noTextContentText;
                 }
 

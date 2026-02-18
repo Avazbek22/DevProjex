@@ -23,7 +23,15 @@ public sealed class TreeAndContentExportService
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths,
 		TreeTextFormat format)
-		=> BuildAsync(rootPath, root, selectedPaths, format, CancellationToken.None).GetAwaiter().GetResult();
+		=> Build(rootPath, root, selectedPaths, format, pathPresentation: null);
+
+	public string Build(
+		string rootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedPaths,
+		TreeTextFormat format,
+		ExportPathPresentation? pathPresentation)
+		=> BuildAsync(rootPath, root, selectedPaths, format, CancellationToken.None, pathPresentation).GetAwaiter().GetResult();
 
 	public async Task<string> BuildAsync(string rootPath, TreeNodeDescriptor root, IReadOnlySet<string> selectedPaths, CancellationToken cancellationToken)
 		=> await BuildAsync(rootPath, root, selectedPaths, TreeTextFormat.Ascii, cancellationToken).ConfigureAwait(false);
@@ -33,22 +41,24 @@ public sealed class TreeAndContentExportService
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths,
 		TreeTextFormat format,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		ExportPathPresentation? pathPresentation = null)
 	{
+		var displayRootPath = pathPresentation?.DisplayRootPath;
 		bool hasSelection = selectedPaths.Count > 0 && TreeExportService.HasSelectedDescendantOrSelf(root, selectedPaths);
 
 		string tree = hasSelection
-			? _treeExport.BuildSelectedTree(rootPath, root, selectedPaths, format)
-			: _treeExport.BuildFullTree(rootPath, root, format);
+			? _treeExport.BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath)
+			: _treeExport.BuildFullTree(rootPath, root, format, displayRootPath);
 
 		if (hasSelection && string.IsNullOrWhiteSpace(tree))
-			tree = _treeExport.BuildFullTree(rootPath, root, format);
+			tree = _treeExport.BuildFullTree(rootPath, root, format, displayRootPath);
 
 		var files = hasSelection
 			? GetSelectedFiles(selectedPaths)
 			: GetAllFilePaths(root);
 
-		var content = await _contentExport.BuildAsync(files, cancellationToken).ConfigureAwait(false);
+		var content = await _contentExport.BuildAsync(files, cancellationToken, pathPresentation?.MapFilePath).ConfigureAwait(false);
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
 
