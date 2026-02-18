@@ -25,6 +25,7 @@ public sealed class RepositoryWebPathPresentationServiceTests
 
 		Assert.NotNull(presentation);
 		Assert.Equal("https://github.com/Avazbek22/DevProjex", presentation!.DisplayRootPath);
+		Assert.Equal("DevProjex", presentation.DisplayRootName);
 	}
 
 	[Fact]
@@ -39,6 +40,41 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		var mapped = presentation!.MapFilePath(@"C:\work\repo\src\MainWindow.axaml.cs");
 
 		Assert.Equal("https://github.com/Avazbek22/DevProjex/src/MainWindow.axaml.cs", mapped);
+	}
+
+	[Theory]
+	[InlineData("https://github.com/user/repo", "repo")]
+	[InlineData("https://github.com/user/repo/", "repo")]
+	[InlineData("https://github.com/user/repo.git", "repo")]
+	[InlineData("https://gitlab.com/group/subgroup/project", "project")]
+	[InlineData("https://bitbucket.org/team/project-name", "project-name")]
+	[InlineData("https://example.com/scm/repositories/Alpha_123", "Alpha_123")]
+	[InlineData("https://example.com/a/b/c/d", "d")]
+	[InlineData("https://example.com/a/My.Repo", "My.Repo")]
+	[InlineData("https://example.com/a/repo~name", "repo~name")]
+	[InlineData("https://example.com/a/repo-name.git", "repo-name")]
+	[InlineData("https://example.com/a/repo_name.git", "repo_name")]
+	[InlineData("https://example.com/a/repo%20name", "repo name")]
+	[InlineData("https://example.com/a/%D0%A2%D0%B5%D1%81%D1%82", "Тест")]
+	[InlineData("https://example.com/a/repo?tab=readme", "repo")]
+	[InlineData("https://example.com/a/repo#top", "repo")]
+	public void TryCreate_ExtractsDisplayRootName_FromRepositoryUrl(string repositoryUrl, string expectedName)
+	{
+		var service = new RepositoryWebPathPresentationService();
+		var presentation = service.TryCreate(@"C:\work\repo", repositoryUrl);
+
+		Assert.NotNull(presentation);
+		Assert.Equal(expectedName, presentation!.DisplayRootName);
+	}
+
+	[Fact]
+	public void TryCreate_LeavesDisplayRootNameNull_WhenRepositoryPathHasNoSegments()
+	{
+		var service = new RepositoryWebPathPresentationService();
+		var presentation = service.TryCreate(@"C:\work\repo", "https://example.com");
+
+		Assert.NotNull(presentation);
+		Assert.Null(presentation!.DisplayRootName);
 	}
 
 	[Fact]
@@ -85,4 +121,3 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		Assert.Equal(external, mapped);
 	}
 }
-

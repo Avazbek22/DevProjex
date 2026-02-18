@@ -45,14 +45,15 @@ public sealed class TreeAndContentExportService
 		ExportPathPresentation? pathPresentation = null)
 	{
 		var displayRootPath = pathPresentation?.DisplayRootPath;
+		var displayRootName = pathPresentation?.DisplayRootName;
 		bool hasSelection = selectedPaths.Count > 0 && TreeExportService.HasSelectedDescendantOrSelf(root, selectedPaths);
 
 		string tree = hasSelection
-			? _treeExport.BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath)
-			: _treeExport.BuildFullTree(rootPath, root, format, displayRootPath);
+			? _treeExport.BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath, displayRootName)
+			: _treeExport.BuildFullTree(rootPath, root, format, displayRootPath, displayRootName);
 
 		if (hasSelection && string.IsNullOrWhiteSpace(tree))
-			tree = _treeExport.BuildFullTree(rootPath, root, format, displayRootPath);
+			tree = _treeExport.BuildFullTree(rootPath, root, format, displayRootPath, displayRootName);
 
 		var files = hasSelection
 			? GetSelectedFiles(selectedPaths)

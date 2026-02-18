@@ -20,10 +20,12 @@ public sealed class RepositoryWebPathPresentationService
         }
 
         var rootWebPath = repoUri.ToString().TrimEnd('/');
+        var displayRootName = ExtractRepositoryName(repoUri);
 
         return new ExportPathPresentation(
             displayRootPath: rootWebPath,
-            mapFilePath: filePath => MapToFileWebPath(filePath, normalizedRootPath, rootWebPath));
+            mapFilePath: filePath => MapToFileWebPath(filePath, normalizedRootPath, rootWebPath),
+            displayRootName: displayRootName);
     }
 
     private static string NormalizeRepositoryUrl(string repositoryUrl)
@@ -73,6 +75,20 @@ public sealed class RepositoryWebPathPresentationService
         var encodedRelativePath = EncodePathSegments(relativeUnixPath);
 
         return $"{rootWebPath}/{encodedRelativePath}";
+    }
+
+    private static string? ExtractRepositoryName(Uri repositoryUri)
+    {
+        var path = repositoryUri.AbsolutePath.Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+            return null;
+
+        var repositoryName = Uri.UnescapeDataString(segments[^1]);
+        return string.IsNullOrWhiteSpace(repositoryName) ? null : repositoryName;
     }
 
     private static string EncodePathSegments(string path)

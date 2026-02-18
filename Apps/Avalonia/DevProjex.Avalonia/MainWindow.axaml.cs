@@ -1243,13 +1243,30 @@ public partial class MainWindow : Window
 
         var pathPresentation = CreateExportPathPresentation();
         var displayRootPath = pathPresentation?.DisplayRootPath;
+        var displayRootName = pathPresentation?.DisplayRootName;
         var hasSelection = selectedPaths.Count > 0;
         var treeText = hasSelection
-            ? _treeExport.BuildSelectedTree(_currentPath, _currentTree.Root, selectedPaths, format, displayRootPath)
-            : _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format, displayRootPath);
+            ? _treeExport.BuildSelectedTree(
+                _currentPath,
+                _currentTree.Root,
+                selectedPaths,
+                format,
+                displayRootPath,
+                displayRootName)
+            : _treeExport.BuildFullTree(
+                _currentPath,
+                _currentTree.Root,
+                format,
+                displayRootPath,
+                displayRootName);
 
         if (hasSelection && string.IsNullOrWhiteSpace(treeText))
-            treeText = _treeExport.BuildFullTree(_currentPath, _currentTree.Root, format, displayRootPath);
+            treeText = _treeExport.BuildFullTree(
+                _currentPath,
+                _currentTree.Root,
+                format,
+                displayRootPath,
+                displayRootName);
 
         return treeText;
     }

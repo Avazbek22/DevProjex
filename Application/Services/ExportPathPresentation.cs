@@ -1,14 +1,11 @@
 namespace DevProjex.Application.Services;
 
-public sealed class ExportPathPresentation
+public sealed class ExportPathPresentation(
+    string displayRootPath,
+    Func<string, string> mapFilePath,
+    string? displayRootName = null)
 {
-    public ExportPathPresentation(string displayRootPath, Func<string, string> mapFilePath)
-    {
-        DisplayRootPath = displayRootPath;
-        MapFilePath = mapFilePath;
-    }
-
-    public string DisplayRootPath { get; }
-    public Func<string, string> MapFilePath { get; }
+    public string DisplayRootPath { get; } = displayRootPath;
+    public Func<string, string> MapFilePath { get; } = mapFilePath;
+    public string? DisplayRootName { get; } = displayRootName;
 }
-
