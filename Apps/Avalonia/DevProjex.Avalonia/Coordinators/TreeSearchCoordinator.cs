@@ -8,6 +8,22 @@ namespace DevProjex.Avalonia.Coordinators;
 
 public sealed class TreeSearchCoordinator : IDisposable
 {
+    private enum BringIntoViewResult
+    {
+        NotFound = 0,
+        Pending = 1,
+        Visible = 2
+    }
+
+    private const int MaxBringIntoViewAttempts = 6;
+    private static readonly DispatcherPriority[] BringIntoViewRetryPriorities =
+    [
+        DispatcherPriority.Render,
+        DispatcherPriority.Loaded,
+        DispatcherPriority.Background,
+        DispatcherPriority.Background
+    ];
+
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeView _treeView;
     private readonly Timer _searchDebounceTimer;
@@ -18,6 +34,7 @@ public sealed class TreeSearchCoordinator : IDisposable
     private int _searchMatchIndex = -1;
     private TreeNodeViewModel? _currentSearchMatch;
     private string? _activeHighlightQuery;
+    private int _bringIntoViewVersion;
 
     // Cached brushes to avoid creating new objects for each node
     private IBrush? _cachedHighlightBackground;
@@ -122,6 +139,8 @@ public sealed class TreeSearchCoordinator : IDisposable
 
     public void ClearSearchState()
     {
+        Interlocked.Increment(ref _bringIntoViewVersion);
+
         // Clear current match reference first
         _currentSearchMatch = null;
         _searchMatchIndex = -1;
@@ -136,6 +155,7 @@ public sealed class TreeSearchCoordinator : IDisposable
 
     public void Dispose()
     {
+        Interlocked.Increment(ref _bringIntoViewVersion);
         _searchDebounceTimer.Stop();
         _searchDebounceTimer.Elapsed -= OnSearchDebounceTimerElapsed;
         _searchDebounceTimer.Dispose();
@@ -189,13 +209,8 @@ public sealed class TreeSearchCoordinator : IDisposable
 
     private void BringNodeIntoView(TreeNodeViewModel node)
     {
-        if (TryBringNodeIntoView(node))
-            return;
-
-        // Retry after render pass: container might be materialized after expansion.
-        Dispatcher.UIThread.Post(
-            () => _ = TryBringNodeIntoView(node),
-            DispatcherPriority.Render);
+        var version = Interlocked.Increment(ref _bringIntoViewVersion);
+        TryBringNodeIntoViewWithRetries(node, version, attempt: 0);
     }
 
     private void SelectTreeNode(TreeNodeViewModel node)
@@ -311,23 +326,94 @@ public sealed class TreeSearchCoordinator : IDisposable
         _activeHighlightQuery = null;
     }
 
-    private bool TryBringNodeIntoView(TreeNodeViewModel node)
+    private void TryBringNodeIntoViewWithRetries(TreeNodeViewModel node, int version, int attempt)
+    {
+        if (version != Volatile.Read(ref _bringIntoViewVersion))
+            return;
+
+        var result = TryBringNodeIntoView(node);
+        if (result == BringIntoViewResult.Visible || attempt >= MaxBringIntoViewAttempts - 1)
+            return;
+
+        var priority = BringIntoViewRetryPriorities[Math.Min(attempt, BringIntoViewRetryPriorities.Length - 1)];
+        Dispatcher.UIThread.Post(
+            () => TryBringNodeIntoViewWithRetries(node, version, attempt + 1),
+            priority);
+    }
+
+    private BringIntoViewResult TryBringNodeIntoView(TreeNodeViewModel node)
+    {
+        if (TryGetContainer(node, out var directContainer) && directContainer is not null)
+        {
+            if (IsContainerVisibleInViewport(directContainer))
+                return BringIntoViewResult.Visible;
+
+            directContainer.BringIntoView();
+            return IsContainerVisibleInViewport(directContainer)
+                ? BringIntoViewResult.Visible
+                : BringIntoViewResult.Pending;
+        }
+
+        // The target container may not be materialized yet under virtualization.
+        // Scrolling to the nearest realized ancestor progressively materializes descendants.
+        if (TryGetNearestRealizedAncestorContainer(node, out var ancestorContainer) && ancestorContainer is not null)
+        {
+            if (!IsContainerVisibleInViewport(ancestorContainer))
+                ancestorContainer.BringIntoView();
+
+            return BringIntoViewResult.Pending;
+        }
+
+        return BringIntoViewResult.NotFound;
+    }
+
+    private bool TryGetContainer(TreeNodeViewModel node, out TreeViewItem? container)
     {
         if (_treeView.ContainerFromItem(node) is TreeViewItem directContainer)
         {
-            directContainer.BringIntoView();
+            container = directContainer;
             return true;
         }
 
-        var descendantContainer = _treeView.FindDescendantOfType<TreeViewItem>(
+        container = _treeView.FindDescendantOfType<TreeViewItem>(
             includeSelf: false,
             visual => ReferenceEquals(visual.DataContext, node));
+        return container is not null;
+    }
 
-        if (descendantContainer is null)
-            return false;
+    private bool TryGetNearestRealizedAncestorContainer(TreeNodeViewModel node, out TreeViewItem? ancestorContainer)
+    {
+        var current = node.Parent;
+        while (current is not null)
+        {
+            if (TryGetContainer(current, out ancestorContainer))
+                return true;
 
-        descendantContainer.BringIntoView();
-        return true;
+            current = current.Parent;
+        }
+
+        ancestorContainer = null;
+        return false;
+    }
+
+    private bool IsContainerVisibleInViewport(TreeViewItem container)
+    {
+        var scrollViewer = _treeView.FindDescendantOfType<ScrollViewer>(
+            includeSelf: false,
+            visual => visual is ScrollViewer);
+        if (scrollViewer is null)
+            return true;
+
+        var topLeft = container.TranslatePoint(default, scrollViewer);
+        if (topLeft is null)
+            return true;
+
+        var top = topLeft.Value.Y;
+        var bottom = top + container.Bounds.Height;
+        var viewportHeight = scrollViewer.Viewport.Height;
+
+        const double tolerance = 1.0;
+        return bottom >= -tolerance && top <= viewportHeight + tolerance;
     }
 
     private (IBrush highlightBackground, IBrush highlightForeground, IBrush normalForeground, IBrush currentBackground)

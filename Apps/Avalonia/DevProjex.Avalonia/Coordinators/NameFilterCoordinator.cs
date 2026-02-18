@@ -13,7 +13,9 @@ public sealed class NameFilterCoordinator : IDisposable
     public NameFilterCoordinator(Action<CancellationToken> applyFilterRealtime)
     {
         _applyFilterRealtime = applyFilterRealtime;
-        _filterDebounceTimer = new Timer(280)
+        // Slightly longer debounce keeps typing smooth on the first filter input
+        // when tree rebuild path is still warming up.
+        _filterDebounceTimer = new Timer(360)
         {
             AutoReset = false
         };
@@ -50,6 +52,7 @@ public sealed class NameFilterCoordinator : IDisposable
     /// </summary>
     public void CancelPending()
     {
+        _filterDebounceTimer.Stop();
         lock (_ctsLock)
         {
             _filterCts?.Cancel();

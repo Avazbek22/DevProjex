@@ -159,13 +159,20 @@ public partial class MainWindow : Window
     private Border? _searchBarContainer;
     private TranslateTransform? _searchBarTransform;
     private bool _searchBarAnimating;
+    private bool _searchBarClosePending;
     private const double SearchBarHeight = 46.0;
     private static readonly TimeSpan SearchBarAnimationDuration = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan SearchFilterHotkeyDebounceWindow = TimeSpan.FromMilliseconds(220);
+    private long _lastSearchHotkeyTimestamp;
+    private long _lastFilterHotkeyTimestamp;
+    private int _pendingSearchHotkeyToggle;
+    private int _pendingFilterHotkeyToggle;
 
     // Filter bar animation
     private Border? _filterBarContainer;
     private TranslateTransform? _filterBarTransform;
     private bool _filterBarAnimating;
+    private bool _filterBarClosePending;
     private const double FilterBarHeight = 46.0;
     private static readonly TimeSpan FilterBarAnimationDuration = TimeSpan.FromMilliseconds(250);
 
@@ -173,9 +180,16 @@ public partial class MainWindow : Window
     private Border? _previewBarContainer;
     private Border? _previewBar;
     private TranslateTransform? _previewBarTransform;
+    private Grid? _previewSegmentGrid;
+    private Border? _previewSegmentThumb;
+    private TranslateTransform? _previewSegmentThumbTransform;
+    private Button? _previewTreeModeButton;
+    private Button? _previewContentModeButton;
+    private Button? _previewTreeAndContentModeButton;
     private bool _previewBarAnimating;
     private const double PreviewBarHeight = 46.0;
     private static readonly TimeSpan PreviewBarAnimationDuration = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan PreviewSegmentThumbAnimationDuration = TimeSpan.FromMilliseconds(220);
     private const double PanelIslandSpacing = 4.0;
 
     // Preview generation
@@ -187,9 +201,14 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _previewMemoryCleanupCts;
     private int _previewMemoryCleanupVersion;
     private PreviewCacheEntry? _previewCacheEntry;
+    private CancellationTokenSource? _previewModeSwitchCts;
+    private int _previewModeSwitchVersion;
+    private bool _previewModeSwitchInProgress;
+    private bool _clearPreviewBeforeNextRefresh;
     private bool _restoreSearchAfterPreview;
     private bool _restoreFilterAfterPreview;
     private bool _previewFontInitialized;
+    private int _suppressSearchFilterRealtimeDepth;
 
     // Real-time metrics calculation
     private readonly object _metricsLock = new();
@@ -199,6 +218,14 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _isBackgroundMetricsActive;
     private int _metricsRecalcVersion;
+    private const double CompactStatusMetricsThresholdWidth = 1050;
+    private int _lastStatusTreeLines;
+    private int _lastStatusTreeChars;
+    private int _lastStatusTreeTokens;
+    private int _lastStatusContentLines;
+    private int _lastStatusContentChars;
+    private int _lastStatusContentTokens;
+    private bool _hasStatusMetricsSnapshot;
     private CancellationTokenSource? _recalculateMetricsCts;
     private long _statusOperationSequence;
     private readonly object _statusOperationLock = new();
@@ -276,6 +303,11 @@ public partial class MainWindow : Window
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
         _previewBarContainer = this.FindControl<Border>("PreviewBarContainer");
         _previewBar = this.FindControl<Border>("PreviewBar");
+        _previewSegmentGrid = this.FindControl<Grid>("PreviewSegmentGrid");
+        _previewSegmentThumb = this.FindControl<Border>("PreviewSegmentThumb");
+        _previewTreeModeButton = this.FindControl<Button>("PreviewTreeModeButton");
+        _previewContentModeButton = this.FindControl<Button>("PreviewContentModeButton");
+        _previewTreeAndContentModeButton = this.FindControl<Button>("PreviewTreeAndContentModeButton");
         _previewTextScrollViewer = this.FindControl<ScrollViewer>("PreviewTextScrollViewer");
         _previewLineNumbersControl = this.FindControl<VirtualizedLineNumbersControl>("PreviewLineNumbersControl");
         _settingsContainer = this.FindControl<Border>("SettingsContainer");
@@ -326,6 +358,13 @@ public partial class MainWindow : Window
             _previewBar.Opacity = 0;
         }
 
+        if (_previewSegmentThumb is not null)
+        {
+            _previewSegmentThumbTransform = new TranslateTransform();
+            _previewSegmentThumb.RenderTransform = _previewSegmentThumbTransform;
+            EnsurePreviewSegmentThumbTransitions();
+        }
+
         if (_treeView is not null)
         {
             _treeView.PointerEntered += OnTreePointerEntered;
@@ -369,9 +408,17 @@ public partial class MainWindow : Window
         _viewModelPropertyChangedHandler = (_, args) =>
         {
             if (args.PropertyName == nameof(MainWindowViewModel.SearchQuery))
+            {
+                if (Volatile.Read(ref _suppressSearchFilterRealtimeDepth) > 0)
+                    return;
                 _searchCoordinator.OnSearchQueryChanged();
+            }
             else if (args.PropertyName == nameof(MainWindowViewModel.NameFilter))
+            {
+                if (Volatile.Read(ref _suppressSearchFilterRealtimeDepth) > 0)
+                    return;
                 _filterCoordinator.OnNameFilterChanged();
+            }
             else if (args.PropertyName is nameof(MainWindowViewModel.MaterialIntensity)
                      or nameof(MainWindowViewModel.PanelContrast)
                      or nameof(MainWindowViewModel.BorderStrength)
@@ -391,17 +438,12 @@ public partial class MainWindow : Window
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
             {
-                // Clear content immediately to prevent jank from large text re-rendering
-                // while thumb animation plays
-                _viewModel.PreviewText = string.Empty;
-                _viewModel.PreviewLineCount = 1;
-                InvalidatePreviewCache();
-
-                // Delay preview refresh to let thumb animation (250ms) complete
-                SchedulePreviewRefresh(immediate: false);
+                if (!_previewModeSwitchInProgress)
+                    UpdatePreviewSegmentThumbPosition(animate: false);
             }
         };
         _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
+        UpdatePreviewSegmentThumbPosition(animate: false);
 
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
 
@@ -475,6 +517,8 @@ public partial class MainWindow : Window
         }
         _previewMemoryCleanupCts?.Cancel();
         _previewMemoryCleanupCts?.Dispose();
+        _previewModeSwitchCts?.Cancel();
+        _previewModeSwitchCts?.Dispose();
 
         // Dispose coordinators
         _searchCoordinator.Dispose();
@@ -539,8 +583,17 @@ public partial class MainWindow : Window
     {
         // Defer update to let theme resources settle first
         Dispatcher.UIThread.Post(
-            () => _searchCoordinator.RefreshThemeHighlights(),
+            RefreshThemeHighlightsForActiveQuery,
             DispatcherPriority.Background);
+    }
+
+    private void RefreshThemeHighlightsForActiveQuery()
+    {
+        // Preserve current highlight precedence: active name filter overrides search query.
+        var effectiveQuery = !string.IsNullOrWhiteSpace(_viewModel.NameFilter)
+            ? _viewModel.NameFilter
+            : _viewModel.SearchQuery;
+        _searchCoordinator.UpdateHighlights(effectiveQuery);
     }
 
     private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
@@ -549,7 +602,13 @@ public partial class MainWindow : Window
             return;
 
         if (e.NewValue is Rect rect)
+        {
             _viewModel.UpdateHelpPopoverMaxSize(rect.Size);
+            if (_hasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+                RenderStatusBarMetrics();
+            if (_viewModel.IsPreviewMode && !_previewModeSwitchInProgress)
+                UpdatePreviewSegmentThumbPosition(animate: false);
+        }
     }
 
     private void OnDeactivated(object? sender, EventArgs e)
@@ -1199,6 +1258,7 @@ public partial class MainWindow : Window
         _previewRefreshRequested = false;
         _previewDebounceTimer?.Stop();
         _previewBuildCts?.Cancel();
+        _clearPreviewBeforeNextRefresh = false;
         _viewModel.IsPreviewLoading = false;
     }
 
@@ -1239,6 +1299,8 @@ public partial class MainWindow : Window
     {
         if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsPreviewMode)
             return;
+        if (_previewModeSwitchInProgress)
+            return;
 
         if (!EnsureTreeReady())
         {
@@ -1266,6 +1328,15 @@ public partial class MainWindow : Window
 
         try
         {
+            if (_clearPreviewBeforeNextRefresh)
+            {
+                // Keep old content visible during thumb animation and clear it only
+                // after preview progress becomes visible for a smoother sequence.
+                _viewModel.PreviewText = string.Empty;
+                _viewModel.PreviewLineCount = 1;
+                _clearPreviewBeforeNextRefresh = false;
+            }
+
             // Capture state on UI thread before background work
             var selectedPaths = GetCheckedPaths();
             var selectedMode = _viewModel.SelectedPreviewContentMode;
@@ -1638,19 +1709,126 @@ public partial class MainWindow : Window
         ClosePreviewMode();
     }
 
-    private void OnPreviewTreeModeClick(object? sender, RoutedEventArgs e)
+    private async void OnPreviewTreeModeClick(object? sender, RoutedEventArgs e)
     {
-        _viewModel.SelectedPreviewContentMode = PreviewContentMode.Tree;
+        await SwitchPreviewModeAsync(PreviewContentMode.Tree);
     }
 
-    private void OnPreviewContentModeClick(object? sender, RoutedEventArgs e)
+    private async void OnPreviewContentModeClick(object? sender, RoutedEventArgs e)
     {
-        _viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+        await SwitchPreviewModeAsync(PreviewContentMode.Content);
     }
 
-    private void OnPreviewTreeAndContentModeClick(object? sender, RoutedEventArgs e)
+    private async void OnPreviewTreeAndContentModeClick(object? sender, RoutedEventArgs e)
     {
-        _viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+        await SwitchPreviewModeAsync(PreviewContentMode.TreeAndContent);
+    }
+
+    private async Task SwitchPreviewModeAsync(PreviewContentMode targetMode)
+    {
+        if (_viewModel.SelectedPreviewContentMode == targetMode)
+            return;
+
+        var switchCts = ReplaceCancellationSource(ref _previewModeSwitchCts);
+        var switchVersion = Interlocked.Increment(ref _previewModeSwitchVersion);
+        _previewModeSwitchInProgress = true;
+
+        try
+        {
+            // Cancel any in-flight preview work so stale content cannot render.
+            CancelPreviewRefresh();
+            Interlocked.Increment(ref _previewBuildVersion);
+
+            _viewModel.SelectedPreviewContentMode = targetMode;
+            UpdatePreviewSegmentThumbPosition(animate: true);
+
+            // Wait for thumb transition completion before rebuilding preview.
+            await WaitForPanelAnimationAsync(PreviewSegmentThumbAnimationDuration, switchCts.Token);
+
+            if (switchVersion != Volatile.Read(ref _previewModeSwitchVersion))
+                return;
+
+            // Mark completion before scheduling refresh to avoid a race where
+            // RefreshPreviewAsync exits early while switch is still in-progress.
+            _previewModeSwitchInProgress = false;
+            // Clear preview only when refresh actually starts (after progress is shown).
+            _clearPreviewBeforeNextRefresh = true;
+            SchedulePreviewRefresh(immediate: true);
+        }
+        catch (OperationCanceledException)
+        {
+            // Ignore canceled stale switch operations.
+        }
+        finally
+        {
+            if (switchVersion == Volatile.Read(ref _previewModeSwitchVersion))
+                _previewModeSwitchInProgress = false;
+
+            DisposeIfCurrent(ref _previewModeSwitchCts, switchCts);
+        }
+    }
+
+    private void EnsurePreviewSegmentThumbTransitions()
+    {
+        if (_previewSegmentThumbTransform is null || _previewSegmentThumbTransform.Transitions is not null)
+            return;
+
+        _previewSegmentThumbTransform.Transitions = new Transitions
+        {
+            new DoubleTransition
+            {
+                Property = TranslateTransform.XProperty,
+                Duration = PreviewSegmentThumbAnimationDuration,
+                Easing = new CubicEaseInOut()
+            }
+        };
+    }
+
+    private void UpdatePreviewSegmentThumbPosition(bool animate)
+    {
+        if (_previewSegmentThumb is null || _previewSegmentThumbTransform is null)
+            return;
+        if (!TryGetPreviewSegmentTarget(out var targetX, out var targetWidth))
+            return;
+
+        _previewSegmentThumb.Width = targetWidth;
+
+        if (!animate)
+        {
+            var cachedTransitions = _previewSegmentThumbTransform.Transitions;
+            _previewSegmentThumbTransform.Transitions = null;
+            _previewSegmentThumbTransform.X = targetX;
+            _previewSegmentThumbTransform.Transitions = cachedTransitions;
+            EnsurePreviewSegmentThumbTransitions();
+            return;
+        }
+
+        EnsurePreviewSegmentThumbTransitions();
+        _previewSegmentThumbTransform.X = targetX;
+    }
+
+    private bool TryGetPreviewSegmentTarget(out double targetX, out double targetWidth)
+    {
+        targetX = 0;
+        targetWidth = 0;
+
+        var selectedButton = GetSelectedPreviewModeButton();
+        if (selectedButton is null)
+            return false;
+
+        targetWidth = selectedButton.Bounds.Width;
+        targetX = selectedButton.Bounds.X;
+        return targetWidth > 0;
+    }
+
+    private Button? GetSelectedPreviewModeButton()
+    {
+        return _viewModel.SelectedPreviewContentMode switch
+        {
+            PreviewContentMode.Tree => _previewTreeModeButton,
+            PreviewContentMode.Content => _previewContentModeButton,
+            _ => _previewTreeAndContentModeButton
+        };
     }
 
     private async void OpenPreviewMode()
@@ -1662,15 +1840,19 @@ public partial class MainWindow : Window
 
         _restoreSearchAfterPreview = _viewModel.SearchVisible;
         _restoreFilterAfterPreview = _viewModel.FilterVisible;
+        if (_restoreSearchAfterPreview && _restoreFilterAfterPreview)
+            _restoreFilterAfterPreview = false;
         if (!_previewFontInitialized)
         {
             _viewModel.PreviewFontSize = _viewModel.TreeFontSize;
             _previewFontInitialized = true;
         }
         ForceCloseSearchAndFilterForPreview();
+        UpdatePreviewSegmentThumbPosition(animate: false);
 
         // Animate preview panel open and wait until transition settles.
         await AnimatePreviewBarAsync(show: true);
+        UpdatePreviewSegmentThumbPosition(animate: false);
 
         // Switch from tree view to preview host only after panel is fully opened.
         _viewModel.IsPreviewMode = true;
@@ -1691,6 +1873,8 @@ public partial class MainWindow : Window
         if (_previewBarAnimating)
             return;
 
+        _previewModeSwitchCts?.Cancel();
+        _previewModeSwitchInProgress = false;
         CancelPreviewRefresh();
         await AnimatePreviewBarAsync(show: false);
 
@@ -1703,11 +1887,11 @@ public partial class MainWindow : Window
 
     private void RestoreSearchAndFilterAfterPreview()
     {
+        // Restore only one tool to keep search/filter behavior predictable.
         if (_restoreSearchAfterPreview && !_viewModel.SearchVisible)
-            ShowSearch(focusInput: false);
-
-        if (_restoreFilterAfterPreview && !_viewModel.FilterVisible)
-            ShowFilter(focusInput: false);
+            ShowSearch(focusInput: true, selectAllOnFocus: false);
+        else if (_restoreFilterAfterPreview && !_viewModel.FilterVisible)
+            ShowFilter(focusInput: true, selectAllOnFocus: false);
 
         _restoreSearchAfterPreview = false;
         _restoreFilterAfterPreview = false;
@@ -1870,6 +2054,10 @@ public partial class MainWindow : Window
         try
         {
             EnsureSearchBarTransitions();
+            if (!show)
+                SuppressSearchBoxAccentVisual();
+            _searchBar.IsHitTestVisible = false;
+            _searchBar.IsEnabled = false;
             if (show)
                 _searchBarContainer.IsVisible = true;
             _searchBarContainer.Height = show ? SearchBarHeight : 0.0;
@@ -1879,10 +2067,22 @@ public partial class MainWindow : Window
             await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
             if (!show && !_viewModel.SearchVisible)
                 _searchBarContainer.IsVisible = false;
+            if (show && _viewModel.SearchVisible)
+            {
+                RestoreSearchBoxAccentVisual();
+                _searchBar.IsHitTestVisible = true;
+                _searchBar.IsEnabled = true;
+            }
         }
         finally
         {
             _searchBarAnimating = false;
+
+            if (_searchBarClosePending && !_viewModel.SearchVisible)
+            {
+                _searchBarClosePending = false;
+                AnimateSearchBar(false);
+            }
         }
     }
 
@@ -1927,6 +2127,10 @@ public partial class MainWindow : Window
         try
         {
             EnsureFilterBarTransitions();
+            if (!show)
+                SuppressFilterBoxAccentVisual();
+            _filterBar.IsHitTestVisible = false;
+            _filterBar.IsEnabled = false;
             if (show)
                 _filterBarContainer.IsVisible = true;
             _filterBarContainer.Height = show ? FilterBarHeight : 0.0;
@@ -1936,10 +2140,22 @@ public partial class MainWindow : Window
             await WaitForPanelAnimationAsync(FilterBarAnimationDuration);
             if (!show && !_viewModel.FilterVisible)
                 _filterBarContainer.IsVisible = false;
+            if (show && _viewModel.FilterVisible)
+            {
+                RestoreFilterBoxAccentVisual();
+                _filterBar.IsHitTestVisible = true;
+                _filterBar.IsEnabled = true;
+            }
         }
         finally
         {
             _filterBarAnimating = false;
+
+            if (_filterBarClosePending && !_viewModel.FilterVisible)
+            {
+                _filterBarClosePending = false;
+                AnimateFilterBar(false);
+            }
         }
     }
 
@@ -2135,6 +2351,12 @@ public partial class MainWindow : Window
         return Task.Delay(duration + TimeSpan.FromMilliseconds(24));
     }
 
+    private static Task WaitForPanelAnimationAsync(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        // A tiny safety buffer ensures state flags reset after the transition settles.
+        return Task.Delay(duration + TimeSpan.FromMilliseconds(24), cancellationToken);
+    }
+
     private void OnSetLightTheme(object? sender, RoutedEventArgs e)
     {
         var app = global::Avalonia.Application.Current;
@@ -2143,8 +2365,7 @@ public partial class MainWindow : Window
         app.RequestedThemeVariant = ThemeVariant.Light;
         _viewModel.IsDarkTheme = false;
         ApplyPresetForSelection(ThemePresetVariant.Light, GetSelectedEffectMode());
-        _searchCoordinator.UpdateHighlights(_viewModel.SearchQuery);
-        _searchCoordinator.UpdateHighlights(_viewModel.NameFilter);
+        RefreshThemeHighlightsForActiveQuery();
         _themeBrushCoordinator.UpdateDynamicThemeBrushes();
     }
 
@@ -2156,8 +2377,7 @@ public partial class MainWindow : Window
         app.RequestedThemeVariant = ThemeVariant.Dark;
         _viewModel.IsDarkTheme = true;
         ApplyPresetForSelection(ThemePresetVariant.Dark, GetSelectedEffectMode());
-        _searchCoordinator.UpdateHighlights(_viewModel.SearchQuery);
-        _searchCoordinator.UpdateHighlights(_viewModel.NameFilter);
+        RefreshThemeHighlightsForActiveQuery();
         _themeBrushCoordinator.UpdateDynamicThemeBrushes();
     }
 
@@ -2774,48 +2994,56 @@ public partial class MainWindow : Window
         _searchCoordinator.Navigate(-1);
     }
 
-    private void OnToggleSearch(object? sender, RoutedEventArgs e)
+    private async void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
         if (_viewModel.IsPreviewMode) return;
 
         if (_viewModel.SearchVisible)
         {
-            CloseSearch();
+            await CloseSearchAsync();
             return;
         }
+
+        // Keep only one active text tool at a time: close filter first, then open search.
+        if (IsFilterBarEffectivelyVisible())
+            await CloseFilterAsync(focusTree: false);
 
         ShowSearch();
     }
 
-    private void OnSearchClose(object? sender, RoutedEventArgs e) => CloseSearch();
+    private void OnSearchClose(object? sender, RoutedEventArgs e) => _ = CloseSearchAsync();
 
-    private void OnToggleFilter(object? sender, RoutedEventArgs e)
+    private async void OnToggleFilter(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
         if (_viewModel.IsPreviewMode) return;
 
         if (_viewModel.FilterVisible)
         {
-            CloseFilter();
+            await CloseFilterAsync();
             return;
         }
+
+        // Keep only one active text tool at a time: close search first, then open filter.
+        if (IsSearchBarEffectivelyVisible())
+            await CloseSearchAsync(focusTree: false, waitForAnimation: true);
 
         ShowFilter();
     }
 
-    private void OnFilterClose(object? sender, RoutedEventArgs e) => CloseFilter();
+    private void OnFilterClose(object? sender, RoutedEventArgs e) => _ = CloseFilterAsync();
 
     private void OnFilterKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
         {
-            CloseFilter();
+            _ = CloseFilterAsync();
             e.Handled = true;
         }
     }
 
-    private void ShowFilter(bool focusInput = true)
+    private void ShowFilter(bool focusInput = true, bool selectAllOnFocus = true)
     {
         if (!_viewModel.IsProjectLoaded) return;
         if (_viewModel.IsPreviewMode) return;
@@ -2827,17 +3055,27 @@ public partial class MainWindow : Window
         if (!focusInput)
             return;
 
-        _ = FocusFilterBoxAfterOpenAnimationAsync();
+        _ = FocusFilterBoxAfterOpenAnimationAsync(selectAllOnFocus);
     }
 
-    private async void CloseFilter()
+    private async Task CloseFilterAsync(bool focusTree = true)
     {
-        if (!_viewModel.FilterVisible) return;
-        if (_filterBarAnimating) return;
+        if (!IsFilterBarEffectivelyVisible()) return;
+
+        // Remove focus from the filter textbox before close animation starts.
+        // This avoids a transient focused-border artifact during panel collapse.
+        if (_filterBar?.FilterBoxControl?.IsFocused == true)
+            _treeView?.Focus();
+        SuppressFilterBoxAccentVisual();
 
         _viewModel.FilterVisible = false;
-        AnimateFilterBar(false);
-        _treeView?.Focus();
+
+        if (_filterBarAnimating)
+            _filterBarClosePending = true;
+        else
+            AnimateFilterBar(false);
+        if (focusTree)
+            _treeView?.Focus();
 
         // Let close animation complete first to avoid concurrent UI + tree rebuild pressure.
         await WaitForPanelAnimationAsync(FilterBarAnimationDuration);
@@ -2977,7 +3215,7 @@ public partial class MainWindow : Window
     {
         if (e.Key == Key.Escape)
         {
-            CloseSearch();
+            _ = CloseSearchAsync();
             e.Handled = true;
             return;
         }
@@ -3009,7 +3247,15 @@ public partial class MainWindow : Window
         // Ctrl+F (available only when a project is loaded, same as WinForms miSearch.Enabled)
         if (mods == KeyModifiers.Control && e.Key == Key.F)
         {
-            OnToggleSearch(this, new RoutedEventArgs());
+            if (IsSearchFilterHotkeyDebounced(ref _lastSearchHotkeyTimestamp))
+            {
+                e.Handled = true;
+                return;
+            }
+
+            ScheduleSearchOrFilterHotkeyToggle(
+                isSearchToggle: true,
+                static (window) => window.OnToggleSearch(window, new RoutedEventArgs()));
             e.Handled = true;
             return;
         }
@@ -3017,8 +3263,18 @@ public partial class MainWindow : Window
         // Ctrl+Shift+N - Filter by name
         if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.N)
         {
+            if (IsSearchFilterHotkeyDebounced(ref _lastFilterHotkeyTimestamp))
+            {
+                e.Handled = true;
+                return;
+            }
+
             if (_viewModel.IsProjectLoaded)
-                OnToggleFilter(this, new RoutedEventArgs());
+            {
+                ScheduleSearchOrFilterHotkeyToggle(
+                    isSearchToggle: false,
+                    static (window) => window.OnToggleFilter(window, new RoutedEventArgs()));
+            }
             e.Handled = true;
             return;
         }
@@ -3037,10 +3293,17 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Esc closes search
+        // Esc closes the currently active text tool.
         if (e.Key == Key.Escape && _viewModel.SearchVisible)
         {
-            CloseSearch();
+            _ = CloseSearchAsync();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape && _viewModel.FilterVisible)
+        {
+            _ = CloseFilterAsync();
             e.Handled = true;
             return;
         }
@@ -3196,7 +3459,50 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private void ShowSearch(bool focusInput = true)
+    private static bool IsSearchFilterHotkeyDebounced(ref long lastTimestamp)
+    {
+        var now = Stopwatch.GetTimestamp();
+        var previous = Interlocked.Read(ref lastTimestamp);
+
+        if (previous != 0)
+        {
+            var elapsed = TimeSpan.FromSeconds((now - previous) / (double)Stopwatch.Frequency);
+            if (elapsed < SearchFilterHotkeyDebounceWindow)
+                return true;
+        }
+
+        Interlocked.Exchange(ref lastTimestamp, now);
+        return false;
+    }
+
+    private void ScheduleSearchOrFilterHotkeyToggle(bool isSearchToggle, Action<MainWindow> toggleAction)
+    {
+        ref var pendingFlag = ref isSearchToggle ? ref _pendingSearchHotkeyToggle : ref _pendingFilterHotkeyToggle;
+        if (Interlocked.CompareExchange(ref pendingFlag, 1, 0) != 0)
+            return;
+
+        // Execute toggle after the current keyboard input dispatch completes.
+        // This prevents visual artifacts caused by state changes during tunnel key handling.
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                if (!_viewModel.IsProjectLoaded || _viewModel.IsPreviewMode)
+                    return;
+
+                toggleAction(this);
+            }
+            finally
+            {
+                if (isSearchToggle)
+                    Interlocked.Exchange(ref _pendingSearchHotkeyToggle, 0);
+                else
+                    Interlocked.Exchange(ref _pendingFilterHotkeyToggle, 0);
+            }
+        }, DispatcherPriority.Background);
+    }
+
+    private void ShowSearch(bool focusInput = true, bool selectAllOnFocus = true)
     {
         if (!_viewModel.IsProjectLoaded) return;
         if (_viewModel.IsPreviewMode) return;
@@ -3208,10 +3514,10 @@ public partial class MainWindow : Window
         if (!focusInput)
             return;
 
-        _ = FocusSearchBoxAfterOpenAnimationAsync();
+        _ = FocusSearchBoxAfterOpenAnimationAsync(selectAllOnFocus);
     }
 
-    private async Task FocusSearchBoxAfterOpenAnimationAsync()
+    private async Task FocusSearchBoxAfterOpenAnimationAsync(bool selectAllOnFocus)
     {
         await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
         if (!_viewModel.SearchVisible || _viewModel.IsPreviewMode)
@@ -3219,12 +3525,11 @@ public partial class MainWindow : Window
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            _searchBar?.SearchBoxControl?.Focus();
-            _searchBar?.SearchBoxControl?.SelectAll();
+            FocusInputTextBox(_searchBar?.SearchBoxControl, selectAllOnFocus);
         }, DispatcherPriority.Background);
     }
 
-    private async Task FocusFilterBoxAfterOpenAnimationAsync()
+    private async Task FocusFilterBoxAfterOpenAnimationAsync(bool selectAllOnFocus)
     {
         await WaitForPanelAnimationAsync(FilterBarAnimationDuration);
         if (!_viewModel.FilterVisible || _viewModel.IsPreviewMode)
@@ -3232,29 +3537,273 @@ public partial class MainWindow : Window
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            _filterBar?.FilterBoxControl?.Focus();
-            _filterBar?.FilterBoxControl?.SelectAll();
+            FocusInputTextBox(_filterBar?.FilterBoxControl, selectAllOnFocus);
         }, DispatcherPriority.Background);
     }
 
-    private void CloseSearch()
+    private void FocusInputTextBox(TextBox? textBox, bool selectAllOnFocus)
     {
-        if (!_viewModel.SearchVisible) return;
-        if (_searchBarAnimating) return;
+        if (textBox is null)
+            return;
+
+        textBox.Focus();
+        if (selectAllOnFocus)
+        {
+            textBox.SelectAll();
+            return;
+        }
+
+        // Keep text editable after preview restore: place caret to the end without selecting text.
+        PlaceCaretAtTextEnd(textBox);
+        _ = Dispatcher.UIThread.InvokeAsync(() => PlaceCaretAtTextEnd(textBox), DispatcherPriority.Input);
+    }
+
+    private static void PlaceCaretAtTextEnd(TextBox textBox)
+    {
+        var end = textBox.Text?.Length ?? 0;
+        textBox.SelectionStart = end;
+        textBox.SelectionEnd = end;
+        textBox.CaretIndex = end;
+    }
+
+    private async Task CloseSearchAsync(bool focusTree = true, bool waitForAnimation = false)
+    {
+        if (!IsSearchBarEffectivelyVisible())
+            return;
+
+        // Remove focus from the search textbox before close animation starts.
+        // This avoids a transient focused-border artifact during panel collapse.
+        if (_searchBar?.SearchBoxControl?.IsFocused == true)
+            _treeView?.Focus();
+        SuppressSearchBoxAccentVisual();
 
         _viewModel.SearchVisible = false;
         _viewModel.SearchQuery = string.Empty;
 
-        // Clear highlights immediately instead of waiting for 120ms debounce,
-        // so InlineCollection/Run objects become collectable right away.
-        _searchCoordinator.UpdateHighlights(null);
-        _searchCoordinator.ClearSearchState();
-        AnimateSearchBar(false);
-        _treeView?.Focus();
+        // Clear search and collapse tree immediately (same behavior as before),
+        // without waiting for debounce.
+        _searchCoordinator.CancelPending();
+        _searchCoordinator.UpdateSearchMatches();
+        if (_searchBarAnimating)
+            _searchBarClosePending = true;
+        else
+            AnimateSearchBar(false);
+        if (focusTree)
+            _treeView?.Focus();
 
         // Aggressively release search highlight objects (InlineCollections, Run instances)
         // and trim working set on a background thread.
         ScheduleBackgroundMemoryCleanup();
+
+        if (waitForAnimation)
+            await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
+    }
+
+    private bool IsSearchBarEffectivelyVisible()
+    {
+        if (_viewModel.SearchVisible)
+            return true;
+
+        if (_searchBarContainer?.IsVisible == true)
+            return true;
+
+        return _searchBarContainer?.Bounds.Height > 0.5;
+    }
+
+    private bool IsFilterBarEffectivelyVisible()
+    {
+        if (_viewModel.FilterVisible)
+            return true;
+
+        if (_filterBarContainer?.IsVisible == true)
+            return true;
+
+        return _filterBarContainer?.Bounds.Height > 0.5;
+    }
+
+    private void SuppressSearchBoxAccentVisual()
+    {
+        _searchBar?.SearchBoxControl?.Classes.Add("suppress-accent");
+    }
+
+    private void RestoreSearchBoxAccentVisual()
+    {
+        _searchBar?.SearchBoxControl?.Classes.Remove("suppress-accent");
+    }
+
+    private void SuppressFilterBoxAccentVisual()
+    {
+        _filterBar?.FilterBoxControl?.Classes.Add("suppress-accent");
+    }
+
+    private void RestoreFilterBoxAccentVisual()
+    {
+        _filterBar?.FilterBoxControl?.Classes.Remove("suppress-accent");
+    }
+
+    private void ForceHideSearchBarVisualState()
+    {
+        SuppressSearchBoxAccentVisual();
+
+        if (_searchBarContainer is not null)
+        {
+            _searchBarContainer.Height = 0;
+            _searchBarContainer.Margin = new Thickness(0);
+            _searchBarContainer.IsVisible = false;
+        }
+
+        if (_searchBarTransform is not null)
+            _searchBarTransform.Y = -SearchBarHeight;
+
+        if (_searchBar is not null)
+        {
+            _searchBar.Opacity = 0;
+            _searchBar.IsHitTestVisible = false;
+            _searchBar.IsEnabled = false;
+        }
+    }
+
+    private void ForceShowSearchBarVisualState()
+    {
+        RestoreSearchBoxAccentVisual();
+
+        if (_searchBarContainer is not null)
+        {
+            _searchBarContainer.Height = SearchBarHeight;
+            _searchBarContainer.Margin = new Thickness(0, 0, 0, PanelIslandSpacing);
+            _searchBarContainer.IsVisible = true;
+        }
+
+        if (_searchBarTransform is not null)
+            _searchBarTransform.Y = 0;
+
+        if (_searchBar is not null)
+        {
+            _searchBar.Opacity = 1;
+            _searchBar.IsHitTestVisible = true;
+            _searchBar.IsEnabled = true;
+        }
+    }
+
+    private void ForceHideFilterBarVisualState()
+    {
+        SuppressFilterBoxAccentVisual();
+
+        if (_filterBarContainer is not null)
+        {
+            _filterBarContainer.Height = 0;
+            _filterBarContainer.Margin = new Thickness(0);
+            _filterBarContainer.IsVisible = false;
+        }
+
+        if (_filterBarTransform is not null)
+            _filterBarTransform.Y = -FilterBarHeight;
+
+        if (_filterBar is not null)
+        {
+            _filterBar.Opacity = 0;
+            _filterBar.IsHitTestVisible = false;
+            _filterBar.IsEnabled = false;
+        }
+    }
+
+    private void ForceShowFilterBarVisualState()
+    {
+        RestoreFilterBoxAccentVisual();
+
+        if (_filterBarContainer is not null)
+        {
+            _filterBarContainer.Height = FilterBarHeight;
+            _filterBarContainer.Margin = new Thickness(0, 0, 0, PanelIslandSpacing);
+            _filterBarContainer.IsVisible = true;
+        }
+
+        if (_filterBarTransform is not null)
+            _filterBarTransform.Y = 0;
+
+        if (_filterBar is not null)
+        {
+            _filterBar.Opacity = 1;
+            _filterBar.IsHitTestVisible = true;
+            _filterBar.IsEnabled = true;
+        }
+    }
+
+    private void SyncSearchAndFilterVisualStateFromFlags()
+    {
+        // Load-cancel fallback restores logical visibility flags first.
+        // Apply matching visual state immediately to avoid stale hidden containers.
+        _searchBarAnimating = false;
+        _filterBarAnimating = false;
+        _searchBarClosePending = false;
+        _filterBarClosePending = false;
+
+        if (_viewModel.SearchVisible && _viewModel.FilterVisible)
+        {
+            // Keep one active text tool if an old snapshot ever contains both flags.
+            _viewModel.FilterVisible = false;
+        }
+
+        if (_viewModel.SearchVisible)
+            ForceShowSearchBarVisualState();
+        else
+            ForceHideSearchBarVisualState();
+
+        if (_viewModel.FilterVisible)
+            ForceShowFilterBarVisualState();
+        else
+            ForceHideFilterBarVisualState();
+    }
+
+    private async Task PrepareSearchAndFilterForProjectLoadAsync()
+    {
+        var hadVisibleSearch = IsSearchBarEffectivelyVisible();
+        var hadVisibleFilter = IsFilterBarEffectivelyVisible();
+
+        Interlocked.Increment(ref _suppressSearchFilterRealtimeDepth);
+        try
+        {
+            _viewModel.SearchVisible = false;
+            _viewModel.FilterVisible = false;
+
+            _searchBarClosePending = false;
+            _filterBarClosePending = false;
+
+            if (hadVisibleSearch && !_searchBarAnimating)
+                AnimateSearchBar(false);
+
+            if (hadVisibleFilter && !_filterBarAnimating)
+                AnimateFilterBar(false);
+
+            if (hadVisibleSearch || hadVisibleFilter)
+                await WaitForPanelAnimationAsync(SearchBarAnimationDuration > FilterBarAnimationDuration
+                    ? SearchBarAnimationDuration
+                    : FilterBarAnimationDuration);
+
+            _searchCoordinator.CancelPending();
+            _filterCoordinator.CancelPending();
+
+            if (!string.IsNullOrEmpty(_viewModel.SearchQuery))
+                _viewModel.SearchQuery = string.Empty;
+            if (!string.IsNullOrEmpty(_viewModel.NameFilter))
+                _viewModel.NameFilter = string.Empty;
+
+            // Cancel once more after resetting queries to eliminate any stale queued work.
+            _searchCoordinator.CancelPending();
+            _filterCoordinator.CancelPending();
+
+            _searchCoordinator.UpdateHighlights(null);
+            _searchCoordinator.ClearSearchState();
+            _filterExpansionSnapshot = null;
+            Interlocked.Increment(ref _filterApplyVersion);
+
+            ForceHideSearchBarVisualState();
+            ForceHideFilterBarVisualState();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _suppressSearchFilterRealtimeDepth);
+        }
     }
 
     private void OnRootAllChanged(object? sender, RoutedEventArgs e)
@@ -3321,6 +3870,7 @@ public partial class MainWindow : Window
         }
 
         _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
+        await PrepareSearchAndFilterForProjectLoadAsync();
         CancelPreviewRefresh();
 
         // Clear previous project state BEFORE loading new one to release memory early
@@ -3539,13 +4089,9 @@ public partial class MainWindow : Window
             IgnoreRules: ignoreRules,
             NameFilter: nameFilter);
 
-        var waitCursorActive = false;
         if (!interactiveFilter)
-        {
             _viewModel.StatusMetricsVisible = false;
-            Cursor = new Cursor(StandardCursorType.Wait);
-            waitCursorActive = true;
-        }
+
         try
         {
             BuildTreeResult result;
@@ -3602,12 +4148,6 @@ public partial class MainWindow : Window
             // Only do full scan on initial load, not on interactive filter changes
             if (!interactiveFilter)
             {
-                if (waitCursorActive)
-                {
-                    Cursor = new Cursor(StandardCursorType.Arrow);
-                    waitCursorActive = false;
-                }
-
                 // Animate settings panel BEFORE metrics calculation starts
                 // so user sees the panel immediately after tree renders
                 if (_viewModel.SettingsVisible && !_settingsAnimating)
@@ -3635,9 +4175,6 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (!interactiveFilter && waitCursorActive)
-                Cursor = new Cursor(StandardCursorType.Arrow);
-
             DisposeIfCurrent(ref _refreshCts, refreshCts);
         }
     }
@@ -3922,6 +4459,7 @@ public partial class MainWindow : Window
         _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
         _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
         _hasCompleteMetricsBaseline = snapshot.HasCompleteMetricsBaseline;
+        SyncSearchAndFilterVisualStateFromFlags();
 
         if (_viewModel.TreeNodes.Count == 0 && snapshot.Tree is not null && !string.IsNullOrWhiteSpace(snapshot.Path))
         {
@@ -4681,6 +5219,18 @@ public partial class MainWindow : Window
         int treeLines, int treeChars, int treeTokens,
         int contentLines, int contentChars, int contentTokens)
     {
+        _lastStatusTreeLines = treeLines;
+        _lastStatusTreeChars = treeChars;
+        _lastStatusTreeTokens = treeTokens;
+        _lastStatusContentLines = contentLines;
+        _lastStatusContentChars = contentChars;
+        _lastStatusContentTokens = contentTokens;
+        _hasStatusMetricsSnapshot = true;
+        RenderStatusBarMetrics();
+    }
+
+    private void RenderStatusBarMetrics()
+    {
         // Format: [Lines: X | Chars: X | ~Tokens: X]
         var linesLabel = _localization.Format("Status.Metric.Lines", "{0}");
         var charsLabel = _localization.Format("Status.Metric.Chars", "{0}");
@@ -4691,8 +5241,16 @@ public partial class MainWindow : Window
         var charsPrefix = charsLabel.Replace("{0}", "").Trim();
         var tokensPrefix = tokensLabel.Replace("{0}", "").Trim();
 
-        _viewModel.StatusTreeStatsText = $"[{linesPrefix} {FormatNumber(treeLines)} | {charsPrefix} {FormatNumber(treeChars)} | {tokensPrefix} {FormatNumber(treeTokens)}]";
-        _viewModel.StatusContentStatsText = $"[{linesPrefix} {FormatNumber(contentLines)} | {charsPrefix} {FormatNumber(contentChars)} | {tokensPrefix} {FormatNumber(contentTokens)}]";
+        var useCompactMetrics = Bounds.Width > 0 && Bounds.Width <= CompactStatusMetricsThresholdWidth;
+        if (useCompactMetrics)
+        {
+            _viewModel.StatusTreeStatsText = $"[{linesPrefix} {FormatNumber(_lastStatusTreeLines)}]";
+            _viewModel.StatusContentStatsText = $"[{linesPrefix} {FormatNumber(_lastStatusContentLines)}]";
+            return;
+        }
+
+        _viewModel.StatusTreeStatsText = $"[{linesPrefix} {FormatNumber(_lastStatusTreeLines)} | {charsPrefix} {FormatNumber(_lastStatusTreeChars)} | {tokensPrefix} {FormatNumber(_lastStatusTreeTokens)}]";
+        _viewModel.StatusContentStatsText = $"[{linesPrefix} {FormatNumber(_lastStatusContentLines)} | {charsPrefix} {FormatNumber(_lastStatusContentChars)} | {tokensPrefix} {FormatNumber(_lastStatusContentTokens)}]";
     }
 
     /// <summary>
@@ -4730,11 +5288,28 @@ public partial class MainWindow : Window
             // Ignore cancellation callback errors and continue with fallback logic.
         }
 
-        // Secondary cancellation path for legacy/background operations.
-        _projectOperationCts?.Cancel();
-        _refreshCts?.Cancel();
-        _gitCloneCts?.Cancel();
-        _gitOperationCts?.Cancel();
+        // Scoped fallback path: cancel only the currently active operation family.
+        switch (activeOperationType)
+        {
+            case StatusOperationType.LoadProject:
+            case StatusOperationType.RefreshProject:
+                _projectOperationCts?.Cancel();
+                _refreshCts?.Cancel();
+                break;
+            case StatusOperationType.GitPullUpdates:
+            case StatusOperationType.GitSwitchBranch:
+                _gitOperationCts?.Cancel();
+                break;
+            case StatusOperationType.PreviewBuild:
+                _previewBuildCts?.Cancel();
+                break;
+            case StatusOperationType.MetricsCalculation:
+                // Metrics cancellation is handled below by dedicated fallback logic.
+                break;
+            case StatusOperationType.None:
+            default:
+                break;
+        }
 
         if (activeOperationType == StatusOperationType.MetricsCalculation)
         {

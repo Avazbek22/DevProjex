@@ -3,14 +3,22 @@ namespace DevProjex.Tests.Integration;
 public sealed class OperationCancellationWiringIntegrationTests
 {
     [Fact]
-    public void MainWindow_StatusCancelHandler_CancelsAllOperationTokens()
+    public void MainWindow_StatusCancelHandler_UsesScopedCancellationByActiveOperationType()
     {
         var content = ReadMainWindowCode();
+        var body = ExtractMethodBody(
+            content,
+            "private void OnStatusOperationCancelRequested(",
+            "#endregion");
 
-        Assert.Contains("_projectOperationCts?.Cancel();", content);
-        Assert.Contains("_refreshCts?.Cancel();", content);
-        Assert.Contains("_gitCloneCts?.Cancel();", content);
-        Assert.Contains("_gitOperationCts?.Cancel();", content);
+        Assert.Contains("switch (activeOperationType)", body);
+        Assert.Contains("case StatusOperationType.LoadProject:", body);
+        Assert.Contains("case StatusOperationType.RefreshProject:", body);
+        Assert.Contains("case StatusOperationType.GitPullUpdates:", body);
+        Assert.Contains("case StatusOperationType.GitSwitchBranch:", body);
+        Assert.Contains("case StatusOperationType.PreviewBuild:", body);
+        Assert.DoesNotContain("Secondary cancellation path for legacy/background operations.", body);
+        Assert.DoesNotContain("_gitCloneCts?.Cancel();", body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -65,11 +73,38 @@ public sealed class OperationCancellationWiringIntegrationTests
         Assert.DoesNotContain("Cursor = new Cursor(StandardCursorType.Wait)", switchBody, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MainWindow_RefreshTree_DoesNotUseWaitCursorAssignments()
+    {
+        var content = ReadMainWindowCode();
+        var body = ExtractMethodBody(
+            content,
+            "private async Task RefreshTreeAsync(",
+            "private TreeNodeViewModel BuildTreeViewModel(");
+
+        Assert.DoesNotContain("waitCursorActive", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Cursor = new Cursor(StandardCursorType.Wait)", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Cursor = new Cursor(StandardCursorType.Arrow)", body, StringComparison.Ordinal);
+    }
+
     private static string ReadMainWindowCode()
     {
         var repoRoot = FindRepositoryRoot();
         var file = Path.Combine(repoRoot, "Apps", "Avalonia", "DevProjex.Avalonia", "MainWindow.axaml.cs");
         return File.ReadAllText(file);
+    }
+
+    private static string ExtractMethodBody(string content, string methodStartMarker, string methodEndMarker)
+    {
+        var start = content.IndexOf(methodStartMarker, StringComparison.Ordinal);
+        var end = start >= 0
+            ? content.IndexOf(methodEndMarker, start, StringComparison.Ordinal)
+            : -1;
+
+        Assert.True(start >= 0, $"Method start marker not found: {methodStartMarker}");
+        Assert.True(end > start, $"Method end marker not found for: {methodStartMarker}");
+
+        return content.Substring(start, end - start);
     }
 
     private static string FindRepositoryRoot()

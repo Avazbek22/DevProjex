@@ -144,10 +144,18 @@ Opens the search bar, highlights matches, and allows navigation.
 
 Search auto-expands only the needed branches; clearing the query collapses the tree (except root).
 
+Constraints:
+* opening Search closes Filter automatically;
+* in Preview mode, Search is unavailable.
+
 ## 9) Filter (by name)
 Shows only nodes matching the filter string and their parents. Updates are debounced.
 * Ctrl+Shift+N — show/hide filter
 * Esc — close filter
+
+Constraints:
+* opening Filter closes Search automatically;
+* in Preview mode, Filter is unavailable.
 
 ## 10) Options (settings panel)
 Lists on the right:

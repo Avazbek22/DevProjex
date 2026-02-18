@@ -144,10 +144,18 @@ Aktiviert eine sanfte Schiebe-Animation beim Überfahren von Baumzeilen.
 
 Die Suche öffnet nur benötigte Zweige; beim Leeren der Suche wird der Baum eingeklappt (außer der Wurzel).
 
+Einschränkungen:
+* Beim Öffnen der Suche wird der Filter automatisch geschlossen.
+* Im Vorschaumodus ist die Suche nicht verfügbar.
+
 ## 9) Filter nach Namen
 Zeigt nur passende Knoten und ihre Eltern. Aktualisierung mit Verzögerung (Debounce).
 * Ctrl+Shift+N — Filter anzeigen/ausblenden
 * Esc — Filter schließen
+
+Einschränkungen:
+* Beim Öffnen des Filters wird die Suche automatisch geschlossen.
+* Im Vorschaumodus ist der Filter nicht verfügbar.
 
 ## 10) Optionen
 Rechts befinden sich Listen:

@@ -144,10 +144,18 @@ Ouvre la recherche, met en évidence les correspondances et permet la navigation
 
 La recherche n’ouvre que les branches nécessaires ; en effaçant la requête, l’arbre se replie (sauf la racine).
 
+Limitations :
+* à l’ouverture de la recherche, le filtre se ferme automatiquement ;
+* en mode aperçu, la recherche n’est pas disponible.
+
 ## 9) Filtrer par nom
 Affiche uniquement les nœuds correspondant au filtre et leurs parents. Mise à jour avec délai (debounce).
 * Ctrl+Shift+N — afficher/masquer le filtre
 * Esc — fermer le filtre
+
+Limitations :
+* à l’ouverture du filtre, la recherche se ferme automatiquement ;
+* en mode aperçu, le filtre n’est pas disponible.
 
 ## 10) Options
 Listes à droite :
