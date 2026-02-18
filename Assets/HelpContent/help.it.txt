@@ -92,7 +92,9 @@ Scorciatoia: Ctrl+Shift+V.
 In modalità JSON viene usata una struttura compatta dell’albero.
 
 Albero (Copia albero / Esporta albero):
-* `rootPath` — percorso assoluto della radice.
+* `rootPath` — percorso radice nel formato di output corrente:
+  * per una cartella locale — percorso locale assoluto;
+  * per un progetto Git — URL del repository.
 * `root` — nodo radice.
 * campi nodo: `name`, `path`, `dirs`, `files`, `accessDenied` (se necessario).
 

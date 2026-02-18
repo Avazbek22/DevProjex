@@ -31,7 +31,7 @@ public sealed class TreeExportService
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 
 		if (format == TreeTextFormat.Json)
-			return BuildFullTreeJson(rootPath, outputRootPath, root);
+			return BuildFullTreeJson(rootPath, ResolveJsonRootPath(rootPath, displayRootPath), root);
 
 		var sb = new StringBuilder();
 		sb.Append(outputRootPath).AppendLine(":");
@@ -59,7 +59,7 @@ public sealed class TreeExportService
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 
 		if (format == TreeTextFormat.Json)
-			return BuildSelectedTreeJson(rootPath, outputRootPath, root, selectedPaths);
+			return BuildSelectedTreeJson(rootPath, ResolveJsonRootPath(rootPath, displayRootPath), root, selectedPaths);
 
 		var sb = new StringBuilder();
 		sb.Append(outputRootPath).AppendLine(":");
@@ -169,6 +169,21 @@ public sealed class TreeExportService
 			Root: selectedRoot);
 
 		return JsonSerializer.Serialize(payload, JsonOptions);
+	}
+
+	private static string ResolveJsonRootPath(string localRootPath, string? displayRootPath)
+	{
+		if (!string.IsNullOrWhiteSpace(displayRootPath))
+			return displayRootPath;
+
+		try
+		{
+			return Path.GetFullPath(localRootPath);
+		}
+		catch
+		{
+			return localRootPath;
+		}
 	}
 
 	private static TreeJsonNode BuildJsonNode(string rootPath, TreeNodeDescriptor node)

@@ -126,6 +126,9 @@ public partial class MainWindow : Window
     private string? _currentPath;
     private string? _currentProjectDisplayName;
     private string? _currentRepositoryUrl;
+    private string? _cachedPathPresentationProjectPath;
+    private string? _cachedPathPresentationRepositoryUrl;
+    private ExportPathPresentation? _cachedPathPresentation;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
     private ThemePresetDb _themePresetDb = new();
@@ -1254,15 +1257,33 @@ public partial class MainWindow : Window
     private ExportPathPresentation? CreateExportPathPresentation()
     {
         if (!_viewModel.IsGitMode)
+        {
+            _cachedPathPresentation = null;
+            _cachedPathPresentationProjectPath = null;
+            _cachedPathPresentationRepositoryUrl = null;
             return null;
+        }
 
         if (string.IsNullOrWhiteSpace(_currentPath) || string.IsNullOrWhiteSpace(_currentRepositoryUrl))
+        {
+            _cachedPathPresentation = null;
+            _cachedPathPresentationProjectPath = null;
+            _cachedPathPresentationRepositoryUrl = null;
             return null;
+        }
 
-        return _repositoryWebPathPresentationService.TryCreate(
-            _currentPath,
-            _currentRepositoryUrl,
-            _viewModel.CurrentBranch);
+        if (_cachedPathPresentation is not null &&
+            string.Equals(_cachedPathPresentationProjectPath, _currentPath, StringComparison.Ordinal) &&
+            string.Equals(_cachedPathPresentationRepositoryUrl, _currentRepositoryUrl, StringComparison.Ordinal))
+        {
+            return _cachedPathPresentation;
+        }
+
+        _cachedPathPresentation = _repositoryWebPathPresentationService.TryCreate(_currentPath, _currentRepositoryUrl);
+        _cachedPathPresentationProjectPath = _currentPath;
+        _cachedPathPresentationRepositoryUrl = _currentRepositoryUrl;
+
+        return _cachedPathPresentation;
     }
 
     private void SchedulePreviewRefresh(bool immediate = false)

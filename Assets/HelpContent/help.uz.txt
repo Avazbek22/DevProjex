@@ -92,7 +92,9 @@ Tugma: Ctrl+Shift+V.
 JSON rejimida daraxtning ixcham tuzilmasi ishlatiladi.
 
 Daraxt (Daraxtni nusxalash / Daraxtni eksport qilish):
-* `rootPath` — ildizning absolyut yo‘li.
+* `rootPath` — joriy chiqish formatidagi ildiz yo‘li:
+  * lokal papka uchun — absolyut lokal yo‘l;
+  * Git loyihasi uchun — repository URL.
 * `root` — ildiz tugun.
 * tugun maydonlari: `name`, `path`, `dirs`, `files`, `accessDenied` (zarurat bo‘lsa).
 
