@@ -2,32 +2,28 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:DevProjex.Avalonia.ViewModels"
         xmlns:views="using:DevProjex.Avalonia.Views"
+        xmlns:controls="using:DevProjex.Avalonia.Controls"
         xmlns:converters="using:DevProjex.Avalonia.Converters"
         x:Class="DevProjex.Avalonia.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
         Icon="avares://DevProjex/AppIcon/icon-256.png"
         Width="1200" Height="800"
-        MinWidth="800" MinHeight="600"
+        MinWidth="850" MinHeight="600"
         TransparencyLevelHint="Mica, AcrylicBlur, Blur"
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TreeViewItem">
-      <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
-      <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+      <Setter Property="IsExpanded" Value="{ReflectionBinding IsExpanded, Mode=TwoWay}" />
+      <Setter Property="IsSelected" Value="{ReflectionBinding IsSelected, Mode=TwoWay}" />
       <Setter Property="Padding"
-              Value="{Binding DataContext.TreeItemPadding, RelativeSource={RelativeSource AncestorType=TreeView}}" />
-      <Setter Property="ItemsPanel">
-        <ItemsPanelTemplate>
-          <VirtualizingStackPanel />
-        </ItemsPanelTemplate>
-      </Setter>
+              Value="{ReflectionBinding DataContext.TreeItemPadding, RelativeSource={RelativeSource AncestorType=TreeView}}" />
     </Style>
     <!-- Fix for virtualization cache bug: the :empty pseudo-class may not update correctly
          when VirtualizingStackPanel recycles TreeViewItem containers. We use Opacity binding
          instead of IsVisible to hide the expander while preserving layout space for alignment. -->
     <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron">
-      <Setter Property="Opacity" Value="{Binding DataContext.HasChildren,
+      <Setter Property="Opacity" Value="{ReflectionBinding DataContext.HasChildren,
         RelativeSource={RelativeSource AncestorType=TreeViewItem},
         Converter={x:Static converters:BoolToOpacityConverter.Instance}}" />
     </Style>
@@ -35,16 +31,83 @@
     <!-- Drop Zone Styles -->
 
     <!-- Dashed border animation around the drop zone -->
+    <!-- Animation only runs when parent has "animating" class to save CPU when hidden -->
     <Style Selector="Rectangle.drop-zone-border">
       <Setter Property="Opacity" Value="1" />
       <Setter Property="StrokeDashOffset" Value="0" />
+    </Style>
+    <Style Selector="Border.drop-zone-animating Rectangle.drop-zone-border">
       <Style.Animations>
-        <Animation Duration="0:0:0.8" IterationCount="INFINITE">
+        <Animation Duration="0:0:0.8" IterationCount="INFINITE" Easing="LinearEasing">
           <KeyFrame Cue="0%">
             <Setter Property="StrokeDashOffset" Value="0" />
           </KeyFrame>
           <KeyFrame Cue="100%">
             <Setter Property="StrokeDashOffset" Value="-14" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
+    <Style Selector="Viewbox.drop-zone-icon">
+      <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+      <Setter Property="RenderTransform">
+        <TranslateTransform Y="5" />
+      </Setter>
+    </Style>
+    <Style Selector="Border.drop-zone-animating Viewbox.drop-zone-icon">
+      <Style.Animations>
+        <Animation Duration="0:0:2.1" IterationCount="INFINITE">
+          <KeyFrame Cue="0%">
+            <Setter Property="TranslateTransform.Y" Value="5" />
+          </KeyFrame>
+          <KeyFrame Cue="6.25%">
+            <Setter Property="TranslateTransform.Y" Value="7.1" />
+          </KeyFrame>
+          <KeyFrame Cue="12.5%">
+            <Setter Property="TranslateTransform.Y" Value="8.89" />
+          </KeyFrame>
+          <KeyFrame Cue="18.75%">
+            <Setter Property="TranslateTransform.Y" Value="10.08" />
+          </KeyFrame>
+          <KeyFrame Cue="25%">
+            <Setter Property="TranslateTransform.Y" Value="10.5" />
+          </KeyFrame>
+          <KeyFrame Cue="31.25%">
+            <Setter Property="TranslateTransform.Y" Value="10.08" />
+          </KeyFrame>
+          <KeyFrame Cue="37.5%">
+            <Setter Property="TranslateTransform.Y" Value="8.89" />
+          </KeyFrame>
+          <KeyFrame Cue="43.75%">
+            <Setter Property="TranslateTransform.Y" Value="7.1" />
+          </KeyFrame>
+          <KeyFrame Cue="50%">
+            <Setter Property="TranslateTransform.Y" Value="5" />
+          </KeyFrame>
+          <KeyFrame Cue="56.25%">
+            <Setter Property="TranslateTransform.Y" Value="2.9" />
+          </KeyFrame>
+          <KeyFrame Cue="62.5%">
+            <Setter Property="TranslateTransform.Y" Value="1.11" />
+          </KeyFrame>
+          <KeyFrame Cue="68.75%">
+            <Setter Property="TranslateTransform.Y" Value="-0.08" />
+          </KeyFrame>
+          <KeyFrame Cue="75%">
+            <Setter Property="TranslateTransform.Y" Value="-0.5" />
+          </KeyFrame>
+          <KeyFrame Cue="81.25%">
+            <Setter Property="TranslateTransform.Y" Value="-0.08" />
+          </KeyFrame>
+          <KeyFrame Cue="87.5%">
+            <Setter Property="TranslateTransform.Y" Value="1.11" />
+          </KeyFrame>
+          <KeyFrame Cue="93.75%">
+            <Setter Property="TranslateTransform.Y" Value="2.9" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="TranslateTransform.Y" Value="5" />
           </KeyFrame>
         </Animation>
       </Style.Animations>
@@ -162,6 +225,7 @@
                           AboutOpenLinkRequested="OnAboutOpenLink"
                           AboutCopyLinkRequested="OnAboutCopyLink"
                           ResetSettingsRequested="OnResetSettings"
+                          ResetDataRequested="OnResetData"
                           SetLightThemeRequested="OnSetLightThemeCheckbox"
                           SetDarkThemeRequested="OnSetDarkThemeCheckbox"
                           SetTransparentModeRequested="OnSetTransparentMode"
@@ -297,6 +361,7 @@
                     ClipToBounds="False">
               <!-- Folder icon with floating animation -->
               <Viewbox Name="DropZoneIcon"
+                       Classes="drop-zone-icon"
                        Width="128"
                        Height="128"
                        VerticalAlignment="Bottom">
@@ -453,40 +518,45 @@
                     VerticalAlignment="Center">
                 <!-- Left spacer keeps segmented control visually centered against the close button. -->
                 <Border Grid.Column="0"
-                        Width="44"
+                        Width="37"
                         Background="Transparent" />
 
                 <Border Grid.Column="1"
+                        Name="PreviewSegmentedControl"
                         Classes="segmented-control preview-segmented-control">
-                  <Panel>
+                  <Grid Name="PreviewSegmentGrid"
+                        ColumnDefinitions="1.15*,1.15*,1.6*">
                     <Border Name="PreviewSegmentThumb"
+                            Grid.Column="0"
                             Classes="segment-thumb preview-segment-thumb"
                             HorizontalAlignment="Left"
-                            VerticalAlignment="Stretch"
-                            Classes.preview-segment-thumb-middle="{Binding IsPreviewContentSelected}"
-                            Classes.preview-segment-thumb-right="{Binding IsPreviewTreeAndContentSelected}" />
+                            VerticalAlignment="Stretch" />
 
-                    <StackPanel Orientation="Horizontal">
-                      <Button Classes="segment-text-button preview-segment-button"
-                              Classes.segment-selected="{Binding IsPreviewTreeSelected}"
-                              Content="{Binding PreviewModeTree}"
-                              Click="OnPreviewTreeModeClick" />
-                      <Button Classes="segment-text-button preview-segment-button"
-                              Classes.segment-selected="{Binding IsPreviewContentSelected}"
-                              Content="{Binding PreviewModeContent}"
-                              Click="OnPreviewContentModeClick" />
-                      <Button Classes="segment-text-button preview-segment-button"
-                              Classes.segment-selected="{Binding IsPreviewTreeAndContentSelected}"
-                              Content="{Binding PreviewModeTreeAndContent}"
-                              Click="OnPreviewTreeAndContentModeClick" />
-                    </StackPanel>
-                  </Panel>
+                    <Button Grid.Column="0"
+                            Name="PreviewTreeModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewTreeSelected}"
+                            Content="{Binding PreviewModeTree}"
+                            Click="OnPreviewTreeModeClick" />
+                    <Button Grid.Column="1"
+                            Name="PreviewContentModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewContentSelected}"
+                            Content="{Binding PreviewModeContent}"
+                            Click="OnPreviewContentModeClick" />
+                    <Button Grid.Column="2"
+                            Name="PreviewTreeAndContentModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewTreeAndContentSelected}"
+                            Content="{Binding PreviewModeTreeAndContent}"
+                            Click="OnPreviewTreeAndContentModeClick" />
+                  </Grid>
                 </Border>
                 <Button Grid.Column="2"
                         Classes="menu-icon-button preview-close-button"
                         Width="32"
                         Height="32"
-                        Margin="12,0,0,0"
+                        Margin="5,0,0,0"
                         Content="✕"
                         Click="OnPreviewClose" />
               </Grid>
@@ -505,11 +575,12 @@
                         FontSize="{Binding TreeFontSize}">
                 <TreeView.ItemsPanel>
                   <ItemsPanelTemplate>
-                    <VirtualizingStackPanel />
+                    <VirtualizingStackPanel CacheLength="2" />
                   </ItemsPanelTemplate>
                 </TreeView.ItemsPanel>
                 <TreeView.ItemTemplate>
-                  <TreeDataTemplate ItemsSource="{Binding ChildItemsSource}">
+                  <TreeDataTemplate x:DataType="vm:TreeNodeViewModel"
+                                    ItemsSource="{CompiledBinding ChildItemsSource}">
                     <Grid ColumnDefinitions="Auto,*" Background="Transparent">
                       <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="{Binding Level, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource TreeIndentConverter}}" />
@@ -518,28 +589,28 @@
                       <StackPanel Grid.Column="1"
                                   Orientation="Horizontal"
                                   Background="Transparent"
-                                  Spacing="{Binding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
+                                  Spacing="{ReflectionBinding DataContext.TreeItemSpacing, RelativeSource={RelativeSource AncestorType=TreeView}}">
                         <CheckBox IsThreeState="True"
-                                  IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                  IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
                                   VerticalAlignment="Center" />
-                        <Image Source="{Binding Icon}"
-                               Width="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                               Height="{Binding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                        <Image Source="{CompiledBinding Icon}"
+                               Width="{ReflectionBinding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                               Height="{ReflectionBinding DataContext.TreeIconSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                Stretch="Uniform"
                                VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding DisplayName}"
+                        <TextBlock Text="{CompiledBinding DisplayName}"
                                    IsVisible="{Binding !HasHighlightedDisplay}"
                                    VerticalAlignment="Center"
-                                   Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                   FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                   FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   Margin="{ReflectionBinding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontFamily="{ReflectionBinding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontSize="{ReflectionBinding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                    Foreground="{DynamicResource AppTextBrush}" />
-                        <TextBlock Inlines="{Binding DisplayInlines}"
+                        <TextBlock Inlines="{CompiledBinding DisplayInlines}"
                                    IsVisible="{Binding HasHighlightedDisplay}"
                                    VerticalAlignment="Center"
-                                   Margin="{Binding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                   FontFamily="{Binding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                   FontSize="{Binding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   Margin="{ReflectionBinding DataContext.TreeTextMargin, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontFamily="{ReflectionBinding DataContext.SelectedFontFamily, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                   FontSize="{ReflectionBinding DataContext.TreeFontSize, RelativeSource={RelativeSource AncestorType=TreeView}}"
                                    Foreground="{DynamicResource AppTextBrush}" />
                       </StackPanel>
                     </Grid>
@@ -555,23 +626,19 @@
                     <Grid Grid.Column="0">
                       <Border Name="PreviewLineNumbersBackground"
                               Classes="preview-line-numbers"
-                              Margin="0,-6,0,0"
-                              Width="{Binding Bounds.Width, ElementName=PreviewLineNumbersHost}" />
-                      <ScrollViewer Name="PreviewLineNumbersScrollViewer"
-                                    HorizontalScrollBarVisibility="Disabled"
-                                    VerticalScrollBarVisibility="Hidden"
-                                    IsHitTestVisible="False">
-                        <Border Name="PreviewLineNumbersHost"
-                                Background="Transparent"
-                                Padding="10,10,8,10">
-                          <TextBlock Text="{Binding PreviewLineNumbers}"
-                                     FontFamily="{Binding SelectedFontFamily}"
-                                     FontSize="{Binding TreeFontSize}"
-                                     Opacity="0.72"
-                                     Margin="0"
-                                     TextWrapping="NoWrap" />
-                        </Border>
-                      </ScrollViewer>
+                              Margin="0,-6,0,0" />
+                      <controls:VirtualizedLineNumbersControl Name="PreviewLineNumbersControl"
+                                                              IsHitTestVisible="False"
+                                                              VerticalAlignment="Stretch"
+                                                              LineCount="{Binding PreviewLineCount}"
+                                                              NumberFontFamily="{Binding SelectedFontFamily}"
+                                                              NumberFontSize="{Binding PreviewFontSize}"
+                                                              NumberBrush="{DynamicResource AppTextBrush}"
+                                                              Opacity="0.72"
+                                                              TopPadding="10"
+                                                              BottomPadding="10"
+                                                              LeftPadding="10"
+                                                              RightPadding="8" />
                     </Grid>
 
                     <ScrollViewer Grid.Column="1"
@@ -583,7 +650,7 @@
                       <Border Padding="10,10,16,10">
                         <TextBlock Text="{Binding PreviewText}"
                                    FontFamily="{Binding SelectedFontFamily}"
-                                   FontSize="{Binding TreeFontSize}"
+                                   FontSize="{Binding PreviewFontSize}"
                                    TextWrapping="NoWrap"
                                    HorizontalAlignment="Left"
                                    VerticalAlignment="Top" />

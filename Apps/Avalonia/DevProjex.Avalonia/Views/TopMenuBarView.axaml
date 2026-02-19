@@ -6,7 +6,7 @@
              x:DataType="vm:MainWindowViewModel">
   <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
     <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
-    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0">
+    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,100,0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
@@ -30,20 +30,20 @@
         <MenuItem Header="{Binding MenuCopyTreeAndContent}" Click="OnCopyTreeAndContent" />
       </MenuItem>
       <MenuItem Header="{Binding MenuView}" IsEnabled="{Binding IsProjectLoaded}">
-        <MenuItem Header="{Binding MenuViewExpandAll}" Click="OnExpandAll" />
-        <MenuItem Header="{Binding MenuViewCollapseAll}" Click="OnCollapseAll" />
+        <MenuItem Header="{Binding MenuViewExpandAll}" Click="OnExpandAll" IsVisible="{Binding !IsPreviewMode}" />
+        <MenuItem Header="{Binding MenuViewCollapseAll}" Click="OnCollapseAll" IsVisible="{Binding !IsPreviewMode}" />
         <MenuItem Header="{Binding MenuViewZoomIn}" Click="OnZoomIn" />
         <MenuItem Header="{Binding MenuViewZoomOut}" Click="OnZoomOut" />
         <MenuItem Header="{Binding MenuViewZoomReset}" Click="OnZoomReset" />
-        <Separator />
-        <MenuItem Click="OnToggleCompactMode">
+        <Separator IsVisible="{Binding !IsPreviewMode}" />
+        <MenuItem Click="OnToggleCompactMode" IsVisible="{Binding !IsPreviewMode}">
           <MenuItem.Header>
             <CheckBox Content="{Binding MenuViewCompactMode}"
                       IsChecked="{Binding IsCompactMode}"
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>
-        <MenuItem Click="OnToggleTreeAnimation">
+        <MenuItem Click="OnToggleTreeAnimation" IsVisible="{Binding !IsPreviewMode}">
           <MenuItem.Header>
             <CheckBox Content="{Binding MenuViewTreeAnimation}"
                       IsChecked="{Binding IsTreeAnimationEnabled}"
@@ -69,6 +69,7 @@
         <MenuItem Header="{Binding MenuHelpAbout}" Click="OnAbout" />
         <Separator />
         <MenuItem Header="{Binding MenuHelpResetSettings}" Click="OnResetSettings" />
+        <MenuItem Header="{Binding MenuHelpResetData}" Click="OnResetData" />
       </MenuItem>
     </Menu>
 
@@ -155,7 +156,7 @@
     <Popup Name="ThemePopup"
            IsOpen="{Binding ThemePopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
-           PlacementMode="Bottom"
+           Placement="Bottom"
            PlacementTarget="{Binding #ThemeMenuItem}">
       <views:ThemePopoverView Name="ThemePopover" />
     </Popup>
@@ -165,7 +166,7 @@
            IsOpen="{Binding HelpPopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
            PlacementConstraintAdjustment="All"
-           PlacementMode="Bottom"
+           Placement="Bottom"
            PlacementTarget="{Binding #HelpMenuItem}">
       <views:AboutPopoverView Name="HelpPopover" />
     </Popup>
@@ -175,7 +176,7 @@
            IsOpen="{Binding HelpDocsPopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
            PlacementConstraintAdjustment="All"
-           PlacementMode="Bottom"
+           Placement="Bottom"
            PlacementTarget="{Binding #HelpMenuItem}">
       <views:HelpPopoverView Name="HelpDocsPopover" />
     </Popup>

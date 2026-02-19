@@ -1,7 +1,3 @@
-using System.Text;
-using DevProjex.Kernel;
-using DevProjex.Kernel.Abstractions;
-
 namespace DevProjex.Application.Services;
 
 /// <summary>
@@ -23,18 +19,33 @@ public sealed class SelectedContentExportService
 	}
 
 	public string Build(IEnumerable<string> filePaths) =>
-		BuildAsync(filePaths, CancellationToken.None).GetAwaiter().GetResult();
+		Build(filePaths, displayPathMapper: null);
+
+	public string Build(IEnumerable<string> filePaths, Func<string, string>? displayPathMapper) =>
+		BuildAsync(filePaths, CancellationToken.None, displayPathMapper).GetAwaiter().GetResult();
 
 	public async Task<string> BuildAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken)
-	{
-		var files = filePaths
-			.Where(p => !string.IsNullOrWhiteSpace(p))
-			.Distinct(PathComparer.Default)
-			.OrderBy(p => p, PathComparer.Default)
-			.ToList();
+		=> await BuildAsync(filePaths, cancellationToken, displayPathMapper: null).ConfigureAwait(false);
 
-		if (files.Count == 0)
+	public async Task<string> BuildAsync(
+		IEnumerable<string> filePaths,
+		CancellationToken cancellationToken,
+		Func<string, string>? displayPathMapper)
+	{
+		// Use HashSet for O(1) deduplication
+		var uniqueFiles = new HashSet<string>(PathComparer.Default);
+		foreach (var path in filePaths)
+		{
+			if (!string.IsNullOrWhiteSpace(path))
+				uniqueFiles.Add(path);
+		}
+
+		if (uniqueFiles.Count == 0)
 			return string.Empty;
+
+		// Convert to list and sort in-place
+		var files = new List<string>(uniqueFiles);
+		files.Sort(PathComparer.Default);
 
 		var sb = new StringBuilder();
 		bool anyWritten = false;
@@ -57,7 +68,8 @@ public sealed class SelectedContentExportService
 
 			anyWritten = true;
 
-			sb.AppendLine($"{file}:");
+			var displayPath = MapDisplayPath(file, displayPathMapper);
+			sb.AppendLine($"{displayPath}:");
 			AppendClipboardBlankLine(sb);
 
 			if (content.IsEmpty)
@@ -77,6 +89,22 @@ public sealed class SelectedContentExportService
 		}
 
 		return anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
+	}
+
+	private static string MapDisplayPath(string filePath, Func<string, string>? displayPathMapper)
+	{
+		if (displayPathMapper is null)
+			return filePath;
+
+		try
+		{
+			var mapped = displayPathMapper(filePath);
+			return string.IsNullOrWhiteSpace(mapped) ? filePath : mapped;
+		}
+		catch
+		{
+			return filePath;
+		}
 	}
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);

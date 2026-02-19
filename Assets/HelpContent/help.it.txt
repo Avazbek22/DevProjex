@@ -47,7 +47,7 @@ Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Cl
 La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
 `%TEMP%\DevProjex\RepoCache`
 
-* Branch — mostra l’elenco dei branch remoti; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste, viene scaricato (fetch) e creato localmente.
+* Branch — mostra l’elenco dei branch disponibili con indicazione di quello attivo; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste in locale, viene scaricato (fetch) e creato localmente.
 * Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
 
 ## 5) Copia
@@ -92,7 +92,9 @@ Scorciatoia: Ctrl+Shift+V.
 In modalità JSON viene usata una struttura compatta dell’albero.
 
 Albero (Copia albero / Esporta albero):
-* `rootPath` — percorso assoluto della radice.
+* `rootPath` — percorso radice nel formato di output corrente:
+  * per una cartella locale — percorso locale assoluto;
+  * per un progetto Git — URL del repository.
 * `root` — nodo radice.
 * campi nodo: `name`, `path`, `dirs`, `files`, `accessDenied` (se necessario).
 
@@ -125,9 +127,9 @@ Chiusura: pulsante X oppure nuovo clic sull’icona occhio.
 * Ctrl++ / Ctrl+= — aumenta
 * Ctrl+- — riduci
 * Ctrl+0 — reset
-* Ctrl + rotellina sul tree — zoom fluido
+* Ctrl + rotellina sul tree e in modalità anteprima — zoom fluido
 
-Intervallo: 6–28, reset: 12.
+Intervallo: 6–28, reset: 15.
 
 ### Modalità compatta
 Rende l'interfaccia più densa: spazi più piccoli nell'albero e nelle impostazioni.
@@ -144,10 +146,18 @@ Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 
 La ricerca apre solo i rami necessari; svuotando la query l’albero si richiude (tranne la radice).
 
+Limitazioni:
+* all’apertura della ricerca, il filtro si chiude automaticamente;
+* in modalità anteprima, la ricerca non è disponibile.
+
 ## 9) Filtra per nome
 Mostra solo i nodi che corrispondono al filtro e i loro genitori. Aggiornamento con debounce.
 * Ctrl+Shift+N — mostra/nascondi filtro
 * Esc — chiudi filtro
+
+Limitazioni:
+* all’apertura del filtro, la ricerca si chiude automaticamente;
+* in modalità anteprima, il filtro non è disponibile.
 
 ## 10) Opzioni
 Liste a destra:
@@ -163,6 +173,20 @@ Nota su « Tipi di file »:
 * i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Ignora ».
 
 Ctrl+P — mostra/nascondi pannello.
+
+### 10.1 Profili dei parametri dei progetti locali
+Per le cartelle locali, DevProjex memorizza gli ultimi parametri di progetto applicati:
+* cartelle di primo livello selezionate;
+* tipi di file selezionati;
+* opzioni selezionate nel blocco «Ignora».
+
+Il salvataggio avviene quando fai clic su «Applica».
+Quando si riapre la stessa cartella locale, i parametri vengono ripristinati automaticamente.
+
+Importante:
+* i profili vengono salvati solo per i progetti locali;
+* per i progetti aperti tramite Git Clone, i profili non vengono salvati;
+* se alcune opzioni salvate non sono più disponibili nel progetto corrente, vengono ignorate e gli altri parametri vengono applicati.
 
 ## 11) Ignora
 L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
@@ -296,10 +320,18 @@ Il popover del tema permette di scegliere:
 
 Gli elementi [Beta] possono cambiare tra versioni.
 
-## 15) Aiuto → Informazioni
-Apre un popover con info app e link al repository.
-Reimposta impostazioni (Aiuto → Reimposta impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
-* Esc — chiudi popover
+## 15) Aiuto
+
+### 15.1 Ripristina impostazioni
+Ripristina impostazioni (Aiuto → Ripristina impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
+
+### 15.2 Ripristina dati
+Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
+* cartelle di primo livello selezionate;
+* tipi di file selezionati;
+* opzioni selezionate nel blocco «Ignora».
+
+File e cartelle dei progetti sul disco non vengono modificati né eliminati.
 
 ## 16) Lingue
 La lingua si seleziona dal menu Lingua.
@@ -324,4 +356,3 @@ Pulsante X (annulla) nella barra di stato:
 ## 18) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
-

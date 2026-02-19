@@ -1,7 +1,3 @@
-using System;
-using System.Globalization;
-using Avalonia.Data.Converters;
-
 namespace DevProjex.Avalonia.Converters;
 
 /// <summary>

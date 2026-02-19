@@ -1,12 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using DevProjex.Application.Services;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Unit.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class IgnoreRulesServiceMixedWorkspaceMatrixTests
@@ -86,7 +77,7 @@ public sealed class IgnoreRulesServiceMixedWorkspaceMatrixTests
 		temp.CreateFile("proj-git/App.csproj", "<Project />");
 		temp.CreateFile("proj-no-git/package.json", "{}");
 
-		var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+		var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<ISmartIgnoreRule>()));
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, new[] { "proj-git" });
 
 		Assert.True(availability.IncludeGitIgnore);
@@ -101,7 +92,7 @@ public sealed class IgnoreRulesServiceMixedWorkspaceMatrixTests
 		temp.CreateFile("proj-git/App.csproj", "<Project />");
 		temp.CreateFile("proj-no-git/package.json", "{}");
 
-		var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+		var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<ISmartIgnoreRule>()));
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, new[] { "proj-no-git" });
 
 		Assert.False(availability.IncludeGitIgnore);

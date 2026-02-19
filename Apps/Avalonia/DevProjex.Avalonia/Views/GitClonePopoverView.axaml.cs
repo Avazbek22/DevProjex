@@ -1,9 +1,3 @@
-using System;
-using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Interactivity;
-using Avalonia.Markup.Xaml;
-
 namespace DevProjex.Avalonia.Views;
 
 public partial class GitClonePopoverView : UserControl

@@ -1,7 +1,3 @@
-using System.Reflection;
-using System.Text.Json;
-using DevProjex.Kernel.Abstractions;
-
 namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class EmbeddedIconStore : IIconStore
@@ -29,7 +25,7 @@ public sealed class EmbeddedIconStore : IIconStore
 
 	private static IconPack LoadPack()
 	{
-		var assembly = typeof(DevProjex.Assets.Marker).Assembly;
+		var assembly = typeof(Marker).Assembly;
 		var manifestResource = "DevProjex.Assets.IconPacks.Configuration.manifest.json";
 		using var stream = assembly.GetManifestResourceStream(manifestResource)
 			?? throw new InvalidOperationException($"Icon manifest not found: {manifestResource}");

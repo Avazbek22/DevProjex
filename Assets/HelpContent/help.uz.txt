@@ -47,7 +47,7 @@ Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Il
 Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
 `%TEMP%\DevProjex\RepoCache`
 
-* Tarmoq — masofaviy tarmoqlar ro‘yxatini ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
+* Tarmoq — mavjud tarmoqlar ro‘yxatini faol tarmoq belgisi bilan ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar tarmoq lokalda bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
 * Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset.
 
 ## 5) Nusxa
@@ -92,7 +92,9 @@ Tugma: Ctrl+Shift+V.
 JSON rejimida daraxtning ixcham tuzilmasi ishlatiladi.
 
 Daraxt (Daraxtni nusxalash / Daraxtni eksport qilish):
-* `rootPath` — ildizning absolyut yo‘li.
+* `rootPath` — joriy chiqish formatidagi ildiz yo‘li:
+  * lokal papka uchun — absolyut lokal yo‘l;
+  * Git loyihasi uchun — repository URL.
 * `root` — ildiz tugun.
 * tugun maydonlari: `name`, `path`, `dirs`, `files`, `accessDenied` (zarurat bo‘lsa).
 
@@ -125,9 +127,9 @@ Yopish: X tugmasi yoki ko‘zcha ikonani qayta bosish.
 * Ctrl++ / Ctrl+= — kattalashtirish
 * Ctrl+- — kichraytirish
 * Ctrl+0 — tiklash
-* Ctrl + g‘ildirak — silliq zoom
+* Ctrl + g‘ildirak daraxtda va prevyu rejimida — silliq zoom
 
-Oraliq: 6–28, tiklash — 12.
+Oraliq: 6–28, tiklash — 15.
 
 ### Ixcham rejim
 Interfeysni zichroq qiladi: daraxt va sozlamalarda oraliqlar kichikroq.
@@ -144,10 +146,18 @@ Qidiruv panelini ochadi, mosliklarni yoritadi va navigatsiya qiladi.
 
 Qidiruv faqat kerakli shoxlarni ochadi; so‘rov tozalansa, daraxt yig‘iladi (ildizdan tashqari).
 
+Cheklovlar:
+* qidiruv ochilganda, filtr avtomatik yopiladi;
+* preview rejimida qidiruv mavjud emas.
+
 ## 9) Nom bo‘yicha filtr
 Filtr satriga mos tugunlar va ularning ota‑onalarini ko‘rsatadi. Yangilanish kechikish bilan.
 * Ctrl+Shift+N — filtrni ko‘rsatish/yashirish
 * Esc — filtrni yopish
+
+Cheklovlar:
+* filtr ochilganda, qidiruv avtomatik yopiladi;
+* preview rejimida filtr mavjud emas.
 
 ## 10) Sozlamalar
 O‘ng tomonda ro‘yxatlar:
@@ -163,6 +173,20 @@ Har bir ro‘yxatda Barchasi tugmasi bor.
 * kengaytmasiz fayllar bu ro‘yxatga qo‘shilmaydi va «E’tiborsiz qoldirish» ichidagi alohida band orqali boshqariladi.
 
 Ctrl+P — panelni ko‘rsatish/yashirish.
+
+### 10.1 Mahalliy loyiha parametr profillari
+Mahalliy jildlar uchun DevProjex loyihaning oxirgi qo‘llangan parametrlarini eslab qoladi:
+* tanlangan yuqori darajadagi jildlar;
+* tanlangan fayl turlari;
+* «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
+
+Saqlash «Sozlamalarni qo‘llash» tugmasi bosilganda bajariladi.
+Xuddi shu mahalliy jild qayta ochilganda parametrlar avtomatik tiklanadi.
+
+Muhim:
+* profillar faqat mahalliy loyihalar uchun saqlanadi;
+* Git Clone orqali ochilgan loyihalar uchun profillar saqlanmaydi;
+* agar joriy loyihada saqlangan ayrim bandlar endi mavjud bo‘lmasa, ular o‘tkazib yuboriladi, qolgan parametrlar qo‘llanadi.
 
 ## 11) Ignorlash
 "Ignorlash" roʻyxati joriy yoʻl va tanlangan yuqori darajadagi papkalar asosida avtomatik shakllanadi.
@@ -296,10 +320,18 @@ Tema popoveri quyilarni almashtiradi:
 
 [Beta] belgilari versiyalar oralig‘ida o‘zgarishi mumkin.
 
-## 15) Yordam → Dastur haqida
-Ilova ma’lumoti va repozitoriy havolasi bilan popover ochadi.
+## 15) Yordam
+
+### 15.1 Sozlamalarni tiklash
 Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) faqat interfeysning vizual sozlamalarini tiklaydi (tema, effektlar, ixcham rejim, daraxt animatsiyasi) va loyiha ma’lumotlarini o‘zgartirmaydi.
-* Esc — popoverni yopish
+
+### 15.2 Ma’lumotlarni tiklash
+Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:
+* tanlangan yuqori darajadagi jildlar;
+* tanlangan fayl turlari;
+* «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
+
+Diskdagi loyiha fayllari va jildlari o‘zgartirilmaydi va o‘chirilmaydi.
 
 ## 16) Tillar
 Til menyusi orqali tanlanadi.
@@ -324,4 +356,3 @@ Status-bardagi X (bekor qilish) tugmasi:
 ## 18) Eslatmalar
 * Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.
-

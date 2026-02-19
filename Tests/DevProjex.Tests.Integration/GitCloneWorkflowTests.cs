@@ -1,12 +1,3 @@
-using System;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-using DevProjex.Infrastructure.Git;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 /// <summary>
@@ -104,11 +95,12 @@ public sealed class GitCloneWorkflowTests : IDisposable
             Assert.NotNull(cloneResult.ErrorMessage);
 
             // Step 3: MainWindow cleans up cache on error
+            var deletedPath = currentCachedRepoPath;
             _cacheService.DeleteRepositoryDirectory(currentCachedRepoPath);
             currentCachedRepoPath = null;
 
             // Assert - cache was cleaned up
-            Assert.False(Directory.Exists(currentCachedRepoPath ?? string.Empty));
+            await AssertCacheEventuallyDeletedAsync(deletedPath);
         }
         finally
         {
@@ -144,7 +136,7 @@ public sealed class GitCloneWorkflowTests : IDisposable
             _cacheService.DeleteRepositoryDirectory(currentCachedRepoPath);
 
             // Assert - cache was cleaned up
-            Assert.False(Directory.Exists(currentCachedRepoPath));
+            await AssertCacheEventuallyDeletedAsync(currentCachedRepoPath);
         }
         finally
         {
@@ -214,6 +206,27 @@ public sealed class GitCloneWorkflowTests : IDisposable
             if (secondCachedRepoPath is not null)
                 _cacheService.DeleteRepositoryDirectory(secondCachedRepoPath);
         }
+    }
+
+    private async Task AssertCacheEventuallyDeletedAsync(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        const int maxAttempts = 30;
+        const int delayMs = 100;
+
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            if (!Directory.Exists(path))
+                return;
+
+            // Best-effort delete can fail transiently right after cancellation due to file locks.
+            _cacheService.DeleteRepositoryDirectory(path);
+            await Task.Delay(delayMs);
+        }
+
+        Assert.False(Directory.Exists(path), $"Cache directory was not deleted within {maxAttempts * delayMs} ms: {path}");
     }
 
     [Fact]

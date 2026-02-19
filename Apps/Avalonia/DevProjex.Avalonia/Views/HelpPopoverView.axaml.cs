@@ -1,13 +1,3 @@
-using System;
-using System.ComponentModel;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Interactivity;
-using Avalonia.Layout;
-using Avalonia.Markup.Xaml;
-using Avalonia.Media;
-using DevProjex.Avalonia.ViewModels;
-
 namespace DevProjex.Avalonia.Views;
 
 public partial class HelpPopoverView : UserControl
@@ -19,25 +9,44 @@ public partial class HelpPopoverView : UserControl
     {
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += OnDataContextChanged;
+        AttachedToVisualTree += OnAttachedToVisualTree;
+        DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        BindAndRenderCurrentViewModel();
+    }
+
+    private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        BindAndRenderCurrentViewModel();
+    }
+
+    private void BindAndRenderCurrentViewModel()
     {
         var bodyPanel = GetBodyPanel();
         if (bodyPanel is null)
             return;
 
-        if (_boundViewModel is not null)
-            _boundViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        var nextViewModel = DataContext as MainWindowViewModel;
+        if (!ReferenceEquals(_boundViewModel, nextViewModel))
+        {
+            if (_boundViewModel is not null)
+                _boundViewModel.PropertyChanged -= OnViewModelPropertyChanged;
 
-        _boundViewModel = DataContext as MainWindowViewModel;
+            _boundViewModel = nextViewModel;
+
+            if (_boundViewModel is not null)
+                _boundViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        }
+
         if (_boundViewModel is null)
         {
             bodyPanel.Children.Clear();
             return;
         }
 
-        _boundViewModel.PropertyChanged += OnViewModelPropertyChanged;
         BuildBody(bodyPanel, _boundViewModel.HelpHelpBody);
     }
 
@@ -166,6 +175,15 @@ public partial class HelpPopoverView : UserControl
 
         Grid.SetColumn(grid.Children[1], 1);
         return grid;
+    }
+
+    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (_boundViewModel is not null)
+        {
+            _boundViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _boundViewModel = null;
+        }
     }
 
     private StackPanel? GetBodyPanel() => this.FindControl<StackPanel>("BodyPanel");

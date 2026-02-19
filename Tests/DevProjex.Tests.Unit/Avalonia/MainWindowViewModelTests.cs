@@ -1,12 +1,4 @@
-﻿using System.Collections.Generic;
-using DevProjex.Avalonia.ViewModels;
-using DevProjex.Application.Services;
-using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Unit.Helpers;
-using Xunit;
-
-namespace DevProjex.Tests.Unit.Avalonia;
+﻿namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowViewModelTests
 {

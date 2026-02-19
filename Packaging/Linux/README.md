@@ -16,19 +16,21 @@ dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj \
     -c Release \
     -r linux-x64 \
     --self-contained true \
-    -o ./publish/linux
+    /p:PublishSingleFile=true \
+    /p:PublishTrimmed=false \
+    -o ./publish/linux-x64
 ```
 
 ### 2. Install the executable
 
 ```bash
 # System-wide
-sudo cp ./publish/linux/DevProjex.Avalonia /usr/local/bin/devprojex
+sudo cp ./publish/linux-x64/DevProjex /usr/local/bin/devprojex
 sudo chmod +x /usr/local/bin/devprojex
 
 # Or user-only
 mkdir -p ~/.local/bin
-cp ./publish/linux/DevProjex.Avalonia ~/.local/bin/devprojex
+cp ./publish/linux-x64/DevProjex ~/.local/bin/devprojex
 chmod +x ~/.local/bin/devprojex
 ```
 
@@ -65,3 +67,10 @@ The application window icon is set automatically via Avalonia's `Window.Icon` pr
 ## Future: DEB/RPM Packages
 
 For proper distribution packages (`.deb`, `.rpm`, Flatpak, Snap), additional configuration files will be needed. The icon assets and desktop entry in this folder serve as the foundation for those packages.
+
+## GitHub Release Asset Naming
+
+Portable Linux single-file artifacts are published as:
+
+- `DevProjex.v<version>.linux-x64.portable`
+- `DevProjex.v<version>.linux-arm64.portable`

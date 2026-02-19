@@ -1,9 +1,3 @@
-using System.Collections.Generic;
-using System.Linq;
-using DevProjex.Avalonia.ViewModels;
-using DevProjex.Kernel.Contracts;
-using Xunit;
-
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class TreeNodeViewModelTests

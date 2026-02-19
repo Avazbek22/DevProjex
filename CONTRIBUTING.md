@@ -32,4 +32,4 @@ dotnet test
 
 ## Contribution license
 
-By submitting a contribution, you agree that it is licensed under the current project license (BSL 1.1).
+By submitting a contribution, you agree that it is licensed under the current project license (GPL-3.0).

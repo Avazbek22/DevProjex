@@ -1,9 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using DevProjex.Infrastructure.Git;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class GitRepositoryServiceCancellationTests

@@ -50,7 +50,7 @@
             <ItemsControl ItemsSource="{Binding IgnoreOptions}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{Binding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
@@ -87,7 +87,7 @@
             <ItemsControl ItemsSource="{Binding Extensions}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{Binding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
@@ -116,7 +116,7 @@
             <ItemsControl ItemsSource="{Binding RootFolders}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{Binding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>

@@ -20,7 +20,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.103
 
       - name: Restore
         run: dotnet restore DevProjex.sln
@@ -28,5 +28,8 @@ jobs:
       - name: Build
         run: dotnet build DevProjex.sln -c Release --no-restore
 
-      - name: Test
-        run: dotnet test DevProjex.sln -c Release --no-build --verbosity normal
+      - name: Test Unit
+        run: dotnet test Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj -c Release --no-build --verbosity normal
+
+      - name: Test Integration
+        run: dotnet test Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj -c Release --no-build --verbosity normal

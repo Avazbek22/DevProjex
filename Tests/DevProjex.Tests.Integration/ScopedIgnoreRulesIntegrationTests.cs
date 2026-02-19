@@ -1,15 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.IO;
-using DevProjex.Application.Services;
-using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Infrastructure.SmartIgnore;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class ScopedIgnoreRulesIntegrationTests

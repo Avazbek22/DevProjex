@@ -1,11 +1,3 @@
-using Avalonia;
-using Avalonia.Media;
-using System.Collections.Specialized;
-using System.Collections.ObjectModel;
-using DevProjex.Application.Services;
-using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Avalonia.ViewModels;
 
 /// <summary>
@@ -24,13 +16,21 @@ public enum PreviewContentMode
     TreeAndContent
 }
 
-public sealed class MainWindowViewModel : ViewModelBase
+public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    public const string BaseTitle = "DevProjex v4.5";
-    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.5";
+    public const string BaseTitle = "DevProjex v4.6";
+    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v4.6";
+    public const double DefaultTreeFontSize = 15;
+    public const double DefaultPreviewFontSize = 15;
 
     private readonly LocalizationService _localization;
     private readonly HelpContentProvider _helpContentProvider;
+
+    // Event handler delegates for proper cleanup
+    private readonly NotifyCollectionChangedEventHandler _ignoreOptionsChangedHandler;
+    private readonly NotifyCollectionChangedEventHandler _extensionsChangedHandler;
+    private readonly NotifyCollectionChangedEventHandler _rootFoldersChangedHandler;
+    private bool _disposed;
 
     private string _title;
     private bool _isProjectLoaded;
@@ -42,7 +42,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private FontFamily? _selectedFontFamily;
     private FontFamily? _pendingFontFamily;
 
-    private double _treeFontSize = 15;
+    private double _treeFontSize = DefaultTreeFontSize;
+    private double _previewFontSize = DefaultPreviewFontSize;
 
     private bool _allExtensionsChecked;
     private bool _allRootFoldersChecked;
@@ -59,7 +60,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isPreviewMode;
     private bool _isPreviewLoading;
     private string _previewText = string.Empty;
-    private string _previewLineNumbers = "1";
+    private int _previewLineCount = 1;
 
     // Theme intensity sliders (0-100)
     // MaterialIntensity: single slider controlling overall effect (transparency, depth, material feel)
@@ -101,10 +102,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         _allIgnoreChecked = true;
         UpdateLocalization();
 
+        // Create named handlers for proper cleanup
+        _ignoreOptionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
+        _extensionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
+        _rootFoldersChangedHandler = (_, _) => UpdateAllCheckboxLabels();
+
         // Subscribe to collection changes to update "All" checkbox labels with counts
-        IgnoreOptions.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
-        Extensions.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
-        RootFolders.CollectionChanged += (_, _) => UpdateAllCheckboxLabels();
+        IgnoreOptions.CollectionChanged += _ignoreOptionsChangedHandler;
+        Extensions.CollectionChanged += _extensionsChangedHandler;
+        RootFolders.CollectionChanged += _rootFoldersChangedHandler;
         ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
     }
 
@@ -173,12 +179,16 @@ public sealed class MainWindowViewModel : ViewModelBase
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(StatusProgressVisible));
             RaisePropertyChanged(nameof(StatusProgressPercentVisible));
+            // Also update IsIndeterminate since it depends on StatusBusy
+            // This stops the indeterminate animation when progress bar is hidden
+            RaisePropertyChanged(nameof(StatusProgressIsIndeterminate));
         }
     }
 
     public bool StatusProgressIsIndeterminate
     {
-        get => _statusProgressIsIndeterminate;
+        // Only return true when also visible - prevents animation running when hidden
+        get => _statusProgressIsIndeterminate && _statusBusy;
         set
         {
             if (_statusProgressIsIndeterminate == value) return;
@@ -413,13 +423,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public string PreviewLineNumbers
+    public int PreviewLineCount
     {
-        get => _previewLineNumbers;
+        get => _previewLineCount;
         set
         {
-            if (_previewLineNumbers == value) return;
-            _previewLineNumbers = value;
+            var normalized = Math.Max(1, value);
+            if (_previewLineCount == normalized) return;
+            _previewLineCount = normalized;
             RaisePropertyChanged();
         }
     }
@@ -805,6 +816,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    public double PreviewFontSize
+    {
+        get => _previewFontSize;
+        set
+        {
+            if (Math.Abs(_previewFontSize - value) < 0.1) return;
+            _previewFontSize = value;
+            RaisePropertyChanged();
+        }
+    }
+
     private double TreeIconScale =>
         string.Equals(_selectedFontFamily?.Name, "Consolas", StringComparison.OrdinalIgnoreCase) ? 1.35 : 1.25;
 
@@ -894,6 +916,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MenuHelpHelp { get; private set; } = string.Empty;
     public string MenuHelpAbout { get; private set; } = string.Empty;
     public string MenuHelpResetSettings { get; private set; } = string.Empty;
+    public string MenuHelpResetData { get; private set; } = string.Empty;
     public string HelpHelpTitle { get; private set; } = string.Empty;
     public string HelpHelpBody { get; private set; } = string.Empty;
     public string HelpAboutTitle { get; private set; } = string.Empty;
@@ -1017,6 +1040,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         MenuHelpHelp = _localization["Menu.Help.Help"];
         MenuHelpAbout = _localization["Menu.Help.About"];
         MenuHelpResetSettings = _localization["Menu.Help.ResetSettings"];
+        MenuHelpResetData = _localization["Menu.Help.ResetData"];
         HelpHelpTitle = _localization["Help.Help.Title"];
         HelpHelpBody = _helpContentProvider.GetHelpBody(_localization.CurrentLanguage);
         HelpAboutTitle = _localization["Help.About.Title"];
@@ -1138,6 +1162,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MenuHelpHelp));
         RaisePropertyChanged(nameof(MenuHelpAbout));
         RaisePropertyChanged(nameof(MenuHelpResetSettings));
+        RaisePropertyChanged(nameof(MenuHelpResetData));
         RaisePropertyChanged(nameof(HelpHelpTitle));
         RaisePropertyChanged(nameof(HelpHelpBody));
         RaisePropertyChanged(nameof(HelpAboutTitle));
@@ -1254,5 +1279,33 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(SettingsAllExtensions));
         RaisePropertyChanged(nameof(SettingsAllRootFolders));
         RaisePropertyChanged(nameof(HasRootFolderOptions));
+    }
+
+    /// <summary>
+    /// Cleans up event subscriptions and resources to prevent memory leaks.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        // Unsubscribe from collection change events
+        IgnoreOptions.CollectionChanged -= _ignoreOptionsChangedHandler;
+        Extensions.CollectionChanged -= _extensionsChangedHandler;
+        RootFolders.CollectionChanged -= _rootFoldersChangedHandler;
+        ToastItems.CollectionChanged -= OnToastItemsCollectionChanged;
+
+        // Clear collections to release references
+        TreeNodes.Clear();
+        IgnoreOptions.Clear();
+        Extensions.Clear();
+        RootFolders.Clear();
+        FontFamilies.Clear();
+        GitBranches.Clear();
+        ToastItems.Clear();
+
+        // Clear large strings
+        _previewText = string.Empty;
+        _previewLineCount = 1;
     }
 }

@@ -1,6 +1,4 @@
 using DevProjex.Application.Services;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Contracts;
 
 namespace DevProjex.Application.UseCases;
 

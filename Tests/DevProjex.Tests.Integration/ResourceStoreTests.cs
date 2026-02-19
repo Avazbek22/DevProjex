@@ -1,8 +1,3 @@
-using System.Collections.Generic;
-using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Kernel.Models;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class ResourceStoreTests

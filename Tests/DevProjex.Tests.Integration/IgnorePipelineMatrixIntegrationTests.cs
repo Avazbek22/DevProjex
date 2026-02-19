@@ -1,14 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
-using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class IgnorePipelineMatrixIntegrationTests
@@ -103,7 +92,7 @@ public sealed class IgnorePipelineMatrixIntegrationTests
 		if (includesNoGitProject)
 		{
 			var noGitProjectNode = treeResult.Root.Children.Single(child => child.Name == "proj-no-git");
-			var smartApplies = rules.ShouldApplySmartIgnore(System.IO.Path.Combine(temp.Path, "proj-no-git", "src"));
+			var smartApplies = rules.ShouldApplySmartIgnore(Path.Combine(temp.Path, "proj-no-git", "src"));
 			var shouldHideSmartIgnoredDirs = rules.UseSmartIgnore && smartApplies;
 
 			Assert.Equal(!shouldHideSmartIgnoredDirs, noGitProjectNode.Children.Any(child => child.Name == "node_modules"));
@@ -116,7 +105,7 @@ public sealed class IgnorePipelineMatrixIntegrationTests
 
 		var expectedCs = includesGitProject;
 		var expectedDll = includesGitProject && !rules.UseGitIgnore;
-		var smartAppliesNoGit = rules.ShouldApplySmartIgnore(System.IO.Path.Combine(temp.Path, "proj-no-git", "src"));
+		var smartAppliesNoGit = rules.ShouldApplySmartIgnore(Path.Combine(temp.Path, "proj-no-git", "src"));
 		var expectedTs = includesNoGitProject;
 		var expectedJs = includesNoGitProject && !(rules.UseSmartIgnore && smartAppliesNoGit);
 		var expectedTxt = (includesGitProject && !rules.UseGitIgnore) ||

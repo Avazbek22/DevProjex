@@ -1,5 +1,3 @@
-using System;
-
 namespace DevProjex.Avalonia.ViewModels;
 
 public sealed class ToastMessageViewModel : ViewModelBase

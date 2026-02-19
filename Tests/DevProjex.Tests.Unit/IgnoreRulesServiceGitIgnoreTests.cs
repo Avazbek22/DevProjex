@@ -1,11 +1,3 @@
-using System;
-using System.IO;
-using System.Collections.Generic;
-using DevProjex.Application.Services;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Unit.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class IgnoreRulesServiceGitIgnoreTests
@@ -17,7 +9,7 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 		Directory.CreateDirectory(tempRoot);
 		try
 		{
-			var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+			var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<ISmartIgnoreRule>()));
 
 			var rules = service.Build(tempRoot, new[] { IgnoreOptionId.UseGitIgnore });
 
@@ -70,7 +62,7 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 				"nested/cache/"
 			});
 
-			var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+			var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<ISmartIgnoreRule>()));
 			var rules = service.Build(tempRoot, new[] { IgnoreOptionId.UseGitIgnore });
 
 			Assert.True(rules.UseGitIgnore);
@@ -102,7 +94,7 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 			var gitIgnorePath = Path.Combine(tempRoot, ".gitignore");
 			File.WriteAllText(gitIgnorePath, "bin/");
 
-			var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<DevProjex.Kernel.Abstractions.ISmartIgnoreRule>()));
+			var service = new IgnoreRulesService(new SmartIgnoreService(Array.Empty<ISmartIgnoreRule>()));
 			var firstRules = service.Build(tempRoot, new[] { IgnoreOptionId.UseGitIgnore });
 			Assert.True(firstRules.GitIgnoreMatcher.IsIgnored(Path.Combine(tempRoot, "bin"), isDirectory: true, "bin"));
 			Assert.False(firstRules.GitIgnoreMatcher.IsIgnored(Path.Combine(tempRoot, "dist"), isDirectory: true, "dist"));

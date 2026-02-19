@@ -1,8 +1,3 @@
-using System;
-using System.Globalization;
-using DevProjex.Kernel.Models;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class CommandLineOptionsTests

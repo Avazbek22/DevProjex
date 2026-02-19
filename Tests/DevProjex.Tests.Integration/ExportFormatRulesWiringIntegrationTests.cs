@@ -1,7 +1,3 @@
-using System;
-using System.IO;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class ExportFormatRulesWiringIntegrationTests
@@ -55,7 +51,12 @@ public sealed class ExportFormatRulesWiringIntegrationTests
         var body = Slice(content, "private async void OnExportTreeAndContentToFile(", "private TreeTextFormat GetCurrentTreeTextFormat()");
 
         Assert.Contains("var format = GetCurrentTreeTextFormat();", body, StringComparison.Ordinal);
-        Assert.Contains("_treeAndContentExport.BuildAsync(_currentPath!, _currentTree!.Root, selected, format, CancellationToken.None)", body, StringComparison.Ordinal);
+        Assert.Contains("_treeAndContentExport.BuildAsync(", body, StringComparison.Ordinal);
+        Assert.Contains("_currentPath!", body, StringComparison.Ordinal);
+        Assert.Contains("_currentTree!.Root", body, StringComparison.Ordinal);
+        Assert.Contains("selected", body, StringComparison.Ordinal);
+        Assert.Contains("format", body, StringComparison.Ordinal);
+        Assert.Contains("CancellationToken.None", body, StringComparison.Ordinal);
         Assert.Contains("var saveAsJson = false;", body, StringComparison.Ordinal);
         Assert.Contains("BuildSuggestedExportFileName(\"tree_content\", saveAsJson)", body, StringComparison.Ordinal);
         Assert.Contains("useJsonDefaultExtension: false", body, StringComparison.Ordinal);

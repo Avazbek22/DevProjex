@@ -1,8 +1,5 @@
-using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Markup.Xaml;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Avalonia;
 

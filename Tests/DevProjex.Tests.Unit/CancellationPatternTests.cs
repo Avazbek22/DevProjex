@@ -1,7 +1,4 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using Xunit;
+using System.Collections.Concurrent;
 
 namespace DevProjex.Tests.Unit;
 
@@ -146,7 +143,7 @@ public sealed class CancellationPatternTests
 	{
 		var version = 0;
 		CancellationTokenSource? cts = null;
-		var updates = new System.Collections.Concurrent.ConcurrentBag<int>();
+		var updates = new ConcurrentBag<int>();
 
 		async Task SimulateRecalculate(int expectedVersion)
 		{

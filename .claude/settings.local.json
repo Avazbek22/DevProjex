@@ -24,7 +24,10 @@
       "WebFetch(domain:github.com)",
       "Bash(dotnet clean:*)",
       "Bash(git status:*)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.avaloniaui.net)",
+      "WebFetch(domain:avaloniaui.net)",
+      "Bash(grep:*)"
     ]
   }
 }

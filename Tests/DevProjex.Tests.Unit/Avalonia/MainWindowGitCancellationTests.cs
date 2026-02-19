@@ -1,10 +1,3 @@
-using System;
-using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
-using DevProjex.Avalonia;
-using Xunit;
-
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowGitCancellationTests

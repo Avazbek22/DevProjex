@@ -1,8 +1,3 @@
-using System.Reflection;
-using System.Text.Json;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class JsonLocalizationCatalog : ILocalizationCatalog
@@ -22,7 +17,7 @@ public sealed class JsonLocalizationCatalog : ILocalizationCatalog
 
 	private static IReadOnlyDictionary<AppLanguage, IReadOnlyDictionary<string, string>> LoadAll()
 	{
-		var assembly = typeof(DevProjex.Assets.Marker).Assembly;
+		var assembly = typeof(Marker).Assembly;
 		return new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
 		{
 			[AppLanguage.Ru] = Load(assembly, "ru"),

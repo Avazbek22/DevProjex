@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Infrastructure.SmartIgnore;
 
 /// <summary>

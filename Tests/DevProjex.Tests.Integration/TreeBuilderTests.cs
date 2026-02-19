@@ -1,12 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit;
-
-namespace DevProjex.Tests.Integration;
+﻿namespace DevProjex.Tests.Integration;
 
 public sealed class TreeBuilderTests
 {

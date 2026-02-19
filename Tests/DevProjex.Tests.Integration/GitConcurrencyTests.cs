@@ -1,12 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using DevProjex.Infrastructure.Git;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 /// <summary>
@@ -193,7 +184,7 @@ public class GitConcurrencyTests : IAsyncLifetime
 
         // All should create unique directories
         Assert.Equal(urls.Length, results.Distinct().Count());
-        Assert.All(results, dir => Assert.True(System.IO.Directory.Exists(dir)));
+        Assert.All(results, dir => Assert.True(Directory.Exists(dir)));
 
         // Cleanup
         foreach (var dir in results)
@@ -237,7 +228,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     {
         var url = "https://github.com/user/repo";
         var dir = _cacheService.CreateRepositoryDirectory(url);
-        System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "test.txt"), "test");
+        File.WriteAllText(Path.Combine(dir, "test.txt"), "test");
 
         // Try deleting same directory from multiple threads
         var task1 = Task.Run(() => _cacheService.DeleteRepositoryDirectory(dir));

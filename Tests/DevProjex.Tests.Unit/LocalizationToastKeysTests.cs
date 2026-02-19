@@ -1,10 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text.Json;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class LocalizationToastKeysTests
@@ -24,7 +17,8 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Git.NoUpdates",
 		"Toast.Git.BranchSwitched",
 		"Toast.Refresh.Success",
-		"Toast.Settings.Reset"
+		"Toast.Settings.Reset",
+		"Toast.Data.Reset"
 	};
 
 	[Fact]

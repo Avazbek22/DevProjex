@@ -47,7 +47,7 @@ Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wu
 Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
 `%TEMP%\DevProjex\RepoCache`
 
-* Branch — zeigt die Liste der Remote‑Branches; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn nicht, wird sie per fetch geladen und lokal erstellt.
+* Branch — zeigt die Liste verfügbarer Branches mit Markierung der aktiven Branch; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn sie lokal noch nicht existiert, wird sie per fetch geladen und lokal erstellt.
 * Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>.
 
 ## 5) Kopieren
@@ -92,7 +92,9 @@ Tastenkürzel: Ctrl+Shift+V.
 Im JSON-Modus wird eine kompakte Baumstruktur verwendet.
 
 Baum (Baum kopieren / Baum exportieren):
-* `rootPath` — absoluter Wurzelpfad.
+* `rootPath` — Wurzelpfad im aktuellen Ausgabeformat:
+  * für einen lokalen Ordner — absoluter lokaler Pfad;
+  * für ein Git-Projekt — Repository-URL.
 * `root` — Wurzelknoten.
 * Knotenfelder: `name`, `path`, `dirs`, `files`, `accessDenied` (bei Bedarf).
 
@@ -125,9 +127,9 @@ Schließen: X-Schaltfläche oder erneuter Klick auf das Auge.
 * Ctrl++ / Ctrl+= — vergrößern
 * Ctrl+- — verkleinern
 * Ctrl+0 — zurücksetzen
-* Ctrl + Mausrad über dem Baum — weiches Zoomen
+* Ctrl + Mausrad über dem Baum und im Vorschaumodus — weiches Zoomen
 
-Bereich: 6–28, Reset: 12.
+Bereich: 6–28, Reset: 15.
 
 ### Kompaktmodus
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
@@ -144,10 +146,18 @@ Aktiviert eine sanfte Schiebe-Animation beim Überfahren von Baumzeilen.
 
 Die Suche öffnet nur benötigte Zweige; beim Leeren der Suche wird der Baum eingeklappt (außer der Wurzel).
 
+Einschränkungen:
+* Beim Öffnen der Suche wird der Filter automatisch geschlossen.
+* Im Vorschaumodus ist die Suche nicht verfügbar.
+
 ## 9) Filter nach Namen
 Zeigt nur passende Knoten und ihre Eltern. Aktualisierung mit Verzögerung (Debounce).
 * Ctrl+Shift+N — Filter anzeigen/ausblenden
 * Esc — Filter schließen
+
+Einschränkungen:
+* Beim Öffnen des Filters wird die Suche automatisch geschlossen.
+* Im Vorschaumodus ist der Filter nicht verfügbar.
 
 ## 10) Optionen
 Rechts befinden sich Listen:
@@ -163,6 +173,20 @@ Hinweis zu „Dateitypen“:
 * Dateien ohne Erweiterung werden hier nicht angezeigt und über eine separate Option in „Ignorieren“ gesteuert.
 
 Ctrl+P — Panel anzeigen/ausblenden.
+
+### 10.1 Profile lokaler Projektparameter
+Für lokale Ordner merkt sich DevProjex die zuletzt angewendeten Projektparameter:
+* ausgewählte Ordner der obersten Ebene;
+* ausgewählte Dateitypen;
+* ausgewählte Optionen im Block „Ignorieren“.
+
+Gespeichert wird beim Klick auf „Anwenden“.
+Beim erneuten Öffnen desselben lokalen Ordners werden die Parameter automatisch wiederhergestellt.
+
+Wichtig:
+* Profile werden nur für lokale Projekte gespeichert;
+* für Projekte, die über Git Clone geöffnet wurden, werden keine Profile gespeichert;
+* wenn einzelne gespeicherte Punkte im aktuellen Projekt nicht mehr verfügbar sind, werden sie übersprungen, die übrigen Parameter werden angewendet.
 
 ## 11) Ignore
 Die Liste „Ignorieren“ wird automatisch aus dem aktuellen Pfad und den ausgewählten Ordnern der obersten Ebene aufgebaut.
@@ -296,10 +320,18 @@ Das Theme‑Popover ermöglicht:
 
 Einträge mit [Beta] können sich zwischen Versionen ändern.
 
-## 15) Hilfe → Über
-Öffnet ein Popover mit App‑Info und Repository‑Link.
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt nur visuelle UI‑Parameter zurück (Theme, Effekte, Kompaktmodus, Baumanimation) und ändert keine Projektdaten.
-* Esc — Popover schließen
+## 15) Hilfe
+
+### 15.1 Einstellungen zurücksetzen
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt nur visuelle UI-Parameter zurück (Theme, Effekte, Kompaktmodus, Baumanimation) und ändert keine Projektdaten.
+
+### 15.2 Daten zurücksetzen
+Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
+* ausgewählte Ordner der obersten Ebene;
+* ausgewählte Dateitypen;
+* ausgewählte Optionen im Block „Ignorieren“.
+
+Dateien und Ordner der Projekte auf dem Datenträger werden nicht geändert und nicht gelöscht.
 
 ## 16) Sprachen
 Die Sprache wird über das Sprache‑Menü gewählt.
@@ -324,4 +356,3 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 ## 18) Hinweise
 * Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.
-

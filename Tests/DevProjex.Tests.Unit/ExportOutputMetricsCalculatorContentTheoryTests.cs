@@ -1,11 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using DevProjex.Application.Services;
-using DevProjex.Kernel;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class ExportOutputMetricsCalculatorContentTheoryTests

@@ -1,11 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using DevProjex.Infrastructure.Git;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 /// <summary>

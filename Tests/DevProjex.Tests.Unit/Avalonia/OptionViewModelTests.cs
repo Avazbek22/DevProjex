@@ -1,9 +1,4 @@
-﻿using System.Collections.Generic;
-using DevProjex.Avalonia.ViewModels;
-using DevProjex.Kernel.Models;
-using Xunit;
-
-namespace DevProjex.Tests.Unit.Avalonia;
+﻿namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class OptionViewModelTests
 {

@@ -162,6 +162,26 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
+    <!-- Suppress focus/hover border while search/filter panel is animating.
+         Target both specific and generic template borders because part names differ across themes. -->
+    <Style Selector="TextBox.suppress-accent,
+                     TextBox.suppress-accent:focus,
+                     TextBox.suppress-accent:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <Style Selector="TextBox.suppress-accent /template/ Border#PART_BorderElement,
+                     TextBox.suppress-accent:focus /template/ Border#PART_BorderElement,
+                     TextBox.suppress-accent:pointerover /template/ Border#PART_BorderElement,
+                     TextBox.suppress-accent /template/ Border,
+                     TextBox.suppress-accent:focus /template/ Border,
+                     TextBox.suppress-accent:pointerover /template/ Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
     <Style Selector="ComboBox">
         <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
@@ -507,6 +527,8 @@
     <!-- Rounded controls inside search/filter panels -->
     <Style Selector="Border.search-panel TextBox, Border.filter-panel TextBox">
         <Setter Property="CornerRadius" Value="6" />
+        <!-- Prevent adorner-layer bleed while panel slides in/out under clipping. -->
+        <Setter Property="FocusAdorner" Value="{x:Null}" />
     </Style>
 
     <Style Selector="Border.search-panel Button, Border.filter-panel Button">
@@ -983,33 +1005,23 @@
 
     <Style Selector="Border.preview-segmented-control">
         <Setter Property="Padding" Value="2" />
-        <Setter Property="Width" Value="544" />
-        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="MaxWidth" Value="544" />
         <Setter Property="ClipToBounds" Value="True" />
     </Style>
 
     <Style Selector="Border.preview-segment-thumb">
-        <Setter Property="Width" Value="180" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.25" Easing="CubicEaseInOut" />
-            </Transitions>
-        </Setter>
-    </Style>
-
-    <Style Selector="Border.preview-segment-thumb.preview-segment-thumb-middle">
-        <Setter Property="RenderTransform" Value="translate(180px, 0px)" />
-    </Style>
-
-    <Style Selector="Border.preview-segment-thumb.preview-segment-thumb-right">
-        <Setter Property="RenderTransform" Value="translate(360px, 0px)" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
     </Style>
 
     <Style Selector="Button.preview-segment-button">
-        <Setter Property="Width" Value="180" />
+        <Setter Property="Width" Value="NaN" />
+        <Setter Property="MinWidth" Value="0" />
         <Setter Property="Padding" Value="0,5" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>

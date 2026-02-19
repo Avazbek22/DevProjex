@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Avalonia.Controls.Documents;
-using Avalonia.Media;
-using DevProjex.Kernel.Contracts;
 
 namespace DevProjex.Avalonia.ViewModels;
 
@@ -134,13 +129,40 @@ public sealed class TreeNodeViewModel : ViewModelBase
             child.SetExpandedRecursive(expanded);
     }
 
+    /// <summary>
+    /// Enumerates this node and all descendants using a stack-based approach.
+    /// Avoids recursive yield return which creates O(N) state machine objects.
+    /// </summary>
     public IEnumerable<TreeNodeViewModel> Flatten()
     {
-        yield return this;
-        foreach (var child in Children)
+        var stack = new Stack<TreeNodeViewModel>();
+        stack.Push(this);
+        while (stack.Count > 0)
         {
-            foreach (var descendant in child.Flatten())
-                yield return descendant;
+            var current = stack.Pop();
+            yield return current;
+            var children = current.Children;
+            for (var i = children.Count - 1; i >= 0; i--)
+                stack.Push(children[i]);
+        }
+    }
+
+    /// <summary>
+    /// Traverses all descendants of the given roots without allocating an IEnumerable.
+    /// Use this in hot paths where Flatten() + SelectMany overhead is undesirable.
+    /// </summary>
+    public static void ForEachDescendant(IList<TreeNodeViewModel> roots, Action<TreeNodeViewModel> action)
+    {
+        var stack = new Stack<TreeNodeViewModel>();
+        for (var i = roots.Count - 1; i >= 0; i--)
+            stack.Push(roots[i]);
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            action(current);
+            var children = current.Children;
+            for (var j = children.Count - 1; j >= 0; j--)
+                stack.Push(children[j]);
         }
     }
 
@@ -267,8 +289,21 @@ public sealed class TreeNodeViewModel : ViewModelBase
         if (Children.Count == 0)
             return;
 
-        bool allChecked = Children.All(child => child.IsChecked == true);
-        bool anyChecked = Children.Any(child => child.IsChecked != false);
+        // Single pass through children instead of two LINQ enumerations
+        var allChecked = true;
+        var anyChecked = false;
+        foreach (var child in Children)
+        {
+            if (child.IsChecked != true)
+                allChecked = false;
+            if (child.IsChecked != false)
+                anyChecked = true;
+
+            // Early exit: if we know result is indeterminate, stop checking
+            if (!allChecked && anyChecked)
+                break;
+        }
+
         bool? next = allChecked ? true : anyChecked ? null : false;
 
         if (_isChecked != next)

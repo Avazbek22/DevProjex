@@ -1,14 +1,13 @@
-using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Avalonia.Services;
 
 /// <summary>
 /// Thread-safe LRU cache for file type icons.
 /// Supports concurrent access for parallel tree building operations.
+/// Properly disposes Bitmap resources when evicting or clearing.
 /// </summary>
-public sealed class IconCache
+public sealed class IconCache : IDisposable
 {
     /// <summary>
     /// Maximum number of cached icons. Icons are typically limited (~50-100 types),
@@ -67,7 +66,7 @@ public sealed class IconCache
     }
 
     /// <summary>
-    /// Evicts oldest entries. Must be called within lock.
+    /// Evicts oldest entries and disposes their Bitmap resources. Must be called within lock.
     /// </summary>
     private void EvictOldestUnsafe()
     {
@@ -77,20 +76,40 @@ public sealed class IconCache
             var oldest = _accessOrder.First!.Value;
             _accessOrder.RemoveFirst();
             _accessNodes.Remove(oldest);
+
+            // Dispose the bitmap to release GPU/native resources
+            if (_cache.TryGetValue(oldest, out var image) && image is IDisposable disposable)
+                disposable.Dispose();
+
             _cache.Remove(oldest);
         }
     }
 
     /// <summary>
-    /// Clears all cached icons. Call when switching projects to free memory.
+    /// Clears all cached icons and disposes their resources. Call when switching projects to free memory.
     /// </summary>
     public void Clear()
     {
         lock (_lock)
         {
+            // Dispose all cached bitmaps
+            foreach (var image in _cache.Values)
+            {
+                if (image is IDisposable disposable)
+                    disposable.Dispose();
+            }
+
             _cache.Clear();
             _accessOrder.Clear();
             _accessNodes.Clear();
         }
+    }
+
+    /// <summary>
+    /// Disposes all cached icons and releases resources.
+    /// </summary>
+    public void Dispose()
+    {
+        Clear();
     }
 }

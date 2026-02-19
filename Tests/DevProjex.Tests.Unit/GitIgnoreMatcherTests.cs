@@ -1,9 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using DevProjex.Kernel.Models;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class GitIgnoreMatcherTests

@@ -1,8 +1,3 @@
-using System;
-using System.IO;
-using System.Text.RegularExpressions;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class CopyMenuBindingsTests

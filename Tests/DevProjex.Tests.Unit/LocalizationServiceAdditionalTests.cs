@@ -1,9 +1,3 @@
-using System.Collections.Generic;
-using DevProjex.Application.Services;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Unit.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class LocalizationServiceAdditionalTests

@@ -47,7 +47,7 @@ Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git C
 Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’est généralement :
 `%TEMP%\DevProjex\RepoCache`
 
-* Branche — affiche la liste des branches distantes ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement est hors ligne (sans mise à jour). Sinon, elle est récupérée (fetch) et créée localement.
+* Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
 * Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
 
 ## 5) Copier
@@ -92,7 +92,9 @@ Raccourci : Ctrl+Shift+V.
 Le mode JSON utilise une structure compacte de l’arborescence.
 
 Arborescence (Copier l’arborescence / Exporter l’arborescence) :
-* `rootPath` — chemin absolu de la racine.
+* `rootPath` — chemin racine dans le format de sortie actuel :
+  * pour un dossier local — chemin local absolu ;
+  * pour un projet Git — URL du dépôt.
 * `root` — nœud racine.
 * champs du nœud : `name`, `path`, `dirs`, `files`, `accessDenied` (si nécessaire).
 
@@ -125,9 +127,9 @@ Fermeture : bouton X ou nouveau clic sur l’icône œil.
 * Ctrl++ / Ctrl+= — agrandir
 * Ctrl+- — réduire
 * Ctrl+0 — réinitialiser
-* Ctrl + molette sur l’arbre — zoom fluide
+* Ctrl + molette sur l’arbre et en mode aperçu — zoom fluide
 
-Plage : 6–28, reset : 12.
+Plage : 6–28, reset : 15.
 
 ### Mode compact
 Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
@@ -144,10 +146,18 @@ Ouvre la recherche, met en évidence les correspondances et permet la navigation
 
 La recherche n’ouvre que les branches nécessaires ; en effaçant la requête, l’arbre se replie (sauf la racine).
 
+Limitations :
+* à l’ouverture de la recherche, le filtre se ferme automatiquement ;
+* en mode aperçu, la recherche n’est pas disponible.
+
 ## 9) Filtrer par nom
 Affiche uniquement les nœuds correspondant au filtre et leurs parents. Mise à jour avec délai (debounce).
 * Ctrl+Shift+N — afficher/masquer le filtre
 * Esc — fermer le filtre
+
+Limitations :
+* à l’ouverture du filtre, la recherche se ferme automatiquement ;
+* en mode aperçu, le filtre n’est pas disponible.
 
 ## 10) Options
 Listes à droite :
@@ -163,6 +173,20 @@ Remarque sur « Types de fichiers » :
 * les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Ignorer ».
 
 Ctrl+P — afficher/masquer le panneau.
+
+### 10.1 Profils de paramètres des projets locaux
+Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
+* dossiers de premier niveau sélectionnés ;
+* types de fichiers sélectionnés ;
+* options sélectionnées dans le bloc « Ignorer ».
+
+L’enregistrement est effectué après clic sur « Appliquer ».
+Lors de la réouverture du même dossier local, les paramètres sont restaurés automatiquement.
+
+Important :
+* les profils sont enregistrés uniquement pour les projets locaux ;
+* pour les projets ouverts via Git Clone, les profils ne sont pas enregistrés ;
+* si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués.
 
 ## 11) Ignorer
 La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
@@ -296,10 +320,18 @@ Le popover de thème permet :
 
 Les éléments [Beta] peuvent évoluer entre versions.
 
-## 15) Aide → À propos
-Ouvre un popover avec les infos de l’app et un lien vers le dépôt.
+## 15) Aide
+
+### 15.1 Réinitialiser les paramètres
 Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) réinitialise uniquement les paramètres visuels de l’interface (thème, effets, mode compact, animation de l'arborescence) et ne modifie pas les données du projet.
-* Esc — fermer le popover
+
+### 15.2 Réinitialiser les données
+Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
+* dossiers de premier niveau sélectionnés ;
+* types de fichiers sélectionnés ;
+* options sélectionnées dans le bloc « Ignorer ».
+
+Les fichiers et dossiers des projets sur le disque ne sont ni modifiés ni supprimés.
 
 ## 16) Langues
 La langue se choisit via le menu Langue.
@@ -324,4 +356,3 @@ Bouton X (annuler) dans la barre d’état :
 ## 18) Notes
 * Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
-

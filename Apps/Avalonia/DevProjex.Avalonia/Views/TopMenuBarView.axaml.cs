@@ -1,13 +1,3 @@
-using System;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Input;
-using Avalonia.Interactivity;
-using Avalonia.Media;
-using Avalonia.VisualTree;
-using DevProjex.Avalonia.ViewModels;
-
 namespace DevProjex.Avalonia.Views;
 
 public partial class TopMenuBarView : UserControl
@@ -55,6 +45,7 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? AboutOpenLinkRequested;
     public event EventHandler<RoutedEventArgs>? AboutCopyLinkRequested;
     public event EventHandler<RoutedEventArgs>? ResetSettingsRequested;
+    public event EventHandler<RoutedEventArgs>? ResetDataRequested;
     public event EventHandler<RoutedEventArgs>? SetLightThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetDarkThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetTransparentModeRequested;
@@ -206,6 +197,8 @@ public partial class TopMenuBarView : UserControl
 
     private void OnResetSettings(object? sender, RoutedEventArgs e) => ResetSettingsRequested?.Invoke(sender, e);
 
+    private void OnResetData(object? sender, RoutedEventArgs e) => ResetDataRequested?.Invoke(sender, e);
+
     private void OnGitClone(object? sender, RoutedEventArgs e) => GitCloneRequested?.Invoke(sender, e);
 
     private void OnGitGetUpdates(object? sender, RoutedEventArgs e) => GitGetUpdatesRequested?.Invoke(sender, e);
@@ -234,8 +227,8 @@ public partial class TopMenuBarView : UserControl
 
         DetachHelpPopupHandlers();
         _helpPopupTopLevel = topLevel;
-        topLevel.AddHandler(InputElement.GotFocusEvent, OnTopLevelGotFocus, RoutingStrategies.Tunnel);
-        topLevel.AddHandler(InputElement.PointerPressedEvent, OnTopLevelPointerPressed, RoutingStrategies.Tunnel);
+        topLevel.AddHandler(GotFocusEvent, OnTopLevelGotFocus, RoutingStrategies.Tunnel);
+        topLevel.AddHandler(PointerPressedEvent, OnTopLevelPointerPressed, RoutingStrategies.Tunnel);
         _helpPopupHandlersAttached = true;
         topLevel.PropertyChanged += OnHelpPopupTopLevelPropertyChanged;
         _helpPopupBoundsHandlerAttached = true;
@@ -280,8 +273,8 @@ public partial class TopMenuBarView : UserControl
         if (!_helpPopupHandlersAttached || _helpPopupTopLevel is null)
             return;
 
-        _helpPopupTopLevel.RemoveHandler(InputElement.GotFocusEvent, OnTopLevelGotFocus);
-        _helpPopupTopLevel.RemoveHandler(InputElement.PointerPressedEvent, OnTopLevelPointerPressed);
+        _helpPopupTopLevel.RemoveHandler(GotFocusEvent, OnTopLevelGotFocus);
+        _helpPopupTopLevel.RemoveHandler(PointerPressedEvent, OnTopLevelPointerPressed);
         if (_helpPopupBoundsHandlerAttached)
         {
             _helpPopupTopLevel.PropertyChanged -= OnHelpPopupTopLevelPropertyChanged;
@@ -305,8 +298,8 @@ public partial class TopMenuBarView : UserControl
 
         DetachHelpDocsPopupHandlers();
         _helpDocsPopupTopLevel = topLevel;
-        topLevel.AddHandler(InputElement.GotFocusEvent, OnTopLevelHelpDocsGotFocus, RoutingStrategies.Tunnel);
-        topLevel.AddHandler(InputElement.PointerPressedEvent, OnTopLevelHelpDocsPointerPressed, RoutingStrategies.Tunnel);
+        topLevel.AddHandler(GotFocusEvent, OnTopLevelHelpDocsGotFocus, RoutingStrategies.Tunnel);
+        topLevel.AddHandler(PointerPressedEvent, OnTopLevelHelpDocsPointerPressed, RoutingStrategies.Tunnel);
         _helpDocsPopupHandlersAttached = true;
         topLevel.PropertyChanged += OnHelpDocsPopupTopLevelPropertyChanged;
         _helpDocsPopupBoundsHandlerAttached = true;
@@ -342,8 +335,8 @@ public partial class TopMenuBarView : UserControl
         if (!_helpDocsPopupHandlersAttached || _helpDocsPopupTopLevel is null)
             return;
 
-        _helpDocsPopupTopLevel.RemoveHandler(InputElement.GotFocusEvent, OnTopLevelHelpDocsGotFocus);
-        _helpDocsPopupTopLevel.RemoveHandler(InputElement.PointerPressedEvent, OnTopLevelHelpDocsPointerPressed);
+        _helpDocsPopupTopLevel.RemoveHandler(GotFocusEvent, OnTopLevelHelpDocsGotFocus);
+        _helpDocsPopupTopLevel.RemoveHandler(PointerPressedEvent, OnTopLevelHelpDocsPointerPressed);
         if (_helpDocsPopupBoundsHandlerAttached)
         {
             _helpDocsPopupTopLevel.PropertyChanged -= OnHelpDocsPopupTopLevelPropertyChanged;
@@ -407,9 +400,9 @@ public partial class TopMenuBarView : UserControl
         else if (!double.IsNaN(popover.Height))
             popover.Height = double.NaN;
 
-        global::Avalonia.Threading.Dispatcher.UIThread.Post(
+        Dispatcher.UIThread.Post(
             () => ApplyPopupOffsets(popup, topLevel, margin),
-            global::Avalonia.Threading.DispatcherPriority.Render);
+            DispatcherPriority.Render);
     }
 
     private static void ApplyPopupOffsets(Popup popup, TopLevel topLevel, double margin)

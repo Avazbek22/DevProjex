@@ -1,6 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
+using System.Runtime.CompilerServices;
 
 namespace DevProjex.Kernel.Models;
 
@@ -66,18 +64,23 @@ public sealed record IgnoreRules(
 		return false;
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static bool IsPathInsideScope(string fullPath, string scopeRootPath)
 	{
 		if (string.IsNullOrWhiteSpace(fullPath) || string.IsNullOrWhiteSpace(scopeRootPath))
 			return false;
 
-		if (!fullPath.StartsWith(scopeRootPath, PathComparison))
+		// Use Span for faster comparison
+		var fullSpan = fullPath.AsSpan();
+		var scopeSpan = scopeRootPath.AsSpan();
+
+		if (!fullSpan.StartsWith(scopeSpan, PathComparison))
 			return false;
 
-		if (fullPath.Length == scopeRootPath.Length)
+		if (fullSpan.Length == scopeSpan.Length)
 			return true;
 
-		var next = fullPath[scopeRootPath.Length];
+		var next = fullSpan[scopeSpan.Length];
 		return next == Path.DirectorySeparatorChar || next == Path.AltDirectorySeparatorChar;
 	}
 }

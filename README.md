@@ -2,7 +2,7 @@
 
 **Visual project context builder for humans and AI**
 
-DevProjex is a cross-platform desktop application for **quickly exploring folder/project structures**, selecting what matters, and preparing **clean, controlled context** (tree, file contents, or both) for clipboard and file export.
+DevProjex is a cross-platform desktop application for **quickly exploring folder/project structures**, selecting what matters, and preparing **clean, controlled context in ASCII or JSON** (tree, file contents, or both) for clipboard and file export.
 
 It’s designed for real projects where CLI output is noisy, IDE tools are unavailable or limited, and you need **clarity, speed, and control**.
 
@@ -20,14 +20,19 @@ It’s designed for real projects where CLI output is noisy, IDE tools are unava
 
 Older versions are available on the Releases page.
 
+**Install via WinGet (Windows):**
+```powershell
+winget install OlimoffDev.DevProjex
+```
+
 ---
 
 ## App Screenshots 🖼️
 
-> <img width="1723" height="1183" alt="Снимок экрана 2026-02-15 132448" src="https://github.com/user-attachments/assets/a6752e4d-2616-42d4-85fd-cd541506f0cf" />
-> <img width="1696" height="1188" alt="Снимок экрана 2026-02-15 132511" src="https://github.com/user-attachments/assets/f09737e7-56ac-43d5-8fa7-95e3a36f76ab" />
-> <img width="1692" height="1175" alt="Снимок экрана 2026-02-15 132525" src="https://github.com/user-attachments/assets/99e7de19-8a23-4171-90ec-6f0441130e98" />
-> <img width="1715" height="1171" alt="Снимок экрана 2026-02-15 132558" src="https://github.com/user-attachments/assets/6812e8c5-bcaa-45d9-acfa-8a21d3084a03" />
+> <img width="1723" height="1183" src="https://github.com/user-attachments/assets/a6752e4d-2616-42d4-85fd-cd541506f0cf" />
+> <img width="1696" height="1188" src="https://github.com/user-attachments/assets/f09737e7-56ac-43d5-8fa7-95e3a36f76ab" />
+> <img width="1692" height="1175" src="https://github.com/user-attachments/assets/99e7de19-8a23-4171-90ec-6f0441130e98" />
+> <img width="1715" height="1171" src="https://github.com/user-attachments/assets/6812e8c5-bcaa-45d9-acfa-8a21d3084a03" />
 
 ---
 
@@ -37,6 +42,7 @@ Older versions are available on the Releases page.
 * **Multiple copy/export modes** (tree / content / combined)
 * **Preview mode** (tree / content / combined) before copy/export
 * **ASCII/JSON tree format toggle** for tree-based operations
+* **Per-project local parameter profiles** (saved per local project path)
 * **Export to file** from menu (tree / content / tree + content)
 * **Search & name filtering** for large projects
 * **Smart Ignore + .gitignore support** (scope-aware behavior for mixed workspaces)
@@ -87,6 +93,7 @@ DevProjex is not tied to a specific language or IDE.
   * tree + content (`.txt`, with selected tree format)
 * Shows preview output before copy/export
 * Shows live output metrics and operation progress in status bar
+* Restores previously applied parameters for each local project folder
 * Supports smart ignore rules (VCS, IDEs, build outputs)
 * Works well on large, layered projects
 
@@ -104,7 +111,7 @@ DevProjex is not tied to a specific language or IDE.
 * **Avalonia UI** (cross-platform)
 * Cleanly separated architecture (Core / Services / UI)
 * JSON-based resources (localization, icon mappings, presets)
-* 2300+ automated tests (unit + integration)
+* 3050+ automated tests (unit + integration)
 
 ---
 
@@ -126,11 +133,7 @@ See `CONTRIBUTING.md` for details.
 
 ## License 📄
 
-DevProjex is **source-available** under the **Business Source License (BSL) 1.1**.
-
-* Free for non-commercial use
-* Commercial use restricted until **2030-01-01**
-* Automatically converts to **MIT** on that date
+DevProjex is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
 See `LICENSE` for details.
 
@@ -138,4 +141,4 @@ See `LICENSE` for details.
 
 ## Keywords 🔎
 
-project tree viewer, folder structure, context builder, AI prompt preparation, clipboard export, avalonia ui, .net 10, cross-platform desktop app, repository visualization, developer tools
+project tree viewer, folder structure, context builder, AI prompt preparation, llm, clipboard export, avalonia ui, .net 10, cross-platform desktop app, repository visualization, developer tools

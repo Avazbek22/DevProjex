@@ -1,5 +1,4 @@
 using DevProjex.Avalonia.Services;
-using Xunit;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 

@@ -7,6 +7,8 @@ What you get:
 - Preview mode before copy/export
 - Copy or export: Tree, Content, Tree + Content
 - ASCII/JSON tree format toggle
+- Per-project local parameter profiles
+- Reset Data action for saved local profiles
 - Smart Ignore + .gitignore scopes for mixed workspaces
 - Git support: clone, switch branches, get updates in local cache
 - Search and filter for large codebases
@@ -18,6 +20,6 @@ Built for trust:
 
 - Read-only by design (never modifies your files)
 - No telemetry, no cloud, no account required
-- Source-available on GitHub
+- Open-source on GitHub (GPL-3.0)
 
 Works with any project type and any stack.

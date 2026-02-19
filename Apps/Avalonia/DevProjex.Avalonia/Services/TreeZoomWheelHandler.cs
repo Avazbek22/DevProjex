@@ -1,6 +1,3 @@
-using Avalonia.Input;
-using Avalonia;
-
 namespace DevProjex.Avalonia.Services;
 
 internal static class TreeZoomWheelHandler

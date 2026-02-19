@@ -1,13 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.Git;
 
@@ -34,6 +25,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
     // Platform-specific git executable name
     private static readonly string GitExecutable =
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "git.exe" : "git";
+    private const int CommandOutputBufferChars = 64 * 1024;
+    private const int CommandErrorBufferChars = 64 * 1024;
 
     /// <summary>
     /// Checks if Git CLI is available on the system by running "git --version".
@@ -651,16 +644,16 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
         using var process = new Process { StartInfo = startInfo };
 
-        var outputBuilder = new StringBuilder();
-        var errorBuilder = new StringBuilder();
+        var outputBuffer = new BoundedLineBuffer(CommandOutputBufferChars);
+        var errorBuffer = new BoundedLineBuffer(CommandErrorBufferChars);
+        var lastReportedPercent = -1;
 
         // Capture stdout
         process.OutputDataReceived += (_, e) =>
         {
             if (e.Data is not null)
             {
-                outputBuilder.AppendLine(e.Data);
-                progress?.Report(e.Data);
+                outputBuffer.Add(e.Data);
             }
         };
 
@@ -669,10 +662,25 @@ public sealed class GitRepositoryService : IGitRepositoryService
         {
             if (e.Data is not null)
             {
-                errorBuilder.AppendLine(e.Data);
-                // Report progress lines (they contain %)
-                if (e.Data.Contains('%'))
-                    progress?.Report(e.Data);
+                var line = e.Data;
+                if (TryExtractProgressPercent(line, out var percent))
+                {
+                    if (progress is not null)
+                    {
+                        var previousPercent = Interlocked.Exchange(ref lastReportedPercent, percent);
+                        if (previousPercent != percent)
+                            progress.Report($"{percent}%");
+                    }
+
+                    // Progress lines can be very noisy during clone/fetch and are not
+                    // needed in the final error payload.
+                    return;
+                }
+
+                errorBuffer.Add(line);
+
+                if (progress is not null && !string.IsNullOrWhiteSpace(line))
+                    progress.Report(line);
             }
         };
 
@@ -686,8 +694,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
             return new GitCommandResult(
                 process.ExitCode,
-                outputBuilder.ToString(),
-                errorBuilder.ToString());
+                outputBuffer.ToString(),
+                errorBuffer.ToString());
         }
         catch (OperationCanceledException)
         {
@@ -701,6 +709,90 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 // Ignore kill errors - process might have already exited
             }
             throw;
+        }
+    }
+
+    private static bool TryExtractProgressPercent(string line, out int percent)
+    {
+        percent = -1;
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        var percentIndex = line.IndexOf('%');
+        while (percentIndex >= 0)
+        {
+            var end = percentIndex - 1;
+            while (end >= 0 && char.IsWhiteSpace(line[end]))
+                end--;
+
+            if (end >= 0)
+            {
+                var start = end;
+                while (start >= 0 && char.IsDigit(line[start]))
+                    start--;
+
+                var length = end - start;
+                if (length > 0 &&
+                    int.TryParse(line.AsSpan(start + 1, length), out var value) &&
+                    value is >= 0 and <= 100)
+                {
+                    percent = value;
+                    return true;
+                }
+            }
+
+            percentIndex = line.IndexOf('%', percentIndex + 1);
+        }
+
+        return false;
+    }
+
+    private sealed class BoundedLineBuffer
+    {
+        private readonly int _maxChars;
+        private readonly Queue<string> _lines = new();
+        private readonly object _sync = new();
+        private int _charCount;
+
+        public BoundedLineBuffer(int maxChars)
+        {
+            _maxChars = Math.Max(1024, maxChars);
+        }
+
+        public void Add(string line)
+        {
+            lock (_sync)
+            {
+                _lines.Enqueue(line);
+                _charCount += line.Length + Environment.NewLine.Length;
+
+                while (_charCount > _maxChars && _lines.Count > 0)
+                {
+                    var removed = _lines.Dequeue();
+                    _charCount -= removed.Length + Environment.NewLine.Length;
+                }
+            }
+        }
+
+        public override string ToString()
+        {
+            lock (_sync)
+            {
+                if (_lines.Count == 0)
+                    return string.Empty;
+
+                var sb = new StringBuilder(_charCount + Environment.NewLine.Length);
+                var isFirst = true;
+                foreach (var line in _lines)
+                {
+                    if (!isFirst)
+                        sb.AppendLine();
+                    sb.Append(line);
+                    isFirst = false;
+                }
+
+                return sb.ToString();
+            }
         }
     }
 

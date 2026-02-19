@@ -1,12 +1,4 @@
-﻿using System.Collections.Generic;
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Unit.Helpers;
-using Xunit;
-
-namespace DevProjex.Tests.Unit;
+﻿namespace DevProjex.Tests.Unit;
 
 public sealed class BuildTreeUseCaseTests
 {

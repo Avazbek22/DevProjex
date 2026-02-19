@@ -1,8 +1,3 @@
-using System;
-using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Interactivity;
-
 namespace DevProjex.Avalonia.Views;
 
 public partial class SearchBarView : UserControl

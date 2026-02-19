@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text.Json;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class DragDropUiRegressionTests

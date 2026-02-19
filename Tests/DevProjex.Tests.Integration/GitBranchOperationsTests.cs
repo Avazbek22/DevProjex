@@ -1,11 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using DevProjex.Infrastructure.Git;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 /// <summary>
@@ -221,7 +213,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
             return;
 
         // Count files before switch
-        var filesBefore = System.IO.Directory.GetFiles(repoPath, "*", System.IO.SearchOption.AllDirectories)
+        var filesBefore = Directory.GetFiles(repoPath, "*", SearchOption.AllDirectories)
             .Where(f => !f.Contains(".git"))
             .Count();
 
@@ -229,7 +221,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
         await _service.SwitchBranchAsync(repoPath, targetBranch);
 
         // Files should still exist (working directory preserved)
-        var filesAfter = System.IO.Directory.GetFiles(repoPath, "*", System.IO.SearchOption.AllDirectories)
+        var filesAfter = Directory.GetFiles(repoPath, "*", SearchOption.AllDirectories)
             .Where(f => !f.Contains(".git"))
             .Count();
 
@@ -245,7 +237,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
         var repoPath = _tempDir.CreateDirectory("empty-repo");
 
         // Create empty git repo using Process
-        var psi = new System.Diagnostics.ProcessStartInfo
+        var psi = new ProcessStartInfo
         {
             FileName = "git",
             Arguments = $"init \"{repoPath}\"",
@@ -255,7 +247,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
             RedirectStandardError = true
         };
 
-        using var process = System.Diagnostics.Process.Start(psi);
+        using var process = Process.Start(psi);
         await process!.WaitForExitAsync();
 
         var branches = await _service.GetBranchesAsync(repoPath);
@@ -278,7 +270,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
         if (branches.Count < 2)
             return;
 
-        var progressReports = new System.Collections.Generic.List<string>();
+        var progressReports = new List<string>();
         var progress = new Progress<string>(msg => progressReports.Add(msg));
 
         var targetBranch = branches.First(b => !b.IsActive).Name;

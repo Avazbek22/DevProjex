@@ -1,6 +1,3 @@
-using System.Collections.ObjectModel;
-using DevProjex.Avalonia.ViewModels;
-
 namespace DevProjex.Avalonia.Services;
 
 public interface IToastService

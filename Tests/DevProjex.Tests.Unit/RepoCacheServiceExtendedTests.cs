@@ -1,9 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using DevProjex.Infrastructure.Git;
-using Xunit;
-
 namespace DevProjex.Tests.Unit;
 
 /// <summary>
@@ -89,7 +83,7 @@ public sealed class RepoCacheServiceExtendedTests : IDisposable
 
         // Act
         var path1 = _service.CreateRepositoryDirectory(url);
-        System.Threading.Thread.Sleep(10); // Ensure different timestamp
+        Thread.Sleep(10); // Ensure different timestamp
         var path2 = _service.CreateRepositoryDirectory(url);
 
         try
@@ -324,7 +318,7 @@ public sealed class RepoCacheServiceExtendedTests : IDisposable
             for (int i = 0; i < 10; i++)
             {
                 paths[i] = _service.CreateRepositoryDirectory(url);
-                System.Threading.Thread.Sleep(1); // Minimal delay to ensure unique timestamps
+                Thread.Sleep(1); // Minimal delay to ensure unique timestamps
             }
 
             // Assert - all paths should be unique

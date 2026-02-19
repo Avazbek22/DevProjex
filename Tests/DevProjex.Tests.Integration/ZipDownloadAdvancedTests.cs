@@ -1,13 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using DevProjex.Infrastructure.Git;
-using DevProjex.Kernel.Models;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit;
-
 namespace DevProjex.Tests.Integration;
 
 /// <summary>
@@ -162,7 +152,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Test that progress callback receives updates
         var targetDir = _tempDir.CreateDirectory("progress-zip");
-        var progressReports = new System.Collections.Generic.List<string>();
+        var progressReports = new List<string>();
         var progress = new Progress<string>(msg => progressReports.Add(msg));
 
         var result = await _zipService.DownloadAndExtractAsync(
@@ -333,21 +323,20 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     [Fact]
     public async Task DownloadAndExtractAsync_SupportsCancellationDuringDownload()
     {
-        // Test cancellation during download phase
+        // Cancel as soon as download starts reporting progress.
+        // This avoids flaky timing windows on fast CI runners.
         var targetDir = _tempDir.CreateDirectory("cancel-download");
         using var cts = new CancellationTokenSource();
+        var progress = new ImmediateProgress(_ => cts.Cancel());
 
         var downloadTask = _zipService.DownloadAndExtractAsync(
             TestRepoUrl,
             targetDir,
+            progress,
             cancellationToken: cts.Token);
 
-        // Cancel after brief delay
-        await Task.Delay(50);
-        cts.Cancel();
-
         // Should throw OperationCanceledException or its subtype
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await downloadTask);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => downloadTask);
     }
 
     [Fact]
@@ -517,4 +506,16 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     }
 
     #endregion
+
+    private sealed class ImmediateProgress : IProgress<string>
+    {
+        private readonly Action<string> _onReport;
+
+        public ImmediateProgress(Action<string> onReport)
+        {
+            _onReport = onReport;
+        }
+
+        public void Report(string value) => _onReport(value);
+    }
 }
