@@ -608,7 +608,9 @@ function Get-InnerPackageFromMsixUpload([string]$msixUploadPath, [string]$tempDi
     }
     New-Item -ItemType Directory -Force -Path $tempDirectory | Out-Null
 
-    Expand-Archive -Path $msixUploadPath -DestinationPath $tempDirectory -Force
+    # .msixupload is a ZIP container; use ZipFile API to avoid extension-based limitations of Expand-Archive.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($msixUploadPath, $tempDirectory)
 
     $innerBundle = Get-ChildItem -Path $tempDirectory -Recurse -File -Filter *.msixbundle -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending |
@@ -789,9 +791,102 @@ function Publish-ArtifactsToSource([string]$sourceRoot, [string]$version) {
     }
 }
 
+function Start-DeferredCleanup([string]$targetPath) {
+    $cleanupScriptPath = Join-Path $env:TEMP ("devprojex-cleanup-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+    $scriptContent = @'
+param(
+    [string]$TargetPath,
+    [string]$SelfScriptPath
+)
+
+for ($attempt = 1; $attempt -le 120; $attempt++) {
+    if (-not (Test-Path $TargetPath)) {
+        break
+    }
+
+    try {
+        Remove-Item -Path $TargetPath -Recurse -Force -ErrorAction Stop
+    }
+    catch {
+        # Keep retrying; file handles can be released with delay after build tooling exits.
+    }
+
+    if (-not (Test-Path $TargetPath)) {
+        break
+    }
+
+    Start-Sleep -Seconds 3
+}
+
+try {
+    Remove-Item -Path $SelfScriptPath -Force -ErrorAction SilentlyContinue
+}
+catch {
+    # Ignore cleanup script self-delete failures.
+}
+'@
+
+    Set-Content -Path $cleanupScriptPath -Value $scriptContent -Encoding UTF8
+
+    Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $cleanupScriptPath,
+        "-TargetPath", $targetPath,
+        "-SelfScriptPath", $cleanupScriptPath
+    ) | Out-Null
+
+    return $cleanupScriptPath
+}
+
 function Cleanup-IsolatedWorkspace() {
-    if (-not [string]::IsNullOrWhiteSpace($script:IsolatedWorkspaceRoot) -and (Test-Path $script:IsolatedWorkspaceRoot)) {
-        Remove-Item -Path $script:IsolatedWorkspaceRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($script:IsolatedWorkspaceRoot)) {
+        return
+    }
+
+    if (-not (Test-Path $script:IsolatedWorkspaceRoot)) {
+        return
+    }
+
+    # Remove read-only flag from files/folders in case package tools produced protected artifacts.
+    try {
+        Get-ChildItem -Path $script:IsolatedWorkspaceRoot -Recurse -Force -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                try {
+                    if (($_.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+                        $_.Attributes = ($_.Attributes -bxor [System.IO.FileAttributes]::ReadOnly)
+                    }
+                }
+                catch {
+                    # Ignore per-file attribute errors; delete retries below can still succeed.
+                }
+            }
+    }
+    catch {
+        # Ignore attribute pass issues and continue with deletion retries.
+    }
+
+    $maxAttempts = 20
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Remove-Item -Path $script:IsolatedWorkspaceRoot -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path $script:IsolatedWorkspaceRoot)) {
+                return
+            }
+        }
+        catch {
+            # Retry because antivirus/indexer/MSBuild can temporarily hold handles.
+        }
+
+        Start-Sleep -Milliseconds (500 * $attempt)
+    }
+
+    # Fallback to cmd rmdir for stubborn directory trees.
+    cmd /c "rmdir /s /q ""$script:IsolatedWorkspaceRoot""" | Out-Null
+    if (Test-Path $script:IsolatedWorkspaceRoot) {
+        $deferredScript = Start-DeferredCleanup -targetPath $script:IsolatedWorkspaceRoot
+        Write-Warning "Immediate cleanup failed. Scheduled deferred cleanup for: $script:IsolatedWorkspaceRoot"
+        Write-Warning "Deferred cleanup helper: $deferredScript"
     }
 }
 
