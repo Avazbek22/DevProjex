@@ -1,8 +1,3 @@
-using System.Text;
-using DevProjex.Application.Services;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit.Abstractions;
-
 namespace DevProjex.Tests.Integration.Performance;
 
 [Collection("LocalPerformance")]

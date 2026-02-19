@@ -1,5 +1,3 @@
-using DevProjex.Infrastructure.SmartIgnore;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class DotNetArtifactsIgnoreRuleTests : IDisposable

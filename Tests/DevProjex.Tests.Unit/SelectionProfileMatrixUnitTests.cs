@@ -1,10 +1,3 @@
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
-using DevProjex.Avalonia.Coordinators;
-using DevProjex.Avalonia.ViewModels;
-using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Tests.Unit.Helpers;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class SelectionProfileMatrixUnitTests

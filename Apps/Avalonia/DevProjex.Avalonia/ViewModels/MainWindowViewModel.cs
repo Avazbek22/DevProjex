@@ -1,9 +1,3 @@
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using DevProjex.Application.Services;
-using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Avalonia.ViewModels;
 
 /// <summary>

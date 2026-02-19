@@ -1,7 +1,3 @@
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Avalonia.Services;

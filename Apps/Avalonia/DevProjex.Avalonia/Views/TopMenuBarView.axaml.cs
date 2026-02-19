@@ -1,6 +1,3 @@
-using Avalonia.Controls.Primitives;
-using Avalonia.VisualTree;
-
 namespace DevProjex.Avalonia.Views;
 
 public partial class TopMenuBarView : UserControl

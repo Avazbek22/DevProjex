@@ -1,11 +1,4 @@
-﻿using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
-using DevProjex.Avalonia.Coordinators;
-using DevProjex.Avalonia.ViewModels;
-using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Tests.Unit.Helpers;
-
-namespace DevProjex.Tests.Unit;
+﻿namespace DevProjex.Tests.Unit;
 
 public sealed class SelectionSyncCoordinatorAdditionalTests
 {
@@ -728,7 +721,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	{
 		var method = typeof(SelectionSyncCoordinator).GetMethod(
 			"ShouldClearCachesForCurrentPath",
-			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(method);
 		return (bool)method.Invoke(coordinator, new object[] { path })!;
 	}
@@ -737,7 +730,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	{
 		var method = typeof(SelectionSyncCoordinator).GetMethod(
 			"ShouldSkipRefreshForPreparedPath",
-			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(method);
 		return (bool)method.Invoke(coordinator, new object[] { path })!;
 	}
@@ -746,7 +739,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	{
 		var field = typeof(SelectionSyncCoordinator).GetField(
 			fieldName,
-			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(field);
 		field.SetValue(coordinator, value);
 	}
@@ -755,7 +748,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	{
 		var field = typeof(SelectionSyncCoordinator).GetField(
 			fieldName,
-			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(field);
 		return (bool)field.GetValue(coordinator)!;
 	}
@@ -764,7 +757,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	{
 		var field = typeof(SelectionSyncCoordinator).GetField(
 			fieldName,
-			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(field);
 		return (string?)field.GetValue(coordinator);
 	}
@@ -773,7 +766,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	{
 		var field = typeof(SelectionSyncCoordinator).GetField(
 			fieldName,
-			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(field);
 		return (HashSet<string>)field.GetValue(coordinator)!;
 	}

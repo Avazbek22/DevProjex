@@ -1,8 +1,27 @@
 global using Avalonia;
 global using Avalonia.Controls;
+global using Avalonia.Controls.Primitives;
+global using Avalonia.Data.Converters;
 global using Avalonia.Input;
 global using Avalonia.Interactivity;
+global using Avalonia.Layout;
+global using Avalonia.Markup.Xaml;
 global using Avalonia.Media;
+global using Avalonia.Styling;
 global using Avalonia.Threading;
+global using Avalonia.VisualTree;
+global using DevProjex.Application.Services;
+global using DevProjex.Application.UseCases;
+global using DevProjex.Infrastructure.ResourceStore;
+global using DevProjex.Kernel.Abstractions;
+global using DevProjex.Kernel.Contracts;
+global using DevProjex.Kernel.Models;
 global using DevProjex.Avalonia.ViewModels;
+global using System.Collections.ObjectModel;
+global using System.Collections.Specialized;
+global using System.ComponentModel;
+global using System.Diagnostics;
+global using System.Globalization;
+global using System.Reflection;
+global using System.Text;
 

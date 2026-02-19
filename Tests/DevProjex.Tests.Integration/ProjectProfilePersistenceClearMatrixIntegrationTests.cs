@@ -1,6 +1,3 @@
-using DevProjex.Infrastructure.ProjectProfiles;
-using DevProjex.Tests.Integration.Helpers;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class ProjectProfilePersistenceClearMatrixIntegrationTests

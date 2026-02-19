@@ -1,6 +1,3 @@
-using System.Text.Json;
-using DevProjex.Infrastructure.ProjectProfiles;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class ProjectProfileStoreAdditionalTests

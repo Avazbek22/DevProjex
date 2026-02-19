@@ -1,5 +1,3 @@
-using DevProjex.Kernel;
-
 namespace DevProjex.Application.Services;
 
 public static class ExportOutputMetricsCalculator

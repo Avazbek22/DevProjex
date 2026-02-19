@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace DevProjex.Tests.Integration.Performance;
 
 internal sealed class PerfBaselineStore

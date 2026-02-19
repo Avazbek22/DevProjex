@@ -1,5 +1,4 @@
 using Avalonia.Controls.Documents;
-using DevProjex.Kernel.Contracts;
 
 namespace DevProjex.Avalonia.ViewModels;
 

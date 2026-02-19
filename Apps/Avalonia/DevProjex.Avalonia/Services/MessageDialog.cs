@@ -1,7 +1,3 @@
-using Avalonia.Layout;
-using Avalonia.Styling;
-using Avalonia.VisualTree;
-
 namespace DevProjex.Avalonia.Services;
 
 public static class MessageDialog

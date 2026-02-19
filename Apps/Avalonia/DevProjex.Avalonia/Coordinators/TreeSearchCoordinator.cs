@@ -1,7 +1,4 @@
 using System.Timers;
-using Avalonia.Styling;
-using Avalonia.VisualTree;
-using DevProjex.Application.Services;
 using Timer = System.Timers.Timer;
 
 namespace DevProjex.Avalonia.Coordinators;

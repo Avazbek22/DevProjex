@@ -1,6 +1,3 @@
-using System.Reflection;
-using DevProjex.Infrastructure.Git;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class ZipDownloadServiceInternalHelpersTests

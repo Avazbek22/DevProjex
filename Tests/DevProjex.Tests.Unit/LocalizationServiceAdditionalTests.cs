@@ -1,6 +1,3 @@
-using DevProjex.Application.Services;
-using DevProjex.Tests.Unit.Helpers;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class LocalizationServiceAdditionalTests

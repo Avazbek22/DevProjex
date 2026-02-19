@@ -1,5 +1,3 @@
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Kernel.Abstractions;
 
 public interface ISmartIgnoreRule

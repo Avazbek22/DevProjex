@@ -1,4 +1,3 @@
-using System.Reflection;
 using Avalonia.Media;
 using DevProjex.Avalonia.Controls;
 

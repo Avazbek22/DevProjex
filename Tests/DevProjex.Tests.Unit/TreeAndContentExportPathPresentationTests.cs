@@ -1,6 +1,3 @@
-using DevProjex.Application.Services;
-using DevProjex.Tests.Unit.Helpers;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class TreeAndContentExportPathPresentationTests
@@ -110,7 +107,7 @@ public sealed class TreeAndContentExportPathPresentationTests
 		var separatorIndex = result.IndexOf('\u00A0');
 		Assert.True(separatorIndex > 0);
 		var jsonPart = result[..separatorIndex].TrimEnd('\r', '\n');
-		using var doc = System.Text.Json.JsonDocument.Parse(jsonPart);
+		using var doc = JsonDocument.Parse(jsonPart);
 		Assert.Equal("DevProjex", doc.RootElement.GetProperty("root").GetProperty("name").GetString());
 		Assert.Contains("https://github.com/user/repo/src/main.cs:", result, StringComparison.Ordinal);
 	}

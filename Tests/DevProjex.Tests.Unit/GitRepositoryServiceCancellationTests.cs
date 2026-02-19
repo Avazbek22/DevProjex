@@ -1,5 +1,3 @@
-using DevProjex.Infrastructure.Git;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class GitRepositoryServiceCancellationTests

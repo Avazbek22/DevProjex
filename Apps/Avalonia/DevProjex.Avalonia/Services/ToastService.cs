@@ -1,5 +1,3 @@
-using System.Collections.ObjectModel;
-
 namespace DevProjex.Avalonia.Services;
 
 public sealed class ToastService : IToastService, IDisposable

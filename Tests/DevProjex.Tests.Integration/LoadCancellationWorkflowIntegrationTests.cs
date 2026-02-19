@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class LoadCancellationWorkflowIntegrationTests

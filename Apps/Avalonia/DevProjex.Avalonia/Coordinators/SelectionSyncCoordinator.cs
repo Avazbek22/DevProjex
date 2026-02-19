@@ -1,11 +1,5 @@
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
 using DevProjex.Application.Models;
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
 using DevProjex.Kernel;
-using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Avalonia.Coordinators;
 

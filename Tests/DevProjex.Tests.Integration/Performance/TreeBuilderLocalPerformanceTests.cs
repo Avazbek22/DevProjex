@@ -1,7 +1,3 @@
-using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Tests.Integration.Helpers;
-using Xunit.Abstractions;
-
 namespace DevProjex.Tests.Integration.Performance;
 
 [Collection("LocalPerformance")]

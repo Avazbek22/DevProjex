@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class CommandLineOptionsTests

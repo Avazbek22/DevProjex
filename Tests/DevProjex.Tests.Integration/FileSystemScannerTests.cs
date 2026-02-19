@@ -1,9 +1,3 @@
-using DevProjex.Application.Services;
-using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Infrastructure.SmartIgnore;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Tests.Integration.Helpers;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class FileSystemScannerTests

@@ -1,5 +1,3 @@
-using DevProjex.Infrastructure.ProjectProfiles;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class ProjectProfileStorePathMatrixUnitTests

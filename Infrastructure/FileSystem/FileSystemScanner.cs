@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-
 namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class FileSystemScanner : IFileSystemScanner

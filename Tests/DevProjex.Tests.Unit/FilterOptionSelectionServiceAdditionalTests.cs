@@ -1,6 +1,4 @@
-﻿using DevProjex.Application.Services;
-
-namespace DevProjex.Tests.Unit;
+﻿namespace DevProjex.Tests.Unit;
 
 public sealed class FilterOptionSelectionServiceAdditionalTests
 {

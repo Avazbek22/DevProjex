@@ -1,5 +1,3 @@
-using System.Text.Json;
-using DevProjex.Application.Services;
 using Xunit.Sdk;
 
 namespace DevProjex.Tests.Unit;
