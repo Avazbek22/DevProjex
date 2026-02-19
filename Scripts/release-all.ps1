@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   This script keeps your local Rider workspace stable:
-    1) asks for a version in 0.0.0.0 format (unless provided)
+    1) asks for a version in 2-4 segment format (4.6 / 4.7.1 / 4.7.1.0)
     2) copies repo to a temporary isolated workspace
     3) builds GitHub artifacts in Release mode
     4) builds Microsoft Store package in ReleaseStore mode
@@ -69,18 +69,49 @@ function Ensure-DotnetAvailable() {
     }
 }
 
+function Try-ParseVersionInput([string]$rawVersion) {
+    if ([string]::IsNullOrWhiteSpace($rawVersion)) {
+        return $null
+    }
+
+    $trimmed = $rawVersion.Trim()
+    if ($trimmed -notmatch '^\d+(\.\d+){0,3}$') {
+        return $null
+    }
+
+    $parts = @($trimmed.Split('.'))
+    if ($parts.Count -lt 1 -or $parts.Count -gt 4) {
+        return $null
+    }
+
+    $displayVersion = ($parts -join '.')
+    $storeParts = [System.Collections.Generic.List[string]]::new()
+    foreach ($part in $parts) {
+        $storeParts.Add($part)
+    }
+    while ($storeParts.Count -lt 4) {
+        $storeParts.Add("0")
+    }
+
+    return @{
+        DisplayVersion = $displayVersion
+        StorePackageVersion = ($storeParts -join '.')
+    }
+}
+
 function Get-VersionInteractive([string]$currentValue) {
     $value = $currentValue
     while ($true) {
         if ([string]::IsNullOrWhiteSpace($value)) {
-            $value = Read-Host "Enter release version (format 0.0.0.0)"
+            $value = Read-Host "Enter release version (5 / 4.6 / 4.7.1 / 4.7.1.0)"
         }
 
-        if ($value -match '^\d+\.\d+\.\d+\.\d+$') {
-            return $value
+        $parsedVersion = Try-ParseVersionInput -rawVersion $value
+        if ($null -ne $parsedVersion) {
+            return $parsedVersion
         }
 
-        Write-Host "Invalid version format. Use exactly: 0.0.0.0" -ForegroundColor Yellow
+        Write-Host "Invalid version format. Use 1-4 numeric segments, for example: 5, 4.6, 4.7.1, 4.7.1.0" -ForegroundColor Yellow
         $value = ""
     }
 }
@@ -511,6 +542,207 @@ function Get-StoreArtifactPaths() {
     )
 }
 
+function Get-AppCertToolPath() {
+    $appCertPaths = @(
+        "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\appcert.exe",
+        "$env:ProgramFiles\Windows Kits\10\App Certification Kit\appcert.exe"
+    )
+
+    return $appCertPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+function Get-LatestStoreArtifact([object[]]$storeArtifacts, [string]$extension) {
+    if ($null -eq $storeArtifacts -or $storeArtifacts.Count -eq 0) {
+        return $null
+    }
+
+    return $storeArtifacts |
+        Where-Object { $_.Extension.Equals($extension, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+}
+
+function Copy-AppCertLogsToReportDirectory([string]$reportDirectory) {
+    $appCertLogRoot = Join-Path $env:LOCALAPPDATA "Microsoft\AppCertKit"
+    if (-not (Test-Path $appCertLogRoot)) {
+        return
+    }
+
+    Get-ChildItem -Path $appCertLogRoot -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 10 |
+        ForEach-Object {
+            try {
+                Copy-Item -Path $_.FullName -Destination $reportDirectory -Force
+            }
+            catch {
+                # Ignore transient locked log files.
+            }
+        }
+}
+
+function Invoke-WackForPackage(
+    [string]$appCertPath,
+    [string]$packagePath,
+    [string]$reportDirectory,
+    [string]$label
+) {
+    $safeLabel = ($label -replace '[^a-zA-Z0-9\-_]', '_').ToLowerInvariant()
+    $reportPath = Join-Path $reportDirectory ("wack-" + $safeLabel + ".xml")
+
+    & $appCertPath test -appxpackagepath "$packagePath" -reportoutputpath "$reportPath"
+    $exitCode = $LASTEXITCODE
+
+    return @{
+        Label = $label
+        PackagePath = $packagePath
+        ExitCode = $exitCode
+        Success = ($exitCode -eq 0)
+        ReportPath = $reportPath
+    }
+}
+
+function Get-InnerPackageFromMsixUpload([string]$msixUploadPath, [string]$tempDirectory) {
+    if (Test-Path $tempDirectory) {
+        Remove-Item -Path $tempDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $tempDirectory | Out-Null
+
+    Expand-Archive -Path $msixUploadPath -DestinationPath $tempDirectory -Force
+
+    $innerBundle = Get-ChildItem -Path $tempDirectory -Recurse -File -Filter *.msixbundle -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($null -ne $innerBundle) {
+        return $innerBundle.FullName
+    }
+
+    $innerMsix = Get-ChildItem -Path $tempDirectory -Recurse -File -Filter *.msix -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($null -ne $innerMsix) {
+        return $innerMsix.FullName
+    }
+
+    return $null
+}
+
+function Invoke-WackValidationInWorkspace() {
+    Write-Step "Running WACK validation"
+
+    $storeArtifacts = Get-StoreArtifactPaths
+    if ($null -eq $storeArtifacts -or $storeArtifacts.Count -eq 0) {
+        throw "WACK validation failed: Store artifacts were not found in isolated workspace."
+    }
+
+    $appCert = Get-AppCertToolPath
+    if ([string]::IsNullOrWhiteSpace($appCert)) {
+        throw "WACK validation cannot start: appcert.exe not found. Install Windows SDK (App Certification Kit)."
+    }
+
+    $reportDir = Join-Path $script:IsolatedRepoRoot "publish\store\wack"
+    New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+    $tempExtractionDir = Join-Path $reportDir "_temp_msixupload"
+    $summaryLines = New-Object System.Collections.Generic.List[string]
+    $anySuccess = $false
+
+    Write-Host "WACK tool   : $appCert"
+
+    try {
+        $msixUploadCandidate = Get-LatestStoreArtifact -storeArtifacts $storeArtifacts -extension ".msixupload"
+        $msixBundleCandidate = Get-LatestStoreArtifact -storeArtifacts $storeArtifacts -extension ".msixbundle"
+        $msixCandidate = Get-LatestStoreArtifact -storeArtifacts $storeArtifacts -extension ".msix"
+
+        $msixUploadPassed = $false
+        $msixUploadFailed = $false
+
+        if ($null -ne $msixUploadCandidate) {
+            Write-Host "WACK stage 1: validating package from .msixupload"
+            try {
+                $innerPackagePath = Get-InnerPackageFromMsixUpload -msixUploadPath $msixUploadCandidate.FullName -tempDirectory $tempExtractionDir
+                if ([string]::IsNullOrWhiteSpace($innerPackagePath)) {
+                    throw "No .msixbundle/.msix was found inside .msixupload."
+                }
+
+                $uploadResult = Invoke-WackForPackage -appCertPath $appCert -packagePath $innerPackagePath -reportDirectory $reportDir -label "msixupload-inner"
+                if ($uploadResult.Success) {
+                    $summaryLines.Add("MSIXUPLOAD: PASS ($($uploadResult.PackagePath))")
+                    $msixUploadPassed = $true
+                    $anySuccess = $true
+                }
+                else {
+                    $summaryLines.Add("MSIXUPLOAD: FAIL (exit code: $($uploadResult.ExitCode))")
+                    $msixUploadFailed = $true
+                }
+            }
+            catch {
+                $summaryLines.Add("MSIXUPLOAD: FAIL ($($_.Exception.Message))")
+                $msixUploadFailed = $true
+            }
+        }
+        else {
+            $summaryLines.Add("MSIXUPLOAD: SKIPPED (artifact not found)")
+            $msixUploadFailed = $true
+        }
+
+        if ($msixUploadFailed -and -not $msixUploadPassed) {
+            Write-Host "WACK stage 2: fallback to .msixbundle/.msix artifacts"
+
+            if ($null -ne $msixBundleCandidate) {
+                $bundleResult = Invoke-WackForPackage -appCertPath $appCert -packagePath $msixBundleCandidate.FullName -reportDirectory $reportDir -label "msixbundle"
+                if ($bundleResult.Success) {
+                    $summaryLines.Add("MSIXBUNDLE: PASS ($($bundleResult.PackagePath))")
+                    $anySuccess = $true
+                }
+                else {
+                    $summaryLines.Add("MSIXBUNDLE: FAIL (exit code: $($bundleResult.ExitCode))")
+                }
+            }
+            else {
+                $summaryLines.Add("MSIXBUNDLE: SKIPPED (artifact not found)")
+            }
+
+            if ($null -ne $msixCandidate) {
+                $msixResult = Invoke-WackForPackage -appCertPath $appCert -packagePath $msixCandidate.FullName -reportDirectory $reportDir -label "msix"
+                if ($msixResult.Success) {
+                    $summaryLines.Add("MSIX: PASS ($($msixResult.PackagePath))")
+                    $anySuccess = $true
+                }
+                else {
+                    $summaryLines.Add("MSIX: FAIL (exit code: $($msixResult.ExitCode))")
+                }
+            }
+            else {
+                $summaryLines.Add("MSIX: SKIPPED (artifact not found)")
+            }
+        }
+        else {
+            $summaryLines.Add("MSIXBUNDLE: SKIPPED (not needed, msixupload passed)")
+            $summaryLines.Add("MSIX: SKIPPED (not needed, msixupload passed)")
+        }
+    }
+    finally {
+        if (Test-Path $tempExtractionDir) {
+            Remove-Item -Path $tempExtractionDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Copy-AppCertLogsToReportDirectory -reportDirectory $reportDir
+    }
+
+    $summaryPath = Join-Path $reportDir "summary.txt"
+    Set-Content -Path $summaryPath -Value $summaryLines -Encoding UTF8
+
+    Write-Host ""
+    Write-Host "WACK summary:"
+    foreach ($summaryLine in $summaryLines) {
+        Write-Host "  $summaryLine"
+    }
+    Write-Host "  Report folder: $reportDir"
+
+    if (-not $anySuccess) {
+        throw "WACK validation failed. See summary and reports in: $reportDir"
+    }
+}
+
 function Publish-ArtifactsToSource([string]$sourceRoot, [string]$version) {
     Write-Step "Publishing artifacts to source publish folder"
 
@@ -546,6 +778,11 @@ function Publish-ArtifactsToSource([string]$sourceRoot, [string]$version) {
         Copy-Item -Path $isolatedBuildLogPath -Destination (Join-Path $sourceStoreDir "msix-build.log") -Force
     }
 
+    $isolatedWackDir = Join-Path $script:IsolatedRepoRoot "publish\store\wack"
+    if (Test-Path $isolatedWackDir) {
+        Copy-Item -Path $isolatedWackDir -Destination (Join-Path $sourceStoreDir "wack") -Recurse -Force
+    }
+
     return @{
         GitHub = $sourceGitHubDir
         Store = $sourceStoreDir
@@ -559,15 +796,19 @@ function Cleanup-IsolatedWorkspace() {
 }
 
 Ensure-DotnetAvailable
-$resolvedVersion = Get-VersionInteractive -currentValue $Version
+$versionInfo = Get-VersionInteractive -currentValue $Version
+$resolvedVersion = [string]$versionInfo.DisplayVersion
+$storePackageVersion = [string]$versionInfo.StorePackageVersion
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $finalPaths = $null
 
 Write-Step "Release plan"
 Write-Host "Version: $resolvedVersion"
+Write-Host "Store package version: $storePackageVersion"
 Write-Host "Build mode  : isolated workspace (local source tree untouched)"
 Write-Host "GitHub build: Release (single-file, self-contained)"
 Write-Host "Store build : ReleaseStore (.msixupload, x64|arm64)"
+Write-Host "Store check : WACK (must pass before artifacts are published)"
 Write-Host "Store listing CSV: not modified"
 
 try {
@@ -578,7 +819,9 @@ try {
     Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration "Release"
 
     Write-Step "Building Microsoft Store package in isolated workspace"
-    Build-StoreArtifactsInWorkspace -configuration "ReleaseStore" -platform "x64" -bundlePlatforms "x64|arm64" -packageVersion $resolvedVersion
+    Build-StoreArtifactsInWorkspace -configuration "ReleaseStore" -platform "x64" -bundlePlatforms "x64|arm64" -packageVersion $storePackageVersion
+
+    Invoke-WackValidationInWorkspace
 
     $finalPaths = Publish-ArtifactsToSource -sourceRoot $sourceRoot -version $resolvedVersion
 
