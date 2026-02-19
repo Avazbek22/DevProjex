@@ -211,6 +211,7 @@ DocProject/Help/html
 
 # Click-Once directory
 publish/
+.release-cache/
 
 # Publish Web Output
 *.[Pp]ublish.xml

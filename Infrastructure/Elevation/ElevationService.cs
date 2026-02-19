@@ -22,7 +22,7 @@ public sealed class ElevationService : IElevationService
 		// Store builds must never trigger UAC or relaunch with elevation.
 #if DEVPROJEX_STORE
 		return false;
-#endif
+#else
 		if (!OperatingSystem.IsWindows()) return false;
 
 		try
@@ -45,5 +45,6 @@ public sealed class ElevationService : IElevationService
 		{
 			return false;
 		}
+#endif
 	}
 }
