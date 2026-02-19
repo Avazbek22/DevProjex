@@ -174,6 +174,20 @@ Note about "Extensions":
 
 Ctrl+P — show/hide the panel.
 
+### 10.1 Local project parameter profiles
+For local folders, DevProjex remembers the last applied project parameters:
+* selected top-level folders;
+* selected file types;
+* selected options in the "Ignore" block.
+
+Saving is performed when you click "Apply settings".
+When the same local folder is opened again, parameters are restored automatically.
+
+Important:
+* profiles are saved only for local projects;
+* for projects opened via Git Clone, profiles are not saved;
+* if some saved options are no longer available in the current project, they are skipped, and the remaining parameters are applied.
+
 ## 11) Ignore
 The "Ignore" list is built automatically from the current path and selected top-level folders.
 
@@ -306,10 +320,18 @@ Theme popover lets you switch:
 
 Items marked [Beta] may change between versions.
 
-## 15) Help → About
-Opens a popover with app info and repository link.
-Reset settings (Help → Reset settings) resets only visual interface settings (theme, effects, Compact Mode, Tree animation) and does not modify project data.
-* Esc — close popover
+## 15) Help
+
+### 15.1 Reset settings
+Reset settings (Help → Reset settings) resets only visual interface settings (theme, effects, Compact mode, Tree animation) and does not modify project data.
+
+### 15.2 Reset data
+Reset data (Help → Reset data) removes saved local-project parameter profiles:
+* selected top-level folders;
+* selected file types;
+* selected options in the "Ignore" block.
+
+Files and folders on disk are not modified or deleted.
 
 ## 16) Languages
 Language is selected via the Language menu.

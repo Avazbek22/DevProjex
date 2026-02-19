@@ -13,26 +13,44 @@ public partial class HelpPopoverView : UserControl
     {
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += OnDataContextChanged;
+        AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        BindAndRenderCurrentViewModel();
+    }
+
+    private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        BindAndRenderCurrentViewModel();
+    }
+
+    private void BindAndRenderCurrentViewModel()
+    {
         var bodyPanel = GetBodyPanel();
         if (bodyPanel is null)
             return;
 
-        if (_boundViewModel is not null)
-            _boundViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        var nextViewModel = DataContext as MainWindowViewModel;
+        if (!ReferenceEquals(_boundViewModel, nextViewModel))
+        {
+            if (_boundViewModel is not null)
+                _boundViewModel.PropertyChanged -= OnViewModelPropertyChanged;
 
-        _boundViewModel = DataContext as MainWindowViewModel;
+            _boundViewModel = nextViewModel;
+
+            if (_boundViewModel is not null)
+                _boundViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        }
+
         if (_boundViewModel is null)
         {
             bodyPanel.Children.Clear();
             return;
         }
 
-        _boundViewModel.PropertyChanged += OnViewModelPropertyChanged;
         BuildBody(bodyPanel, _boundViewModel.HelpHelpBody);
     }
 

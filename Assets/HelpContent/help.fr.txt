@@ -174,6 +174,20 @@ Remarque sur « Types de fichiers » :
 
 Ctrl+P — afficher/masquer le panneau.
 
+### 10.1 Profils de paramètres des projets locaux
+Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
+* dossiers de premier niveau sélectionnés ;
+* types de fichiers sélectionnés ;
+* options sélectionnées dans le bloc « Ignorer ».
+
+L’enregistrement est effectué après clic sur « Appliquer ».
+Lors de la réouverture du même dossier local, les paramètres sont restaurés automatiquement.
+
+Important :
+* les profils sont enregistrés uniquement pour les projets locaux ;
+* pour les projets ouverts via Git Clone, les profils ne sont pas enregistrés ;
+* si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués.
+
 ## 11) Ignorer
 La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
 
@@ -306,10 +320,18 @@ Le popover de thème permet :
 
 Les éléments [Beta] peuvent évoluer entre versions.
 
-## 15) Aide → À propos
-Ouvre un popover avec les infos de l’app et un lien vers le dépôt.
+## 15) Aide
+
+### 15.1 Réinitialiser les paramètres
 Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) réinitialise uniquement les paramètres visuels de l’interface (thème, effets, mode compact, animation de l'arborescence) et ne modifie pas les données du projet.
-* Esc — fermer le popover
+
+### 15.2 Réinitialiser les données
+Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
+* dossiers de premier niveau sélectionnés ;
+* types de fichiers sélectionnés ;
+* options sélectionnées dans le bloc « Ignorer ».
+
+Les fichiers et dossiers des projets sur le disque ne sont ni modifiés ni supprimés.
 
 ## 16) Langues
 La langue se choisit via le menu Langue.

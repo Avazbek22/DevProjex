@@ -174,6 +174,20 @@ Nota su « Tipi di file »:
 
 Ctrl+P — mostra/nascondi pannello.
 
+### 10.1 Profili dei parametri dei progetti locali
+Per le cartelle locali, DevProjex memorizza gli ultimi parametri di progetto applicati:
+* cartelle di primo livello selezionate;
+* tipi di file selezionati;
+* opzioni selezionate nel blocco «Ignora».
+
+Il salvataggio avviene quando fai clic su «Applica».
+Quando si riapre la stessa cartella locale, i parametri vengono ripristinati automaticamente.
+
+Importante:
+* i profili vengono salvati solo per i progetti locali;
+* per i progetti aperti tramite Git Clone, i profili non vengono salvati;
+* se alcune opzioni salvate non sono più disponibili nel progetto corrente, vengono ignorate e gli altri parametri vengono applicati.
+
 ## 11) Ignora
 L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
 
@@ -306,10 +320,18 @@ Il popover del tema permette di scegliere:
 
 Gli elementi [Beta] possono cambiare tra versioni.
 
-## 15) Aiuto → Informazioni
-Apre un popover con info app e link al repository.
-Reimposta impostazioni (Aiuto → Reimposta impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
-* Esc — chiudi popover
+## 15) Aiuto
+
+### 15.1 Ripristina impostazioni
+Ripristina impostazioni (Aiuto → Ripristina impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
+
+### 15.2 Ripristina dati
+Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
+* cartelle di primo livello selezionate;
+* tipi di file selezionati;
+* opzioni selezionate nel blocco «Ignora».
+
+File e cartelle dei progetti sul disco non vengono modificati né eliminati.
 
 ## 16) Lingue
 La lingua si seleziona dal menu Lingua.
