@@ -1,5 +1,3 @@
-using DevProjex.Infrastructure.ResourceStore;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class ResourceStoreTests

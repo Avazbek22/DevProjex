@@ -1,5 +1,3 @@
-using DevProjex.Infrastructure.Elevation;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class ElevationServiceTests

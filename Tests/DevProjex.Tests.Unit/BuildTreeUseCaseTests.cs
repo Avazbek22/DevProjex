@@ -1,8 +1,4 @@
-﻿using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
-using DevProjex.Tests.Unit.Helpers;
-
-namespace DevProjex.Tests.Unit;
+﻿namespace DevProjex.Tests.Unit;
 
 public sealed class BuildTreeUseCaseTests
 {

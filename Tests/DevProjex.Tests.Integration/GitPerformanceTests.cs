@@ -1,7 +1,3 @@
-using System.Diagnostics;
-using DevProjex.Infrastructure.Git;
-using DevProjex.Tests.Integration.Helpers;
-
 namespace DevProjex.Tests.Integration;
 
 /// <summary>

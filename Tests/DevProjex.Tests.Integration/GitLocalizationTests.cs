@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace DevProjex.Tests.Integration;
 
 /// <summary>

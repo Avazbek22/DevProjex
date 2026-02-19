@@ -1,4 +1,3 @@
-using System.Globalization;
 using Avalonia.Controls;
 using DevProjex.Avalonia.Converters;
 

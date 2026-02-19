@@ -1,5 +1,3 @@
-using System.Reflection;
-using DevProjex.Avalonia.Coordinators;
 using DebounceTimer = System.Timers.Timer;
 
 namespace DevProjex.Tests.Unit.Avalonia;

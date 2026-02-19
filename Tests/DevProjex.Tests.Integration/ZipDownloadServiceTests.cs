@@ -1,5 +1,3 @@
-using DevProjex.Infrastructure.Git;
-
 namespace DevProjex.Tests.Integration;
 
 /// <summary>

@@ -1,9 +1,4 @@
-﻿using DevProjex.Application.Services;
-using DevProjex.Avalonia.ViewModels;
-using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Tests.Unit.Helpers;
-
-namespace DevProjex.Tests.Unit.Avalonia;
+﻿namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowViewModelTests
 {

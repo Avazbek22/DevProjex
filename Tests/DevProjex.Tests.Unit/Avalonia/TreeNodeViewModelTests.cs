@@ -1,5 +1,3 @@
-using DevProjex.Avalonia.ViewModels;
-
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class TreeNodeViewModelTests

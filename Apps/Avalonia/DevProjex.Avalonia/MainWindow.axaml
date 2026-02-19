@@ -225,6 +225,7 @@
                           AboutOpenLinkRequested="OnAboutOpenLink"
                           AboutCopyLinkRequested="OnAboutCopyLink"
                           ResetSettingsRequested="OnResetSettings"
+                          ResetDataRequested="OnResetData"
                           SetLightThemeRequested="OnSetLightThemeCheckbox"
                           SetDarkThemeRequested="OnSetDarkThemeCheckbox"
                           SetTransparentModeRequested="OnSetTransparentMode"

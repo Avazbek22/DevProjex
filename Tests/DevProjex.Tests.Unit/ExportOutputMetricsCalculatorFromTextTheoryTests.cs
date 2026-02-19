@@ -1,5 +1,3 @@
-using DevProjex.Application.Services;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class ExportOutputMetricsCalculatorFromTextTheoryTests

@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class LocalizationExportMenuKeysTests

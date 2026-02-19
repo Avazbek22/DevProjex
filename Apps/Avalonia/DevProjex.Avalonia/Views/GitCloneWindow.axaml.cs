@@ -1,5 +1,3 @@
-using Avalonia.Markup.Xaml;
-
 namespace DevProjex.Avalonia.Views;
 
 public partial class GitCloneWindow : Window

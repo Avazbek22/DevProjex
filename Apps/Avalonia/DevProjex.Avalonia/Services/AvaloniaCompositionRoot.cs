@@ -1,13 +1,9 @@
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.Elevation;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.Git;
-using DevProjex.Infrastructure.ResourceStore;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
-using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -50,6 +46,7 @@ public static class AvaloniaCompositionRoot
         var toastService = new ToastService();
         var elevation = new ElevationService();
         var themePresetStore = new ThemePresetStore();
+        var projectProfileStore = new ProjectProfileStore();
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();
@@ -58,6 +55,7 @@ public static class AvaloniaCompositionRoot
             Localization: localization,
             HelpContentProvider: helpContentProvider,
             ThemePresetStore: themePresetStore,
+            ProjectProfileStore: projectProfileStore,
             Elevation: elevation,
             ScanOptionsUseCase: scanOptionsUseCase,
             BuildTreeUseCase: buildTreeUseCase,

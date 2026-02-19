@@ -174,6 +174,20 @@ Har bir ro‘yxatda Barchasi tugmasi bor.
 
 Ctrl+P — panelni ko‘rsatish/yashirish.
 
+### 10.1 Mahalliy loyiha parametr profillari
+Mahalliy jildlar uchun DevProjex loyihaning oxirgi qo‘llangan parametrlarini eslab qoladi:
+* tanlangan yuqori darajadagi jildlar;
+* tanlangan fayl turlari;
+* «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
+
+Saqlash «Sozlamalarni qo‘llash» tugmasi bosilganda bajariladi.
+Xuddi shu mahalliy jild qayta ochilganda parametrlar avtomatik tiklanadi.
+
+Muhim:
+* profillar faqat mahalliy loyihalar uchun saqlanadi;
+* Git Clone orqali ochilgan loyihalar uchun profillar saqlanmaydi;
+* agar joriy loyihada saqlangan ayrim bandlar endi mavjud bo‘lmasa, ular o‘tkazib yuboriladi, qolgan parametrlar qo‘llanadi.
+
 ## 11) Ignorlash
 "Ignorlash" roʻyxati joriy yoʻl va tanlangan yuqori darajadagi papkalar asosida avtomatik shakllanadi.
 
@@ -306,10 +320,18 @@ Tema popoveri quyilarni almashtiradi:
 
 [Beta] belgilari versiyalar oralig‘ida o‘zgarishi mumkin.
 
-## 15) Yordam → Dastur haqida
-Ilova ma’lumoti va repozitoriy havolasi bilan popover ochadi.
+## 15) Yordam
+
+### 15.1 Sozlamalarni tiklash
 Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) faqat interfeysning vizual sozlamalarini tiklaydi (tema, effektlar, ixcham rejim, daraxt animatsiyasi) va loyiha ma’lumotlarini o‘zgartirmaydi.
-* Esc — popoverni yopish
+
+### 15.2 Ma’lumotlarni tiklash
+Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:
+* tanlangan yuqori darajadagi jildlar;
+* tanlangan fayl turlari;
+* «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
+
+Diskdagi loyiha fayllari va jildlari o‘zgartirilmaydi va o‘chirilmaydi.
 
 ## 16) Tillar
 Til menyusi orqali tanlanadi.

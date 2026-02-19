@@ -23,10 +23,11 @@ public sealed class FilterOptionSelectionService
 	public IReadOnlyList<SelectionOption> BuildRootFolderOptions(
 		IEnumerable<string> rootFolders,
 		IReadOnlySet<string> previousSelections,
-		IgnoreRules ignoreRules)
+		IgnoreRules ignoreRules,
+		bool hasPreviousSelections = false)
 	{
 		var list = new List<SelectionOption>();
-		bool hasPrevious = previousSelections.Count > 0;
+		bool hasPrevious = hasPreviousSelections || previousSelections.Count > 0;
 
 		foreach (var name in rootFolders)
 		{

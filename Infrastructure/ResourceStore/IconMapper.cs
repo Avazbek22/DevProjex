@@ -1,6 +1,3 @@
-using System.Text.Json;
-using DevProjex.Assets;
-
 namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class IconMapper : IIconMapper

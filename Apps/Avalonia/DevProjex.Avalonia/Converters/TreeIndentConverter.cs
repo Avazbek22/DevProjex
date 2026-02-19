@@ -1,6 +1,3 @@
-using System.Globalization;
-using Avalonia.Data.Converters;
-
 namespace DevProjex.Avalonia.Converters;
 
 public sealed class TreeIndentConverter : IValueConverter

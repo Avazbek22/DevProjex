@@ -1,5 +1,4 @@
 using Avalonia.Media.Imaging;
-using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Avalonia.Services;
 

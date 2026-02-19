@@ -1,7 +1,3 @@
-using System.Reflection;
-using DevProjex.Avalonia;
-using DevProjex.Avalonia.ViewModels;
-
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowPreviewInternalsTests

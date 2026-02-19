@@ -1,6 +1,4 @@
-﻿using DevProjex.Avalonia.ViewModels;
-
-namespace DevProjex.Tests.Unit.Avalonia;
+﻿namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class OptionViewModelTests
 {

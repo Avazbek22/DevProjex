@@ -1,9 +1,3 @@
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using DevProjex.Application.Services;
-using DevProjex.Infrastructure.ResourceStore;
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Avalonia.ViewModels;
 
 /// <summary>
@@ -922,6 +916,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuHelpHelp { get; private set; } = string.Empty;
     public string MenuHelpAbout { get; private set; } = string.Empty;
     public string MenuHelpResetSettings { get; private set; } = string.Empty;
+    public string MenuHelpResetData { get; private set; } = string.Empty;
     public string HelpHelpTitle { get; private set; } = string.Empty;
     public string HelpHelpBody { get; private set; } = string.Empty;
     public string HelpAboutTitle { get; private set; } = string.Empty;
@@ -1045,6 +1040,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuHelpHelp = _localization["Menu.Help.Help"];
         MenuHelpAbout = _localization["Menu.Help.About"];
         MenuHelpResetSettings = _localization["Menu.Help.ResetSettings"];
+        MenuHelpResetData = _localization["Menu.Help.ResetData"];
         HelpHelpTitle = _localization["Help.Help.Title"];
         HelpHelpBody = _helpContentProvider.GetHelpBody(_localization.CurrentLanguage);
         HelpAboutTitle = _localization["Help.About.Title"];
@@ -1166,6 +1162,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuHelpHelp));
         RaisePropertyChanged(nameof(MenuHelpAbout));
         RaisePropertyChanged(nameof(MenuHelpResetSettings));
+        RaisePropertyChanged(nameof(MenuHelpResetData));
         RaisePropertyChanged(nameof(HelpHelpTitle));
         RaisePropertyChanged(nameof(HelpHelpBody));
         RaisePropertyChanged(nameof(HelpAboutTitle));

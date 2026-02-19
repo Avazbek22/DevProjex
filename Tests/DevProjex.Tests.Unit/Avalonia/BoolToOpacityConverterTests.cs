@@ -1,4 +1,3 @@
-using System.Globalization;
 using DevProjex.Avalonia.Converters;
 
 namespace DevProjex.Tests.Unit.Avalonia;

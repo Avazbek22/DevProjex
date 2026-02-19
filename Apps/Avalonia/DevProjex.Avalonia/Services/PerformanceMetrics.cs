@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace DevProjex.Avalonia.Services;
 
 /// <summary>

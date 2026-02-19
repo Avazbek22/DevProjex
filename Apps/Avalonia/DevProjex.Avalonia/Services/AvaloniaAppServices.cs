@@ -1,8 +1,4 @@
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
-using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Infrastructure.ThemePresets;
-using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -10,6 +6,7 @@ public sealed record AvaloniaAppServices(
     LocalizationService Localization,
     HelpContentProvider HelpContentProvider,
     ThemePresetStore ThemePresetStore,
+    IProjectProfileStore ProjectProfileStore,
     IElevationService Elevation,
     ScanOptionsUseCase ScanOptionsUseCase,
     BuildTreeUseCase BuildTreeUseCase,

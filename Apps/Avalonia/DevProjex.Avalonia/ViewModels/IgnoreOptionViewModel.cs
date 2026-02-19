@@ -1,5 +1,3 @@
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Avalonia.ViewModels;
 
 public sealed class IgnoreOptionViewModel : ViewModelBase

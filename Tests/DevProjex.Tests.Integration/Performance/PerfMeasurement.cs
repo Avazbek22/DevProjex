@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace DevProjex.Tests.Integration.Performance;
 
 internal readonly record struct PerfMeasurement(

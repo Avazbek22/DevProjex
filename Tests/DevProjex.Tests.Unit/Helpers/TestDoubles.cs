@@ -1,5 +1,3 @@
-using DevProjex.Kernel.Abstractions;
-
 namespace DevProjex.Tests.Unit.Helpers;
 
 internal sealed class StubLocalizationCatalog : ILocalizationCatalog
