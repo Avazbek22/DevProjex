@@ -2592,15 +2592,41 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void OnResetSettings(object? sender, RoutedEventArgs e)
+    private async void OnResetSettings(object? sender, RoutedEventArgs e)
     {
+        var confirmed = await MessageDialog.ShowConfirmationAsync(
+            this,
+            _localization["Dialog.ResetSettings.Title"],
+            _localization["Dialog.ResetSettings.Message"],
+            _localization["Dialog.ResetSettings.Confirm"],
+            _localization["Dialog.Cancel"]);
+
+        if (!confirmed)
+        {
+            e.Handled = true;
+            return;
+        }
+
         ResetThemeSettings();
         _toastService.Show(_localization["Toast.Settings.Reset"]);
         e.Handled = true;
     }
 
-    private void OnResetData(object? sender, RoutedEventArgs e)
+    private async void OnResetData(object? sender, RoutedEventArgs e)
     {
+        var confirmed = await MessageDialog.ShowConfirmationAsync(
+            this,
+            _localization["Dialog.ResetData.Title"],
+            _localization["Dialog.ResetData.Message"],
+            _localization["Dialog.ResetData.Confirm"],
+            _localization["Dialog.Cancel"]);
+
+        if (!confirmed)
+        {
+            e.Handled = true;
+            return;
+        }
+
         _projectProfileStore.ClearAllProfiles();
         _toastService.Show(_localization["Toast.Data.Reset"]);
         e.Handled = true;
