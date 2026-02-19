@@ -20,6 +20,11 @@ It’s designed for real projects where CLI output is noisy, IDE tools are unava
 
 Older versions are available on the Releases page.
 
+**Install via WinGet (Windows):**
+```powershell
+winget install OlimoffDev.DevProjex
+```
+
 ---
 
 ## App Screenshots 🖼️
