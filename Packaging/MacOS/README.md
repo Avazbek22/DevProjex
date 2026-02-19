@@ -66,6 +66,8 @@ dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj \
     -c Release \
     -r osx-x64 \
     --self-contained true \
+    /p:PublishSingleFile=true \
+    /p:PublishTrimmed=false \
     -o ./publish/macos
 
 # Create app bundle structure
@@ -91,11 +93,11 @@ cat > "DevProjex.app/Contents/Info.plist" << 'EOF'
     <key>CFBundleIdentifier</key>
     <string>com.devprojex.app</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>4.6.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>4.6.0</string>
     <key>CFBundleExecutable</key>
-    <string>DevProjex.Avalonia</string>
+    <string>DevProjex</string>
     <key>CFBundleIconFile</key>
     <string>app.icns</string>
     <key>CFBundlePackageType</key>

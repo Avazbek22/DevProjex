@@ -211,6 +211,9 @@ DocProject/Help/html
 
 # Click-Once directory
 publish/
+.release-cache/
+.ai/
+*.DotSettings.user.bak*
 
 # Publish Web Output
 *.[Pp]ublish.xml
