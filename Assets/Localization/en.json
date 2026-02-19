@@ -77,7 +77,7 @@
   "Menu.Help.ResetData": "Reset data",
   "Help.Help.Title": "Help",
   "Help.About.Title": "About",
-  "Help.About.Body": "DevProjex is a tool for quickly preparing project context: visualize the structure, select the needed files, and copy the tree or contents to the clipboard. This is convenient for code analysis, code review, learning, and working with AI assistants when it is important to convey the project structure quickly and accurately.\n\nThe application operates only in read-only mode and does not modify files.\n\nDevProjex is a source-available project. The source code is open for study and use; architectural suggestions and improvements (PRs) are welcome as part of the project's development.\n\nStack: .NET 10 · Avalonia UI\nDeveloper: Avazbek Olimov\nCopyright © 2025–2026 Avazbek Olimov",
+  "Help.About.Body": "DevProjex is a tool for quickly preparing project context: visualize the structure, select the needed files, and copy the tree or contents to the clipboard. This is convenient for code analysis, code review, learning, and working with AI assistants when it is important to convey the project structure quickly and accurately.\n\nThe application operates only in read-only mode and does not modify files.\n\nDevProjex is an open-source project licensed under GPL-3.0. The source code is open for study and modification; architectural suggestions and improvements (PRs) are welcome as part of the project's development.\n\nStack: .NET 10 · Avalonia UI\nDeveloper: Avazbek Olimov\nCopyright © 2025–2026 Avazbek Olimov",
   "Help.About.OpenLink": "Open GitHub repository",
   "Help.About.CopyLink": "Copy link",
   "Dialog.SelectRoot": "Select the project root folder",

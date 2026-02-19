@@ -128,11 +128,7 @@ See `CONTRIBUTING.md` for details.
 
 ## License 📄
 
-DevProjex is **source-available** under the **Business Source License (BSL) 1.1**.
-
-* Free for non-commercial use
-* Commercial use restricted until **2030-01-01**
-* Automatically converts to **MIT** on that date
+DevProjex is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
 See `LICENSE` for details.
 
@@ -140,4 +136,4 @@ See `LICENSE` for details.
 
 ## Keywords 🔎
 
-project tree viewer, folder structure, context builder, AI prompt preparation, clipboard export, avalonia ui, .net 10, cross-platform desktop app, repository visualization, developer tools
+project tree viewer, folder structure, context builder, AI prompt preparation, llm, clipboard export, avalonia ui, .net 10, cross-platform desktop app, repository visualization, developer tools

@@ -77,7 +77,7 @@
   "Menu.Help.ResetData": "Ma'lumotlarni tiklash",
   "Help.Help.Title": "Yordam",
   "Help.About.Title": "Dastur haqida",
-  "Help.About.Body": "DevProjex — loyiha kontekstini tez tayyorlash uchun vosita: tuzilmani vizuallashtirish, kerakli fayllarni tanlash va daraxt yoki kontentni buferga nusxalash. Bu kodni tahlil qilish, code review, o‘qish va AI-assistentlar bilan ishlashda, loyiha tuzilmasini tez va aniq yetkazish muhim bo‘lganda, juda qulay.\n\nIlova faqat o‘qish (read-only) rejimida ishlaydi va fayllarga o‘zgartirish kiritmaydi.\n\nDevProjex — source-available loyiha. Manba kodi o‘rganish va foydalanish uchun ochiq; arxitektura bo‘yicha takliflar va yaxshilanishlar (PR) loyiha rivojida mamnuniyat bilan qabul qilinadi.\n\nStek: .NET 10 · Avalonia UI\nDasturchi: Avazbek Olimov\nCopyright © 2025–2026 Avazbek Olimov",
+  "Help.About.Body": "DevProjex — loyiha kontekstini tez tayyorlash uchun vosita: tuzilmani vizuallashtirish, kerakli fayllarni tanlash va daraxt yoki kontentni buferga nusxalash. Bu kodni tahlil qilish, code review, o‘qish va AI-assistentlar bilan ishlashda, loyiha tuzilmasini tez va aniq yetkazish muhim bo‘lganda, juda qulay.\n\nIlova faqat o‘qish (read-only) rejimida ishlaydi va fayllarga o‘zgartirish kiritmaydi.\n\nDevProjex — GPL-3.0 litsenziyasi ostidagi open-source loyiha. Manba kodi o‘rganish va o‘zgartirish uchun ochiq; arxitektura bo‘yicha takliflar va yaxshilanishlar (PR) loyiha rivojida mamnuniyat bilan qabul qilinadi.\n\nStek: .NET 10 · Avalonia UI\nDasturchi: Avazbek Olimov\nCopyright © 2025–2026 Avazbek Olimov",
   "Help.About.OpenLink": "GitHub-repozitoriyini ochish",
   "Help.About.CopyLink": "Havolani nusxalash",
   "Dialog.SelectRoot": "Loyiha ildiz jildini tanlang",
