@@ -174,33 +174,317 @@ function Create-IsolatedWorkspace([string]$sourceRoot) {
     }
 }
 
-function Invoke-IsolatedScript([string]$relativeScriptPath, [hashtable]$arguments) {
-    $scriptPath = Join-Path $script:IsolatedRepoRoot $relativeScriptPath
-    if (-not (Test-Path $scriptPath)) {
-        throw "Isolated script not found: $scriptPath"
+function Build-GitHubArtifactsInWorkspace([string]$version, [string]$configuration) {
+    $projectPath = Join-Path $script:IsolatedRepoRoot "Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj"
+    if (-not (Test-Path $projectPath)) {
+        throw "Avalonia project not found in isolated workspace: $projectPath"
     }
 
-    $psExe = Join-Path $PSHOME "powershell.exe"
-    if (-not (Test-Path $psExe)) {
-        $psExe = "powershell"
+    $releaseDir = Join-Path $script:IsolatedRepoRoot "publish\github\v$version"
+    $workDir = Join-Path $releaseDir "_work"
+
+    $targets = @(
+        @{ Rid = "win-x64"; Binary = "DevProjex.exe"; Name = "DevProjex.v$version.win-x64.exe" },
+        @{ Rid = "win-arm64"; Binary = "DevProjex.exe"; Name = "DevProjex.v$version.win-arm64.exe" },
+        @{ Rid = "linux-x64"; Binary = "DevProjex"; Name = "DevProjex.v$version.linux-x64.portable" },
+        @{ Rid = "linux-arm64"; Binary = "DevProjex"; Name = "DevProjex.v$version.linux-arm64.portable" },
+        @{ Rid = "osx-x64"; Binary = "DevProjex"; Name = "DevProjex.v$version.osx-x64" },
+        @{ Rid = "osx-arm64"; Binary = "DevProjex"; Name = "DevProjex.v$version.osx-arm64" }
+    )
+
+    if (Test-Path $releaseDir) {
+        Remove-Item -Path $releaseDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    $argList = New-Object System.Collections.Generic.List[string]
-    $argList.Add("-NoProfile")
-    $argList.Add("-ExecutionPolicy")
-    $argList.Add("Bypass")
-    $argList.Add("-File")
-    $argList.Add($scriptPath)
+    New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
-    foreach ($key in $arguments.Keys) {
-        $argList.Add("-$key")
-        $argList.Add([string]$arguments[$key])
+    Write-Host "Preparing GitHub release artifacts..."
+    Write-Host "  Version: $version"
+    Write-Host "  Configuration: $configuration"
+    Write-Host "  Output: $releaseDir"
+
+    Write-Host "Restoring project..."
+    Invoke-ExternalCommand -filePath "dotnet" -arguments @("restore", $projectPath) -failureMessage "dotnet restore failed for GitHub artifacts" -workingDirectory $script:IsolatedRepoRoot
+
+    foreach ($target in $targets) {
+        $rid = [string]$target.Rid
+        $ridOutDir = Join-Path $workDir $rid
+
+        Write-Host "Publishing $rid..."
+        $publishArgs = @(
+            "publish", $projectPath,
+            "-c", $configuration,
+            "-r", $rid,
+            "--self-contained", "true",
+            "/p:PublishSingleFile=true",
+            "/p:IncludeNativeLibrariesForSelfExtract=true",
+            "/p:PublishTrimmed=false",
+            "/p:DebugType=None",
+            "/p:DebugSymbols=false",
+            "-o", $ridOutDir
+        )
+
+        Invoke-ExternalCommand -filePath "dotnet" -arguments $publishArgs -failureMessage "dotnet publish failed for RID: $rid" -workingDirectory $script:IsolatedRepoRoot
+
+        $sourcePath = Join-Path $ridOutDir ([string]$target.Binary)
+        if (-not (Test-Path $sourcePath)) {
+            throw "Single-file artifact not found: $sourcePath"
+        }
+
+        $destinationPath = Join-Path $releaseDir ([string]$target.Name)
+        Copy-Item -Path $sourcePath -Destination $destinationPath -Force
     }
 
-    Invoke-ExternalCommand -filePath $psExe -arguments $argList -failureMessage "Script failed: $relativeScriptPath" -workingDirectory $script:IsolatedRepoRoot
+    $shaFile = Join-Path $releaseDir "SHA256SUMS.txt"
+    $hashLines = @()
+    Get-ChildItem -Path $releaseDir -File |
+        Where-Object { $_.Name -ne "SHA256SUMS.txt" } |
+        Sort-Object Name |
+        ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant()
+            $hashLines += "$hash *$($_.Name)"
+        }
+
+    Set-Content -Path $shaFile -Value $hashLines -Encoding UTF8
+
+    if (Test-Path $workDir) {
+        Remove-Item -Path $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host ""
+    Write-Host "GitHub release artifacts are ready:"
+    Get-ChildItem -Path $releaseDir -File |
+        Sort-Object Name |
+        ForEach-Object {
+            Write-Host "  $($_.Name)"
+        }
 }
 
-function Get-LatestStoreArtifactPath() {
+function Get-LatestVisualStudioInstancePath() {
+    $vswherePath = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vswherePath)) {
+        return $null
+    }
+
+    try {
+        $json = & $vswherePath -latest -format json -requires Microsoft.Component.MSBuild 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
+            return $null
+        }
+
+        $instances = $json | ConvertFrom-Json
+        if ($null -eq $instances) {
+            return $null
+        }
+
+        if ($instances -is [array]) {
+            if ($instances.Length -eq 0) {
+                return $null
+            }
+
+            return [string]$instances[0].installationPath
+        }
+
+        return [string]$instances.installationPath
+    }
+    catch {
+        return $null
+    }
+}
+
+function Build-StoreArtifactsInWorkspace(
+    [string]$configuration,
+    [string]$platform,
+    [string]$bundlePlatforms,
+    [string]$packageVersion
+) {
+    $project = Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\DevProjex.Store.wapproj"
+    $manifestPath = Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\Package.appxmanifest"
+    $listingCsvPath = Join-Path $script:IsolatedRepoRoot "Packaging\Windows\StoreListing\listing.csv"
+
+    Write-Host "Building MSIX bundle..."
+    Write-Host "  Project: Packaging\Windows\DevProjex.Store\DevProjex.Store.wapproj"
+    Write-Host "  Configuration: $configuration"
+    Write-Host "  Platform: $platform"
+    Write-Host "  Bundle platforms: $bundlePlatforms"
+    if (-not [string]::IsNullOrWhiteSpace($packageVersion)) {
+        Write-Host "  Package version override: $packageVersion"
+    }
+
+    Write-Host "Cleaning stale packaging artifacts..."
+    $cleanupPaths = @(
+        (Join-Path $script:IsolatedRepoRoot "publish\store"),
+        (Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\publish\store"),
+        (Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\BundleArtifacts"),
+        (Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\bin"),
+        (Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\obj")
+    )
+    foreach ($cleanupPath in $cleanupPaths) {
+        if (Test-Path $cleanupPath) {
+            Remove-Item -Path $cleanupPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $vsInstancePath = Get-LatestVisualStudioInstancePath
+    $desktopBridgeTargets = @(
+        $(if (-not [string]::IsNullOrWhiteSpace($vsInstancePath)) { Join-Path $vsInstancePath "MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets" }),
+        "C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "C:\BuildTools\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "C:\Program Files (x86)\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "$env:ProgramFiles\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "$env:ProgramFiles\Microsoft Visual Studio\18\Professional\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "$env:ProgramFiles(x86)\MSBuild\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets",
+        "$env:ProgramFiles(x86)\Windows Kits\10\DesignTime\CommonConfiguration\Neutral\Microsoft.DesktopBridge.targets"
+    )
+
+    $desktopBridgeAvailable = $desktopBridgeTargets | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($null -eq $desktopBridgeAvailable) {
+        throw "Microsoft.DesktopBridge targets not found. Install Visual Studio Build Tools + Windows SDK."
+    }
+
+    $msbuildCandidates = @(
+        $(if (-not [string]::IsNullOrWhiteSpace($vsInstancePath)) { Join-Path $vsInstancePath "MSBuild\Current\Bin\MSBuild.exe" }),
+        "C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\BuildTools18\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+        "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+        "$env:ProgramFiles(x86)\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "$env:ProgramFiles\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    $msbuildExe = $msbuildCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($null -eq $msbuildExe) {
+        throw "MSBuild.exe not found. Install Visual Studio Build Tools."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($packageVersion)) {
+        if ($packageVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+            throw "Invalid PackageVersion '$packageVersion'. Expected format: Major.Minor.Build.Revision"
+        }
+
+        [xml]$manifestForUpdate = Get-Content -Path $manifestPath
+        $manifestForUpdate.Package.Identity.Version = $packageVersion
+        $manifestForUpdate.Save($manifestPath)
+        Write-Host "Updated Package.appxmanifest version to $packageVersion"
+    }
+
+    $avaloniaProjectPath = Join-Path $script:IsolatedRepoRoot "Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj"
+    Write-Host "Restoring packages..."
+    Invoke-ExternalCommand -filePath "dotnet" -arguments @("restore", $avaloniaProjectPath, "/p:Configuration=$configuration") -failureMessage "dotnet restore failed for store build" -workingDirectory $script:IsolatedRepoRoot
+
+    $publishStoreDir = Join-Path $script:IsolatedRepoRoot "publish\store"
+    New-Item -ItemType Directory -Force -Path $publishStoreDir | Out-Null
+    $buildLogRelative = "publish\store\msix-build.log"
+
+    $bundleMode = if ($bundlePlatforms -like "*|*") { "Always" } else { "Never" }
+    $msbuildArgs = @(
+        $project,
+        "/p:Configuration=$configuration",
+        "/p:Platform=$platform",
+        "/p:AppxBundle=$bundleMode",
+        "/p:AppxBundlePlatforms=$bundlePlatforms",
+        "/p:UapAppxPackageBuildMode=StoreUpload",
+        "/p:AppxPackageDir=publish\store\",
+        "/flp:logfile=$buildLogRelative;verbosity=normal"
+    )
+    Invoke-ExternalCommand -filePath $msbuildExe -arguments $msbuildArgs -failureMessage "MSIX build failed" -workingDirectory $script:IsolatedRepoRoot
+
+    $objRoot = Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\obj"
+    if (Test-Path $objRoot) {
+        $bundleToken = $bundlePlatforms -replace '\|', '_'
+        $bundlePattern = "*_${bundleToken}_bundle_${configuration}.msixbundle"
+        $platformMsixPattern = "*_${platform}_${configuration}.msix"
+
+        $bundleCandidate = Get-ChildItem -Path $objRoot -Recurse -File -Filter $bundlePattern -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+        if ($null -ne $bundleCandidate) {
+            Copy-Item -Path $bundleCandidate.FullName -Destination (Join-Path $publishStoreDir $bundleCandidate.Name) -Force
+        }
+
+        $platformMsixCandidate = Get-ChildItem -Path $objRoot -Recurse -File -Filter $platformMsixPattern -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+        if ($null -ne $platformMsixCandidate) {
+            Copy-Item -Path $platformMsixCandidate.FullName -Destination (Join-Path $publishStoreDir $platformMsixCandidate.Name) -Force
+        }
+    }
+
+    [xml]$manifest = Get-Content -Path $manifestPath
+    $identity = $manifest.Package.Identity
+    $publisherDisplay = $manifest.Package.Properties.PublisherDisplayName
+
+    $stringsRoot = Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\Strings"
+    $stringsFolders = @()
+    if (Test-Path $stringsRoot) {
+        $stringsFolders = Get-ChildItem -Path $stringsRoot -Directory | Select-Object -ExpandProperty Name
+    }
+
+    $missingResources = New-Object System.Collections.Generic.List[string]
+    foreach ($resource in $manifest.Package.Resources.Resource) {
+        $language = [string]$resource.Language
+        $hasFolder = $false
+        foreach ($folder in $stringsFolders) {
+            if ($folder.Equals($language, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $hasFolder = $true
+                break
+            }
+        }
+
+        if (-not $hasFolder) {
+            $missingResources.Add($language)
+        }
+    }
+
+    if ($missingResources.Count -gt 0) {
+        throw "Missing Store language resources in '$stringsRoot' for: $($missingResources -join ', ')"
+    }
+
+    if (Test-Path $listingCsvPath) {
+        $listingHeaders = (Get-Content -Path $listingCsvPath -First 1) -split ','
+        if (($listingHeaders -notcontains 'en-us') -or ($listingHeaders -notcontains 'ru-ru')) {
+            throw "Store listing CSV must include 'en-us' and 'ru-ru' columns: $listingCsvPath"
+        }
+    }
+    else {
+        Write-Warning "Store listing CSV not found: $listingCsvPath"
+    }
+
+    $artifacts = @(
+        Get-ChildItem -Path $publishStoreDir -Recurse -File -Include *.msixupload,*.msixbundle,*.msix -ErrorAction SilentlyContinue
+        Get-ChildItem -Path (Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\publish\store") -Recurse -File -Include *.msixupload,*.msixbundle,*.msix -ErrorAction SilentlyContinue
+    ) | Sort-Object LastWriteTime -Descending
+
+    if ($null -eq $artifacts -or $artifacts.Count -eq 0) {
+        throw "Store artifact (.msixupload/.msixbundle/.msix) not found in publish\store or Packaging\Windows\DevProjex.Store\publish\store"
+    }
+
+    Write-Host ""
+    Write-Host "Build output:"
+    ($artifacts |
+        Sort-Object Name -Unique |
+        ForEach-Object {
+            Write-Host "  Artifact: $($_.FullName)"
+        })
+    Write-Host "  Version: $($identity.Version)"
+    Write-Host "  Identity.Name: $($identity.Name)"
+    Write-Host "  Identity.Publisher: $($identity.Publisher)"
+    Write-Host "  PublisherDisplayName: $publisherDisplay"
+    Write-Host "  Architectures: $bundlePlatforms"
+}
+
+function Get-StoreArtifactPaths() {
     $candidateRoots = @(
         (Join-Path $script:IsolatedRepoRoot "publish\store"),
         (Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\publish\store")
@@ -212,10 +496,19 @@ function Get-LatestStoreArtifactPath() {
             continue
         }
 
-        $artifacts += Get-ChildItem -Path $candidateRoot -Recurse -File -Include *.msixupload -ErrorAction SilentlyContinue
+        $artifacts += Get-ChildItem -Path $candidateRoot -Recurse -File -Include *.msixupload,*.msixbundle,*.msix -ErrorAction SilentlyContinue
     }
 
-    return ($artifacts | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+    if ($null -eq $artifacts -or $artifacts.Count -eq 0) {
+        return @()
+    }
+
+    return @(
+        $artifacts |
+            Sort-Object LastWriteTime -Descending |
+            Group-Object Name |
+            ForEach-Object { $_.Group | Select-Object -First 1 }
+    )
 }
 
 function Publish-ArtifactsToSource([string]$sourceRoot, [string]$version) {
@@ -233,9 +526,9 @@ function Publish-ArtifactsToSource([string]$sourceRoot, [string]$version) {
     New-Item -ItemType Directory -Path $sourceGitHubDir -Force | Out-Null
     Copy-Item -Path (Join-Path $isolatedGitHubDir "*") -Destination $sourceGitHubDir -Recurse -Force
 
-    $latestStoreArtifact = Get-LatestStoreArtifactPath
-    if ($null -eq $latestStoreArtifact) {
-        throw "MS Store artifact (.msixupload) not found in isolated workspace."
+    $storeArtifacts = Get-StoreArtifactPaths
+    if ($null -eq $storeArtifacts -or $storeArtifacts.Count -eq 0) {
+        throw "MS Store artifacts (.msixupload/.msixbundle/.msix) not found in isolated workspace."
     }
 
     $sourceStoreDir = Join-Path $sourceRoot "publish\store\v$version"
@@ -244,7 +537,9 @@ function Publish-ArtifactsToSource([string]$sourceRoot, [string]$version) {
     }
     New-Item -ItemType Directory -Path $sourceStoreDir -Force | Out-Null
 
-    Copy-Item -Path $latestStoreArtifact.FullName -Destination (Join-Path $sourceStoreDir $latestStoreArtifact.Name) -Force
+    foreach ($storeArtifact in $storeArtifacts) {
+        Copy-Item -Path $storeArtifact.FullName -Destination (Join-Path $sourceStoreDir $storeArtifact.Name) -Force
+    }
 
     $isolatedBuildLogPath = Join-Path $script:IsolatedRepoRoot "publish\store\msix-build.log"
     if (Test-Path $isolatedBuildLogPath) {
@@ -280,20 +575,10 @@ try {
     Configure-IsolatedNuGetCache
 
     Write-Step "Building GitHub artifacts in isolated workspace"
-    Invoke-IsolatedScript -relativeScriptPath "Scripts\publish-github.ps1" -arguments @{
-        Version = $resolvedVersion
-        Configuration = "Release"
-        OutputRoot = "publish\github"
-    }
+    Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration "Release"
 
     Write-Step "Building Microsoft Store package in isolated workspace"
-    Invoke-IsolatedScript -relativeScriptPath "Scripts\build-msix.ps1" -arguments @{
-        Configuration = "ReleaseStore"
-        Platform = "x64"
-        BundlePlatforms = "x64|arm64"
-        PackageVersion = $resolvedVersion
-        CleanPackagingArtifacts = 1
-    }
+    Build-StoreArtifactsInWorkspace -configuration "ReleaseStore" -platform "x64" -bundlePlatforms "x64|arm64" -packageVersion $resolvedVersion
 
     $finalPaths = Publish-ArtifactsToSource -sourceRoot $sourceRoot -version $resolvedVersion
 
