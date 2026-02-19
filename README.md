@@ -131,7 +131,7 @@ See `CONTRIBUTING.md` for details.
 
 ---
 
-## License 📄
+## License (GPL-3.0) 📄
 
 DevProjex is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 Copyright (c) 2025-2026 Avazbek Olimov.
