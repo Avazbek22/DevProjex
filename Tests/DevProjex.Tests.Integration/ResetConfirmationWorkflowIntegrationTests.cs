@@ -14,7 +14,10 @@ public sealed class ResetConfirmationWorkflowIntegrationTests
 
 		var body = content.Substring(start, end - start);
 		Assert.Contains("MessageDialog.ShowConfirmationAsync(", body);
-		Assert.Contains("Подтверждение сброса настроек", body);
+		Assert.Contains("_localization[\"Dialog.ResetSettings.Title\"]", body);
+		Assert.Contains("_localization[\"Dialog.ResetSettings.Message\"]", body);
+		Assert.Contains("_localization[\"Dialog.ResetSettings.Confirm\"]", body);
+		Assert.Contains("_localization[\"Dialog.Cancel\"]", body);
 		Assert.Contains("ResetThemeSettings();", body);
 	}
 
@@ -30,7 +33,10 @@ public sealed class ResetConfirmationWorkflowIntegrationTests
 
 		var body = content.Substring(start, end - start);
 		Assert.Contains("MessageDialog.ShowConfirmationAsync(", body);
-		Assert.Contains("Подтверждение сброса данных", body);
+		Assert.Contains("_localization[\"Dialog.ResetData.Title\"]", body);
+		Assert.Contains("_localization[\"Dialog.ResetData.Message\"]", body);
+		Assert.Contains("_localization[\"Dialog.ResetData.Confirm\"]", body);
+		Assert.Contains("_localization[\"Dialog.Cancel\"]", body);
 		Assert.Contains("_projectProfileStore.ClearAllProfiles();", body);
 	}
 
