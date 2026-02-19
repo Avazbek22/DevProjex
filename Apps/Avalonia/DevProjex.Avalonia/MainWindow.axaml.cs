@@ -111,6 +111,7 @@ public partial class MainWindow : Window
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
     private readonly ThemePresetStore _themePresetStore;
+    private readonly IProjectProfileStore _projectProfileStore;
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
@@ -274,6 +275,7 @@ public partial class MainWindow : Window
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
         _themePresetStore = services.ThemePresetStore;
+        _projectProfileStore = services.ProjectProfileStore;
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
@@ -988,7 +990,7 @@ public partial class MainWindow : Window
             cancelAction: () => refreshCts.Cancel());
         try
         {
-            await ReloadProjectAsync(cancellationToken);
+            await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
             CompleteStatusOperation(statusOperationId);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
@@ -2597,6 +2599,13 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void OnResetData(object? sender, RoutedEventArgs e)
+    {
+        _projectProfileStore.ClearAllProfiles();
+        _toastService.Show(_localization["Toast.Data.Reset"]);
+        e.Handled = true;
+    }
+
     /// <summary>
     /// Resets all theme presets to factory defaults and reapplies current selection.
     /// </summary>
@@ -3928,6 +3937,8 @@ public partial class MainWindow : Window
             }
 
             await RefreshTreeAsync();
+            await _selectionCoordinator.WaitForPendingRefreshesAsync();
+            PersistLocalProjectProfileIfNeeded();
         }
         catch (OperationCanceledException)
         {
@@ -3938,6 +3949,38 @@ public partial class MainWindow : Window
             await ShowErrorAsync(ex.Message);
         }
     }
+
+    private void PersistLocalProjectProfileIfNeeded()
+    {
+        if (!IsLocalProjectProfilePersistenceApplicable())
+            return;
+
+        if (string.IsNullOrWhiteSpace(_currentPath))
+            return;
+
+        var profile = new ProjectSelectionProfile(
+            SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders),
+            SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions),
+            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray());
+
+        _projectProfileStore.SaveProfile(_currentPath, profile);
+    }
+
+    private bool TryGetLocalProjectProfile(out ProjectSelectionProfile profile)
+    {
+        profile = new ProjectSelectionProfile(
+            SelectedRootFolders: Array.Empty<string>(),
+            SelectedExtensions: Array.Empty<string>(),
+            SelectedIgnoreOptions: Array.Empty<IgnoreOptionId>());
+
+        if (!IsLocalProjectProfilePersistenceApplicable() || string.IsNullOrWhiteSpace(_currentPath))
+            return false;
+
+        return _projectProfileStore.TryLoadProfile(_currentPath, out profile);
+    }
+
+    private bool IsLocalProjectProfilePersistenceApplicable()
+        => _viewModel.ProjectSourceType == ProjectSourceType.LocalFolder;
 
     private async Task TryOpenFolderAsync(string path, bool fromDialog)
     {
@@ -3996,7 +4039,7 @@ public partial class MainWindow : Window
 
             UpdateTitle();
 
-            await ReloadProjectAsync(cancellationToken);
+            await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
 
             // Clear cached repo path only after the new local project load has completed successfully.
             if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))
@@ -4063,10 +4106,20 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private async Task ReloadProjectAsync(CancellationToken cancellationToken = default)
+    private async Task ReloadProjectAsync(
+        CancellationToken cancellationToken = default,
+        bool applyStoredProfile = false)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (applyStoredProfile)
+        {
+            if (TryGetLocalProjectProfile(out var profile))
+                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profile);
+            else
+                _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
+        }
 
         // Keep root/extension scans sequenced to avoid inconsistent UI states.
         await _selectionCoordinator.RefreshRootAndDependentsAsync(_currentPath, cancellationToken);

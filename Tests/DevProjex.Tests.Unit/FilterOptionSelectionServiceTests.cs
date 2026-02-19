@@ -206,6 +206,26 @@ public sealed class FilterOptionSelectionServiceTests
 		Assert.False(options.Single(o => o.Name == ".git").IsChecked);
 		Assert.True(options.Single(o => o.Name == "src").IsChecked);
 	}
+
+	[Fact]
+	public void BuildRootFolderOptions_ExplicitEmptyPreviousSelections_DisablesDefaultChecks()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(),
+			SmartIgnoredFiles: new HashSet<string>());
+
+		var options = service.BuildRootFolderOptions(
+			new[] { "src", "tests" },
+			new HashSet<string>(),
+			rules,
+			hasPreviousSelections: true);
+
+		Assert.All(options, option => Assert.False(option.IsChecked));
+	}
 }
 
 

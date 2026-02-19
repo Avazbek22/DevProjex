@@ -19,7 +19,8 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Git.NoUpdates",
 		"Toast.Git.BranchSwitched",
 		"Toast.Refresh.Success",
-		"Toast.Settings.Reset"
+		"Toast.Settings.Reset",
+		"Toast.Data.Reset"
 	};
 
 	[Fact]

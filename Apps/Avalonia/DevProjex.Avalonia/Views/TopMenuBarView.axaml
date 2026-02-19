@@ -69,6 +69,7 @@
         <MenuItem Header="{Binding MenuHelpAbout}" Click="OnAbout" />
         <Separator />
         <MenuItem Header="{Binding MenuHelpResetSettings}" Click="OnResetSettings" />
+        <MenuItem Header="{Binding MenuHelpResetData}" Click="OnResetData" />
       </MenuItem>
     </Menu>
 
