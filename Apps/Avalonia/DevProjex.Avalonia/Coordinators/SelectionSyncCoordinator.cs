@@ -38,6 +38,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
     private readonly Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> _getIgnoreOptionsAvailability;
     private readonly Func<string, bool> _tryElevateAndRestart;
     private readonly Func<string?> _currentPathProvider;
+    private static readonly HashSet<string> EmptyStringSet = new(StringComparer.OrdinalIgnoreCase);
 
     private IReadOnlyList<IgnoreOptionDescriptor> _ignoreOptions = Array.Empty<IgnoreOptionDescriptor>();
     private HashSet<IgnoreOptionId> _ignoreSelectionCache = new();
@@ -279,6 +280,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
             var visibleExtensions = new List<string>(scan.Value.Count);
             var hasExtensionlessEntries = SplitExtensions(scan.Value, visibleExtensions);
             var options = _filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
+            options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -322,6 +324,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
                 prev,
                 ignoreRules,
                 hasPreviousSelections);
+            options = ApplyMissingProfileSelectionsFallbackToRootFolders(options, scan.RootFolders, ignoreRules);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -620,10 +623,13 @@ public sealed class SelectionSyncCoordinator : IDisposable
             _viewModel.IgnoreOptions.Clear();
             _ignoreOptions = options;
 
+            var useDefaultCheckedFallback = ShouldUseIgnoreDefaultFallback(options, previousSelections);
             foreach (var option in _ignoreOptions)
             {
-                var isChecked = previousSelections.Contains(option.Id) ||
-                                (!hasPreviousSelections && option.DefaultChecked);
+                var isChecked = useDefaultCheckedFallback
+                    ? option.DefaultChecked
+                    : previousSelections.Contains(option.Id) ||
+                      (!hasPreviousSelections && option.DefaultChecked);
                 _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, isChecked));
             }
         }
@@ -672,6 +678,7 @@ public sealed class SelectionSyncCoordinator : IDisposable
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var options = _filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
+        options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
         ApplyExtensionOptions(options, hasExtensionlessEntries);
     }
 
@@ -968,6 +975,87 @@ public sealed class SelectionSyncCoordinator : IDisposable
     private bool ShouldSuppressAllTogglesOverride()
     {
         return _preparedSelectionMode == PreparedSelectionMode.Profile;
+    }
+
+    private IReadOnlyList<SelectionOption> ApplyMissingProfileSelectionsFallbackToExtensions(
+        IReadOnlyList<SelectionOption> options)
+    {
+        if (!ShouldSuppressAllTogglesOverride())
+            return options;
+        if (_extensionsSelectionCache.Count == 0 || options.Count == 0)
+            return options;
+
+        var hasAnyMatchedSelection = false;
+        foreach (var option in options)
+        {
+            if (option.IsChecked)
+            {
+                hasAnyMatchedSelection = true;
+                break;
+            }
+        }
+
+        if (hasAnyMatchedSelection)
+            return options;
+
+        // Saved extension selections exist, but none are available in current scan.
+        // Fall back to current defaults instead of forcing all current options unchecked.
+        var fallback = new List<SelectionOption>(options.Count);
+        foreach (var option in options)
+            fallback.Add(option with { IsChecked = true });
+        return fallback;
+    }
+
+    private IReadOnlyList<SelectionOption> ApplyMissingProfileSelectionsFallbackToRootFolders(
+        IReadOnlyList<SelectionOption> options,
+        IReadOnlyList<string> scannedRootFolders,
+        IgnoreRules ignoreRules)
+    {
+        if (!ShouldSuppressAllTogglesOverride())
+            return options;
+        if (_rootSelectionCache.Count == 0 || options.Count == 0)
+            return options;
+
+        var hasAnyMatchedSelection = false;
+        foreach (var option in options)
+        {
+            if (option.IsChecked)
+            {
+                hasAnyMatchedSelection = true;
+                break;
+            }
+        }
+
+        if (hasAnyMatchedSelection)
+            return options;
+
+        // Saved root folder selections exist, but all of them are absent now.
+        // Recompute with default behavior for currently available roots.
+        return _filterSelectionService.BuildRootFolderOptions(
+            scannedRootFolders,
+            EmptyStringSet,
+            ignoreRules,
+            hasPreviousSelections: false);
+    }
+
+    private bool ShouldUseIgnoreDefaultFallback(
+        IReadOnlyList<IgnoreOptionDescriptor> options,
+        IReadOnlySet<IgnoreOptionId> previousSelections)
+    {
+        if (!ShouldSuppressAllTogglesOverride())
+            return false;
+        if (previousSelections.Count == 0 || options.Count == 0)
+            return false;
+
+        foreach (var option in options)
+        {
+            if (previousSelections.Contains(option.Id))
+                return false;
+        }
+
+        // Saved ignore selections exist, but none of those options are currently available.
+        // Use current default states for visible ignore options.
+        return true;
     }
 
     private void UpdateRootSelectionCache()
