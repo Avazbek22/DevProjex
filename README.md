@@ -2,7 +2,7 @@
 
 **Visual project context builder for humans and AI**
 
-DevProjex is a cross-platform desktop application for **quickly exploring folder/project structures**, selecting what matters, and preparing **clean, controlled context** (tree, file contents, or both) for clipboard and file export.
+DevProjex is a cross-platform desktop application for **quickly exploring folder/project structures**, selecting what matters, and preparing **clean, controlled context in ASCII or JSON** (tree, file contents, or both) for clipboard and file export.
 
 It’s designed for real projects where CLI output is noisy, IDE tools are unavailable or limited, and you need **clarity, speed, and control**.
 
@@ -37,6 +37,7 @@ Older versions are available on the Releases page.
 * **Multiple copy/export modes** (tree / content / combined)
 * **Preview mode** (tree / content / combined) before copy/export
 * **ASCII/JSON tree format toggle** for tree-based operations
+* **Per-project local parameter profiles** (saved per local project path)
 * **Export to file** from menu (tree / content / tree + content)
 * **Search & name filtering** for large projects
 * **Smart Ignore + .gitignore support** (scope-aware behavior for mixed workspaces)
@@ -87,6 +88,7 @@ DevProjex is not tied to a specific language or IDE.
   * tree + content (`.txt`, with selected tree format)
 * Shows preview output before copy/export
 * Shows live output metrics and operation progress in status bar
+* Restores previously applied parameters for each local project folder
 * Supports smart ignore rules (VCS, IDEs, build outputs)
 * Works well on large, layered projects
 
@@ -104,7 +106,7 @@ DevProjex is not tied to a specific language or IDE.
 * **Avalonia UI** (cross-platform)
 * Cleanly separated architecture (Core / Services / UI)
 * JSON-based resources (localization, icon mappings, presets)
-* 2300+ automated tests (unit + integration)
+* 3050+ automated tests (unit + integration)
 
 ---
 
