@@ -3,14 +3,14 @@ using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.Unit;
 
-public sealed class ThemePresetStoreTests
+public sealed class UserSettingsStoreTests
 {
 	[Fact]
 	// Ensures loading without a file returns defaults without requiring persistence.
 	public void Load_ReturnsDefaultsWithoutCreatingFileWhenMissing()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 
 		if (File.Exists(path))
@@ -38,8 +38,8 @@ public sealed class ThemePresetStoreTests
 	public void GetPreset_AddsMissingPresetToDb()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
-		var db = new ThemePresetDb { Presets = new Dictionary<string, ThemePreset>() };
+		var store = new UserSettingsStore();
+		var db = new UserSettingsDb { Presets = new Dictionary<string, ThemePreset>() };
 
 		var preset = store.GetPreset(db, ThemeVariant.Dark, ThemeEffectMode.Acrylic);
 
@@ -55,7 +55,7 @@ public sealed class ThemePresetStoreTests
 	public void Save_And_Load_RoundTripsCustomPreset()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var custom = new ThemePreset
 		{
 			Theme = ThemeVariant.Light,
@@ -67,7 +67,7 @@ public sealed class ThemePresetStoreTests
 			BorderStrength = 5.1
 		};
 
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 99,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -96,8 +96,8 @@ public sealed class ThemePresetStoreTests
 	public void Save_And_Load_RoundTripsViewSettings()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
-		var db = new ThemePresetDb
+		var store = new UserSettingsStore();
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 99,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -105,7 +105,8 @@ public sealed class ThemePresetStoreTests
 			ViewSettings = new AppViewSettings
 			{
 				IsCompactMode = true,
-				IsTreeAnimationEnabled = true
+				IsTreeAnimationEnabled = true,
+				PreferredLanguage = AppLanguage.Fr
 			}
 		};
 
@@ -114,6 +115,23 @@ public sealed class ThemePresetStoreTests
 
 		Assert.True(loaded.ViewSettings.IsCompactMode);
 		Assert.True(loaded.ViewSettings.IsTreeAnimationEnabled);
+		Assert.Equal(AppLanguage.Fr, loaded.ViewSettings.PreferredLanguage);
+	}
+
+	[Fact]
+	// Ensures default view settings do not force language override on first run.
+	public void Load_Defaults_HaveNoPreferredLanguage()
+	{
+		using var scope = new AppDataScope();
+		var store = new UserSettingsStore();
+		var path = store.GetPath();
+
+		if (File.Exists(path))
+			File.Delete(path);
+
+		var db = store.Load();
+
+		Assert.Null(db.ViewSettings.PreferredLanguage);
 	}
 
 	[Fact]
@@ -121,7 +139,7 @@ public sealed class ThemePresetStoreTests
 	public void Load_PartialPresetList_FillsMissingCombinations()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 		var customPreset = new ThemePreset
 		{
@@ -134,7 +152,7 @@ public sealed class ThemePresetStoreTests
 			BorderStrength = 5
 		};
 
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>
@@ -170,9 +188,9 @@ public sealed class ThemePresetStoreTests
 	public void Load_InvalidLastSelected_ResetsToExistingKey()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -193,7 +211,7 @@ public sealed class ThemePresetStoreTests
 	public void Load_CorruptJson_RecreatesFile()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory))
@@ -215,8 +233,8 @@ public sealed class ThemePresetStoreTests
 	public void Save_WritesReadableJson()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
-		var db = new ThemePresetDb
+		var store = new UserSettingsStore();
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -237,7 +255,7 @@ public sealed class ThemePresetStoreTests
 	public void Save_CreatesDirectoryWhenMissing()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
@@ -256,7 +274,7 @@ public sealed class ThemePresetStoreTests
 			}
 		}
 
-		store.Save(new ThemePresetDb());
+		store.Save(new UserSettingsDb());
 
 		Assert.True(File.Exists(path));
 	}
@@ -266,8 +284,8 @@ public sealed class ThemePresetStoreTests
 	public void SetPreset_OverridesExistingPreset()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
-		var db = new ThemePresetDb { Presets = new Dictionary<string, ThemePreset>() };
+		var store = new UserSettingsStore();
+		var db = new UserSettingsDb { Presets = new Dictionary<string, ThemePreset>() };
 		var original = new ThemePreset { Theme = ThemeVariant.Dark, Effect = ThemeEffectMode.Mica };
 		var updated = new ThemePreset { Theme = ThemeVariant.Dark, Effect = ThemeEffectMode.Mica, BlurRadius = 42 };
 
@@ -282,9 +300,9 @@ public sealed class ThemePresetStoreTests
 	public void GetPreset_ReturnsExistingPresetInstance()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var preset = new ThemePreset { Theme = ThemeVariant.Light, Effect = ThemeEffectMode.Transparent, BlurRadius = 1 };
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			Presets = new Dictionary<string, ThemePreset> { ["Light.Transparent"] = preset }
 		};
@@ -300,9 +318,9 @@ public sealed class ThemePresetStoreTests
 	public void Load_ValidLastSelected_IsPreserved()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>
@@ -324,7 +342,7 @@ public sealed class ThemePresetStoreTests
 	public void Load_PreservesCustomPresetValues()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 		var custom = new ThemePreset
 		{
@@ -336,7 +354,7 @@ public sealed class ThemePresetStoreTests
 			MenuChildIntensity = 44,
 			BorderStrength = 55
 		};
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset> { ["Light.Transparent"] = custom },
@@ -359,7 +377,7 @@ public sealed class ThemePresetStoreTests
 	public void Load_EmptyFile_ReturnsDefaults()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory))
@@ -376,7 +394,7 @@ public sealed class ThemePresetStoreTests
 	// Ensures TryParseKey succeeds with exact enum names.
 	public void TryParseKey_ParsesExactCase()
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		Assert.True(store.TryParseKey("Dark.Transparent", out var theme, out var effect));
 		Assert.Equal(ThemeVariant.Dark, theme);
@@ -387,7 +405,7 @@ public sealed class ThemePresetStoreTests
 	// Ensures TryParseKey is case-insensitive for theme and effect.
 	public void TryParseKey_ParsesCaseInsensitive()
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		Assert.True(store.TryParseKey("lIgHt.aCrYlIc", out var theme, out var effect));
 		Assert.Equal(ThemeVariant.Light, theme);
@@ -398,7 +416,7 @@ public sealed class ThemePresetStoreTests
 	// Ensures TryParseKey trims whitespace around the dot-separated parts.
 	public void TryParseKey_TrimsWhitespace()
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		Assert.True(store.TryParseKey("  Dark . Mica ", out var theme, out var effect));
 		Assert.Equal(ThemeVariant.Dark, theme);
@@ -409,7 +427,7 @@ public sealed class ThemePresetStoreTests
 	// Ensures TryParseKey rejects null or empty strings.
 	public void TryParseKey_RejectsNullOrEmpty()
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		Assert.False(store.TryParseKey(null, out _, out _));
 		Assert.False(store.TryParseKey(string.Empty, out _, out _));
@@ -420,7 +438,7 @@ public sealed class ThemePresetStoreTests
 	// Ensures TryParseKey rejects keys with the wrong format.
 	public void TryParseKey_RejectsInvalidFormat()
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		Assert.False(store.TryParseKey("Dark", out _, out _));
 		Assert.False(store.TryParseKey("Dark.Transparent.Extra", out _, out _));
@@ -442,7 +460,7 @@ public sealed class ThemePresetStoreTests
 	[InlineData("Transparent.")]
 	public void TryParseKey_RejectsInvalidTheme(string key)
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		Assert.False(store.TryParseKey(key, out _, out _));
 	}
@@ -459,7 +477,7 @@ public sealed class ThemePresetStoreTests
 	[InlineData("Dark..")]
 	public void TryParseKey_RejectsInvalidEffect(string key)
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		Assert.False(store.TryParseKey(key, out _, out _));
 	}
@@ -478,7 +496,7 @@ public sealed class ThemePresetStoreTests
 	[InlineData("DaRk.TrAnSpArEnT", ThemeVariant.Dark, ThemeEffectMode.Transparent)]
 	public void TryParseKey_ParsesAllValidCombinations(string key, ThemeVariant theme, ThemeEffectMode effect)
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		Assert.True(store.TryParseKey(key, out var parsedTheme, out var parsedEffect));
 		Assert.Equal(theme, parsedTheme);
@@ -490,9 +508,9 @@ public sealed class ThemePresetStoreTests
 	public void Load_UpdatesSchemaVersionToCurrent()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = -1,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -510,7 +528,7 @@ public sealed class ThemePresetStoreTests
 	// Ensures GetPath includes the expected filename and folder.
 	public void GetPath_IncludesExpectedSegments()
 	{
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 
 		Assert.EndsWith(Path.Combine("DevProjex", "user-settings.json"), path);
@@ -527,9 +545,9 @@ public sealed class ThemePresetStoreTests
 	public void Load_PreservesValidLastSelectedKeys(string lastSelected)
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>
@@ -561,7 +579,7 @@ public sealed class ThemePresetStoreTests
 	public void Load_NullPresets_InitializesDictionary()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 		var json = """
 		{
@@ -586,9 +604,9 @@ public sealed class ThemePresetStoreTests
 	public void Load_EmptyLastSelected_IsFixed()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -608,7 +626,7 @@ public sealed class ThemePresetStoreTests
 	public void Load_KeepsPresetCountStable()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var db = store.Load();
 		var initialCount = db.Presets.Count;
 
@@ -623,8 +641,8 @@ public sealed class ThemePresetStoreTests
 	public void Save_EmptyDb_LoadsWithDefaults()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
-		var db = new ThemePresetDb { Presets = new Dictionary<string, ThemePreset>(), LastSelected = string.Empty };
+		var store = new UserSettingsStore();
+		var db = new UserSettingsDb { Presets = new Dictionary<string, ThemePreset>(), LastSelected = string.Empty };
 
 		store.Save(db);
 
@@ -648,7 +666,7 @@ public sealed class ThemePresetStoreTests
 	public void Load_InvalidJsonPayloads_Recovers(string payload)
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory))
@@ -672,8 +690,8 @@ public sealed class ThemePresetStoreTests
 	public void GetPreset_ReturnsMatchingMetadata(ThemeVariant theme, ThemeEffectMode effect)
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
-		var db = new ThemePresetDb { Presets = new Dictionary<string, ThemePreset>() };
+		var store = new UserSettingsStore();
+		var db = new UserSettingsDb { Presets = new Dictionary<string, ThemePreset>() };
 
 		var preset = store.GetPreset(db, theme, effect);
 
@@ -692,8 +710,8 @@ public sealed class ThemePresetStoreTests
 	public void SetPreset_UsesExpectedKey(ThemeVariant theme, ThemeEffectMode effect)
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
-		var db = new ThemePresetDb { Presets = new Dictionary<string, ThemePreset>() };
+		var store = new UserSettingsStore();
+		var db = new UserSettingsDb { Presets = new Dictionary<string, ThemePreset>() };
 		var preset = new ThemePreset { Theme = theme, Effect = effect, BlurRadius = 99 };
 
 		store.SetPreset(db, theme, effect, preset);
@@ -711,8 +729,8 @@ public sealed class ThemePresetStoreTests
 	public void Save_AllowsAnyLastSelectedValue(string lastSelected)
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
-		var db = new ThemePresetDb
+		var store = new UserSettingsStore();
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -731,7 +749,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_ReturnsAllPresetCombinations()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var db = store.ResetToDefaults();
 
@@ -750,9 +768,9 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_DisablesViewTogglesByDefault()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
-		var customDb = new ThemePresetDb
+		var customDb = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -760,7 +778,8 @@ public sealed class ThemePresetStoreTests
 			ViewSettings = new AppViewSettings
 			{
 				IsCompactMode = true,
-				IsTreeAnimationEnabled = true
+				IsTreeAnimationEnabled = true,
+				PreferredLanguage = AppLanguage.De
 			}
 		};
 		store.Save(customDb);
@@ -769,6 +788,7 @@ public sealed class ThemePresetStoreTests
 
 		Assert.False(resetDb.ViewSettings.IsCompactMode);
 		Assert.False(resetDb.ViewSettings.IsTreeAnimationEnabled);
+		Assert.Null(resetDb.ViewSettings.PreferredLanguage);
 	}
 
 	[Fact]
@@ -776,10 +796,10 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_OverwritesCustomPresets()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		// Save custom preset with unique values
-		var customDb = new ThemePresetDb
+		var customDb = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>
@@ -816,7 +836,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_SavesFileImmediately()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 
 		if (File.Exists(path))
@@ -832,7 +852,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_PresetValuesMatchLoadDefaults()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 
 		// Clear any existing file
@@ -872,7 +892,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_LastSelectedIsValid()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var db = store.ResetToDefaults();
 
@@ -886,7 +906,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_HasValidSchemaVersion()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var db = store.ResetToDefaults();
 
@@ -904,7 +924,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_AllPresetsHaveMatchingMetadata(ThemeVariant theme, ThemeEffectMode effect)
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var db = store.ResetToDefaults();
 		var key = $"{theme}.{effect}";
@@ -919,7 +939,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_ReturnsConsistentDefaults()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var first = store.ResetToDefaults();
 		var second = store.ResetToDefaults();
@@ -946,7 +966,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_WorksWithCorruptedFile()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory))
@@ -965,7 +985,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_WorksWithMissingFile()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var path = store.GetPath();
 
 		if (File.Exists(path))
@@ -998,7 +1018,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_AllValuesWithinValidRange()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var db = store.ResetToDefaults();
 
@@ -1017,7 +1037,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_PersistedFileCanBeLoaded()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var resetDb = store.ResetToDefaults();
 		var loadedDb = store.Load();
@@ -1044,10 +1064,10 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_IgnoresPreviousLastSelected()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		// Save with unusual lastSelected
-		var customDb = new ThemePresetDb
+		var customDb = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>
@@ -1080,7 +1100,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_RestoresAfterMultipleModifications()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		// Get baseline defaults
 		var baseline = store.ResetToDefaults();
@@ -1131,7 +1151,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_RestoresSpecificPresetToDefault(ThemeVariant theme, ThemeEffectMode effect)
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 		var key = $"{theme}.{effect}";
 
 		// Get original default for this specific preset
@@ -1166,7 +1186,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_WorksInRepeatedResetCycle()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		// First reset to get baseline
 		var baseline = store.ResetToDefaults();
@@ -1207,12 +1227,12 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_NoCustomValuesRemain()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		// Use obviously wrong values that cannot be defaults
 		const double impossibleValue = 123.456789;
 
-		var db = new ThemePresetDb
+		var db = new UserSettingsDb
 		{
 			SchemaVersion = 1,
 			Presets = new Dictionary<string, ThemePreset>(),
@@ -1256,7 +1276,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_ThemeVariantsHaveIndependentDefaults()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var db = store.ResetToDefaults();
 
@@ -1283,7 +1303,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_EffectModesHaveIndependentDefaults()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var db = store.ResetToDefaults();
 
@@ -1314,7 +1334,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_WritesValidJsonStructure()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		store.ResetToDefaults();
 
@@ -1344,7 +1364,7 @@ public sealed class ThemePresetStoreTests
 	public void ResetToDefaults_AllPresetsHaveRequiredProperties()
 	{
 		using var scope = new AppDataScope();
-		var store = new ThemePresetStore();
+		var store = new UserSettingsStore();
 
 		var db = store.ResetToDefaults();
 
@@ -1373,7 +1393,7 @@ public sealed class ThemePresetStoreTests
 	}
 
 	// Helper to capture all preset values for comparison
-	private static Dictionary<string, (double MI, double BR, double PC, double MCI, double BS)> CaptureAllPresetValues(ThemePresetDb db)
+	private static Dictionary<string, (double MI, double BR, double PC, double MCI, double BS)> CaptureAllPresetValues(UserSettingsDb db)
 	{
 		var result = new Dictionary<string, (double, double, double, double, double)>();
 		foreach (var kvp in db.Presets)
@@ -1392,7 +1412,7 @@ public sealed class ThemePresetStoreTests
 
 	#endregion
 
-	private static void WritePresetFile(string path, ThemePresetDb db)
+	private static void WritePresetFile(string path, UserSettingsDb db)
 	{
 		var directory = Path.GetDirectoryName(path);
 		if (!string.IsNullOrWhiteSpace(directory))

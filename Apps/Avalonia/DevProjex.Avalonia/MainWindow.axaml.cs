@@ -11,8 +11,8 @@ using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
 using DevProjex.Kernel;
-using ThemePresetStore = DevProjex.Infrastructure.ThemePresets.ThemePresetStore;
-using ThemePresetDb = DevProjex.Infrastructure.ThemePresets.ThemePresetDb;
+using UserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
+using UserSettingsDb = DevProjex.Infrastructure.ThemePresets.UserSettingsDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
 using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
 using ThemePresetEffect = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
@@ -99,7 +99,7 @@ public partial class MainWindow : Window
     private readonly IToastService _toastService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
-    private readonly ThemePresetStore _themePresetStore;
+    private readonly UserSettingsStore _userSettingsStore;
     private readonly IProjectProfileStore _projectProfileStore;
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
@@ -121,7 +121,7 @@ public partial class MainWindow : Window
     private ExportPathPresentation? _cachedPathPresentation;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
-    private ThemePresetDb _themePresetDb = new();
+    private UserSettingsDb _userSettingsDb = new();
     private ThemePresetVariant _currentThemeVariant = ThemePresetVariant.Dark;
     private ThemePresetEffect _currentEffectMode = ThemePresetEffect.Transparent;
 
@@ -263,7 +263,7 @@ public partial class MainWindow : Window
         _toastService = services.ToastService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
-        _themePresetStore = services.ThemePresetStore;
+        _userSettingsStore = services.UserSettingsStore;
         _projectProfileStore = services.ProjectProfileStore;
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
@@ -288,7 +288,7 @@ public partial class MainWindow : Window
             _dropZoneContainer.Classes.Add("drop-zone-animating");
         }
 
-        InitializeThemePresets();
+        InitializeUserSettings();
 
         _viewModel.UpdateHelpPopoverMaxSize(Bounds.Size);
         PropertyChanged += OnWindowPropertyChanged;
@@ -739,15 +739,16 @@ public partial class MainWindow : Window
 
         _viewModel.IsDarkTheme = _currentThemeVariant == ThemePresetVariant.Dark;
         ApplyEffectMode(_currentEffectMode);
-        ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, _currentThemeVariant, _currentEffectMode));
+        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, _currentThemeVariant, _currentEffectMode));
         _themeBrushCoordinator.UpdateTransparencyEffect();
     }
 
-    private void InitializeThemePresets()
+    private void InitializeUserSettings()
     {
-        _themePresetDb = _themePresetStore.Load();
+        _userSettingsDb = _userSettingsStore.Load();
+        ApplySavedLanguagePreference(_userSettingsDb.ViewSettings);
 
-        if (!_themePresetStore.TryParseKey(_themePresetDb.LastSelected, out var theme, out var effect))
+        if (!_userSettingsStore.TryParseKey(_userSettingsDb.LastSelected, out var theme, out var effect))
         {
             theme = ThemePresetVariant.Dark;
             effect = ThemePresetEffect.Transparent;
@@ -757,8 +758,8 @@ public partial class MainWindow : Window
         _currentEffectMode = effect;
         _viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
         ApplyEffectMode(effect);
-        ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
-        ApplyViewSettings(_themePresetDb.ViewSettings);
+        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
+        ApplyViewSettings(_userSettingsDb.ViewSettings);
         _wasThemePopoverOpen = _viewModel.ThemePopoverOpen;
     }
 
@@ -791,7 +792,7 @@ public partial class MainWindow : Window
     {
         _currentThemeVariant = theme;
         _currentEffectMode = effect;
-        ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
+        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
     }
 
     private void ApplyViewSettings(AppViewSettings settings)
@@ -808,6 +809,15 @@ public partial class MainWindow : Window
             Classes.Add("tree-animation");
         else
             Classes.Remove("tree-animation");
+    }
+
+    private void ApplySavedLanguagePreference(AppViewSettings settings)
+    {
+        if (settings.PreferredLanguage is not AppLanguage preferredLanguage)
+            return;
+
+        _localization.SetLanguage(preferredLanguage);
+        _viewModel.UpdateLocalization();
     }
 
     private void HandleThemePopoverStateChange()
@@ -837,20 +847,38 @@ public partial class MainWindow : Window
             BorderStrength = _viewModel.BorderStrength
         };
 
-        _themePresetStore.SetPreset(_themePresetDb, theme, effect, preset);
-        _themePresetDb.LastSelected = $"{theme}.{effect}";
-        _themePresetStore.Save(_themePresetDb);
+        _userSettingsStore.SetPreset(_userSettingsDb, theme, effect, preset);
+        _userSettingsDb.LastSelected = $"{theme}.{effect}";
+        _userSettingsStore.Save(_userSettingsDb);
     }
 
     private void SaveCurrentViewSettings()
     {
-        _themePresetDb.ViewSettings = new AppViewSettings
+        _userSettingsDb.ViewSettings = new AppViewSettings
         {
             IsCompactMode = _viewModel.IsCompactMode,
-            IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled
+            IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled,
+            PreferredLanguage = _userSettingsDb.ViewSettings?.PreferredLanguage
         };
 
-        _themePresetStore.Save(_themePresetDb);
+        _userSettingsStore.Save(_userSettingsDb);
+    }
+
+    private void SaveCurrentLanguageSetting()
+    {
+        var currentViewSettings = _userSettingsDb.ViewSettings ?? new AppViewSettings();
+        _userSettingsDb.ViewSettings = currentViewSettings with
+        {
+            PreferredLanguage = _localization.CurrentLanguage
+        };
+
+        _userSettingsStore.Save(_userSettingsDb);
+    }
+
+    private void SetLanguageAndPersist(AppLanguage language)
+    {
+        _localization.SetLanguage(language);
+        SaveCurrentLanguageSetting();
     }
 
     private ThemePresetVariant GetSelectedThemeVariant()
@@ -2544,14 +2572,14 @@ public partial class MainWindow : Window
     }
 
 
-    private void OnLangRu(object? sender, RoutedEventArgs e) => _localization.SetLanguage(AppLanguage.Ru);
-    private void OnLangEn(object? sender, RoutedEventArgs e) => _localization.SetLanguage(AppLanguage.En);
-    private void OnLangUz(object? sender, RoutedEventArgs e) => _localization.SetLanguage(AppLanguage.Uz);
-    private void OnLangTg(object? sender, RoutedEventArgs e) => _localization.SetLanguage(AppLanguage.Tg);
-    private void OnLangKk(object? sender, RoutedEventArgs e) => _localization.SetLanguage(AppLanguage.Kk);
-    private void OnLangFr(object? sender, RoutedEventArgs e) => _localization.SetLanguage(AppLanguage.Fr);
-    private void OnLangDe(object? sender, RoutedEventArgs e) => _localization.SetLanguage(AppLanguage.De);
-    private void OnLangIt(object? sender, RoutedEventArgs e) => _localization.SetLanguage(AppLanguage.It);
+    private void OnLangRu(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Ru);
+    private void OnLangEn(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.En);
+    private void OnLangUz(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Uz);
+    private void OnLangTg(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Tg);
+    private void OnLangKk(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Kk);
+    private void OnLangFr(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Fr);
+    private void OnLangDe(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.De);
+    private void OnLangIt(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.It);
 
     private void OnAbout(object? sender, RoutedEventArgs e)
     {
@@ -2626,10 +2654,10 @@ public partial class MainWindow : Window
     /// </summary>
     private void ResetThemeSettings()
     {
-        _themePresetDb = _themePresetStore.ResetToDefaults();
+        _userSettingsDb = _userSettingsStore.ResetToDefaults();
 
         // Reparse last selected to get current theme variant and effect
-        if (!_themePresetStore.TryParseKey(_themePresetDb.LastSelected, out var theme, out var effect))
+        if (!_userSettingsStore.TryParseKey(_userSettingsDb.LastSelected, out var theme, out var effect))
         {
             theme = ThemePresetVariant.Dark;
             effect = ThemePresetEffect.Transparent;
@@ -2639,8 +2667,8 @@ public partial class MainWindow : Window
         _currentEffectMode = effect;
 
         // Apply default preset values to ViewModel
-        ApplyPresetValues(_themePresetStore.GetPreset(_themePresetDb, theme, effect));
-        ApplyViewSettings(_themePresetDb.ViewSettings);
+        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
+        ApplyViewSettings(_userSettingsDb.ViewSettings);
 
         // Refresh visual effects
         _themeBrushCoordinator.UpdateTransparencyEffect();

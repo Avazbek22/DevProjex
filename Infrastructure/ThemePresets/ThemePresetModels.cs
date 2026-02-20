@@ -24,7 +24,7 @@ public sealed record ThemePreset
     public double BorderStrength { get; init; }
 }
 
-public sealed class ThemePresetDb
+public sealed class UserSettingsDb
 {
     public int SchemaVersion { get; set; }
     public Dictionary<string, ThemePreset> Presets { get; set; } = new();
@@ -36,4 +36,5 @@ public sealed record AppViewSettings
 {
     public bool IsCompactMode { get; init; }
     public bool IsTreeAnimationEnabled { get; init; }
+    public AppLanguage? PreferredLanguage { get; init; }
 }

@@ -1,6 +1,6 @@
 namespace DevProjex.Infrastructure.ThemePresets;
 
-public sealed class ThemePresetStore
+public sealed class UserSettingsStore
 {
     private const int CurrentSchemaVersion = 2;
     private const string FolderName = "DevProjex";
@@ -13,7 +13,7 @@ public sealed class ThemePresetStore
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public ThemePresetDb Load()
+    public UserSettingsDb Load()
     {
         var path = GetPath();
         if (!File.Exists(path))
@@ -22,7 +22,7 @@ public sealed class ThemePresetStore
         try
         {
             var json = File.ReadAllText(path);
-            var db = JsonSerializer.Deserialize<ThemePresetDb>(json, SerializerOptions);
+            var db = JsonSerializer.Deserialize<UserSettingsDb>(json, SerializerOptions);
             if (db is null)
                 return CreateDefaultDb();
 
@@ -36,9 +36,9 @@ public sealed class ThemePresetStore
         }
     }
 
-    public void Save(ThemePresetDb db) => TrySave(db);
+    public void Save(UserSettingsDb db) => TrySave(db);
 
-    public ThemePreset GetPreset(ThemePresetDb db, ThemeVariant theme, ThemeEffectMode effect)
+    public ThemePreset GetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect)
     {
         var key = GetKey(theme, effect);
         if (db.Presets.TryGetValue(key, out var preset) && preset is not null)
@@ -49,7 +49,7 @@ public sealed class ThemePresetStore
         return created;
     }
 
-    public void SetPreset(ThemePresetDb db, ThemeVariant theme, ThemeEffectMode effect, ThemePreset preset)
+    public void SetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect, ThemePreset preset)
     {
         var key = GetKey(theme, effect);
         db.Presets[key] = preset;
@@ -59,7 +59,7 @@ public sealed class ThemePresetStore
     /// Resets all presets to factory defaults and saves the result.
     /// Returns the new database with default values applied.
     /// </summary>
-    public ThemePresetDb ResetToDefaults()
+    public UserSettingsDb ResetToDefaults()
     {
         var defaultDb = CreateDefaultDb();
         TrySave(defaultDb);
@@ -95,7 +95,7 @@ public sealed class ThemePresetStore
         return true;
     }
 
-    private ThemePresetDb Normalize(ThemePresetDb db)
+    private UserSettingsDb Normalize(UserSettingsDb db)
     {
         db.SchemaVersion = CurrentSchemaVersion;
         db.Presets ??= new Dictionary<string, ThemePreset>();
@@ -113,9 +113,9 @@ public sealed class ThemePresetStore
         return db;
     }
 
-    private ThemePresetDb CreateDefaultDb()
+    private UserSettingsDb CreateDefaultDb()
     {
-        var db = new ThemePresetDb
+        var db = new UserSettingsDb
         {
             SchemaVersion = CurrentSchemaVersion,
             Presets = CreateDefaultPresets(),
@@ -123,7 +123,8 @@ public sealed class ThemePresetStore
             ViewSettings = new AppViewSettings
             {
                 IsCompactMode = false,
-                IsTreeAnimationEnabled = false
+                IsTreeAnimationEnabled = false,
+                PreferredLanguage = null
             }
         };
 
@@ -205,7 +206,7 @@ public sealed class ThemePresetStore
 
     private string GetKey(ThemeVariant theme, ThemeEffectMode effect) => $"{theme}.{effect}";
 
-    private void TrySave(ThemePresetDb db)
+    private void TrySave(UserSettingsDb db)
     {
         try
         {

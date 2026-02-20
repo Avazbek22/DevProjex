@@ -45,7 +45,7 @@ public static class AvaloniaCompositionRoot
         var textFileExportService = new TextFileExportService();
         var toastService = new ToastService();
         var elevation = new ElevationService();
-        var themePresetStore = new ThemePresetStore();
+        var userSettingsStore = new UserSettingsStore();
         var projectProfileStore = new ProjectProfileStore();
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
@@ -54,7 +54,7 @@ public static class AvaloniaCompositionRoot
         return new AvaloniaAppServices(
             Localization: localization,
             HelpContentProvider: helpContentProvider,
-            ThemePresetStore: themePresetStore,
+            UserSettingsStore: userSettingsStore,
             ProjectProfileStore: projectProfileStore,
             Elevation: elevation,
             ScanOptionsUseCase: scanOptionsUseCase,

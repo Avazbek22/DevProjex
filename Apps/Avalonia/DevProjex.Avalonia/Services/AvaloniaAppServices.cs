@@ -5,7 +5,7 @@ namespace DevProjex.Avalonia.Services;
 public sealed record AvaloniaAppServices(
     LocalizationService Localization,
     HelpContentProvider HelpContentProvider,
-    ThemePresetStore ThemePresetStore,
+    UserSettingsStore UserSettingsStore,
     IProjectProfileStore ProjectProfileStore,
     IElevationService Elevation,
     ScanOptionsUseCase ScanOptionsUseCase,
