@@ -1,9 +1,12 @@
 using Avalonia.VisualTree;
+using Avalonia.Interactivity;
+using Avalonia.Controls.ApplicationLifetimes;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Contracts;
 using DevProjex.Kernel.Models;
+using DevProjex.Avalonia.Views;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using System.Globalization;
 using System.Reflection;
@@ -153,6 +156,25 @@ internal static class UiTestDriver
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
         => await ClickAsync(window, GetRequiredApplySettingsButton(window));
+
+    public static async Task<GitCloneWindow> OpenGitCloneWindowAsync(MainWindow window)
+    {
+        var method = typeof(MainWindow).GetMethod("OnGitClone", BindingFlags.Instance | BindingFlags.NonPublic);
+        var field = typeof(MainWindow).GetField("_gitCloneWindow", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        Assert.NotNull(field);
+
+        method!.Invoke(window, [window, new RoutedEventArgs()]);
+
+        await WaitForConditionAsync(
+            window,
+            () => field!.GetValue(window) is GitCloneWindow,
+            "git clone window to be created");
+
+        var cloneWindow = Assert.IsType<GitCloneWindow>(field!.GetValue(window));
+        await WaitForSettledFramesAsync(frameCount: 4);
+        return cloneWindow;
+    }
 
     public static Button GetRequiredApplySettingsButton(MainWindow window)
     {

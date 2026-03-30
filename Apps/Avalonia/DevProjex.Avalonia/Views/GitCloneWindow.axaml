@@ -54,8 +54,17 @@
                  Opacity="0.8"
                  IsVisible="{Binding !GitCloneInProgress}" />
 
+      <!-- URL Input (visible when not in progress) -->
+      <TextBox Grid.Row="2"
+               Name="UrlTextBox"
+               Text="{Binding GitCloneUrl, Mode=TwoWay}"
+               Watermark="{Binding GitCloneUrlPlaceholder}"
+               Margin="0,0,0,16"
+               IsVisible="{Binding !GitCloneInProgress}"
+               KeyDown="OnUrlKeyDown" />
+
       <!-- Recent repositories (visible when not in progress) -->
-      <StackPanel Grid.Row="1"
+      <StackPanel Grid.Row="3"
                   Margin="0,0,0,12"
                   Spacing="6"
                   IsVisible="{Binding !GitCloneInProgress}">
@@ -66,6 +75,7 @@
                   Classes="recent-repositories-combo"
                   ItemsSource="{Binding RecentRepositories}"
                   IsEnabled="{Binding HasRecentRepositories}"
+                  AutomationProperties.Name="{Binding GitCloneRecentRepositoriesLabel}"
                   SelectionChanged="OnRecentRepositorySelectionChanged">
           <ComboBox.ItemTemplate>
             <DataTemplate x:DataType="vm:RecentProjectEntryViewModel">
@@ -84,15 +94,6 @@
         </ComboBox>
       </StackPanel>
 
-      <!-- URL Input (visible when not in progress) -->
-      <TextBox Grid.Row="2"
-               Name="UrlTextBox"
-               Text="{Binding GitCloneUrl, Mode=TwoWay}"
-               Watermark="{Binding GitCloneUrlPlaceholder}"
-               Margin="0,0,0,16"
-               IsVisible="{Binding !GitCloneInProgress}"
-               KeyDown="OnUrlKeyDown" />
-
       <!-- Progress section (visible when in progress) -->
       <StackPanel Grid.Row="2"
                   Classes="clone-progress-surface"
@@ -105,7 +106,7 @@
       </StackPanel>
 
       <!-- Buttons -->
-      <StackPanel Grid.Row="3"
+      <StackPanel Grid.Row="4"
                   Orientation="Horizontal"
                   HorizontalAlignment="Right"
                   Spacing="8">
