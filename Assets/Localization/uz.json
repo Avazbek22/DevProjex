@@ -1,6 +1,8 @@
 ﻿{
   "Menu.File": "Fayl",
   "Menu.File.Open": "Jildni ochish...",
+  "Menu.File.Recent": "So'nggi",
+  "Menu.File.Recent.Empty": "Yaqinda ochilgan papkalar yo'q",
   "Menu.File.Refresh": "Yangilash",
   "Menu.File.Export": "Faylga eksport",
   "Menu.File.Export.Tree": "Daraxtni eksport qilish",
@@ -145,6 +147,7 @@
   "Git.Clone.Title": "Repozitoriyani klonlash",
   "Git.Clone.Description": "Repozitoriya URL manzilini kiriting (GitHub yoki boshqa)",
   "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Recent": "So'nggi repozitoriyalar",
   "Git.Clone.Progress.CheckingGit": "Git tekshirilmoqda...",
   "Git.Clone.Progress.Cloning": "Klonlanmoqda...",
   "Git.Clone.Progress.Downloading": "Yuklanmoqda...",

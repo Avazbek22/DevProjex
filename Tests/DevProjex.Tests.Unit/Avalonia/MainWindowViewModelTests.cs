@@ -37,6 +37,27 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void RecentCollections_TrackHasRecentFlags()
+    {
+        var viewModel = CreateViewModel();
+
+        Assert.False(viewModel.HasRecentFolders);
+        Assert.False(viewModel.HasRecentRepositories);
+
+        viewModel.RecentFolders.Add(new RecentProjectEntryViewModel("c:/repo", "repo", "c:/repo"));
+        viewModel.RecentRepositories.Add(new RecentProjectEntryViewModel("https://example.com/user/repo", "user / repo", "https://example.com/user/repo"));
+
+        Assert.True(viewModel.HasRecentFolders);
+        Assert.True(viewModel.HasRecentRepositories);
+
+        viewModel.RecentFolders.Clear();
+        viewModel.RecentRepositories.Clear();
+
+        Assert.False(viewModel.HasRecentFolders);
+        Assert.False(viewModel.HasRecentRepositories);
+    }
+
+    [Fact]
     public void Title_Changes()
     {
         var viewModel = CreateViewModel();

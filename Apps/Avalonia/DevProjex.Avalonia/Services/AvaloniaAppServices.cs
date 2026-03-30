@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -6,6 +7,7 @@ public sealed record AvaloniaAppServices(
     LocalizationService Localization,
     HelpContentProvider HelpContentProvider,
     UserSettingsStore UserSettingsStore,
+    RecentProjectsStore RecentProjectsStore,
     IProjectProfileStore ProjectProfileStore,
     IElevationService Elevation,
     ScanOptionsUseCase ScanOptionsUseCase,

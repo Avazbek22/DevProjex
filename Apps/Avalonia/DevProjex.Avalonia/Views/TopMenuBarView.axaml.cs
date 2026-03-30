@@ -67,6 +67,7 @@ public partial class TopMenuBarView : UserControl
     }
 
     public Menu? MainMenuControl => MainMenu;
+    public MenuItem? RecentMenuItemControl => RecentMenuItem;
 
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => OpenFolderRequested?.Invoke(sender, e);
 

@@ -23,10 +23,11 @@ internal static class UiTestDriver
 
     public static async Task<MainWindow> CreateLoadedMainWindowAsync(
         UiTestProject project,
-        bool waitForInitialSettingsPane = true)
+        bool waitForInitialSettingsPane = true,
+        string? appDataPathOverride = null)
     {
         var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
-        var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+        var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 
         var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);

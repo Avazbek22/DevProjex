@@ -9,6 +9,9 @@
     <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,110,0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
+        <MenuItem Name="RecentMenuItem" Header="{Binding MenuFileRecent}">
+          <!-- Populated dynamically from the recent-projects store. -->
+        </MenuItem>
         <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
         <MenuItem Header="{Binding MenuFileExport}" IsEnabled="{Binding IsProjectLoaded}">
           <MenuItem Header="{Binding MenuFileExportTree}" Click="OnExportTreeToFile" />

@@ -28,12 +28,23 @@
     <Style Selector="StackPanel.clone-progress-surface">
       <Setter Property="Margin" Value="0,0,0,16" />
     </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo">
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="MinHeight" Value="34" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Border#PART_BorderElement,
+                     ComboBox.recent-repositories-combo /template/ Border">
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
   </Window.Styles>
 
   <Border Name="CloneWindowCard"
           Classes="clone-window-card"
           Padding="16">
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto">
       <!-- Description (visible when not in progress) -->
       <TextBlock Grid.Row="0"
                  Text="{Binding GitCloneDescription}"
@@ -43,8 +54,38 @@
                  Opacity="0.8"
                  IsVisible="{Binding !GitCloneInProgress}" />
 
+      <!-- Recent repositories (visible when not in progress) -->
+      <StackPanel Grid.Row="1"
+                  Margin="0,0,0,12"
+                  Spacing="6"
+                  IsVisible="{Binding !GitCloneInProgress}">
+        <TextBlock Text="{Binding GitCloneRecentRepositoriesLabel}"
+                   FontSize="13"
+                   Opacity="0.8" />
+        <ComboBox Name="RecentRepositoriesComboBox"
+                  Classes="recent-repositories-combo"
+                  ItemsSource="{Binding RecentRepositories}"
+                  IsEnabled="{Binding HasRecentRepositories}"
+                  SelectionChanged="OnRecentRepositorySelectionChanged">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:RecentProjectEntryViewModel">
+              <StackPanel Spacing="0">
+                <TextBlock Text="{Binding DisplayText}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding ToolTipText}"
+                           FontSize="11"
+                           Opacity="0.6"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </StackPanel>
+
       <!-- URL Input (visible when not in progress) -->
-      <TextBox Grid.Row="1"
+      <TextBox Grid.Row="2"
                Name="UrlTextBox"
                Text="{Binding GitCloneUrl, Mode=TwoWay}"
                Watermark="{Binding GitCloneUrlPlaceholder}"
@@ -53,7 +94,7 @@
                KeyDown="OnUrlKeyDown" />
 
       <!-- Progress section (visible when in progress) -->
-      <StackPanel Grid.Row="1"
+      <StackPanel Grid.Row="2"
                   Classes="clone-progress-surface"
                   IsVisible="{Binding GitCloneInProgress}">
         <TextBlock Text="{Binding GitCloneStatus}"
@@ -64,7 +105,7 @@
       </StackPanel>
 
       <!-- Buttons -->
-      <StackPanel Grid.Row="2"
+      <StackPanel Grid.Row="3"
                   Orientation="Horizontal"
                   HorizontalAlignment="Right"
                   Spacing="8">
