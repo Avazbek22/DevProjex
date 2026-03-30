@@ -512,6 +512,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(IsPreviewTreeSelected));
             RaisePropertyChanged(nameof(IsPreviewContentSelected));
             RaisePropertyChanged(nameof(IsPreviewTreeAndContentSelected));
+            RaisePropertyChanged(nameof(PreviewCopyCurrentModeTooltip));
         }
     }
 
@@ -1174,6 +1175,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string PreviewSelectionCopy { get; private set; } = string.Empty;
     public string PreviewSelectionSelectAll { get; private set; } = string.Empty;
     public string PreviewSelectionClear { get; private set; } = string.Empty;
+    public string PreviewCopyFilePathTooltip { get; private set; } = string.Empty;
+    public string PreviewCopyCurrentModeTooltip => _selectedPreviewContentMode switch
+    {
+        PreviewContentMode.Tree => MenuCopyTree,
+        PreviewContentMode.Content => MenuCopyContent,
+        _ => MenuCopyTreeAndContent
+    };
 
     // StatusBar labels
     public string StatusTreeLabel { get; private set; } = string.Empty;
@@ -1292,6 +1300,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         PreviewSelectionCopy = _localization["Preview.Selection.Copy"];
         PreviewSelectionSelectAll = _localization["Preview.Selection.SelectAll"];
         PreviewSelectionClear = _localization["Preview.Selection.Clear"];
+        PreviewCopyFilePathTooltip = _localization["Preview.FilePath.Copy.Tooltip"];
 
         // StatusBar labels
         StatusTreeLabel = _localization["Status.Tree.Label"];
@@ -1422,6 +1431,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(PreviewSelectionCopy));
         RaisePropertyChanged(nameof(PreviewSelectionSelectAll));
         RaisePropertyChanged(nameof(PreviewSelectionClear));
+        RaisePropertyChanged(nameof(PreviewCopyFilePathTooltip));
+        RaisePropertyChanged(nameof(PreviewCopyCurrentModeTooltip));
 
         // StatusBar labels
         RaisePropertyChanged(nameof(StatusTreeLabel));

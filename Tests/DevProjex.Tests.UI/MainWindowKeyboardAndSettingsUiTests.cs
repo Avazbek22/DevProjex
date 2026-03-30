@@ -53,6 +53,87 @@ public sealed class MainWindowKeyboardAndSettingsUiTests(UiWorkspaceFixture work
     }
 
     [AvaloniaFact]
+    public async Task InitialSettingsReveal_AfterProjectLoad_DoesNotStartFromCollapsedTreeWidth()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            waitForInitialSettingsPane: false);
+
+        try
+        {
+            var treePaneContainer = UiTestDriver.GetRequiredControl<Border>(window, "TreePaneContainer");
+            var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetActualWidth(settingsContainer) > 0.5,
+                "initial settings animation to begin");
+
+            var minimumObservedTreeWidth = double.PositiveInfinity;
+            for (var frame = 0; frame < 18; frame++)
+            {
+                minimumObservedTreeWidth = Math.Min(
+                    minimumObservedTreeWidth,
+                    UiTestDriver.GetActualWidth(treePaneContainer));
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 1);
+            }
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetActualWidth(settingsContainer) >= 200,
+                "initial settings pane to become visually available");
+
+            var finalTreeWidth = UiTestDriver.GetActualWidth(treePaneContainer);
+            Assert.True(
+                minimumObservedTreeWidth >= finalTreeWidth - 2.0,
+                $"Initial settings reveal started from an undersized tree pane. Minimum observed tree width {minimumObservedTreeWidth:F2}, final tree width {finalTreeWidth:F2}.");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SettingsOpen_InTreeMode_KeepsTreePaneAnchoredToLeftEdge()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var treePaneContainer = UiTestDriver.GetRequiredControl<Border>(window, "TreePaneContainer");
+
+            await UiTestDriver.PressKeyAsync(window, Key.P, RawInputModifiers.Control);
+            await UiTestDriver.WaitForSettingsVisibilityAsync(window, visible: false);
+
+            var anchoredLeft = UiTestDriver.GetBoundsInWindow(treePaneContainer, window).Left;
+
+            await UiTestDriver.PressKeyAsync(window, Key.P, RawInputModifiers.Control);
+
+            var minimumObservedLeft = double.PositiveInfinity;
+            for (var frame = 0; frame < 18; frame++)
+            {
+                minimumObservedLeft = Math.Min(
+                    minimumObservedLeft,
+                    UiTestDriver.GetBoundsInWindow(treePaneContainer, window).Left);
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 1);
+            }
+
+            await UiTestDriver.WaitForSettingsVisibilityAsync(window, visible: true);
+
+            Assert.True(
+                minimumObservedLeft >= anchoredLeft - 0.75,
+                $"Tree pane shifted left during settings open. Expected left >= {anchoredLeft - 0.75:F2}, actual minimum {minimumObservedLeft:F2}.");
+            Assert.True(double.IsNaN(treePaneContainer.Width));
+            Assert.Equal(global::Avalonia.Layout.HorizontalAlignment.Stretch, treePaneContainer.HorizontalAlignment);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PreviewOpen_WhenSettingsAreHidden_DoesNotReopenSettings()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

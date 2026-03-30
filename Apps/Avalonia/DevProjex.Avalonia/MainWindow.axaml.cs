@@ -79,6 +79,7 @@ public partial class MainWindow : Window
     private readonly record struct PreviewSelectionMetricsSnapshot(
         IPreviewTextDocument Document,
         PreviewSelectionRange SelectionRange);
+    private readonly record struct ProjectProfileLoadSnapshot(bool HasProfile, ProjectSelectionProfile? Profile);
 
     private readonly record struct TreeMetricsCacheKey(
         int TreeIdentity,
@@ -178,6 +179,8 @@ public partial class MainWindow : Window
     private ExportPathPresentation? _cachedPathPresentation;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
+    private bool _awaitingSystemDialogActivation;
+    private TaskCompletionSource<bool>? _systemDialogActivationTcs;
     private UserSettingsDb _userSettingsDb = new();
     private ThemePresetVariant _currentThemeVariant = ThemePresetVariant.Dark;
     private ThemePresetEffect _currentEffectMode = ThemePresetEffect.Transparent;
@@ -316,6 +319,7 @@ public partial class MainWindow : Window
     private int _previewMemoryCleanupVersion;
     private CancellationTokenSource? _searchMemoryCleanupCts;
     private int _searchMemoryCleanupVersion;
+    private CancellationTokenSource? _backgroundMemoryCleanupCts;
     private PreviewCacheKeyData? _cachedPreviewKey;
     private CancellationTokenSource? _previewModeSwitchCts;
     private int _previewModeSwitchVersion;
@@ -572,6 +576,7 @@ public partial class MainWindow : Window
             () => _currentPath);
 
         Closed += OnWindowClosed;
+        Activated += OnActivated;
         Deactivated += OnDeactivated;
 
         _elevationAttempted = startupOptions.ElevationAttempted;
@@ -707,6 +712,7 @@ public partial class MainWindow : Window
         // Unsubscribe from window lifecycle events
         Opened -= OnOpened;
         Closed -= OnWindowClosed;
+        Activated -= OnActivated;
         Deactivated -= OnDeactivated;
 
         // Cancel metrics calculation
@@ -720,6 +726,7 @@ public partial class MainWindow : Window
             _metricsDebounceTimer.Stop();
             _metricsDebounceTimer.Tick -= OnMetricsDebounceTimerTick;
         }
+        CancelBackgroundMemoryCleanup();
         _previewSelectionMetricsCts?.Cancel();
         _previewSelectionMetricsCts?.Dispose();
         if (_previewSelectionMetricsDebounceTimer is not null)
@@ -864,16 +871,66 @@ public partial class MainWindow : Window
         UpdateToastHostLayout();
     }
 
+    private void OnActivated(object? sender, EventArgs e)
+    {
+        CancelBackgroundMemoryCleanup();
+        _systemDialogActivationTcs?.TrySetResult(true);
+    }
+
     private void OnDeactivated(object? sender, EventArgs e)
     {
+        if (_awaitingSystemDialogActivation && _systemDialogActivationTcs is null)
+        {
+            _systemDialogActivationTcs =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
         if (_viewModel.HelpPopoverOpen)
             _viewModel.HelpPopoverOpen = false;
         if (_viewModel.HelpDocsPopoverOpen)
             _viewModel.HelpDocsPopoverOpen = false;
 
+        // Native pickers temporarily deactivate the main window too. Running aggressive cleanup
+        // during that handoff makes the dialog open/close path feel heavier than it should.
+        if (_awaitingSystemDialogActivation)
+            return;
+
         // App lost focus — ideal time to compact the heap and return pages to the OS.
         // Runs on a background thread so the deactivation handler returns instantly.
         ScheduleBackgroundMemoryCleanup();
+    }
+
+    private async Task WaitForWindowActivationAfterSystemDialogAsync(CancellationToken cancellationToken = default)
+    {
+        var activationTcs = _systemDialogActivationTcs;
+        _systemDialogActivationTcs = null;
+        _awaitingSystemDialogActivation = false;
+
+        if (activationTcs is not null)
+        {
+            var activationTimeout = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(700));
+            await Task.WhenAny(
+                activationTcs.Task,
+                Task.Delay(activationTimeout, cancellationToken));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+        cancellationToken.ThrowIfCancellationRequested();
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // The first frame after a native picker closes is often the focus/activation handoff frame.
+        // Give the window one short extra beat before project-load work starts on the same UI loop.
+        await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(50)), cancellationToken);
+    }
+
+    private static async Task YieldProjectLoadStartupFrameAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+        cancellationToken.ThrowIfCancellationRequested();
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -1169,7 +1226,9 @@ public partial class MainWindow : Window
 
     private PreviewToolbarLayoutMode DeterminePreviewToolbarLayoutMode()
     {
-        var previewBarWidth = _previewBar?.Bounds.Width ?? _previewBarContainer?.Bounds.Width ?? 0;
+        var previewBarWidth = _previewSegmentGrid?.Bounds.Width > 0
+            ? _previewSegmentGrid.Bounds.Width
+            : _previewBar?.Bounds.Width ?? _previewBarContainer?.Bounds.Width ?? 0;
         if (previewBarWidth <= 0)
             return _previewToolbarLayoutMode;
 
@@ -1526,12 +1585,89 @@ public partial class MainWindow : Window
         return Math.Max(SplitTreePaneMinWidth, workspaceWidth - settingsWidth);
     }
 
+    private double GetAvailableWorkspaceWidthForSettingsAnimation(double settingsPanelWidth, bool includeSplitter)
+    {
+        if (_workspaceGrid is null)
+            return 0;
+
+        var workspaceWidth = _workspaceGrid.Bounds.Width;
+        if (workspaceWidth <= 0.5)
+            return 0;
+
+        var reservedSettingsWidth = settingsPanelWidth > 0.5
+            ? settingsPanelWidth + (includeSplitter ? PreviewSettingsSplitterWidth : 0.0)
+            : 0.0;
+        return Math.Max(0, workspaceWidth - reservedSettingsWidth);
+    }
+
+    private double ResolveTreeModeTargetWidthForSettingsAnimation(double settingsPanelWidth, bool includeSplitter)
+    {
+        var availableWidth = GetAvailableWorkspaceWidthForSettingsAnimation(settingsPanelWidth, includeSplitter);
+        return availableWidth <= 0.5
+            ? SplitTreePaneMinWidth
+            : Math.Max(SplitTreePaneMinWidth, availableWidth);
+    }
+
+    private double ResolvePreviewOnlyTargetWidthForSettingsAnimation(double settingsPanelWidth, bool includeSplitter)
+    {
+        var availableWidth = GetAvailableWorkspaceWidthForSettingsAnimation(settingsPanelWidth, includeSplitter);
+        return availableWidth <= 0.5
+            ? SplitPreviewPaneMinWidth
+            : Math.Max(SplitPreviewPaneMinWidth, availableWidth);
+    }
+
+    private double ResolvePreviewPaneTargetWidthForSettingsAnimation(
+        double treePaneWidth,
+        double settingsPanelWidth,
+        bool includeSplitter)
+    {
+        var availableWorkspaceWidth = GetAvailableWorkspaceWidthForSettingsAnimation(settingsPanelWidth, includeSplitter);
+        var availableSplitWidth = Math.Max(0, availableWorkspaceWidth - TreePreviewSplitterWidth);
+        return availableSplitWidth <= 0.5
+            ? SplitPreviewPaneMinWidth
+            : Math.Max(SplitPreviewPaneMinWidth, availableSplitWidth - treePaneWidth);
+    }
+
+    private void SetSettingsAnimationPaneAnchors(WorkspaceDisplayMode displayMode, bool anchoredToLeftEdge)
+    {
+        switch (displayMode)
+        {
+            case WorkspaceDisplayMode.Tree:
+                SetSettingsAnimationPaneAnchor(_treePaneContainer, anchoredToLeftEdge);
+                break;
+
+            case WorkspaceDisplayMode.PreviewOnly:
+            case WorkspaceDisplayMode.PreviewWithTree:
+                SetSettingsAnimationPaneAnchor(_previewPaneContainer, anchoredToLeftEdge);
+                break;
+        }
+    }
+
+    private static void SetSettingsAnimationPaneAnchor(Border? pane, bool anchoredToLeftEdge)
+    {
+        if (pane is null)
+            return;
+
+        // Explicit Width stops Stretch from controlling layout. While the settings panel is
+        // animating, anchor the active pane to the left edge so the grid cannot recenter it.
+        pane.HorizontalAlignment = anchoredToLeftEdge
+            ? HorizontalAlignment.Left
+            : HorizontalAlignment.Stretch;
+    }
+
     private void UpdatePreviewSettingsSplitterState()
     {
         if (_previewSettingsSplitterColumn is null)
             return;
 
-        var isVisible = ShouldShowPreviewSettingsSplitter();
+        SetPreviewSettingsSplitterVisibility(ShouldShowPreviewSettingsSplitter());
+    }
+
+    private void SetPreviewSettingsSplitterVisibility(bool isVisible)
+    {
+        if (_previewSettingsSplitterColumn is null)
+            return;
+
         _previewSettingsSplitterColumn.Width = new GridLength(isVisible ? PreviewSettingsSplitterWidth : 0);
 
         if (_previewSettingsSplitter is not null)
@@ -2028,26 +2164,39 @@ public partial class MainWindow : Window
                 Title = _viewModel.MenuFileOpen
             };
 
+            CancelBackgroundMemoryCleanup();
+            _awaitingSystemDialogActivation = true;
+            _systemDialogActivationTcs = null;
             var folders = await StorageProvider.OpenFolderPickerAsync(options);
             var folder = folders.FirstOrDefault();
             var path = folder?.TryGetLocalPath();
             if (string.IsNullOrWhiteSpace(path))
+            {
+                _awaitingSystemDialogActivation = false;
+                _systemDialogActivationTcs = null;
                 return;
+            }
 
+            await WaitForWindowActivationAfterSystemDialogAsync();
             await TryOpenFolderAsync(path, fromDialog: true);
         }
         catch (OperationCanceledException)
         {
+            _awaitingSystemDialogActivation = false;
+            _systemDialogActivationTcs = null;
             // Cancellation is handled by status operation fallback.
         }
         catch (Exception ex)
         {
+            _awaitingSystemDialogActivation = false;
+            _systemDialogActivationTcs = null;
             await ShowErrorAsync(ex.Message);
         }
     }
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
+        CancelBackgroundMemoryCleanup();
         CancelPreviewRefresh();
         var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = refreshCts.Token;
@@ -2060,6 +2209,8 @@ public partial class MainWindow : Window
         {
             await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
             CompleteStatusOperation(statusOperationId);
+            ScheduleBackgroundMemoryCleanupAfterUiSettles(
+                SettingsPanelAnimationDuration + TimeSpan.FromMilliseconds(300));
             _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -2474,36 +2625,7 @@ public partial class MainWindow : Window
 
     private void UpdatePreviewStickyPath()
     {
-        if (_previewTextControl is null)
-            return;
-
-        if (!_viewModel.IsAnyPreviewVisible)
-        {
-            HidePreviewStickyPath();
-            return;
-        }
-
-        var document = _previewTextControl.Document ?? _viewModel.PreviewDocument;
-        if (document?.Sections is not { Count: > 0 } sections)
-        {
-            HidePreviewStickyPath();
-            return;
-        }
-
-        var verticalOffset = _previewTextScrollViewer?.Offset.Y ?? _previewTextControl.VerticalOffset;
-        var topLine = _previewTextControl.GetLineNumberAtVerticalOffset(verticalOffset);
-        // Keep the sticky header hidden until the viewport actually enters the first file section.
-        if (topLine < sections[0].StartLine)
-        {
-            HidePreviewStickyPath();
-            return;
-        }
-
-        var currentSection = PreviewDocumentSectionLookup.FindContainingSection(sections, topLine) ??
-                             PreviewDocumentSectionLookup.FindContainingOrNextSection(sections, topLine) ??
-                             sections[^1];
-
-        if (currentSection is null)
+        if (!TryGetCurrentPreviewStickySection(out var currentSection))
         {
             HidePreviewStickyPath();
             return;
@@ -2518,14 +2640,164 @@ public partial class MainWindow : Window
         if (_previewStickyHeaderCap is not null)
             _previewStickyHeaderCap.IsVisible = true;
 
-        _previewTextControl.StickyHeaderReserved = false;
-        _previewTextControl.StickyHeaderVisible = false;
-        _previewTextControl.StickyHeaderText = string.Empty;
+        if (_previewTextControl is not null)
+        {
+            _previewTextControl.StickyHeaderReserved = false;
+            _previewTextControl.StickyHeaderVisible = false;
+            _previewTextControl.StickyHeaderText = string.Empty;
+        }
 
         if (_previewLineNumbersControl is not null)
         {
             _previewLineNumbersControl.StickyHeaderReserved = false;
             _previewLineNumbersControl.StickyHeaderVisible = false;
+        }
+    }
+
+    private void OnPreviewToolTipLoaded(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not ToolTip toolTip)
+            return;
+
+        ApplyPreviewToolTipBackdrop(toolTip);
+    }
+
+    private async void OnPreviewCopyVisibleFilePath(object? sender, RoutedEventArgs e)
+    {
+        if (!await WaitForPreviewClipboardSourceReadyAsync().ConfigureAwait(true) ||
+            !TryBuildCurrentPreviewStickySectionCopyPayload(out var sectionPayload))
+        {
+            return;
+        }
+
+        await CopyPreviewVisibleFilePathAsync(sectionPayload);
+    }
+
+    private async Task CopyPreviewVisibleFilePathAsync(string text)
+    {
+        try
+        {
+            await SetClipboardTextAsync(text);
+            _toastService.Show(_localization["Toast.Copy.Preview"]);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private bool TryGetCurrentPreviewStickySection(out PreviewDocumentSection currentSection)
+    {
+        currentSection = null!;
+        if (_previewTextControl is null || !_viewModel.IsAnyPreviewVisible)
+            return false;
+
+        var document = _previewTextControl.Document ?? _viewModel.PreviewDocument;
+        if (document?.Sections is not { Count: > 0 } sections)
+            return false;
+
+        var verticalOffset = _previewTextScrollViewer?.Offset.Y ?? _previewTextControl.VerticalOffset;
+        var topLine = _previewTextControl.GetLineNumberAtVerticalOffset(verticalOffset);
+        if (topLine < sections[0].StartLine)
+            return false;
+
+        currentSection = PreviewDocumentSectionLookup.FindContainingSection(sections, topLine) ??
+                         PreviewDocumentSectionLookup.FindContainingOrNextSection(sections, topLine) ??
+                         sections[^1];
+
+        return currentSection is not null;
+    }
+
+    private bool TryBuildCurrentPreviewStickySectionCopyPayload(out string sectionPayload)
+    {
+        sectionPayload = string.Empty;
+
+        if (!TryGetCurrentPreviewStickySection(out var currentSection) ||
+            _previewTextControl is null)
+        {
+            return false;
+        }
+
+        var document = _previewTextControl.Document ?? _viewModel.PreviewDocument;
+        if (document is null)
+            return false;
+
+        sectionPayload = PreviewClipboardPayloadBuilder.BuildSectionPayload(document, currentSection);
+        return !string.IsNullOrWhiteSpace(sectionPayload);
+    }
+
+    private bool TryBuildCurrentPreviewCopyPayload(out string previewPayload)
+    {
+        previewPayload = string.Empty;
+
+        var document = _previewTextControl?.Document ?? _viewModel.PreviewDocument;
+        if (document is null)
+            return false;
+
+        previewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
+        return !string.IsNullOrWhiteSpace(previewPayload);
+    }
+
+    private async Task<bool> WaitForPreviewClipboardSourceReadyAsync()
+    {
+        if (!_viewModel.IsAnyPreviewVisible)
+            return false;
+
+        if (!_viewModel.IsPreviewLoading)
+            return (_previewTextControl?.Document ?? _viewModel.PreviewDocument) is not null;
+
+        var timeout = TimeSpan.FromSeconds(10);
+        var stopwatch = Stopwatch.StartNew();
+
+        while (_viewModel.IsAnyPreviewVisible &&
+               _viewModel.IsPreviewLoading &&
+               stopwatch.Elapsed < timeout)
+        {
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await Task.Delay(15).ConfigureAwait(true);
+        }
+
+        return !_viewModel.IsPreviewLoading &&
+               (_previewTextControl?.Document ?? _viewModel.PreviewDocument) is not null;
+    }
+
+    private void ApplyPreviewToolTipBackdrop(ToolTip toolTip)
+    {
+        if (toolTip.GetVisualRoot() is null)
+            return;
+
+        if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
+            return;
+
+        var host = TopLevel.GetTopLevel(this);
+        if (host is not null && ReferenceEquals(tooltipLevel, host))
+            return;
+
+        try
+        {
+            if (_viewModel.HasAnyEffect)
+            {
+                tooltipLevel.TransparencyLevelHint =
+                [
+                    WindowTransparencyLevel.AcrylicBlur,
+                    WindowTransparencyLevel.Blur,
+                    WindowTransparencyLevel.Transparent,
+                    WindowTransparencyLevel.None
+                ];
+
+                tooltipLevel.Background = Brushes.Transparent;
+            }
+            else
+            {
+                tooltipLevel.TransparencyLevelHint =
+                [
+                    WindowTransparencyLevel.None
+                ];
+            }
+        }
+        catch
+        {
+            // Ignore: tooltip could have closed before the backdrop was applied.
         }
     }
 
@@ -3261,6 +3533,36 @@ public partial class MainWindow : Window
         ClosePreviewMode();
     }
 
+    private async void OnPreviewCopyCurrentMode(object? sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.IsProjectLoaded || !_viewModel.IsAnyPreviewVisible)
+            return;
+
+        if (!await WaitForPreviewClipboardSourceReadyAsync().ConfigureAwait(true) ||
+            !TryBuildCurrentPreviewCopyPayload(out var previewPayload))
+        {
+            return;
+        }
+
+        try
+        {
+            await SetClipboardTextAsync(previewPayload);
+
+            var toastKey = _viewModel.SelectedPreviewContentMode switch
+            {
+                PreviewContentMode.Tree => "Toast.Copy.Tree",
+                PreviewContentMode.Content => "Toast.Copy.Content",
+                _ => "Toast.Copy.TreeAndContent"
+            };
+
+            _toastService.Show(_localization[toastKey]);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
     private void OnPreviewTreeHide(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsPreviewTreeVisible)
@@ -3664,13 +3966,68 @@ public partial class MainWindow : Window
     /// (project load, git branch switch, git pull, search/filter close, deactivation).
     /// The delay lets finalizers and UI thread finish releasing references before sweep.
     /// </summary>
-    private static void ScheduleBackgroundMemoryCleanup()
+    private void ScheduleBackgroundMemoryCleanup()
+        => ScheduleBackgroundMemoryCleanupCore(
+            UiTimingProfile.Scale(TimeSpan.FromMilliseconds(400)),
+            waitForUiSettled: false);
+
+    private void ScheduleBackgroundMemoryCleanupAfterUiSettles(TimeSpan additionalDelay)
+        => ScheduleBackgroundMemoryCleanupCore(
+            UiTimingProfile.Scale(additionalDelay),
+            waitForUiSettled: true);
+
+    private void ScheduleBackgroundMemoryCleanupCore(TimeSpan delay, bool waitForUiSettled)
     {
+        var cleanupCts = ReplaceCancellationSource(ref _backgroundMemoryCleanupCts);
+
         _ = Task.Run(async () =>
         {
-            await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(400)));
-            ForceMemoryCleanup();
-        });
+            try
+            {
+                if (waitForUiSettled)
+                    await WaitForUiReadyForMemoryCleanupAsync(cleanupCts.Token);
+
+                await Task.Delay(delay, cleanupCts.Token);
+                cleanupCts.Token.ThrowIfCancellationRequested();
+                ForceMemoryCleanup();
+            }
+            catch (OperationCanceledException)
+            {
+                // Ignore canceled cleanup runs; a newer user interaction superseded them.
+            }
+            finally
+            {
+                DisposeIfCurrent(ref _backgroundMemoryCleanupCts, cleanupCts);
+            }
+        }, cleanupCts.Token);
+    }
+
+    private async Task WaitForUiReadyForMemoryCleanupAsync(CancellationToken cancellationToken)
+    {
+        var stableSamples = 0;
+
+        while (stableSamples < 3)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var isUiReady = await Dispatcher.UIThread.InvokeAsync(
+                () => IsVisible &&
+                      !_viewModel.StatusBusy &&
+                      !_viewModel.IsPreviewLoading &&
+                      !_settingsAnimating &&
+                      !_previewModeSwitchInProgress,
+                DispatcherPriority.Background);
+
+            stableSamples = isUiReady ? stableSamples + 1 : 0;
+            await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(120)), cancellationToken);
+        }
+    }
+
+    private void CancelBackgroundMemoryCleanup()
+    {
+        var previous = Interlocked.Exchange(ref _backgroundMemoryCleanupCts, null);
+        previous?.Cancel();
+        previous?.Dispose();
     }
 
     /// <summary>
@@ -3789,11 +4146,10 @@ public partial class MainWindow : Window
     [DllImport("kernel32.dll")]
     private static extern bool SetProcessWorkingSetSize(IntPtr process, nint minWorkingSetSize, nint maxWorkingSetSize);
 
-    private static async Task WaitForTreeRenderStabilizationAsync(CancellationToken cancellationToken)
+    private async Task WaitForTreeRenderStabilizationAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Wait for two render passes so the tree has time to materialize and paint.
         await Dispatcher.UIThread.InvokeAsync(
             static () => { },
             DispatcherPriority.Render);
@@ -3804,8 +4160,62 @@ public partial class MainWindow : Window
             DispatcherPriority.Render);
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Small buffer helps avoid visual contention with immediate post-load updates.
-        await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(140)), cancellationToken);
+        if (_workspaceGrid is null || _treePaneContainer is null || _settingsContainer is null)
+        {
+            await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(140)), cancellationToken);
+            return;
+        }
+
+        var readinessTimeout = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(700));
+        var frameDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(16));
+        var stopwatch = Stopwatch.StartNew();
+        var previousWorkspaceWidth = 0.0;
+        var previousTreeWidth = 0.0;
+        var stableSamples = 0;
+
+        while (stopwatch.Elapsed < readinessTimeout)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await Dispatcher.UIThread.InvokeAsync(
+                static () => { },
+                DispatcherPriority.Render);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var workspaceWidth = _workspaceGrid.Bounds.Width;
+            var treeWidth = ResolvePreviewTreePaneVisibleWidth();
+            var previewWidth = ResolvePreviewPaneVisibleWidth();
+            var settingsWidth = _settingsContainer.Bounds.Width > 0.5
+                ? _settingsContainer.Bounds.Width
+                : _settingsContainer.Width;
+
+            // The deferred settings animation must start only after the tree already owns
+            // the full workspace width. Otherwise the animation begins from a fallback width
+            // and the first reveal looks like a jump instead of a smooth shrink.
+            var treeOccupiesWorkspace =
+                workspaceWidth > 0.5 &&
+                treeWidth > 0.5 &&
+                previewWidth <= 0.5 &&
+                settingsWidth <= 0.5 &&
+                Math.Abs(treeWidth - workspaceWidth) <= 2.0;
+
+            var widthStable =
+                Math.Abs(workspaceWidth - previousWorkspaceWidth) <= 0.5 &&
+                Math.Abs(treeWidth - previousTreeWidth) <= 0.5;
+
+            stableSamples = treeOccupiesWorkspace && widthStable
+                ? stableSamples + 1
+                : 0;
+
+            if (stableSamples >= 2)
+                break;
+
+            previousWorkspaceWidth = workspaceWidth;
+            previousTreeWidth = treeWidth;
+            await Task.Delay(frameDelay, cancellationToken);
+        }
+
+        await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(60)), cancellationToken);
     }
 
     private void EnsurePreviewTreePaneTransitions()
@@ -4212,23 +4622,113 @@ public partial class MainWindow : Window
         if (_settingsIsland is null || _settingsTransform is null || _settingsContainer is null) return;
         if (_settingsAnimating) return;
 
+        var displayMode = GetCurrentDisplayMode();
         _settingsAnimating = true;
         try
         {
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+
             EnsureSettingsPanelTransitions();
             _currentSettingsPanelWidth = GetClampedSettingsPanelWidth(_currentSettingsPanelWidth);
             var targetVisibleWidth = _currentSettingsPanelWidth;
+            var currentTreeWidth = Math.Max(SplitTreePaneMinWidth, ResolvePreviewTreePaneVisibleWidth());
+            var currentPreviewWidth = Math.Max(SplitPreviewPaneMinWidth, ResolvePreviewPaneVisibleWidth());
+
+            SetSettingsAnimationPaneAnchors(displayMode, anchoredToLeftEdge: true);
 
             if (show)
-                UpdatePreviewSettingsSplitterState();
+            {
+                SetPreviewSettingsSplitterVisibility(true);
+
+                // Drive the neighboring pane with the same easing so the grid does not
+                // have to "catch up" to an Auto-sized settings column on every frame.
+                switch (displayMode)
+                {
+                    case WorkspaceDisplayMode.Tree:
+                        ApplyPreviewTreePaneWidth(currentTreeWidth, animate: false);
+                        ApplyPreviewTreePaneWidth(
+                            ResolveTreeModeTargetWidthForSettingsAnimation(targetVisibleWidth, includeSplitter: true),
+                            animate: true);
+                        break;
+
+                    case WorkspaceDisplayMode.PreviewOnly:
+                        ApplyPreviewPaneWidth(currentPreviewWidth, animate: false);
+                        ApplyPreviewPaneWidth(
+                            ResolvePreviewOnlyTargetWidthForSettingsAnimation(targetVisibleWidth, includeSplitter: true),
+                            animate: true);
+                        break;
+
+                    case WorkspaceDisplayMode.PreviewWithTree:
+                        ApplyPreviewTreePaneWidth(currentTreeWidth, animate: false);
+                        ApplyPreviewPaneWidth(currentPreviewWidth, animate: false);
+                        ApplyPreviewPaneWidth(
+                            ResolvePreviewPaneTargetWidthForSettingsAnimation(
+                                currentTreeWidth,
+                                targetVisibleWidth,
+                                includeSplitter: true),
+                            animate: true);
+                        break;
+                }
+            }
+            else
+            {
+                // Drop the splitter at close start so the neighboring pane can reclaim
+                // the full width during the animation instead of jumping at the end.
+                SetPreviewSettingsSplitterVisibility(false);
+
+                switch (displayMode)
+                {
+                    case WorkspaceDisplayMode.Tree:
+                        ApplyPreviewTreePaneWidth(currentTreeWidth, animate: false);
+                        ApplyPreviewTreePaneWidth(
+                            ResolveTreeModeTargetWidthForSettingsAnimation(0.0, includeSplitter: false),
+                            animate: true);
+                        break;
+
+                    case WorkspaceDisplayMode.PreviewOnly:
+                        ApplyPreviewPaneWidth(currentPreviewWidth, animate: false);
+                        ApplyPreviewPaneWidth(
+                            ResolvePreviewOnlyTargetWidthForSettingsAnimation(0.0, includeSplitter: false),
+                            animate: true);
+                        break;
+
+                    case WorkspaceDisplayMode.PreviewWithTree:
+                        ApplyPreviewTreePaneWidth(currentTreeWidth, animate: false);
+                        ApplyPreviewPaneWidth(currentPreviewWidth, animate: false);
+                        ApplyPreviewPaneWidth(
+                            ResolvePreviewPaneTargetWidthForSettingsAnimation(
+                                currentTreeWidth,
+                                0.0,
+                                includeSplitter: false),
+                            animate: true);
+                        break;
+                }
+            }
 
             ApplySettingsPanelWidth(show ? targetVisibleWidth : 0.0, animate: true);
             _settingsTransform.X = show ? 0.0 : targetVisibleWidth;
             _settingsIsland.Opacity = show ? 1.0 : 0.0;
             await WaitForPanelAnimationAsync(SettingsPanelAnimationDuration);
+
+            switch (displayMode)
+            {
+                case WorkspaceDisplayMode.Tree:
+                    ApplyPreviewTreePaneWidth(double.NaN, animate: false);
+                    break;
+
+                case WorkspaceDisplayMode.PreviewOnly:
+                    ApplyPreviewPaneWidth(double.NaN, animate: false);
+                    break;
+
+                case WorkspaceDisplayMode.PreviewWithTree:
+                    ApplyPreviewTreePaneWidth(ResolveDesiredPreviewTreePaneWidth(), animate: false);
+                    ApplyPreviewPaneWidth(double.NaN, animate: false);
+                    break;
+            }
         }
         finally
         {
+            SetSettingsAnimationPaneAnchors(displayMode, anchoredToLeftEdge: false);
             _settingsAnimating = false;
             UpdatePreviewSettingsSplitterState();
             UpdateAdaptiveWorkspaceChrome();
@@ -6263,6 +6763,13 @@ public partial class MainWindow : Window
         return _projectProfileStore.TryLoadProfile(_currentPath, out profile);
     }
 
+    private ProjectProfileLoadSnapshot LoadProjectProfileSnapshot()
+    {
+        return TryGetLocalProjectProfile(out var profile)
+            ? new ProjectProfileLoadSnapshot(true, profile)
+            : new ProjectProfileLoadSnapshot(false, null);
+    }
+
     private bool IsLocalProjectProfilePersistenceApplicable()
         => _viewModel.ProjectSourceType == ProjectSourceType.LocalFolder;
 
@@ -6286,11 +6793,13 @@ public partial class MainWindow : Window
 
         _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
         await PrepareSearchAndFilterForProjectLoadAsync();
+        CancelBackgroundMemoryCleanup();
         CancelPreviewRefresh();
+        var hadLoadedProjectBefore = _viewModel.IsProjectLoaded;
 
         // Clear previous project state BEFORE loading new one to release memory early
         // This is critical when switching between large projects
-        if (_viewModel.IsProjectLoaded)
+        if (hadLoadedProjectBefore)
             ClearPreviousProjectState(forceCompactingGc: true);
 
         var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
@@ -6322,6 +6831,7 @@ public partial class MainWindow : Window
             }
 
             UpdateTitle();
+            await YieldProjectLoadStartupFrameAsync(cancellationToken);
 
             await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
 
@@ -6335,9 +6845,21 @@ public partial class MainWindow : Window
             _activeProjectLoadCancellationSnapshot = null;
             CompleteStatusOperation(statusOperationId);
 
-            // Clean up memory from previous project (old tree, strings, etc.)
-            // Must be AFTER loading new project so old references are replaced
-            ScheduleBackgroundMemoryCleanup();
+            // First project load has nothing meaningful to reclaim yet. Skip the post-load sweep there
+            // so the initial settings reveal and early interaction stay as smooth as possible.
+            if (hadLoadedProjectBefore)
+            {
+                // Clean up memory from previous project (old tree, strings, etc.)
+                // Must be AFTER loading new project so old references are replaced.
+                ScheduleBackgroundMemoryCleanup();
+            }
+            else
+            {
+                // First load still creates temporary buffers and transient strings, but reclaim them
+                // only after the initial UI settles so opening the project keeps feeling smooth.
+                ScheduleBackgroundMemoryCleanupAfterUiSettles(
+                    SettingsPanelAnimationDuration + TimeSpan.FromMilliseconds(500));
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -6399,8 +6921,11 @@ public partial class MainWindow : Window
 
         if (applyStoredProfile)
         {
-            if (TryGetLocalProjectProfile(out var profile))
-                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profile);
+            var profileSnapshot = await Task.Run(LoadProjectProfileSnapshot, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (profileSnapshot is { HasProfile: true, Profile: not null })
+                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
             else
                 _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
         }
@@ -6969,7 +7494,7 @@ public partial class MainWindow : Window
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         StartDeferredSettingsPanelAnimation(cancellationToken);
         ObserveDetachedTask(
-            InitializeFileMetricsCacheAsync(treeRoot, cancellationToken),
+            InitializeFileMetricsCacheWhenUiSettlesAsync(treeRoot, cancellationToken),
             "InitializeFileMetricsCache");
     }
 
@@ -6988,6 +7513,26 @@ public partial class MainWindow : Window
         await WaitForTreeRenderStabilizationAsync(cancellationToken);
         if (_viewModel.SettingsVisible && !_settingsAnimating)
             AnimateSettingsPanel(true);
+    }
+
+    private async Task InitializeFileMetricsCacheWhenUiSettlesAsync(
+        TreeNodeDescriptor treeRoot,
+        CancellationToken cancellationToken)
+    {
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Metrics warmup is useful but not user-critical. Let the initial layout, activation handoff
+        // and the first settings reveal finish before background metrics start posting progress updates.
+        await Task.Delay(
+            SettingsPanelAnimationDuration + UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80)),
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await InitializeFileMetricsCacheAsync(treeRoot, cancellationToken);
     }
 
     private static async void ObserveDetachedTask(Task task, string operationName)

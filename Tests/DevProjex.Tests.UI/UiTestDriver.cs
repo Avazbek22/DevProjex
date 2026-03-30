@@ -1,4 +1,5 @@
 using Avalonia.VisualTree;
+using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Contracts;
@@ -20,7 +21,9 @@ internal static class UiTestDriver
     private static readonly TimeSpan PollDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(15);
     private static readonly TimeSpan FrameDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(6);
 
-    public static async Task<MainWindow> CreateLoadedMainWindowAsync(UiTestProject project)
+    public static async Task<MainWindow> CreateLoadedMainWindowAsync(
+        UiTestProject project,
+        bool waitForInitialSettingsPane = true)
     {
         var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
         var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
@@ -54,18 +57,21 @@ internal static class UiTestDriver
 
         await WaitForSelectionRefreshIdleAsync(window);
 
-        await WaitForConditionAsync(
-            window,
-            () =>
-            {
-                var viewModel = GetViewModel(window);
-                if (!viewModel.SettingsVisible)
-                    return true;
+        if (waitForInitialSettingsPane)
+        {
+            await WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var viewModel = GetViewModel(window);
+                    if (!viewModel.SettingsVisible)
+                        return true;
 
-                var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
-                return GetActualWidth(settingsContainer) >= 200;
-            },
-            "initial settings pane to become visually available");
+                    var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
+                    return GetActualWidth(settingsContainer) >= 200;
+                },
+                "initial settings pane to become visually available");
+        }
 
         await WaitForSettledFramesAsync(frameCount: 24);
         return window;
@@ -237,6 +243,18 @@ internal static class UiTestDriver
         var previewCloseButton = GetRequiredControl<Button>(window, "PreviewCloseButton");
         await ClickAsync(window, previewCloseButton);
         await WaitForPreviewClosedAsync(window);
+    }
+
+    public static async Task ClickPreviewCopyButtonAsync(MainWindow window)
+    {
+        var previewCopyButton = GetRequiredControl<Button>(window, "PreviewCopyButton");
+        await ClickAsync(window, previewCopyButton);
+    }
+
+    public static async Task ClickPreviewStickyHeaderCopyButtonAsync(MainWindow window)
+    {
+        var stickyHeaderCopyButton = GetRequiredControl<Button>(window, "PreviewStickyHeaderCopyButton");
+        await ClickAsync(window, stickyHeaderCopyButton);
     }
 
     public static async Task WaitForPreviewClosedAsync(MainWindow window)
@@ -438,6 +456,125 @@ internal static class UiTestDriver
         var contentMetrics = ExportOutputMetricsCalculator.FromText(contentText);
 
         return new ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics(treeMetrics, contentMetrics);
+    }
+
+    public static async Task<string> ComputeAppliedPreviewCopyPayloadAsync(
+        MainWindow window,
+        PreviewContentMode mode,
+        CancellationToken cancellationToken = default)
+    {
+        await WaitForSelectionRefreshIdleAsync(window);
+
+        var currentTree = GetRequiredPrivateField<BuildTreeResult>(window, "_currentTree");
+        var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
+        var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
+        var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
+        var treeAndContentExport = GetRequiredPrivateField<TreeAndContentExportService>(window, "_treeAndContentExport");
+        var selectedPaths = CollectCheckedPaths(GetViewModel(window));
+        var hasSelection = selectedPaths.Count > 0;
+        var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
+        var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
+
+        return mode switch
+        {
+            PreviewContentMode.Tree => hasSelection
+                ? treeExport.BuildSelectedTree(
+                    currentPath,
+                    currentTree.Root,
+                    selectedPaths,
+                    treeFormat,
+                    pathPresentation?.DisplayRootPath,
+                    pathPresentation?.DisplayRootName)
+                : treeExport.BuildFullTree(
+                    currentPath,
+                    currentTree.Root,
+                    treeFormat,
+                    pathPresentation?.DisplayRootPath,
+                    pathPresentation?.DisplayRootName),
+            PreviewContentMode.Content => await contentExport.BuildAsync(
+                hasSelection
+                    ? BuildOrderedSelectedFilePaths(selectedPaths)
+                    : BuildOrderedAllFilePaths(currentTree.Root),
+                cancellationToken,
+                pathPresentation?.MapFilePath),
+            PreviewContentMode.TreeAndContent => await treeAndContentExport.BuildAsync(
+                currentPath,
+                currentTree.Root,
+                selectedPaths,
+                treeFormat,
+                cancellationToken,
+                pathPresentation),
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+        };
+    }
+
+    public static string ComputeCurrentPreviewCopyPayload(MainWindow window)
+    {
+        var viewModel = GetViewModel(window);
+        var document = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(window, "PreviewTextControl").Document ??
+                       viewModel.PreviewDocument;
+        Assert.NotNull(document);
+        return PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
+    }
+
+    public static string ComputeVisibleStickyHeaderCopyPayload(MainWindow window)
+    {
+        var viewModel = GetViewModel(window);
+        var previewTextControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(window, "PreviewTextControl");
+        var previewScrollViewer = GetRequiredPreviewScrollViewer(window);
+        var document = previewTextControl.Document ?? viewModel.PreviewDocument;
+        if (document?.Sections is not { Count: > 0 } sections)
+            throw new XunitException("Preview document sections are not available for sticky-header copy.");
+
+        var topLine = previewTextControl.GetLineNumberAtVerticalOffset(previewScrollViewer.Offset.Y);
+        if (topLine < sections[0].StartLine)
+            throw new XunitException("Sticky-header copy payload was requested before the first file section became visible.");
+
+        var currentSection = PreviewDocumentSectionLookup.FindContainingSection(sections, topLine) ??
+                             PreviewDocumentSectionLookup.FindContainingOrNextSection(sections, topLine) ??
+                             sections[^1];
+
+        return PreviewClipboardPayloadBuilder.BuildSectionPayload(document, currentSection);
+    }
+
+    public static async Task SetClipboardTextAsync(MainWindow window, string content)
+    {
+        var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
+        Assert.NotNull(clipboard);
+        await clipboard.SetTextAsync(content);
+        await WaitForSettledFramesAsync(frameCount: 2);
+    }
+
+    public static async Task<string?> GetClipboardTextAsync(MainWindow window)
+    {
+        var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
+        Assert.NotNull(clipboard);
+        return await global::Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard);
+    }
+
+    public static async Task WaitForClipboardTextAsync(
+        MainWindow window,
+        string expectedText,
+        TimeSpan? timeout = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(20));
+        string? lastClipboardText = null;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            lastClipboardText = await GetClipboardTextAsync(window);
+            if (string.Equals(lastClipboardText, expectedText, StringComparison.Ordinal))
+            {
+                await WaitForSettledFramesAsync(frameCount: 4);
+                return;
+            }
+
+            await Task.Delay(PollDelay);
+            await WaitForSettledFramesAsync(frameCount: 2);
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"Timed out waiting for clipboard text to match the expected preview copy payload. Expected length={expectedText.Length}, actual length={lastClipboardText?.Length ?? 0}.");
     }
 
     public static async Task WaitForStatusMetricsReadyAsync(MainWindow window, TimeSpan? timeout = null)

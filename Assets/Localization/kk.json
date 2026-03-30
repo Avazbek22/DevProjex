@@ -73,6 +73,7 @@
   "Preview.Mode.TreeAndContent.Short": "Екеуі",
   "Preview.Loading": "Алдын ала қарау дайындалуда...",
   "Preview.NoData": "Алдын ала қарауға дерек жоқ",
+  "Preview.FilePath.Copy.Tooltip": "Ағымдағы файлды көшіру",
   "Preview.Selection.Copy": "Көшіру",
   "Preview.Selection.SelectAll": "Барлығын таңдау",
   "Preview.Selection.Clear": "Таңдауды тазалау",

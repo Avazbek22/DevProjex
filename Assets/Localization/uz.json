@@ -73,6 +73,7 @@
   "Preview.Mode.TreeAndContent.Short": "Ikkalasi",
   "Preview.Loading": "Oldindan ko'rish tayyorlanmoqda...",
   "Preview.NoData": "Oldindan ko'rish uchun ma'lumot yo'q",
+  "Preview.FilePath.Copy.Tooltip": "Joriy faylni nusxalash",
   "Preview.Selection.Copy": "Nusxa olish",
   "Preview.Selection.SelectAll": "Hammasini tanlash",
   "Preview.Selection.Clear": "Tanlovni tozalash",

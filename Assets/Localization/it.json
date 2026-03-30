@@ -73,6 +73,7 @@
   "Preview.Mode.TreeAndContent.Short": "Entrambi",
   "Preview.Loading": "Preparazione anteprima...",
   "Preview.NoData": "Nessun dato per l'anteprima",
+  "Preview.FilePath.Copy.Tooltip": "Copia il file corrente",
   "Preview.Selection.Copy": "Copia",
   "Preview.Selection.SelectAll": "Seleziona tutto",
   "Preview.Selection.Clear": "Cancella selezione",

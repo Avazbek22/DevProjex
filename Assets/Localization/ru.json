@@ -73,6 +73,7 @@
   "Preview.Mode.TreeAndContent.Short": "Оба",
   "Preview.Loading": "Подготовка превью...",
   "Preview.NoData": "Нет данных для превью",
+  "Preview.FilePath.Copy.Tooltip": "Скопировать текущий файл",
   "Preview.Selection.Copy": "Скопировать",
   "Preview.Selection.SelectAll": "Выделить все",
   "Preview.Selection.Clear": "Сбросить выделение",

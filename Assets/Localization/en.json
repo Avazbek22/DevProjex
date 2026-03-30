@@ -73,6 +73,7 @@
   "Preview.Mode.TreeAndContent.Short": "Both",
   "Preview.Loading": "Building preview...",
   "Preview.NoData": "No data for preview",
+  "Preview.FilePath.Copy.Tooltip": "Copy current file",
   "Preview.Selection.Copy": "Copy",
   "Preview.Selection.SelectAll": "Select all",
   "Preview.Selection.Clear": "Clear selection",

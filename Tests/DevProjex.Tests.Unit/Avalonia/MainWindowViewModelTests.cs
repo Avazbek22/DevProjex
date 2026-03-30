@@ -519,6 +519,53 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void PreviewCopyCurrentModeTooltip_FollowsSelectedPreviewMode()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Menu.Copy.Tree"] = "Copy tree",
+            ["Menu.Copy.Content"] = "Copy content",
+            ["Menu.Copy.TreeAndContent"] = "Copy tree and content"
+        });
+
+        Assert.Equal("Copy tree", viewModel.PreviewCopyCurrentModeTooltip);
+
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+        Assert.Equal("Copy content", viewModel.PreviewCopyCurrentModeTooltip);
+
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+        Assert.Equal("Copy tree and content", viewModel.PreviewCopyCurrentModeTooltip);
+    }
+
+    [Fact]
+    public void SelectedPreviewContentMode_RaisesPreviewCopyCurrentModeTooltipPropertyChanged()
+    {
+        var viewModel = CreateViewModel();
+        var raised = false;
+
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.PreviewCopyCurrentModeTooltip))
+                raised = true;
+        };
+
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+
+        Assert.True(raised);
+    }
+
+    [Fact]
+    public void PreviewCopyFilePathTooltip_UsesLocalizedValue()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Preview.FilePath.Copy.Tooltip"] = "Copy current file"
+        });
+
+        Assert.Equal("Copy current file", viewModel.PreviewCopyFilePathTooltip);
+    }
+
+    [Fact]
     public void CenteredPreviewSelectionMetricsVisible_IsTrue_WhenSelectionVisibleAndNotBusy()
     {
         var viewModel = CreateViewModel();
