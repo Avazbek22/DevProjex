@@ -49,6 +49,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				MaxRecentFolders,
 				PathComparer.Default,
 				static entry => entry.Path,
+				static value => value,
 				static (value, openedUtc) => new RecentFolderEntry
 				{
 					Path = value,
@@ -74,6 +75,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				MaxRecentRepositories,
 				StringComparer.OrdinalIgnoreCase,
 				static entry => entry.Url,
+				static value => NormalizeRepositoryComparisonKey(value),
 				static (value, openedUtc) => new RecentRepositoryEntry
 				{
 					Url = value,
@@ -101,7 +103,20 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		{
 			var json = File.ReadAllText(path);
 			var db = JsonSerializer.Deserialize<RecentProjectsDb>(json, SerializerOptions);
-			return db is null ? CreateDefaultDb() : Normalize(db);
+			if (db is null)
+			{
+				var fallback = CreateDefaultDb();
+				TrySave(fallback);
+				return fallback;
+			}
+
+			var originalSnapshot = JsonSerializer.Serialize(db, SerializerOptions);
+			var normalized = Normalize(db);
+			var normalizedSnapshot = JsonSerializer.Serialize(normalized, SerializerOptions);
+			if (!string.Equals(originalSnapshot, normalizedSnapshot, StringComparison.Ordinal))
+				TrySave(normalized);
+
+			return normalized;
 		}
 		catch
 		{
@@ -175,7 +190,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		foreach (var entry in ordered)
 		{
-			if (seen.Add(entry.Url))
+			if (seen.Add(NormalizeRepositoryComparisonKey(entry.Url)))
 				unique.Add(entry);
 		}
 
@@ -191,9 +206,11 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		int limit,
 		IEqualityComparer<string> comparer,
 		Func<TEntry, string> keySelector,
+		Func<string, string> comparisonKeySelector,
 		Func<string, DateTimeOffset, TEntry> factory)
 	{
-		entries.RemoveAll(entry => comparer.Equals(keySelector(entry), normalizedValue));
+		var normalizedComparisonKey = comparisonKeySelector(normalizedValue);
+		entries.RemoveAll(entry => comparer.Equals(comparisonKeySelector(keySelector(entry)), normalizedComparisonKey));
 		entries.Insert(0, factory(normalizedValue, DateTimeOffset.UtcNow));
 
 		if (entries.Count > limit)
@@ -296,5 +313,13 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		}
 
 		return trimmed;
+	}
+
+	private static string NormalizeRepositoryComparisonKey(string repositoryUrl)
+	{
+		var normalized = NormalizeRepositoryUrl(repositoryUrl);
+		return normalized.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
+			? normalized[..^4]
+			: normalized;
 	}
 }

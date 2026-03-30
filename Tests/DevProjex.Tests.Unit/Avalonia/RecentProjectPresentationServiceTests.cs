@@ -39,4 +39,30 @@ public sealed class RecentProjectPresentationServiceTests
 
 		Assert.Equal("https://github.com/user/repo.git", tooltip);
 	}
+
+	[Fact]
+	public void CreateFolderDisplayText_ReturnsRootPath_WhenFolderHasNoParentSegment()
+	{
+		var rootPath = Path.GetPathRoot(Environment.CurrentDirectory)!;
+
+		var text = RecentProjectPresentationService.CreateFolderDisplayText(rootPath);
+
+		Assert.Equal(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), text.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+	}
+
+	[Fact]
+	public void CreateRepositoryDisplayText_HandlesScpLikeGitUrl()
+	{
+		var text = RecentProjectPresentationService.CreateRepositoryDisplayText("git@github.com:user/repo.git");
+
+		Assert.Equal("git@github.com:user/repo.git", text);
+	}
+
+	[Fact]
+	public void CreateRepositoryToolTip_LeavesScpLikeGitUrlUntouched()
+	{
+		var tooltip = RecentProjectPresentationService.CreateRepositoryToolTip("git@github.com:user/repo.git");
+
+		Assert.Equal("git@github.com:user/repo.git", tooltip);
+	}
 }

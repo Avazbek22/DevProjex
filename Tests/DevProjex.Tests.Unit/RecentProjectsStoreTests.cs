@@ -68,6 +68,20 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void AddRepository_DeduplicatesGitSuffixVariants_AndKeepsLatestValue()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+
+		db = store.AddRepository(db, "https://github.com/user/repo.git");
+		db = store.AddRepository(db, "https://github.com/user/repo");
+
+		Assert.Single(db.RecentRepositories);
+		Assert.Equal("https://github.com/user/repo", db.RecentRepositories[0].Url);
+	}
+
+	[Fact]
 	public void AddFolder_DoesNotPolluteRecentRepositories()
 	{
 		using var temp = new TemporaryDirectory();
@@ -78,6 +92,20 @@ public sealed class RecentProjectsStoreTests
 
 		Assert.Single(db.RecentFolders);
 		Assert.Empty(db.RecentRepositories);
+	}
+
+	[Fact]
+	public void AddFolder_IgnoresRepoCachePath()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+		var repoCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "RepoCache", "repo_123");
+
+		db = store.AddFolder(db, repoCachePath);
+
+		Assert.Empty(db.RecentFolders);
+		Assert.False(File.Exists(store.GetPath()));
 	}
 
 	[Fact]
@@ -112,5 +140,61 @@ public sealed class RecentProjectsStoreTests
 		var loaded = store.Load();
 
 		Assert.Empty(loaded.RecentFolders);
+	}
+
+	[Fact]
+	public void Load_InvalidJson_RewritesDefaultDatabase()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var filePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+		File.WriteAllText(filePath, "{ definitely-not-json");
+
+		var loaded = store.Load();
+		var reloaded = JsonSerializer.Deserialize<RecentProjectsDb>(File.ReadAllText(filePath), new JsonSerializerOptions
+		{
+			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+			PropertyNameCaseInsensitive = true
+		});
+
+		Assert.NotNull(reloaded);
+		Assert.Equal(1, loaded.SchemaVersion);
+		Assert.Empty(loaded.RecentFolders);
+		Assert.Empty(loaded.RecentRepositories);
+		Assert.Equal(1, reloaded!.SchemaVersion);
+		Assert.Empty(reloaded.RecentFolders);
+		Assert.Empty(reloaded.RecentRepositories);
+	}
+
+	[Fact]
+	public void Load_NullCollections_RewritesEmptyListsAndCurrentSchema()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var filePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+		File.WriteAllText(filePath, """
+		{
+		  "schemaVersion": 0,
+		  "recentFolders": null,
+		  "recentRepositories": null
+		}
+		""");
+
+		var loaded = store.Load();
+		var persisted = JsonSerializer.Deserialize<RecentProjectsDb>(File.ReadAllText(filePath), new JsonSerializerOptions
+		{
+			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+			PropertyNameCaseInsensitive = true
+		});
+
+		Assert.NotNull(persisted);
+		Assert.Equal(1, loaded.SchemaVersion);
+		Assert.Empty(loaded.RecentFolders);
+		Assert.Empty(loaded.RecentRepositories);
+		Assert.Equal(1, persisted!.SchemaVersion);
+		Assert.Empty(persisted.RecentFolders);
+		Assert.Empty(persisted.RecentRepositories);
 	}
 }
