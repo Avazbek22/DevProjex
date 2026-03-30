@@ -5479,7 +5479,7 @@ public partial class MainWindow : Window
             // Save cache path for cleanup when project is closed or replaced
             _currentCachedRepoPath = targetPath;
 
-            await TryOpenFolderAsync(result.LocalPath, fromDialog: false);
+            await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
             RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? url : result.RepositoryUrl);
 
             // Load branches if Git mode
@@ -6876,7 +6876,7 @@ public partial class MainWindow : Window
     private bool IsLocalProjectProfilePersistenceApplicable()
         => _viewModel.ProjectSourceType == ProjectSourceType.LocalFolder;
 
-    private async Task TryOpenFolderAsync(string path, bool fromDialog)
+    private async Task TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
         if (!Directory.Exists(path))
         {
@@ -6937,7 +6937,8 @@ public partial class MainWindow : Window
             await YieldProjectLoadStartupFrameAsync(cancellationToken);
 
             await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
-            RecordRecentFolder(path);
+            if (recordRecentFolder)
+                RecordRecentFolder(path);
 
             // Clear cached repo path only after the new local project load has completed successfully.
             if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))

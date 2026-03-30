@@ -11,6 +11,10 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	private const int MaxRecentRepositories = 7;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "recent-projects.json";
+	private static readonly string RepoCacheRootPath = Path.Combine(
+		Path.GetTempPath(),
+		FolderName,
+		"RepoCache");
 
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -137,6 +141,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				Path = PathUtility.Normalize(entry.Path),
 				OpenedUtc = entry.OpenedUtc <= DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : entry.OpenedUtc
 			})
+			.Where(static entry => !IsRepoCachePath(entry.Path))
 			.OrderByDescending(static entry => entry.OpenedUtc)
 			.ToList();
 
@@ -239,7 +244,22 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		try
 		{
 			normalizedPath = PathUtility.Normalize(path);
-			return !string.IsNullOrWhiteSpace(normalizedPath);
+			return !string.IsNullOrWhiteSpace(normalizedPath) && !IsRepoCachePath(normalizedPath);
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static bool IsRepoCachePath(string path)
+	{
+		if (string.IsNullOrWhiteSpace(path))
+			return false;
+
+		try
+		{
+			return PathUtility.IsPathInside(path, RepoCacheRootPath);
 		}
 		catch
 		{

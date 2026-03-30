@@ -66,4 +66,51 @@ public sealed class RecentProjectsStoreTests
 		Assert.Contains(db.RecentRepositories, entry => entry.Url.EndsWith("repo8", StringComparison.Ordinal));
 		Assert.DoesNotContain(db.RecentRepositories, entry => entry.Url.EndsWith("repo0", StringComparison.Ordinal));
 	}
+
+	[Fact]
+	public void AddFolder_DoesNotPolluteRecentRepositories()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+
+		db = store.AddFolder(db, Path.Combine(temp.Path, "FolderA"));
+
+		Assert.Single(db.RecentFolders);
+		Assert.Empty(db.RecentRepositories);
+	}
+
+	[Fact]
+	public void AddRepository_DoesNotPolluteRecentFolders()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+
+		db = store.AddRepository(db, "https://github.com/user/repo");
+
+		Assert.Empty(db.RecentFolders);
+		Assert.Single(db.RecentRepositories);
+	}
+
+	[Fact]
+	public void Load_RemovesRepoCacheFolders_FromLegacyData()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+
+		var regularFolder = temp.CreateFolder("RegularFolder");
+		var db = store.Load();
+		db = store.AddFolder(db, regularFolder);
+
+		var path = store.GetPath();
+		var json = File.ReadAllText(path);
+		var legacyRepoCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "RepoCache", "repo_legacy");
+		json = json.Replace(regularFolder.Replace("\\", "\\\\"), legacyRepoCachePath.Replace("\\", "\\\\"));
+		File.WriteAllText(path, json);
+
+		var loaded = store.Load();
+
+		Assert.Empty(loaded.RecentFolders);
+	}
 }

@@ -68,9 +68,12 @@
                   Margin="0,0,0,12"
                   Spacing="6"
                   IsVisible="{Binding !GitCloneInProgress}">
-        <TextBlock Text="{Binding GitCloneRecentRepositoriesLabel}"
-                   FontSize="13"
-                   Opacity="0.8" />
+        <Label Name="RecentRepositoriesLabel"
+               Content="{Binding GitCloneRecentRepositoriesLabel}"
+               Target="{Binding #RecentRepositoriesComboBox}"
+               FontSize="13"
+               Opacity="0.8"
+               Padding="0" />
         <ComboBox Name="RecentRepositoriesComboBox"
                   Classes="recent-repositories-combo"
                   ItemsSource="{Binding RecentRepositories}"

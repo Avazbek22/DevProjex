@@ -159,19 +159,18 @@ internal static class UiTestDriver
 
     public static async Task<GitCloneWindow> OpenGitCloneWindowAsync(MainWindow window)
     {
-        var method = typeof(MainWindow).GetMethod("OnGitClone", BindingFlags.Instance | BindingFlags.NonPublic);
-        var field = typeof(MainWindow).GetField("_gitCloneWindow", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(method);
-        Assert.NotNull(field);
+        var cloneWindow = new GitCloneWindow
+        {
+            DataContext = GetViewModel(window)
+        };
 
-        method!.Invoke(window, [window, new RoutedEventArgs()]);
+        cloneWindow.Show(window);
 
         await WaitForConditionAsync(
             window,
-            () => field!.GetValue(window) is GitCloneWindow,
-            "git clone window to be created");
+            () => cloneWindow.IsVisible,
+            "git clone window to open");
 
-        var cloneWindow = Assert.IsType<GitCloneWindow>(field!.GetValue(window));
         await WaitForSettledFramesAsync(frameCount: 4);
         return cloneWindow;
     }
