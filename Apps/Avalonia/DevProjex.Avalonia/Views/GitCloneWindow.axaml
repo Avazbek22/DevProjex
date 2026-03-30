@@ -43,6 +43,25 @@
                      ComboBox.recent-repositories-combo /template/ Border">
       <Setter Property="CornerRadius" Value="8" />
     </Style>
+
+
+    <Style Selector="ComboBox.recent-repositories-combo ComboBoxItem">
+      <Setter Property="Margin" Value="0,2" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo ComboBoxItem:pointerover /template/ Border#PART_BorderElement,
+                     ComboBox.recent-repositories-combo ComboBoxItem:pointerover /template/ Border">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo ComboBoxItem:selected /template/ Border#PART_BorderElement,
+                     ComboBox.recent-repositories-combo ComboBoxItem:selected /template/ Border">
+      <Setter Property="Background" Value="{DynamicResource MenuPressedBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
   </Window.Styles>
 
   <Border Name="CloneWindowCard"
