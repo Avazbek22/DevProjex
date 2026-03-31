@@ -129,8 +129,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _ignoreOptionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
         _extensionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
         _rootFoldersChangedHandler = (_, _) => UpdateAllCheckboxLabels();
-        _recentFoldersChangedHandler = (_, _) => RaisePropertyChanged(nameof(HasRecentFolders));
-        _recentRepositoriesChangedHandler = (_, _) => RaisePropertyChanged(nameof(HasRecentRepositories));
+        _recentFoldersChangedHandler = (_, _) =>
+        {
+            RaisePropertyChanged(nameof(HasRecentFolders));
+            RaisePropertyChanged(nameof(RecentFoldersMenuVisible));
+        };
+        _recentRepositoriesChangedHandler = (_, _) =>
+        {
+            RaisePropertyChanged(nameof(HasRecentRepositories));
+            RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
+        };
 
         // Subscribe to collection changes to update "All" checkbox labels with counts
         IgnoreOptions.CollectionChanged += _ignoreOptionsChangedHandler;
@@ -823,6 +831,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_gitCloneInProgress == value) return;
             _gitCloneInProgress = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
         }
     }
 
@@ -1093,7 +1102,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasRecentFolders => RecentFolders.Count > 0;
 
+    // Keep the File > Recent submenu hidden until there is at least one entry
+    // beyond the current workspace. A single entry is just the active project.
+    public bool RecentFoldersMenuVisible => RecentFolders.Count > 1;
+
     public bool HasRecentRepositories => RecentRepositories.Count > 0;
+
+    // Hide the clone recent list while cloning is in progress to avoid
+    // exposing stale selections during the active git operation.
+    public bool GitCloneRecentRepositoriesVisible => !GitCloneInProgress && HasRecentRepositories;
 
     public bool AllIgnoreChecked
     {

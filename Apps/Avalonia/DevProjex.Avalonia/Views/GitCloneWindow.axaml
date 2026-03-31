@@ -87,9 +87,10 @@
                KeyDown="OnUrlKeyDown" />
 
       <!-- Recent repositories (visible when not in progress) -->
-      <Border Grid.Row="3"
+      <Border Name="RecentRepositoriesContainer"
+              Grid.Row="3"
               Margin="0,0,0,12"
-              IsVisible="{Binding !GitCloneInProgress}">
+              IsVisible="{Binding GitCloneRecentRepositoriesVisible}">
         <ComboBox Name="RecentRepositoriesComboBox"
                   Classes="recent-repositories-combo"
                   ItemsSource="{Binding RecentRepositories}"

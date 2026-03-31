@@ -5,9 +5,9 @@ namespace DevProjex.Tests.Integration;
 public sealed class RecentProjectsPersistenceIntegrationTests
 {
 	[Fact]
-	public void Store_PersistsRecentFoldersAndRepositoriesAcrossInstances()
-	{
-		using var temp = new TemporaryDirectory();
+    public void Store_PersistsRecentFoldersAndRepositoriesAcrossInstances()
+    {
+        using var temp = new TemporaryDirectory();
 		var firstStore = new RecentProjectsStore(() => temp.Path);
 		var folderPath = temp.CreateDirectory("Workspace/Feature");
 		var repositoryUrl = "https://github.com/example/project.git";
@@ -21,9 +21,59 @@ public sealed class RecentProjectsPersistenceIntegrationTests
 
 		Assert.Single(reloaded.RecentFolders);
 		Assert.Single(reloaded.RecentRepositories);
-		Assert.Equal(Path.GetFullPath(folderPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), reloaded.RecentFolders[0].Path);
-		Assert.Equal(repositoryUrl, reloaded.RecentRepositories[0].Url);
-	}
+        Assert.Equal(Path.GetFullPath(folderPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), reloaded.RecentFolders[0].Path);
+        Assert.Equal(repositoryUrl, reloaded.RecentRepositories[0].Url);
+    }
+
+    [Fact]
+    public void Store_PersistsOnlyTheTenMostRecentFoldersAcrossInstances()
+    {
+        using var temp = new TemporaryDirectory();
+        var firstStore = new RecentProjectsStore(() => temp.Path);
+        var db = firstStore.Load();
+
+        var folderPaths = Enumerable.Range(0, 12)
+            .Select(index => temp.CreateDirectory($"Folders/Folder{index}"))
+            .ToArray();
+
+        foreach (var folderPath in folderPaths)
+            db = firstStore.AddFolder(db, folderPath);
+
+        var secondStore = new RecentProjectsStore(() => temp.Path);
+        var reloaded = secondStore.Load();
+
+        Assert.Equal(10, reloaded.RecentFolders.Count);
+        Assert.Equal(PathUtility.Normalize(folderPaths[11]), reloaded.RecentFolders[0].Path);
+        Assert.Equal(PathUtility.Normalize(folderPaths[10]), reloaded.RecentFolders[1].Path);
+        Assert.Equal(PathUtility.Normalize(folderPaths[2]), reloaded.RecentFolders[9].Path);
+        Assert.DoesNotContain(reloaded.RecentFolders, entry => entry.Path == PathUtility.Normalize(folderPaths[0]));
+        Assert.DoesNotContain(reloaded.RecentFolders, entry => entry.Path == PathUtility.Normalize(folderPaths[1]));
+    }
+
+    [Fact]
+    public void Store_PersistsOnlyTheSevenMostRecentRepositoriesAcrossInstances()
+    {
+        using var temp = new TemporaryDirectory();
+        var firstStore = new RecentProjectsStore(() => temp.Path);
+        var db = firstStore.Load();
+
+        var repositoryUrls = Enumerable.Range(0, 9)
+            .Select(index => $"https://example.com/user/repo{index}")
+            .ToArray();
+
+        foreach (var repositoryUrl in repositoryUrls)
+            db = firstStore.AddRepository(db, repositoryUrl);
+
+        var secondStore = new RecentProjectsStore(() => temp.Path);
+        var reloaded = secondStore.Load();
+
+        Assert.Equal(7, reloaded.RecentRepositories.Count);
+        Assert.Equal(repositoryUrls[8], reloaded.RecentRepositories[0].Url);
+        Assert.Equal(repositoryUrls[7], reloaded.RecentRepositories[1].Url);
+        Assert.Equal(repositoryUrls[2], reloaded.RecentRepositories[6].Url);
+        Assert.DoesNotContain(reloaded.RecentRepositories, entry => entry.Url == repositoryUrls[0]);
+        Assert.DoesNotContain(reloaded.RecentRepositories, entry => entry.Url == repositoryUrls[1]);
+    }
 
 	[Fact]
 	public void Store_PersistsLatestRepositoryRepresentationAfterComparisonDeduplication()
