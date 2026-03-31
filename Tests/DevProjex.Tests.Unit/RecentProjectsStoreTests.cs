@@ -109,6 +109,21 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void AddFolder_DeduplicatesLegacyTrailingSeparatorVariants_AndKeepsLatestValue()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+		var folder = temp.CreateFolder("Workspace");
+
+		db = store.AddFolder(db, folder);
+		db = store.AddFolder(db, folder + '\\');
+
+		Assert.Single(db.RecentFolders);
+		Assert.Equal(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), db.RecentFolders[0].Path);
+	}
+
+	[Fact]
 	public void AddRepository_DoesNotPolluteRecentFolders()
 	{
 		using var temp = new TemporaryDirectory();
