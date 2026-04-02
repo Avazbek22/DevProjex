@@ -5335,7 +5335,7 @@ public partial class MainWindow : Window
                 Tag = recentFolder.Value
             };
 
-            ToolTip.SetTip(item, recentFolder.ToolTipText);
+            ToolTip.SetTip(item, null);
             item.Click += OnRecentFolderMenuItemClick;
             recentMenuItem.Items.Add(item);
         }
