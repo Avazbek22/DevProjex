@@ -16,6 +16,8 @@ Hotkeys:
 
 ## 3) File
 * Open folder… — open root folder (Ctrl+O)
+* New window — open a new independent DevProjex instance
+* Recent — list of recently opened local folders
 * Refresh — rescan and rebuild the tree (F5)
 * Export to file:
   * Export tree
@@ -41,6 +43,18 @@ Rules:
 * if a path is unavailable or does not exist, the same access checks as in “Open folder…” are applied;
 * unsupported or non-local items are ignored.
 
+### Recent
+The “File → Recent” item shows the history of recently opened local folders.
+
+Rules:
+* only local folders are added to the list;
+* Git repositories cloned via DevProjex are not added to this list;
+* duplicates are not created — opening the same folder again moves it to the top;
+* up to 10 recent folders are stored;
+* history is preserved between app launches.
+
+Each item shows the short folder name, and the full path is available in a tooltip.
+
 ## 4) Git
 Git menu is available only for projects cloned via DevProjex (Git Clone). The app does not touch your files — it works only with the cache.
 
@@ -49,6 +63,20 @@ The cache is stored in the system temp folder. On Windows it is usually:
 
 * Branch — shows the list of available branches with the active one marked; switching updates the tree to the selected branch. If the branch already exists locally, switching is offline (no update). If it does not exist locally, it is fetched and created.
 * Get updates — updates only the current branch: fetch and reset to origin/<branch>.
+
+### Clone window
+In the Git Clone window, a “Recent repositories” list can appear below the URL field.
+
+Rules:
+* the list appears only if the history already contains recently cloned repositories;
+* only repository URLs are added to the list;
+* local folders are not added to this list;
+* duplicates are not created — cloning the same repository again moves it to the top;
+* up to 7 recent repositories are stored;
+* history is preserved between app launches.
+
+Selecting an item automatically fills the URL field.
+While cloning is in progress, the list is temporarily hidden.
 
 ## 5) Copy
 ### Tree format toggle (ASCII/JSON)
@@ -127,10 +155,16 @@ Additionally:
 * files in preview are separated by horizontal lines;
 * while scrolling, the path of the current file is pinned at the top;
 * tree and preview zoom can live independently.
+* in Preview mode, you can copy either the full current result or the current visible file block without opening the Copy menu.
 
 Buttons:
+* copy button on the left side of the top preview island — copies the current preview mode:
+  * Tree
+  * Content
+  * Tree and content
 * X in the tree pane — hides the tree and leaves only the preview pane;
 * X in the top preview pane — closes Preview mode completely;
+* small copy button in the pinned file header — copies the current visible file block exactly as it is shown in Preview;
 * pressing the eye icon again or Ctrl+B also closes Preview mode.
 
 Search and Filter are available while the tree pane is visible in Preview.
@@ -376,7 +410,10 @@ Reset data (Help → Reset data) removes saved local-project parameter profiles:
 * selected file types;
 * selected options in the "Ignore" block.
 
-Files and folders on disk are not modified or deleted.
+Important:
+* Recent history for local folders is not cleared;
+* Recent repositories history in the Git Clone window is not cleared;
+* files and folders on disk are not modified or deleted.
 
 ## 16) Languages
 Language is selected via the Language menu.
