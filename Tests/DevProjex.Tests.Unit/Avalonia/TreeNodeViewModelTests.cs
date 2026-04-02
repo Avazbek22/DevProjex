@@ -531,7 +531,26 @@ public sealed class TreeNodeViewModelTests
     }
 
     [Fact]
-    public void IsChecked_RealizesLazyChildrenForCascadeUpdates()
+    public void IsChecked_DoesNotMaterializeLazyChildrenForCascadeUpdates()
+    {
+        var leafDescriptor = new TreeNodeDescriptor("Leaf", @"C:\Root\Child\Leaf", false, false, "icon", []);
+        var childDescriptor = new TreeNodeDescriptor("Child", @"C:\Root\Child", true, false, "icon", [leafDescriptor]);
+        var rootDescriptor = CreateDescriptor("Root", childDescriptor);
+        var factoryCallCount = 0;
+        var root = new TreeNodeViewModel(rootDescriptor, null, null, parent =>
+        {
+            factoryCallCount++;
+            return BuildChildrenFromDescriptor(parent);
+        });
+
+        root.IsChecked = true;
+
+        Assert.True(root.IsChecked is true);
+        Assert.Equal(0, factoryCallCount);
+    }
+
+    [Fact]
+    public void LazyChildren_InheritDeferredCheckedState_WhenMaterializedLater()
     {
         var leafDescriptor = new TreeNodeDescriptor("Leaf", @"C:\Root\Child\Leaf", false, false, "icon", []);
         var childDescriptor = new TreeNodeDescriptor("Child", @"C:\Root\Child", true, false, "icon", [leafDescriptor]);
@@ -540,9 +559,29 @@ public sealed class TreeNodeViewModelTests
 
         root.IsChecked = true;
 
-        Assert.True(root.IsChecked is true);
-        Assert.True(root.Children[0].IsChecked is true);
-        Assert.True(root.Children[0].Children[0].IsChecked is true);
+        var child = Assert.Single(root.Children);
+        Assert.True(child.IsChecked is true);
+        Assert.True(child.Children[0].IsChecked is true);
+    }
+
+    [Fact]
+    public void CollectCheckedPaths_CheckedParent_ShortCircuitsWithoutMaterializingLazyChildren()
+    {
+        var childDescriptor = new TreeNodeDescriptor("Child", @"C:\Root\Child", true, false, "icon", []);
+        var rootDescriptor = CreateDescriptor("Root", childDescriptor);
+        var factoryCallCount = 0;
+        var root = new TreeNodeViewModel(rootDescriptor, null, null, parent =>
+        {
+            factoryCallCount++;
+            return BuildChildrenFromDescriptor(parent);
+        });
+        var selected = new HashSet<string>(PathComparer.Default);
+
+        root.IsChecked = true;
+        root.CollectCheckedPaths(selected);
+
+        Assert.Equal(0, factoryCallCount);
+        Assert.Equal(new[] { root.FullPath }, selected);
     }
 
     #endregion

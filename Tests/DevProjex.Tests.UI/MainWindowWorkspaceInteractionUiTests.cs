@@ -70,6 +70,34 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
+    public async Task TreeNodeCheckbox_DoubleClick_DoesNotExpandBranch()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var srcNode = rootNode.Children.Single(node => string.Equals(node.DisplayName, "src", StringComparison.Ordinal));
+            srcNode.IsExpanded = false;
+            srcNode.IsChecked = false;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+            await UiTestDriver.DoubleClickAsync(window, checkBox);
+
+            Assert.False(srcNode.IsExpanded);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task RecentProjects_AreFlushedOnClose_WhenImmediateSaveFails()
     {
         var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));

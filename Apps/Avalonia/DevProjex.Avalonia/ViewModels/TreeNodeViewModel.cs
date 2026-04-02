@@ -23,6 +23,7 @@ public sealed class TreeNodeViewModel(
     private bool _hasHighlightedDisplay;
     private int _searchSelfMatchEpoch;
     private int _searchDescendantMatchEpoch;
+    private bool _deferredChildCheckedState;
     private List<TreeNodeViewModel> _children = new(descriptor.Children.Count);
     private Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? _childrenFactory = childrenFactory;
     private bool _childrenInitialized = childrenFactory is null || descriptor.Children.Count == 0;
@@ -196,6 +197,26 @@ public sealed class TreeNodeViewModel(
         }
     }
 
+    /// <summary>
+    /// Collects the minimal checked-path snapshot without forcing lazy subtree realization.
+    /// A checked directory represents the whole subtree, so descendants do not need to be
+    /// materialized or added individually.
+    /// </summary>
+    public void CollectCheckedPaths(HashSet<string> selected)
+    {
+        if (_isChecked == true)
+        {
+            selected.Add(FullPath);
+            return;
+        }
+
+        if (!_childrenInitialized)
+            return;
+
+        foreach (var child in _children)
+            child.CollectCheckedPaths(selected);
+    }
+
     public void UpdateIcon(IImage? icon)
     {
         Icon = icon;
@@ -312,9 +333,15 @@ public sealed class TreeNodeViewModel(
         _isChecked = value;
         RaisePropertyChanged(nameof(IsChecked));
 
+        if (value.HasValue)
+            _deferredChildCheckedState = value.Value;
+
         if (updateChildren && value.HasValue)
         {
-            foreach (var child in EnsureChildrenRealized())
+            // Only propagate to already realized children. Unrealized branches inherit the
+            // latest explicit state when they are materialized later, which keeps checkbox
+            // toggles responsive even on very large trees.
+            foreach (var child in _children)
                 child.SetChecked(value.Value, updateChildren: true, updateParent: false);
         }
 
@@ -378,6 +405,12 @@ public sealed class TreeNodeViewModel(
         _children = builtChildren as List<TreeNodeViewModel> ?? new List<TreeNodeViewModel>(builtChildren);
         _childrenFactory = null;
         _childrenInitialized = true;
+
+        // Newly materialized children must inherit the last explicit subtree state without
+        // forcing recursive realization of their own descendants.
+        foreach (var child in _children)
+            child.SetChecked(_deferredChildCheckedState, updateChildren: false, updateParent: false);
+
         RaisePropertyChanged(nameof(ChildItemsSource));
         return _children;
     }

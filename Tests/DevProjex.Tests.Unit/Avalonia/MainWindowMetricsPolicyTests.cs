@@ -20,4 +20,20 @@ public sealed class MainWindowMetricsPolicyTests
 
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 1)]
+    [InlineData(4, 3)]
+    [InlineData(8, 7)]
+    [InlineData(16, 8)]
+    [InlineData(64, 8)]
+    public void GetBackgroundMetricsParallelism_LeavesUiHeadroom_AndClampsFanOut(
+        int processorCount,
+        int expected)
+    {
+        var result = MetricsCalculationPolicy.GetBackgroundMetricsParallelism(processorCount);
+
+        Assert.Equal(expected, result);
+    }
 }

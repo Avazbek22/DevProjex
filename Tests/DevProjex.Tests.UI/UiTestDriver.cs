@@ -209,6 +209,21 @@ internal static class UiTestDriver
         await WaitForSettledFramesAsync(frameCount: 4);
     }
 
+    public static async Task DoubleClickAsync(MainWindow window, Control control)
+    {
+        var clickPoint = GetControlCenter(control, window);
+        window.MouseMove(clickPoint, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 1);
+
+        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 1);
+
+        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
     public static async Task DragAsync(MainWindow window, Control control, double deltaX)
     {
         var startPoint = GetControlCenter(control, window);
@@ -456,7 +471,7 @@ internal static class UiTestDriver
         var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
         var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
         var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
-        var selectedPaths = CollectCheckedPaths(GetViewModel(window));
+        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
         var hasSelection = selectedPaths.Count > 0;
         var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
         var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
@@ -481,7 +496,7 @@ internal static class UiTestDriver
         var treeMetrics = ExportOutputMetricsCalculator.FromText(treeText);
 
         var orderedFilePaths = hasSelection
-            ? BuildOrderedSelectedFilePaths(selectedPaths)
+            ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
             : BuildOrderedAllFilePaths(currentTree.Root);
         var contentText = await contentExport.BuildAsync(
             orderedFilePaths,
@@ -504,7 +519,7 @@ internal static class UiTestDriver
         var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
         var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
         var treeAndContentExport = GetRequiredPrivateField<TreeAndContentExportService>(window, "_treeAndContentExport");
-        var selectedPaths = CollectCheckedPaths(GetViewModel(window));
+        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
         var hasSelection = selectedPaths.Count > 0;
         var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
         var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
@@ -527,7 +542,7 @@ internal static class UiTestDriver
                     pathPresentation?.DisplayRootName),
             PreviewContentMode.Content => await contentExport.BuildAsync(
                 hasSelection
-                    ? BuildOrderedSelectedFilePaths(selectedPaths)
+                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
                     : BuildOrderedAllFilePaths(currentTree.Root),
                 cancellationToken,
                 pathPresentation?.MapFilePath),
@@ -1016,6 +1031,16 @@ internal static class UiTestDriver
                                        IsInteractableWithinWindow(control, window));
     }
 
+    private static CheckBox? FindTreeNodeCheckBox(MainWindow window, string displayName)
+    {
+        return window
+            .GetVisualDescendants()
+            .OfType<CheckBox>()
+            .FirstOrDefault(control => control.DataContext is TreeNodeViewModel node &&
+                                       string.Equals(node.DisplayName, displayName, StringComparison.Ordinal) &&
+                                       IsInteractableWithinWindow(control, window));
+    }
+
     private static async Task<CheckBox> WaitForRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
     {
         await WaitForConditionAsync(
@@ -1046,6 +1071,16 @@ internal static class UiTestDriver
         return GetRequiredIgnoreOptionCheckBox(window, optionId);
     }
 
+    public static async Task<CheckBox> WaitForTreeNodeCheckBoxAsync(MainWindow window, string displayName)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => FindTreeNodeCheckBox(window, displayName) is not null,
+            $"tree node checkbox '{displayName}' to become interactable");
+
+        return Assert.IsType<CheckBox>(FindTreeNodeCheckBox(window, displayName));
+    }
+
     private static DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator GetSelectionCoordinator(MainWindow window)
     {
         var field = typeof(MainWindow).GetField("_selectionCoordinator", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1071,35 +1106,14 @@ internal static class UiTestDriver
         return method?.Invoke(window, null) as T;
     }
 
-    private static HashSet<string> CollectCheckedPaths(MainWindowViewModel viewModel)
+    private static List<string> BuildOrderedSelectedFilePaths(
+        TreeNodeDescriptor treeRoot,
+        IReadOnlySet<string> selectedPaths)
     {
-        var selected = new HashSet<string>(PathComparer.Default);
-        foreach (var node in viewModel.TreeNodes)
-            CollectChecked(node, selected);
-
-        return selected;
-    }
-
-    private static void CollectChecked(TreeNodeViewModel node, HashSet<string> selected)
-    {
-        if (node.IsChecked == true)
-            selected.Add(node.FullPath);
-
-        foreach (var child in node.Children)
-            CollectChecked(child, selected);
-    }
-
-    private static List<string> BuildOrderedSelectedFilePaths(IReadOnlySet<string> selectedPaths)
-    {
-        var ordered = new List<string>(selectedPaths.Count);
-        foreach (var path in selectedPaths)
-        {
-            if (File.Exists(path))
-                ordered.Add(path);
-        }
-
-        ordered.Sort(PathComparer.Default);
-        return ordered;
+        return PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(
+            selectedPaths,
+            treeRoot,
+            ensureExists: true);
     }
 
     private static List<string> BuildOrderedAllFilePaths(TreeNodeDescriptor root)

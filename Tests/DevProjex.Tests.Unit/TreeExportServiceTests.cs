@@ -170,9 +170,9 @@ public sealed class TreeExportServiceTests
 		Assert.Contains("main.cs", result);
 	}
 
-	// Verifies selecting the root includes the root node only.
+	// Verifies selecting the root includes the full subtree.
 	[Fact]
-	public void BuildSelectedTree_ReturnsRootOnlyWhenRootSelected()
+	public void BuildSelectedTree_ReturnsFullSubtreeWhenRootSelected()
 	{
 		var root = new TreeNodeDescriptor(
 			DisplayName: "root",
@@ -190,7 +190,7 @@ public sealed class TreeExportServiceTests
 		var result = service.BuildSelectedTree("/root", root, selected);
 
 		Assert.Contains("root", result);
-		Assert.DoesNotContain("child", result);
+		Assert.Contains("child", result);
 	}
 
 	// Verifies selecting both root and child includes the child output.

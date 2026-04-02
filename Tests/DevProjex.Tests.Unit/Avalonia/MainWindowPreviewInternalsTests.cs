@@ -63,25 +63,88 @@ public sealed class MainWindowPreviewInternalsTests
     [Fact]
     public void BuildOrderedSelectedFilePaths_CaseVariantPaths_FollowPlatformSemantics()
     {
-        var selected = new HashSet<string>(StringComparer.Ordinal)
-        {
-            CreatePath("root", "B.cs"),
-            CreatePath("root", "a.cs"),
-            CreatePath("root", "A.cs")
-        };
+        var upper = CreatePath("root", "A.cs");
+        var lower = CreatePath("root", "a.cs");
+        var other = CreatePath("root", "B.cs");
+        var selected = new HashSet<string>(StringComparer.Ordinal) { other, lower, upper };
+        var root = new TreeNodeDescriptor(
+            DisplayName: "root",
+            FullPath: CreatePath("root"),
+            IsDirectory: true,
+            IsAccessDenied: false,
+            IconKey: "folder",
+            Children:
+            [
+                new TreeNodeDescriptor("B.cs", other, false, false, "csharp", []),
+                new TreeNodeDescriptor("a.cs", lower, false, false, "csharp", []),
+                new TreeNodeDescriptor("A.cs", upper, false, false, "csharp", [])
+            ]);
 
-        var result = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selected, ensureExists: false);
+        var result = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selected, root, ensureExists: false);
 
         var expected = new HashSet<string>(PathComparer.Default)
         {
-            CreatePath("root", "B.cs"),
-            CreatePath("root", "a.cs"),
-            CreatePath("root", "A.cs")
+            other,
+            lower,
+            upper
         }
         .OrderBy(path => path, PathComparer.Default)
         .ToList();
 
         Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void BuildOrderedSelectedFilePaths_DirectorySelection_ExpandsDescendantFiles()
+    {
+        var innerA = CreatePath("root", "src", "a.cs");
+        var innerB = CreatePath("root", "src", "nested", "b.cs");
+        var ignored = CreatePath("root", "docs", "guide.md");
+        var root = new TreeNodeDescriptor(
+            DisplayName: "root",
+            FullPath: CreatePath("root"),
+            IsDirectory: true,
+            IsAccessDenied: false,
+            IconKey: "folder",
+            Children:
+            [
+                new TreeNodeDescriptor(
+                    "src",
+                    CreatePath("root", "src"),
+                    true,
+                    false,
+                    "folder",
+                    [
+                        new TreeNodeDescriptor("a.cs", innerA, false, false, "csharp", []),
+                        new TreeNodeDescriptor(
+                            "nested",
+                            CreatePath("root", "src", "nested"),
+                            true,
+                            false,
+                            "folder",
+                            [
+                                new TreeNodeDescriptor("b.cs", innerB, false, false, "csharp", [])
+                            ])
+                    ]),
+                new TreeNodeDescriptor(
+                    "docs",
+                    CreatePath("root", "docs"),
+                    true,
+                    false,
+                    "folder",
+                    [
+                        new TreeNodeDescriptor("guide.md", ignored, false, false, "markdown", [])
+                    ])
+            ]);
+
+        var result = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(
+            new HashSet<string>(PathComparer.Default) { CreatePath("root", "src") },
+            root,
+            ensureExists: false);
+
+        Assert.Equal(
+            new[] { innerA, innerB }.OrderBy(path => path, PathComparer.Default),
+            result);
     }
 
     [Fact]

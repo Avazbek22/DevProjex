@@ -264,6 +264,15 @@ public sealed class TreeExportService
 		HashSet<string> includedPaths)
 	{
 		var includeSelf = selectedPaths.Contains(node.FullPath);
+		if (includeSelf)
+		{
+			// Selecting a directory semantically means selecting the whole subtree.
+			// Expanding descendants here keeps tree export aligned with preview/content
+			// metrics without forcing the UI tree to materialize child view-models.
+			CollectSubtreePaths(node, includedPaths);
+			return true;
+		}
+
 		var includeByChildren = false;
 
 		foreach (var child in node.Children)
@@ -277,6 +286,21 @@ public sealed class TreeExportService
 
 		includedPaths.Add(node.FullPath);
 		return true;
+	}
+
+	private static void CollectSubtreePaths(TreeNodeDescriptor node, HashSet<string> includedPaths)
+	{
+		var stack = new Stack<TreeNodeDescriptor>();
+		stack.Push(node);
+
+		while (stack.Count > 0)
+		{
+			var current = stack.Pop();
+			includedPaths.Add(current.FullPath);
+
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				stack.Push(current.Children[index]);
+		}
 	}
 
 	private static string ToRelativeJsonPath(string rootPath, string fullPath)

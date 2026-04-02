@@ -2226,6 +2226,19 @@ public partial class MainWindow : Window
         }
     }
 
+    private static void OnTreeNodeCheckBoxTapped(object? sender, TappedEventArgs e)
+    {
+        // TreeViewItem reacts to routed tap gestures as part of its own selection/expand behavior.
+        // Mark the checkbox gesture as handled after the checkbox processed it so branch toggles
+        // never reinterpret rapid checkbox clicks as expand/collapse requests.
+        e.Handled = true;
+    }
+
+    private static void OnTreeNodeCheckBoxDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        e.Handled = true;
+    }
+
     private async void OnOpenNewWindow(object? sender, RoutedEventArgs e)
     {
         var launchResult = _appInstanceLauncher.LaunchNewInstance();
@@ -3281,7 +3294,9 @@ public partial class MainWindow : Window
         }
 
         var files = hasSelection
-            ? BuildOrderedSelectedFilePaths(selectedPaths)
+            ? currentTreeRoot is not null
+                ? BuildOrderedSelectedFilePaths(currentTreeRoot, selectedPaths)
+                : []
             : currentTreeRoot is not null
                 ? GetOrBuildAllOrderedFilePaths(currentTreeRoot)
                 : [];
@@ -8173,46 +8188,23 @@ public partial class MainWindow : Window
     {
         var selected = new HashSet<string>(PathComparer.Default);
         foreach (var node in _viewModel.TreeNodes)
-            CollectChecked(node, selected);
+            node.CollectCheckedPaths(selected);
         return selected;
     }
 
     private List<string> BuildOrderedUniqueFilePaths(IReadOnlySet<string> selectedPaths)
     {
-        var uniquePaths = new HashSet<string>(PathComparer.Default);
         if (selectedPaths.Count > 0)
         {
-            foreach (var path in selectedPaths)
-            {
-                if (File.Exists(path))
-                    uniquePaths.Add(path);
-            }
-        }
-        else if (_currentTree is not null)
-        {
-            foreach (var path in EnumerateFilePaths(_currentTree.Root))
-                uniquePaths.Add(path);
+            if (_currentTree is null)
+                return [];
+
+            return BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths);
         }
 
-        if (uniquePaths.Count == 0)
-            return [];
-
-        var ordered = new List<string>(uniquePaths.Count);
-        ordered.AddRange(uniquePaths);
-        ordered.Sort(PathComparer.Default);
-        return ordered;
-    }
-
-    private static IEnumerable<string> EnumerateFilePaths(TreeNodeDescriptor node) =>
-        PreviewFileCollectionPolicy.EnumerateFilePaths(node);
-
-    private static void CollectChecked(TreeNodeViewModel node, HashSet<string> selected)
-    {
-        if (node.IsChecked == true)
-            selected.Add(node.FullPath);
-
-        foreach (var child in node.Children)
-            CollectChecked(child, selected);
+        return _currentTree is null
+            ? []
+            : GetOrBuildAllOrderedFilePaths(_currentTree.Root).ToList();
     }
 
     private HashSet<string> CaptureExpandedNodes()
@@ -8475,68 +8467,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var processedCount = 0;
-            var lastProgressPercent = 0;
-
-            // Process files in parallel for better performance on modern multi-core CPUs with NVMe SSDs.
-            // Using full processor count as modern storage can handle high parallelism.
-            var parallelOptions = new ParallelOptions
-            {
-                MaxDegreeOfParallelism = Math.Max(4, Environment.ProcessorCount),
-                CancellationToken = linkedCts.Token
-            };
-
-            await Parallel.ForEachAsync(filePaths, parallelOptions, async (filePath, ct) =>
-            {
-                try
-                {
-                    // GetTextFileMetricsAsync uses streaming - no full content in memory:
-                    // 1. Known binary extensions - instant skip (no I/O)
-                    // 2. Null-byte detection in first 512 bytes (fast binary check)
-                    // 3. Streams through file counting lines/chars without storing content
-                    // 4. Large files (>10MB) get estimated metrics
-                    var metrics = await _fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
-                        .ConfigureAwait(false);
-
-                    // Skip binary files - they won't be exported
-                    if (metrics is not null)
-                    {
-                        stagedMetrics[filePath] = new FileMetricsData(
-                            metrics.SizeBytes,
-                            metrics.LineCount,
-                            metrics.CharCount,
-                            metrics.IsEmpty,
-                            metrics.IsWhitespaceOnly,
-                            metrics.IsEstimated,
-                            metrics.CrLfPairCount,
-                            metrics.TrailingNewlineChars,
-                            metrics.TrailingNewlineLineBreaks);
-                    }
-
-                    // Update progress periodically (every 5%) to reduce UI dispatch pressure.
-                    var current = Interlocked.Increment(ref processedCount);
-                    var progressPercent = (int)(current * 100.0 / totalFiles);
-                    var observed = Volatile.Read(ref lastProgressPercent);
-                    if (progressPercent >= observed + 5 &&
-                        Interlocked.CompareExchange(ref lastProgressPercent, progressPercent, observed) == observed)
-                    {
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                        {
-                            if (_isBackgroundMetricsActive && IsStatusOperationActive(statusOperationId))
-                                _viewModel.StatusProgressValue = progressPercent;
-                        });
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // Skip files that can't be read
-                    Interlocked.Increment(ref processedCount);
-                }
-            });
+            await ScanFileMetricsAsync(filePaths, stagedMetrics, linkedCts.Token, statusOperationId);
 
             MergeStagedMetricsIntoCache(stagedMetrics);
 
@@ -8602,6 +8533,70 @@ public partial class MainWindow : Window
         stagedMetrics.Clear();
     }
 
+    private async Task ScanFileMetricsAsync(
+        IReadOnlyList<string> filePaths,
+        ConcurrentDictionary<string, FileMetricsData> stagedMetrics,
+        CancellationToken cancellationToken,
+        long statusOperationId)
+    {
+        if (filePaths.Count == 0)
+            return;
+
+        var processedCount = 0;
+        var lastProgressPercent = 0;
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = MetricsCalculationPolicy.GetBackgroundMetricsParallelism(Environment.ProcessorCount),
+            CancellationToken = cancellationToken
+        };
+
+        await Parallel.ForEachAsync(filePaths, parallelOptions, async (filePath, ct) =>
+        {
+            try
+            {
+                var metrics = await _fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
+                    .ConfigureAwait(false);
+
+                if (metrics is not null)
+                {
+                    stagedMetrics[filePath] = new FileMetricsData(
+                        metrics.SizeBytes,
+                        metrics.LineCount,
+                        metrics.CharCount,
+                        metrics.IsEmpty,
+                        metrics.IsWhitespaceOnly,
+                        metrics.IsEstimated,
+                        metrics.CrLfPairCount,
+                        metrics.TrailingNewlineChars,
+                        metrics.TrailingNewlineLineBreaks);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // Skip files that cannot be read. Export/preview logic already treats them as unavailable.
+            }
+            finally
+            {
+                var current = Interlocked.Increment(ref processedCount);
+                var progressPercent = (int)(current * 100.0 / filePaths.Count);
+                var observed = Volatile.Read(ref lastProgressPercent);
+                if (progressPercent >= observed + 5 &&
+                    Interlocked.CompareExchange(ref lastProgressPercent, progressPercent, observed) == observed)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (_isBackgroundMetricsActive && IsStatusOperationActive(statusOperationId))
+                            _viewModel.StatusProgressValue = progressPercent;
+                    });
+                }
+            }
+        });
+    }
+
     /// <summary>
     /// Recalculate both tree and content metrics based on current selection.
     /// Calculations run in parallel on background threads for better performance.
@@ -8642,7 +8637,19 @@ public partial class MainWindow : Window
         var currentTree = _currentTree;
         var currentPath = _currentPath;
 
-        // Run calculations in parallel on background threads without blocking waits.
+        if (hasAnyChecked && !hasCompleteMetricsBaseline)
+        {
+            _ = RecalculateSelectedMetricsAsync(
+                recalcCts,
+                token,
+                recalcVersion,
+                selectedPaths,
+                treeFormat,
+                currentTree,
+                currentPath);
+            return;
+        }
+
         _ = RecalculateMetricsCoreAsync(
             recalcCts,
             token,
@@ -8652,6 +8659,70 @@ public partial class MainWindow : Window
             treeFormat,
             currentTree,
             currentPath);
+    }
+
+    private async Task RecalculateSelectedMetricsAsync(
+        CancellationTokenSource recalcCts,
+        CancellationToken token,
+        int recalcVersion,
+        IReadOnlySet<string> selectedPaths,
+        TreeTextFormat treeFormat,
+        BuildTreeResult? currentTree,
+        string? currentPath)
+    {
+        try
+        {
+            if (token.IsCancellationRequested)
+                return;
+
+            if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
+                return;
+            }
+
+            var selectedFilePaths = await Task.Run(
+                () => BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false),
+                token);
+
+            if (selectedFilePaths.Count == 0)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
+                return;
+            }
+
+            var missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(selectedFilePaths), token);
+            if (missingPaths.Count > 0)
+            {
+                if (_isBackgroundMetricsActive)
+                {
+                    _metricsCalculationCts?.Cancel();
+                    return;
+                }
+
+                await EnsureSelectedFileMetricsAsync(missingPaths, token);
+            }
+
+            if (!AreCachedMetricsReady(selectedFilePaths))
+                return;
+
+            await PublishMetricsAsync(
+                token,
+                recalcVersion,
+                hasAnyChecked: true,
+                selectedPaths,
+                treeFormat,
+                currentTree,
+                currentPath);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when a newer selection supersedes the current one.
+        }
+        finally
+        {
+            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
+        }
     }
 
     private async Task RecalculateMetricsCoreAsync(
@@ -8666,52 +8737,14 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Early exit if cancelled before starting.
-            if (token.IsCancellationRequested)
-                return;
-
-            if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
-            {
-                await Dispatcher.UIThread.InvokeAsync(
-                    () => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
-                return;
-            }
-
-            // Check cancellation before starting heavy calculations.
-            if (token.IsCancellationRequested)
-                return;
-
-            // Calculate tree and content metrics in parallel.
-            var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-            var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
-
-            try
-            {
-                await Task.WhenAll(treeMetricsTask, contentMetricsTask).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-
-            // Check cancellation after calculations complete.
-            if (token.IsCancellationRequested)
-                return;
-
-            var treeMetrics = treeMetricsTask.Result;
-            var contentMetrics = contentMetricsTask.Result;
-
-            // Update UI on dispatcher thread.
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                // Double-check: version must match AND not cancelled.
-                if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
-                    return;
-
-                UpdateStatusBarMetrics(
-                    treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
-                    contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
-            });
+            await PublishMetricsAsync(
+                token,
+                recalcVersion,
+                hasAnyChecked,
+                selectedPaths,
+                treeFormat,
+                currentTree,
+                currentPath);
         }
         catch (OperationCanceledException)
         {
@@ -8721,6 +8754,47 @@ public partial class MainWindow : Window
         {
             DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
         }
+    }
+
+    private async Task PublishMetricsAsync(
+        CancellationToken token,
+        int recalcVersion,
+        bool hasAnyChecked,
+        IReadOnlySet<string> selectedPaths,
+        TreeTextFormat treeFormat,
+        BuildTreeResult? currentTree,
+        string? currentPath)
+    {
+        if (token.IsCancellationRequested)
+            return;
+
+        if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
+        {
+            await Dispatcher.UIThread.InvokeAsync(
+                () => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
+            return;
+        }
+
+        var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
+        var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
+
+        await Task.WhenAll(treeMetricsTask, contentMetricsTask).ConfigureAwait(false);
+
+        if (token.IsCancellationRequested)
+            return;
+
+        var treeMetrics = treeMetricsTask.Result;
+        var contentMetrics = contentMetricsTask.Result;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
+                return;
+
+            UpdateStatusBarMetrics(
+                treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
+                contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
+        });
     }
 
     private void ClearFileMetricsCache(bool trimCapacity)
@@ -8735,12 +8809,83 @@ public partial class MainWindow : Window
         InvalidateComputedMetricsCaches();
     }
 
+    private List<string> CollectMissingMetricsFilePaths(IReadOnlyList<string> orderedPaths)
+    {
+        var missingPaths = new List<string>();
+        lock (_metricsLock)
+        {
+            for (var index = 0; index < orderedPaths.Count; index++)
+            {
+                var path = orderedPaths[index];
+                if (!_fileMetricsCache.ContainsKey(path))
+                    missingPaths.Add(path);
+            }
+        }
+
+        return missingPaths;
+    }
+
+    private bool AreCachedMetricsReady(IReadOnlyList<string> orderedPaths)
+    {
+        lock (_metricsLock)
+        {
+            for (var index = 0; index < orderedPaths.Count; index++)
+            {
+                if (!_fileMetricsCache.ContainsKey(orderedPaths[index]))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private async Task EnsureSelectedFileMetricsAsync(
+        IReadOnlyList<string> missingPaths,
+        CancellationToken cancellationToken)
+    {
+        if (missingPaths.Count == 0)
+            return;
+
+        var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, metricsCts.Token);
+
+        _metricsCancellationRequestedByUser = false;
+        _isBackgroundMetricsActive = true;
+        var statusOperationId = BeginStatusOperation(
+            _viewModel.StatusOperationCalculatingData,
+            indeterminate: false,
+            operationType: StatusOperationType.MetricsCalculation,
+            cancelAction: CancelBackgroundMetricsCalculation);
+        var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
+
+        try
+        {
+            if (IsStatusOperationActive(statusOperationId))
+                _viewModel.StatusProgressValue = 0;
+
+            await ScanFileMetricsAsync(missingPaths, stagedMetrics, linkedCts.Token, statusOperationId);
+            MergeStagedMetricsIntoCache(stagedMetrics);
+
+            if (IsStatusOperationActive(statusOperationId))
+                _viewModel.StatusProgressValue = 100;
+        }
+        finally
+        {
+            _isBackgroundMetricsActive = false;
+            CompleteStatusOperation(statusOperationId);
+            DisposeIfCurrent(ref _metricsCalculationCts, metricsCts);
+        }
+    }
+
     /// <summary>
     /// Full metrics require a completed baseline calculation.
     /// Selected metrics can be calculated independently.
     /// </summary>
     private static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
         MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(hasAnyCheckedNodes, hasCompleteMetricsBaseline);
+
+    private static bool IsFullTreeSelection(TreeNodeDescriptor treeRoot, IReadOnlySet<string> selectedPaths) =>
+        selectedPaths.Contains(treeRoot.FullPath);
 
     /// <summary>
     /// Calculates tree metrics from actual tree export output in the currently selected format.
@@ -8754,12 +8899,14 @@ public partial class MainWindow : Window
         if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
             return ExportOutputMetrics.Empty;
 
+        var isFullTreeSelection = hasSelection && IsFullTreeSelection(_currentTree.Root, selectedPaths);
+        var effectiveHasSelection = hasSelection && !isFullTreeSelection;
         var pathPresentation = CreateExportPathPresentation();
         var pathPresentationIdentity = pathPresentation is null
             ? 0
             : HashCode.Combine(pathPresentation.DisplayRootPath, pathPresentation.DisplayRootName);
-        var selectedCount = hasSelection ? selectedPaths.Count : 0;
-        var selectedHash = hasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
+        var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
+        var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
         var cacheKey = new TreeMetricsCacheKey(
             TreeIdentity: RuntimeHelpers.GetHashCode(_currentTree.Root),
             Format: format,
@@ -8773,7 +8920,14 @@ public partial class MainWindow : Window
                 return _treeMetricsCacheValue;
         }
 
-        var treeText = BuildTreeTextForSelection(selectedPaths, format);
+        var treeText = effectiveHasSelection
+            ? BuildTreeTextForSelection(selectedPaths, format)
+            : _treeExport.BuildFullTree(
+                _currentPath,
+                _currentTree.Root,
+                format,
+                pathPresentation?.DisplayRootPath,
+                pathPresentation?.DisplayRootName);
         var metrics = ExportOutputMetricsCalculator.FromText(treeText);
 
         lock (_metricsComputationCacheLock)
@@ -8796,8 +8950,10 @@ public partial class MainWindow : Window
             return ExportOutputMetrics.Empty;
 
         var pathMapper = CreateExportPathPresentation()?.MapFilePath;
-        var selectedCount = hasSelection ? selectedPaths.Count : 0;
-        var selectedHash = hasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
+        var isFullTreeSelection = hasSelection && IsFullTreeSelection(_currentTree.Root, selectedPaths);
+        var effectiveHasSelection = hasSelection && !isFullTreeSelection;
+        var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
+        var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
         var cacheKey = new ContentMetricsCacheKey(
             TreeIdentity: RuntimeHelpers.GetHashCode(_currentTree.Root),
             SelectedCount: selectedCount,
@@ -8810,8 +8966,8 @@ public partial class MainWindow : Window
                 return _contentMetricsCacheValue;
         }
 
-        var orderedPaths = hasSelection
-            ? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, ensureExists: false)
+        var orderedPaths = effectiveHasSelection
+            ? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths, ensureExists: false)
             : GetOrBuildAllOrderedFilePaths(_currentTree.Root);
 
         if (orderedPaths.Count == 0)
@@ -8874,9 +9030,10 @@ public partial class MainWindow : Window
     }
 
     private static List<string> BuildOrderedSelectedFilePaths(
+        TreeNodeDescriptor treeRoot,
         IReadOnlySet<string> selectedPaths,
         bool ensureExists = true) =>
-        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, ensureExists);
+        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
 
     /// <summary>
     /// Update status bar with calculated metrics.
