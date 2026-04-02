@@ -425,6 +425,7 @@ public partial class MainWindow : Window
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _viewModel.SetToastItems(_toastService.Items);
+        EnsureAppStateStoresExist();
         LoadRecentProjects();
         DataContext = _viewModel;
         SubscribeToMetricsUpdates();
@@ -671,6 +672,22 @@ public partial class MainWindow : Window
 
         // Hook menu item submenu opening to apply brushes directly
         AddHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened, RoutingStrategies.Bubble);
+    }
+
+    private void EnsureAppStateStoresExist()
+    {
+        try
+        {
+            // Keep all user-facing state documents present from startup so the app can
+            // recover from partial external cleanup without waiting for a later save path.
+            _userSettingsStore.EnsureStorageExists();
+            _recentProjectsStore.EnsureStorageExists();
+            _projectProfileStore.EnsureStorageExists();
+        }
+        catch
+        {
+            // Best effort only. Persistence bootstrap must never prevent startup.
+        }
     }
 
     private void OnWindowClosed(object? sender, EventArgs e)

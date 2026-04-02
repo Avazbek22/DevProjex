@@ -18,6 +18,45 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
+	public void EnsureStorageExists_CreatesPrimaryAndBackup_WhenFilesAreMissing()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+
+			Assert.True(store.EnsureStorageExists());
+			Assert.True(File.Exists(store.GetPath()));
+			Assert.True(File.Exists(store.GetPath() + ".bak"));
+			Assert.False(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void EnsureStorageExists_RecreatesMissingBackup_FromPrimarySnapshot()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), CreateProfile());
+			File.Delete(store.GetPath() + ".bak");
+
+			Assert.True(store.EnsureStorageExists());
+			Assert.True(File.Exists(store.GetPath() + ".bak"));
+			Assert.True(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void ClearAllProfiles_WhenStorageFileMissing_DoesNotThrow()
 	{
 		var tempRoot = CreateTempDirectory();

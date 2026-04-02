@@ -7,6 +7,42 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture workspace)
 {
     [AvaloniaFact]
+    public async Task Startup_BootstrapsAllStateStoreFiles_InIsolatedAppData()
+    {
+        var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDataPath);
+
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            appDataPathOverride: appDataPath);
+
+        try
+        {
+            var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "user-settings.json")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "user-settings.json.bak")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "recent-projects.json")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "recent-projects.json.bak")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "project-profiles.json")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "project-profiles.json.bak")));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+
+            try
+            {
+                Directory.Delete(appDataPath, recursive: true);
+            }
+            catch
+            {
+                // Best effort test cleanup only.
+            }
+        }
+    }
+
+    [AvaloniaFact]
     public async Task OpenNewWindowMenuItem_LaunchesIndependentAppInstance()
     {
         var launcher = new RecordingAppInstanceLauncher(AppInstanceLaunchResult.Success);
@@ -184,6 +220,18 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
         public string StoragePath { get; } = storagePath;
         public int SaveAttemptCount => _saveAttemptCount;
+
+        public bool EnsureStorageExists()
+        {
+            var directory = Path.GetDirectoryName(StoragePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            if (!File.Exists(StoragePath))
+                File.WriteAllText(StoragePath, "{}");
+
+            return true;
+        }
 
         public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
         {

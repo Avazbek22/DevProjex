@@ -34,7 +34,21 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				return CreateDefaultDb();
 
 			using var _ = heldLock;
+			EnsureStorageExistsCore(fileSet);
 			return LoadInternal(fileSet);
+		}
+	}
+
+	public bool EnsureStorageExists()
+	{
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			return EnsureStorageExistsCore(fileSet);
 		}
 	}
 
@@ -191,6 +205,28 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		}
 
 		return CreateDefaultDb();
+	}
+
+	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
+	{
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+		{
+			var sanitizedPrimaryDb = SanitizeState(fileSet, primaryDb, out var primaryRequiresSanitizationRewrite);
+			if (primaryRequiresRewrite || primaryRequiresSanitizationRewrite || !File.Exists(fileSet.BackupPath))
+				return TrySave(fileSet, sanitizedPrimaryDb);
+
+			return true;
+		}
+
+		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+			return TrySave(fileSet, SanitizeState(fileSet, backupDb));
+
+		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+			return false;
+
+		// Keep the store files present from startup so external cleanup or partial state loss
+		// cannot leave the app with a surprising "history feature silently disappeared" state.
+		return TrySave(fileSet, CreateDefaultDb());
 	}
 
 	private static RecentProjectsDb CreateDefaultDb()

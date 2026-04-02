@@ -26,6 +26,19 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
     private readonly object _sync = new();
 
+    public bool EnsureStorageExists()
+    {
+        lock (_sync)
+        {
+            var fileSet = GetFileSet();
+            if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+                return false;
+
+            using var _ = heldLock;
+            return EnsureStorageExistsCore(fileSet);
+        }
+    }
+
     public UserSettingsDb Load()
     {
         lock (_sync)
@@ -35,6 +48,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 return CreateDefaultDb();
 
             using var _ = heldLock;
+            EnsureStorageExistsCore(fileSet);
             return LoadInternal(fileSet);
         }
     }
@@ -151,6 +165,39 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             TrySaveInternal(fileSet, fallback);
 
         return fallback;
+    }
+
+    private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
+    {
+        if (JsonStorePersistence.TryReadNormalized(
+                fileSet.PrimaryPath,
+                SerializerOptions,
+                CreateDefaultDb,
+                Normalize,
+                out var primaryDb,
+                out var primaryRequiresRewrite))
+        {
+            if (primaryRequiresRewrite || !File.Exists(fileSet.BackupPath))
+                return TrySaveInternal(fileSet, primaryDb);
+
+            return true;
+        }
+
+        if (JsonStorePersistence.TryReadNormalized(
+                fileSet.BackupPath,
+                SerializerOptions,
+                CreateDefaultDb,
+                Normalize,
+                out var backupDb,
+                out _))
+        {
+            return TrySaveInternal(fileSet, backupDb);
+        }
+
+        if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+            return false;
+
+        return TrySaveInternal(fileSet, CreateDefaultDb());
     }
 
     private UserSettingsDb CreateDefaultDb()

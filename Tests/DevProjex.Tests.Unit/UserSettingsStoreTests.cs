@@ -538,6 +538,36 @@ public sealed class UserSettingsStoreTests
 		Assert.EndsWith(Path.Combine("DevProjex", "user-settings.json"), path);
 	}
 
+	[Fact]
+	// Ensures the settings store recreates its primary and backup files during startup bootstrap.
+	public void EnsureStorageExists_CreatesPrimaryAndBackup_WhenFilesAreMissing()
+	{
+		using var scope = new AppDataScope();
+		var store = new UserSettingsStore();
+
+		Assert.True(store.EnsureStorageExists());
+		Assert.True(File.Exists(store.GetPath()));
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+	}
+
+	[Fact]
+	// Ensures the backup file is rebuilt from the current primary snapshot when it disappears.
+	public void EnsureStorageExists_RecreatesMissingBackup_FromPrimarySnapshot()
+	{
+		using var scope = new AppDataScope();
+		var store = new UserSettingsStore();
+		var db = store.Load();
+		db.LastSelected = "Light.Acrylic";
+		store.Save(db);
+		File.Delete(store.GetPath() + ".bak");
+
+		Assert.True(store.EnsureStorageExists());
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+
+		var reloaded = store.Load();
+		Assert.Equal("Light.Acrylic", reloaded.LastSelected);
+	}
+
 	[Theory]
 	// Ensures Save/Load preserves lastSelected for multiple valid keys.
 	[InlineData("Light.Transparent")]
@@ -1499,6 +1529,8 @@ internal sealed class IsolatedUserSettingsStore
 	public UserSettingsDb ResetToDefaults() => _inner.ResetToDefaults();
 
 	public string GetPath() => _inner.GetPath();
+
+	public bool EnsureStorageExists() => _inner.EnsureStorageExists();
 
 	public bool TryParseKey(string? key, out ThemeVariant theme, out ThemeEffectMode effect)
 		=> _inner.TryParseKey(key, out theme, out effect);
