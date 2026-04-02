@@ -48,8 +48,11 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				// Keep the current session history responsive even when the shared store
 				// cannot be reached. The caller keeps the returned snapshot in memory and
 				// a later flush can still retry persistence.
-				var inMemoryState = MergeStates(CreateDefaultDb(), db);
+				var inMemoryState = SanitizeState(fileSet, MergeStates(CreateDefaultDb(), db));
 				if (!TryNormalizeFolderPath(path, out var inMemoryNormalizedPath))
+					return inMemoryState;
+
+				if (IsIgnoredFolderPath(fileSet, inMemoryNormalizedPath))
 					return inMemoryState;
 
 				MoveToFront(
@@ -68,8 +71,11 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 			}
 
 			using var _ = heldLock;
-			var state = MergeStates(LoadInternal(fileSet), db);
+			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
 			if (!TryNormalizeFolderPath(path, out var normalizedPath))
+				return state;
+
+			if (IsIgnoredFolderPath(fileSet, normalizedPath))
 				return state;
 
 			MoveToFront(
@@ -100,7 +106,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				// Keep the current session history responsive even when the shared store
 				// cannot be reached. The caller keeps the returned snapshot in memory and
 				// a later flush can still retry persistence.
-				var inMemoryState = MergeStates(CreateDefaultDb(), db);
+				var inMemoryState = SanitizeState(fileSet, MergeStates(CreateDefaultDb(), db));
 				if (!TryNormalizeRepositoryUrl(repositoryUrl, out var inMemoryNormalizedUrl))
 					return inMemoryState;
 
@@ -120,7 +126,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 			}
 
 			using var _ = heldLock;
-			var state = MergeStates(LoadInternal(fileSet), db);
+			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
 			if (!TryNormalizeRepositoryUrl(repositoryUrl, out var normalizedUrl))
 				return state;
 
@@ -151,7 +157,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
-			var state = MergeStates(LoadInternal(fileSet), db);
+			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
 			return TrySave(fileSet, state);
 		}
 	}
@@ -168,18 +174,20 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	{
 		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
-			if (primaryRequiresRewrite)
-				TrySave(fileSet, primaryDb);
+			var sanitizedPrimaryDb = SanitizeState(fileSet, primaryDb, out var primaryRequiresSanitizationRewrite);
+			if (primaryRequiresRewrite || primaryRequiresSanitizationRewrite)
+				TrySave(fileSet, sanitizedPrimaryDb);
 
-			return primaryDb;
+			return sanitizedPrimaryDb;
 		}
 
 		// Keep the last known-good snapshot as a recovery path.
 		// A partially written or externally corrupted primary file must not silently erase history.
 		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
 		{
-			TrySave(fileSet, backupDb);
-			return backupDb;
+			var sanitizedBackupDb = SanitizeState(fileSet, backupDb);
+			TrySave(fileSet, sanitizedBackupDb);
+			return sanitizedBackupDb;
 		}
 
 		return CreateDefaultDb();
@@ -204,6 +212,20 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		db.RecentFolders = NormalizeFolders(db.RecentFolders);
 		db.RecentRepositories = NormalizeRepositories(db.RecentRepositories);
 		return db;
+	}
+
+	private static RecentProjectsDb SanitizeState(JsonStoreFileSet fileSet, RecentProjectsDb db)
+		=> SanitizeState(fileSet, db, out _);
+
+	private static RecentProjectsDb SanitizeState(JsonStoreFileSet fileSet, RecentProjectsDb db, out bool requiresRewrite)
+	{
+		var normalized = Normalize(db);
+		var originalCount = normalized.RecentFolders.Count;
+		normalized.RecentFolders = normalized.RecentFolders
+			.Where(entry => !IsIgnoredFolderPath(fileSet, entry.Path))
+			.ToList();
+		requiresRewrite = normalized.RecentFolders.Count != originalCount;
+		return normalized;
 	}
 
 	private static RecentProjectsDb MergeStates(RecentProjectsDb current, RecentProjectsDb? snapshot)
@@ -293,7 +315,10 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	}
 
 	private bool TrySave(JsonStoreFileSet fileSet, RecentProjectsDb db)
-		=> JsonStorePersistence.TryWriteAtomic(fileSet, db, SerializerOptions);
+	{
+		var sanitized = SanitizeState(fileSet, db);
+		return JsonStorePersistence.TryWriteAtomic(fileSet, sanitized, SerializerOptions);
+	}
 
 	private static bool TryLoadFromPath(string path, out RecentProjectsDb db, out bool requiresRewrite)
 	{
@@ -350,6 +375,26 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		try
 		{
 			return PathUtility.IsPathInside(path, RepoCacheRootPath);
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static bool IsIgnoredFolderPath(JsonStoreFileSet fileSet, string path)
+	{
+		if (IsRepoCachePath(path))
+			return true;
+
+		if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
+			return false;
+
+		try
+		{
+			// The application state directory is an internal persistence implementation detail.
+			// Users can inspect it manually, but it must never pollute the recent-project history.
+			return PathUtility.IsPathInside(path, fileSet.DirectoryPath);
 		}
 		catch
 		{

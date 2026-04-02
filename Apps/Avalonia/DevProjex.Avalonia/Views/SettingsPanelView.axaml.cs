@@ -4,7 +4,6 @@ public partial class SettingsPanelView : UserControl
 {
     private const double DefaultHeaderMinimumGap = 3.0;
     private const double MinimumWidthSafetyPadding = 2.0;
-    private static readonly Size InfiniteMeasureSize = new(double.PositiveInfinity, double.PositiveInfinity);
 
     private Border? _panelRoot;
     private Grid? _ignoreHeaderGrid;
@@ -121,13 +120,7 @@ public partial class SettingsPanelView : UserControl
     }
 
     private static double MeasureControlWidth(Control? control)
-    {
-        if (control is null)
-            return 0;
-
-        control.Measure(InfiniteMeasureSize);
-        return control.DesiredSize.Width + control.Margin.Left + control.Margin.Right;
-    }
+        => SettingsPanelMeasurementHelper.MeasureControlWidth(control);
 
     private void QueueMinimumWidthRefresh(bool force)
     {
