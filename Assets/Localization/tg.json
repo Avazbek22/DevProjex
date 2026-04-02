@@ -1,6 +1,8 @@
 ﻿{
   "Menu.File": "Файл",
   "Menu.File.Open": "Кушодани ҷузвдон...",
+  "Menu.File.Recent": "Нав",
+  "Menu.File.Recent.Empty": "Ҷузвдонҳои нав нестанд",
   "Menu.File.Refresh": "Навсозӣ",
   "Menu.File.Export": "Содирот ба файл",
   "Menu.File.Export.Tree": "Содироти дарахт",
@@ -145,6 +147,7 @@
   "Git.Clone.Title": "Клон кардани репозиторӣ",
   "Git.Clone.Description": "URL-и репозиториро ворид кунед (GitHub ё дигар)",
   "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Recent": "Репозиторияҳои нав",
   "Git.Clone.Progress.CheckingGit": "Тафтиши git...",
   "Git.Clone.Progress.Cloning": "Клон карда истодааст...",
   "Git.Clone.Progress.Downloading": "Боргирӣ...",

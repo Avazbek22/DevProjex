@@ -2,6 +2,7 @@ using DevProjex.Infrastructure.Elevation;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
 
@@ -55,6 +56,7 @@ public static class AvaloniaCompositionRoot
         // previous runs cannot leak into the current window state and make workflow
         // scenarios nondeterministic on CI.
         var userSettingsStore = new UserSettingsStore(appDataPathProvider);
+        var recentProjectsStore = new RecentProjectsStore(appDataPathProvider);
         var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
@@ -64,6 +66,7 @@ public static class AvaloniaCompositionRoot
             Localization: localization,
             HelpContentProvider: helpContentProvider,
             UserSettingsStore: userSettingsStore,
+            RecentProjectsStore: recentProjectsStore,
             ProjectProfileStore: projectProfileStore,
             Elevation: elevation,
             ScanOptionsUseCase: scanOptionsUseCase,

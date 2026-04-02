@@ -3,6 +3,15 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public void GetPath_IncludesExpectedSegments()
+	{
+		var store = new ProjectProfileStore();
+		var path = store.GetPath();
+
+		Assert.EndsWith(Path.Combine("DevProjex", "project-profiles.json"), path);
+	}
+
+	[Fact]
 	public void SaveProfile_ThenTryLoadProfile_ReturnsRoundTripData()
 	{
 		var tempRoot = CreateTempDirectory();
@@ -24,6 +33,25 @@ public sealed class ProjectProfileStoreTests
 			Assert.Contains("src", loaded.SelectedRootFolders);
 			Assert.Contains(".cs", loaded.SelectedExtensions);
 			Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void TryLoadProfile_MissingFile_ReturnsFalse_AndDoesNotCreateStorageFile()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+
+			Assert.False(File.Exists(store.GetPath()));
+			Assert.False(store.TryLoadProfile(projectPath, out _));
+			Assert.False(File.Exists(store.GetPath()));
 		}
 		finally
 		{
@@ -54,6 +82,33 @@ public sealed class ProjectProfileStoreTests
 			Assert.Single(loaded.SelectedRootFolders);
 			Assert.Single(loaded.SelectedExtensions);
 			Assert.Single(loaded.SelectedIgnoreOptions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void TryLoadProfile_InvalidPrimaryFile_RecoversFromBackup()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			var profile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["src"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles]);
+
+			store.SaveProfile(projectPath, profile);
+			File.WriteAllText(store.GetPath(), "{ invalid");
+
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.Contains("src", loaded.SelectedRootFolders);
+			Assert.Contains(".cs", loaded.SelectedExtensions);
+			Assert.Contains(IgnoreOptionId.DotFiles, loaded.SelectedIgnoreOptions);
 		}
 		finally
 		{

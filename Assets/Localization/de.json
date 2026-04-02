@@ -1,6 +1,8 @@
 ﻿{
   "Menu.File": "Datei",
   "Menu.File.Open": "Ordner öffnen...",
+  "Menu.File.Recent": "Zuletzt",
+  "Menu.File.Recent.Empty": "Keine letzten Ordner",
   "Menu.File.Refresh": "Aktualisieren",
   "Menu.File.Export": "In Datei exportieren",
   "Menu.File.Export.Tree": "Baum exportieren",
@@ -145,6 +147,7 @@
   "Git.Clone.Title": "Repository klonen",
   "Git.Clone.Description": "Repository-URL eingeben (GitHub oder andere)",
   "Git.Clone.UrlPlaceholder": "https://github.com/user/repo",
+  "Git.Clone.Recent": "Letzte Repositories",
   "Git.Clone.Progress.CheckingGit": "Git wird überprüft...",
   "Git.Clone.Progress.Cloning": "Klonen...",
   "Git.Clone.Progress.Downloading": "Herunterladen...",

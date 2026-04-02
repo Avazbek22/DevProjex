@@ -37,6 +37,62 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void RecentCollections_TrackHasRecentFlags()
+    {
+        var viewModel = CreateViewModel();
+
+        Assert.False(viewModel.HasRecentFolders);
+        Assert.False(viewModel.HasRecentRepositories);
+        Assert.False(viewModel.GitCloneRecentRepositoriesVisible);
+        Assert.False(viewModel.RecentFoldersMenuVisible);
+
+        viewModel.RecentFolders.Add(new RecentProjectEntryViewModel("c:/repo", "repo", "c:/repo"));
+        viewModel.RecentRepositories.Add(new RecentProjectEntryViewModel("https://example.com/user/repo", "user / repo", "https://example.com/user/repo"));
+
+        Assert.True(viewModel.HasRecentFolders);
+        Assert.True(viewModel.HasRecentRepositories);
+        Assert.True(viewModel.GitCloneRecentRepositoriesVisible);
+        Assert.True(viewModel.RecentFoldersMenuVisible);
+
+        viewModel.GitCloneInProgress = true;
+        Assert.False(viewModel.GitCloneRecentRepositoriesVisible);
+
+        viewModel.GitCloneInProgress = false;
+        Assert.True(viewModel.GitCloneRecentRepositoriesVisible);
+
+        viewModel.RecentFolders.Clear();
+        viewModel.RecentRepositories.Clear();
+
+        Assert.False(viewModel.HasRecentFolders);
+        Assert.False(viewModel.HasRecentRepositories);
+        Assert.False(viewModel.GitCloneRecentRepositoriesVisible);
+        Assert.False(viewModel.RecentFoldersMenuVisible);
+    }
+
+    [Fact]
+    public void RecentCollections_RaiseVisibilityPropertyChanged_WhenCollectionsChange()
+    {
+        var viewModel = CreateViewModel();
+        var recentFoldersVisibilityRaised = false;
+        var recentRepositoriesVisibilityRaised = false;
+
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.RecentFoldersMenuVisible))
+                recentFoldersVisibilityRaised = true;
+
+            if (e.PropertyName == nameof(MainWindowViewModel.GitCloneRecentRepositoriesVisible))
+                recentRepositoriesVisibilityRaised = true;
+        };
+
+        viewModel.RecentFolders.Add(new RecentProjectEntryViewModel("c:/repo", "repo", "c:/repo"));
+        viewModel.RecentRepositories.Add(new RecentProjectEntryViewModel("https://example.com/user/repo", "user / repo", "https://example.com/user/repo"));
+
+        Assert.True(recentFoldersVisibilityRaised);
+        Assert.True(recentRepositoriesVisibilityRaised);
+    }
+
+    [Fact]
     public void Title_Changes()
     {
         var viewModel = CreateViewModel();

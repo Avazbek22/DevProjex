@@ -47,4 +47,20 @@ public partial class GitCloneWindow : Window
             e.Handled = true;
         }
     }
+
+    private void OnRecentRepositorySelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox { SelectedItem: RecentProjectEntryViewModel recent })
+            return;
+
+        if (DataContext is not MainWindowViewModel viewModel)
+            return;
+
+        viewModel.GitCloneUrl = recent.Value;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _urlTextBox?.Focus();
+            _urlTextBox?.SelectAll();
+        }, DispatcherPriority.Input);
+    }
 }

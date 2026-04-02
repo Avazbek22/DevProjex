@@ -13,6 +13,7 @@ using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
 using DevProjex.Kernel;
+using DevProjex.Infrastructure.RecentProjects;
 using UserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
 using UserSettingsDb = DevProjex.Infrastructure.ThemePresets.UserSettingsDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
@@ -154,6 +155,7 @@ public partial class MainWindow : Window
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
     private readonly IFileContentAnalyzer _fileContentAnalyzer;
+    private readonly RecentProjectsStore _recentProjectsStore;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
@@ -226,6 +228,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
+    private RecentProjectsDb _recentProjectsDb = new();
+    private bool _projectProfilePersistencePending;
+    private string? _lastPersistedProjectProfilePath;
+    private ProjectSelectionProfile? _lastPersistedProjectProfile;
     private Border? _dropZoneContainer;
 
     // Settings panel animation
@@ -412,9 +418,11 @@ public partial class MainWindow : Window
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
         _fileContentAnalyzer = services.FileContentAnalyzer;
+        _recentProjectsStore = services.RecentProjectsStore;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _viewModel.SetToastItems(_toastService.Items);
+        LoadRecentProjects();
         DataContext = _viewModel;
         SubscribeToMetricsUpdates();
 
@@ -475,6 +483,8 @@ public partial class MainWindow : Window
         _previewTextScrollViewer = this.FindControl<ScrollViewer>("PreviewTextScrollViewer");
         _previewTextControl = this.FindControl<VirtualizedPreviewTextControl>("PreviewTextControl");
         _previewLineNumbersControl = this.FindControl<VirtualizedLineNumbersControl>("PreviewLineNumbersControl");
+        AttachRecentMenuHandlers();
+        RefreshRecentFoldersMenu();
         if (_treePaneSnapshotImage is not null)
         {
             _treePaneSnapshotTransform = _treePaneSnapshotImage.RenderTransform as TranslateTransform ?? new TranslateTransform();
@@ -662,6 +672,8 @@ public partial class MainWindow : Window
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
+        FlushPersistedStateOnWindowClose();
+
         // Unsubscribe from window events
         PropertyChanged -= OnWindowPropertyChanged;
 
@@ -5225,6 +5237,101 @@ public partial class MainWindow : Window
         _themeBrushCoordinator.UpdateDynamicThemeBrushes();
     }
 
+    #region Recent Projects
+
+    private void LoadRecentProjects()
+    {
+        _recentProjectsDb = _recentProjectsStore.Load();
+        SyncRecentProjectsToViewModel();
+    }
+
+    private void SyncRecentProjectsToViewModel()
+    {
+        _viewModel.RecentFolders.Clear();
+        foreach (var entry in _recentProjectsDb.RecentFolders)
+        {
+            _viewModel.RecentFolders.Add(new RecentProjectEntryViewModel(
+                entry.Path,
+                RecentProjectPresentationService.CreateFolderDisplayText(entry.Path),
+                RecentProjectPresentationService.CreateFolderToolTip(entry.Path)));
+        }
+
+        _viewModel.RecentRepositories.Clear();
+        foreach (var entry in _recentProjectsDb.RecentRepositories)
+        {
+            _viewModel.RecentRepositories.Add(new RecentProjectEntryViewModel(
+                entry.Url,
+                RecentProjectPresentationService.CreateRepositoryDisplayText(entry.Url),
+                RecentProjectPresentationService.CreateRepositoryToolTip(entry.Url)));
+        }
+    }
+
+    private void AttachRecentMenuHandlers()
+    {
+        if (_topMenuBar?.RecentMenuItemControl is { } recentMenuItem)
+            recentMenuItem.SubmenuOpened += OnRecentMenuSubmenuOpened;
+    }
+
+    private void OnRecentMenuSubmenuOpened(object? sender, RoutedEventArgs e)
+    {
+        RefreshRecentFoldersMenu();
+    }
+
+    private void RefreshRecentFoldersMenu()
+    {
+        var recentMenuItem = _topMenuBar?.RecentMenuItemControl;
+        if (recentMenuItem is null)
+            return;
+
+        recentMenuItem.Items.Clear();
+
+        if (_viewModel.RecentFolders.Count == 0)
+        {
+            recentMenuItem.Items.Add(new MenuItem
+            {
+                Header = _viewModel.MenuFileRecentEmpty,
+                IsEnabled = false
+            });
+            return;
+        }
+
+        foreach (var recentFolder in _viewModel.RecentFolders)
+        {
+            var item = new MenuItem
+            {
+                Header = recentFolder.DisplayText,
+                Tag = recentFolder.Value
+            };
+
+            ToolTip.SetTip(item, recentFolder.ToolTipText);
+            item.Click += OnRecentFolderMenuItemClick;
+            recentMenuItem.Items.Add(item);
+        }
+    }
+
+    private async void OnRecentFolderMenuItemClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string path })
+            return;
+
+        await TryOpenFolderAsync(path, fromDialog: true);
+    }
+
+    private void RecordRecentFolder(string path)
+    {
+        _recentProjectsDb = _recentProjectsStore.AddFolder(_recentProjectsDb, path);
+        SyncRecentProjectsToViewModel();
+        RefreshRecentFoldersMenu();
+    }
+
+    private void RecordRecentRepository(string repositoryUrl)
+    {
+        _recentProjectsDb = _recentProjectsStore.AddRepository(_recentProjectsDb, repositoryUrl);
+        SyncRecentProjectsToViewModel();
+    }
+
+    #endregion
+
     #region Git Operations
 
     private void OnGitClone(object? sender, RoutedEventArgs e)
@@ -5377,7 +5484,8 @@ public partial class MainWindow : Window
             // Save cache path for cleanup when project is closed or replaced
             _currentCachedRepoPath = targetPath;
 
-            await TryOpenFolderAsync(result.LocalPath, fromDialog: false);
+            await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
+            RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? url : result.RepositoryUrl);
 
             // Load branches if Git mode
             if (result.SourceType == ProjectSourceType.GitClone)
@@ -6742,12 +6850,10 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(_currentPath))
             return;
 
-        var profile = new ProjectSelectionProfile(
-            SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default),
-            SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
-            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray());
-
-        _projectProfileStore.SaveProfile(_currentPath, profile);
+        var profile = CaptureCurrentProjectSelectionProfile();
+        _lastPersistedProjectProfilePath = _currentPath;
+        _lastPersistedProjectProfile = CloneProjectSelectionProfile(profile);
+        _projectProfilePersistencePending = !_projectProfileStore.TrySaveProfile(_currentPath, profile);
     }
 
     private bool TryGetLocalProjectProfile(out ProjectSelectionProfile profile)
@@ -6773,7 +6879,46 @@ public partial class MainWindow : Window
     private bool IsLocalProjectProfilePersistenceApplicable()
         => _viewModel.ProjectSourceType == ProjectSourceType.LocalFolder;
 
-    private async Task TryOpenFolderAsync(string path, bool fromDialog)
+    private ProjectSelectionProfile CaptureCurrentProjectSelectionProfile()
+    {
+        return new ProjectSelectionProfile(
+            SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default),
+            SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
+            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray());
+    }
+
+    private static ProjectSelectionProfile CloneProjectSelectionProfile(ProjectSelectionProfile profile)
+    {
+        return new ProjectSelectionProfile(
+            SelectedRootFolders: profile.SelectedRootFolders.ToArray(),
+            SelectedExtensions: profile.SelectedExtensions.ToArray(),
+            SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray());
+    }
+
+    private void FlushPersistedStateOnWindowClose()
+    {
+        // Give persistence one last synchronous chance before the process exits.
+        // This protects against transient IO failures that would otherwise make the UI look correct
+        // during the session but leave no durable snapshot for the next launch.
+        if (_recentProjectsDb.RecentFolders.Count > 0 || _recentProjectsDb.RecentRepositories.Count > 0)
+            _recentProjectsStore.TryPersist(_recentProjectsDb);
+
+        if (!_projectProfilePersistencePending ||
+            string.IsNullOrWhiteSpace(_lastPersistedProjectProfilePath) ||
+            _lastPersistedProjectProfile is null)
+        {
+            return;
+        }
+
+        if (_projectProfileStore.TrySaveProfile(
+                _lastPersistedProjectProfilePath,
+                CloneProjectSelectionProfile(_lastPersistedProjectProfile)))
+        {
+            _projectProfilePersistencePending = false;
+        }
+    }
+
+    private async Task TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
         if (!Directory.Exists(path))
         {
@@ -6834,6 +6979,8 @@ public partial class MainWindow : Window
             await YieldProjectLoadStartupFrameAsync(cancellationToken);
 
             await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
+            if (recordRecentFolder)
+                RecordRecentFolder(path);
 
             // Clear cached repo path only after the new local project load has completed successfully.
             if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))

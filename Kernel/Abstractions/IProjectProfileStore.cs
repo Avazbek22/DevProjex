@@ -3,6 +3,7 @@ namespace DevProjex.Kernel.Abstractions;
 public interface IProjectProfileStore
 {
 	bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile);
+	bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile);
 	void SaveProfile(string localProjectPath, ProjectSelectionProfile profile);
 	void ClearAllProfiles();
 }

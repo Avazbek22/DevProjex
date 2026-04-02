@@ -1,9 +1,12 @@
 using Avalonia.VisualTree;
+using Avalonia.Interactivity;
+using Avalonia.Controls.ApplicationLifetimes;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Contracts;
 using DevProjex.Kernel.Models;
+using DevProjex.Avalonia.Views;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using System.Globalization;
 using System.Reflection;
@@ -23,10 +26,11 @@ internal static class UiTestDriver
 
     public static async Task<MainWindow> CreateLoadedMainWindowAsync(
         UiTestProject project,
-        bool waitForInitialSettingsPane = true)
+        bool waitForInitialSettingsPane = true,
+        string? appDataPathOverride = null)
     {
         var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
-        var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+        var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 
         var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
@@ -152,6 +156,24 @@ internal static class UiTestDriver
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
         => await ClickAsync(window, GetRequiredApplySettingsButton(window));
+
+    public static async Task<GitCloneWindow> OpenGitCloneWindowAsync(MainWindow window)
+    {
+        var cloneWindow = new GitCloneWindow
+        {
+            DataContext = GetViewModel(window)
+        };
+
+        cloneWindow.Show(window);
+
+        await WaitForConditionAsync(
+            window,
+            () => cloneWindow.IsVisible,
+            "git clone window to open");
+
+        await WaitForSettledFramesAsync(frameCount: 4);
+        return cloneWindow;
+    }
 
     public static Button GetRequiredApplySettingsButton(MainWindow window)
     {
