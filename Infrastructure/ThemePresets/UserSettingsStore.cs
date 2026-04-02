@@ -48,7 +48,8 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 return CreateDefaultDb();
 
             using var _ = heldLock;
-            EnsureStorageExistsCore(fileSet);
+            // Loading settings should not create files by itself. A dedicated bootstrap
+            // path handles store creation so pure reads remain predictable for tests/tools.
             return LoadInternal(fileSet);
         }
     }

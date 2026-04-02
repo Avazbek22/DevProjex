@@ -34,7 +34,8 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				return CreateDefaultDb();
 
 			using var _ = heldLock;
-			EnsureStorageExistsCore(fileSet);
+			// Reads must stay side-effect free. Startup bootstrap is responsible for
+			// making the store files exist; plain loading should not recreate files.
 			return LoadInternal(fileSet);
 		}
 	}

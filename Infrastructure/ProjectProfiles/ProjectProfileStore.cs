@@ -32,7 +32,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-    public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+	public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
 	{
 		profile = new ProjectSelectionProfile(
 			SelectedRootFolders: [],
@@ -49,7 +49,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
-			EnsureStorageExistsCore(fileSet);
+			// Reading a missing profile should not materialize persistence files.
+			// The app bootstrap explicitly ensures store presence when that contract is needed.
 			var db = LoadInternal(fileSet);
 			if (db.Profiles.Count == 0)
 				return false;
