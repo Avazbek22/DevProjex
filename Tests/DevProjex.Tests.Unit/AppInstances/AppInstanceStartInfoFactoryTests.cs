@@ -29,12 +29,14 @@ public sealed class AppInstanceStartInfoFactoryTests
         Assert.Equal(context.WorkingDirectory, fallbackCandidate.WorkingDirectory);
     }
 
-    [Fact]
-    public void CreateCandidates_DotnetHostContext_LaunchesEntryAssemblyThroughCurrentHost()
+    [Theory]
+    [InlineData(@"C:\Program Files\dotnet\dotnet.exe")]
+    [InlineData("/usr/local/share/dotnet/dotnet")]
+    public void CreateCandidates_DotnetHostContext_LaunchesEntryAssemblyThroughCurrentHost(string processPath)
     {
         var context = new AppInstanceLaunchContext(
             IsWindows: false,
-            ProcessPath: @"C:\Program Files\dotnet\dotnet.exe",
+            ProcessPath: processPath,
             EntryAssemblyPath: @"C:\Users\avazb\RiderProjects\DevProjex\Apps\Avalonia\DevProjex.Avalonia\bin\Debug\net10.0\DevProjex.dll",
             WorkingDirectory: @"C:\Users\avazb\RiderProjects\DevProjex",
             WindowsPackageFamilyName: null);

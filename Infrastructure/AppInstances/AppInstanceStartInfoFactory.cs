@@ -57,7 +57,11 @@ internal static class AppInstanceStartInfoFactory
 
     private static bool IsDotnetHost(string processPath)
     {
-        var fileName = Path.GetFileName(processPath);
+        var separatorIndex = processPath.LastIndexOfAny(['\\', '/']);
+        var fileName = separatorIndex >= 0
+            ? processPath[(separatorIndex + 1)..]
+            : processPath;
+
         return string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(fileName, "dotnet.exe", StringComparison.OrdinalIgnoreCase);
     }
