@@ -175,4 +175,27 @@ public sealed class RecentProjectsPersistenceIntegrationTests
 		Assert.Empty(persisted.RecentFolders);
 		Assert.Empty(persisted.RecentRepositories);
 	}
+
+	[Fact]
+	public void Store_RecoversFromCorruptedPrimaryFile_UsingPersistedBackupAcrossInstances()
+	{
+		using var temp = new TemporaryDirectory();
+		var firstStore = new RecentProjectsStore(() => temp.Path);
+		var folderPath = temp.CreateDirectory("Workspace/Recovered");
+		var repositoryUrl = "https://github.com/example/recovered-repo";
+
+		var db = firstStore.Load();
+		db = firstStore.AddFolder(db, folderPath);
+		db = firstStore.AddRepository(db, repositoryUrl);
+
+		File.WriteAllText(firstStore.GetPath(), "{ invalid");
+
+		var secondStore = new RecentProjectsStore(() => temp.Path);
+		var reloaded = secondStore.Load();
+
+		Assert.Single(reloaded.RecentFolders);
+		Assert.Single(reloaded.RecentRepositories);
+		Assert.Equal(PathUtility.Normalize(folderPath), reloaded.RecentFolders[0].Path);
+		Assert.Equal(repositoryUrl, reloaded.RecentRepositories[0].Url);
+	}
 }

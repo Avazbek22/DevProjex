@@ -1102,9 +1102,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasRecentFolders => RecentFolders.Count > 0;
 
-    // Keep the File > Recent submenu hidden until there is at least one entry
-    // beyond the current workspace. A single entry is just the active project.
-    public bool RecentFoldersMenuVisible => RecentFolders.Count > 1;
+    // Expose File > Recent as soon as at least one persisted folder exists.
+    // Hiding a single entry makes the feature look broken after restart.
+    public bool RecentFoldersMenuVisible => HasRecentFolders;
 
     public bool HasRecentRepositories => RecentRepositories.Count > 0;
 

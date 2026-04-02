@@ -243,7 +243,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void TryLoadProfile_CorruptedJson_RewritesToValidStorageDocument()
+	public void TryLoadProfile_CorruptedJson_DoesNotOverwriteOriginalFileWithoutBackup()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -251,13 +251,11 @@ public sealed class ProjectProfileStoreAdditionalTests
 			var store = CreateStore(tempRoot);
 			var storagePath = store.GetPath();
 			Directory.CreateDirectory(Path.GetDirectoryName(storagePath)!);
-			File.WriteAllText(storagePath, "{ invalid");
+			const string invalidJson = "{ invalid";
+			File.WriteAllText(storagePath, invalidJson);
 
 			Assert.False(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
-
-			var persisted = File.ReadAllText(storagePath);
-			using var doc = JsonDocument.Parse(persisted);
-			Assert.True(doc.RootElement.TryGetProperty("profiles", out _));
+			Assert.Equal(invalidJson, File.ReadAllText(storagePath));
 		}
 		finally
 		{

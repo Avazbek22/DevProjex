@@ -6,6 +6,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	private const int MaxProfiles = 500;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
+	private const string BackupExtension = ".bak";
 
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -63,8 +64,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			try
 			{
 				var path = GetPath();
+				var backupPath = GetBackupPath(path);
 				if (File.Exists(path))
 					File.Delete(path);
+				if (File.Exists(backupPath))
+					File.Delete(backupPath);
 			}
 			catch
 			{
@@ -82,24 +86,22 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	private ProjectProfileDb LoadInternal()
 	{
 		var path = GetPath();
-		if (!File.Exists(path))
-			return CreateDefaultDb();
-
-		try
+		if (TryLoadFromPath(path, out var primaryDb, out var primaryRequiresRewrite))
 		{
-			var json = File.ReadAllText(path);
-			var db = JsonSerializer.Deserialize<ProjectProfileDb>(json, SerializerOptions);
-			if (db is null)
-				return CreateDefaultDb();
+			if (primaryRequiresRewrite)
+				TrySaveInternal(primaryDb);
 
-			return Normalize(db);
+			return primaryDb;
 		}
-		catch
+
+		var backupPath = GetBackupPath(path);
+		if (TryLoadFromPath(backupPath, out var backupDb, out _))
 		{
-			var fallback = CreateDefaultDb();
-			TrySaveInternal(fallback);
-			return fallback;
+			TrySaveInternal(backupDb);
+			return backupDb;
 		}
+
+		return CreateDefaultDb();
 	}
 
 	private void TrySaveInternal(ProjectProfileDb db)
@@ -107,6 +109,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		try
 		{
 			var path = GetPath();
+			var backupPath = GetBackupPath(path);
 			var directory = Path.GetDirectoryName(path);
 			if (string.IsNullOrWhiteSpace(directory))
 				return;
@@ -119,7 +122,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			try
 			{
 				if (File.Exists(path))
-					File.Replace(tempPath, path, null);
+					File.Replace(tempPath, path, backupPath);
 				else
 					File.Move(tempPath, path);
 			}
@@ -127,6 +130,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			{
 				File.Move(tempPath, path, overwrite: true);
 			}
+
+			TryUpdateBackup(path, backupPath);
 		}
 		catch
 		{
@@ -248,6 +253,49 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		catch
 		{
 			return false;
+		}
+	}
+
+	private static bool TryLoadFromPath(string path, out ProjectProfileDb db, out bool requiresRewrite)
+	{
+		db = CreateDefaultDb();
+		requiresRewrite = false;
+
+		if (!File.Exists(path))
+			return false;
+
+		try
+		{
+			var json = File.ReadAllText(path);
+			var deserialized = JsonSerializer.Deserialize<ProjectProfileDb>(json, SerializerOptions);
+			if (deserialized is null)
+				return false;
+
+			var originalSnapshot = JsonSerializer.Serialize(deserialized, SerializerOptions);
+			var normalized = Normalize(deserialized);
+			var normalizedSnapshot = JsonSerializer.Serialize(normalized, SerializerOptions);
+			requiresRewrite = !string.Equals(originalSnapshot, normalizedSnapshot, StringComparison.Ordinal);
+			db = normalized;
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static string GetBackupPath(string path) => $"{path}{BackupExtension}";
+
+	private static void TryUpdateBackup(string path, string backupPath)
+	{
+		try
+		{
+			if (File.Exists(path))
+				File.Copy(path, backupPath, overwrite: true);
+		}
+		catch
+		{
+			// Best effort only. The primary file must remain authoritative.
 		}
 	}
 

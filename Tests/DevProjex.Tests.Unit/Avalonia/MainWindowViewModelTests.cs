@@ -52,9 +52,6 @@ public sealed class MainWindowViewModelTests
         Assert.True(viewModel.HasRecentFolders);
         Assert.True(viewModel.HasRecentRepositories);
         Assert.True(viewModel.GitCloneRecentRepositoriesVisible);
-        Assert.False(viewModel.RecentFoldersMenuVisible);
-
-        viewModel.RecentFolders.Add(new RecentProjectEntryViewModel("c:/repo-2", "repo-2", "c:/repo-2"));
         Assert.True(viewModel.RecentFoldersMenuVisible);
 
         viewModel.GitCloneInProgress = true;

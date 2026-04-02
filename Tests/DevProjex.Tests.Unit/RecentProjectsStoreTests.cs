@@ -5,6 +5,15 @@ namespace DevProjex.Tests.Unit;
 public sealed class RecentProjectsStoreTests
 {
 	[Fact]
+	public void GetPath_IncludesExpectedSegments()
+	{
+		var store = new RecentProjectsStore();
+		var path = store.GetPath();
+
+		Assert.EndsWith(Path.Combine("DevProjex", "recent-projects.json"), path);
+	}
+
+	[Fact]
 	public void AddFolder_MovesDuplicateToFront_AndPersists()
 	{
 		using var temp = new TemporaryDirectory();
@@ -158,28 +167,47 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
-	public void Load_InvalidJson_RewritesDefaultDatabase()
+	public void Load_InvalidJson_ReturnsDefaultWithoutDestroyingOriginalFile()
 	{
 		using var temp = new TemporaryDirectory();
 		var store = new RecentProjectsStore(() => temp.Path);
 		var filePath = store.GetPath();
 		Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
-		File.WriteAllText(filePath, "{ definitely-not-json");
+		const string invalidJson = "{ definitely-not-json";
+		File.WriteAllText(filePath, invalidJson);
 
 		var loaded = store.Load();
-		var reloaded = JsonSerializer.Deserialize<RecentProjectsDb>(File.ReadAllText(filePath), new JsonSerializerOptions
+
+		Assert.Equal(1, loaded.SchemaVersion);
+		Assert.Empty(loaded.RecentFolders);
+		Assert.Empty(loaded.RecentRepositories);
+		Assert.Equal(invalidJson, File.ReadAllText(filePath));
+	}
+
+	[Fact]
+	public void Load_InvalidPrimaryFile_RecoversFromBackupAndRestoresPrimary()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+		db = store.AddFolder(db, Path.Combine(temp.Path, "FolderA"));
+		db = store.AddRepository(db, "https://github.com/example/repo");
+
+		var filePath = store.GetPath();
+		File.WriteAllText(filePath, "{ invalid");
+
+		var loaded = store.Load();
+		var persisted = JsonSerializer.Deserialize<RecentProjectsDb>(File.ReadAllText(filePath), new JsonSerializerOptions
 		{
 			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 			PropertyNameCaseInsensitive = true
 		});
 
-		Assert.NotNull(reloaded);
-		Assert.Equal(1, loaded.SchemaVersion);
-		Assert.Empty(loaded.RecentFolders);
-		Assert.Empty(loaded.RecentRepositories);
-		Assert.Equal(1, reloaded!.SchemaVersion);
-		Assert.Empty(reloaded.RecentFolders);
-		Assert.Empty(reloaded.RecentRepositories);
+		Assert.NotNull(persisted);
+		Assert.Single(loaded.RecentFolders);
+		Assert.Single(loaded.RecentRepositories);
+		Assert.Single(persisted!.RecentFolders);
+		Assert.Single(persisted.RecentRepositories);
 	}
 
 	[Fact]
