@@ -1,4 +1,3 @@
-using DevProjex.Tests.Integration.Helpers;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 

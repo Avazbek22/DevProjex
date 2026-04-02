@@ -198,4 +198,25 @@ public sealed class RecentProjectsPersistenceIntegrationTests
 		Assert.Equal(PathUtility.Normalize(folderPath), reloaded.RecentFolders[0].Path);
 		Assert.Equal(repositoryUrl, reloaded.RecentRepositories[0].Url);
 	}
+
+	[Fact]
+	public void Store_DoesNotPersistApplicationStateDirectory_AcrossInstances()
+	{
+		using var temp = new TemporaryDirectory();
+		var firstStore = new RecentProjectsStore(() => temp.Path);
+		var validFolder = temp.CreateDirectory("Workspace/Valid");
+		var applicationStateDirectory = Path.Combine(temp.Path, "DevProjex");
+		Directory.CreateDirectory(applicationStateDirectory);
+
+		var db = firstStore.Load();
+		db = firstStore.AddFolder(db, applicationStateDirectory);
+		db = firstStore.AddFolder(db, validFolder);
+
+		var secondStore = new RecentProjectsStore(() => temp.Path);
+		var reloaded = secondStore.Load();
+
+		Assert.Single(reloaded.RecentFolders);
+		Assert.Equal(PathUtility.Normalize(validFolder), reloaded.RecentFolders[0].Path);
+		Assert.DoesNotContain(applicationStateDirectory, File.ReadAllText(firstStore.GetPath()), StringComparison.Ordinal);
+	}
 }

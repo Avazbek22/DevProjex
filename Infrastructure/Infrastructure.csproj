@@ -7,6 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
+    <InternalsVisibleTo Include="DevProjex.Tests.UI" />
+    <InternalsVisibleTo Include="DevProjex.Tests.Integration" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Kernel\Kernel.csproj" />
     <ProjectReference Include="..\Assets\Assets.csproj" />
   </ItemGroup>

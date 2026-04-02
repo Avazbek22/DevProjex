@@ -62,6 +62,37 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 	}
 
 	[AvaloniaFact]
+	public async Task FileMenu_RecentFolders_DoesNotShowApplicationStateDirectory()
+	{
+		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var validFolder = Path.Combine(workspace.Project.RootPath, "history", "visible-folder");
+		var applicationStateDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(validFolder);
+		Directory.CreateDirectory(applicationStateDirectory);
+
+		var db = recentStore.Load();
+		db = recentStore.AddFolder(db, applicationStateDirectory);
+		db = recentStore.AddFolder(db, validFolder);
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project, appDataPathOverride: appDataPath);
+
+		try
+		{
+			var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
+			var recentItems = recentMenu.Items.OfType<MenuItem>().ToArray();
+
+			Assert.Contains(recentItems, item => string.Equals(item.Tag as string, workspace.Project.RootPath, StringComparison.Ordinal));
+			Assert.Contains(recentItems, item => string.Equals(item.Tag as string, validFolder, StringComparison.Ordinal));
+			Assert.DoesNotContain(recentItems, item => string.Equals(item.Tag as string, applicationStateDirectory, StringComparison.Ordinal));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task GitCloneWindow_RecentRepositories_FillsUrlFromSelection()
 	{
 		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));

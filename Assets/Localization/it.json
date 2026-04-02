@@ -1,6 +1,7 @@
 ﻿{
   "Menu.File": "File",
   "Menu.File.Open": "Apri cartella...",
+  "Menu.File.OpenNewWindow": "Nuova finestra",
   "Menu.File.Recent": "Recenti",
   "Menu.File.Recent.Empty": "Nessuna cartella recente",
   "Menu.File.Refresh": "Aggiorna",
@@ -119,6 +120,7 @@
   "Settings.Apply": "Applica",
   "Msg.ErrorTitle": "Errore",
   "Msg.InfoTitle": "Info",
+  "Msg.NewWindowLaunchFailed": "Impossibile aprire una nuova finestra:\n{0}",
   "Msg.PathNotFound": "Cartella non trovata:\n{0}",
   "Msg.NoCheckedTree": "Nessun file/cartella selezionato (usa le checkbox nell’albero).",
   "Msg.NoCheckedFiles": "Nessun file selezionato (le checkbox devono essere sui file).",

@@ -188,6 +188,21 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void AddFolder_IgnoresApplicationStateDirectory()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+		var applicationStateDirectory = Path.Combine(temp.Path, "DevProjex");
+		Directory.CreateDirectory(applicationStateDirectory);
+
+		db = store.AddFolder(db, applicationStateDirectory);
+
+		Assert.Empty(db.RecentFolders);
+		Assert.False(File.Exists(store.GetPath()));
+	}
+
+	[Fact]
 	public void AddFolder_DeduplicatesLegacyTrailingSeparatorVariants_AndKeepsLatestValue()
 	{
 		using var temp = new TemporaryDirectory();
@@ -252,6 +267,34 @@ public sealed class RecentProjectsStoreTests
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
 		Assert.Equal(invalidJson, File.ReadAllText(filePath));
+	}
+
+	[Fact]
+	public void Load_RemovesApplicationStateDirectory_FromLegacyData()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var validFolder = temp.CreateFolder("Workspace");
+		var applicationStateDirectory = Path.Combine(temp.Path, "DevProjex");
+		Directory.CreateDirectory(applicationStateDirectory);
+		var filePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+		File.WriteAllText(filePath, $$"""
+		{
+		  "schemaVersion": 1,
+		  "recentFolders": [
+		    { "path": "{{applicationStateDirectory.Replace("\\", "\\\\")}}", "openedUtc": "2026-04-02T13:11:48.4602914+00:00" },
+		    { "path": "{{validFolder.Replace("\\", "\\\\")}}", "openedUtc": "2026-04-01T13:11:48.4602914+00:00" }
+		  ],
+		  "recentRepositories": []
+		}
+		""");
+
+		var loaded = store.Load();
+
+		Assert.Single(loaded.RecentFolders);
+		Assert.Equal(PathUtility.Normalize(validFolder), loaded.RecentFolders[0].Path);
+		Assert.DoesNotContain(applicationStateDirectory, File.ReadAllText(filePath), StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -1,6 +1,4 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using DevProjex.Kernel;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.RecentProjects;
 
@@ -11,7 +9,6 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	private const int MaxRecentRepositories = 7;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "recent-projects.json";
-	private const string BackupExtension = ".bak";
 	private static readonly string RepoCacheRootPath = Path.Combine(
 		Path.GetTempPath(),
 		FolderName,
@@ -32,7 +29,12 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	{
 		lock (_sync)
 		{
-			return LoadInternal();
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return CreateDefaultDb();
+
+			using var _ = heldLock;
+			return LoadInternal(fileSet);
 		}
 	}
 
@@ -40,8 +42,40 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	{
 		lock (_sync)
 		{
-			var state = Normalize(db ?? LoadInternal());
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+			{
+				// Keep the current session history responsive even when the shared store
+				// cannot be reached. The caller keeps the returned snapshot in memory and
+				// a later flush can still retry persistence.
+				var inMemoryState = SanitizeState(fileSet, MergeStates(CreateDefaultDb(), db));
+				if (!TryNormalizeFolderPath(path, out var inMemoryNormalizedPath))
+					return inMemoryState;
+
+				if (IsIgnoredFolderPath(fileSet, inMemoryNormalizedPath))
+					return inMemoryState;
+
+				MoveToFront(
+					inMemoryState.RecentFolders,
+					inMemoryNormalizedPath,
+					MaxRecentFolders,
+					PathComparer.Default,
+					static entry => entry.Path,
+					static value => value,
+					static (value, openedUtc) => new RecentFolderEntry
+					{
+						Path = value,
+						OpenedUtc = openedUtc
+					});
+				return inMemoryState;
+			}
+
+			using var _ = heldLock;
+			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
 			if (!TryNormalizeFolderPath(path, out var normalizedPath))
+				return state;
+
+			if (IsIgnoredFolderPath(fileSet, normalizedPath))
 				return state;
 
 			MoveToFront(
@@ -57,7 +91,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 					OpenedUtc = openedUtc
 				});
 
-			TrySave(state);
+			TrySave(fileSet, state);
 			return state;
 		}
 	}
@@ -66,7 +100,33 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	{
 		lock (_sync)
 		{
-			var state = Normalize(db ?? LoadInternal());
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+			{
+				// Keep the current session history responsive even when the shared store
+				// cannot be reached. The caller keeps the returned snapshot in memory and
+				// a later flush can still retry persistence.
+				var inMemoryState = SanitizeState(fileSet, MergeStates(CreateDefaultDb(), db));
+				if (!TryNormalizeRepositoryUrl(repositoryUrl, out var inMemoryNormalizedUrl))
+					return inMemoryState;
+
+				MoveToFront(
+					inMemoryState.RecentRepositories,
+					inMemoryNormalizedUrl,
+					MaxRecentRepositories,
+					StringComparer.OrdinalIgnoreCase,
+					static entry => entry.Url,
+					static value => NormalizeRepositoryComparisonKey(value),
+					static (value, openedUtc) => new RecentRepositoryEntry
+					{
+						Url = value,
+						OpenedUtc = openedUtc
+					});
+				return inMemoryState;
+			}
+
+			using var _ = heldLock;
+			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
 			if (!TryNormalizeRepositoryUrl(repositoryUrl, out var normalizedUrl))
 				return state;
 
@@ -83,7 +143,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 					OpenedUtc = openedUtc
 				});
 
-			TrySave(state);
+			TrySave(fileSet, state);
 			return state;
 		}
 	}
@@ -92,36 +152,42 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	{
 		lock (_sync)
 		{
-			var state = Normalize(db ?? LoadInternal());
-			return TrySave(state);
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
+			return TrySave(fileSet, state);
 		}
 	}
 
 	public string GetPath()
 	{
-		var root = _appDataPathProvider();
-		return Path.Combine(root, FolderName, FileName);
+		return GetFileSet().PrimaryPath;
 	}
 
-	private RecentProjectsDb LoadInternal()
+	private JsonStoreFileSet GetFileSet()
+		=> JsonStoreFileSet.Create(_appDataPathProvider, FolderName, FileName);
+
+	private RecentProjectsDb LoadInternal(JsonStoreFileSet fileSet)
 	{
-		var path = GetPath();
-		if (TryLoadFromPath(path, out var primaryDb, out var primaryRequiresRewrite))
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
-			if (primaryRequiresRewrite)
-				TrySave(primaryDb);
+			var sanitizedPrimaryDb = SanitizeState(fileSet, primaryDb, out var primaryRequiresSanitizationRewrite);
+			if (primaryRequiresRewrite || primaryRequiresSanitizationRewrite)
+				TrySave(fileSet, sanitizedPrimaryDb);
 
-			return primaryDb;
+			return sanitizedPrimaryDb;
 		}
-
-		var backupPath = GetBackupPath(path);
 
 		// Keep the last known-good snapshot as a recovery path.
 		// A partially written or externally corrupted primary file must not silently erase history.
-		if (TryLoadFromPath(backupPath, out var backupDb, out _))
+		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
 		{
-			TrySave(backupDb);
-			return backupDb;
+			var sanitizedBackupDb = SanitizeState(fileSet, backupDb);
+			TrySave(fileSet, sanitizedBackupDb);
+			return sanitizedBackupDb;
 		}
 
 		return CreateDefaultDb();
@@ -146,6 +212,36 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		db.RecentFolders = NormalizeFolders(db.RecentFolders);
 		db.RecentRepositories = NormalizeRepositories(db.RecentRepositories);
 		return db;
+	}
+
+	private static RecentProjectsDb SanitizeState(JsonStoreFileSet fileSet, RecentProjectsDb db)
+		=> SanitizeState(fileSet, db, out _);
+
+	private static RecentProjectsDb SanitizeState(JsonStoreFileSet fileSet, RecentProjectsDb db, out bool requiresRewrite)
+	{
+		var normalized = Normalize(db);
+		var originalCount = normalized.RecentFolders.Count;
+		normalized.RecentFolders = normalized.RecentFolders
+			.Where(entry => !IsIgnoredFolderPath(fileSet, entry.Path))
+			.ToList();
+		requiresRewrite = normalized.RecentFolders.Count != originalCount;
+		return normalized;
+	}
+
+	private static RecentProjectsDb MergeStates(RecentProjectsDb current, RecentProjectsDb? snapshot)
+	{
+		if (snapshot is null)
+			return current;
+
+		// Window-scoped snapshots can be stale by the time they are flushed on close.
+		// Merge them with the latest on-disk state so one process never drops another
+		// process window's history entries during a delayed retry.
+		var merged = CreateDefaultDb();
+		merged.RecentFolders.AddRange(snapshot.RecentFolders);
+		merged.RecentFolders.AddRange(current.RecentFolders);
+		merged.RecentRepositories.AddRange(snapshot.RecentRepositories);
+		merged.RecentRepositories.AddRange(current.RecentRepositories);
+		return Normalize(merged);
 	}
 
 	private static List<RecentFolderEntry> NormalizeFolders(IEnumerable<RecentFolderEntry> entries)
@@ -218,41 +314,10 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 			entries.RemoveRange(limit, entries.Count - limit);
 	}
 
-	private bool TrySave(RecentProjectsDb db)
+	private bool TrySave(JsonStoreFileSet fileSet, RecentProjectsDb db)
 	{
-		try
-		{
-			var path = GetPath();
-			var backupPath = GetBackupPath(path);
-			var directory = Path.GetDirectoryName(path);
-			if (string.IsNullOrWhiteSpace(directory))
-				return false;
-
-			Directory.CreateDirectory(directory);
-			var json = JsonSerializer.Serialize(db, SerializerOptions);
-			var tempPath = Path.Combine(directory, $"{FileName}.{Guid.NewGuid():N}.tmp");
-			File.WriteAllText(tempPath, json);
-
-			try
-			{
-				if (File.Exists(path))
-					File.Replace(tempPath, path, backupPath);
-				else
-					File.Move(tempPath, path);
-			}
-			catch
-			{
-				File.Move(tempPath, path, overwrite: true);
-			}
-
-			TryUpdateBackup(path, backupPath);
-			return true;
-		}
-		catch
-		{
-			// Ignore persistence errors. The application must remain usable without this cache.
-			return false;
-		}
+		var sanitized = SanitizeState(fileSet, db);
+		return JsonStorePersistence.TryWriteAtomic(fileSet, sanitized, SerializerOptions);
 	}
 
 	private static bool TryLoadFromPath(string path, out RecentProjectsDb db, out bool requiresRewrite)
@@ -285,23 +350,6 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-	private static string GetBackupPath(string path) => $"{path}{BackupExtension}";
-
-	private static void TryUpdateBackup(string path, string backupPath)
-	{
-		try
-		{
-			// Copy the final primary snapshot after a successful save instead of writing a separate branch.
-			// That keeps the backup byte-for-byte aligned with the last committed primary state.
-			if (File.Exists(path))
-				File.Copy(path, backupPath, overwrite: true);
-		}
-		catch
-		{
-			// Best effort only. The primary file must remain authoritative.
-		}
-	}
-
 	private static bool TryNormalizeFolderPath(string path, out string normalizedPath)
 	{
 		normalizedPath = string.Empty;
@@ -327,6 +375,26 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		try
 		{
 			return PathUtility.IsPathInside(path, RepoCacheRootPath);
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static bool IsIgnoredFolderPath(JsonStoreFileSet fileSet, string path)
+	{
+		if (IsRepoCachePath(path))
+			return true;
+
+		if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
+			return false;
+
+		try
+		{
+			// The application state directory is an internal persistence implementation detail.
+			// Users can inspect it manually, but it must never pollute the recent-project history.
+			return PathUtility.IsPathInside(path, fileSet.DirectoryPath);
 		}
 		catch
 		{

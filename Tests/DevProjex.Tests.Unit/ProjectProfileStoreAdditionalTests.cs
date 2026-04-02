@@ -363,6 +363,42 @@ public sealed class ProjectProfileStoreAdditionalTests
 		Assert.False(store.TrySaveProfile(projectPath, CreateProfile()));
 	}
 
+	[Fact]
+	public void TrySaveProfile_OlderTimestampRetry_DoesNotOverwriteNewerProfile()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			var olderProfile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["src"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles]);
+			var newerProfile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["docs"],
+				SelectedExtensions: [".md"],
+				SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore]);
+			var olderTimestamp = new DateTimeOffset(2026, 4, 2, 10, 0, 0, TimeSpan.Zero);
+			var newerTimestamp = olderTimestamp.AddMinutes(5);
+
+			Assert.True(store.TrySaveProfile(projectPath, olderProfile, olderTimestamp));
+			Assert.True(store.TrySaveProfile(projectPath, newerProfile, newerTimestamp));
+			Assert.True(store.TrySaveProfile(projectPath, olderProfile, olderTimestamp));
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.Contains("docs", loaded.SelectedRootFolders);
+			Assert.DoesNotContain("src", loaded.SelectedRootFolders);
+			Assert.Contains(".md", loaded.SelectedExtensions);
+			Assert.DoesNotContain(".cs", loaded.SelectedExtensions);
+			Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+			Assert.DoesNotContain(IgnoreOptionId.DotFiles, loaded.SelectedIgnoreOptions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
 	[Theory]
 	[InlineData("RepoTrailingSlash")]
 	[InlineData("RepoTrailingAltSlash")]

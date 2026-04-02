@@ -1,6 +1,7 @@
 ﻿{
   "Menu.File": "Datei",
   "Menu.File.Open": "Ordner öffnen...",
+  "Menu.File.OpenNewWindow": "Neues Fenster",
   "Menu.File.Recent": "Zuletzt",
   "Menu.File.Recent.Empty": "Keine letzten Ordner",
   "Menu.File.Refresh": "Aktualisieren",
@@ -119,6 +120,7 @@
   "Settings.Apply": "Anwenden",
   "Msg.ErrorTitle": "Fehler",
   "Msg.InfoTitle": "Info",
+  "Msg.NewWindowLaunchFailed": "Neues Fenster konnte nicht geöffnet werden:\n{0}",
   "Msg.PathNotFound": "Ordner nicht gefunden:\n{0}",
   "Msg.NoCheckedTree": "Keine markierten Dateien/Ordner (Checkboxen im Baum verwenden).",
   "Msg.NoCheckedFiles": "Keine markierten Dateien (Checkboxen müssen auf Dateien sein).",

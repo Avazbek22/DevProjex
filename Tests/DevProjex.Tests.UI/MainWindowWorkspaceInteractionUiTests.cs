@@ -7,6 +7,33 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture workspace)
 {
     [AvaloniaFact]
+    public async Task OpenNewWindowMenuItem_LaunchesIndependentAppInstance()
+    {
+        var launcher = new RecordingAppInstanceLauncher(AppInstanceLaunchResult.Success);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            configureServices: services => services with
+            {
+                AppInstanceLauncher = launcher
+            });
+
+        try
+        {
+            var menuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "OpenNewWindowMenuItem");
+
+            await UiTestDriver.RaiseMenuItemClickAsync(menuItem);
+
+            Assert.Equal(1, launcher.LaunchCallCount);
+            Assert.True(window.IsVisible);
+            Assert.True(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task RecentProjects_AreFlushedOnClose_WhenImmediateSaveFails()
     {
         var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
@@ -115,11 +142,16 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 },
                 "initial settings pane to become visually available before applying settings");
 
-            await UiTestDriver.ClickApplySettingsAsync(window);
+            var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
+            await UiTestDriver.RaiseButtonClickAsync(applyButton);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => flakyStore.SaveAttemptCount >= 1,
+                "initial profile persistence attempt to run after applying settings");
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => !UiTestDriver.GetViewModel(window).StatusBusy,
-                "apply settings operation to finish");
+                "apply settings operation to finish after the profile save attempt");
             Assert.Equal(1, flakyStore.SaveAttemptCount);
 
             window.Close();
@@ -166,6 +198,9 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         }
 
         public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+            => TrySaveProfile(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+        public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
         {
             if (Interlocked.Increment(ref _saveAttemptCount) == 1)
                 return false;
@@ -206,6 +241,19 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 SelectedRootFolders: profile.SelectedRootFolders.ToArray(),
                 SelectedExtensions: profile.SelectedExtensions.ToArray(),
                 SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray());
+        }
+    }
+
+    private sealed class RecordingAppInstanceLauncher(AppInstanceLaunchResult launchResult) : IAppInstanceLauncher
+    {
+        private int _launchCallCount;
+
+        public int LaunchCallCount => _launchCallCount;
+
+        public AppInstanceLaunchResult LaunchNewInstance()
+        {
+            Interlocked.Increment(ref _launchCallCount);
+            return launchResult;
         }
     }
 

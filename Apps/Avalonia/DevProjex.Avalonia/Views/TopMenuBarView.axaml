@@ -9,6 +9,9 @@
     <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,110,0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
+        <MenuItem Name="OpenNewWindowMenuItem"
+                  Header="{Binding MenuFileOpenNewWindow}"
+                  Click="OnOpenNewWindow" />
         <MenuItem Name="RecentMenuItem"
                   Header="{Binding MenuFileRecent}"
                   IsVisible="{Binding RecentFoldersMenuVisible}">

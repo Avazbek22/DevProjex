@@ -1,6 +1,7 @@
 ﻿{
   "Menu.File": "Fichier",
   "Menu.File.Open": "Ouvrir le dossier...",
+  "Menu.File.OpenNewWindow": "Nouvelle fenêtre",
   "Menu.File.Recent": "Récents",
   "Menu.File.Recent.Empty": "Aucun dossier récent",
   "Menu.File.Refresh": "Actualiser",
@@ -119,6 +120,7 @@
   "Settings.Apply": "Appliquer",
   "Msg.ErrorTitle": "Erreur",
   "Msg.InfoTitle": "Info",
+  "Msg.NewWindowLaunchFailed": "Impossible d'ouvrir une nouvelle fenêtre :\n{0}",
   "Msg.PathNotFound": "Dossier introuvable :\n{0}",
   "Msg.NoCheckedTree": "Aucun fichier/dossier coché (utilisez les cases dans l’arborescence).",
   "Msg.NoCheckedFiles": "Aucun fichier coché (les cases doivent être sur des fichiers).",

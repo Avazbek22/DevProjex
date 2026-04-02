@@ -16,6 +16,8 @@ Issiq tugmalar:
 
 ## 3) Fayl
 * Jildni ochish… — ildiz papkani ochish (Ctrl+O)
+* Yangi oyna — DevProjex’ning yangi mustaqil nusxasini ochish
+* So‘nggilar — yaqinda ochilgan lokal jildlar ro‘yxati
 * Yangilash — daraxtni qayta o‘qish va qayta qurish (F5)
 * Faylga eksport:
   * Daraxtni eksport qilish
@@ -41,6 +43,18 @@ Qoidalar:
 * yo‘l mavjud bo‘lmasa yoki kirish bo‘lmasa, «Jildni ochish…» dagi kabi bir xil kirish tekshiruvlari qo‘llanadi;
 * qo‘llab-quvvatlanmaydigan yoki lokal bo‘lmagan obyektlar e’tiborga olinmaydi.
 
+### So‘nggilar
+“Fayl → So‘nggilar” bandi yaqinda ochilgan lokal jildlar tarixini ko‘rsatadi.
+
+Qoidalar:
+* ro‘yxatga faqat lokal jildlar qo‘shiladi;
+* DevProjex orqali klonlangan Git repozitoriylari bu ro‘yxatga qo‘shilmaydi;
+* dublikatlar yaratilmaydi — bir xil jildni qayta ochish uni ro‘yxatning yuqorisiga olib chiqadi;
+* 10 tagacha so‘nggi jild saqlanadi;
+* tarix ilova qayta ishga tushirilganda ham saqlanadi.
+
+Har bir element uchun jildning qisqa nomi ko‘rsatiladi, to‘liq yo‘l esa tooltip’da mavjud bo‘ladi.
+
 ## 4) Git
 Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
 
@@ -49,6 +63,20 @@ Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
 
 * Tarmoq — mavjud tarmoqlar ro‘yxatini faol tarmoq belgisi bilan ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar tarmoq lokalda bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
 * Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset.
+
+### Klonlash oynasi
+Git Clone oynasida URL maydoni ostida “So‘nggi repozitoriylar” ro‘yxati ko‘rsatilishi mumkin.
+
+Qoidalar:
+* ro‘yxat faqat tarixda yaqinda klonlangan repozitoriylar bo‘lsa paydo bo‘ladi;
+* ro‘yxatga faqat repozitoriy URL manzillari qo‘shiladi;
+* lokal jildlar bu ro‘yxatga qo‘shilmaydi;
+* dublikatlar yaratilmaydi — bir xil repozitoriyani qayta klonlash uni ro‘yxatning yuqorisiga olib chiqadi;
+* 7 tagacha so‘nggi repozitoriy saqlanadi;
+* tarix ilova qayta ishga tushirilganda ham saqlanadi.
+
+Ro‘yxatdan element tanlansa, URL avtomatik ravishda kiritish maydoniga qo‘yiladi.
+Faol klonlash vaqtida ro‘yxat vaqtincha yashiriladi.
 
 ## 5) Nusxa
 ### Daraxt formati tumbleri (ASCII/JSON)
@@ -127,10 +155,16 @@ Qo‘shimcha:
 * preview ichida fayllar gorizontal chiziqlar bilan ajratiladi;
 * skroll paytida joriy fayl yo‘li tepada mahkamlanadi;
 * daraxt va preview masshtabi alohida yashashi mumkin.
+* preview rejimida “Nusxa” menyusiga kirmasdan turib to‘liq joriy natijani ham, joriy ko‘rinib turgan fayl blokini ham nusxalash mumkin.
 
 Tugmalar:
+* yuqori preview orolining chap tomonidagi nusxa tugmasi — joriy preview rejimini nusxalaydi:
+  * Daraxt
+  * Mazmun
+  * Daraxt va mazmun
 * daraxt orolidagi X — daraxtni yashiradi va faqat preview orolini qoldiradi;
 * preview’ning yuqori orolidagi X — preview rejimini to‘liq yopadi;
+* faylning mahkamlangan yuqori sarlavhasidagi kichik nusxa tugmasi — joriy ko‘rinib turgan fayl blokini previewda ko‘rsatilgan holatda nusxalaydi;
 * ko‘zcha ikonani yana bir marta bosish yoki Ctrl+B ham preview rejimini yopadi.
 
 Qidiruv va filtr preview ichida daraxt oroli ko‘rinib turgan paytda ishlaydi.
@@ -376,7 +410,10 @@ Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha par
 * tanlangan fayl turlari;
 * «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
 
-Diskdagi loyiha fayllari va jildlari o‘zgartirilmaydi va o‘chirilmaydi.
+Muhim:
+* lokal jildlar uchun “So‘nggilar” tarixi tozalanmaydi;
+* Git Clone oynasidagi “So‘nggi repozitoriylar” tarixi tozalanmaydi;
+* diskdagi loyiha fayllari va jildlari o‘zgartirilmaydi va o‘chirilmaydi.
 
 ## 16) Tillar
 Til menyusi orqali tanlanadi.

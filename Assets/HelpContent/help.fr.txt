@@ -16,6 +16,8 @@ Raccourcis :
 
 ## 3) Fichier
 * Ouvrir le dossier… — ouvrir le dossier racine (Ctrl+O)
+* Nouvelle fenêtre — ouvrir une nouvelle instance indépendante de DevProjex
+* Récents — liste des dossiers locaux ouverts récemment
 * Actualiser — relire et reconstruire l’arborescence (F5)
 * Exporter vers un fichier :
   * Exporter l’arborescence
@@ -41,6 +43,18 @@ Règles :
 * si un chemin est indisponible ou inexistant, les mêmes vérifications d’accès que pour « Ouvrir le dossier… » sont appliquées ;
 * les éléments non pris en charge ou non locaux sont ignorés.
 
+### Récents
+L’élément « Fichier → Récents » affiche l’historique des dossiers locaux ouverts récemment.
+
+Règles :
+* seuls les dossiers locaux sont ajoutés à la liste ;
+* les dépôts Git clonés via DevProjex ne sont pas ajoutés à cette liste ;
+* aucun doublon n’est créé — rouvrir le même dossier le remonte en haut de la liste ;
+* jusqu’à 10 derniers dossiers sont conservés ;
+* l’historique est conservé entre les démarrages de l’application.
+
+Pour chaque élément, le nom court du dossier est affiché ; le chemin complet est disponible dans une info-bulle.
+
 ## 4) Git
 Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git Clone). L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
 
@@ -49,6 +63,20 @@ Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’e
 
 * Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
 * Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
+
+### Fenêtre de clonage
+Dans la fenêtre Git Clone, une liste « Dépôts récents » peut apparaître sous le champ URL.
+
+Règles :
+* la liste apparaît seulement si l’historique contient déjà des dépôts clonés récemment ;
+* seules les URL des dépôts sont ajoutées à la liste ;
+* les dossiers locaux ne sont pas ajoutés à cette liste ;
+* aucun doublon n’est créé — re-cloner le même dépôt le remonte en haut de la liste ;
+* jusqu’à 7 derniers dépôts sont conservés ;
+* l’historique est conservé entre les démarrages de l’application.
+
+Si vous choisissez un élément dans la liste, l’URL est automatiquement insérée dans le champ de saisie.
+Pendant un clonage actif, la liste est temporairement masquée.
 
 ## 5) Copier
 ### Sélecteur de format de l’arborescence (ASCII/JSON)
@@ -127,10 +155,16 @@ En plus :
 * les fichiers de l’aperçu sont séparés par des lignes horizontales ;
 * pendant le défilement, le chemin du fichier courant reste épinglé en haut ;
 * le zoom de l’arborescence et celui de l’aperçu peuvent vivre séparément.
+* en mode aperçu, vous pouvez copier soit le résultat complet actuel, soit le bloc du fichier actuellement visible sans passer par le menu « Copier ».
 
 Boutons :
+* bouton de copie à gauche dans le panneau supérieur d’aperçu — copie le mode d’aperçu actuel :
+  * Arborescence
+  * Contenu
+  * Arborescence et contenu
 * X dans le panneau de l’arborescence — masque l’arborescence et laisse uniquement le panneau d’aperçu ;
 * X dans la barre supérieure de l’aperçu — ferme complètement le mode aperçu ;
+* petit bouton de copie dans l’en-tête épinglé du fichier — copie le bloc du fichier actuellement visible tel qu’il est affiché dans l’aperçu ;
 * un nouveau clic sur l’icône œil ou Ctrl+B ferme aussi le mode aperçu.
 
 La recherche et le filtre restent disponibles tant que le panneau de l’arborescence est visible dans l’aperçu.
@@ -376,7 +410,10 @@ Réinitialiser les données (Aide → Réinitialiser les données) supprime les 
 * types de fichiers sélectionnés ;
 * options sélectionnées dans le bloc « Ignorer ».
 
-Les fichiers et dossiers des projets sur le disque ne sont ni modifiés ni supprimés.
+Important :
+* l’historique « Récents » des dossiers locaux n’est pas effacé ;
+* l’historique des « Dépôts récents » dans la fenêtre Git Clone n’est pas effacé ;
+* les fichiers et dossiers des projets sur le disque ne sont ni modifiés ni supprimés.
 
 ## 16) Langues
 La langue se choisit via le menu Langue.

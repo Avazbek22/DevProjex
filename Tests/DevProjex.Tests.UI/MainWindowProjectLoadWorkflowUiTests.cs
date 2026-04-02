@@ -1,6 +1,4 @@
 using System.Text.RegularExpressions;
-using DevProjex.Application.Services;
-using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.UI;

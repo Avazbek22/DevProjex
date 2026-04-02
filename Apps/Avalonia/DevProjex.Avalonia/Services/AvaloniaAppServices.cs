@@ -9,6 +9,7 @@ public sealed record AvaloniaAppServices(
     UserSettingsStore UserSettingsStore,
     RecentProjectsStore RecentProjectsStore,
     IProjectProfileStore ProjectProfileStore,
+    IAppInstanceLauncher AppInstanceLauncher,
     IElevationService Elevation,
     ScanOptionsUseCase ScanOptionsUseCase,
     BuildTreeUseCase BuildTreeUseCase,
