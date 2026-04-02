@@ -50,6 +50,34 @@ public sealed class ContentMetricsContractTests
 		Assert.Equal(expected.Tokens, actual.Tokens);
 	}
 
+	[Fact]
+	public async Task ContentMetricsPipeline_MixedTextAndBinaryFiles_SkipsBinaryWithoutZeroingContentMetrics()
+	{
+		using var temp = new TemporaryDirectory();
+		var alpha = temp.CreateFile("alpha.txt", "line1\nline2\nline3\n");
+		var beta = temp.CreateFile("beta.md", "# Title\n\nbody\n");
+		var binary = temp.CreateBinaryFile("image.bin", [0x00, 0x01, 0x02, 0x03, 0xFF]);
+
+		var analyzer = new FileContentAnalyzer();
+		var exportService = new SelectedContentExportService(analyzer);
+		var inputs = await BuildMetricsInputsAsync(
+			[binary, beta, alpha],
+			analyzer,
+			mapFilePath: null);
+		var exportText = await exportService.BuildAsync(
+			[binary, beta, alpha],
+			CancellationToken.None,
+			displayPathMapper: null);
+
+		var expected = ExportOutputMetricsCalculator.FromText(exportText);
+		var actual = ExportOutputMetricsCalculator.FromContentFiles(inputs);
+
+		Assert.NotEqual(ExportOutputMetrics.Empty, actual);
+		Assert.Equal(expected.Lines, actual.Lines);
+		Assert.Equal(expected.Chars, actual.Chars);
+		Assert.Equal(expected.Tokens, actual.Tokens);
+	}
+
 	private static async Task<IReadOnlyList<ContentFileMetrics>> BuildMetricsInputsAsync(
 		IEnumerable<string> filePaths,
 		IFileContentAnalyzer analyzer,

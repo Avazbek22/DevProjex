@@ -348,6 +348,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _previewSelectionMetricsDebounceTimer;
 
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(PathComparer.Default);
+    private readonly HashSet<string> _inspectedFileMetricsPaths = new(PathComparer.Default);
     private volatile bool _isBackgroundMetricsActive;
     private int _metricsRecalcVersion;
     private int _previewSelectionMetricsVersion;
@@ -8424,6 +8425,7 @@ public partial class MainWindow : Window
             operationType: StatusOperationType.MetricsCalculation,
             cancelAction: CancelBackgroundMetricsCalculation);
         var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
+        var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
         try
         {
             if (IsStatusOperationActive(statusOperationId))
@@ -8467,9 +8469,10 @@ public partial class MainWindow : Window
                 return;
             }
 
-            await ScanFileMetricsAsync(filePaths, stagedMetrics, linkedCts.Token, statusOperationId);
+            await ScanFileMetricsAsync(filePaths, stagedMetrics, stagedInspectedPaths, linkedCts.Token, statusOperationId);
 
             MergeStagedMetricsIntoCache(stagedMetrics);
+            MergeInspectedMetricsPaths(stagedInspectedPaths);
 
             // Calculation completed successfully
             _isBackgroundMetricsActive = false;
@@ -8486,6 +8489,7 @@ public partial class MainWindow : Window
             _isBackgroundMetricsActive = false;
             _hasCompleteMetricsBaseline = false;
             MergeStagedMetricsIntoCache(stagedMetrics);
+            MergeInspectedMetricsPaths(stagedInspectedPaths);
             var hasCachedMetrics = false;
             lock (_metricsLock)
                 hasCachedMetrics = _fileMetricsCache.Count > 0;
@@ -8533,9 +8537,24 @@ public partial class MainWindow : Window
         stagedMetrics.Clear();
     }
 
+    private void MergeInspectedMetricsPaths(ConcurrentDictionary<string, byte> inspectedPaths)
+    {
+        if (inspectedPaths.IsEmpty)
+            return;
+
+        lock (_metricsLock)
+        {
+            foreach (var pair in inspectedPaths)
+                _inspectedFileMetricsPaths.Add(pair.Key);
+        }
+
+        inspectedPaths.Clear();
+    }
+
     private async Task ScanFileMetricsAsync(
         IReadOnlyList<string> filePaths,
         ConcurrentDictionary<string, FileMetricsData> stagedMetrics,
+        ConcurrentDictionary<string, byte> stagedInspectedPaths,
         CancellationToken cancellationToken,
         long statusOperationId)
     {
@@ -8570,6 +8589,11 @@ public partial class MainWindow : Window
                         metrics.TrailingNewlineChars,
                         metrics.TrailingNewlineLineBreaks);
                 }
+
+                // Null means "not exportable as text", not "still missing". Remembering the
+                // completed probe prevents binary files from keeping selected content metrics
+                // stuck behind a permanent "missing metrics" gate.
+                stagedInspectedPaths[filePath] = 0;
             }
             catch (OperationCanceledException)
             {
@@ -8578,6 +8602,7 @@ public partial class MainWindow : Window
             catch
             {
                 // Skip files that cannot be read. Export/preview logic already treats them as unavailable.
+                stagedInspectedPaths[filePath] = 0;
             }
             finally
             {
@@ -8626,27 +8651,28 @@ public partial class MainWindow : Window
         var selectedPaths = GetCheckedPaths();
         var hasAnyChecked = selectedPaths.Count > 0;
         var hasCompleteMetricsBaseline = _hasCompleteMetricsBaseline;
-        if (!MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(hasAnyChecked, hasCompleteMetricsBaseline))
-        {
-            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-            return;
-        }
-
         var treeFormat = GetCurrentTreeTextFormat();
         var currentTree = _currentTree;
         var currentPath = _currentPath;
 
-        if (hasAnyChecked && !hasCompleteMetricsBaseline)
+        if (!hasCompleteMetricsBaseline)
         {
-            _ = RecalculateSelectedMetricsAsync(
+            _ = RecalculateIncompleteBaselineMetricsAsync(
                 recalcCts,
                 token,
                 recalcVersion,
+                hasAnyChecked,
                 selectedPaths,
                 treeFormat,
                 currentTree,
                 currentPath);
+            return;
+        }
+
+        if (!MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(hasAnyChecked, hasCompleteMetricsBaseline))
+        {
+            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
             return;
         }
 
@@ -8661,10 +8687,16 @@ public partial class MainWindow : Window
             currentPath);
     }
 
-    private async Task RecalculateSelectedMetricsAsync(
+    /// <summary>
+    /// Recalculates metrics while the global baseline is still incomplete.
+    /// A non-empty selection computes subtree metrics, while an empty selection
+    /// falls back to whole-project metrics instead of incorrectly zeroing the status bar.
+    /// </summary>
+    private async Task RecalculateIncompleteBaselineMetricsAsync(
         CancellationTokenSource recalcCts,
         CancellationToken token,
         int recalcVersion,
+        bool hasAnyChecked,
         IReadOnlySet<string> selectedPaths,
         TreeTextFormat treeFormat,
         BuildTreeResult? currentTree,
@@ -8681,35 +8713,57 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var selectedFilePaths = await Task.Run(
-                () => BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false),
+            var targetFilePaths = await Task.Run(
+                () => hasAnyChecked
+                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
+                    : GetOrBuildAllOrderedFilePaths(currentTree.Root),
                 token);
 
-            if (selectedFilePaths.Count == 0)
+            if (targetFilePaths.Count == 0)
             {
-                await Dispatcher.UIThread.InvokeAsync(() => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
+                await PublishTreeMetricsWhileContentPendingAsync(
+                    token,
+                    recalcVersion,
+                    hasAnyChecked,
+                    selectedPaths,
+                    treeFormat,
+                    currentTree,
+                    currentPath);
                 return;
             }
 
-            var missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(selectedFilePaths), token);
+            var missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(targetFilePaths), token);
             if (missingPaths.Count > 0)
             {
                 if (_isBackgroundMetricsActive)
                 {
                     _metricsCalculationCts?.Cancel();
-                    return;
+                    await WaitForBackgroundMetricsIdleAsync(token);
+                    if (token.IsCancellationRequested)
+                        return;
+
+                    missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(targetFilePaths), token);
                 }
 
-                await EnsureSelectedFileMetricsAsync(missingPaths, token);
-            }
+                if (missingPaths.Count > 0)
+                {
+                    await PublishTreeMetricsWhileContentPendingAsync(
+                        token,
+                        recalcVersion,
+                        hasAnyChecked,
+                        selectedPaths,
+                        treeFormat,
+                        currentTree,
+                        currentPath);
 
-            if (!AreCachedMetricsReady(selectedFilePaths))
-                return;
+                    await EnsureSelectedFileMetricsAsync(missingPaths, token);
+                }
+            }
 
             await PublishMetricsAsync(
                 token,
                 recalcVersion,
-                hasAnyChecked: true,
+                hasAnyChecked,
                 selectedPaths,
                 treeFormat,
                 currentTree,
@@ -8723,6 +8777,44 @@ public partial class MainWindow : Window
         {
             DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
         }
+    }
+
+    private async Task WaitForBackgroundMetricsIdleAsync(CancellationToken cancellationToken)
+    {
+        while (_isBackgroundMetricsActive)
+            await Task.Delay(10, cancellationToken);
+    }
+
+    private async Task PublishTreeMetricsWhileContentPendingAsync(
+        CancellationToken token,
+        int recalcVersion,
+        bool hasAnyChecked,
+        IReadOnlySet<string> selectedPaths,
+        TreeTextFormat treeFormat,
+        BuildTreeResult currentTree,
+        string currentPath)
+    {
+        if (token.IsCancellationRequested)
+            return;
+
+        // Tree metrics do not depend on file-content warmup, so we can publish them
+        // immediately while the content side is still scanning missing files.
+        var treeMetrics = await Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
+
+        if (token.IsCancellationRequested)
+            return;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
+                return;
+
+            if (!string.Equals(_currentPath, currentPath, StringComparison.Ordinal) || !ReferenceEquals(_currentTree, currentTree))
+                return;
+
+            UpdateStatusBarMetrics(treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens, 0, 0, 0);
+            _viewModel.StatusMetricsVisible = true;
+        });
     }
 
     private async Task RecalculateMetricsCoreAsync(
@@ -8802,8 +8894,12 @@ public partial class MainWindow : Window
         lock (_metricsLock)
         {
             _fileMetricsCache.Clear();
+            _inspectedFileMetricsPaths.Clear();
             if (trimCapacity)
+            {
                 _fileMetricsCache.TrimExcess();
+                _inspectedFileMetricsPaths.TrimExcess();
+            }
         }
 
         InvalidateComputedMetricsCaches();
@@ -8817,26 +8913,12 @@ public partial class MainWindow : Window
             for (var index = 0; index < orderedPaths.Count; index++)
             {
                 var path = orderedPaths[index];
-                if (!_fileMetricsCache.ContainsKey(path))
+                if (!_inspectedFileMetricsPaths.Contains(path))
                     missingPaths.Add(path);
             }
         }
 
         return missingPaths;
-    }
-
-    private bool AreCachedMetricsReady(IReadOnlyList<string> orderedPaths)
-    {
-        lock (_metricsLock)
-        {
-            for (var index = 0; index < orderedPaths.Count; index++)
-            {
-                if (!_fileMetricsCache.ContainsKey(orderedPaths[index]))
-                    return false;
-            }
-        }
-
-        return true;
     }
 
     private async Task EnsureSelectedFileMetricsAsync(
@@ -8857,17 +8939,27 @@ public partial class MainWindow : Window
             operationType: StatusOperationType.MetricsCalculation,
             cancelAction: CancelBackgroundMetricsCalculation);
         var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
+        var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
 
         try
         {
             if (IsStatusOperationActive(statusOperationId))
                 _viewModel.StatusProgressValue = 0;
 
-            await ScanFileMetricsAsync(missingPaths, stagedMetrics, linkedCts.Token, statusOperationId);
+            await ScanFileMetricsAsync(missingPaths, stagedMetrics, stagedInspectedPaths, linkedCts.Token, statusOperationId);
             MergeStagedMetricsIntoCache(stagedMetrics);
+            MergeInspectedMetricsPaths(stagedInspectedPaths);
 
             if (IsStatusOperationActive(statusOperationId))
                 _viewModel.StatusProgressValue = 100;
+        }
+        catch (OperationCanceledException)
+        {
+            // Preserve already completed probes so rapid selection changes do not keep
+            // re-scanning the same text/binary files from scratch.
+            MergeStagedMetricsIntoCache(stagedMetrics);
+            MergeInspectedMetricsPaths(stagedInspectedPaths);
+            throw;
         }
         finally
         {

@@ -90,6 +90,17 @@ internal sealed class UiTestProject : IDisposable
         return CreateForSharedWorkspace(ProjectLoadWorkflowSharedWorkspace.RootPath);
     }
 
+    public static UiTestProject CreateWithMixedTextAndBinaryMetricsWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("src", "main.cs"), BuildCSharpFile("BinaryAware", "Program", 8));
+            WriteFile(rootPath, Path.Combine("src", "notes.md"), BuildMarkdown("Binary-aware metrics", 8));
+            WriteBinaryFile(rootPath, Path.Combine("src", "assets", "image.bin"), [0, 1, 2, 3, 255, 0, 4, 5]);
+            WriteFile(rootPath, Path.Combine("docs", "guide.md"), BuildMarkdown("Guide", 6));
+        });
+    }
+
     private static UiTestProject Create(Action<string> seedWorkspace)
     {
         var testRoot = Path.Combine(
@@ -163,6 +174,16 @@ internal sealed class UiTestProject : IDisposable
             Directory.CreateDirectory(directoryPath);
 
         File.WriteAllText(fullPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    private static void WriteBinaryFile(string rootPath, string relativePath, byte[] content)
+    {
+        var fullPath = Path.Combine(rootPath, relativePath);
+        var directoryPath = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+            Directory.CreateDirectory(directoryPath);
+
+        File.WriteAllBytes(fullPath, content);
     }
 
     private static void SeedDefaultWorkspace(string rootPath)

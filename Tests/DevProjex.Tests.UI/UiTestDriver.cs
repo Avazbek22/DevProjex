@@ -24,7 +24,8 @@ internal static class UiTestDriver
         UiTestProject project,
         bool waitForInitialSettingsPane = true,
         string? appDataPathOverride = null,
-        Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null)
+        Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null,
+        bool waitForStatusIdle = true)
     {
         var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
         var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
@@ -54,11 +55,14 @@ internal static class UiTestDriver
                 var viewModel = GetViewModel(window);
                 return viewModel.IsProjectLoaded &&
                        viewModel.TreeNodes.Count > 0 &&
-                       !viewModel.StatusBusy;
+                       (!waitForStatusIdle || !viewModel.StatusBusy);
             },
-            "project to finish loading");
+            waitForStatusIdle
+                ? "project to finish loading"
+                : "project tree to become available before background metrics finish");
 
-        await WaitForSelectionRefreshIdleAsync(window);
+        if (waitForStatusIdle)
+            await WaitForSelectionRefreshIdleAsync(window);
 
         if (waitForInitialSettingsPane)
         {
@@ -195,6 +199,16 @@ internal static class UiTestDriver
             .OfType<Button>()
             .FirstOrDefault(control => control.IsVisible &&
                                        string.Equals(control.Content?.ToString(), viewModel.SettingsApply, StringComparison.Ordinal));
+
+        return Assert.IsType<Button>(button);
+    }
+
+    public static Button GetRequiredStatusCancelButton(MainWindow window)
+    {
+        var button = window
+            .GetVisualDescendants()
+            .OfType<Button>()
+            .FirstOrDefault(control => control.IsVisible && control.Classes.Contains("status-cancel"));
 
         return Assert.IsType<Button>(button);
     }

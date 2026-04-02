@@ -170,6 +170,31 @@ public sealed class TreeExportServiceTests
 		Assert.Contains("main.cs", result);
 	}
 
+	// Verifies selecting an empty directory still renders the subtree entry even when
+	// content metrics would legitimately remain zero for that selection.
+	[Fact]
+	public void BuildSelectedTree_EmptyDirectorySelection_RendersDirectoryEntry()
+	{
+		var root = new TreeNodeDescriptor(
+			DisplayName: "root",
+			FullPath: "/root",
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: new List<TreeNodeDescriptor>
+			{
+				new TreeNodeDescriptor("empty", "/root/empty", true, false, "folder", new List<TreeNodeDescriptor>()),
+				new TreeNodeDescriptor("readme.md", "/root/readme.md", false, false, "text", new List<TreeNodeDescriptor>())
+			});
+
+		var service = new TreeExportService();
+		var selected = new HashSet<string> { "/root/empty" };
+		var result = service.BuildSelectedTree("/root", root, selected);
+
+		Assert.Contains("empty", result);
+		Assert.DoesNotContain("readme.md", result);
+	}
+
 	// Verifies selecting the root includes the full subtree.
 	[Fact]
 	public void BuildSelectedTree_ReturnsFullSubtreeWhenRootSelected()

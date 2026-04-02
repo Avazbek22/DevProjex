@@ -148,6 +148,75 @@ public sealed class MainWindowPreviewInternalsTests
     }
 
     [Fact]
+    public void BuildOrderedSelectedFilePaths_RootSelection_ReturnsAllDescendantFiles()
+    {
+        var first = CreatePath("root", "src", "a.cs");
+        var second = CreatePath("root", "src", "nested", "b.cs");
+        var third = CreatePath("root", "README.md");
+        var rootPath = CreatePath("root");
+        var root = new TreeNodeDescriptor(
+            DisplayName: "root",
+            FullPath: rootPath,
+            IsDirectory: true,
+            IsAccessDenied: false,
+            IconKey: "folder",
+            Children:
+            [
+                new TreeNodeDescriptor(
+                    "src",
+                    CreatePath("root", "src"),
+                    true,
+                    false,
+                    "folder",
+                    [
+                        new TreeNodeDescriptor("a.cs", first, false, false, "csharp", []),
+                        new TreeNodeDescriptor(
+                            "nested",
+                            CreatePath("root", "src", "nested"),
+                            true,
+                            false,
+                            "folder",
+                            [
+                                new TreeNodeDescriptor("b.cs", second, false, false, "csharp", [])
+                            ])
+                    ]),
+                new TreeNodeDescriptor("README.md", third, false, false, "markdown", [])
+            ]);
+
+        var result = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(
+            new HashSet<string>(PathComparer.Default) { rootPath },
+            root,
+            ensureExists: false);
+
+        Assert.Equal(
+            new[] { first, second, third }.OrderBy(path => path, PathComparer.Default),
+            result);
+    }
+
+    [Fact]
+    public void BuildOrderedSelectedFilePaths_EmptyDirectorySelection_ReturnsNoFiles()
+    {
+        var root = new TreeNodeDescriptor(
+            DisplayName: "root",
+            FullPath: CreatePath("root"),
+            IsDirectory: true,
+            IsAccessDenied: false,
+            IconKey: "folder",
+            Children:
+            [
+                new TreeNodeDescriptor("empty", CreatePath("root", "empty"), true, false, "folder", []),
+                new TreeNodeDescriptor("readme.md", CreatePath("root", "readme.md"), false, false, "markdown", [])
+            ]);
+
+        var result = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(
+            new HashSet<string>(PathComparer.Default) { CreatePath("root", "empty") },
+            root,
+            ensureExists: false);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
     public void BuildOrderedAllFilePaths_ReturnsSortedUniqueFiles()
     {
         var root = new TreeNodeDescriptor(
