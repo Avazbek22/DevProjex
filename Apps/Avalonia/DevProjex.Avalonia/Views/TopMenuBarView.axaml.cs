@@ -11,6 +11,7 @@ public partial class TopMenuBarView : UserControl
     private bool _ownedControlHandlersAttached;
 
     public event EventHandler<RoutedEventArgs>? OpenFolderRequested;
+    public event EventHandler<RoutedEventArgs>? OpenNewWindowRequested;
     public event EventHandler<RoutedEventArgs>? RefreshRequested;
     public event EventHandler<RoutedEventArgs>? ExportTreeToFileRequested;
     public event EventHandler<RoutedEventArgs>? ExportContentToFileRequested;
@@ -70,6 +71,8 @@ public partial class TopMenuBarView : UserControl
     public MenuItem? RecentMenuItemControl => RecentMenuItem;
 
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => OpenFolderRequested?.Invoke(sender, e);
+
+    private void OnOpenNewWindow(object? sender, RoutedEventArgs e) => OpenNewWindowRequested?.Invoke(sender, e);
 
     private void OnRefresh(object? sender, RoutedEventArgs e) => RefreshRequested?.Invoke(sender, e);
 

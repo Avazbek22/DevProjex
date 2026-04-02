@@ -149,6 +149,7 @@ public partial class MainWindow : Window
     private readonly IToastService _toastService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
+    private readonly IAppInstanceLauncher _appInstanceLauncher;
     private readonly UserSettingsStore _userSettingsStore;
     private readonly IProjectProfileStore _projectProfileStore;
     private readonly IGitRepositoryService _gitService;
@@ -232,6 +233,7 @@ public partial class MainWindow : Window
     private bool _projectProfilePersistencePending;
     private string? _lastPersistedProjectProfilePath;
     private ProjectSelectionProfile? _lastPersistedProjectProfile;
+    private DateTimeOffset _lastPersistedProjectProfileUpdatedUtc;
     private Border? _dropZoneContainer;
 
     // Settings panel animation
@@ -412,6 +414,7 @@ public partial class MainWindow : Window
         _toastService = services.ToastService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
+        _appInstanceLauncher = services.AppInstanceLauncher;
         _userSettingsStore = services.UserSettingsStore;
         _projectProfileStore = services.ProjectProfileStore;
         _gitService = services.GitRepositoryService;
@@ -2204,6 +2207,18 @@ public partial class MainWindow : Window
             _systemDialogActivationTcs = null;
             await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private async void OnOpenNewWindow(object? sender, RoutedEventArgs e)
+    {
+        var launchResult = _appInstanceLauncher.LaunchNewInstance();
+        if (launchResult.Succeeded)
+            return;
+
+        var details = string.IsNullOrWhiteSpace(launchResult.ErrorMessage)
+            ? "No launch candidate was available."
+            : launchResult.ErrorMessage;
+        await ShowErrorAsync(_localization.Format("Msg.NewWindowLaunchFailed", details));
     }
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
@@ -6851,9 +6866,11 @@ public partial class MainWindow : Window
             return;
 
         var profile = CaptureCurrentProjectSelectionProfile();
+        var persistedAtUtc = DateTimeOffset.UtcNow;
         _lastPersistedProjectProfilePath = _currentPath;
         _lastPersistedProjectProfile = CloneProjectSelectionProfile(profile);
-        _projectProfilePersistencePending = !_projectProfileStore.TrySaveProfile(_currentPath, profile);
+        _lastPersistedProjectProfileUpdatedUtc = persistedAtUtc;
+        _projectProfilePersistencePending = !_projectProfileStore.TrySaveProfile(_currentPath, profile, persistedAtUtc);
     }
 
     private bool TryGetLocalProjectProfile(out ProjectSelectionProfile profile)
@@ -6912,7 +6929,8 @@ public partial class MainWindow : Window
 
         if (_projectProfileStore.TrySaveProfile(
                 _lastPersistedProjectProfilePath,
-                CloneProjectSelectionProfile(_lastPersistedProjectProfile)))
+                CloneProjectSelectionProfile(_lastPersistedProjectProfile),
+                _lastPersistedProjectProfileUpdatedUtc))
         {
             _projectProfilePersistencePending = false;
         }

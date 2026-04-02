@@ -1,12 +1,8 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
-using Avalonia.Controls.ApplicationLifetimes;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
-using DevProjex.Kernel;
 using DevProjex.Kernel.Contracts;
-using DevProjex.Kernel.Models;
-using DevProjex.Avalonia.Views;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using System.Globalization;
 using System.Reflection;
@@ -27,13 +23,16 @@ internal static class UiTestDriver
     public static async Task<MainWindow> CreateLoadedMainWindowAsync(
         UiTestProject project,
         bool waitForInitialSettingsPane = true,
-        string? appDataPathOverride = null)
+        string? appDataPathOverride = null,
+        Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null)
     {
         var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
         var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 
         var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+        if (configureServices is not null)
+            services = configureServices(services);
         var window = new MainWindow(options, services)
         {
             Width = 1500,
@@ -156,6 +155,12 @@ internal static class UiTestDriver
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
         => await ClickAsync(window, GetRequiredApplySettingsButton(window));
+
+    public static async Task RaiseMenuItemClickAsync(MenuItem menuItem)
+    {
+        menuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
 
     public static async Task<GitCloneWindow> OpenGitCloneWindowAsync(MainWindow window)
     {

@@ -1,8 +1,5 @@
-using System.Text.RegularExpressions;
 using DevProjex.Application.Models;
 using DevProjex.Avalonia.Coordinators;
-using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Tests.Integration.Helpers;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;

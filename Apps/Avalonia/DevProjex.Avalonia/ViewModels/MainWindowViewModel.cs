@@ -100,6 +100,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _gitCloneInProgress;
     private string _menuFileRecent = string.Empty;
     private string _menuFileRecentEmpty = string.Empty;
+    private string _menuFileOpenNewWindow = string.Empty;
     private string _gitCloneRecentRepositoriesLabel = string.Empty;
     private double _helpPopoverMaxWidth = 800;
     private double _helpPopoverMaxHeight = 680;
@@ -1125,6 +1126,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string MenuFile { get; private set; } = string.Empty;
     public string MenuFileOpen { get; private set; } = string.Empty;
+    public string MenuFileOpenNewWindow
+    {
+        get => _menuFileOpenNewWindow;
+        private set
+        {
+            if (_menuFileOpenNewWindow == value) return;
+            _menuFileOpenNewWindow = value;
+            RaisePropertyChanged();
+        }
+    }
     public string MenuFileRecent
     {
         get => _menuFileRecent;
@@ -1299,6 +1310,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         MenuFile = _localization["Menu.File"];
         MenuFileOpen = _localization["Menu.File.Open"];
+        MenuFileOpenNewWindow = _localization["Menu.File.OpenNewWindow"];
         MenuFileRecent = _localization["Menu.File.Recent"];
         MenuFileRecentEmpty = _localization["Menu.File.Recent.Empty"];
         MenuFileRefresh = _localization["Menu.File.Refresh"];
@@ -1434,6 +1446,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         RaisePropertyChanged(nameof(MenuFile));
         RaisePropertyChanged(nameof(MenuFileOpen));
+        RaisePropertyChanged(nameof(MenuFileOpenNewWindow));
         RaisePropertyChanged(nameof(MenuFileRecent));
         RaisePropertyChanged(nameof(MenuFileRecentEmpty));
         RaisePropertyChanged(nameof(MenuFileRefresh));

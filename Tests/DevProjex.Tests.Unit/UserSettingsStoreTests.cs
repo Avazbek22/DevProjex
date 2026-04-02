@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 using DevProjex.Infrastructure.ThemePresets;
+using InfrastructureUserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
+using UserSettingsStore = DevProjex.Tests.Unit.IsolatedUserSettingsStore;
 
 namespace DevProjex.Tests.Unit;
 
@@ -1450,6 +1452,7 @@ public sealed class UserSettingsStoreTests
 			Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", _temp.Path);
 			Environment.SetEnvironmentVariable("APPDATA", _temp.Path);
 			Environment.SetEnvironmentVariable("LOCALAPPDATA", _temp.Path);
+			UserSettingsTestAppDataContext.CurrentRoot.Value = _temp.Path;
 		}
 
 		public void Dispose()
@@ -1458,7 +1461,45 @@ public sealed class UserSettingsStoreTests
 			Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", _originalXdgConfig);
 			Environment.SetEnvironmentVariable("APPDATA", _originalAppData);
 			Environment.SetEnvironmentVariable("LOCALAPPDATA", _originalLocalAppData);
+			UserSettingsTestAppDataContext.CurrentRoot.Value = null;
 			_temp.Dispose();
 		}
 	}
+}
+
+internal static class UserSettingsTestAppDataContext
+{
+	public static readonly AsyncLocal<string?> CurrentRoot = new();
+}
+
+internal sealed class IsolatedUserSettingsStore
+{
+	private readonly InfrastructureUserSettingsStore _inner;
+
+	public IsolatedUserSettingsStore()
+	{
+		// These tests validate persistence semantics against an explicit per-test app-data root.
+		// Environment-variable overrides are not reliable on Windows for SpecialFolder resolution.
+		var rootPath = UserSettingsTestAppDataContext.CurrentRoot.Value;
+		_inner = rootPath is null
+			? new InfrastructureUserSettingsStore()
+			: new InfrastructureUserSettingsStore(() => rootPath);
+	}
+
+	public UserSettingsDb Load() => _inner.Load();
+
+	public void Save(UserSettingsDb db) => _inner.Save(db);
+
+	public ThemePreset GetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect)
+		=> _inner.GetPreset(db, theme, effect);
+
+	public void SetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect, ThemePreset preset)
+		=> _inner.SetPreset(db, theme, effect, preset);
+
+	public UserSettingsDb ResetToDefaults() => _inner.ResetToDefaults();
+
+	public string GetPath() => _inner.GetPath();
+
+	public bool TryParseKey(string? key, out ThemeVariant theme, out ThemeEffectMode effect)
+		=> _inner.TryParseKey(key, out theme, out effect);
 }

@@ -1,6 +1,7 @@
 ﻿{
   "Menu.File": "Файл",
   "Menu.File.Open": "Открыть папку...",
+  "Menu.File.OpenNewWindow": "Открыть новое окно",
   "Menu.File.Recent": "Недавние",
   "Menu.File.Recent.Empty": "Недавних папок нет",
   "Menu.File.Refresh": "Обновить",
@@ -119,6 +120,7 @@
   "Settings.Apply": "Применить настройки",
   "Msg.ErrorTitle": "Ошибка",
   "Msg.InfoTitle": "Информация",
+  "Msg.NewWindowLaunchFailed": "Не удалось открыть новое окно:\n{0}",
   "Msg.PathNotFound": "Папка не найдена:\n{0}",
   "Msg.NoCheckedTree": "Не выбраны файлы или папки (галочки в дереве).",
   "Msg.NoCheckedFiles": "Не выбраны файлы (галочки должны стоять на файлах).",

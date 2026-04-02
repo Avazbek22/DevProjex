@@ -1,3 +1,5 @@
+using DevProjex.Infrastructure.Persistence;
+
 namespace DevProjex.Infrastructure.ProjectProfiles;
 
 public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null) : IProjectProfileStore
@@ -6,7 +8,6 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	private const int MaxProfiles = 500;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
-	private const string BackupExtension = ".bak";
 
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -30,7 +31,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 		lock (_sync)
 		{
-			var db = LoadInternal();
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			var db = LoadInternal(fileSet);
 			if (db.Profiles.Count == 0)
 				return false;
 
@@ -43,20 +49,38 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	}
 
 	public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
-		=> TrySaveProfile(localProjectPath, profile);
+		=> TrySaveProfile(localProjectPath, profile, DateTimeOffset.UtcNow);
 
 	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		=> TrySaveProfile(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 			return false;
 
 		lock (_sync)
 		{
-			var db = LoadInternal();
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			var db = LoadInternal(fileSet);
 			db.SchemaVersion = CurrentSchemaVersion;
-			db.Profiles[normalizedPath] = ToPersistedProfile(profile);
+
+			// A delayed retry from another window/process must not stomp a newer profile revision.
+			// The caller-provided timestamp reflects when the profile became user-approved.
+			if (db.Profiles.TryGetValue(normalizedPath, out var existing) &&
+				existing is not null &&
+				existing.UpdatedUtc > updatedUtc)
+			{
+				return true;
+			}
+
+			db.Profiles[normalizedPath] = ToPersistedProfile(profile, updatedUtc);
 			PruneProfiles(db);
-			return TrySaveInternal(db);
+			return TrySaveInternal(fileSet, db);
 		}
 	}
 
@@ -66,12 +90,15 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		{
 			try
 			{
-				var path = GetPath();
-				var backupPath = GetBackupPath(path);
-				if (File.Exists(path))
-					File.Delete(path);
-				if (File.Exists(backupPath))
-					File.Delete(backupPath);
+				var fileSet = GetFileSet();
+				if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+					return;
+
+				using var _ = heldLock;
+				if (File.Exists(fileSet.PrimaryPath))
+					File.Delete(fileSet.PrimaryPath);
+				if (File.Exists(fileSet.BackupPath))
+					File.Delete(fileSet.BackupPath);
 			}
 			catch
 			{
@@ -82,67 +109,35 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	public string GetPath()
 	{
-		var root = _appDataPathProvider();
-		return Path.Combine(root, FolderName, FileName);
+		return GetFileSet().PrimaryPath;
 	}
 
-	private ProjectProfileDb LoadInternal()
+	private JsonStoreFileSet GetFileSet()
+		=> JsonStoreFileSet.Create(_appDataPathProvider, FolderName, FileName);
+
+	private ProjectProfileDb LoadInternal(JsonStoreFileSet fileSet)
 	{
-		var path = GetPath();
-		if (TryLoadFromPath(path, out var primaryDb, out var primaryRequiresRewrite))
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
 			if (primaryRequiresRewrite)
-				TrySaveInternal(primaryDb);
+				TrySaveInternal(fileSet, primaryDb);
 
 			return primaryDb;
 		}
 
-		var backupPath = GetBackupPath(path);
 		// Recover from the last known-good snapshot when the primary profile document becomes unreadable.
-		if (TryLoadFromPath(backupPath, out var backupDb, out _))
+		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
 		{
-			TrySaveInternal(backupDb);
+			TrySaveInternal(fileSet, backupDb);
 			return backupDb;
 		}
 
 		return CreateDefaultDb();
 	}
 
-	private bool TrySaveInternal(ProjectProfileDb db)
+	private bool TrySaveInternal(JsonStoreFileSet fileSet, ProjectProfileDb db)
 	{
-		try
-		{
-			var path = GetPath();
-			var backupPath = GetBackupPath(path);
-			var directory = Path.GetDirectoryName(path);
-			if (string.IsNullOrWhiteSpace(directory))
-				return false;
-
-			Directory.CreateDirectory(directory);
-			var json = JsonSerializer.Serialize(db, SerializerOptions);
-			var tempPath = Path.Combine(directory, $"{FileName}.{Guid.NewGuid():N}.tmp");
-			File.WriteAllText(tempPath, json);
-
-			try
-			{
-				if (File.Exists(path))
-					File.Replace(tempPath, path, backupPath);
-				else
-					File.Move(tempPath, path);
-			}
-			catch
-			{
-				File.Move(tempPath, path, overwrite: true);
-			}
-
-			TryUpdateBackup(path, backupPath);
-			return true;
-		}
-		catch
-		{
-			// Ignore persistence errors - app behavior must not depend on storage availability.
-			return false;
-		}
+		return JsonStorePersistence.TryWriteAtomic(fileSet, db, SerializerOptions);
 	}
 
 	private static ProjectProfileDb CreateDefaultDb()
@@ -199,7 +194,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		return profile;
 	}
 
-	private static PersistedProjectProfile ToPersistedProfile(ProjectSelectionProfile profile)
+	private static PersistedProjectProfile ToPersistedProfile(ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
 	{
 		return new PersistedProjectProfile
 		{
@@ -214,7 +209,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			SelectedIgnoreOptions = profile.SelectedIgnoreOptions
 				.Distinct()
 				.ToList(),
-			UpdatedUtc = DateTimeOffset.UtcNow
+			UpdatedUtc = updatedUtc
 		};
 	}
 
@@ -289,22 +284,6 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		catch
 		{
 			return false;
-		}
-	}
-
-	private static string GetBackupPath(string path) => $"{path}{BackupExtension}";
-
-	private static void TryUpdateBackup(string path, string backupPath)
-	{
-		try
-		{
-			// Mirror the committed primary file to the backup after a successful save.
-			if (File.Exists(path))
-				File.Copy(path, backupPath, overwrite: true);
-		}
-		catch
-		{
-			// Best effort only. The primary file must remain authoritative.
 		}
 	}
 

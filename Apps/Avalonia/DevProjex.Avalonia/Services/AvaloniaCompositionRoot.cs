@@ -3,6 +3,7 @@ using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.AppInstances;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
 
@@ -52,6 +53,7 @@ public static class AvaloniaCompositionRoot
         var textFileExportService = new TextFileExportService();
         var toastService = new ToastService();
         var elevation = new ElevationService();
+        var appInstanceLauncher = new AppInstanceLauncher();
         // UI tests need an isolated app-data root so persisted settings/profiles from
         // previous runs cannot leak into the current window state and make workflow
         // scenarios nondeterministic on CI.
@@ -68,6 +70,7 @@ public static class AvaloniaCompositionRoot
             UserSettingsStore: userSettingsStore,
             RecentProjectsStore: recentProjectsStore,
             ProjectProfileStore: projectProfileStore,
+            AppInstanceLauncher: appInstanceLauncher,
             Elevation: elevation,
             ScanOptionsUseCase: scanOptionsUseCase,
             BuildTreeUseCase: buildTreeUseCase,

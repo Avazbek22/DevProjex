@@ -93,6 +93,17 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void MenuFileOpenNewWindow_UsesLocalizedValue()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Menu.File.OpenNewWindow"] = "Open another window"
+        });
+
+        Assert.Equal("Open another window", viewModel.MenuFileOpenNewWindow);
+    }
+
+    [Fact]
     public void Title_Changes()
     {
         var viewModel = CreateViewModel();

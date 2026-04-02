@@ -1,6 +1,7 @@
 ﻿{
   "Menu.File": "Файл",
   "Menu.File.Open": "Қалтаны ашу...",
+  "Menu.File.OpenNewWindow": "Жаңа терезе ашу",
   "Menu.File.Recent": "Жуырдағы",
   "Menu.File.Recent.Empty": "Жуырдағы қалталар жоқ",
   "Menu.File.Refresh": "Жаңарту",
@@ -119,6 +120,7 @@
   "Settings.Apply": "Қолдану",
   "Msg.ErrorTitle": "Қате",
   "Msg.InfoTitle": "Ақпарат",
+  "Msg.NewWindowLaunchFailed": "Жаңа терезені ашу сәтсіз аяқталды:\n{0}",
   "Msg.PathNotFound": "Қалта табылмады:\n{0}",
   "Msg.NoCheckedTree": "Таңдалған файл/қалта жоқ (ағаштағы белгілерді қолданыңыз).",
   "Msg.NoCheckedFiles": "Таңдалған файл жоқ (белгілер файлда болуы керек).",

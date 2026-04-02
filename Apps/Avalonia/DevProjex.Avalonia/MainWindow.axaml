@@ -204,6 +204,7 @@
     <views:TopMenuBarView DockPanel.Dock="Top"
                           Name="TopMenuBar"
                           OpenFolderRequested="OnOpenFolder"
+                          OpenNewWindowRequested="OnOpenNewWindow"
                           RefreshRequested="OnRefresh"
                           ExportTreeToFileRequested="OnExportTreeToFile"
                           ExportContentToFileRequested="OnExportContentToFile"
