@@ -142,11 +142,16 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 },
                 "initial settings pane to become visually available before applying settings");
 
-            await UiTestDriver.ClickApplySettingsAsync(window);
+            var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
+            await UiTestDriver.RaiseButtonClickAsync(applyButton);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => flakyStore.SaveAttemptCount >= 1,
+                "initial profile persistence attempt to run after applying settings");
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => !UiTestDriver.GetViewModel(window).StatusBusy,
-                "apply settings operation to finish");
+                "apply settings operation to finish after the profile save attempt");
             Assert.Equal(1, flakyStore.SaveAttemptCount);
 
             window.Close();

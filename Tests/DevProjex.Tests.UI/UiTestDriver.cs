@@ -156,6 +156,13 @@ internal static class UiTestDriver
     public static async Task ClickApplySettingsAsync(MainWindow window)
         => await ClickAsync(window, GetRequiredApplySettingsButton(window));
 
+    public static async Task RaiseButtonClickAsync(Button button)
+    {
+        Assert.True(button.IsEnabled);
+        button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
     public static async Task RaiseMenuItemClickAsync(MenuItem menuItem)
     {
         menuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
