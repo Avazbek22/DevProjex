@@ -1,8 +1,251 @@
+using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Kernel.Abstractions;
+
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture workspace)
 {
+    [AvaloniaFact]
+    public async Task RecentProjects_AreFlushedOnClose_WhenImmediateSaveFails()
+    {
+        var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDataPath);
+
+        var options = new CommandLineOptions(workspace.Project.RootPath, AppLanguage.En, false);
+        var baseServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+        var recentPathCallCount = 0;
+        var services = baseServices with
+        {
+            RecentProjectsStore = new RecentProjectsStore(() =>
+                Interlocked.Increment(ref recentPathCallCount) == 2
+                    ? string.Concat("broken", '\0', "recent-root")
+                    : appDataPath)
+        };
+
+        var window = new MainWindow(options, services)
+        {
+            Width = 1500,
+            Height = 920
+        };
+
+        try
+        {
+            window.Show();
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var viewModel = UiTestDriver.GetViewModel(window);
+                    return viewModel.IsProjectLoaded &&
+                           viewModel.TreeNodes.Count > 0 &&
+                           !viewModel.StatusBusy;
+                },
+                "project to finish loading with a transient recent-projects save failure");
+
+            window.Close();
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var filePath = Path.Combine(appDataPath, "DevProjex", "recent-projects.json");
+            Assert.True(File.Exists(filePath));
+
+            var store = new RecentProjectsStore(() => appDataPath);
+            var db = store.Load();
+            Assert.Single(db.RecentFolders);
+            Assert.Empty(db.RecentRepositories);
+        }
+        finally
+        {
+            if (window.IsVisible)
+                window.Close();
+
+            try
+            {
+                Directory.Delete(appDataPath, recursive: true);
+            }
+            catch
+            {
+                // Best effort test cleanup only.
+            }
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ProjectProfiles_AreFlushedOnClose_WhenApplySaveFails()
+    {
+        var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDataPath);
+
+        var options = new CommandLineOptions(workspace.Project.RootPath, AppLanguage.En, false);
+        var baseServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+        var flakyStore = new FlakyProjectProfileStore(Path.Combine(appDataPath, "DevProjex", "project-profiles.json"));
+        var services = baseServices with
+        {
+            ProjectProfileStore = flakyStore
+        };
+
+        var window = new MainWindow(options, services)
+        {
+            Width = 1500,
+            Height = 920
+        };
+
+        try
+        {
+            window.Show();
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var viewModel = UiTestDriver.GetViewModel(window);
+                    return viewModel.IsProjectLoaded &&
+                           viewModel.TreeNodes.Count > 0 &&
+                           !viewModel.StatusBusy;
+                },
+                "project to finish loading with a transient profile save failure");
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+                    return UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width >= 200;
+                },
+                "initial settings pane to become visually available before applying settings");
+
+            await UiTestDriver.ClickApplySettingsAsync(window);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !UiTestDriver.GetViewModel(window).StatusBusy,
+                "apply settings operation to finish");
+            Assert.Equal(1, flakyStore.SaveAttemptCount);
+
+            window.Close();
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            Assert.True(File.Exists(flakyStore.StoragePath));
+            Assert.True(flakyStore.TryLoadProfile(workspace.Project.RootPath, out var profile));
+            Assert.NotNull(profile);
+        }
+        finally
+        {
+            if (window.IsVisible)
+                window.Close();
+
+            try
+            {
+                Directory.Delete(appDataPath, recursive: true);
+            }
+            catch
+            {
+                // Best effort test cleanup only.
+            }
+        }
+    }
+
+    private sealed class FlakyProjectProfileStore(string storagePath) : IProjectProfileStore
+    {
+        private readonly Dictionary<string, ProjectSelectionProfile> _profiles = new(PathComparer.Default);
+        private int _saveAttemptCount;
+
+        public string StoragePath { get; } = storagePath;
+        public int SaveAttemptCount => _saveAttemptCount;
+
+        public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+        {
+            if (_profiles.TryGetValue(PathUtility.Normalize(localProjectPath), out var existing))
+            {
+                profile = CloneProfile(existing);
+                return true;
+            }
+
+            profile = CreateEmptyProfile();
+            return false;
+        }
+
+        public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+        {
+            if (Interlocked.Increment(ref _saveAttemptCount) == 1)
+                return false;
+
+            var normalizedPath = PathUtility.Normalize(localProjectPath);
+            _profiles[normalizedPath] = CloneProfile(profile);
+
+            var directory = Path.GetDirectoryName(StoragePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            File.WriteAllText(StoragePath, $$"""
+                                        {
+                                          "path": "{{normalizedPath}}",
+                                          "saveAttemptCount": {{_saveAttemptCount}}
+                                        }
+                                        """);
+
+            return true;
+        }
+
+        public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+            => TrySaveProfile(localProjectPath, profile);
+
+        public void ClearAllProfiles()
+        {
+            _profiles.Clear();
+            if (File.Exists(StoragePath))
+                File.Delete(StoragePath);
+        }
+
+        private static ProjectSelectionProfile CreateEmptyProfile()
+            => new([], [], []);
+
+        private static ProjectSelectionProfile CloneProfile(ProjectSelectionProfile profile)
+        {
+            return new ProjectSelectionProfile(
+                SelectedRootFolders: profile.SelectedRootFolders.ToArray(),
+                SelectedExtensions: profile.SelectedExtensions.ToArray(),
+                SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray());
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task GitCloneRecentRepositoriesContainer_HidesWhileCloneIsInProgress()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            viewModel.RecentRepositories.Add(new RecentProjectEntryViewModel(
+                "https://github.com/example/repo",
+                "example / repo",
+                "https://github.com/example/repo"));
+
+            var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+            try
+            {
+                var recentContainer = cloneWindow.FindControl<Border>("RecentRepositoriesContainer");
+                Assert.NotNull(recentContainer);
+                Assert.True(recentContainer!.IsVisible);
+
+                viewModel.GitCloneInProgress = true;
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+                Assert.False(recentContainer.IsVisible);
+            }
+            finally
+            {
+                cloneWindow.Close();
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+            }
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task FilterButton_RemainsEnabledButIgnoredInPreviewOnly()
     {

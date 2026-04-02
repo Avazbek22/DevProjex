@@ -70,6 +70,32 @@ public sealed class ProjectProfilePersistenceMatrixIntegrationTests
 			[..loaded.SelectedIgnoreOptions]);
 	}
 
+	[Fact]
+	public void ProfilePersistence_RecoversFromCorruptedPrimaryFile_UsingPersistedBackupAcrossInstances()
+	{
+		using var temp = new TemporaryDirectory();
+		var firstStore = new ProjectProfileStore(() => temp.Path);
+		var canonicalPath = Path.Combine(temp.Path, "workspace", "RepoA");
+		Directory.CreateDirectory(canonicalPath);
+		var profile = new ProjectSelectionProfile(
+			SelectedRootFolders: ["src", "tests"],
+			SelectedExtensions: [".cs", ".json"],
+			SelectedIgnoreOptions: [IgnoreOptionId.DotFiles, IgnoreOptionId.UseGitIgnore]);
+
+		firstStore.SaveProfile(canonicalPath, profile);
+		File.WriteAllText(firstStore.GetPath(), "{ invalid");
+
+		var secondStore = new ProjectProfileStore(() => temp.Path);
+
+		Assert.True(secondStore.TryLoadProfile(canonicalPath, out var loaded));
+		Assert.Contains("src", loaded.SelectedRootFolders);
+		Assert.Contains("tests", loaded.SelectedRootFolders);
+		Assert.Contains(".cs", loaded.SelectedExtensions);
+		Assert.Contains(".json", loaded.SelectedExtensions);
+		Assert.Contains(IgnoreOptionId.DotFiles, loaded.SelectedIgnoreOptions);
+		Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+	}
+
 	public static IEnumerable<object[]> RoundTripCases()
 	{
 		var pathModes = new[] { 0, 1, 2, 3 };

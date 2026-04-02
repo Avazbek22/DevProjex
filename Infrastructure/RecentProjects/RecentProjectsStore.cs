@@ -88,6 +88,15 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
+	public bool TryPersist(RecentProjectsDb? db)
+	{
+		lock (_sync)
+		{
+			var state = Normalize(db ?? LoadInternal());
+			return TrySave(state);
+		}
+	}
+
 	public string GetPath()
 	{
 		var root = _appDataPathProvider();
@@ -106,6 +115,9 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		}
 
 		var backupPath = GetBackupPath(path);
+
+		// Keep the last known-good snapshot as a recovery path.
+		// A partially written or externally corrupted primary file must not silently erase history.
 		if (TryLoadFromPath(backupPath, out var backupDb, out _))
 		{
 			TrySave(backupDb);
@@ -258,6 +270,8 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 			if (deserialized is null)
 				return false;
 
+			// Normalize in-memory and rewrite only structurally valid payloads.
+			// Invalid payloads are left untouched so operators can inspect them and the backup can recover them.
 			var originalSnapshot = JsonSerializer.Serialize(deserialized, SerializerOptions);
 			var normalized = Normalize(deserialized);
 			var normalizedSnapshot = JsonSerializer.Serialize(normalized, SerializerOptions);
@@ -277,6 +291,8 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	{
 		try
 		{
+			// Copy the final primary snapshot after a successful save instead of writing a separate branch.
+			// That keeps the backup byte-for-byte aligned with the last committed primary state.
 			if (File.Exists(path))
 				File.Copy(path, backupPath, overwrite: true);
 		}

@@ -229,6 +229,9 @@ public partial class MainWindow : Window
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
+    private bool _projectProfilePersistencePending;
+    private string? _lastPersistedProjectProfilePath;
+    private ProjectSelectionProfile? _lastPersistedProjectProfile;
     private Border? _dropZoneContainer;
 
     // Settings panel animation
@@ -669,6 +672,8 @@ public partial class MainWindow : Window
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
+        FlushPersistedStateOnWindowClose();
+
         // Unsubscribe from window events
         PropertyChanged -= OnWindowPropertyChanged;
 
@@ -6845,12 +6850,10 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(_currentPath))
             return;
 
-        var profile = new ProjectSelectionProfile(
-            SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default),
-            SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
-            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray());
-
-        _projectProfileStore.SaveProfile(_currentPath, profile);
+        var profile = CaptureCurrentProjectSelectionProfile();
+        _lastPersistedProjectProfilePath = _currentPath;
+        _lastPersistedProjectProfile = CloneProjectSelectionProfile(profile);
+        _projectProfilePersistencePending = !_projectProfileStore.TrySaveProfile(_currentPath, profile);
     }
 
     private bool TryGetLocalProjectProfile(out ProjectSelectionProfile profile)
@@ -6875,6 +6878,45 @@ public partial class MainWindow : Window
 
     private bool IsLocalProjectProfilePersistenceApplicable()
         => _viewModel.ProjectSourceType == ProjectSourceType.LocalFolder;
+
+    private ProjectSelectionProfile CaptureCurrentProjectSelectionProfile()
+    {
+        return new ProjectSelectionProfile(
+            SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default),
+            SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
+            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray());
+    }
+
+    private static ProjectSelectionProfile CloneProjectSelectionProfile(ProjectSelectionProfile profile)
+    {
+        return new ProjectSelectionProfile(
+            SelectedRootFolders: profile.SelectedRootFolders.ToArray(),
+            SelectedExtensions: profile.SelectedExtensions.ToArray(),
+            SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray());
+    }
+
+    private void FlushPersistedStateOnWindowClose()
+    {
+        // Give persistence one last synchronous chance before the process exits.
+        // This protects against transient IO failures that would otherwise make the UI look correct
+        // during the session but leave no durable snapshot for the next launch.
+        if (_recentProjectsDb.RecentFolders.Count > 0 || _recentProjectsDb.RecentRepositories.Count > 0)
+            _recentProjectsStore.TryPersist(_recentProjectsDb);
+
+        if (!_projectProfilePersistencePending ||
+            string.IsNullOrWhiteSpace(_lastPersistedProjectProfilePath) ||
+            _lastPersistedProjectProfile is null)
+        {
+            return;
+        }
+
+        if (_projectProfileStore.TrySaveProfile(
+                _lastPersistedProjectProfilePath,
+                CloneProjectSelectionProfile(_lastPersistedProjectProfile)))
+        {
+            _projectProfilePersistencePending = false;
+        }
+    }
 
     private async Task TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {

@@ -43,9 +43,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	}
 
 	public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		=> TrySaveProfile(localProjectPath, profile);
+
+	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
-			return;
+			return false;
 
 		lock (_sync)
 		{
@@ -53,7 +56,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			db.SchemaVersion = CurrentSchemaVersion;
 			db.Profiles[normalizedPath] = ToPersistedProfile(profile);
 			PruneProfiles(db);
-			TrySaveInternal(db);
+			return TrySaveInternal(db);
 		}
 	}
 
@@ -95,6 +98,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 
 		var backupPath = GetBackupPath(path);
+		// Recover from the last known-good snapshot when the primary profile document becomes unreadable.
 		if (TryLoadFromPath(backupPath, out var backupDb, out _))
 		{
 			TrySaveInternal(backupDb);
@@ -104,7 +108,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		return CreateDefaultDb();
 	}
 
-	private void TrySaveInternal(ProjectProfileDb db)
+	private bool TrySaveInternal(ProjectProfileDb db)
 	{
 		try
 		{
@@ -112,7 +116,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			var backupPath = GetBackupPath(path);
 			var directory = Path.GetDirectoryName(path);
 			if (string.IsNullOrWhiteSpace(directory))
-				return;
+				return false;
 
 			Directory.CreateDirectory(directory);
 			var json = JsonSerializer.Serialize(db, SerializerOptions);
@@ -132,10 +136,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			}
 
 			TryUpdateBackup(path, backupPath);
+			return true;
 		}
 		catch
 		{
 			// Ignore persistence errors - app behavior must not depend on storage availability.
+			return false;
 		}
 	}
 
@@ -271,6 +277,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (deserialized is null)
 				return false;
 
+			// Only normalize payloads that were parsed successfully.
+			// If parsing fails, keep the file untouched and let the backup act as the recovery source.
 			var originalSnapshot = JsonSerializer.Serialize(deserialized, SerializerOptions);
 			var normalized = Normalize(deserialized);
 			var normalizedSnapshot = JsonSerializer.Serialize(normalized, SerializerOptions);
@@ -290,6 +298,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	{
 		try
 		{
+			// Mirror the committed primary file to the backup after a successful save.
 			if (File.Exists(path))
 				File.Copy(path, backupPath, overwrite: true);
 		}

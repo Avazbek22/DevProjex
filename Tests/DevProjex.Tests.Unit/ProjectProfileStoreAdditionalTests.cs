@@ -42,6 +42,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 			var store = CreateStore(tempRoot);
 			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), CreateProfile());
 			Assert.True(File.Exists(store.GetPath()));
+			Assert.True(File.Exists(store.GetPath() + ".bak"));
 		}
 		finally
 		{
@@ -330,6 +331,36 @@ public sealed class ProjectProfileStoreAdditionalTests
 		{
 			Directory.Delete(tempRoot, recursive: true);
 		}
+	}
+
+	[Fact]
+	public void ClearAllProfiles_RemovesBackupFile()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), CreateProfile());
+
+			store.ClearAllProfiles();
+
+			Assert.False(File.Exists(store.GetPath()));
+			Assert.False(File.Exists(store.GetPath() + ".bak"));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void TrySaveProfile_InvalidAppDataPath_ReturnsFalse()
+	{
+		var invalidRoot = string.Concat("broken", '\0', "root");
+		var store = new ProjectProfileStore(() => invalidRoot);
+		var projectPath = Path.Combine(Path.GetTempPath(), "RepoA");
+
+		Assert.False(store.TrySaveProfile(projectPath, CreateProfile()));
 	}
 
 	[Theory]

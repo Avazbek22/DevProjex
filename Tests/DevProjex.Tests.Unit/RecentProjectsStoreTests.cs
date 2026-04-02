@@ -33,6 +33,76 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void AddFolder_CreatesBackupSnapshotAlongsidePrimaryFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+
+		store.AddFolder(db, Path.Combine(temp.Path, "FolderA"));
+
+		Assert.True(File.Exists(store.GetPath()));
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+	}
+
+	[Fact]
+	public void TryPersist_DetachedSnapshot_WritesPrimaryAndBackup()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var snapshot = new RecentProjectsDb
+		{
+			SchemaVersion = 1,
+			RecentFolders =
+			[
+				new RecentFolderEntry
+				{
+					Path = Path.Combine(temp.Path, "Workspace"),
+					OpenedUtc = DateTimeOffset.UtcNow
+				}
+			],
+			RecentRepositories =
+			[
+				new RecentRepositoryEntry
+				{
+					Url = "https://github.com/example/repo",
+					OpenedUtc = DateTimeOffset.UtcNow
+				}
+			]
+		};
+
+		Assert.True(store.TryPersist(snapshot));
+		Assert.True(File.Exists(store.GetPath()));
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+
+		var reloaded = store.Load();
+		Assert.Single(reloaded.RecentFolders);
+		Assert.Single(reloaded.RecentRepositories);
+	}
+
+	[Fact]
+	public void TryPersist_InvalidAppDataPath_ReturnsFalse()
+	{
+		var invalidRoot = string.Concat("broken", '\0', "root");
+		var store = new RecentProjectsStore(() => invalidRoot);
+		var snapshot = new RecentProjectsDb
+		{
+			SchemaVersion = 1,
+			RecentFolders =
+			[
+				new RecentFolderEntry
+				{
+					Path = Path.GetTempPath(),
+					OpenedUtc = DateTimeOffset.UtcNow
+				}
+			],
+			RecentRepositories = []
+		};
+
+		Assert.False(store.TryPersist(snapshot));
+	}
+
+	[Fact]
 	public void AddFolder_ClampsToTenItems()
 	{
 		using var temp = new TemporaryDirectory();
