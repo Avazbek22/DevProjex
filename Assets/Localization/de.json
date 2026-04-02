@@ -1,7 +1,7 @@
 ﻿{
   "Menu.File": "Datei",
   "Menu.File.Open": "Ordner öffnen...",
-  "Menu.File.OpenNewWindow": "Neues Fenster öffnen",
+  "Menu.File.OpenNewWindow": "Neues Fenster",
   "Menu.File.Recent": "Zuletzt",
   "Menu.File.Recent.Empty": "Keine letzten Ordner",
   "Menu.File.Refresh": "Aktualisieren",

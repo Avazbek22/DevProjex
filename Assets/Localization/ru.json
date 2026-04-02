@@ -1,7 +1,7 @@
 ﻿{
   "Menu.File": "Файл",
   "Menu.File.Open": "Открыть папку...",
-  "Menu.File.OpenNewWindow": "Открыть новое окно",
+  "Menu.File.OpenNewWindow": "Новое окно",
   "Menu.File.Recent": "Недавние",
   "Menu.File.Recent.Empty": "Недавних папок нет",
   "Menu.File.Refresh": "Обновить",
