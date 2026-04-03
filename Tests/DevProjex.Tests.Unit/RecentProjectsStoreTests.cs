@@ -46,6 +46,38 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void EnsureStorageExists_CreatesPrimaryAndBackup_WhenFilesAreMissing()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+
+		Assert.True(store.EnsureStorageExists());
+		Assert.True(File.Exists(store.GetPath()));
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+
+		var loaded = store.Load();
+		Assert.Empty(loaded.RecentFolders);
+		Assert.Empty(loaded.RecentRepositories);
+	}
+
+	[Fact]
+	public void EnsureStorageExists_RecreatesMissingBackup_FromPrimarySnapshot()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var db = store.Load();
+
+		store.AddFolder(db, Path.Combine(temp.Path, "FolderA"));
+		File.Delete(store.GetPath() + ".bak");
+
+		Assert.True(store.EnsureStorageExists());
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+
+		var reloaded = store.Load();
+		Assert.Single(reloaded.RecentFolders);
+	}
+
+	[Fact]
 	public void TryPersist_DetachedSnapshot_WritesPrimaryAndBackup()
 	{
 		using var temp = new TemporaryDirectory();

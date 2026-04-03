@@ -7,6 +7,42 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture workspace)
 {
     [AvaloniaFact]
+    public async Task Startup_BootstrapsAllStateStoreFiles_InIsolatedAppData()
+    {
+        var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDataPath);
+
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            appDataPathOverride: appDataPath);
+
+        try
+        {
+            var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "user-settings.json")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "user-settings.json.bak")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "recent-projects.json")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "recent-projects.json.bak")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "project-profiles.json")));
+            Assert.True(File.Exists(Path.Combine(storeDirectory, "project-profiles.json.bak")));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+
+            try
+            {
+                Directory.Delete(appDataPath, recursive: true);
+            }
+            catch
+            {
+                // Best effort test cleanup only.
+            }
+        }
+    }
+
+    [AvaloniaFact]
     public async Task OpenNewWindowMenuItem_LaunchesIndependentAppInstance()
     {
         var launcher = new RecordingAppInstanceLauncher(AppInstanceLaunchResult.Success);
@@ -26,6 +62,34 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Assert.Equal(1, launcher.LaunchCallCount);
             Assert.True(window.IsVisible);
             Assert.True(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TreeNodeCheckbox_DoubleClick_DoesNotExpandBranch()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var srcNode = rootNode.Children.Single(node => string.Equals(node.DisplayName, "src", StringComparison.Ordinal));
+            srcNode.IsExpanded = false;
+            srcNode.IsChecked = false;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+            await UiTestDriver.DoubleClickAsync(window, checkBox);
+
+            Assert.False(srcNode.IsExpanded);
         }
         finally
         {
@@ -184,6 +248,18 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
         public string StoragePath { get; } = storagePath;
         public int SaveAttemptCount => _saveAttemptCount;
+
+        public bool EnsureStorageExists()
+        {
+            var directory = Path.GetDirectoryName(StoragePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            if (!File.Exists(StoragePath))
+                File.WriteAllText(StoragePath, "{}");
+
+            return true;
+        }
 
         public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
         {

@@ -16,10 +16,23 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 	};
 
-	private readonly object _sync = new();
+    private readonly object _sync = new();
     private readonly Func<string> _appDataPathProvider = appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
 
-    public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+    public bool EnsureStorageExists()
+	{
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			return EnsureStorageExistsCore(fileSet);
+		}
+	}
+
+	public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
 	{
 		profile = new ProjectSelectionProfile(
 			SelectedRootFolders: [],
@@ -36,6 +49,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
+			// Reading a missing profile should not materialize persistence files.
+			// The app bootstrap explicitly ensures store presence when that contract is needed.
 			var db = LoadInternal(fileSet);
 			if (db.Profiles.Count == 0)
 				return false;
@@ -133,6 +148,27 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 
 		return CreateDefaultDb();
+	}
+
+	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
+	{
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+		{
+			if (primaryRequiresRewrite || !File.Exists(fileSet.BackupPath))
+				return TrySaveInternal(fileSet, primaryDb);
+
+			return true;
+		}
+
+		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+			return TrySaveInternal(fileSet, backupDb);
+
+		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+			return false;
+
+		// Create an empty but durable profile store up front so the app-state surface stays stable
+		// even before the first explicit "Apply settings" action persists a project snapshot.
+		return TrySaveInternal(fileSet, CreateDefaultDb());
 	}
 
 	private bool TrySaveInternal(JsonStoreFileSet fileSet, ProjectProfileDb db)

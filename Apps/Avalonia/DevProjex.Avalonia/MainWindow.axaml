@@ -573,6 +573,8 @@
                                       Spacing="{DynamicResource TreeItemSpacingResource}">
                             <CheckBox IsThreeState="True"
                                       IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
+                                      Tapped="OnTreeNodeCheckBoxTapped"
+                                      DoubleTapped="OnTreeNodeCheckBoxDoubleTapped"
                                       VerticalAlignment="Center" />
                             <Image Source="{CompiledBinding Icon}"
                                    Width="{DynamicResource TreeIconSizeResource}"

@@ -1,4 +1,7 @@
 using System.Text.RegularExpressions;
+using DevProjex.Avalonia.Services;
+using DevProjex.Application.Services;
+using DevProjex.Kernel.Abstractions;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.UI;
@@ -6,6 +9,534 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowProjectLoadWorkflowUiTests
 {
+    [AvaloniaFact]
+    public async Task CancelledBaselineRootSelection_PublishesTreeMetricsBeforeContentMetricsFinish()
+    {
+        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !UiTestDriver.GetViewModel(window).StatusBusy,
+                "initial baseline metrics cancellation to settle");
+
+            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, rootNode.DisplayName);
+            await UiTestDriver.ClickAsync(window, checkBox);
+
+            ExportOutputMetrics pendingTreeMetrics = default;
+            ExportOutputMetrics pendingContentMetrics = default;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var viewModel = UiTestDriver.GetViewModel(window);
+                    if (!viewModel.StatusBusy)
+                        return false;
+
+                    if (!UiTestDriver.TryGetCurrentStatusMetrics(window, out var actualTreeMetrics, out var actualContentMetrics))
+                        return false;
+
+                    pendingTreeMetrics = actualTreeMetrics;
+                    pendingContentMetrics = actualContentMetrics;
+                    return actualTreeMetrics != ExportOutputMetrics.Empty &&
+                           actualContentMetrics == ExportOutputMetrics.Empty;
+                },
+                "tree metrics to appear while selected content metrics are still warming up");
+
+            analyzer.Release();
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+
+            Assert.Equal(expected.TreeMetrics, pendingTreeMetrics);
+            Assert.Equal(ExportOutputMetrics.Empty, pendingContentMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+
+            await UiTestDriver.WaitForStatusMetricsAsync(
+                window,
+                expected.TreeMetrics,
+                expected.ContentMetrics,
+                waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SelectingRootWhileBaselineMetricsAreStillRunning_AutoTransitionsToSelectionMetrics()
+    {
+        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, rootNode.DisplayName);
+            await UiTestDriver.ClickAsync(window, checkBox);
+
+            ExportOutputMetrics pendingTreeMetrics = default;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var viewModel = UiTestDriver.GetViewModel(window);
+                    if (!viewModel.StatusBusy)
+                        return false;
+
+                    if (!UiTestDriver.TryGetCurrentStatusMetrics(window, out var actualTreeMetrics, out var actualContentMetrics))
+                        return false;
+
+                    pendingTreeMetrics = actualTreeMetrics;
+                    return actualTreeMetrics != ExportOutputMetrics.Empty &&
+                           actualContentMetrics == ExportOutputMetrics.Empty;
+                },
+                "selection metrics to replace the in-flight baseline without a second click");
+
+            analyzer.Release();
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+
+            Assert.Equal(expected.TreeMetrics, pendingTreeMetrics);
+            Assert.True(rootNode.IsChecked);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+
+            await UiTestDriver.WaitForStatusMetricsAsync(
+                window,
+                expected.TreeMetrics,
+                expected.ContentMetrics,
+                waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineFolderSelection_PublishesSubtreeTreeMetricsBeforeContentMetricsFinish()
+    {
+        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !UiTestDriver.GetViewModel(window).StatusBusy,
+                "initial baseline metrics cancellation to settle");
+
+            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+            await UiTestDriver.ClickAsync(window, checkBox);
+
+            ExportOutputMetrics pendingTreeMetrics = default;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var viewModel = UiTestDriver.GetViewModel(window);
+                    if (!viewModel.StatusBusy)
+                        return false;
+
+                    if (!UiTestDriver.TryGetCurrentStatusMetrics(window, out var actualTreeMetrics, out var actualContentMetrics))
+                        return false;
+
+                    pendingTreeMetrics = actualTreeMetrics;
+                    return actualTreeMetrics != ExportOutputMetrics.Empty &&
+                           actualContentMetrics == ExportOutputMetrics.Empty;
+                },
+                "folder subtree tree metrics to appear while selected content metrics are still warming up");
+
+            analyzer.Release();
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+
+            Assert.Equal(expected.TreeMetrics, pendingTreeMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+            await UiTestDriver.WaitForStatusMetricsAsync(
+                window,
+                expected.TreeMetrics,
+                expected.ContentMetrics,
+                waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineClearingRootSelection_RestoresWholeWorkspaceMetricsInsteadOfZeroingStatusBar()
+    {
+        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !UiTestDriver.GetViewModel(window).StatusBusy,
+                "initial baseline metrics cancellation to settle");
+
+            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            var rootCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, rootNode.DisplayName);
+
+            await UiTestDriver.ClickAsync(window, rootCheckBox);
+            analyzer.Release();
+
+            var selectedExpected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, selectedExpected.ContentMetrics);
+            await UiTestDriver.WaitForStatusMetricsAsync(
+                window,
+                selectedExpected.TreeMetrics,
+                selectedExpected.ContentMetrics,
+                waitForSelectionRefreshIdle: false);
+
+            await UiTestDriver.ClickAsync(window, rootCheckBox);
+
+            var fullWorkspaceExpected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, fullWorkspaceExpected.TreeMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, fullWorkspaceExpected.ContentMetrics);
+            await UiTestDriver.WaitForStatusMetricsAsync(
+                window,
+                fullWorkspaceExpected.TreeMetrics,
+                fullWorkspaceExpected.ContentMetrics,
+                waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineFolderSelection_WithBinaryFiles_StillPublishesFinalContentMetrics()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !UiTestDriver.GetViewModel(window).StatusBusy,
+                "initial baseline metrics cancellation to settle");
+
+            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+            await UiTestDriver.ClickAsync(window, checkBox);
+
+            analyzer.Release();
+
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+
+            await UiTestDriver.WaitForStatusMetricsAsync(
+                window,
+                expected.TreeMetrics,
+                expected.ContentMetrics,
+                waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineRootSelection_WithBinaryFiles_StillPublishesFinalContentMetrics()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !UiTestDriver.GetViewModel(window).StatusBusy,
+                "initial baseline metrics cancellation to settle");
+
+            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            var rootCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, rootNode.DisplayName);
+            await UiTestDriver.ClickAsync(window, rootCheckBox);
+
+            analyzer.Release();
+
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+
+            await UiTestDriver.WaitForStatusMetricsAsync(
+                window,
+                expected.TreeMetrics,
+                expected.ContentMetrics,
+                waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineBinaryOnlyFolderSelection_PublishesTreeMetricsWithZeroContentMetrics()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(window, () => !UiTestDriver.GetViewModel(window).StatusBusy, "baseline cancellation to settle");
+
+            await ExpandChildPathAsync(window, "src", "assets", "raw");
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "raw");
+            await UiTestDriver.ClickAsync(window, checkBox);
+
+            analyzer.Release();
+
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
+            Assert.Equal(ExportOutputMetrics.Empty, expected.ContentMetrics);
+
+            await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics, waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineBinaryOnlyFileSelection_PublishesZeroContentMetrics()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(window, () => !UiTestDriver.GetViewModel(window).StatusBusy, "baseline cancellation to settle");
+
+            await ExpandChildPathAsync(window, "src", "assets");
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "image.bin");
+            await UiTestDriver.ClickAsync(window, checkBox);
+
+            analyzer.Release();
+
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
+            Assert.Equal(ExportOutputMetrics.Empty, expected.ContentMetrics);
+
+            await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics, waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineTextOnlyFileSelection_PublishesFinalContentMetrics()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(window, () => !UiTestDriver.GetViewModel(window).StatusBusy, "baseline cancellation to settle");
+
+            await ExpandChildPathAsync(window, "docs");
+            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "guide.md");
+            await UiTestDriver.ClickAsync(window, checkBox);
+
+            analyzer.Release();
+
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+
+            await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics, waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SelectingLatestFolderWhileSelectionMetricsAreInFlight_PublishesLatestMetricsOnly()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(window, () => !UiTestDriver.GetViewModel(window).StatusBusy, "baseline cancellation to settle");
+
+            await ExpandChildPathAsync(window, "src");
+            var srcCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+            var docsCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "docs");
+
+            await UiTestDriver.ClickAsync(window, srcCheckBox);
+            await UiTestDriver.WaitForConditionAsync(window, () => UiTestDriver.GetViewModel(window).StatusBusy, "selection metrics to start for src");
+            await UiTestDriver.ClickAsync(window, srcCheckBox);
+            await UiTestDriver.ClickAsync(window, docsCheckBox);
+
+            analyzer.Release();
+
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+
+            await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics, waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineClearingFolderSelection_RestoresWholeWorkspaceMetrics()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(window, () => !UiTestDriver.GetViewModel(window).StatusBusy, "baseline cancellation to settle");
+
+            var docsCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "docs");
+            await UiTestDriver.ClickAsync(window, docsCheckBox);
+
+            analyzer.Release();
+
+            var selectedExpected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, selectedExpected.ContentMetrics);
+            await UiTestDriver.WaitForStatusMetricsAsync(window, selectedExpected.TreeMetrics, selectedExpected.ContentMetrics, waitForSelectionRefreshIdle: false);
+
+            await UiTestDriver.ClickAsync(window, docsCheckBox);
+
+            var fullWorkspaceExpected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, fullWorkspaceExpected.TreeMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, fullWorkspaceExpected.ContentMetrics);
+            await UiTestDriver.WaitForStatusMetricsAsync(window, fullWorkspaceExpected.TreeMetrics, fullWorkspaceExpected.ContentMetrics, waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ActiveBaselineFolderSelection_WithBinaryFiles_AutoTransitionsToFinalContentMetrics()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            var srcCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+            await UiTestDriver.ClickAsync(window, srcCheckBox);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    if (!UiTestDriver.GetViewModel(window).StatusBusy)
+                        return false;
+
+                    return UiTestDriver.TryGetCurrentStatusMetrics(window, out var actualTreeMetrics, out var actualContentMetrics) &&
+                           actualTreeMetrics != ExportOutputMetrics.Empty &&
+                           actualContentMetrics == ExportOutputMetrics.Empty;
+                },
+                "tree metrics to appear while active baseline hands off to selected content metrics");
+
+            analyzer.Release();
+
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+            await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics, waitForSelectionRefreshIdle: false);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CancelledBaselineRapidRootToggle_DoesNotLeaveBusyStateAndRestoresFullMetrics()
+    {
+        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
+        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
+        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
+
+        try
+        {
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+            await UiTestDriver.WaitForConditionAsync(window, () => !UiTestDriver.GetViewModel(window).StatusBusy, "baseline cancellation to settle");
+
+            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            var rootCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, rootNode.DisplayName);
+            await UiTestDriver.ClickAsync(window, rootCheckBox);
+            await UiTestDriver.ClickAsync(window, rootCheckBox);
+
+            analyzer.Release();
+
+            var expected = await ComputeExpectedAppliedMetricsAsync(window);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
+            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
+            await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics, waitForSelectionRefreshIdle: false);
+            Assert.False(UiTestDriver.GetViewModel(window).StatusBusy);
+        }
+        finally
+        {
+            analyzer.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task InitialLoad_ProjectWorkflowWorkspace_StatusBarMatchesExpectedExportMetrics()
     {
@@ -539,6 +1070,54 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         return await UiTestDriver.ComputeAppliedExportMetricsAsync(window, CancellationToken.None);
     }
 
+    private static async Task<TreeNodeViewModel> ExpandChildPathAsync(MainWindow window, params string[] childPath)
+    {
+        var current = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+        foreach (var segment in childPath)
+        {
+            current.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+            current = Assert.Single(current.Children.Where(child => string.Equals(child.DisplayName, segment, StringComparison.Ordinal)));
+        }
+
+        current.IsExpanded = true;
+        await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+        return current;
+    }
+
+    private static async Task<MainWindow> CreateWindowDuringInitialMetricsWarmupAsync(
+        UiTestProject project,
+        BlockingFileContentAnalyzer analyzer)
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            waitForInitialSettingsPane: false,
+            configureServices: services => ReplaceFileContentServices(services, analyzer),
+            waitForStatusIdle: false);
+
+        await UiTestDriver.WaitForConditionAsync(
+            window,
+            () => analyzer.MetricsRequestCount > 0 && UiTestDriver.GetViewModel(window).StatusBusy,
+            "initial background metrics calculation to start");
+
+        return window;
+    }
+
+    private static AvaloniaAppServices ReplaceFileContentServices(
+        AvaloniaAppServices services,
+        IFileContentAnalyzer analyzer)
+    {
+        var contentExportService = new SelectedContentExportService(analyzer);
+        return services with
+        {
+            FileContentAnalyzer = analyzer,
+            ContentExportService = contentExportService,
+            TreeAndContentExportService = new TreeAndContentExportService(services.TreeExportService, contentExportService),
+            PreviewDocumentBuilder = new PreviewDocumentBuilder(analyzer)
+        };
+    }
+
     private static async Task<ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics> ComputeProjectedMetricsFromSettingsAsync(
         string rootPath,
         MainWindow window)
@@ -649,6 +1228,35 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             Assert.True(int.TryParse(match.Groups[1].Value, out var count) && count > 0,
                 $"Advanced ignore option '{option.Id}' must never stay visible with a zero/invalid count. Actual label: '{option.Label}'.");
         }
+    }
+
+    private sealed class BlockingFileContentAnalyzer(IFileContentAnalyzer innerAnalyzer) : IFileContentAnalyzer
+    {
+        private readonly TaskCompletionSource<bool> _releaseMetrics = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _metricsRequestCount;
+
+        public int MetricsRequestCount => Volatile.Read(ref _metricsRequestCount);
+
+        public void Release() => _releaseMetrics.TrySetResult(true);
+
+        public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+            innerAnalyzer.IsTextFileAsync(path, cancellationToken);
+
+        public async Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _metricsRequestCount);
+            await _releaseMetrics.Task.WaitAsync(cancellationToken);
+            return await innerAnalyzer.GetTextFileMetricsAsync(path, cancellationToken);
+        }
+
+        public Task<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default) =>
+            innerAnalyzer.TryReadAsTextAsync(path, cancellationToken);
+
+        public Task<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            long maxSizeForFullRead,
+            CancellationToken cancellationToken = default) =>
+            innerAnalyzer.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
     }
 
 }

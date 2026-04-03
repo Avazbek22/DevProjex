@@ -93,6 +93,33 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 	}
 
 	[AvaloniaFact]
+	public async Task FileMenu_RecentFolders_DoesNotAttachTooltipToItems()
+	{
+		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var folderPath = Path.Combine(workspace.Project.RootPath, "history", "tooltip-free");
+		Directory.CreateDirectory(folderPath);
+
+		var db = recentStore.Load();
+		db = recentStore.AddFolder(db, folderPath);
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project, appDataPathOverride: appDataPath);
+
+		try
+		{
+			var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
+			var recentItems = recentMenu.Items.OfType<MenuItem>().ToArray();
+
+			Assert.NotEmpty(recentItems);
+			Assert.All(recentItems, item => Assert.Null(ToolTip.GetTip(item)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task GitCloneWindow_RecentRepositories_FillsUrlFromSelection()
 	{
 		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));

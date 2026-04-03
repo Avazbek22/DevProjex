@@ -91,7 +91,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_JsonCompactSchema_DirectorySelectionDoesNotForceAllDescendants()
+	public void BuildSelectedTree_JsonCompactSchema_DirectorySelectionIncludesDescendants()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -102,13 +102,14 @@ public sealed class TreeExportServiceJsonCompactTests
 		using var doc = JsonDocument.Parse(result);
 		var root = doc.RootElement.GetProperty("root");
 		var srcDir = FindDirByName(root, "src");
+		var innerDir = FindDirByName(srcDir, "inner");
 
-		Assert.False(srcDir.TryGetProperty("dirs", out _));
-		Assert.False(srcDir.TryGetProperty("files", out _));
+		Assert.True(srcDir.TryGetProperty("dirs", out _));
+		Assert.Equal("c.cs", innerDir.GetProperty("files")[0].GetString());
 	}
 
 	[Fact]
-	public void BuildSelectedTree_JsonCompactSchema_RootSelectionReturnsRootNodeOnly()
+	public void BuildSelectedTree_JsonCompactSchema_RootSelectionReturnsFullSubtree()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -119,8 +120,8 @@ public sealed class TreeExportServiceJsonCompactTests
 		using var doc = JsonDocument.Parse(result);
 		var root = doc.RootElement.GetProperty("root");
 		Assert.Equal(".", root.GetProperty("path").GetString());
-		Assert.False(root.TryGetProperty("dirs", out _));
-		Assert.False(root.TryGetProperty("files", out _));
+		Assert.True(root.TryGetProperty("dirs", out var dirs));
+		Assert.NotEmpty(dirs.EnumerateArray());
 	}
 
 	[Fact]
