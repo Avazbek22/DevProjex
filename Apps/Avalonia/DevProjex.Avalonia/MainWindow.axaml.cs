@@ -2227,7 +2227,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private static void OnTreeNodeCheckBoxTapped(object? sender, TappedEventArgs e)
+    private void OnTreeNodeCheckBoxTapped(object? sender, TappedEventArgs e)
     {
         // TreeViewItem reacts to routed tap gestures as part of its own selection/expand behavior.
         // Mark the checkbox gesture as handled after the checkbox processed it so branch toggles
@@ -2235,7 +2235,7 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private static void OnTreeNodeCheckBoxDoubleTapped(object? sender, TappedEventArgs e)
+    private void OnTreeNodeCheckBoxDoubleTapped(object? sender, TappedEventArgs e)
     {
         e.Handled = true;
     }
