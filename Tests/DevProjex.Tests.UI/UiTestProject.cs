@@ -97,7 +97,10 @@ internal sealed class UiTestProject : IDisposable
             WriteFile(rootPath, Path.Combine("src", "main.cs"), BuildCSharpFile("BinaryAware", "Program", 8));
             WriteFile(rootPath, Path.Combine("src", "notes.md"), BuildMarkdown("Binary-aware metrics", 8));
             WriteBinaryFile(rootPath, Path.Combine("src", "assets", "image.bin"), [0, 1, 2, 3, 255, 0, 4, 5]);
+            WriteBinaryFile(rootPath, Path.Combine("src", "assets", "raw", "sprite.bin"), [137, 80, 78, 71, 13, 10, 26, 10]);
+            WriteBinaryFile(rootPath, Path.Combine("src", "assets", "raw", "atlas.bin"), [0, 255, 10, 0, 11, 12, 13]);
             WriteFile(rootPath, Path.Combine("docs", "guide.md"), BuildMarkdown("Guide", 6));
+            Directory.CreateDirectory(Path.Combine(rootPath, "docs", "empty"));
         });
     }
 
