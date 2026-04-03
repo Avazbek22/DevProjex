@@ -18,6 +18,45 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
+	public void EnsureStorageExists_CreatesPrimaryAndBackup_WhenFilesAreMissing()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+
+			Assert.True(store.EnsureStorageExists());
+			Assert.True(File.Exists(store.GetPath()));
+			Assert.True(File.Exists(store.GetPath() + ".bak"));
+			Assert.False(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void EnsureStorageExists_RecreatesMissingBackup_FromPrimarySnapshot()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), CreateProfile());
+			File.Delete(store.GetPath() + ".bak");
+
+			Assert.True(store.EnsureStorageExists());
+			Assert.True(File.Exists(store.GetPath() + ".bak"));
+			Assert.True(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void ClearAllProfiles_WhenStorageFileMissing_DoesNotThrow()
 	{
 		var tempRoot = CreateTempDirectory();
@@ -42,6 +81,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 			var store = CreateStore(tempRoot);
 			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), CreateProfile());
 			Assert.True(File.Exists(store.GetPath()));
+			Assert.True(File.Exists(store.GetPath() + ".bak"));
 		}
 		finally
 		{
@@ -243,7 +283,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void TryLoadProfile_CorruptedJson_RewritesToValidStorageDocument()
+	public void TryLoadProfile_CorruptedJson_DoesNotOverwriteOriginalFileWithoutBackup()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -251,13 +291,11 @@ public sealed class ProjectProfileStoreAdditionalTests
 			var store = CreateStore(tempRoot);
 			var storagePath = store.GetPath();
 			Directory.CreateDirectory(Path.GetDirectoryName(storagePath)!);
-			File.WriteAllText(storagePath, "{ invalid");
+			const string invalidJson = "{ invalid";
+			File.WriteAllText(storagePath, invalidJson);
 
 			Assert.False(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
-
-			var persisted = File.ReadAllText(storagePath);
-			using var doc = JsonDocument.Parse(persisted);
-			Assert.True(doc.RootElement.TryGetProperty("profiles", out _));
+			Assert.Equal(invalidJson, File.ReadAllText(storagePath));
 		}
 		finally
 		{
@@ -327,6 +365,72 @@ public sealed class ProjectProfileStoreAdditionalTests
 			var storageDir = Path.GetDirectoryName(store.GetPath())!;
 			var tempFiles = Directory.GetFiles(storageDir, "*.tmp");
 			Assert.Empty(tempFiles);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ClearAllProfiles_RemovesBackupFile()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), CreateProfile());
+
+			store.ClearAllProfiles();
+
+			Assert.False(File.Exists(store.GetPath()));
+			Assert.False(File.Exists(store.GetPath() + ".bak"));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void TrySaveProfile_InvalidAppDataPath_ReturnsFalse()
+	{
+		var invalidRoot = string.Concat("broken", '\0', "root");
+		var store = new ProjectProfileStore(() => invalidRoot);
+		var projectPath = Path.Combine(Path.GetTempPath(), "RepoA");
+
+		Assert.False(store.TrySaveProfile(projectPath, CreateProfile()));
+	}
+
+	[Fact]
+	public void TrySaveProfile_OlderTimestampRetry_DoesNotOverwriteNewerProfile()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			var olderProfile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["src"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles]);
+			var newerProfile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["docs"],
+				SelectedExtensions: [".md"],
+				SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore]);
+			var olderTimestamp = new DateTimeOffset(2026, 4, 2, 10, 0, 0, TimeSpan.Zero);
+			var newerTimestamp = olderTimestamp.AddMinutes(5);
+
+			Assert.True(store.TrySaveProfile(projectPath, olderProfile, olderTimestamp));
+			Assert.True(store.TrySaveProfile(projectPath, newerProfile, newerTimestamp));
+			Assert.True(store.TrySaveProfile(projectPath, olderProfile, olderTimestamp));
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.Contains("docs", loaded.SelectedRootFolders);
+			Assert.DoesNotContain("src", loaded.SelectedRootFolders);
+			Assert.Contains(".md", loaded.SelectedExtensions);
+			Assert.DoesNotContain(".cs", loaded.SelectedExtensions);
+			Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+			Assert.DoesNotContain(IgnoreOptionId.DotFiles, loaded.SelectedIgnoreOptions);
 		}
 		finally
 		{

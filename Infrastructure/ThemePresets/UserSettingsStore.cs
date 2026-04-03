@@ -1,6 +1,8 @@
+using DevProjex.Infrastructure.Persistence;
+
 namespace DevProjex.Infrastructure.ThemePresets;
 
-public sealed class UserSettingsStore
+public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 {
     private const int CurrentSchemaVersion = 2;
     private const string FolderName = "DevProjex";
@@ -20,27 +22,35 @@ public sealed class UserSettingsStore
         IsAdvancedIgnoreCountsEnabled = true,
         PreferredLanguage = null
     };
+    private readonly Func<string> _appDataPathProvider =
+        appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+    private readonly object _sync = new();
+
+    public bool EnsureStorageExists()
+    {
+        lock (_sync)
+        {
+            var fileSet = GetFileSet();
+            if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+                return false;
+
+            using var _ = heldLock;
+            return EnsureStorageExistsCore(fileSet);
+        }
+    }
 
     public UserSettingsDb Load()
     {
-        var path = GetPath();
-        if (!File.Exists(path))
-            return CreateDefaultDb();
-
-        try
+        lock (_sync)
         {
-            var json = File.ReadAllText(path);
-            var db = JsonSerializer.Deserialize<UserSettingsDb>(json, SerializerOptions);
-            if (db is null)
+            var fileSet = GetFileSet();
+            if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
                 return CreateDefaultDb();
 
-            return Normalize(db);
-        }
-        catch
-        {
-            var fallback = CreateDefaultDb();
-            TrySave(fallback);
-            return fallback;
+            using var _ = heldLock;
+            // Loading settings should not create files by itself. A dedicated bootstrap
+            // path handles store creation so pure reads remain predictable for tests/tools.
+            return LoadInternal(fileSet);
         }
     }
 
@@ -76,8 +86,7 @@ public sealed class UserSettingsStore
 
     public string GetPath()
     {
-        var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        return Path.Combine(root, FolderName, FileName);
+        return GetFileSet().PrimaryPath;
     }
 
     public bool TryParseKey(string? key, out ThemeVariant theme, out ThemeEffectMode effect)
@@ -119,6 +128,77 @@ public sealed class UserSettingsStore
             db.LastSelected = GetKey(ThemeVariant.Dark, ThemeEffectMode.Transparent);
 
         return db;
+    }
+
+    private JsonStoreFileSet GetFileSet()
+        => JsonStoreFileSet.Create(_appDataPathProvider, FolderName, FileName);
+
+    private UserSettingsDb LoadInternal(JsonStoreFileSet fileSet)
+    {
+        if (JsonStorePersistence.TryReadNormalized(
+                fileSet.PrimaryPath,
+                SerializerOptions,
+                CreateDefaultDb,
+                Normalize,
+                out var primaryDb,
+                out var primaryRequiresRewrite))
+        {
+            if (primaryRequiresRewrite)
+                TrySaveInternal(fileSet, primaryDb);
+
+            return primaryDb;
+        }
+
+        if (JsonStorePersistence.TryReadNormalized(
+                fileSet.BackupPath,
+                SerializerOptions,
+                CreateDefaultDb,
+                Normalize,
+                out var backupDb,
+                out _))
+        {
+            TrySaveInternal(fileSet, backupDb);
+            return backupDb;
+        }
+
+        var fallback = CreateDefaultDb();
+        if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+            TrySaveInternal(fileSet, fallback);
+
+        return fallback;
+    }
+
+    private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
+    {
+        if (JsonStorePersistence.TryReadNormalized(
+                fileSet.PrimaryPath,
+                SerializerOptions,
+                CreateDefaultDb,
+                Normalize,
+                out var primaryDb,
+                out var primaryRequiresRewrite))
+        {
+            if (primaryRequiresRewrite || !File.Exists(fileSet.BackupPath))
+                return TrySaveInternal(fileSet, primaryDb);
+
+            return true;
+        }
+
+        if (JsonStorePersistence.TryReadNormalized(
+                fileSet.BackupPath,
+                SerializerOptions,
+                CreateDefaultDb,
+                Normalize,
+                out var backupDb,
+                out _))
+        {
+            return TrySaveInternal(fileSet, backupDb);
+        }
+
+        if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+            return false;
+
+        return TrySaveInternal(fileSet, CreateDefaultDb());
     }
 
     private UserSettingsDb CreateDefaultDb()
@@ -211,33 +291,24 @@ public sealed class UserSettingsStore
 
     private void TrySave(UserSettingsDb db)
     {
-        try
+        lock (_sync)
         {
-            var path = GetPath();
-            var directory = Path.GetDirectoryName(path);
-            if (string.IsNullOrWhiteSpace(directory))
-                return;
-
-            Directory.CreateDirectory(directory);
-            var json = JsonSerializer.Serialize(db, SerializerOptions);
-            var tempPath = Path.Combine(directory, $"{FileName}.{Guid.NewGuid():N}.tmp");
-            File.WriteAllText(tempPath, json);
-
             try
             {
-                if (File.Exists(path))
-                    File.Replace(tempPath, path, null);
-                else
-                    File.Move(tempPath, path);
+                var fileSet = GetFileSet();
+                if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+                    return;
+
+                using var _ = heldLock;
+                TrySaveInternal(fileSet, Normalize(db));
             }
             catch
             {
-                File.Move(tempPath, path, true);
+                // Ignore persistence errors.
             }
         }
-        catch
-        {
-            // Ignore persistence errors.
-        }
     }
+
+    private static bool TrySaveInternal(JsonStoreFileSet fileSet, UserSettingsDb db)
+        => JsonStorePersistence.TryWriteAtomic(fileSet, db, SerializerOptions);
 }

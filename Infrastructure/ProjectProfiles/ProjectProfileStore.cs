@@ -1,3 +1,5 @@
+using DevProjex.Infrastructure.Persistence;
+
 namespace DevProjex.Infrastructure.ProjectProfiles;
 
 public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null) : IProjectProfileStore
@@ -14,10 +16,23 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 	};
 
-	private readonly object _sync = new();
+    private readonly object _sync = new();
     private readonly Func<string> _appDataPathProvider = appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
 
-    public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+    public bool EnsureStorageExists()
+	{
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			return EnsureStorageExistsCore(fileSet);
+		}
+	}
+
+	public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
 	{
 		profile = new ProjectSelectionProfile(
 			SelectedRootFolders: [],
@@ -29,7 +44,14 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 		lock (_sync)
 		{
-			var db = LoadInternal();
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			// Reading a missing profile should not materialize persistence files.
+			// The app bootstrap explicitly ensures store presence when that contract is needed.
+			var db = LoadInternal(fileSet);
 			if (db.Profiles.Count == 0)
 				return false;
 
@@ -42,17 +64,38 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	}
 
 	public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		=> TrySaveProfile(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		=> TrySaveProfile(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
-			return;
+			return false;
 
 		lock (_sync)
 		{
-			var db = LoadInternal();
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			var db = LoadInternal(fileSet);
 			db.SchemaVersion = CurrentSchemaVersion;
-			db.Profiles[normalizedPath] = ToPersistedProfile(profile);
+
+			// A delayed retry from another window/process must not stomp a newer profile revision.
+			// The caller-provided timestamp reflects when the profile became user-approved.
+			if (db.Profiles.TryGetValue(normalizedPath, out var existing) &&
+				existing is not null &&
+				existing.UpdatedUtc > updatedUtc)
+			{
+				return true;
+			}
+
+			db.Profiles[normalizedPath] = ToPersistedProfile(profile, updatedUtc);
 			PruneProfiles(db);
-			TrySaveInternal(db);
+			return TrySaveInternal(fileSet, db);
 		}
 	}
 
@@ -62,9 +105,15 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		{
 			try
 			{
-				var path = GetPath();
-				if (File.Exists(path))
-					File.Delete(path);
+				var fileSet = GetFileSet();
+				if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+					return;
+
+				using var _ = heldLock;
+				if (File.Exists(fileSet.PrimaryPath))
+					File.Delete(fileSet.PrimaryPath);
+				if (File.Exists(fileSet.BackupPath))
+					File.Delete(fileSet.BackupPath);
 			}
 			catch
 			{
@@ -75,63 +124,56 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	public string GetPath()
 	{
-		var root = _appDataPathProvider();
-		return Path.Combine(root, FolderName, FileName);
+		return GetFileSet().PrimaryPath;
 	}
 
-	private ProjectProfileDb LoadInternal()
+	private JsonStoreFileSet GetFileSet()
+		=> JsonStoreFileSet.Create(_appDataPathProvider, FolderName, FileName);
+
+	private ProjectProfileDb LoadInternal(JsonStoreFileSet fileSet)
 	{
-		var path = GetPath();
-		if (!File.Exists(path))
-			return CreateDefaultDb();
-
-		try
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
-			var json = File.ReadAllText(path);
-			var db = JsonSerializer.Deserialize<ProjectProfileDb>(json, SerializerOptions);
-			if (db is null)
-				return CreateDefaultDb();
+			if (primaryRequiresRewrite)
+				TrySaveInternal(fileSet, primaryDb);
 
-			return Normalize(db);
+			return primaryDb;
 		}
-		catch
+
+		// Recover from the last known-good snapshot when the primary profile document becomes unreadable.
+		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
 		{
-			var fallback = CreateDefaultDb();
-			TrySaveInternal(fallback);
-			return fallback;
+			TrySaveInternal(fileSet, backupDb);
+			return backupDb;
 		}
+
+		return CreateDefaultDb();
 	}
 
-	private void TrySaveInternal(ProjectProfileDb db)
+	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
 	{
-		try
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
-			var path = GetPath();
-			var directory = Path.GetDirectoryName(path);
-			if (string.IsNullOrWhiteSpace(directory))
-				return;
+			if (primaryRequiresRewrite || !File.Exists(fileSet.BackupPath))
+				return TrySaveInternal(fileSet, primaryDb);
 
-			Directory.CreateDirectory(directory);
-			var json = JsonSerializer.Serialize(db, SerializerOptions);
-			var tempPath = Path.Combine(directory, $"{FileName}.{Guid.NewGuid():N}.tmp");
-			File.WriteAllText(tempPath, json);
+			return true;
+		}
 
-			try
-			{
-				if (File.Exists(path))
-					File.Replace(tempPath, path, null);
-				else
-					File.Move(tempPath, path);
-			}
-			catch
-			{
-				File.Move(tempPath, path, overwrite: true);
-			}
-		}
-		catch
-		{
-			// Ignore persistence errors - app behavior must not depend on storage availability.
-		}
+		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+			return TrySaveInternal(fileSet, backupDb);
+
+		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+			return false;
+
+		// Create an empty but durable profile store up front so the app-state surface stays stable
+		// even before the first explicit "Apply settings" action persists a project snapshot.
+		return TrySaveInternal(fileSet, CreateDefaultDb());
+	}
+
+	private bool TrySaveInternal(JsonStoreFileSet fileSet, ProjectProfileDb db)
+	{
+		return JsonStorePersistence.TryWriteAtomic(fileSet, db, SerializerOptions);
 	}
 
 	private static ProjectProfileDb CreateDefaultDb()
@@ -188,7 +230,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		return profile;
 	}
 
-	private static PersistedProjectProfile ToPersistedProfile(ProjectSelectionProfile profile)
+	private static PersistedProjectProfile ToPersistedProfile(ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
 	{
 		return new PersistedProjectProfile
 		{
@@ -203,7 +245,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			SelectedIgnoreOptions = profile.SelectedIgnoreOptions
 				.Distinct()
 				.ToList(),
-			UpdatedUtc = DateTimeOffset.UtcNow
+			UpdatedUtc = updatedUtc
 		};
 	}
 
@@ -244,6 +286,36 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		{
 			normalizedPath = PathUtility.Normalize(input);
 			return !string.IsNullOrWhiteSpace(normalizedPath);
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static bool TryLoadFromPath(string path, out ProjectProfileDb db, out bool requiresRewrite)
+	{
+		db = CreateDefaultDb();
+		requiresRewrite = false;
+
+		if (!File.Exists(path))
+			return false;
+
+		try
+		{
+			var json = File.ReadAllText(path);
+			var deserialized = JsonSerializer.Deserialize<ProjectProfileDb>(json, SerializerOptions);
+			if (deserialized is null)
+				return false;
+
+			// Only normalize payloads that were parsed successfully.
+			// If parsing fails, keep the file untouched and let the backup act as the recovery source.
+			var originalSnapshot = JsonSerializer.Serialize(deserialized, SerializerOptions);
+			var normalized = Normalize(deserialized);
+			var normalizedSnapshot = JsonSerializer.Serialize(normalized, SerializerOptions);
+			requiresRewrite = !string.Equals(originalSnapshot, normalizedSnapshot, StringComparison.Ordinal);
+			db = normalized;
+			return true;
 		}
 		catch
 		{

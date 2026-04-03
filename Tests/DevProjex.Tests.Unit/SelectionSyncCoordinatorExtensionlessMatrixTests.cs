@@ -14,7 +14,6 @@ public sealed class SelectionSyncCoordinatorExtensionlessMatrixTests
 		var coordinator = CreateCoordinator(viewModel, @"C:\Temp\Project");
 
 		coordinator.ApplyExtensionScan(scanEntries);
-		viewModel.AllIgnoreChecked = false;
 		coordinator.PopulateIgnoreOptionsForRootSelection([], @"C:\Temp\Project");
 
 		var visible = viewModel.Extensions.Select(option => option.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -31,7 +30,7 @@ public sealed class SelectionSyncCoordinatorExtensionlessMatrixTests
 
 		var extensionlessOption = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.ExtensionlessFiles);
 		Assert.Equal($"Files without extension ({expectedExtensionlessCount})", extensionlessOption.Label);
-		Assert.False(extensionlessOption.IsChecked);
+		Assert.True(extensionlessOption.IsChecked);
 	}
 
 	[Fact]
@@ -65,6 +64,7 @@ public sealed class SelectionSyncCoordinatorExtensionlessMatrixTests
 
 		var extensionlessOption = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.ExtensionlessFiles);
 		Assert.Equal("Files without extension (2)", extensionlessOption.Label);
+		Assert.True(extensionlessOption.IsChecked);
 	}
 
 	[Fact]
@@ -132,12 +132,7 @@ public sealed class SelectionSyncCoordinatorExtensionlessMatrixTests
 	private static MainWindowViewModel CreateViewModel()
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
-		var viewModel = new MainWindowViewModel(localization, new HelpContentProvider())
-		{
-			AllIgnoreChecked = false
-		};
-
-		return viewModel;
+		return new MainWindowViewModel(localization, new HelpContentProvider());
 	}
 
 	private static StubLocalizationCatalog CreateCatalog()

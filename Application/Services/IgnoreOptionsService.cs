@@ -74,7 +74,7 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 			options.Add(new IgnoreOptionDescriptor(
 				IgnoreOptionId.ExtensionlessFiles,
 				FormatLabelWithCount(localization["Settings.Ignore.ExtensionlessFiles"], availability.ExtensionlessFilesCount, availability.ShowAdvancedCounts),
-				false));
+				true));
 		}
 
 		return options;

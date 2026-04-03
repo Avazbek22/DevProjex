@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace DevProjex.Tests.Shared.StoreListing;
 
 internal static class StoreListingCsvWriter

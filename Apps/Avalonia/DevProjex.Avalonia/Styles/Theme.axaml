@@ -136,6 +136,7 @@
 
             <!-- Compact mode uses the Fluent CheckBox template with a scale transform. -->
             <Geometry x:Key="CheckBoxIndeterminateMarkGeometry">M3,6 L9,6</Geometry>
+            <Geometry x:Key="PreviewCopyIconGeometry">M6.25,2.5 H12.25 A1.75,1.75 0 0 1 14,4.25 V10.25 A1.75,1.75 0 0 1 12.25,12 H10.5 V11 H12.25 A0.75,0.75 0 0 0 13,10.25 V4.25 A0.75,0.75 0 0 0 12.25,3.5 H6.25 A0.75,0.75 0 0 0 5.5,4.25 V6 H4.5 V4.25 A1.75,1.75 0 0 1 6.25,2.5 Z M4.25,6.5 H10.25 A1.75,1.75 0 0 1 12,8.25 V14.25 A1.75,1.75 0 0 1 10.25,16 H4.25 A1.75,1.75 0 0 1 2.5,14.25 V8.25 A1.75,1.75 0 0 1 4.25,6.5 Z M4.25,7.5 A0.75,0.75 0 0 0 3.5,8.25 V14.25 A0.75,0.75 0 0 0 4.25,15 H10.25 A0.75,0.75 0 0 0 11,14.25 V8.25 A0.75,0.75 0 0 0 10.25,7.5 Z</Geometry>
         </ResourceDictionary>
     </Styles.Resources>
 
@@ -454,6 +455,15 @@
                 <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
+    </Style>
+
+    <Style Selector="ToolTip.preview-blurred-tooltip">
+        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="Opacity" Value="0.92" />
     </Style>
 
     <Style Selector="TextBlock.section-title">
@@ -1083,6 +1093,10 @@
         <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
     </Style>
 
+    <Style Selector="Border.preview-panel.preview-toolbar-suspended Button.preview-copy-button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+    </Style>
+
     <!-- Segment control: disabled -->
     <Style Selector="Border.segmented-control:disabled">
         <Setter Property="Opacity" Value="0.5" />
@@ -1125,6 +1139,45 @@
     </Style>
 
     <Style Selector="Button.preview-close-button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="Button.preview-copy-button">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Button.preview-copy-button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="Border.preview-sticky-copy-host">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="BoxShadow" Value="0 1 4 0 #22000000" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Button.preview-sticky-copy-button">
+        <Setter Property="Width" Value="24" />
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Button.preview-sticky-copy-button:pointerover">
         <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
     </Style>
 
@@ -1171,6 +1224,12 @@
         <Setter Property="Width" Value="28" />
         <Setter Property="Height" Value="28" />
         <Setter Property="Margin" Value="2,0,0,0" />
+    </Style>
+
+    <Style Selector="Border.preview-panel.preview-toolbar-narrow Button.preview-copy-button">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Margin" Value="0,0,2,0" />
     </Style>
 
     <Style Selector="Path.preview-icon">

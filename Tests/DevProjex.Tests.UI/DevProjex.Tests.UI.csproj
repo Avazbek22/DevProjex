@@ -18,4 +18,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\ProjectLoadWorkflow\**\*.cs" LinkBase="ProjectLoadWorkflow" />
+  </ItemGroup>
 </Project>

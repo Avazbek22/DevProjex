@@ -17,10 +17,9 @@ public sealed class SelectionSyncCoordinatorExtensionlessCountSequenceTests
 		for (var i = 0; i < scans.Length; i++)
 		{
 			coordinator.ApplyExtensionScan(scans[i]);
-			viewModel.AllIgnoreChecked = false;
 			coordinator.PopulateIgnoreOptionsForRootSelection([], projectPath);
 
-			AssertExtensionlessOptionState(viewModel, expectedCounts[i], expectChecked: false);
+			AssertExtensionlessOptionState(viewModel, expectedCounts[i], expectChecked: expectedCounts[i] > 0);
 		}
 	}
 
@@ -90,21 +89,18 @@ public sealed class SelectionSyncCoordinatorExtensionlessCountSequenceTests
 
 		var rootOnlyScan = scanOptions.GetExtensionsForRootFolders(projectPath, [], ignoreRules);
 		coordinator.ApplyExtensionScan(rootOnlyScan.Value);
-		viewModel.AllIgnoreChecked = false;
 		coordinator.PopulateIgnoreOptionsForRootSelection([], projectPath);
-		AssertExtensionlessOptionState(viewModel, expectedCount: 1, expectChecked: false);
+		AssertExtensionlessOptionState(viewModel, expectedCount: 1, expectChecked: true);
 
 		var srcScan = scanOptions.GetExtensionsForRootFolders(projectPath, ["src"], ignoreRules);
 		coordinator.ApplyExtensionScan(srcScan.Value);
-		viewModel.AllIgnoreChecked = false;
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], projectPath);
-		AssertExtensionlessOptionState(viewModel, expectedCount: 2, expectChecked: false);
+		AssertExtensionlessOptionState(viewModel, expectedCount: 2, expectChecked: true);
 
 		var srcAndTestsScan = scanOptions.GetExtensionsForRootFolders(projectPath, ["src", "tests"], ignoreRules);
 		coordinator.ApplyExtensionScan(srcAndTestsScan.Value);
-		viewModel.AllIgnoreChecked = false;
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src", "tests"], projectPath);
-		AssertExtensionlessOptionState(viewModel, expectedCount: 3, expectChecked: false);
+		AssertExtensionlessOptionState(viewModel, expectedCount: 3, expectChecked: true);
 	}
 
 	public static IEnumerable<object[]> CountSequenceCases()
@@ -205,12 +201,7 @@ public sealed class SelectionSyncCoordinatorExtensionlessCountSequenceTests
 	private static MainWindowViewModel CreateViewModel()
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
-		var viewModel = new MainWindowViewModel(localization, new HelpContentProvider())
-		{
-			AllIgnoreChecked = false
-		};
-
-		return viewModel;
+		return new MainWindowViewModel(localization, new HelpContentProvider());
 	}
 
 	private static StubLocalizationCatalog CreateCatalog()

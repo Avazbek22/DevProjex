@@ -2,9 +2,9 @@ name: .NET CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches:
+      - master
   pull_request:
-    branches: [ "master" ]
   workflow_dispatch:
 
 permissions:
@@ -13,83 +13,71 @@ permissions:
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DEVPROJEX_FAST_UI_TESTS: 1
 
 concurrency:
   group: dotnet-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  prepare-matrix:
+    name: Prepare CI Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+      - name: Select CI matrix
+        id: set-matrix
+        shell: pwsh
+        run: |
+          $isFullMatrix =
+            '${{ github.event_name }}' -eq 'workflow_dispatch' -or
+            '${{ github.ref }}' -eq 'refs/heads/master'
+
+          # Feature branches keep a fast confidence matrix: Windows covers the full
+          # app surface, Linux keeps non-UI integration confidence, and macOS still
+          # compiles/runs the core unit layer. Full cross-platform UI/integration
+          # coverage stays on master and on manual runs.
+          if ($isFullMatrix) {
+            $matrix = @{
+              include = @(
+                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
+                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
+                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
+                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
+                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
+                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
+                @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
+                @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
+                @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' }
+              )
+            }
+          }
+          else {
+            $matrix = @{
+              include = @(
+                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
+                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
+                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
+                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
+                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
+                @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' }
+              )
+            }
+          }
+
+          "matrix=$($matrix | ConvertTo-Json -Compress -Depth 5)" >> $env:GITHUB_OUTPUT
+
   test-suite:
     name: CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})
+    needs: prepare-matrix
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os_name: Windows
-            runner: windows-latest
-            os_id: windows
-            suite_name: Unit
-            suite_id: unit
-            project_path: Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj
-            trx_name: unit.trx
-          - os_name: Windows
-            runner: windows-latest
-            os_id: windows
-            suite_name: Integration
-            suite_id: integration
-            project_path: Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
-            trx_name: integration.trx
-          - os_name: Windows
-            runner: windows-latest
-            os_id: windows
-            suite_name: UI
-            suite_id: ui
-            project_path: Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj
-            trx_name: ui.trx
-          - os_name: Linux
-            runner: ubuntu-latest
-            os_id: linux
-            suite_name: Unit
-            suite_id: unit
-            project_path: Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj
-            trx_name: unit.trx
-          - os_name: Linux
-            runner: ubuntu-latest
-            os_id: linux
-            suite_name: Integration
-            suite_id: integration
-            project_path: Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
-            trx_name: integration.trx
-          - os_name: Linux
-            runner: ubuntu-latest
-            os_id: linux
-            suite_name: UI
-            suite_id: ui
-            project_path: Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj
-            trx_name: ui.trx
-          - os_name: macOS
-            runner: macos-latest
-            os_id: macos
-            suite_name: Unit
-            suite_id: unit
-            project_path: Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj
-            trx_name: unit.trx
-          - os_name: macOS
-            runner: macos-latest
-            os_id: macos
-            suite_name: Integration
-            suite_id: integration
-            project_path: Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
-            trx_name: integration.trx
-          - os_name: macOS
-            runner: macos-latest
-            os_id: macos
-            suite_name: UI
-            suite_id: ui
-            project_path: Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj
-            trx_name: ui.trx
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -109,11 +97,11 @@ jobs:
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore DevProjex.sln
+        run: dotnet restore ${{ matrix.project_path }}
 
       - name: Build
         shell: pwsh
-        run: dotnet build DevProjex.sln -c Release --no-restore
+        run: dotnet build ${{ matrix.project_path }} -c Release --no-restore
 
       - name: Ensure Linux headless runner
         if: ${{ matrix.os_id == 'linux' }}
@@ -131,7 +119,7 @@ jobs:
           dotnet test ${{ matrix.project_path }}
           -c Release
           --no-build
-          --verbosity normal
+          --verbosity minimal
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
 
@@ -142,7 +130,7 @@ jobs:
           xvfb-run -a dotnet test ${{ matrix.project_path }}
           -c Release
           --no-build
-          --verbosity normal
+          --verbosity minimal
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
 

@@ -2,6 +2,8 @@ using DevProjex.Infrastructure.Elevation;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.AppInstances;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
 
@@ -10,6 +12,11 @@ namespace DevProjex.Avalonia.Services;
 public static class AvaloniaCompositionRoot
 {
     public static AvaloniaAppServices CreateDefault(CommandLineOptions options)
+        => CreateDefault(options, appDataPathProvider: null);
+
+    public static AvaloniaAppServices CreateDefault(
+        CommandLineOptions options,
+        Func<string>? appDataPathProvider)
     {
         var localizationCatalog = new JsonLocalizationCatalog();
         var localization = new LocalizationService(localizationCatalog, options.Language ?? CommandLineOptions.DetectSystemLanguage());
@@ -46,8 +53,13 @@ public static class AvaloniaCompositionRoot
         var textFileExportService = new TextFileExportService();
         var toastService = new ToastService();
         var elevation = new ElevationService();
-        var userSettingsStore = new UserSettingsStore();
-        var projectProfileStore = new ProjectProfileStore();
+        var appInstanceLauncher = new AppInstanceLauncher();
+        // UI tests need an isolated app-data root so persisted settings/profiles from
+        // previous runs cannot leak into the current window state and make workflow
+        // scenarios nondeterministic on CI.
+        var userSettingsStore = new UserSettingsStore(appDataPathProvider);
+        var recentProjectsStore = new RecentProjectsStore(appDataPathProvider);
+        var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();
@@ -56,7 +68,9 @@ public static class AvaloniaCompositionRoot
             Localization: localization,
             HelpContentProvider: helpContentProvider,
             UserSettingsStore: userSettingsStore,
+            RecentProjectsStore: recentProjectsStore,
             ProjectProfileStore: projectProfileStore,
+            AppInstanceLauncher: appInstanceLauncher,
             Elevation: elevation,
             ScanOptionsUseCase: scanOptionsUseCase,
             BuildTreeUseCase: buildTreeUseCase,

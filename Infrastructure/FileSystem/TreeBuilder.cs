@@ -3,7 +3,7 @@ namespace DevProjex.Infrastructure.FileSystem;
 public sealed class TreeBuilder : ITreeBuilder
 {
 	// Pre-allocated comparer instance to avoid allocation per sort
-	private static readonly FileSystemInfoComparer EntryComparer = new();
+	private static readonly FileSystemTreeEntryComparer EntryComparer = new();
 	private static readonly int RootBuildParallelism =
 		Math.Clamp(Environment.ProcessorCount, min: 2, max: 16);
 
@@ -40,12 +40,14 @@ public sealed class TreeBuilder : ITreeBuilder
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		FileSystemInfo[] entries;
+		var entries = new List<FileSystemTreeEntry>(capacity: 32);
 		try
 		{
-			// Get entries and sort in-place - avoids LINQ allocations
-			entries = new DirectoryInfo(path).GetFileSystemInfos();
-			Array.Sort(entries, EntryComparer);
+			// Tree building is on the project-load hot path, so avoid FileSystemInfo materialization.
+			// The lightweight entry snapshots already carry the metadata we need for sorting/filtering.
+			foreach (var entry in FileSystemEntryEnumerator.EnumerateEntries(path))
+				entries.Add(entry);
+			entries.Sort(EntryComparer);
 		}
 		catch (UnauthorizedAccessException)
 		{
@@ -65,7 +67,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
 		var shouldApplySmartIgnoreForFiles = options.IgnoreRules.ShouldApplySmartIgnore(path, isDirectory: true);
 
-		if (isRoot && entries.Length > 1)
+		if (isRoot && entries.Count > 1)
 		{
 			BuildRootChildrenInParallel(
 				entries,
@@ -96,7 +98,7 @@ public sealed class TreeBuilder : ITreeBuilder
 	}
 
 	private static void BuildRootChildrenInParallel(
-		FileSystemInfo[] entries,
+		IReadOnlyList<FileSystemTreeEntry> entries,
 		List<FileSystemNode> children,
 		TreeFilterOptions options,
 		bool hasNameFilter,
@@ -104,15 +106,15 @@ public sealed class TreeBuilder : ITreeBuilder
 		BuildState state,
 		CancellationToken cancellationToken)
 	{
-		var nodes = new FileSystemNode?[entries.Length];
-		var maxDegree = Math.Min(RootBuildParallelism, entries.Length);
+		var nodes = new FileSystemNode?[entries.Count];
+		var maxDegree = Math.Min(RootBuildParallelism, entries.Count);
 		var parallelOptions = new ParallelOptions
 		{
 			MaxDegreeOfParallelism = maxDegree,
 			CancellationToken = cancellationToken
 		};
 
-		Parallel.For(0, entries.Length, parallelOptions, i =>
+		Parallel.For(0, entries.Count, parallelOptions, i =>
 		{
 			var entry = entries[i];
 			nodes[i] = BuildNodeForEntry(
@@ -134,7 +136,7 @@ public sealed class TreeBuilder : ITreeBuilder
 	}
 
 	private static FileSystemNode? BuildNodeForEntry(
-		FileSystemInfo entry,
+		FileSystemTreeEntry entry,
 		TreeFilterOptions options,
 		bool isRoot,
 		bool hasNameFilter,
@@ -143,7 +145,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		CancellationToken cancellationToken)
 	{
 		var name = entry.Name;
-		bool isDir = IsDirectory(entry);
+		bool isDir = entry.IsDirectory;
 
 		if (isDir && isRoot && !options.AllowedRootFolders.Contains(name))
 			return null;
@@ -152,19 +154,19 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (isDir)
 		{
 			var directoryGitIgnore = ignore.UseGitIgnore
-				? ignore.EvaluateGitIgnore(entry.FullName, isDirectory: true, name)
+				? ignore.EvaluateGitIgnore(entry.FullPath, isDirectory: true, name)
 				: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 			if (ShouldSkipDirectory(entry, ignore, directoryGitIgnore))
 				return null;
 
 			var dirNode = new FileSystemNode(
 				name: name,
-				fullPath: entry.FullName,
+				fullPath: entry.FullPath,
 				isDirectory: true,
 				isAccessDenied: false,
 				children: new List<FileSystemNode>());
 
-			BuildChildren(dirNode, entry.FullName, options, isRoot: false, state, cancellationToken);
+			BuildChildren(dirNode, entry.FullPath, options, isRoot: false, state, cancellationToken);
 
 			if (ignore.IgnoreEmptyFolders &&
 			    dirNode.Children.Count == 0 &&
@@ -182,16 +184,9 @@ public sealed class TreeBuilder : ITreeBuilder
 				return (hasMatchingChildren || matchesName) ? dirNode : null;
 			}
 
-			// Keep empty directories hidden when gitignore effectively ignores their content
-			// (e.g. patterns like **/bin/* that may not ignore the directory entry itself).
-			if (dirNode.Children.Count == 0 &&
-			    !dirNode.IsAccessDenied &&
-			    IsEffectivelyGitIgnoredDirectory(entry, ignore, directoryGitIgnore))
-			{
-				return null;
-			}
-
 			// Keep ignored directories out of UI when traversal found no visible descendants.
+			// Parents that only became empty after descendant filtering remain visible until
+			// IgnoreEmptyFolders explicitly removes them.
 			if (directoryGitIgnore.IsIgnored &&
 			    directoryGitIgnore.ShouldTraverseIgnoredDirectory &&
 			    dirNode.Children.Count == 0 &&
@@ -204,7 +199,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		}
 
 		var fileGitIgnore = ignore.UseGitIgnore
-			? ignore.EvaluateGitIgnore(entry.FullName, isDirectory: false, name)
+			? ignore.EvaluateGitIgnore(entry.FullPath, isDirectory: false, name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 		if (ShouldSkipFile(entry, ignore, shouldApplySmartIgnoreForFiles, fileGitIgnore))
 			return null;
@@ -228,32 +223,14 @@ public sealed class TreeBuilder : ITreeBuilder
 
 		return new FileSystemNode(
 			name: name,
-			fullPath: entry.FullName,
+			fullPath: entry.FullPath,
 			isDirectory: false,
 			isAccessDenied: false,
 			children: FileSystemNode.EmptyChildren);
 	}
 
-	private static bool IsDirectory(FileSystemInfo entry)
-	{
-		try
-		{
-			return entry.Attributes.HasFlag(FileAttributes.Directory);
-		}
-		catch (IOException)
-		{
-			// Reserved Windows device names (nul, con, prn, etc.) throw IOException
-			// Treat them as files (non-directories)
-			return false;
-		}
-		catch (UnauthorizedAccessException)
-		{
-			return false;
-		}
-	}
-
 	private static bool ShouldSkipDirectory(
-		FileSystemInfo entry,
+		FileSystemTreeEntry entry,
 		IgnoreRules rules,
 		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
 	{
@@ -263,51 +240,20 @@ public sealed class TreeBuilder : ITreeBuilder
 				return true;
 		}
 
-		if (rules.ShouldApplySmartIgnore(entry.FullName, isDirectory: true) && rules.SmartIgnoredFolders.Contains(entry.Name))
+		if (rules.ShouldApplySmartIgnore(entry.FullPath, isDirectory: true) && rules.SmartIgnoredFolders.Contains(entry.Name))
 			return true;
 
 		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
 			return true;
 
-		if (rules.IgnoreHiddenFolders)
-		{
-			try
-			{
-				if (entry.Attributes.HasFlag(FileAttributes.Hidden))
-					return true;
-			}
-			catch (IOException)
-			{
-				// Reserved Windows device names (nul, con, prn, etc.) throw IOException
-				return true;
-			}
-			catch (UnauthorizedAccessException)
-			{
-				return true;
-			}
-		}
+		if (rules.IgnoreHiddenFolders && entry.IsHidden)
+			return true;
 
 		return false;
 	}
 
-	private static bool IsEffectivelyGitIgnoredDirectory(
-		FileSystemInfo entry,
-		IgnoreRules rules,
-		in IgnoreRules.GitIgnoreEvaluation directoryGitIgnoreEvaluation)
-	{
-		if (!rules.UseGitIgnore)
-			return false;
-
-		if (directoryGitIgnoreEvaluation.IsIgnored)
-			return true;
-
-		const string probeName = "__devprojex_ignore_probe__";
-		var probePath = Path.Combine(entry.FullName, probeName);
-		return rules.EvaluateGitIgnore(probePath, isDirectory: false, probeName).IsIgnored;
-	}
-
 	private static bool ShouldSkipFile(
-		FileSystemInfo entry,
+		FileSystemTreeEntry entry,
 		IgnoreRules rules,
 		bool shouldApplySmartIgnoreForFiles,
 		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
@@ -324,26 +270,11 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(entry.Name))
 			return true;
 
-		if (rules.IgnoreEmptyFiles && IsZeroLengthFile(entry))
+		if (rules.IgnoreEmptyFiles && entry.Length == 0)
 			return true;
 
-		if (rules.IgnoreHiddenFiles)
-		{
-			try
-			{
-				if (entry.Attributes.HasFlag(FileAttributes.Hidden))
-					return true;
-			}
-			catch (IOException)
-			{
-				// Reserved Windows device names (nul, con, prn, etc.) throw IOException
-				return true;
-			}
-			catch (UnauthorizedAccessException)
-			{
-				return true;
-			}
-		}
+		if (rules.IgnoreHiddenFiles && entry.IsHidden)
+			return true;
 
 		return false;
 	}
@@ -355,20 +286,6 @@ public sealed class TreeBuilder : ITreeBuilder
 
 		var extension = Path.GetExtension(fileName);
 		return string.IsNullOrEmpty(extension) || extension == ".";
-	}
-
-	private static bool IsZeroLengthFile(FileSystemInfo entry)
-	{
-		try
-		{
-			return entry is FileInfo fileInfo
-				? fileInfo.Length == 0
-				: new FileInfo(entry.FullName).Length == 0;
-		}
-		catch
-		{
-			return false;
-		}
 	}
 
 	private sealed class BuildState
@@ -394,41 +311,19 @@ public sealed class TreeBuilder : ITreeBuilder
 	}
 
 	/// <summary>
-	/// High-performance comparer for FileSystemInfo entries.
-	/// Sorts directories before files, then by name (case-insensitive).
-	/// Uses inlined checks to avoid virtual method overhead.
+	/// Sorts lightweight tree entries without allocating FileSystemInfo wrappers.
+	/// The tree keeps directories first to match the long-standing UI contract.
 	/// </summary>
-	private sealed class FileSystemInfoComparer : IComparer<FileSystemInfo>
+	private sealed class FileSystemTreeEntryComparer : IComparer<FileSystemTreeEntry>
 	{
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public int Compare(FileSystemInfo? x, FileSystemInfo? y)
+		public int Compare(FileSystemTreeEntry x, FileSystemTreeEntry y)
 		{
-			if (ReferenceEquals(x, y)) return 0;
-			if (x is null) return -1;
-			if (y is null) return 1;
-
-			// Directories first (inlined attribute check)
-			bool xIsDir = IsDirectoryFast(x);
-			bool yIsDir = IsDirectoryFast(y);
-
-			if (xIsDir != yIsDir)
-				return xIsDir ? -1 : 1;
+			if (x.IsDirectory != y.IsDirectory)
+				return x.IsDirectory ? -1 : 1;
 
 			// Then by name, case-insensitive ordinal (fastest string comparison)
 			return string.Compare(x.Name, y.Name, StringComparison.OrdinalIgnoreCase);
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static bool IsDirectoryFast(FileSystemInfo entry)
-		{
-			try
-			{
-				return (entry.Attributes & FileAttributes.Directory) != 0;
-			}
-			catch
-			{
-				return false;
-			}
 		}
 	}
 }

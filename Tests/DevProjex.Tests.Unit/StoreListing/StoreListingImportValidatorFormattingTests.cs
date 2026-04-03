@@ -1,4 +1,3 @@
-using System.Text;
 using DevProjex.Tests.Shared.StoreListing;
 
 namespace DevProjex.Tests.Unit.StoreListing;

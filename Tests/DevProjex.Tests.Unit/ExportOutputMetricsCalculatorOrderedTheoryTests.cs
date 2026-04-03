@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class ExportOutputMetricsCalculatorOrderedTheoryTests
@@ -17,6 +15,26 @@ public sealed class ExportOutputMetricsCalculatorOrderedTheoryTests
 		string expectedRenderedText)
 	{
 		var actual = ExportOutputMetricsCalculator.FromOrderedContentFiles(orderedFiles);
+		var expected = ExportOutputMetricsCalculator.FromText(expectedRenderedText);
+
+		Assert.Equal(expected.Lines, actual.Lines);
+		Assert.Equal(expected.Chars, actual.Chars);
+		Assert.Equal(expected.Tokens, actual.Tokens);
+		Assert.True(caseId >= 0);
+	}
+
+	[Theory]
+	[MemberData(nameof(OrderedCases))]
+	public void OrderedContentMetricsAccumulator_MatchesRenderedClipboardMetrics(
+		int caseId,
+		IReadOnlyList<ContentFileMetrics> orderedFiles,
+		string expectedRenderedText)
+	{
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		foreach (var file in orderedFiles)
+			accumulator.AppendFile(file);
+
+		var actual = accumulator.ToMetrics();
 		var expected = ExportOutputMetricsCalculator.FromText(expectedRenderedText);
 
 		Assert.Equal(expected.Lines, actual.Lines);

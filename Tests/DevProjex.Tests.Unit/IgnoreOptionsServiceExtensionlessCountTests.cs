@@ -39,7 +39,7 @@ public sealed class IgnoreOptionsServiceExtensionlessCountTests
 		var option = options.SingleOrDefault(item => item.Id == IgnoreOptionId.ExtensionlessFiles);
 		Assert.NotNull(option);
 		Assert.Equal(expectedLabel, option!.Label);
-		Assert.False(option.DefaultChecked);
+		Assert.True(option.DefaultChecked);
 	}
 
 	[Fact]

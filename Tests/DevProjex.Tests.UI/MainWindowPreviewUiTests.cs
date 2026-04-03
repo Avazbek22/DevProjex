@@ -1,3 +1,5 @@
+using Avalonia.Layout;
+
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
@@ -101,6 +103,117 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.False(viewModel.IsPreviewMode);
             Assert.True(treeIsland.IsVisible);
             Assert.False(previewIsland.IsVisible);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewCopyButton_IsPlacedBeforeModeSelector_AndMatchesCloseButtonSize()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+
+            var copyButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewCopyButton");
+            var segmentedControl = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSegmentedControl");
+            var closeButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewCloseButton");
+
+            var copyBounds = UiTestDriver.GetBoundsInWindow(copyButton, window);
+            var segmentedBounds = UiTestDriver.GetBoundsInWindow(segmentedControl, window);
+            var closeBounds = UiTestDriver.GetBoundsInWindow(closeButton, window);
+
+            Assert.True(copyBounds.Left < segmentedBounds.Left);
+            Assert.InRange(segmentedBounds.Left - copyBounds.Right, 0, 12);
+            Assert.InRange(Math.Abs(copyBounds.Width - closeBounds.Width), 0, 1.5);
+            Assert.InRange(Math.Abs(copyBounds.Height - closeBounds.Height), 0, 1.5);
+            Assert.Equal(0, copyButton.Padding.Left);
+            Assert.Equal(0, copyButton.Padding.Right);
+            Assert.Equal(0, copyButton.Padding.Top);
+            Assert.Equal(0, copyButton.Padding.Bottom);
+            Assert.Equal(HorizontalAlignment.Center, copyButton.HorizontalContentAlignment);
+            Assert.Equal(VerticalAlignment.Center, copyButton.VerticalContentAlignment);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewCopyButton_CopiesPayloadForActivePreviewMode()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+
+            foreach (var mode in new[]
+                     {
+                         PreviewContentMode.Tree,
+                         PreviewContentMode.Content,
+                         PreviewContentMode.TreeAndContent
+                     })
+            {
+                await UiTestDriver.SwitchPreviewModeAsync(window, mode);
+                var expectedText = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+                Assert.False(string.IsNullOrWhiteSpace(expectedText));
+
+                await UiTestDriver.SetClipboardTextAsync(window, $"preview-copy-sentinel-{mode}-{Guid.NewGuid():N}");
+                await UiTestDriver.ClickPreviewCopyButtonAsync(window);
+                await UiTestDriver.WaitForClipboardTextAsync(window, expectedText);
+            }
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewCopyButton_DoesNotReplacePreviewDocument_OrTogglePreviewLoading()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+
+            foreach (var mode in new[]
+                     {
+                         PreviewContentMode.Tree,
+                         PreviewContentMode.Content,
+                         PreviewContentMode.TreeAndContent
+                     })
+            {
+                await UiTestDriver.SwitchPreviewModeAsync(window, mode);
+
+                var viewModel = UiTestDriver.GetViewModel(window);
+                var previewDocumentBeforeCopy = viewModel.PreviewDocument;
+                var previewLineCountBeforeCopy = viewModel.PreviewLineCount;
+                var selectedModeBeforeCopy = viewModel.SelectedPreviewContentMode;
+
+                Assert.NotNull(previewDocumentBeforeCopy);
+                Assert.False(viewModel.IsPreviewLoading);
+
+                await UiTestDriver.SetClipboardTextAsync(window, $"preview-copy-stability-{mode}-{Guid.NewGuid():N}");
+                await UiTestDriver.ClickPreviewCopyButtonAsync(window);
+                await UiTestDriver.WaitForClipboardTextAsync(
+                    window,
+                    UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
+
+                Assert.Same(previewDocumentBeforeCopy, viewModel.PreviewDocument);
+                Assert.Equal(previewLineCountBeforeCopy, viewModel.PreviewLineCount);
+                Assert.Equal(selectedModeBeforeCopy, viewModel.SelectedPreviewContentMode);
+                Assert.False(viewModel.IsPreviewLoading);
+            }
         }
         finally
         {
@@ -244,6 +357,114 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
             Assert.True(stickyHeader.IsVisible);
             Assert.False(string.IsNullOrWhiteSpace(stickyHeaderText.Text));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StickyPathCopyButton_IsVisibleInsideLineNumberCap_AndUsesCompactSize()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.ScrollPreviewUntilStickyHeaderVisibleAsync(window);
+
+            var stickyHeaderCap = UiTestDriver.GetRequiredControl<Border>(window, "PreviewStickyHeaderCap");
+            var stickyHeaderContainer = UiTestDriver.GetRequiredControl<Border>(window, "PreviewStickyHeaderContainer");
+            var stickyHeaderCopyButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewStickyHeaderCopyButton");
+            var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
+
+            var capBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderCap, window);
+            var headerBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderContainer, window);
+            var buttonBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderCopyButton, window);
+            var textBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderText, window);
+
+            Assert.True(stickyHeaderCap.IsVisible);
+            Assert.True(stickyHeaderContainer.IsVisible);
+            Assert.InRange(Math.Abs(buttonBounds.Width - 24), 0, 1.5);
+            Assert.InRange(Math.Abs(buttonBounds.Height - 24), 0, 1.5);
+            Assert.True(stickyHeaderCopyButton.BorderThickness.Left >= 0.9);
+            Assert.True(stickyHeaderCopyButton.BorderThickness.Top >= 0.9);
+            Assert.NotNull(stickyHeaderCopyButton.Background);
+            Assert.NotNull(stickyHeaderCopyButton.BorderBrush);
+            Assert.True(buttonBounds.Left >= capBounds.Left - 1);
+            Assert.True(buttonBounds.Right <= capBounds.Right + 1);
+            Assert.True(buttonBounds.Right <= headerBounds.Left + 2);
+            Assert.True(capBounds.Right <= textBounds.Left + 2);
+            Assert.Equal(PlacementMode.Right, ToolTip.GetPlacement(stickyHeaderCopyButton));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StickyPathCopyButton_CopiesVisibleSectionPath()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.ScrollPreviewUntilStickyHeaderVisibleAsync(window);
+
+            var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
+            var expectedPayload = UiTestDriver.ComputeVisibleStickyHeaderCopyPayload(window);
+
+            Assert.False(string.IsNullOrWhiteSpace(stickyHeaderText.Text));
+            Assert.StartsWith($"{stickyHeaderText.Text}:", expectedPayload, StringComparison.Ordinal);
+
+            await UiTestDriver.SetClipboardTextAsync(window, $"sticky-header-sentinel-{Guid.NewGuid():N}");
+            await UiTestDriver.ClickPreviewStickyHeaderCopyButtonAsync(window);
+            await UiTestDriver.WaitForClipboardTextAsync(window, expectedPayload);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StickyPathCopyButton_DoesNotReplacePreviewDocument_OrChangeVisibleSection()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.ScrollPreviewUntilStickyHeaderVisibleAsync(window);
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
+            var stickyHeaderTextBeforeCopy = stickyHeaderText.Text;
+            var previewDocumentBeforeCopy = viewModel.PreviewDocument;
+            var previewLineCountBeforeCopy = viewModel.PreviewLineCount;
+            var expectedPayload = UiTestDriver.ComputeVisibleStickyHeaderCopyPayload(window);
+
+            Assert.NotNull(previewDocumentBeforeCopy);
+            Assert.False(string.IsNullOrWhiteSpace(stickyHeaderTextBeforeCopy));
+            Assert.False(viewModel.IsPreviewLoading);
+            Assert.False(viewModel.StatusBusy);
+
+            await UiTestDriver.SetClipboardTextAsync(window, $"sticky-copy-stability-{Guid.NewGuid():N}");
+            await UiTestDriver.ClickPreviewStickyHeaderCopyButtonAsync(window);
+            await UiTestDriver.WaitForClipboardTextAsync(window, expectedPayload);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+
+            Assert.Same(previewDocumentBeforeCopy, viewModel.PreviewDocument);
+            Assert.Equal(previewLineCountBeforeCopy, viewModel.PreviewLineCount);
+            Assert.Equal(stickyHeaderTextBeforeCopy, stickyHeaderText.Text);
+            Assert.False(viewModel.IsPreviewLoading);
+            Assert.False(viewModel.StatusBusy);
         }
         finally
         {

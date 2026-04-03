@@ -1,5 +1,4 @@
 using Avalonia.Media.TextFormatting;
-using DevProjex.Application.Preview;
 
 namespace DevProjex.Avalonia.Controls;
 

@@ -8,8 +8,10 @@ public sealed class PathUtilityTests
 		using var temp = new TemporaryDirectory();
 		var folderPath = temp.CreateFolder("repo");
 		var withSeparator = folderPath + Path.DirectorySeparatorChar;
+		var withLegacySeparator = folderPath + '\\';
 
 		Assert.Equal(folderPath, PathUtility.Normalize(withSeparator));
+		Assert.Equal(folderPath, PathUtility.Normalize(withLegacySeparator));
 
 		var rootPath = Path.GetPathRoot(Path.GetTempPath())!;
 		Assert.Equal(rootPath, PathUtility.Normalize(rootPath));
@@ -58,5 +60,17 @@ public sealed class PathUtilityTests
 		var alteredCaseRoot = cacheRoot.Replace("RepoCache", "rePOcAche", StringComparison.Ordinal);
 
 		Assert.Equal(OperatingSystem.IsWindows(), PathUtility.IsPathInside(descendant, alteredCaseRoot));
+	}
+
+	[Fact]
+	public void IsPathInside_ReturnsTrue_ForLegacyTrailingSeparatorVariant()
+	{
+		using var temp = new TemporaryDirectory();
+		var cacheRoot = temp.CreateFolder("RepoCache");
+		var child = temp.CreateFolder(Path.Combine("RepoCache", "repo"));
+		var legacyRoot = cacheRoot + '\\';
+
+		Assert.True(PathUtility.IsPathInside(child, legacyRoot));
+		Assert.True(PathUtility.IsPathInside(legacyRoot, legacyRoot));
 	}
 }

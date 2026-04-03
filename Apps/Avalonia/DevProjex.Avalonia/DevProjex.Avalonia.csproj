@@ -24,6 +24,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
     <InternalsVisibleTo Include="DevProjex.Tests.UI" />
+    <InternalsVisibleTo Include="DevProjex.Tests.Integration" />
   </ItemGroup>
 
   <ItemGroup>

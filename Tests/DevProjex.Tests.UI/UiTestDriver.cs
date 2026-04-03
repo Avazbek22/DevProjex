@@ -1,22 +1,45 @@
+using Avalonia.VisualTree;
+using Avalonia.Interactivity;
+using DevProjex.Application.Preview;
+using DevProjex.Application.Services;
+using DevProjex.Kernel.Contracts;
+using DevProjex.Tests.Shared.ProjectLoadWorkflow;
+using System.Globalization;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
+
 namespace DevProjex.Tests.UI;
 
 internal static class UiTestDriver
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
+    private static readonly ConcurrentDictionary<MainWindow, string> WindowAppDataPaths = new();
     private static readonly bool FastTimingsEnabled =
         string.Equals(Environment.GetEnvironmentVariable("DEVPROJEX_FAST_UI_TESTS"), "1", StringComparison.Ordinal);
     private static readonly TimeSpan PollDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(15);
     private static readonly TimeSpan FrameDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(6);
 
-    public static async Task<MainWindow> CreateLoadedMainWindowAsync(UiTestProject project)
+    public static async Task<MainWindow> CreateLoadedMainWindowAsync(
+        UiTestProject project,
+        bool waitForInitialSettingsPane = true,
+        string? appDataPathOverride = null,
+        Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null,
+        bool waitForStatusIdle = true)
     {
         var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
-        var services = AvaloniaCompositionRoot.CreateDefault(options);
+        var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDataPath);
+
+        var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+        if (configureServices is not null)
+            services = configureServices(services);
         var window = new MainWindow(options, services)
         {
             Width = 1500,
             Height = 920
         };
+        WindowAppDataPaths[window] = appDataPath;
 
         window.Show();
 
@@ -32,22 +55,30 @@ internal static class UiTestDriver
                 var viewModel = GetViewModel(window);
                 return viewModel.IsProjectLoaded &&
                        viewModel.TreeNodes.Count > 0 &&
-                       !viewModel.StatusBusy;
+                       (!waitForStatusIdle || !viewModel.StatusBusy);
             },
-            "project to finish loading");
+            waitForStatusIdle
+                ? "project to finish loading"
+                : "project tree to become available before background metrics finish");
 
-        await WaitForConditionAsync(
-            window,
-            () =>
-            {
-                var viewModel = GetViewModel(window);
-                if (!viewModel.SettingsVisible)
-                    return true;
+        if (waitForStatusIdle)
+            await WaitForSelectionRefreshIdleAsync(window);
 
-                var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
-                return GetActualWidth(settingsContainer) >= 200;
-            },
-            "initial settings pane to become visually available");
+        if (waitForInitialSettingsPane)
+        {
+            await WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var viewModel = GetViewModel(window);
+                    if (!viewModel.SettingsVisible)
+                        return true;
+
+                    var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
+                    return GetActualWidth(settingsContainer) >= 200;
+                },
+                "initial settings pane to become visually available");
+        }
 
         await WaitForSettledFramesAsync(frameCount: 24);
         return window;
@@ -56,10 +87,14 @@ internal static class UiTestDriver
     public static async Task CloseWindowAsync(MainWindow window)
     {
         if (!window.IsVisible)
+        {
+            CleanupWindowAppData(window);
             return;
+        }
 
         window.Close();
         await WaitForSettledFramesAsync(frameCount: 6);
+        CleanupWindowAppData(window);
     }
 
     public static MainWindowViewModel GetViewModel(MainWindow window)
@@ -68,7 +103,10 @@ internal static class UiTestDriver
     public static T GetRequiredControl<T>(MainWindow window, string name)
         where T : Control
     {
-        var control = window.FindControl<T>(name);
+        var control = window.FindControl<T>(name) ??
+                      window.GetVisualDescendants()
+                          .OfType<T>()
+                          .FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.Ordinal));
         return Assert.IsType<T>(control);
     }
 
@@ -80,11 +118,121 @@ internal static class UiTestDriver
         return Assert.IsType<T>(control);
     }
 
+    public static CheckBox GetRequiredIgnoreOptionCheckBox(MainWindow window, IgnoreOptionId optionId)
+    {
+        var checkBox = FindIgnoreOptionCheckBox(window, optionId);
+
+        return Assert.IsType<CheckBox>(checkBox);
+    }
+
+    public static CheckBox GetRequiredRootFolderCheckBox(MainWindow window, string rootFolderName)
+    {
+        var checkBox = FindRootFolderCheckBox(window, rootFolderName);
+
+        return Assert.IsType<CheckBox>(checkBox);
+    }
+
+    public static CheckBox GetRequiredExtensionCheckBox(MainWindow window, string extensionName)
+    {
+        var checkBox = FindExtensionCheckBox(window, extensionName);
+
+        return Assert.IsType<CheckBox>(checkBox);
+    }
+
+    public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
+    {
+        var checkBox = await WaitForRootFolderCheckBoxAsync(window, rootFolderName);
+        await ClickAsync(window, checkBox);
+    }
+
+    public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
+    {
+        var checkBox = await WaitForExtensionCheckBoxAsync(window, extensionName);
+        await ClickAsync(window, checkBox);
+    }
+
+    public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
+    {
+        var checkBox = await WaitForIgnoreOptionCheckBoxAsync(window, optionId);
+        await ClickAsync(window, checkBox);
+    }
+
+    public static async Task ClickApplySettingsAsync(MainWindow window)
+        => await ClickAsync(window, GetRequiredApplySettingsButton(window));
+
+    public static async Task RaiseButtonClickAsync(Button button)
+    {
+        Assert.True(button.IsEnabled);
+        button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
+    public static async Task RaiseMenuItemClickAsync(MenuItem menuItem)
+    {
+        menuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
+    public static async Task<GitCloneWindow> OpenGitCloneWindowAsync(MainWindow window)
+    {
+        var cloneWindow = new GitCloneWindow
+        {
+            DataContext = GetViewModel(window)
+        };
+
+        cloneWindow.Show(window);
+
+        await WaitForConditionAsync(
+            window,
+            () => cloneWindow.IsVisible,
+            "git clone window to open");
+
+        await WaitForSettledFramesAsync(frameCount: 4);
+        return cloneWindow;
+    }
+
+    public static Button GetRequiredApplySettingsButton(MainWindow window)
+    {
+        var viewModel = GetViewModel(window);
+        var button = window
+            .GetVisualDescendants()
+            .OfType<Button>()
+            .FirstOrDefault(control => control.IsVisible &&
+                                       string.Equals(control.Content?.ToString(), viewModel.SettingsApply, StringComparison.Ordinal));
+
+        return Assert.IsType<Button>(button);
+    }
+
+    public static Button GetRequiredStatusCancelButton(MainWindow window)
+    {
+        var button = window
+            .GetVisualDescendants()
+            .OfType<Button>()
+            .FirstOrDefault(control => control.IsVisible && control.Classes.Contains("status-cancel"));
+
+        return Assert.IsType<Button>(button);
+    }
+
     public static async Task ClickAsync(MainWindow window, Control control)
     {
         var clickPoint = GetControlCenter(control, window);
         window.MouseMove(clickPoint, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 2);
+        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
+    public static async Task DoubleClickAsync(MainWindow window, Control control)
+    {
+        var clickPoint = GetControlCenter(control, window);
+        window.MouseMove(clickPoint, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 1);
+
+        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 1);
+
         window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
         window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 4);
@@ -158,6 +306,18 @@ internal static class UiTestDriver
         var previewCloseButton = GetRequiredControl<Button>(window, "PreviewCloseButton");
         await ClickAsync(window, previewCloseButton);
         await WaitForPreviewClosedAsync(window);
+    }
+
+    public static async Task ClickPreviewCopyButtonAsync(MainWindow window)
+    {
+        var previewCopyButton = GetRequiredControl<Button>(window, "PreviewCopyButton");
+        await ClickAsync(window, previewCopyButton);
+    }
+
+    public static async Task ClickPreviewStickyHeaderCopyButtonAsync(MainWindow window)
+    {
+        var stickyHeaderCopyButton = GetRequiredControl<Button>(window, "PreviewStickyHeaderCopyButton");
+        await ClickAsync(window, stickyHeaderCopyButton);
     }
 
     public static async Task WaitForPreviewClosedAsync(MainWindow window)
@@ -237,6 +397,337 @@ internal static class UiTestDriver
             $"settings visibility to become {visible}");
 
         await WaitForSettledFramesAsync(frameCount: 12);
+    }
+
+    public static async Task WaitForIgnoreOptionStateAsync(
+        MainWindow window,
+        IgnoreOptionId optionId,
+        bool visible,
+        bool? isChecked = null)
+    {
+        await WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var option = GetViewModel(window).IgnoreOptions.FirstOrDefault(item => item.Id == optionId);
+                if (!visible)
+                    return option is null;
+
+                if (option is null)
+                    return false;
+
+                return isChecked is null || option.IsChecked == isChecked.Value;
+            },
+            $"ignore option {optionId} to become visible={visible} checked={isChecked?.ToString() ?? "<any>"}");
+
+        await WaitForSettledFramesAsync(frameCount: 8);
+    }
+
+    public static async Task WaitForIgnoreOptionLabelAsync(
+        MainWindow window,
+        IgnoreOptionId optionId,
+        string expectedLabel)
+    {
+        await WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var option = GetViewModel(window).IgnoreOptions.FirstOrDefault(item => item.Id == optionId);
+                return option is not null &&
+                       string.Equals(option.Label, expectedLabel, StringComparison.Ordinal);
+            },
+            $"ignore option {optionId} label to become '{expectedLabel}'");
+
+        await WaitForSettledFramesAsync(frameCount: 8);
+    }
+
+    public static async Task WaitForStatusMetricsAsync(
+        MainWindow window,
+        ExportOutputMetrics expectedTreeMetrics,
+        ExportOutputMetrics expectedContentMetrics,
+        bool waitForSelectionRefreshIdle = true)
+    {
+        if (waitForSelectionRefreshIdle)
+            await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(30));
+
+        await WaitForStatusMetricsReadyAsync(window);
+
+        await WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var viewModel = GetViewModel(window);
+                if (!viewModel.StatusMetricsVisible ||
+                    string.IsNullOrWhiteSpace(viewModel.StatusTreeStatsText) ||
+                    string.IsNullOrWhiteSpace(viewModel.StatusContentStatsText))
+                {
+                    return false;
+                }
+
+                return TryParseStatusMetrics(viewModel.StatusTreeStatsText, out var actualTreeMetrics) &&
+                       TryParseStatusMetrics(viewModel.StatusContentStatsText, out var actualContentMetrics) &&
+                       actualTreeMetrics == expectedTreeMetrics &&
+                       actualContentMetrics == expectedContentMetrics;
+            },
+            $"status metrics to match the expected applied export snapshot (expected tree={expectedTreeMetrics}, expected content={expectedContentMetrics})",
+            timeout: TimeSpan.FromSeconds(30));
+
+        await WaitForSettledFramesAsync(frameCount: 12);
+    }
+
+    public static async Task<ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics> ComputeAppliedExportMetricsAsync(
+        MainWindow window,
+        CancellationToken cancellationToken = default)
+    {
+        await WaitForSelectionRefreshIdleAsync(window);
+
+        var currentTree = GetRequiredPrivateField<BuildTreeResult>(window, "_currentTree");
+        var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
+        var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
+        var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
+        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
+        var hasSelection = selectedPaths.Count > 0;
+        var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
+        var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
+
+        // UI workflow assertions must compare the status bar against the already-applied
+        // tree/export pipeline of the open window. Rebuilding a second tree from settings
+        // state looked cheaper, but it let CI drift away from the actual MainWindow state.
+        var treeText = hasSelection
+            ? treeExport.BuildSelectedTree(
+                currentPath,
+                currentTree.Root,
+                selectedPaths,
+                treeFormat,
+                pathPresentation?.DisplayRootPath,
+                pathPresentation?.DisplayRootName)
+            : treeExport.BuildFullTree(
+                currentPath,
+                currentTree.Root,
+                treeFormat,
+                pathPresentation?.DisplayRootPath,
+                pathPresentation?.DisplayRootName);
+        var treeMetrics = ExportOutputMetricsCalculator.FromText(treeText);
+
+        var orderedFilePaths = hasSelection
+            ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
+            : BuildOrderedAllFilePaths(currentTree.Root);
+        var contentText = await contentExport.BuildAsync(
+            orderedFilePaths,
+            cancellationToken,
+            pathPresentation?.MapFilePath);
+        var contentMetrics = ExportOutputMetricsCalculator.FromText(contentText);
+
+        return new ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics(treeMetrics, contentMetrics);
+    }
+
+    public static async Task<string> ComputeAppliedPreviewCopyPayloadAsync(
+        MainWindow window,
+        PreviewContentMode mode,
+        CancellationToken cancellationToken = default)
+    {
+        await WaitForSelectionRefreshIdleAsync(window);
+
+        var currentTree = GetRequiredPrivateField<BuildTreeResult>(window, "_currentTree");
+        var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
+        var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
+        var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
+        var treeAndContentExport = GetRequiredPrivateField<TreeAndContentExportService>(window, "_treeAndContentExport");
+        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
+        var hasSelection = selectedPaths.Count > 0;
+        var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
+        var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
+
+        return mode switch
+        {
+            PreviewContentMode.Tree => hasSelection
+                ? treeExport.BuildSelectedTree(
+                    currentPath,
+                    currentTree.Root,
+                    selectedPaths,
+                    treeFormat,
+                    pathPresentation?.DisplayRootPath,
+                    pathPresentation?.DisplayRootName)
+                : treeExport.BuildFullTree(
+                    currentPath,
+                    currentTree.Root,
+                    treeFormat,
+                    pathPresentation?.DisplayRootPath,
+                    pathPresentation?.DisplayRootName),
+            PreviewContentMode.Content => await contentExport.BuildAsync(
+                hasSelection
+                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
+                    : BuildOrderedAllFilePaths(currentTree.Root),
+                cancellationToken,
+                pathPresentation?.MapFilePath),
+            PreviewContentMode.TreeAndContent => await treeAndContentExport.BuildAsync(
+                currentPath,
+                currentTree.Root,
+                selectedPaths,
+                treeFormat,
+                cancellationToken,
+                pathPresentation),
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+        };
+    }
+
+    public static string ComputeCurrentPreviewCopyPayload(MainWindow window)
+    {
+        var viewModel = GetViewModel(window);
+        var document = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(window, "PreviewTextControl").Document ??
+                       viewModel.PreviewDocument;
+        Assert.NotNull(document);
+        return PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
+    }
+
+    public static string ComputeVisibleStickyHeaderCopyPayload(MainWindow window)
+    {
+        var viewModel = GetViewModel(window);
+        var previewTextControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(window, "PreviewTextControl");
+        var previewScrollViewer = GetRequiredPreviewScrollViewer(window);
+        var document = previewTextControl.Document ?? viewModel.PreviewDocument;
+        if (document?.Sections is not { Count: > 0 } sections)
+            throw new XunitException("Preview document sections are not available for sticky-header copy.");
+
+        var topLine = previewTextControl.GetLineNumberAtVerticalOffset(previewScrollViewer.Offset.Y);
+        if (topLine < sections[0].StartLine)
+            throw new XunitException("Sticky-header copy payload was requested before the first file section became visible.");
+
+        var currentSection = PreviewDocumentSectionLookup.FindContainingSection(sections, topLine) ??
+                             PreviewDocumentSectionLookup.FindContainingOrNextSection(sections, topLine) ??
+                             sections[^1];
+
+        return PreviewClipboardPayloadBuilder.BuildSectionPayload(document, currentSection);
+    }
+
+    public static async Task SetClipboardTextAsync(MainWindow window, string content)
+    {
+        var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
+        Assert.NotNull(clipboard);
+        await clipboard.SetTextAsync(content);
+        await WaitForSettledFramesAsync(frameCount: 2);
+    }
+
+    public static async Task<string?> GetClipboardTextAsync(MainWindow window)
+    {
+        var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
+        Assert.NotNull(clipboard);
+        return await global::Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard);
+    }
+
+    public static async Task WaitForClipboardTextAsync(
+        MainWindow window,
+        string expectedText,
+        TimeSpan? timeout = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(20));
+        string? lastClipboardText = null;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            lastClipboardText = await GetClipboardTextAsync(window);
+            if (string.Equals(lastClipboardText, expectedText, StringComparison.Ordinal))
+            {
+                await WaitForSettledFramesAsync(frameCount: 4);
+                return;
+            }
+
+            await Task.Delay(PollDelay);
+            await WaitForSettledFramesAsync(frameCount: 2);
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"Timed out waiting for clipboard text to match the expected preview copy payload. Expected length={expectedText.Length}, actual length={lastClipboardText?.Length ?? 0}.");
+    }
+
+    public static async Task WaitForStatusMetricsReadyAsync(MainWindow window, TimeSpan? timeout = null)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => TryGetCurrentStatusMetrics(window, out _, out _),
+            "status metrics to become visible and parsable",
+            timeout ?? TimeSpan.FromSeconds(30));
+
+        await WaitForSettledFramesAsync(frameCount: 6);
+    }
+
+    public static bool TryParseStatusMetrics(string text, out ExportOutputMetrics metrics)
+    {
+        metrics = ExportOutputMetrics.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var normalizedText = text.Replace('\u00A0', ' ');
+        var segments = normalizedText.Trim('[', ']').Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 3)
+            return false;
+
+        var tokens = new string[3];
+        for (var index = 0; index < 3; index++)
+        {
+            // CI runners can format status-bar numbers with culture-specific thousands
+            // separators (for example 4,698 on en-US Windows or 4 698 on other locales).
+            // The parser must accept the rendered token exactly as the user sees it.
+            var match = Regex.Match(segments[index], @"([0-9][0-9\s,\.\u00A0]*[KM]?)");
+            if (!match.Success)
+                return false;
+
+            tokens[index] = match.Groups[1].Value;
+        }
+
+        if (!TryParseMetricNumber(tokens[0], out var lines) ||
+            !TryParseMetricNumber(tokens[1], out var chars) ||
+            !TryParseMetricNumber(tokens[2], out var tokenCount))
+        {
+            return false;
+        }
+
+        metrics = new ExportOutputMetrics(lines, chars, tokenCount);
+        return true;
+    }
+
+    public static IReadOnlyCollection<IgnoreOptionId> GetSelectedIgnoreOptionIds(MainWindow window)
+    {
+        return GetSelectionCoordinator(window).GetSelectedIgnoreOptionIds();
+    }
+
+    public static async Task WaitForSelectionRefreshIdleAsync(MainWindow window, TimeSpan? timeout = null)
+    {
+        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        using var cts = new CancellationTokenSource(effectiveTimeout);
+        await GetSelectionCoordinator(window).WaitForPendingRefreshesAsync(cts.Token);
+
+        await WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var viewModel = GetViewModel(window);
+                return !viewModel.StatusBusy;
+            },
+            "selection refresh pipeline to become idle",
+            effectiveTimeout);
+
+        await WaitForSettledFramesAsync(frameCount: 6);
+    }
+
+    public static bool TryGetCurrentStatusMetrics(
+        MainWindow window,
+        out ExportOutputMetrics treeMetrics,
+        out ExportOutputMetrics contentMetrics)
+    {
+        treeMetrics = ExportOutputMetrics.Empty;
+        contentMetrics = ExportOutputMetrics.Empty;
+
+        var viewModel = GetViewModel(window);
+        if (!viewModel.StatusMetricsVisible ||
+            string.IsNullOrWhiteSpace(viewModel.StatusTreeStatsText) ||
+            string.IsNullOrWhiteSpace(viewModel.StatusContentStatsText))
+        {
+            return false;
+        }
+
+        return TryParseStatusMetrics(viewModel.StatusTreeStatsText, out treeMetrics) &&
+               TryParseStatusMetrics(viewModel.StatusContentStatsText, out contentMetrics);
     }
 
     public static async Task SwitchPreviewModeAsync(MainWindow window, PreviewContentMode mode)
@@ -514,7 +1005,231 @@ internal static class UiTestDriver
                 $"FilterVisible={viewModel.FilterVisible}",
                 $"SearchBusy={viewModel.IsSearchInProgress}",
                 $"FilterBusy={viewModel.IsFilterInProgress}",
-                $"StatusBusy={viewModel.StatusBusy}"
+                $"StatusBusy={viewModel.StatusBusy}",
+                $"StatusTree={viewModel.StatusTreeStatsText}",
+                $"StatusContent={viewModel.StatusContentStatsText}"
             ]);
+    }
+
+    private static bool IsInteractableWithinWindow(Control control, MainWindow window)
+        => control.IsVisible && control.TranslatePoint(default, window).HasValue;
+
+    private static CheckBox? FindIgnoreOptionCheckBox(MainWindow window, IgnoreOptionId optionId)
+    {
+        return window
+            .GetVisualDescendants()
+            .OfType<CheckBox>()
+            .FirstOrDefault(control => control.DataContext is IgnoreOptionViewModel option &&
+                                       option.Id == optionId &&
+                                       IsInteractableWithinWindow(control, window));
+    }
+
+    private static CheckBox? FindRootFolderCheckBox(MainWindow window, string rootFolderName)
+    {
+        return window
+            .GetVisualDescendants()
+            .OfType<CheckBox>()
+            .FirstOrDefault(control => control.DataContext is SelectionOptionViewModel option &&
+                                       string.Equals(option.Name, rootFolderName, StringComparison.Ordinal) &&
+                                       IsInteractableWithinWindow(control, window));
+    }
+
+    private static CheckBox? FindExtensionCheckBox(MainWindow window, string extensionName)
+    {
+        return window
+            .GetVisualDescendants()
+            .OfType<CheckBox>()
+            .FirstOrDefault(control => control.DataContext is SelectionOptionViewModel option &&
+                                       string.Equals(option.Name, extensionName, StringComparison.Ordinal) &&
+                                       GetViewModel(window).Extensions.Contains(option) &&
+                                       IsInteractableWithinWindow(control, window));
+    }
+
+    private static CheckBox? FindTreeNodeCheckBox(MainWindow window, string displayName)
+    {
+        return window
+            .GetVisualDescendants()
+            .OfType<CheckBox>()
+            .FirstOrDefault(control => control.DataContext is TreeNodeViewModel node &&
+                                       string.Equals(node.DisplayName, displayName, StringComparison.Ordinal) &&
+                                       IsInteractableWithinWindow(control, window));
+    }
+
+    private static async Task<CheckBox> WaitForRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => FindRootFolderCheckBox(window, rootFolderName) is not null,
+            $"root folder checkbox '{rootFolderName}' to become interactable");
+
+        return GetRequiredRootFolderCheckBox(window, rootFolderName);
+    }
+
+    private static async Task<CheckBox> WaitForExtensionCheckBoxAsync(MainWindow window, string extensionName)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => FindExtensionCheckBox(window, extensionName) is not null,
+            $"extension checkbox '{extensionName}' to become interactable");
+
+        return GetRequiredExtensionCheckBox(window, extensionName);
+    }
+
+    private static async Task<CheckBox> WaitForIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => FindIgnoreOptionCheckBox(window, optionId) is not null,
+            $"ignore checkbox '{optionId}' to become interactable");
+
+        return GetRequiredIgnoreOptionCheckBox(window, optionId);
+    }
+
+    public static async Task<CheckBox> WaitForTreeNodeCheckBoxAsync(MainWindow window, string displayName)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => FindTreeNodeCheckBox(window, displayName) is not null,
+            $"tree node checkbox '{displayName}' to become interactable");
+
+        return Assert.IsType<CheckBox>(FindTreeNodeCheckBox(window, displayName));
+    }
+
+    private static DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator GetSelectionCoordinator(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField("_selectionCoordinator", BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
+    }
+
+    private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)
+    {
+        var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<T>(field?.GetValue(window));
+    }
+
+    private static T InvokePrivateMethod<T>(MainWindow window, string methodName)
+    {
+        var method = typeof(MainWindow).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<T>(method?.Invoke(window, null));
+    }
+
+    private static T? InvokePrivateMethodAllowNull<T>(MainWindow window, string methodName)
+        where T : class
+    {
+        var method = typeof(MainWindow).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        return method?.Invoke(window, null) as T;
+    }
+
+    private static List<string> BuildOrderedSelectedFilePaths(
+        TreeNodeDescriptor treeRoot,
+        IReadOnlySet<string> selectedPaths)
+    {
+        return PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(
+            selectedPaths,
+            treeRoot,
+            ensureExists: true);
+    }
+
+    private static List<string> BuildOrderedAllFilePaths(TreeNodeDescriptor root)
+    {
+        var uniquePaths = new HashSet<string>(PathComparer.Default);
+        var stack = new Stack<TreeNodeDescriptor>();
+        stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            if (!current.IsDirectory)
+            {
+                uniquePaths.Add(current.FullPath);
+                continue;
+            }
+
+            for (var index = current.Children.Count - 1; index >= 0; index--)
+                stack.Push(current.Children[index]);
+        }
+
+        var ordered = new List<string>(uniquePaths.Count);
+        ordered.AddRange(uniquePaths);
+        ordered.Sort(PathComparer.Default);
+        return ordered;
+    }
+
+    private static void CleanupWindowAppData(MainWindow window)
+    {
+        if (!WindowAppDataPaths.TryRemove(window, out var appDataPath))
+            return;
+
+        try
+        {
+            if (Directory.Exists(appDataPath))
+                Directory.Delete(appDataPath, recursive: true);
+        }
+        catch
+        {
+            // Best effort cleanup only. CI can keep temporary handles alive for a short time.
+        }
+    }
+
+    private static bool TryParseMetricNumber(string text, out int value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var normalized = text
+            .Replace('\u00A0', ' ')
+            .Trim();
+        var multiplier = 1.0;
+        if (normalized.EndsWith('K'))
+        {
+            multiplier = 1_000.0;
+            normalized = normalized[..^1];
+        }
+        else if (normalized.EndsWith('M'))
+        {
+            multiplier = 1_000_000.0;
+            normalized = normalized[..^1];
+        }
+
+        if (multiplier == 1.0)
+        {
+            // Integer status values use localized group separators only. We deliberately
+            // keep digits and drop every separator so 4,698 / 4 698 / 4.698 all become 4698.
+            normalized = string.Concat(normalized.Where(char.IsDigit));
+            if (normalized.Length == 0 || !int.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out value))
+                return false;
+
+            return true;
+        }
+
+        normalized = normalized.Replace(" ", string.Empty, StringComparison.Ordinal);
+
+        // Compact K/M labels can use either '.' or ',' as the decimal separator depending
+        // on the current culture. Normalizing to invariant form keeps the comparison stable.
+        var lastComma = normalized.LastIndexOf(',');
+        var lastDot = normalized.LastIndexOf('.');
+        var decimalSeparatorIndex = Math.Max(lastComma, lastDot);
+        if (decimalSeparatorIndex >= 0)
+        {
+            var integerPart = new string(normalized[..decimalSeparatorIndex].Where(char.IsDigit).ToArray());
+            var fractionalPart = new string(normalized[(decimalSeparatorIndex + 1)..].Where(char.IsDigit).ToArray());
+            normalized = fractionalPart.Length == 0
+                ? integerPart
+                : $"{integerPart}.{fractionalPart}";
+        }
+        else
+        {
+            normalized = string.Concat(normalized.Where(char.IsDigit));
+        }
+
+        if (normalized.Length == 0 ||
+            !double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return false;
+        }
+
+        value = (int)Math.Round(parsed * multiplier, MidpointRounding.AwayFromZero);
+        return true;
     }
 }

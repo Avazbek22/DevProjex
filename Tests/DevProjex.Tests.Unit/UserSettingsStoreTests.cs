@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 using DevProjex.Infrastructure.ThemePresets;
+using InfrastructureUserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
+using UserSettingsStore = DevProjex.Tests.Unit.IsolatedUserSettingsStore;
 
 namespace DevProjex.Tests.Unit;
 
@@ -534,6 +536,36 @@ public sealed class UserSettingsStoreTests
 		var path = store.GetPath();
 
 		Assert.EndsWith(Path.Combine("DevProjex", "user-settings.json"), path);
+	}
+
+	[Fact]
+	// Ensures the settings store recreates its primary and backup files during startup bootstrap.
+	public void EnsureStorageExists_CreatesPrimaryAndBackup_WhenFilesAreMissing()
+	{
+		using var scope = new AppDataScope();
+		var store = new UserSettingsStore();
+
+		Assert.True(store.EnsureStorageExists());
+		Assert.True(File.Exists(store.GetPath()));
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+	}
+
+	[Fact]
+	// Ensures the backup file is rebuilt from the current primary snapshot when it disappears.
+	public void EnsureStorageExists_RecreatesMissingBackup_FromPrimarySnapshot()
+	{
+		using var scope = new AppDataScope();
+		var store = new UserSettingsStore();
+		var db = store.Load();
+		db.LastSelected = "Light.Acrylic";
+		store.Save(db);
+		File.Delete(store.GetPath() + ".bak");
+
+		Assert.True(store.EnsureStorageExists());
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+
+		var reloaded = store.Load();
+		Assert.Equal("Light.Acrylic", reloaded.LastSelected);
 	}
 
 	[Theory]
@@ -1450,6 +1482,7 @@ public sealed class UserSettingsStoreTests
 			Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", _temp.Path);
 			Environment.SetEnvironmentVariable("APPDATA", _temp.Path);
 			Environment.SetEnvironmentVariable("LOCALAPPDATA", _temp.Path);
+			UserSettingsTestAppDataContext.CurrentRoot.Value = _temp.Path;
 		}
 
 		public void Dispose()
@@ -1458,7 +1491,47 @@ public sealed class UserSettingsStoreTests
 			Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", _originalXdgConfig);
 			Environment.SetEnvironmentVariable("APPDATA", _originalAppData);
 			Environment.SetEnvironmentVariable("LOCALAPPDATA", _originalLocalAppData);
+			UserSettingsTestAppDataContext.CurrentRoot.Value = null;
 			_temp.Dispose();
 		}
 	}
+}
+
+internal static class UserSettingsTestAppDataContext
+{
+	public static readonly AsyncLocal<string?> CurrentRoot = new();
+}
+
+internal sealed class IsolatedUserSettingsStore
+{
+	private readonly InfrastructureUserSettingsStore _inner;
+
+	public IsolatedUserSettingsStore()
+	{
+		// These tests validate persistence semantics against an explicit per-test app-data root.
+		// Environment-variable overrides are not reliable on Windows for SpecialFolder resolution.
+		var rootPath = UserSettingsTestAppDataContext.CurrentRoot.Value;
+		_inner = rootPath is null
+			? new InfrastructureUserSettingsStore()
+			: new InfrastructureUserSettingsStore(() => rootPath);
+	}
+
+	public UserSettingsDb Load() => _inner.Load();
+
+	public void Save(UserSettingsDb db) => _inner.Save(db);
+
+	public ThemePreset GetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect)
+		=> _inner.GetPreset(db, theme, effect);
+
+	public void SetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect, ThemePreset preset)
+		=> _inner.SetPreset(db, theme, effect, preset);
+
+	public UserSettingsDb ResetToDefaults() => _inner.ResetToDefaults();
+
+	public string GetPath() => _inner.GetPath();
+
+	public bool EnsureStorageExists() => _inner.EnsureStorageExists();
+
+	public bool TryParseKey(string? key, out ThemeVariant theme, out ThemeEffectMode effect)
+		=> _inner.TryParseKey(key, out theme, out effect);
 }

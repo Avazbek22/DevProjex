@@ -6,7 +6,8 @@ namespace DevProjex.Avalonia.ViewModels;
 public sealed class TreeNodeViewModel(
     TreeNodeDescriptor descriptor,
     TreeNodeViewModel? parent,
-    IImage? icon)
+    IImage? icon,
+    Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? childrenFactory = null)
     : ViewModelBase
 {
     private const double DefaultTreeIndentSize = 16;
@@ -22,6 +23,10 @@ public sealed class TreeNodeViewModel(
     private bool _hasHighlightedDisplay;
     private int _searchSelfMatchEpoch;
     private int _searchDescendantMatchEpoch;
+    private bool _deferredChildCheckedState;
+    private List<TreeNodeViewModel> _children = new(descriptor.Children.Count);
+    private Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? _childrenFactory = childrenFactory;
+    private bool _childrenInitialized = childrenFactory is null || descriptor.Children.Count == 0;
 
     /// <summary>
     /// Raised when checkbox state changes. Used for real-time metrics updates.
@@ -38,14 +43,14 @@ public sealed class TreeNodeViewModel(
     public GridLength IndentWidth { get; } =
         new(Math.Max(0, parent is null ? 0 : parent.Depth + 1) * DefaultTreeIndentSize);
 
-    public IList<TreeNodeViewModel> Children { get; } = new List<TreeNodeViewModel>(descriptor.Children.Count);
-    public IEnumerable<TreeNodeViewModel> ChildItemsSource => Children.Count > 0 ? Children : EmptyChildItems;
+    public IList<TreeNodeViewModel> Children => EnsureChildrenRealized();
+    public IEnumerable<TreeNodeViewModel> ChildItemsSource => HasChildren ? EnsureChildrenRealized() : EmptyChildItems;
 
     /// <summary>
     /// Indicates whether this node has children. Used to control expander visibility
     /// independently of VirtualizingStackPanel's cached :empty pseudo-class state.
     /// </summary>
-    public bool HasChildren => Children.Count > 0;
+    public bool HasChildren => _children.Count > 0 || (!_childrenInitialized && Descriptor is not null && Descriptor.Children.Count > 0);
 
     public IImage? Icon { get; set; } = icon;
 
@@ -109,12 +114,12 @@ public sealed class TreeNodeViewModel(
             if (_isExpanded == value) return;
             _isExpanded = value;
 
-            if (!value && Children.Count > 0 && Volatile.Read(ref _preserveDescendantExpansionStateDepth) == 0)
+            if (!value && _children.Count > 0 && Volatile.Read(ref _preserveDescendantExpansionStateDepth) == 0)
             {
                 // Manual collapse should reset descendant expansion state so reopening the branch
                 // behaves predictably and does not immediately realize the entire previously-open subtree.
                 using var _ = BeginPreserveDescendantExpansionStateScope();
-                foreach (var child in Children)
+                foreach (var child in _children)
                     child.SetExpandedRecursive(false);
             }
 
@@ -157,7 +162,7 @@ public sealed class TreeNodeViewModel(
         {
             var current = stack.Pop();
             yield return current;
-            var children = current.Children;
+            var children = current.EnsureChildrenRealized();
             for (var i = children.Count - 1; i >= 0; i--)
                 stack.Push(children[i]);
         }
@@ -176,7 +181,7 @@ public sealed class TreeNodeViewModel(
         {
             var current = stack.Pop();
             action(current);
-            var children = current.Children;
+            var children = current.EnsureChildrenRealized();
             for (var j = children.Count - 1; j >= 0; j--)
                 stack.Push(children[j]);
         }
@@ -190,6 +195,26 @@ public sealed class TreeNodeViewModel(
             current.IsExpanded = true;
             current = current.Parent;
         }
+    }
+
+    /// <summary>
+    /// Collects the minimal checked-path snapshot without forcing lazy subtree realization.
+    /// A checked directory represents the whole subtree, so descendants do not need to be
+    /// materialized or added individually.
+    /// </summary>
+    public void CollectCheckedPaths(HashSet<string> selected)
+    {
+        if (_isChecked == true)
+        {
+            selected.Add(FullPath);
+            return;
+        }
+
+        if (!_childrenInitialized)
+            return;
+
+        foreach (var child in _children)
+            child.CollectCheckedPaths(selected);
     }
 
     public void UpdateIcon(IImage? icon)
@@ -211,14 +236,16 @@ public sealed class TreeNodeViewModel(
     public void ClearRecursive()
     {
         // Clear children recursively first
-        foreach (var child in Children)
+        foreach (var child in _children)
             child.ClearRecursive();
 
         // Clear the children list
-        Children.Clear();
-        if (Children is List<TreeNodeViewModel> list)
-            list.TrimExcess();
+        _children.Clear();
+        _children.TrimExcess();
+        _childrenInitialized = true;
+        _childrenFactory = null;
         RaisePropertyChanged(nameof(ChildItemsSource));
+        RaisePropertyChanged(nameof(HasChildren));
 
         // Clear UI-related objects
         _displayInlines?.Clear();
@@ -306,9 +333,15 @@ public sealed class TreeNodeViewModel(
         _isChecked = value;
         RaisePropertyChanged(nameof(IsChecked));
 
+        if (value.HasValue)
+            _deferredChildCheckedState = value.Value;
+
         if (updateChildren && value.HasValue)
         {
-            foreach (var child in Children)
+            // Only propagate to already realized children. Unrealized branches inherit the
+            // latest explicit state when they are materialized later, which keeps checkbox
+            // toggles responsive even on very large trees.
+            foreach (var child in _children)
                 child.SetChecked(value.Value, updateChildren: true, updateParent: false);
         }
 
@@ -322,13 +355,13 @@ public sealed class TreeNodeViewModel(
 
     private void UpdateCheckedFromChildren()
     {
-        if (Children.Count == 0)
+        if (_children.Count == 0)
             return;
 
         // Single pass through children instead of two LINQ enumerations
         var allChecked = true;
         var anyChecked = false;
-        foreach (var child in Children)
+        foreach (var child in _children)
         {
             if (child.IsChecked != true)
                 allChecked = false;
@@ -339,6 +372,9 @@ public sealed class TreeNodeViewModel(
             if (!allChecked && anyChecked)
                 break;
         }
+
+        if (_children.Count < (Descriptor?.Children.Count ?? _children.Count))
+            allChecked = false;
 
         bool? next = allChecked ? true : anyChecked ? null : false;
 
@@ -354,8 +390,29 @@ public sealed class TreeNodeViewModel(
     private static void SetExpandedRecursiveCore(TreeNodeViewModel node, bool expanded)
     {
         node.IsExpanded = expanded;
-        foreach (var child in node.Children)
+        foreach (var child in node.EnsureChildrenRealized())
             SetExpandedRecursiveCore(child, expanded);
+    }
+
+    private List<TreeNodeViewModel> EnsureChildrenRealized()
+    {
+        if (_childrenInitialized)
+            return _children;
+
+        // Deeper branches are materialized on demand so initial project load does not pay
+        // for the entire view-model graph before the user expands or traverses that subtree.
+        var builtChildren = _childrenFactory?.Invoke(this) ?? [];
+        _children = builtChildren as List<TreeNodeViewModel> ?? new List<TreeNodeViewModel>(builtChildren);
+        _childrenFactory = null;
+        _childrenInitialized = true;
+
+        // Newly materialized children must inherit the last explicit subtree state without
+        // forcing recursive realization of their own descendants.
+        foreach (var child in _children)
+            child.SetChecked(_deferredChildCheckedState, updateChildren: false, updateParent: false);
+
+        RaisePropertyChanged(nameof(ChildItemsSource));
+        return _children;
     }
 
     private readonly struct DescendantExpansionStateScope : IDisposable

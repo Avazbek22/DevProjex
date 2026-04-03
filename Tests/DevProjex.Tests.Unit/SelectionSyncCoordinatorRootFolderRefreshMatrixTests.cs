@@ -1,5 +1,4 @@
 using DevProjex.Application.Models;
-using DevProjex.Avalonia.Coordinators;
 
 namespace DevProjex.Tests.Unit;
 

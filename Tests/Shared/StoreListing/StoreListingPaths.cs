@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace DevProjex.Tests.Shared.StoreListing;
 
 internal static class StoreListingPaths

@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using DevProjex.Tests.Integration.Helpers;
 using DevProjex.Tests.Shared.StoreListing;
 
 namespace DevProjex.Tests.Integration;

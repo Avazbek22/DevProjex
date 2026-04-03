@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Collections;
+
 namespace DevProjex.Avalonia.ViewModels;
 
 /// <summary>
@@ -25,7 +27,7 @@ public enum PreviewWorkspaceMode
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    public const string TitleVersion = "4.8";
+    public const string TitleVersion = "4.8.5";
     public const string BaseTitle = "DevProjex v" + TitleVersion;
     public const string BaseTitleWithAuthor = "DevProjex by Olimoff v" + TitleVersion;
     public const double DefaultTreeFontSize = 15;
@@ -38,6 +40,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly NotifyCollectionChangedEventHandler _ignoreOptionsChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _extensionsChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _rootFoldersChangedHandler;
+    private readonly NotifyCollectionChangedEventHandler _recentFoldersChangedHandler;
+    private readonly NotifyCollectionChangedEventHandler _recentRepositoriesChangedHandler;
     private bool _disposed;
 
     private string _title;
@@ -96,6 +100,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _gitCloneUrl = string.Empty;
     private string _gitCloneStatus = string.Empty;
     private bool _gitCloneInProgress;
+    private string _menuFileRecent = string.Empty;
+    private string _menuFileRecentEmpty = string.Empty;
+    private string _menuFileOpenNewWindow = string.Empty;
+    private string _gitCloneRecentRepositoriesLabel = string.Empty;
     private double _helpPopoverMaxWidth = 800;
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
@@ -124,11 +132,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _ignoreOptionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
         _extensionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
         _rootFoldersChangedHandler = (_, _) => UpdateAllCheckboxLabels();
+        _recentFoldersChangedHandler = (_, _) =>
+        {
+            RaisePropertyChanged(nameof(HasRecentFolders));
+            RaisePropertyChanged(nameof(RecentFoldersMenuVisible));
+        };
+        _recentRepositoriesChangedHandler = (_, _) =>
+        {
+            RaisePropertyChanged(nameof(HasRecentRepositories));
+            RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
+        };
 
         // Subscribe to collection changes to update "All" checkbox labels with counts
         IgnoreOptions.CollectionChanged += _ignoreOptionsChangedHandler;
         Extensions.CollectionChanged += _extensionsChangedHandler;
         RootFolders.CollectionChanged += _rootFoldersChangedHandler;
+        RecentFolders.CollectionChanged += _recentFoldersChangedHandler;
+        RecentRepositories.CollectionChanged += _recentRepositoriesChangedHandler;
         ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
     }
 
@@ -144,10 +164,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
         }
     }
-    public ObservableCollection<SelectionOptionViewModel> RootFolders { get; } = [];
-    public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = [];
-    public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = [];
+    public ObservableCollection<SelectionOptionViewModel> RootFolders { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
+    public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
+    public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new ResettableObservableCollection<IgnoreOptionViewModel>();
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
+    public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
+    public ObservableCollection<RecentProjectEntryViewModel> RecentRepositories { get; } = [];
 
     public void ResetTreeNodes()
     {
@@ -512,6 +534,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(IsPreviewTreeSelected));
             RaisePropertyChanged(nameof(IsPreviewContentSelected));
             RaisePropertyChanged(nameof(IsPreviewTreeAndContentSelected));
+            RaisePropertyChanged(nameof(PreviewCopyCurrentModeTooltip));
         }
     }
 
@@ -811,6 +834,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_gitCloneInProgress == value) return;
             _gitCloneInProgress = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
         }
     }
 
@@ -1079,6 +1103,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasRootFolderOptions => RootFolders.Count > 0;
 
+    public bool HasRecentFolders => RecentFolders.Count > 0;
+
+    // Expose File > Recent as soon as at least one persisted folder exists.
+    // Hiding a single entry makes the feature look broken after restart.
+    public bool RecentFoldersMenuVisible => HasRecentFolders;
+
+    public bool HasRecentRepositories => RecentRepositories.Count > 0;
+
+    // Hide the clone recent list while cloning is in progress to avoid
+    // exposing stale selections during the active git operation.
+    public bool GitCloneRecentRepositoriesVisible => !GitCloneInProgress && HasRecentRepositories;
+
     public bool AllIgnoreChecked
     {
         get => _allIgnoreChecked;
@@ -1092,6 +1128,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string MenuFile { get; private set; } = string.Empty;
     public string MenuFileOpen { get; private set; } = string.Empty;
+    public string MenuFileOpenNewWindow
+    {
+        get => _menuFileOpenNewWindow;
+        private set
+        {
+            if (_menuFileOpenNewWindow == value) return;
+            _menuFileOpenNewWindow = value;
+            RaisePropertyChanged();
+        }
+    }
+    public string MenuFileRecent
+    {
+        get => _menuFileRecent;
+        private set
+        {
+            if (_menuFileRecent == value) return;
+            _menuFileRecent = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public string MenuFileRecentEmpty
+    {
+        get => _menuFileRecentEmpty;
+        private set
+        {
+            if (_menuFileRecentEmpty == value) return;
+            _menuFileRecentEmpty = value;
+            RaisePropertyChanged();
+        }
+    }
+
     public string MenuFileRefresh { get; private set; } = string.Empty;
     public string MenuFileExport { get; private set; } = string.Empty;
     public string MenuFileExportTree { get; private set; } = string.Empty;
@@ -1174,6 +1242,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string PreviewSelectionCopy { get; private set; } = string.Empty;
     public string PreviewSelectionSelectAll { get; private set; } = string.Empty;
     public string PreviewSelectionClear { get; private set; } = string.Empty;
+    public string PreviewCopyFilePathTooltip { get; private set; } = string.Empty;
+    public string PreviewCopyCurrentModeTooltip => _selectedPreviewContentMode switch
+    {
+        PreviewContentMode.Tree => MenuCopyTree,
+        PreviewContentMode.Content => MenuCopyContent,
+        _ => MenuCopyTreeAndContent
+    };
 
     // StatusBar labels
     public string StatusTreeLabel { get; private set; } = string.Empty;
@@ -1203,6 +1278,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string GitCloneTitle { get; private set; } = string.Empty;
     public string GitCloneDescription { get; private set; } = string.Empty;
     public string GitCloneUrlPlaceholder { get; private set; } = string.Empty;
+    public string GitCloneRecentRepositoriesLabel
+    {
+        get => _gitCloneRecentRepositoriesLabel;
+        private set
+        {
+            if (_gitCloneRecentRepositoriesLabel == value) return;
+            _gitCloneRecentRepositoriesLabel = value;
+            RaisePropertyChanged();
+        }
+    }
     public string GitCloneProgressCheckingGit { get; private set; } = string.Empty;
     public string GitCloneProgressCloning { get; private set; } = string.Empty;
     public string GitCloneProgressDownloading { get; private set; } = string.Empty;
@@ -1227,6 +1312,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         MenuFile = _localization["Menu.File"];
         MenuFileOpen = _localization["Menu.File.Open"];
+        MenuFileOpenNewWindow = _localization["Menu.File.OpenNewWindow"];
+        MenuFileRecent = _localization["Menu.File.Recent"];
+        MenuFileRecentEmpty = _localization["Menu.File.Recent.Empty"];
         MenuFileRefresh = _localization["Menu.File.Refresh"];
         MenuFileExport = _localization["Menu.File.Export"];
         MenuFileExportTree = _localization["Menu.File.Export.Tree"];
@@ -1292,6 +1380,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         PreviewSelectionCopy = _localization["Preview.Selection.Copy"];
         PreviewSelectionSelectAll = _localization["Preview.Selection.SelectAll"];
         PreviewSelectionClear = _localization["Preview.Selection.Clear"];
+        PreviewCopyFilePathTooltip = _localization["Preview.FilePath.Copy.Tooltip"];
 
         // StatusBar labels
         StatusTreeLabel = _localization["Status.Tree.Label"];
@@ -1321,6 +1410,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         GitCloneTitle = _localization["Git.Clone.Title"];
         GitCloneDescription = _localization["Git.Clone.Description"];
         GitCloneUrlPlaceholder = _localization["Git.Clone.UrlPlaceholder"];
+        GitCloneRecentRepositoriesLabel = _localization["Git.Clone.Recent"];
         GitCloneProgressCheckingGit = _localization["Git.Clone.Progress.CheckingGit"];
         GitCloneProgressCloning = _localization["Git.Clone.Progress.Cloning"];
         GitCloneProgressDownloading = _localization["Git.Clone.Progress.Downloading"];
@@ -1358,6 +1448,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         RaisePropertyChanged(nameof(MenuFile));
         RaisePropertyChanged(nameof(MenuFileOpen));
+        RaisePropertyChanged(nameof(MenuFileOpenNewWindow));
+        RaisePropertyChanged(nameof(MenuFileRecent));
+        RaisePropertyChanged(nameof(MenuFileRecentEmpty));
         RaisePropertyChanged(nameof(MenuFileRefresh));
         RaisePropertyChanged(nameof(MenuFileExport));
         RaisePropertyChanged(nameof(MenuFileExportTree));
@@ -1422,6 +1515,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(PreviewSelectionCopy));
         RaisePropertyChanged(nameof(PreviewSelectionSelectAll));
         RaisePropertyChanged(nameof(PreviewSelectionClear));
+        RaisePropertyChanged(nameof(PreviewCopyFilePathTooltip));
+        RaisePropertyChanged(nameof(PreviewCopyCurrentModeTooltip));
 
         // StatusBar labels
         RaisePropertyChanged(nameof(StatusTreeLabel));
@@ -1464,6 +1559,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(GitCloneTitle));
         RaisePropertyChanged(nameof(GitCloneDescription));
         RaisePropertyChanged(nameof(GitCloneUrlPlaceholder));
+        RaisePropertyChanged(nameof(GitCloneRecentRepositoriesLabel));
         RaisePropertyChanged(nameof(GitCloneProgressCheckingGit));
         RaisePropertyChanged(nameof(GitCloneProgressCloning));
         RaisePropertyChanged(nameof(GitCloneProgressDownloading));
@@ -1528,6 +1624,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IgnoreOptions.CollectionChanged -= _ignoreOptionsChangedHandler;
         Extensions.CollectionChanged -= _extensionsChangedHandler;
         RootFolders.CollectionChanged -= _rootFoldersChangedHandler;
+        RecentFolders.CollectionChanged -= _recentFoldersChangedHandler;
+        RecentRepositories.CollectionChanged -= _recentRepositoriesChangedHandler;
         ToastItems.CollectionChanged -= OnToastItemsCollectionChanged;
 
         // Clear collections to release references

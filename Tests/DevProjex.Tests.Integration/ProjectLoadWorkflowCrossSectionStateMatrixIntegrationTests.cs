@@ -1,0 +1,59 @@
+using DevProjex.Tests.Shared.ProjectLoadWorkflow;
+using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
+
+namespace DevProjex.Tests.Integration;
+
+public sealed class ProjectLoadWorkflowCrossSectionStateMatrixIntegrationTests
+{
+    [Theory]
+    [MemberData(nameof(Cases))]
+    public async Task ComputeFullRefreshSnapshot_CrossSectionStateMatrix_ConvergesAndPreservesSelectionContracts(
+        string rootScenarioName,
+        string extensionScenarioName,
+        string ignoreScenarioName)
+    {
+        var rootScenario = Enum.Parse<WorkflowRootScenario>(rootScenarioName);
+        var extensionScenario = Enum.Parse<WorkflowExtensionScenario>(extensionScenarioName);
+        var ignoreScenario = Enum.Parse<WorkflowIgnoreScenario>(ignoreScenarioName);
+
+        var rootPath = ProjectLoadWorkflowSharedWorkspace.RootPath;
+
+        var services = CreateServices();
+        var baselineSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+            CreateDefaultContext(rootPath),
+            CancellationToken.None);
+        var scenario = CreateScenario(baselineSnapshot, rootScenario, extensionScenario, ignoreScenario);
+
+        var firstSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+            CreateScenarioContext(rootPath, scenario),
+            CancellationToken.None);
+
+        AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(firstSnapshot);
+        AssertScenarioSelectionContract(firstSnapshot, scenario);
+
+        var secondSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+            BuildConvergedContext(rootPath, firstSnapshot),
+            CancellationToken.None);
+
+        AssertEquivalentSnapshots(firstSnapshot, secondSnapshot);
+        AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(secondSnapshot);
+        AssertScenarioSelectionContract(secondSnapshot, scenario);
+
+        var firstMetrics = await ComputeMetricsFromSnapshotAsync(rootPath, firstSnapshot);
+        var secondMetrics = await ComputeMetricsFromSnapshotAsync(rootPath, secondSnapshot);
+        Assert.Equal(firstMetrics.TreeMetrics, secondMetrics.TreeMetrics);
+        Assert.Equal(firstMetrics.ContentMetrics, secondMetrics.ContentMetrics);
+    }
+
+    public static IEnumerable<object[]> Cases()
+    {
+        foreach (var rootScenario in Enum.GetValues<WorkflowRootScenario>())
+        {
+            foreach (var extensionScenario in Enum.GetValues<WorkflowExtensionScenario>())
+            {
+                foreach (var ignoreScenario in Enum.GetValues<WorkflowIgnoreScenario>())
+                    yield return [rootScenario.ToString(), extensionScenario.ToString(), ignoreScenario.ToString()];
+            }
+        }
+    }
+}

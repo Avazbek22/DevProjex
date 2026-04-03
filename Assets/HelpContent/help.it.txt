@@ -16,6 +16,8 @@ Scorciatoie:
 
 ## 3) File
 * Apri cartella… — apri la cartella radice (Ctrl+O)
+* Nuova finestra — apri una nuova istanza indipendente di DevProjex
+* Recenti — elenco delle cartelle locali aperte di recente
 * Aggiorna — rileggi e ricostruisci l’albero (F5)
 * Esporta su file:
   * Esporta albero
@@ -41,6 +43,18 @@ Regole:
 * se un percorso non è disponibile o non esiste, vengono applicati gli stessi controlli di accesso di «Apri cartella…»;
 * elementi non supportati o non locali vengono ignorati.
 
+### Recenti
+La voce «File → Recenti» mostra la cronologia delle cartelle locali aperte di recente.
+
+Regole:
+* nell’elenco vengono aggiunte solo cartelle locali;
+* i repository Git clonati tramite DevProjex non vengono aggiunti a questo elenco;
+* non vengono creati duplicati — riaprire la stessa cartella la sposta in cima;
+* vengono conservate fino a 10 cartelle recenti;
+* la cronologia viene mantenuta tra gli avvii dell’applicazione.
+
+Per ogni elemento viene mostrato il nome breve della cartella; il percorso completo è disponibile in un tooltip.
+
 ## 4) Git
 Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Clone). L'app non tocca i tuoi file — lavora solo con la cache.
 
@@ -49,6 +63,20 @@ La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
 
 * Branch — mostra l’elenco dei branch disponibili con indicazione di quello attivo; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste in locale, viene scaricato (fetch) e creato localmente.
 * Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
+
+### Finestra di clonazione
+Nella finestra Git Clone può comparire sotto il campo URL un elenco «Repository recenti».
+
+Regole:
+* l’elenco appare solo se nella cronologia esistono già repository clonati di recente;
+* nell’elenco vengono aggiunti solo gli URL dei repository;
+* le cartelle locali non vengono aggiunte a questo elenco;
+* non vengono creati duplicati — clonare di nuovo lo stesso repository lo sposta in cima;
+* vengono conservati fino a 7 repository recenti;
+* la cronologia viene mantenuta tra gli avvii dell’applicazione.
+
+Se selezioni un elemento dall’elenco, l’URL viene inserito automaticamente nel campo di input.
+Durante una clonazione attiva l’elenco viene nascosto temporaneamente.
 
 ## 5) Copia
 ### Selettore formato albero (ASCII/JSON)
@@ -127,10 +155,16 @@ Inoltre:
 * i file nell’anteprima sono separati da linee orizzontali;
 * durante lo scorrimento, il percorso del file corrente resta fissato in alto;
 * lo zoom dell’albero e quello dell’anteprima possono vivere separatamente.
+* nella modalità anteprima puoi copiare sia il risultato completo corrente sia il blocco del file attualmente visibile senza aprire il menu «Copia».
 
 Pulsanti:
+* pulsante di copia a sinistra nel pannello superiore di anteprima — copia la modalità di anteprima corrente:
+  * Albero
+  * Contenuto
+  * Albero e contenuto
 * X nel pannello dell’albero — nasconde l’albero e lascia solo il pannello di anteprima;
 * X nella barra superiore dell’anteprima — chiude completamente la modalità anteprima;
+* piccolo pulsante di copia nell’intestazione fissata del file — copia il blocco del file attualmente visibile esattamente come appare nell’anteprima;
 * anche premere di nuovo l’icona occhio o Ctrl+B chiude la modalità anteprima.
 
 Ricerca e filtro restano disponibili finché nell’anteprima è visibile il pannello dell’albero.
@@ -266,7 +300,7 @@ Opzioni:
 * File senza estensione
 
 Quando un’opzione è attiva, nasconde gli elementi corrispondenti nell’albero e nei risultati di copia/esportazione.
-Queste regole sono indipendenti da `.gitignore` e Smart Ignore.
+Le regole di base vengono attivate separatamente da `.gitignore` e Smart Ignore, ma il risultato finale viene sempre calcolato sull’albero corrente dopo l’applicazione di tutti i filtri attivi.
 
 ### 11.5 Comportamento interno: casi tipici
 1. Progetto singolo con `.gitignore`.
@@ -293,6 +327,8 @@ Restano solo le regole base di visibilità.
 
 ### 11.6 Cartelle vuote
 Nasconde le cartelle logicamente vuote dall’albero e dai risultati di copia/esportazione.
+Una cartella logicamente vuota è una cartella nella quale non restano discendenti visibili dopo l’applicazione delle regole di visibilità correnti, di `.gitignore`, di Smart Ignore e dei tipi di file selezionati.
+Se la cartella stessa non è nascosta da altre regole, la sua rimozione dall’albero è controllata proprio da questa opzione.
 
 ### 11.7 File vuoti
 Nasconde i file vuoti di dimensione 0 byte dall’albero e dai risultati di copia/esportazione.
@@ -302,6 +338,7 @@ Nasconde i file senza estensione (ad esempio: `Dockerfile`, `Makefile`, `README`
 
 ### 11.9 Contatori nel blocco « Ignora »
 Quando « Visualizza → Contatori aggiuntivi » è attivo, vicino alle opzioni disponibili viene mostrato il numero nel formato `(N)`.
+Per le regole di base, questo numero mostra quanti elementi vengono nascosti proprio da quella regola nella configurazione corrente dell’albero.
 ## 12) Come vengono calcolati albero e metriche
 Il risultato dipende da:
 * cartelle di primo livello selezionate
@@ -373,7 +410,10 @@ Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parame
 * tipi di file selezionati;
 * opzioni selezionate nel blocco «Ignora».
 
-File e cartelle dei progetti sul disco non vengono modificati né eliminati.
+Importante:
+* la cronologia «Recenti» delle cartelle locali non viene cancellata;
+* la cronologia dei «Repository recenti» nella finestra Git Clone non viene cancellata;
+* file e cartelle dei progetti sul disco non vengono modificati né eliminati.
 
 ## 16) Lingue
 La lingua si seleziona dal menu Lingua.

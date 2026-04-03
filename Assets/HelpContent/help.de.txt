@@ -16,6 +16,8 @@ Tastenkürzel:
 
 ## 3) Datei
 * Ordner öffnen… — Wurzelordner öffnen (Ctrl+O)
+* Neues Fenster — eine neue unabhängige DevProjex-Instanz öffnen
+* Zuletzt verwendet — Liste zuletzt geöffneter lokaler Ordner
 * Aktualisieren — Baum neu einlesen und aufbauen (F5)
 * In Datei exportieren:
   * Baum exportieren
@@ -41,6 +43,18 @@ Regeln:
 * wenn ein Pfad nicht verfügbar ist oder nicht existiert, gelten dieselben Zugriffsprüfungen wie bei „Ordner öffnen…“;
 * nicht unterstützte oder nicht-lokale Objekte werden ignoriert.
 
+### Zuletzt verwendet
+Der Punkt „Datei → Zuletzt verwendet“ zeigt den Verlauf der zuletzt geöffneten lokalen Ordner.
+
+Regeln:
+* in die Liste werden nur lokale Ordner aufgenommen;
+* über DevProjex geklonte Git-Repositories werden dieser Liste nicht hinzugefügt;
+* es werden keine Duplikate erzeugt — das erneute Öffnen desselben Ordners verschiebt ihn nach oben;
+* es werden bis zu 10 letzte Ordner gespeichert;
+* der Verlauf bleibt zwischen App-Starts erhalten.
+
+Für jeden Eintrag wird der kurze Ordnername angezeigt; der vollständige Pfad ist über einen Tooltip verfügbar.
+
 ## 4) Git
 Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
 
@@ -49,6 +63,20 @@ Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
 
 * Branch — zeigt die Liste verfügbarer Branches mit Markierung der aktiven Branch; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn sie lokal noch nicht existiert, wird sie per fetch geladen und lokal erstellt.
 * Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>.
+
+### Klonfenster
+Im Git-Clone-Fenster kann unter dem URL-Feld eine Liste „Zuletzt verwendete Repositories“ angezeigt werden.
+
+Regeln:
+* die Liste erscheint nur, wenn im Verlauf bereits zuletzt geklonte Repositories vorhanden sind;
+* in die Liste werden nur Repository-URLs aufgenommen;
+* lokale Ordner werden dieser Liste nicht hinzugefügt;
+* es werden keine Duplikate erzeugt — das erneute Klonen desselben Repositories verschiebt es nach oben;
+* es werden bis zu 7 letzte Repositories gespeichert;
+* der Verlauf bleibt zwischen App-Starts erhalten.
+
+Wenn Sie einen Eintrag auswählen, wird die URL automatisch in das Eingabefeld eingesetzt.
+Während eines aktiven Klonvorgangs wird die Liste vorübergehend ausgeblendet.
 
 ## 5) Kopieren
 ### Baumformat-Schalter (ASCII/JSON)
@@ -127,10 +155,16 @@ Zusätzlich:
 * Dateien in der Vorschau werden durch horizontale Linien getrennt;
 * beim Scrollen wird der Pfad der aktuellen Datei oben angeheftet;
 * Baum und Vorschau können unterschiedliche Zoomstufen haben.
+* im Vorschaumodus können Sie entweder das vollständige aktuelle Ergebnis oder den aktuell sichtbaren Dateiblock kopieren, ohne das Menü „Kopieren“ zu öffnen.
 
 Schaltflächen:
+* Kopier-Schaltfläche links auf der oberen Vorschauinsel — kopiert den aktuellen Vorschaumodus:
+  * Baum
+  * Inhalt
+  * Baum und Inhalt
 * X in der Bauminsel — blendet den Baum aus und lässt nur die Vorschauinsel übrig;
 * X in der oberen Vorschauleiste — schließt den Vorschaumodus vollständig;
+* kleine Kopier-Schaltfläche in der fixierten oberen Dateileiste — kopiert den aktuell sichtbaren Dateiblock genau so, wie er in der Vorschau angezeigt wird;
 * ein erneuter Klick auf das Auge oder Ctrl+B schließt den Vorschaumodus ebenfalls.
 
 Suche und Filter sind verfügbar, solange in der Vorschau die Bauminsel sichtbar ist.
@@ -266,7 +300,7 @@ Optionen:
 * Dateien ohne Erweiterung
 
 Wenn aktiviert, blendet eine Option die passenden Elemente im Baum sowie in Kopier-/Exportergebnissen aus.
-Diese Regeln sind unabhängig von `.gitignore` und Smart Ignore.
+Die Grundregeln werden getrennt von `.gitignore` und Smart Ignore aktiviert, aber das Endergebnis wird immer anhand des aktuellen Baums nach Anwendung aller aktiven Filter berechnet.
 
 ### 11.5 Internes Verhalten: typische Fälle
 1. Ein Projekt mit `.gitignore`.
@@ -293,6 +327,8 @@ Es bleiben nur die grundlegenden Sichtbarkeitsregeln.
 
 ### 11.6 Leere Ordner
 Blendet logisch leere Ordner im Baum sowie in Kopier-/Exportergebnissen aus.
+Ein logisch leerer Ordner ist ein Ordner, in dem nach Anwendung der aktuellen Sichtbarkeitsregeln, von `.gitignore`, Smart Ignore und der ausgewählten Dateitypen keine sichtbaren Nachfolger mehr verbleiben.
+Wenn der Ordner selbst nicht durch andere Regeln ausgeblendet wird, wird seine Entfernung aus dem Baum genau durch diese Option gesteuert.
 
 ### 11.7 Leere Dateien
 Blendet leere Dateien mit Größe 0 Byte im Baum sowie in Kopier-/Exportergebnissen aus.
@@ -302,6 +338,7 @@ Blendet Dateien ohne Erweiterung (zum Beispiel: `Dockerfile`, `Makefile`, `READM
 
 ### 11.9 Zähler im Block „Ignorieren“
 Wenn „Ansicht → Zusätzliche Zähler“ aktiviert ist, wird bei verfügbaren Optionen die Anzahl im Format `(N)` angezeigt.
+Bei Grundregeln zeigt diese Zahl, wie viele Elemente in der aktuellen Baumkonfiguration genau durch diese Regel ausgeblendet werden.
 ## 12) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
 * ausgewählte Ordner der obersten Ebene
@@ -373,7 +410,10 @@ Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile
 * ausgewählte Dateitypen;
 * ausgewählte Optionen im Block „Ignorieren“.
 
-Dateien und Ordner der Projekte auf dem Datenträger werden nicht geändert und nicht gelöscht.
+Wichtig:
+* der Verlauf „Zuletzt verwendet“ für lokale Ordner wird nicht gelöscht;
+* der Verlauf „Zuletzt verwendete Repositories“ im Git-Clone-Fenster wird nicht gelöscht;
+* Dateien und Ordner der Projekte auf dem Datenträger werden nicht geändert und nicht gelöscht.
 
 ## 16) Sprachen
 Die Sprache wird über das Sprache‑Menü gewählt.

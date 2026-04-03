@@ -108,7 +108,7 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 		AssertCountLabel(options, IgnoreOptionId.ExtensionlessFiles, "Files without extension", 7, showAdvancedCounts, includeExtensionless);
 
 		if (includeExtensionless)
-			Assert.False(options.Single(x => x.Id == IgnoreOptionId.ExtensionlessFiles).DefaultChecked);
+			Assert.True(options.Single(x => x.Id == IgnoreOptionId.ExtensionlessFiles).DefaultChecked);
 	}
 
 	public static IEnumerable<object[]> CountLabelMatrix()

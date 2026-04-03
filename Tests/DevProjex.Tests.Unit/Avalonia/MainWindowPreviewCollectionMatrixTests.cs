@@ -1,5 +1,4 @@
 using DevProjex.Avalonia.Services;
-using System.Text;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -31,9 +30,9 @@ public sealed class MainWindowPreviewCollectionMatrixTests
     [InlineData(true, true, false, false, "A.txt|b.txt")]
     [InlineData(true, false, true, false, "A.txt")]
     [InlineData(false, false, true, false, "")]
-    [InlineData(false, false, false, true, "")]
-    [InlineData(true, false, false, true, "A.txt")]
-    [InlineData(true, true, true, true, "A.txt|b.txt")]
+    [InlineData(false, false, false, true, "nested.txt")]
+    [InlineData(true, false, false, true, "A.txt|nested.txt")]
+    [InlineData(true, true, true, true, "A.txt|b.txt|nested.txt")]
     public void CollectOrderedPreviewFiles_WithSelection_ReturnsOnlyExistingFiles(
         bool includeA,
         bool includeB,
@@ -46,9 +45,17 @@ public sealed class MainWindowPreviewCollectionMatrixTests
         var fileA = temp.CreateFile("A.txt", "A");
         var fileB = temp.CreateFile("b.txt", "B");
         var fileInTreeOnly = temp.CreateFile(Path.Combine("tree", "only.txt"), "X");
+        var fileInDirectory = temp.CreateFile(Path.Combine("folder", "nested.txt"), "N");
         var missing = Path.Combine(temp.Path, "missing.txt");
         var directory = temp.CreateFolder("folder");
-        var treeRoot = CreateTree(temp.Path, [Path.GetRelativePath(temp.Path, fileInTreeOnly)]);
+        var treeRoot = CreateTree(
+            temp.Path,
+            [
+                Path.GetRelativePath(temp.Path, fileA),
+                Path.GetRelativePath(temp.Path, fileB),
+                Path.GetRelativePath(temp.Path, fileInDirectory),
+                Path.GetRelativePath(temp.Path, fileInTreeOnly)
+            ]);
 
         var selectedPaths = new HashSet<string>(PathComparer.Default);
         if (includeA)

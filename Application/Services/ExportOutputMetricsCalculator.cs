@@ -53,115 +53,132 @@ public static class ExportOutputMetricsCalculator
 		if (ordered.Count == 0)
 			return ExportOutputMetrics.Empty;
 
-		// Status metrics use normalized line-break counting (CRLF/CR/LF => one character).
-		const int normalizedNewLineChars = 1;
-		int chars = 0;
-		int lineBreaks = 0;
-		int trailingLineBreakChars = 0;
-		int trailingLineBreaks = 0;
-		bool anyWritten = false;
-
+		var accumulator = new OrderedContentMetricsAccumulator();
 		foreach (var file in ordered)
+			accumulator.AppendFile(file);
+
+		return accumulator.ToMetrics();
+	}
+
+	/// <summary>
+	/// Accumulates clipboard-style content metrics without forcing callers to build
+	/// a temporary <see cref="List{T}"/> for large status-bar recalculations.
+	/// </summary>
+	public struct OrderedContentMetricsAccumulator
+	{
+		private const int NormalizedNewLineChars = 1;
+
+		private int _chars;
+		private int _lineBreaks;
+		private int _trailingLineBreakChars;
+		private int _trailingLineBreaks;
+		private bool _anyWritten;
+
+		public void AppendFile(ContentFileMetrics file)
 		{
-			if (anyWritten)
+			if (string.IsNullOrWhiteSpace(file.Path))
+				return;
+
+			if (_anyWritten)
 			{
 				AppendLiteralLine(
 					ClipboardBlankLine,
-					normalizedNewLineChars,
-					ref chars,
-					ref lineBreaks,
-					ref trailingLineBreakChars,
-					ref trailingLineBreaks);
+					NormalizedNewLineChars,
+					ref _chars,
+					ref _lineBreaks,
+					ref _trailingLineBreakChars,
+					ref _trailingLineBreaks);
 				AppendLiteralLine(
 					ClipboardBlankLine,
-					normalizedNewLineChars,
-					ref chars,
-					ref lineBreaks,
-					ref trailingLineBreakChars,
-					ref trailingLineBreaks);
+					NormalizedNewLineChars,
+					ref _chars,
+					ref _lineBreaks,
+					ref _trailingLineBreakChars,
+					ref _trailingLineBreaks);
 			}
 
-			anyWritten = true;
+			_anyWritten = true;
 
 			AppendLiteralLine(
 				$"{file.Path}:",
-				normalizedNewLineChars,
-				ref chars,
-				ref lineBreaks,
-				ref trailingLineBreakChars,
-				ref trailingLineBreaks);
+				NormalizedNewLineChars,
+				ref _chars,
+				ref _lineBreaks,
+				ref _trailingLineBreakChars,
+				ref _trailingLineBreaks);
 			AppendLiteralLine(
 				ClipboardBlankLine,
-				normalizedNewLineChars,
-				ref chars,
-				ref lineBreaks,
-				ref trailingLineBreakChars,
-				ref trailingLineBreaks);
+				NormalizedNewLineChars,
+				ref _chars,
+				ref _lineBreaks,
+				ref _trailingLineBreakChars,
+				ref _trailingLineBreaks);
 
 			if (file.IsEmpty)
 			{
 				AppendLiteralLine(
 					NoContentMarker,
-					normalizedNewLineChars,
-					ref chars,
-					ref lineBreaks,
-					ref trailingLineBreakChars,
-					ref trailingLineBreaks);
-				continue;
+					NormalizedNewLineChars,
+					ref _chars,
+					ref _lineBreaks,
+					ref _trailingLineBreakChars,
+					ref _trailingLineBreaks);
+				return;
 			}
 
 			if (file.IsWhitespaceOnly)
 			{
 				AppendLiteralLine(
 					$"{WhitespaceMarkerPrefix}{file.SizeBytes}{WhitespaceMarkerSuffix}",
-					normalizedNewLineChars,
-					ref chars,
-					ref lineBreaks,
-					ref trailingLineBreakChars,
-					ref trailingLineBreaks);
-				continue;
+					NormalizedNewLineChars,
+					ref _chars,
+					ref _lineBreaks,
+					ref _trailingLineBreakChars,
+					ref _trailingLineBreaks);
+				return;
 			}
 
 			if (file.IsEstimated)
 			{
-				// SelectedContentExportService writes an empty content line for estimated files.
-				// It becomes relevant for intermediate files, while trailing line-break trim is handled below.
+				// Estimated files intentionally keep an empty content line in the rendered export.
 				AppendRenderedLine(
 					renderedChars: 0,
 					internalLineBreaks: 0,
-					newLineChars: normalizedNewLineChars,
-					chars: ref chars,
-					lineBreaks: ref lineBreaks,
-					trailingLineBreakChars: ref trailingLineBreakChars,
-					trailingLineBreaks: ref trailingLineBreaks);
-				continue;
+					newLineChars: NormalizedNewLineChars,
+					chars: ref _chars,
+					lineBreaks: ref _lineBreaks,
+					trailingLineBreakChars: ref _trailingLineBreakChars,
+					trailingLineBreaks: ref _trailingLineBreaks);
+				return;
 			}
 
-			int internalLineBreaks = Math.Max(0, file.LineCount - 1);
-			int trimmedLineBreaks = Math.Max(0, internalLineBreaks - file.TrailingNewlineLineBreaks);
-			int normalizedChars = Math.Max(0, file.CharCount - file.CrLfPairCount);
-			int trimmedChars = Math.Max(0, normalizedChars - file.TrailingNewlineLineBreaks);
+			var internalLineBreaks = Math.Max(0, file.LineCount - 1);
+			var trimmedLineBreaks = Math.Max(0, internalLineBreaks - file.TrailingNewlineLineBreaks);
+			var normalizedChars = Math.Max(0, file.CharCount - file.CrLfPairCount);
+			var trimmedChars = Math.Max(0, normalizedChars - file.TrailingNewlineLineBreaks);
 
 			AppendRenderedLine(
 				renderedChars: trimmedChars,
 				internalLineBreaks: trimmedLineBreaks,
-				newLineChars: normalizedNewLineChars,
-				chars: ref chars,
-				lineBreaks: ref lineBreaks,
-				trailingLineBreakChars: ref trailingLineBreakChars,
-				trailingLineBreaks: ref trailingLineBreaks);
+				newLineChars: NormalizedNewLineChars,
+				chars: ref _chars,
+				lineBreaks: ref _lineBreaks,
+				trailingLineBreakChars: ref _trailingLineBreakChars,
+				trailingLineBreaks: ref _trailingLineBreaks);
 		}
 
-		// SelectedContentExportService trims trailing CR/LF from the final result.
-		chars = Math.Max(0, chars - trailingLineBreakChars);
-		lineBreaks = Math.Max(0, lineBreaks - trailingLineBreaks);
+		public ExportOutputMetrics ToMetrics()
+		{
+			var chars = Math.Max(0, _chars - _trailingLineBreakChars);
+			var lineBreaks = Math.Max(0, _lineBreaks - _trailingLineBreaks);
 
-		if (chars == 0)
-			return ExportOutputMetrics.Empty;
+			if (chars == 0)
+				return ExportOutputMetrics.Empty;
 
-		int lines = lineBreaks + 1;
-		int tokens = EstimateTokens(chars);
-		return new ExportOutputMetrics(lines, chars, tokens);
+			var lines = lineBreaks + 1;
+			var tokens = EstimateTokens(chars);
+			return new ExportOutputMetrics(lines, chars, tokens);
+		}
 	}
 
 	private static void AppendLiteralLine(

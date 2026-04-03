@@ -37,6 +37,73 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void RecentCollections_TrackHasRecentFlags()
+    {
+        var viewModel = CreateViewModel();
+
+        Assert.False(viewModel.HasRecentFolders);
+        Assert.False(viewModel.HasRecentRepositories);
+        Assert.False(viewModel.GitCloneRecentRepositoriesVisible);
+        Assert.False(viewModel.RecentFoldersMenuVisible);
+
+        viewModel.RecentFolders.Add(new RecentProjectEntryViewModel("c:/repo", "repo", "c:/repo"));
+        viewModel.RecentRepositories.Add(new RecentProjectEntryViewModel("https://example.com/user/repo", "user / repo", "https://example.com/user/repo"));
+
+        Assert.True(viewModel.HasRecentFolders);
+        Assert.True(viewModel.HasRecentRepositories);
+        Assert.True(viewModel.GitCloneRecentRepositoriesVisible);
+        Assert.True(viewModel.RecentFoldersMenuVisible);
+
+        viewModel.GitCloneInProgress = true;
+        Assert.False(viewModel.GitCloneRecentRepositoriesVisible);
+
+        viewModel.GitCloneInProgress = false;
+        Assert.True(viewModel.GitCloneRecentRepositoriesVisible);
+
+        viewModel.RecentFolders.Clear();
+        viewModel.RecentRepositories.Clear();
+
+        Assert.False(viewModel.HasRecentFolders);
+        Assert.False(viewModel.HasRecentRepositories);
+        Assert.False(viewModel.GitCloneRecentRepositoriesVisible);
+        Assert.False(viewModel.RecentFoldersMenuVisible);
+    }
+
+    [Fact]
+    public void RecentCollections_RaiseVisibilityPropertyChanged_WhenCollectionsChange()
+    {
+        var viewModel = CreateViewModel();
+        var recentFoldersVisibilityRaised = false;
+        var recentRepositoriesVisibilityRaised = false;
+
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.RecentFoldersMenuVisible))
+                recentFoldersVisibilityRaised = true;
+
+            if (e.PropertyName == nameof(MainWindowViewModel.GitCloneRecentRepositoriesVisible))
+                recentRepositoriesVisibilityRaised = true;
+        };
+
+        viewModel.RecentFolders.Add(new RecentProjectEntryViewModel("c:/repo", "repo", "c:/repo"));
+        viewModel.RecentRepositories.Add(new RecentProjectEntryViewModel("https://example.com/user/repo", "user / repo", "https://example.com/user/repo"));
+
+        Assert.True(recentFoldersVisibilityRaised);
+        Assert.True(recentRepositoriesVisibilityRaised);
+    }
+
+    [Fact]
+    public void MenuFileOpenNewWindow_UsesLocalizedValue()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Menu.File.OpenNewWindow"] = "Open another window"
+        });
+
+        Assert.Equal("Open another window", viewModel.MenuFileOpenNewWindow);
+    }
+
+    [Fact]
     public void Title_Changes()
     {
         var viewModel = CreateViewModel();
@@ -516,6 +583,53 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Tree", viewModel.PreviewModeTreeShort);
         Assert.Equal("Content", viewModel.PreviewModeContentShort);
         Assert.Equal("Both", viewModel.PreviewModeTreeAndContentShort);
+    }
+
+    [Fact]
+    public void PreviewCopyCurrentModeTooltip_FollowsSelectedPreviewMode()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Menu.Copy.Tree"] = "Copy tree",
+            ["Menu.Copy.Content"] = "Copy content",
+            ["Menu.Copy.TreeAndContent"] = "Copy tree and content"
+        });
+
+        Assert.Equal("Copy tree", viewModel.PreviewCopyCurrentModeTooltip);
+
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+        Assert.Equal("Copy content", viewModel.PreviewCopyCurrentModeTooltip);
+
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+        Assert.Equal("Copy tree and content", viewModel.PreviewCopyCurrentModeTooltip);
+    }
+
+    [Fact]
+    public void SelectedPreviewContentMode_RaisesPreviewCopyCurrentModeTooltipPropertyChanged()
+    {
+        var viewModel = CreateViewModel();
+        var raised = false;
+
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.PreviewCopyCurrentModeTooltip))
+                raised = true;
+        };
+
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+
+        Assert.True(raised);
+    }
+
+    [Fact]
+    public void PreviewCopyFilePathTooltip_UsesLocalizedValue()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Preview.FilePath.Copy.Tooltip"] = "Copy current file"
+        });
+
+        Assert.Equal("Copy current file", viewModel.PreviewCopyFilePathTooltip);
     }
 
     [Fact]

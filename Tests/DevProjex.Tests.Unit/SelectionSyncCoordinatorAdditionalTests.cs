@@ -1,4 +1,4 @@
-using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Models;
 
 namespace DevProjex.Tests.Unit;
 
@@ -196,15 +196,15 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	[Fact]
 	public void PopulateIgnoreOptionsForRootSelection_EmptyRoots_StillPopulatesIgnoreOptions()
 	{
-		// After Problem 1 fix: even with empty folder selection, we still scan root files
-		// so ignore options should be populated, not cleared
+		// Emulate a root-level extensionless entry so the coordinator has a real
+		// count-driven reason to keep one advanced option visible.
 		var viewModel = CreateViewModel();
 		var coordinator = CreateCoordinator(viewModel);
+		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(ExtensionlessFiles: 1));
 
-		coordinator.PopulateIgnoreOptionsForRootSelection([]);
+		coordinator.PopulateIgnoreOptionsForRootSelection([], "C:\\ProjectA");
 
-		// Ignore options are populated for root-level files
-		Assert.NotEmpty(viewModel.IgnoreOptions);
+		Assert.Contains(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.ExtensionlessFiles);
 	}
 
 	[Fact]
@@ -212,13 +212,15 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	{
 		var viewModel = CreateViewModel();
 		var coordinator = CreateCoordinator(viewModel);
-		coordinator.PopulateIgnoreOptionsForRootSelection(["src"]);
+		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1));
+		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], "C:\\ProjectA");
 		coordinator.HandleIgnoreAllChanged(false, currentPath: null);
 		viewModel.IgnoreOptions[0].IsChecked = true;
 		viewModel.IgnoreOptions[1].IsChecked = false;
 		coordinator.UpdateIgnoreSelectionCache();
 
-		coordinator.PopulateIgnoreOptionsForRootSelection(["src"]);
+		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1));
+		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], "C:\\ProjectA");
 
 		var hiddenFolders = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFolders);
 		var hiddenFiles = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFiles);
@@ -409,6 +411,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore]);
 
 		coordinator.ApplyProjectProfileSelections("C:\\ProjectA", profile);
+		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1, DotFolders: 1, DotFiles: 1));
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], "C:\\ProjectA");
 
 		var hiddenFolders = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFolders);
@@ -686,7 +689,8 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			SelectedIgnoreOptions: [IgnoreOptionId.DotFiles]);
 
 		coordinator.ApplyProjectProfileSelections("C:\\ProjectA", profile);
-		coordinator.PopulateIgnoreOptionsForRootSelection(["src"]);
+		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(DotFiles: 1, HiddenFolders: 1));
+		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], "C:\\ProjectA");
 
 		Assert.False(viewModel.AllIgnoreChecked);
 		Assert.Contains(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFiles && option.IsChecked);
@@ -709,6 +713,15 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		};
 
 		return new StubLocalizationCatalog(data);
+	}
+
+	private static void ApplyIgnoreCounts(SelectionSyncCoordinator coordinator, IgnoreOptionCounts ignoreCounts)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"ApplyExtensionOptions",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, true]);
 	}
 
 	private static void SetPrivateField(SelectionSyncCoordinator coordinator, string fieldName, string? value)

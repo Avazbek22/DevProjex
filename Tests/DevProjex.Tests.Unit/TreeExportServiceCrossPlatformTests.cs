@@ -73,7 +73,7 @@ public sealed class TreeExportServiceCrossPlatformTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_Ascii_SelectedDirectoryIncludesDirectoryWithoutUnselectedFiles()
+	public void BuildSelectedTree_Ascii_SelectedDirectoryIncludesDescendantFiles()
 	{
 		var service = new TreeExportService();
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjex", "TreeExportCrossDirectorySelection");
@@ -85,7 +85,7 @@ public sealed class TreeExportServiceCrossPlatformTests
 		var ascii = service.BuildSelectedTree(rootPath, root, selected, TreeTextFormat.Ascii);
 
 		Assert.Contains("src", ascii);
-		Assert.DoesNotContain("main.cs", ascii);
+		Assert.Contains("main.cs", ascii);
 	}
 
 	[Fact]
@@ -102,7 +102,7 @@ public sealed class TreeExportServiceCrossPlatformTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_Json_RootSelectionReturnsRootOnly()
+	public void BuildSelectedTree_Json_RootSelectionReturnsFullSubtree()
 	{
 		var service = new TreeExportService();
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjex", "TreeExportRootOnly");
@@ -116,8 +116,8 @@ public sealed class TreeExportServiceCrossPlatformTests
 		using var doc = JsonDocument.Parse(json);
 		var rootElement = doc.RootElement.GetProperty("root");
 		Assert.Equal(".", rootElement.GetProperty("path").GetString());
-		Assert.False(rootElement.TryGetProperty("dirs", out _));
-		Assert.False(rootElement.TryGetProperty("files", out _));
+		Assert.True(rootElement.TryGetProperty("dirs", out var dirs));
+		Assert.Equal(1, dirs.GetArrayLength());
 	}
 
 	private static TreeNodeDescriptor CreateRoot(string rootPath, string? srcPath = null, string? filePath = null)

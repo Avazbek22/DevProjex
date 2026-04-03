@@ -204,6 +204,7 @@
     <views:TopMenuBarView DockPanel.Dock="Top"
                           Name="TopMenuBar"
                           OpenFolderRequested="OnOpenFolder"
+                          OpenNewWindowRequested="OnOpenNewWindow"
                           RefreshRequested="OnRefresh"
                           ExportTreeToFileRequested="OnExportTreeToFile"
                           ExportContentToFileRequested="OnExportContentToFile"
@@ -572,6 +573,8 @@
                                       Spacing="{DynamicResource TreeItemSpacingResource}">
                             <CheckBox IsThreeState="True"
                                       IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
+                                      Tapped="OnTreeNodeCheckBoxTapped"
+                                      DoubleTapped="OnTreeNodeCheckBoxDoubleTapped"
                                       VerticalAlignment="Center" />
                             <Image Source="{CompiledBinding Icon}"
                                    Width="{DynamicResource TreeIconSizeResource}"
@@ -655,10 +658,33 @@
               <Border Name="PreviewBar"
                       Classes="preview-panel">
               <Grid Name="PreviewBarLayoutGrid"
-                    ColumnDefinitions="*,Auto"
+                    ColumnDefinitions="Auto,*,Auto"
                     Margin="12,5"
                     VerticalAlignment="Center">
-                <Border Grid.Column="0"
+                <Button Grid.Column="0"
+                        Name="PreviewCopyButton"
+                        Classes="menu-icon-button preview-copy-button"
+                        ToolTip.ShowDelay="700"
+                        Width="32"
+                        Height="32"
+                        Margin="0,0,8,0"
+                        Click="OnPreviewCopyCurrentMode">
+                  <ToolTip.Tip>
+                    <ToolTip Classes="preview-blurred-tooltip"
+                             Loaded="OnPreviewToolTipLoaded">
+                      <TextBlock Text="{Binding PreviewCopyCurrentModeTooltip}" />
+                    </ToolTip>
+                  </ToolTip.Tip>
+                  <Viewbox Width="15"
+                           Height="15"
+                           Margin="-1,0,0,0"
+                           Stretch="Uniform">
+                    <Path Classes="preview-icon"
+                          Data="{StaticResource PreviewCopyIconGeometry}"
+                          Fill="{DynamicResource AppTextBrush}" />
+                  </Viewbox>
+                </Button>
+                <Border Grid.Column="1"
                         Name="PreviewSegmentedControl"
                         Margin="0,0,8,0"
                         Classes="segmented-control preview-segmented-control">
@@ -687,7 +713,7 @@
                             Click="OnPreviewTreeAndContentModeClick" />
                   </Grid>
                 </Border>
-                <Button Grid.Column="1"
+                <Button Grid.Column="2"
                         Name="PreviewCloseButton"
                         Classes="menu-icon-button preview-close-button"
                         Width="32"
@@ -761,7 +787,32 @@
                         Grid.Column="0"
                         Name="PreviewStickyHeaderCap"
                         Classes="preview-sticky-header-cap"
-                        IsVisible="False" />
+                        IsVisible="False">
+                  <Border Classes="preview-sticky-copy-host">
+                    <Button Name="PreviewStickyHeaderCopyButton"
+                            Classes="menu-icon-button preview-sticky-copy-button"
+                            ToolTip.Placement="Right"
+                            ToolTip.ShowDelay="700"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Click="OnPreviewCopyVisibleFilePath">
+                      <ToolTip.Tip>
+                        <ToolTip Classes="preview-blurred-tooltip"
+                                 Loaded="OnPreviewToolTipLoaded">
+                          <TextBlock Text="{Binding PreviewCopyFilePathTooltip}" />
+                        </ToolTip>
+                      </ToolTip.Tip>
+                      <Viewbox Width="12"
+                               Height="12"
+                               Margin="-1,0,0,0"
+                               Stretch="Uniform">
+                        <Path Classes="preview-icon"
+                              Data="{StaticResource PreviewCopyIconGeometry}"
+                              Fill="{DynamicResource AppTextBrush}" />
+                      </Viewbox>
+                    </Button>
+                  </Border>
+                </Border>
 
                 <Border Grid.Row="0"
                         Grid.Column="1"
@@ -772,7 +823,8 @@
                              Classes="preview-sticky-header-text"
                              FontFamily="{Binding SelectedFontFamily}"
                              FontSize="{Binding PreviewFontSize}"
-                             Margin="10,4,16,4"
+                             Margin="10,4,10,4"
+                             MinWidth="0"
                              VerticalAlignment="Center"
                              TextTrimming="CharacterEllipsis" />
                 </Border>

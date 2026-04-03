@@ -1,5 +1,3 @@
-using Avalonia.Headless;
-
 [assembly: AvaloniaTestApplication(typeof(DevProjex.Tests.UI.AvaloniaHeadlessTestApp))]
 [assembly: AvaloniaTestIsolation(AvaloniaTestIsolationLevel.PerTest)]
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
