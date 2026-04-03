@@ -392,6 +392,16 @@ internal static class PreviewSelectionMetricsPolicy
 
 internal static class MetricsCalculationPolicy
 {
+    public static TimeSpan GetInitialWarmupStartDelay(bool settingsVisible)
+    {
+        // Warmup should start shortly after the first stable paint instead of waiting for the
+        // entire settings reveal choreography. The old "animation duration + extra delay" path
+        // improved cosmetics, but it also introduced noticeable latency before Calculating data.
+        return settingsVisible
+            ? TimeSpan.FromMilliseconds(40)
+            : TimeSpan.Zero;
+    }
+
     public static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
         hasAnyCheckedNodes || hasCompleteMetricsBaseline;
 

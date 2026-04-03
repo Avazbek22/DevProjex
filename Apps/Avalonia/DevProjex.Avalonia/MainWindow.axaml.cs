@@ -7694,7 +7694,7 @@ public partial class MainWindow : Window
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         StartDeferredSettingsPanelAnimation(cancellationToken);
         ObserveDetachedTask(
-            InitializeFileMetricsCacheWhenUiSettlesAsync(treeRoot, cancellationToken),
+            InitializeFileMetricsCacheSoonAfterFirstPaintAsync(treeRoot, cancellationToken),
             "InitializeFileMetricsCache");
     }
 
@@ -7715,23 +7715,25 @@ public partial class MainWindow : Window
             AnimateSettingsPanel(true);
     }
 
-    private async Task InitializeFileMetricsCacheWhenUiSettlesAsync(
+    private async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
         TreeNodeDescriptor treeRoot,
         CancellationToken cancellationToken)
     {
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        // Two quick frames are enough for the freshly swapped tree to become visible and for the
+        // loading status strip to enter a stable state. Waiting for the full settings-panel
+        // choreography was adding visible latency before the metrics warmup even started.
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
         cancellationToken.ThrowIfCancellationRequested();
 
         await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Metrics warmup is useful but not user-critical. Let the initial layout, activation handoff
-        // and the first settings reveal finish before background metrics start posting progress updates.
-        await Task.Delay(
-            SettingsPanelAnimationDuration + UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80)),
-            cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
+        var warmupDelay = UiTimingProfile.Scale(
+            MetricsCalculationPolicy.GetInitialWarmupStartDelay(_viewModel.SettingsVisible));
+        if (warmupDelay > TimeSpan.Zero)
+            await Task.Delay(warmupDelay, cancellationToken);
 
+        cancellationToken.ThrowIfCancellationRequested();
         await InitializeFileMetricsCacheAsync(treeRoot, cancellationToken);
     }
 

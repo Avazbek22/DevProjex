@@ -36,4 +36,16 @@ public sealed class MainWindowMetricsPolicyTests
 
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData(true, 40)]
+    [InlineData(false, 0)]
+    public void GetInitialWarmupStartDelay_ReturnsSmallPostPaintDelay(
+        bool settingsVisible,
+        int expectedDelayMilliseconds)
+    {
+        var result = MetricsCalculationPolicy.GetInitialWarmupStartDelay(settingsVisible);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(expectedDelayMilliseconds), result);
+    }
 }
