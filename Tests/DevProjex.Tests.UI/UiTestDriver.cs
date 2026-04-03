@@ -75,7 +75,8 @@ internal static class UiTestDriver
                         return true;
 
                     var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
-                    return GetActualWidth(settingsContainer) >= 200;
+                    return GetActualWidth(settingsContainer) >= 200 &&
+                           !GetRequiredPrivateField<bool>(window, "_settingsAnimating");
                 },
                 "initial settings pane to become visually available");
         }
@@ -390,9 +391,11 @@ internal static class UiTestDriver
                 var viewModel = GetViewModel(window);
                 var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
                 var isEffectivelyVisible = IsActuallyVisibleHorizontally(settingsContainer);
+                var settingsAnimating = GetRequiredPrivateField<bool>(window, "_settingsAnimating");
 
                 return viewModel.SettingsVisible == visible &&
-                       isEffectivelyVisible == visible;
+                       isEffectivelyVisible == visible &&
+                       !settingsAnimating;
             },
             $"settings visibility to become {visible}");
 
@@ -748,9 +751,13 @@ internal static class UiTestDriver
             () =>
             {
                 var viewModel = GetViewModel(window);
+                var previewTextControl = window.FindControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>("PreviewTextControl");
+                var previewDocument = previewTextControl?.Document ?? viewModel.PreviewDocument;
+
                 return viewModel.SelectedPreviewContentMode == mode &&
                        !viewModel.IsPreviewLoading &&
-                       viewModel.PreviewDocument is not null;
+                       previewDocument is not null &&
+                       IsPreviewPipelineIdle(window);
             },
             $"preview mode {mode} to become active");
 
@@ -765,10 +772,14 @@ internal static class UiTestDriver
             {
                 var viewModel = GetViewModel(window);
                 var previewIsland = GetRequiredControl<Border>(window, "PreviewIsland");
+                var previewTextControl = window.FindControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>("PreviewTextControl");
+                var previewDocument = previewTextControl?.Document ?? viewModel.PreviewDocument;
+
                 return viewModel.IsPreviewMode &&
                        previewIsland.IsVisible &&
                        !viewModel.IsPreviewLoading &&
-                       viewModel.PreviewDocument is not null;
+                       previewDocument is not null &&
+                       IsPreviewPipelineIdle(window);
             },
             "preview workspace to become ready");
         await WaitForSettledFramesAsync(frameCount: 18);
@@ -1099,6 +1110,16 @@ internal static class UiTestDriver
     {
         var field = typeof(MainWindow).GetField("_selectionCoordinator", BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
+    }
+
+    private static bool IsPreviewPipelineIdle(MainWindow window)
+    {
+        // Preview mode switching is a two-step pipeline: the selected mode changes first,
+        // then the actual preview refresh is scheduled and can temporarily clear the document.
+        // UI tests must wait for both steps to settle before reading the live preview payload.
+        return !GetRequiredPrivateField<bool>(window, "_previewModeSwitchInProgress") &&
+               !GetRequiredPrivateField<bool>(window, "_previewRefreshRequested") &&
+               !GetRequiredPrivateField<bool>(window, "_clearPreviewBeforeNextRefresh");
     }
 
     private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)
