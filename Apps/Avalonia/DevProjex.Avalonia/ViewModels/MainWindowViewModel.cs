@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Collections;
+
 namespace DevProjex.Avalonia.ViewModels;
 
 /// <summary>
@@ -162,9 +164,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
         }
     }
-    public ObservableCollection<SelectionOptionViewModel> RootFolders { get; } = [];
-    public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = [];
-    public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = [];
+    public ObservableCollection<SelectionOptionViewModel> RootFolders { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
+    public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
+    public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new ResettableObservableCollection<IgnoreOptionViewModel>();
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentRepositories { get; } = [];

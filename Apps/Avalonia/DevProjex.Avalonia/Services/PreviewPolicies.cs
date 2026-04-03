@@ -392,16 +392,38 @@ internal static class PreviewSelectionMetricsPolicy
 
 internal static class MetricsCalculationPolicy
 {
+    public static TimeSpan GetInitialWarmupStartDelay(bool settingsVisible)
+    {
+        // Warmup should start shortly after the first stable paint instead of waiting for the
+        // entire settings reveal choreography. The old "animation duration + extra delay" path
+        // improved cosmetics, but it also introduced noticeable latency before Calculating data.
+        return settingsVisible
+            ? TimeSpan.FromMilliseconds(40)
+            : TimeSpan.Zero;
+    }
+
     public static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
         hasAnyCheckedNodes || hasCompleteMetricsBaseline;
 
-    public static int GetBackgroundMetricsParallelism(int processorCount)
+    public static int GetBaselineWarmupParallelism(int processorCount)
     {
         if (processorCount <= 1)
             return 1;
 
-        // Leave at least one core free for the UI/render thread and clamp the fan-out
-        // so large scans do not saturate modern CPUs just to update status metrics.
+        // The initial whole-project warmup is a throughput-oriented phase. Matching the older
+        // aggressive fan-out keeps large baseline scans fast, while later selection recovery
+        // still uses a more conservative policy to preserve UI responsiveness.
+        return Math.Max(4, processorCount);
+    }
+
+    public static int GetSelectionRecoveryParallelism(int processorCount)
+    {
+        if (processorCount <= 1)
+            return 1;
+
+        // Recovery scans are user-driven and often happen while the user is actively interacting
+        // with the window. Keep one core free for UI work and clamp the fan-out to avoid turning
+        // a follow-up selection into a CPU saturation event.
         return Math.Clamp(processorCount - 1, 1, 8);
     }
 }

@@ -1,4 +1,5 @@
 using DevProjex.Application.Models;
+using DevProjex.Avalonia.Collections;
 using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
@@ -339,11 +340,12 @@ public sealed class SelectionSyncCoordinator(
                 cancellationToken.ThrowIfCancellationRequested();
                 if (version != _rootScanVersion) return;
                 if (IsStalePathRequest(path)) return;
-                viewModel.RootFolders.Clear();
+                var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
+                foreach (var option in options)
+                    optionViewModels.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
 
                 _suppressRootItemCheck = true;
-                foreach (var option in options)
-                    viewModel.RootFolders.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+                ReplaceCollectionItems(viewModel.RootFolders, optionViewModels);
                 _suppressRootItemCheck = false;
 
                 if (!ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked)
@@ -758,22 +760,23 @@ public sealed class SelectionSyncCoordinator(
         IReadOnlySet<IgnoreOptionId> previousSelections,
         bool hasPreviousSelections)
     {
+        var useDefaultCheckedFallback = ShouldUseIgnoreDefaultFallback(options, previousSelections);
+        var optionViewModels = new List<IgnoreOptionViewModel>(options.Count);
+        foreach (var option in options)
+        {
+            var isChecked = ResolveIgnoreOptionCheckedState(
+                option,
+                previousSelections,
+                hasPreviousSelections,
+                useDefaultCheckedFallback);
+            optionViewModels.Add(new IgnoreOptionViewModel(option.Id, option.Label, isChecked));
+        }
+
         _suppressIgnoreItemCheck = true;
         try
         {
-            viewModel.IgnoreOptions.Clear();
             _ignoreOptions = options;
-
-            var useDefaultCheckedFallback = ShouldUseIgnoreDefaultFallback(options, previousSelections);
-            foreach (var option in _ignoreOptions)
-            {
-                var isChecked = ResolveIgnoreOptionCheckedState(
-                    option,
-                    previousSelections,
-                    hasPreviousSelections,
-                    useDefaultCheckedFallback);
-                viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, isChecked));
-            }
+            ReplaceCollectionItems(viewModel.IgnoreOptions, optionViewModels);
         }
         finally
         {
@@ -1003,7 +1006,10 @@ public sealed class SelectionSyncCoordinator(
         IgnoreOptionCounts ignoreOptionCounts,
         bool hasIgnoreOptionCounts)
     {
-        viewModel.Extensions.Clear();
+        var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
+        foreach (var option in options)
+            optionViewModels.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+
         var effectiveExtensionlessCount = hasIgnoreOptionCounts
             ? ignoreOptionCounts.ExtensionlessFiles
             : extensionlessEntriesCount;
@@ -1014,8 +1020,7 @@ public sealed class SelectionSyncCoordinator(
         _hasIgnoreOptionCounts = hasIgnoreOptionCounts;
 
         _suppressExtensionItemCheck = true;
-        foreach (var option in options)
-            viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+        ReplaceCollectionItems(viewModel.Extensions, optionViewModels);
         _suppressExtensionItemCheck = false;
 
         if (!ShouldSuppressAllTogglesOverride() && viewModel.AllExtensionsChecked)
@@ -1032,11 +1037,12 @@ public sealed class SelectionSyncCoordinator(
 
     private void ApplyRootOptions(IReadOnlyList<SelectionOption> options)
     {
-        viewModel.RootFolders.Clear();
+        var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
+        foreach (var option in options)
+            optionViewModels.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
 
         _suppressRootItemCheck = true;
-        foreach (var option in options)
-            viewModel.RootFolders.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+        ReplaceCollectionItems(viewModel.RootFolders, optionViewModels);
         _suppressRootItemCheck = false;
 
         if (!ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked)
@@ -1052,17 +1058,18 @@ public sealed class SelectionSyncCoordinator(
         IReadOnlyList<ResolvedIgnoreOptionState> options,
         IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
     {
+        var descriptors = new List<IgnoreOptionDescriptor>(options.Count);
+        var optionViewModels = new List<IgnoreOptionViewModel>(options.Count);
+        foreach (var option in options)
+        {
+            descriptors.Add(new IgnoreOptionDescriptor(option.Id, option.Label, option.DefaultChecked));
+            optionViewModels.Add(new IgnoreOptionViewModel(option.Id, option.Label, option.IsChecked));
+        }
+
         _suppressIgnoreItemCheck = true;
         try
         {
-            viewModel.IgnoreOptions.Clear();
-            var descriptors = new List<IgnoreOptionDescriptor>(options.Count);
-            foreach (var option in options)
-            {
-                descriptors.Add(new IgnoreOptionDescriptor(option.Id, option.Label, option.DefaultChecked));
-                viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, option.IsChecked));
-            }
-
+            ReplaceCollectionItems(viewModel.IgnoreOptions, optionViewModels);
             _ignoreOptions = descriptors;
         }
         finally
@@ -1088,6 +1095,21 @@ public sealed class SelectionSyncCoordinator(
             snapshot.HasIgnoreOptionCounts);
 
         ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+    }
+
+    private static void ReplaceCollectionItems<T>(
+        ObservableCollection<T> collection,
+        IReadOnlyList<T> items)
+    {
+        if (collection is ResettableObservableCollection<T> resettableCollection)
+        {
+            resettableCollection.ReplaceAll(items);
+            return;
+        }
+
+        collection.Clear();
+        foreach (var item in items)
+            collection.Add(item);
     }
 
     private static HashSet<string> CollectCheckedSelectionNames(

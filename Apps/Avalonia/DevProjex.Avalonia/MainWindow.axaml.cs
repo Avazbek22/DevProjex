@@ -6556,7 +6556,10 @@ public partial class MainWindow : Window
         {
             _viewModel.SearchQuery = string.Empty;
             _searchCoordinator.CancelPending();
-            _searchCoordinator.UpdateSearchMatches();
+            // Project load clears search state ahead of time. Skip the expensive tree-wide search
+            // normalization when there is no active query or cached match state to restore.
+            if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery) || _searchCoordinator.HasMatches)
+                _searchCoordinator.UpdateSearchMatches();
 
             // Release stale highlight objects after search state is rebuilt.
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.SearchClose);
@@ -7568,7 +7571,11 @@ public partial class MainWindow : Window
             if (!interactiveFilter && !string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
                 _toastService.Show(_localization["Toast.NoMatches"]);
 
-            _searchCoordinator.UpdateSearchMatches();
+            // Project-load and refresh paths usually arrive here with an empty search state.
+            // Skip the tree-wide search normalization unless there is an active query or a
+            // non-empty cached result set that still needs to be rebound to the new tree.
+            if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery) || _searchCoordinator.HasMatches)
+                _searchCoordinator.UpdateSearchMatches();
 
             // Initialize file metrics cache in background for real-time status bar updates
             // Only do full scan on initial load, not on interactive filter changes
@@ -7687,7 +7694,7 @@ public partial class MainWindow : Window
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         StartDeferredSettingsPanelAnimation(cancellationToken);
         ObserveDetachedTask(
-            InitializeFileMetricsCacheWhenUiSettlesAsync(treeRoot, cancellationToken),
+            InitializeFileMetricsCacheSoonAfterFirstPaintAsync(treeRoot, cancellationToken),
             "InitializeFileMetricsCache");
     }
 
@@ -7708,23 +7715,25 @@ public partial class MainWindow : Window
             AnimateSettingsPanel(true);
     }
 
-    private async Task InitializeFileMetricsCacheWhenUiSettlesAsync(
+    private async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
         TreeNodeDescriptor treeRoot,
         CancellationToken cancellationToken)
     {
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        // Two quick frames are enough for the freshly swapped tree to become visible and for the
+        // loading status strip to enter a stable state. Waiting for the full settings-panel
+        // choreography was adding visible latency before the metrics warmup even started.
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
         cancellationToken.ThrowIfCancellationRequested();
 
         await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Metrics warmup is useful but not user-critical. Let the initial layout, activation handoff
-        // and the first settings reveal finish before background metrics start posting progress updates.
-        await Task.Delay(
-            SettingsPanelAnimationDuration + UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80)),
-            cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
+        var warmupDelay = UiTimingProfile.Scale(
+            MetricsCalculationPolicy.GetInitialWarmupStartDelay(_viewModel.SettingsVisible));
+        if (warmupDelay > TimeSpan.Zero)
+            await Task.Delay(warmupDelay, cancellationToken);
 
+        cancellationToken.ThrowIfCancellationRequested();
         await InitializeFileMetricsCacheAsync(treeRoot, cancellationToken);
     }
 
@@ -8464,7 +8473,13 @@ public partial class MainWindow : Window
                 return;
             }
 
-            await ScanFileMetricsAsync(filePaths, stagedMetrics, stagedInspectedPaths, linkedCts.Token, statusOperationId);
+            await ScanFileMetricsAsync(
+                filePaths,
+                stagedMetrics,
+                stagedInspectedPaths,
+                linkedCts.Token,
+                statusOperationId,
+                MetricsCalculationPolicy.GetBaselineWarmupParallelism(Environment.ProcessorCount));
 
             MergeStagedMetricsIntoCache(stagedMetrics);
             MergeInspectedMetricsPaths(stagedInspectedPaths);
@@ -8551,7 +8566,8 @@ public partial class MainWindow : Window
         ConcurrentDictionary<string, FileMetricsData> stagedMetrics,
         ConcurrentDictionary<string, byte> stagedInspectedPaths,
         CancellationToken cancellationToken,
-        long statusOperationId)
+        long statusOperationId,
+        int maxDegreeOfParallelism)
     {
         if (filePaths.Count == 0)
             return;
@@ -8560,7 +8576,7 @@ public partial class MainWindow : Window
         var lastProgressPercent = 0;
         var parallelOptions = new ParallelOptions
         {
-            MaxDegreeOfParallelism = MetricsCalculationPolicy.GetBackgroundMetricsParallelism(Environment.ProcessorCount),
+            MaxDegreeOfParallelism = maxDegreeOfParallelism,
             CancellationToken = cancellationToken
         };
 
@@ -8941,7 +8957,13 @@ public partial class MainWindow : Window
             if (IsStatusOperationActive(statusOperationId))
                 _viewModel.StatusProgressValue = 0;
 
-            await ScanFileMetricsAsync(missingPaths, stagedMetrics, stagedInspectedPaths, linkedCts.Token, statusOperationId);
+            await ScanFileMetricsAsync(
+                missingPaths,
+                stagedMetrics,
+                stagedInspectedPaths,
+                linkedCts.Token,
+                statusOperationId,
+                MetricsCalculationPolicy.GetSelectionRecoveryParallelism(Environment.ProcessorCount));
             MergeStagedMetricsIntoCache(stagedMetrics);
             MergeInspectedMetricsPaths(stagedInspectedPaths);
 
@@ -9007,15 +9029,23 @@ public partial class MainWindow : Window
                 return _treeMetricsCacheValue;
         }
 
-        var treeText = effectiveHasSelection
-            ? BuildTreeTextForSelection(selectedPaths, format)
-            : _treeExport.BuildFullTree(
+        // Tree status metrics are requested frequently while the user tweaks selection.
+        // Rebuilding a 100k+ line ASCII tree string only to count chars/lines is wasteful,
+        // so the export service provides a direct metrics path that preserves the same contract.
+        var metrics = effectiveHasSelection
+            ? _treeExport.CalculateSelectedTreeMetrics(
+                _currentPath,
+                _currentTree.Root,
+                selectedPaths,
+                format,
+                pathPresentation?.DisplayRootPath,
+                pathPresentation?.DisplayRootName)
+            : _treeExport.CalculateFullTreeMetrics(
                 _currentPath,
                 _currentTree.Root,
                 format,
                 pathPresentation?.DisplayRootPath,
                 pathPresentation?.DisplayRootName);
-        var metrics = ExportOutputMetricsCalculator.FromText(treeText);
 
         lock (_metricsComputationCacheLock)
         {
@@ -9060,7 +9090,7 @@ public partial class MainWindow : Window
         if (orderedPaths.Count == 0)
             return ExportOutputMetrics.Empty;
 
-        var metricsInputs = new List<ContentFileMetrics>(orderedPaths.Count);
+        var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
         lock (_metricsLock)
         {
             foreach (var path in orderedPaths)
@@ -9069,7 +9099,7 @@ public partial class MainWindow : Window
                     continue;
 
                 var displayPath = MapExportDisplayPath(path, pathMapper);
-                metricsInputs.Add(new ContentFileMetrics(
+                accumulator.AppendFile(new ContentFileMetrics(
                     Path: displayPath,
                     SizeBytes: metrics.Size,
                     LineCount: metrics.LineCount,
@@ -9083,7 +9113,7 @@ public partial class MainWindow : Window
             }
         }
 
-        var computed = ExportOutputMetricsCalculator.FromOrderedContentFiles(metricsInputs);
+        var computed = accumulator.ToMetrics();
         lock (_metricsComputationCacheLock)
         {
             _hasContentMetricsCache = true;
