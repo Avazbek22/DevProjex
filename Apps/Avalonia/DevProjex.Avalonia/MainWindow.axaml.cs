@@ -930,7 +930,7 @@ public partial class MainWindow : Window
 
         // App lost focus — ideal time to compact the heap and return pages to the OS.
         // Runs on a background thread so the deactivation handler returns instantly.
-        ScheduleBackgroundMemoryCleanup();
+        ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.WindowDeactivated);
     }
 
     private async Task WaitForWindowActivationAfterSystemDialogAsync(CancellationToken cancellationToken = default)
@@ -2267,8 +2267,7 @@ public partial class MainWindow : Window
         {
             await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
             CompleteStatusOperation(statusOperationId);
-            ScheduleBackgroundMemoryCleanupAfterUiSettles(
-                SettingsPanelAnimationDuration + TimeSpan.FromMilliseconds(300));
+            ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.RefreshProject);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -4022,21 +4021,17 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Schedules aggressive memory cleanup on a background thread after heavy operations
-    /// (project load, git branch switch, git pull, search/filter close, deactivation).
-    /// The delay lets finalizers and UI thread finish releasing references before sweep.
+    /// Schedules aggressive memory cleanup on a background thread.
+    /// The reason-driven policy keeps heavy GC out of hot UI paths while still preserving the
+    /// explicit "free memory back to the OS" behavior that large project sessions rely on.
     /// </summary>
-    private void ScheduleBackgroundMemoryCleanup()
-        => ScheduleBackgroundMemoryCleanupCore(
-            UiTimingProfile.Scale(TimeSpan.FromMilliseconds(400)),
-            waitForUiSettled: false);
+    private void ScheduleBackgroundMemoryCleanup(MemoryCleanupReason reason)
+    {
+        var cleanupPlan = MemoryCleanupPolicy.CreateDeferredPlan(reason, SettingsPanelAnimationDuration);
+        ScheduleBackgroundMemoryCleanupCore(cleanupPlan);
+    }
 
-    private void ScheduleBackgroundMemoryCleanupAfterUiSettles(TimeSpan additionalDelay)
-        => ScheduleBackgroundMemoryCleanupCore(
-            UiTimingProfile.Scale(additionalDelay),
-            waitForUiSettled: true);
-
-    private void ScheduleBackgroundMemoryCleanupCore(TimeSpan delay, bool waitForUiSettled)
+    private void ScheduleBackgroundMemoryCleanupCore(MemoryCleanupPlan cleanupPlan)
     {
         var cleanupCts = ReplaceCancellationSource(ref _backgroundMemoryCleanupCts);
 
@@ -4044,10 +4039,13 @@ public partial class MainWindow : Window
         {
             try
             {
-                if (waitForUiSettled)
+                if (cleanupPlan.WaitForUiSettled)
                     await WaitForUiReadyForMemoryCleanupAsync(cleanupCts.Token);
 
-                await Task.Delay(delay, cleanupCts.Token);
+                var scaledDelay = UiTimingProfile.Scale(cleanupPlan.Delay);
+                if (scaledDelay > TimeSpan.Zero)
+                    await Task.Delay(scaledDelay, cleanupCts.Token);
+
                 cleanupCts.Token.ThrowIfCancellationRequested();
                 ForceMemoryCleanup();
             }
@@ -4120,7 +4118,7 @@ public partial class MainWindow : Window
                 if (cleanupVersion != Volatile.Read(ref _searchMemoryCleanupVersion))
                     return;
 
-                ScheduleBackgroundMemoryCleanup();
+                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.SearchClose);
             }
             catch (OperationCanceledException)
             {
@@ -4166,12 +4164,7 @@ public partial class MainWindow : Window
                 if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
                     return;
 
-                // Keep a tiny buffer so panel/tree transitions settle first.
-                await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(140)), cleanupCts.Token);
-                if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
-                    return;
-
-                ForceMemoryCleanup();
+                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.PreviewClose);
             }
             catch (OperationCanceledException)
             {
@@ -5646,8 +5639,8 @@ public partial class MainWindow : Window
             {
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
                 CompleteStatusOperation(statusOperationId);
-                // Clean up memory from old tree after successful update
-                ScheduleBackgroundMemoryCleanup();
+                // Clean up memory from old tree after successful update.
+                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.GitPullUpdate);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -5718,8 +5711,8 @@ public partial class MainWindow : Window
             UpdateTitle();
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
 
-            // Clean up memory from old branch tree
-            ScheduleBackgroundMemoryCleanup();
+            // Clean up memory from old branch tree.
+            ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.GitBranchSwitch);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -5922,7 +5915,7 @@ public partial class MainWindow : Window
             _ = ApplyFilterRealtimeAsync(CancellationToken.None);
 
             // Release stale filtered snapshots after rebuild is queued.
-            ScheduleBackgroundMemoryCleanup();
+            ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.FilterClose);
         }
         else
         {
@@ -6566,7 +6559,7 @@ public partial class MainWindow : Window
             _searchCoordinator.UpdateSearchMatches();
 
             // Release stale highlight objects after search state is rebuilt.
-            ScheduleBackgroundMemoryCleanup();
+            ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.SearchClose);
         }
         else
         {
@@ -6992,12 +6985,6 @@ public partial class MainWindow : Window
         CancelBackgroundMemoryCleanup();
         CancelPreviewRefresh();
         var hadLoadedProjectBefore = _viewModel.IsProjectLoaded;
-
-        // Clear previous project state BEFORE loading new one to release memory early
-        // This is critical when switching between large projects
-        if (hadLoadedProjectBefore)
-            ClearPreviousProjectState(forceCompactingGc: true);
-
         var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
         var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = projectLoadCts.Token;
@@ -7009,6 +6996,15 @@ public partial class MainWindow : Window
             cancelAction: () => projectLoadCts.Cancel());
         try
         {
+            if (hadLoadedProjectBefore)
+            {
+                // Render the loading shell before the blocking compacting GC runs.
+                // The pause still exists, but it now happens after the user sees an explicit
+                // project-switch transition instead of an unexplained UI hitch.
+                await YieldProjectLoadStartupFrameAsync(cancellationToken);
+                ClearPreviousProjectState(forceCompactingGc: true);
+            }
+
             _currentPath = path;
             _viewModel.IsProjectLoaded = true;
             _viewModel.SettingsVisible = true;
@@ -7048,15 +7044,15 @@ public partial class MainWindow : Window
             if (hadLoadedProjectBefore)
             {
                 // Clean up memory from previous project (old tree, strings, etc.)
-                // Must be AFTER loading new project so old references are replaced.
-                ScheduleBackgroundMemoryCleanup();
+                // Must be AFTER loading new project so old references are replaced, but also
+                // after the new UI has had a chance to render at least one stable frame.
+                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.ProjectSwitchPostLoad);
             }
             else
             {
                 // First load still creates temporary buffers and transient strings, but reclaim them
                 // only after the initial UI settles so opening the project keeps feeling smooth.
-                ScheduleBackgroundMemoryCleanupAfterUiSettles(
-                    SettingsPanelAnimationDuration + TimeSpan.FromMilliseconds(500));
+                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.InitialProjectLoad);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -7588,10 +7584,9 @@ public partial class MainWindow : Window
 
             SchedulePreviewRefresh(immediate: true);
 
-            // Collect old tree objects after building the new one.
-            // Full-load refreshes warrant a forced sweep; interactive filter changes skip GC entirely.
-            if (!interactiveFilter)
-                GC.Collect(2, GCCollectionMode.Forced, blocking: false);
+            // Do not force GC from the hot end-of-load path.
+            // Large sessions still get a heavy cleanup, but only through the explicit
+            // deferred scheduler once the UI has finished the visible transition.
         }
         finally
         {
