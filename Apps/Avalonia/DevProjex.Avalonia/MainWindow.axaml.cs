@@ -8473,7 +8473,13 @@ public partial class MainWindow : Window
                 return;
             }
 
-            await ScanFileMetricsAsync(filePaths, stagedMetrics, stagedInspectedPaths, linkedCts.Token, statusOperationId);
+            await ScanFileMetricsAsync(
+                filePaths,
+                stagedMetrics,
+                stagedInspectedPaths,
+                linkedCts.Token,
+                statusOperationId,
+                MetricsCalculationPolicy.GetBaselineWarmupParallelism(Environment.ProcessorCount));
 
             MergeStagedMetricsIntoCache(stagedMetrics);
             MergeInspectedMetricsPaths(stagedInspectedPaths);
@@ -8560,7 +8566,8 @@ public partial class MainWindow : Window
         ConcurrentDictionary<string, FileMetricsData> stagedMetrics,
         ConcurrentDictionary<string, byte> stagedInspectedPaths,
         CancellationToken cancellationToken,
-        long statusOperationId)
+        long statusOperationId,
+        int maxDegreeOfParallelism)
     {
         if (filePaths.Count == 0)
             return;
@@ -8569,7 +8576,7 @@ public partial class MainWindow : Window
         var lastProgressPercent = 0;
         var parallelOptions = new ParallelOptions
         {
-            MaxDegreeOfParallelism = MetricsCalculationPolicy.GetBackgroundMetricsParallelism(Environment.ProcessorCount),
+            MaxDegreeOfParallelism = maxDegreeOfParallelism,
             CancellationToken = cancellationToken
         };
 
@@ -8950,7 +8957,13 @@ public partial class MainWindow : Window
             if (IsStatusOperationActive(statusOperationId))
                 _viewModel.StatusProgressValue = 0;
 
-            await ScanFileMetricsAsync(missingPaths, stagedMetrics, stagedInspectedPaths, linkedCts.Token, statusOperationId);
+            await ScanFileMetricsAsync(
+                missingPaths,
+                stagedMetrics,
+                stagedInspectedPaths,
+                linkedCts.Token,
+                statusOperationId,
+                MetricsCalculationPolicy.GetSelectionRecoveryParallelism(Environment.ProcessorCount));
             MergeStagedMetricsIntoCache(stagedMetrics);
             MergeInspectedMetricsPaths(stagedInspectedPaths);
 
