@@ -6556,7 +6556,10 @@ public partial class MainWindow : Window
         {
             _viewModel.SearchQuery = string.Empty;
             _searchCoordinator.CancelPending();
-            _searchCoordinator.UpdateSearchMatches();
+            // Project load clears search state ahead of time. Skip the expensive tree-wide search
+            // normalization when there is no active query or cached match state to restore.
+            if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery) || _searchCoordinator.HasMatches)
+                _searchCoordinator.UpdateSearchMatches();
 
             // Release stale highlight objects after search state is rebuilt.
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.SearchClose);
@@ -7568,7 +7571,11 @@ public partial class MainWindow : Window
             if (!interactiveFilter && !string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
                 _toastService.Show(_localization["Toast.NoMatches"]);
 
-            _searchCoordinator.UpdateSearchMatches();
+            // Project-load and refresh paths usually arrive here with an empty search state.
+            // Skip the tree-wide search normalization unless there is an active query or a
+            // non-empty cached result set that still needs to be rebound to the new tree.
+            if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery) || _searchCoordinator.HasMatches)
+                _searchCoordinator.UpdateSearchMatches();
 
             // Initialize file metrics cache in background for real-time status bar updates
             // Only do full scan on initial load, not on interactive filter changes
