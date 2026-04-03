@@ -627,6 +627,11 @@ public sealed class GitRepositoryService : IGitRepositoryService
         CancellationToken cancellationToken,
         IProgress<string>? progress = null)
     {
+        // Honor pre-canceled tokens before spawning git. Without this guard a very fast
+        // command such as "git --version" can complete before WaitForExitAsync observes
+        // cancellation, which makes cancellation behavior platform-timing dependent.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var startInfo = new ProcessStartInfo
         {
             FileName = GitExecutable,
