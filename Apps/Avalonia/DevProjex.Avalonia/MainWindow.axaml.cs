@@ -9016,15 +9016,23 @@ public partial class MainWindow : Window
                 return _treeMetricsCacheValue;
         }
 
-        var treeText = effectiveHasSelection
-            ? BuildTreeTextForSelection(selectedPaths, format)
-            : _treeExport.BuildFullTree(
+        // Tree status metrics are requested frequently while the user tweaks selection.
+        // Rebuilding a 100k+ line ASCII tree string only to count chars/lines is wasteful,
+        // so the export service provides a direct metrics path that preserves the same contract.
+        var metrics = effectiveHasSelection
+            ? _treeExport.CalculateSelectedTreeMetrics(
+                _currentPath,
+                _currentTree.Root,
+                selectedPaths,
+                format,
+                pathPresentation?.DisplayRootPath,
+                pathPresentation?.DisplayRootName)
+            : _treeExport.CalculateFullTreeMetrics(
                 _currentPath,
                 _currentTree.Root,
                 format,
                 pathPresentation?.DisplayRootPath,
                 pathPresentation?.DisplayRootName);
-        var metrics = ExportOutputMetricsCalculator.FromText(treeText);
 
         lock (_metricsComputationCacheLock)
         {
@@ -9069,7 +9077,7 @@ public partial class MainWindow : Window
         if (orderedPaths.Count == 0)
             return ExportOutputMetrics.Empty;
 
-        var metricsInputs = new List<ContentFileMetrics>(orderedPaths.Count);
+        var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
         lock (_metricsLock)
         {
             foreach (var path in orderedPaths)
@@ -9078,7 +9086,7 @@ public partial class MainWindow : Window
                     continue;
 
                 var displayPath = MapExportDisplayPath(path, pathMapper);
-                metricsInputs.Add(new ContentFileMetrics(
+                accumulator.AppendFile(new ContentFileMetrics(
                     Path: displayPath,
                     SizeBytes: metrics.Size,
                     LineCount: metrics.LineCount,
@@ -9092,7 +9100,7 @@ public partial class MainWindow : Window
             }
         }
 
-        var computed = ExportOutputMetricsCalculator.FromOrderedContentFiles(metricsInputs);
+        var computed = accumulator.ToMetrics();
         lock (_metricsComputationCacheLock)
         {
             _hasContentMetricsCache = true;

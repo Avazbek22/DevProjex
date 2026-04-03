@@ -44,6 +44,22 @@ public sealed class TreeExportService
 		return sb.ToString();
 	}
 
+	public ExportOutputMetrics CalculateFullTreeMetrics(
+		string rootPath,
+		TreeNodeDescriptor root,
+		TreeTextFormat format,
+		string? displayRootPath = null,
+		string? displayRootName = null)
+	{
+		if (format == TreeTextFormat.Json)
+			return ExportOutputMetricsCalculator.FromText(
+				BuildFullTree(rootPath, root, format, displayRootPath, displayRootName));
+
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
+		var outputRootName = ResolveRootDisplayName(root, displayRootName);
+		return CalculateAsciiFullTreeMetrics(outputRootPath, root, outputRootName);
+	}
+
 	public string BuildSelectedTree(string rootPath, TreeNodeDescriptor root, IReadOnlySet<string> selectedPaths)
 		=> BuildSelectedTree(rootPath, root, selectedPaths, TreeTextFormat.Ascii);
 
@@ -78,6 +94,27 @@ public sealed class TreeExportService
 		AppendSelectedAscii(root, includedPaths, "│   ", sb);
 
 		return sb.ToString();
+	}
+
+	public ExportOutputMetrics CalculateSelectedTreeMetrics(
+		string rootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedPaths,
+		TreeTextFormat format,
+		string? displayRootPath = null,
+		string? displayRootName = null)
+	{
+		var includedPaths = new HashSet<string>(PathComparer.Default);
+		if (!CollectIncludedPaths(root, selectedPaths, includedPaths))
+			return ExportOutputMetrics.Empty;
+
+		if (format == TreeTextFormat.Json)
+			return ExportOutputMetricsCalculator.FromText(
+				BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath, displayRootName));
+
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
+		var outputRootName = ResolveRootDisplayName(root, displayRootName);
+		return CalculateAsciiSelectedTreeMetrics(outputRootPath, root, includedPaths, outputRootName);
 	}
 
 	public static bool HasSelectedDescendantOrSelf(TreeNodeDescriptor node, IReadOnlySet<string> selectedPaths)
@@ -301,6 +338,104 @@ public sealed class TreeExportService
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 				stack.Push(current.Children[index]);
 		}
+	}
+
+	private static ExportOutputMetrics CalculateAsciiFullTreeMetrics(
+		string outputRootPath,
+		TreeNodeDescriptor root,
+		string outputRootName)
+	{
+		var chars = 0;
+		var lineBreaks = 0;
+
+		AppendAsciiLineMetrics(outputRootPath.Length + 1, ref chars, ref lineBreaks); // "<rootPath>:"
+		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
+		AppendAsciiLineMetrics(BranchMiddle.Length + outputRootName.Length, ref chars, ref lineBreaks);
+		AppendFullAsciiChildMetrics(root, IndentPipe.Length, ref chars, ref lineBreaks);
+
+		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
+	}
+
+	private static ExportOutputMetrics CalculateAsciiSelectedTreeMetrics(
+		string outputRootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths,
+		string outputRootName)
+	{
+		var chars = 0;
+		var lineBreaks = 0;
+
+		AppendAsciiLineMetrics(outputRootPath.Length + 1, ref chars, ref lineBreaks); // "<rootPath>:"
+		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
+		AppendAsciiLineMetrics(BranchMiddle.Length + outputRootName.Length, ref chars, ref lineBreaks);
+		AppendSelectedAsciiChildMetrics(root, includedPaths, IndentPipe.Length, ref chars, ref lineBreaks);
+
+		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
+	}
+
+	private static void AppendFullAsciiChildMetrics(
+		TreeNodeDescriptor node,
+		int indentLength,
+		ref int chars,
+		ref int lineBreaks)
+	{
+		var childCount = node.Children.Count;
+		for (var index = 0; index < childCount; index++)
+		{
+			var child = node.Children[index];
+			var branchLength = index == childCount - 1 ? BranchLast.Length : BranchMiddle.Length;
+
+			AppendAsciiLineMetrics(indentLength + branchLength + child.DisplayName.Length, ref chars, ref lineBreaks);
+
+			if (child.Children.Count > 0)
+				AppendFullAsciiChildMetrics(child, indentLength + IndentPipe.Length, ref chars, ref lineBreaks);
+		}
+	}
+
+	private static void AppendSelectedAsciiChildMetrics(
+		TreeNodeDescriptor node,
+		IReadOnlySet<string> includedPaths,
+		int indentLength,
+		ref int chars,
+		ref int lineBreaks)
+	{
+		var visibleCount = 0;
+		foreach (var child in node.Children)
+		{
+			if (includedPaths.Contains(child.FullPath))
+				visibleCount++;
+		}
+
+		var visibleIndex = 0;
+		foreach (var child in node.Children)
+		{
+			if (!includedPaths.Contains(child.FullPath))
+				continue;
+
+			visibleIndex++;
+			var branchLength = visibleIndex == visibleCount ? BranchLast.Length : BranchMiddle.Length;
+
+			AppendAsciiLineMetrics(indentLength + branchLength + child.DisplayName.Length, ref chars, ref lineBreaks);
+
+			if (child.Children.Count > 0)
+				AppendSelectedAsciiChildMetrics(child, includedPaths, indentLength + IndentPipe.Length, ref chars, ref lineBreaks);
+		}
+	}
+
+	private static void AppendAsciiLineMetrics(int renderedChars, ref int chars, ref int lineBreaks)
+	{
+		chars += renderedChars + 1; // Normalize any platform newline to a single logical line-break char.
+		lineBreaks++;
+	}
+
+	private static ExportOutputMetrics CreateMetricsFromNormalizedCounts(int chars, int lineBreaks)
+	{
+		if (chars <= 0)
+			return ExportOutputMetrics.Empty;
+
+		var lines = lineBreaks + 1;
+		var tokens = (chars + 3) / 4;
+		return new ExportOutputMetrics(lines, chars, tokens);
 	}
 
 	private static string ToRelativeJsonPath(string rootPath, string fullPath)
