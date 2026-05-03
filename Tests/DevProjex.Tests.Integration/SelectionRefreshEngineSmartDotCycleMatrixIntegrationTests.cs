@@ -138,6 +138,92 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
         AssertEquivalentVisibleSnapshots(initial, restored);
     }
 
+    [Fact]
+    public void ComputeFullRefreshSnapshot_MixedGitAndSmartWorkspace_KeepsControllersIndependent()
+    {
+        using var temp = new TemporaryDirectory();
+        temp.CreateFile("api/.gitignore", "logs/\n");
+        temp.CreateFile("api/App.csproj", "<Project />\n");
+        temp.CreateFile("api/Program.cs", "Console.WriteLine(\"ok\");\n");
+        temp.CreateFile("api/logs/runtime.log", "git ignored\n");
+        temp.CreateFile("web/package.json", "{ \"name\": \"web\" }\n");
+        temp.CreateFile("web/src/app.ts", "export const ok = true;\n");
+        temp.CreateFile("web/node_modules/pkg/generated.noise", "smart ignored\n");
+        temp.CreateFile(".idea/workspace.xml", "<project />\n");
+
+        var services = CreateServices();
+        var initial = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateDefaultContext(temp.Path));
+        AssertIgnoreOption(initial, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: true);
+        AssertIgnoreOption(initial, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+        AssertIgnoreOption(initial, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+        AssertExtensionOptionVisible(initial, ".cs", expectedVisible: true);
+        AssertExtensionOptionVisible(initial, ".ts", expectedVisible: true);
+        AssertExtensionOptionVisible(initial, ".log", expectedVisible: false);
+        AssertExtensionOptionVisible(initial, ".noise", expectedVisible: false);
+        AssertExtensionOptionVisible(initial, ".xml", expectedVisible: false);
+
+        var gitOff = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateManualIgnoreContext(
+                temp.Path,
+                initial,
+                new Dictionary<IgnoreOptionId, bool>
+                {
+                    [IgnoreOptionId.UseGitIgnore] = false,
+                    [IgnoreOptionId.SmartIgnore] = true,
+                    [IgnoreOptionId.DotFolders] = true
+                }));
+        AssertIgnoreOption(gitOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+        AssertIgnoreOption(gitOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+        AssertIgnoreOption(gitOff, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+        AssertExtensionOptionVisible(gitOff, ".log", expectedVisible: true);
+        AssertExtensionOptionVisible(gitOff, ".noise", expectedVisible: false);
+        AssertExtensionOptionVisible(gitOff, ".xml", expectedVisible: false);
+
+        var smartOff = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateManualIgnoreContext(
+                temp.Path,
+                gitOff,
+                new Dictionary<IgnoreOptionId, bool>
+                {
+                    [IgnoreOptionId.UseGitIgnore] = false,
+                    [IgnoreOptionId.SmartIgnore] = false,
+                    [IgnoreOptionId.DotFolders] = true
+                }));
+        AssertIgnoreOption(smartOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+        AssertIgnoreOption(smartOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+        AssertIgnoreOption(smartOff, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+        AssertExtensionOptionVisible(smartOff, ".log", expectedVisible: true);
+        AssertExtensionOptionVisible(smartOff, ".noise", expectedVisible: true);
+        AssertExtensionOptionVisible(smartOff, ".xml", expectedVisible: false);
+
+        var dotOff = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateManualIgnoreContext(
+                temp.Path,
+                smartOff,
+                new Dictionary<IgnoreOptionId, bool>
+                {
+                    [IgnoreOptionId.UseGitIgnore] = false,
+                    [IgnoreOptionId.SmartIgnore] = false,
+                    [IgnoreOptionId.DotFolders] = false
+                }));
+        AssertIgnoreOption(dotOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+        AssertIgnoreOption(dotOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+        AssertIgnoreOption(dotOff, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: false);
+        AssertRootOptionVisible(dotOff, ".idea", expectedVisible: true, "mixed-git-smart-workspace");
+        AssertExtensionOptionVisible(dotOff, ".log", expectedVisible: true);
+        AssertExtensionOptionVisible(dotOff, ".noise", expectedVisible: true);
+        AssertExtensionOptionVisible(dotOff, ".xml", expectedVisible: true);
+    }
+
     public static IEnumerable<object[]> StackCases()
     {
         yield return ["frontend", "package.json", "node_modules", "index.js"];
@@ -285,5 +371,17 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
         Assert.True(
             actualVisible == expectedVisible,
             $"Case '{caseName}' expected root option '{rootName}' visible={expectedVisible}, actual={actualVisible}.");
+    }
+
+    private static void AssertExtensionOptionVisible(
+        SelectionRefreshSnapshot snapshot,
+        string extensionName,
+        bool expectedVisible)
+    {
+        var actualVisible = snapshot.ExtensionOptions.Any(
+            option => string.Equals(option.Name, extensionName, StringComparison.OrdinalIgnoreCase));
+        Assert.True(
+            actualVisible == expectedVisible,
+            $"Expected extension option '{extensionName}' visible={expectedVisible}, actual={actualVisible}.");
     }
 }

@@ -589,14 +589,16 @@ public sealed class SelectionSyncCoordinator(
                     return;
 
                 ApplySelectionRefreshSnapshot(snapshot);
-            });
 
-            // Consume prepared selection only after refresh for that exact path completes.
-            if (HasPreparedSelectionForPath(currentPath))
-            {
-                _preparedSelectionPath = null;
-                _preparedSelectionMode = PreparedSelectionMode.None;
-            }
+                // Consume prepared selection only after the matching snapshot is applied.
+                // Keeping this with the UI mutation prevents stale background refreshes from
+                // clearing the prepared state between capture and apply.
+                if (HasPreparedSelectionForPath(currentPath))
+                {
+                    _preparedSelectionPath = null;
+                    _preparedSelectionMode = PreparedSelectionMode.None;
+                }
+            });
         }
         finally
         {
@@ -939,19 +941,29 @@ public sealed class SelectionSyncCoordinator(
         if (string.IsNullOrWhiteSpace(currentPath))
             return;
 
+        CancellationTokenSource? previousCts;
+        Task previousTask;
+        Task queuedTask;
         CancellationToken token;
         int version;
         lock (_backgroundRefreshSync)
         {
-            _liveOptionsRefreshCts?.Cancel();
-            _liveOptionsRefreshCts?.Dispose();
-              _liveOptionsRefreshCts = new CancellationTokenSource();
-              token = _liveOptionsRefreshCts.Token;
-              version = unchecked(++_liveOptionsRequestVersion);
-              _latestLiveOptionsRefreshTask = RunQueuedLiveOptionsRefreshAsync(currentPath, version, token);
-          }
+            if (_disposed)
+                return;
 
-        FireAndForgetSafe(_latestLiveOptionsRefreshTask);
+            previousCts = _liveOptionsRefreshCts;
+            previousTask = _latestLiveOptionsRefreshTask;
+            previousCts?.Cancel();
+
+            _liveOptionsRefreshCts = new CancellationTokenSource();
+            token = _liveOptionsRefreshCts.Token;
+            version = unchecked(++_liveOptionsRequestVersion);
+            queuedTask = RunQueuedLiveOptionsRefreshAsync(currentPath, version, token);
+            _latestLiveOptionsRefreshTask = queuedTask;
+        }
+
+        DisposeCancellationSourceWhenTaskCompletes(previousCts, previousTask);
+        FireAndForgetSafe(queuedTask);
     }
 
     /// <summary>
@@ -962,19 +974,29 @@ public sealed class SelectionSyncCoordinator(
         if (string.IsNullOrWhiteSpace(currentPath))
             return;
 
+        CancellationTokenSource? previousCts;
+        Task previousTask;
+        Task queuedTask;
         CancellationToken token;
         int version;
         lock (_backgroundRefreshSync)
         {
-            _fullRefreshRequestCts?.Cancel();
-            _fullRefreshRequestCts?.Dispose();
-              _fullRefreshRequestCts = new CancellationTokenSource();
-              token = _fullRefreshRequestCts.Token;
-              version = unchecked(++_fullRefreshRequestVersion);
-              _latestFullRefreshTask = RunQueuedFullRefreshAsync(currentPath, version, token);
-          }
+            if (_disposed)
+                return;
 
-        FireAndForgetSafe(_latestFullRefreshTask);
+            previousCts = _fullRefreshRequestCts;
+            previousTask = _latestFullRefreshTask;
+            previousCts?.Cancel();
+
+            _fullRefreshRequestCts = new CancellationTokenSource();
+            token = _fullRefreshRequestCts.Token;
+            version = unchecked(++_fullRefreshRequestVersion);
+            queuedTask = RunQueuedFullRefreshAsync(currentPath, version, token);
+            _latestFullRefreshTask = queuedTask;
+        }
+
+        DisposeCancellationSourceWhenTaskCompletes(previousCts, previousTask);
+        FireAndForgetSafe(queuedTask);
     }
 
     private async Task RunQueuedLiveOptionsRefreshAsync(
@@ -1411,10 +1433,25 @@ public sealed class SelectionSyncCoordinator(
         {
             // Expected when operation is superseded
         }
-        catch
+        catch (Exception ex)
         {
-            // Log or handle if needed; suppressed to not crash UI
+            Debug.WriteLine($"[WARN] Selection refresh task failed: {ex}");
         }
+    }
+
+    private static void DisposeCancellationSourceWhenTaskCompletes(
+        CancellationTokenSource? source,
+        Task task)
+    {
+        if (source is null)
+            return;
+
+        _ = task.ContinueWith(
+            static (_, state) => ((CancellationTokenSource)state!).Dispose(),
+            source,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private static async Task AwaitBackgroundRefreshTaskAsync(Task task, CancellationToken cancellationToken)
@@ -1440,13 +1477,19 @@ public sealed class SelectionSyncCoordinator(
 
         lock (_backgroundRefreshSync)
         {
+            var liveOptionsRefreshCts = _liveOptionsRefreshCts;
+            var fullRefreshRequestCts = _fullRefreshRequestCts;
+            var latestLiveOptionsRefreshTask = _latestLiveOptionsRefreshTask;
+            var latestFullRefreshTask = _latestFullRefreshTask;
+
             _liveOptionsRefreshCts?.Cancel();
-            _liveOptionsRefreshCts?.Dispose();
             _liveOptionsRefreshCts = null;
 
             _fullRefreshRequestCts?.Cancel();
-            _fullRefreshRequestCts?.Dispose();
             _fullRefreshRequestCts = null;
+
+            DisposeCancellationSourceWhenTaskCompletes(liveOptionsRefreshCts, latestLiveOptionsRefreshTask);
+            DisposeCancellationSourceWhenTaskCompletes(fullRefreshRequestCts, latestFullRefreshTask);
         }
         lock (_ignoreRulesBuildCacheSync)
             _ignoreRulesBuildCache = null;

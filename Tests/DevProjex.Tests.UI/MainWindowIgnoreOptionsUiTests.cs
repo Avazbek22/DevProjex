@@ -511,6 +511,68 @@ public sealed class MainWindowIgnoreOptionsUiTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task PythonProjectWithIdeaFolder_RapidSmartAndDotFolderChangesConvergeToLastAppliedState()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
+                await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+                await AssertPythonIdeaWorkspaceStateAsync(
+                    window,
+                    smartChecked: true,
+                    dotChecked: false,
+                    ideaVisible: true,
+                    pycacheVisible: false);
+                await AssertIgnoreOptionsStayStableAsync(window);
+
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+                await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+                await AssertPythonIdeaWorkspaceStateAsync(
+                    window,
+                    smartChecked: false,
+                    dotChecked: true,
+                    ideaVisible: false,
+                    pycacheVisible: true);
+                await AssertIgnoreOptionsStayStableAsync(window);
+            }
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await AssertPythonIdeaWorkspaceStateAsync(
+                window,
+                smartChecked: true,
+                dotChecked: true,
+                ideaVisible: false,
+                pycacheVisible: false);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     private static async Task AssertDynamicIgnoreOptionStateIsPreservedWhenRootSelectionRestoresIt(
         IgnoreOptionId optionId)
     {
@@ -553,6 +615,27 @@ public sealed class MainWindowIgnoreOptionsUiTests
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static async Task AssertPythonIdeaWorkspaceStateAsync(
+        MainWindow window,
+        bool smartChecked,
+        bool dotChecked,
+        bool ideaVisible,
+        bool pycacheVisible)
+    {
+        await UiTestDriver.WaitForIgnoreOptionStateAsync(
+            window,
+            IgnoreOptionId.SmartIgnore,
+            visible: true,
+            isChecked: smartChecked);
+        await UiTestDriver.WaitForIgnoreOptionStateAsync(
+            window,
+            IgnoreOptionId.DotFolders,
+            visible: true,
+            isChecked: dotChecked);
+        await WaitForProjectTreePathStateAsync(window, exists: ideaVisible, ".idea", "workspace.xml");
+        await WaitForProjectTreePathStateAsync(window, exists: pycacheVisible, "src", "__pycache__", "app.pyc");
     }
 
     private static async Task AssertIgnoreOptionsStayStableAsync(MainWindow window)
