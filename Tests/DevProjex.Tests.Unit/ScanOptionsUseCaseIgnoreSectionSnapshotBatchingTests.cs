@@ -116,7 +116,7 @@ public sealed class ScanOptionsUseCaseIgnoreSectionSnapshotBatchingTests
 				CreateDiscoveryRules(),
 				CreateEffectiveRules(),
 				CreateAllowedExtensions(),
-				cts.Token));
+				cancellationToken: cts.Token));
 	}
 
 	[Fact]
@@ -134,7 +134,7 @@ public sealed class ScanOptionsUseCaseIgnoreSectionSnapshotBatchingTests
 				CreateDiscoveryRules(),
 				CreateEffectiveRules(),
 				CreateAllowedExtensions(),
-				cts.Token));
+				cancellationToken: cts.Token));
 	}
 
 	public static IEnumerable<object[]> AggregationCases()

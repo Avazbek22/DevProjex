@@ -229,6 +229,288 @@ public sealed class MainWindowIgnoreOptionsUiTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task PythonProjectWithoutGitIgnore_ShowsSmartIgnoreAndHidesSmartArtifacts()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: false);
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            Assert.Contains(viewModel.RootFolders, option => string.Equals(option.Name, "src", StringComparison.Ordinal));
+
+            await WaitForProjectTreePathStateAsync(window, exists: true, "src", "app.py");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "src", "__pycache__");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PythonProjectWithGitIgnore_ShowsGitIgnoreOnlyAndUsesItAsSmartController()
+    {
+        using var project = UiTestProject.CreateWithPythonGitIgnoreWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: false);
+
+            await WaitForProjectTreePathStateAsync(window, exists: true, "src", "app.py");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "src", "__pycache__");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "logs", "app.log");
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.UseGitIgnore);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: false);
+
+            await UiTestDriver.ClickApplySettingsAsync(window);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+
+            await WaitForProjectTreePathStateAsync(window, exists: true, "src", "__pycache__");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "logs", "app.log");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PythonProjectWithIdeaFolder_KeepsDotFoldersToggleAvailableAfterSmartIgnoreChanges()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true);
+
+            if (UiTestDriver.GetViewModel(window).IgnoreOptions.Single(option => option.Id == IgnoreOptionId.DotFolders).IsChecked is false)
+            {
+                await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.DotFolders);
+                await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                    window,
+                    IgnoreOptionId.DotFolders,
+                    visible: true,
+                    isChecked: true);
+                await UiTestDriver.ClickApplySettingsAsync(window);
+                await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            }
+
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".idea");
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.SmartIgnore);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.DotFolders);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: false);
+
+            await UiTestDriver.ClickApplySettingsAsync(window);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+
+            await WaitForProjectTreePathStateAsync(window, exists: true, ".idea", "workspace.xml");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PythonProjectWithIdeaFolder_IgnoreOptionsStayStableAcrossRepeatedRefreshes()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true);
+
+            if (UiTestDriver.GetViewModel(window).IgnoreOptions.Single(option => option.Id == IgnoreOptionId.DotFolders).IsChecked is false)
+            {
+                await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.DotFolders);
+                await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                    window,
+                    IgnoreOptionId.DotFolders,
+                    visible: true,
+                    isChecked: true);
+                await UiTestDriver.ClickApplySettingsAsync(window);
+                await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            }
+
+            await AssertIgnoreOptionsStayStableAsync(window);
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.SmartIgnore);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.ClickApplySettingsAsync(window);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
+
+            await AssertIgnoreOptionsStayStableAsync(window);
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.DotFolders);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.ClickApplySettingsAsync(window);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: true, ".idea", "workspace.xml");
+
+            await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PythonProjectWithIdeaFolder_RepeatedSmartAndDotFolderCyclesKeepTreeAndTogglesAligned()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            for (var cycle = 0; cycle < 2; cycle++)
+            {
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+                await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+                await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                    window,
+                    IgnoreOptionId.SmartIgnore,
+                    visible: true,
+                    isChecked: false);
+                await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                    window,
+                    IgnoreOptionId.DotFolders,
+                    visible: true,
+                    isChecked: true);
+                await WaitForProjectTreePathStateAsync(window, exists: false, ".idea", "workspace.xml");
+                await WaitForProjectTreePathStateAsync(window, exists: true, "src", "__pycache__", "app.pyc");
+
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+                await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+                await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                    window,
+                    IgnoreOptionId.DotFolders,
+                    visible: true,
+                    isChecked: false);
+                await WaitForProjectTreePathStateAsync(window, exists: true, ".idea", "workspace.xml");
+                await WaitForProjectTreePathStateAsync(window, exists: true, "src", "__pycache__", "app.pyc");
+
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
+                await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+                await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                    window,
+                    IgnoreOptionId.SmartIgnore,
+                    visible: true,
+                    isChecked: true);
+                await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                    window,
+                    IgnoreOptionId.DotFolders,
+                    visible: true,
+                    isChecked: false);
+                await WaitForProjectTreePathStateAsync(window, exists: true, ".idea", "workspace.xml");
+                await WaitForProjectTreePathStateAsync(window, exists: false, "src", "__pycache__");
+
+                await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+                await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+                await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                    window,
+                    IgnoreOptionId.DotFolders,
+                    visible: true,
+                    isChecked: true);
+                await WaitForProjectTreePathStateAsync(window, exists: false, ".idea", "workspace.xml");
+                await WaitForProjectTreePathStateAsync(window, exists: false, "src", "__pycache__");
+            }
+
+            await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     private static async Task AssertDynamicIgnoreOptionStateIsPreservedWhenRootSelectionRestoresIt(
         IgnoreOptionId optionId)
     {
@@ -271,5 +553,85 @@ public sealed class MainWindowIgnoreOptionsUiTests
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static async Task AssertIgnoreOptionsStayStableAsync(MainWindow window)
+    {
+        var expected = CaptureIgnoreOptionState(window);
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+            Assert.Equal(expected, CaptureIgnoreOptionState(window));
+        }
+    }
+
+    private static IReadOnlyList<(IgnoreOptionId Id, bool IsChecked)> CaptureIgnoreOptionState(MainWindow window)
+    {
+        return UiTestDriver.GetViewModel(window).IgnoreOptions
+            .Select(option => (option.Id, option.IsChecked))
+            .ToArray();
+    }
+
+    private static async Task SetIgnoreOptionCheckedAsync(
+        MainWindow window,
+        IgnoreOptionId optionId,
+        bool isChecked)
+    {
+        await UiTestDriver.WaitForIgnoreOptionStateAsync(window, optionId, visible: true);
+
+        var option = UiTestDriver.GetViewModel(window).IgnoreOptions.Single(candidate => candidate.Id == optionId);
+        if (option.IsChecked == isChecked)
+            return;
+
+        await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+        await UiTestDriver.WaitForIgnoreOptionStateAsync(
+            window,
+            optionId,
+            visible: true,
+            isChecked: isChecked);
+    }
+
+    private static async Task ApplySettingsAndWaitForIgnoreRefreshAsync(MainWindow window)
+    {
+        await UiTestDriver.ClickApplySettingsAsync(window);
+        await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+    }
+
+    private static async Task WaitForProjectTreePathStateAsync(
+        MainWindow window,
+        bool exists,
+        params string[] relativeDisplayPath)
+    {
+        await UiTestDriver.WaitForConditionAsync(
+            window,
+            () => ProjectTreeContainsPath(window, relativeDisplayPath) == exists,
+            $"project tree path '{string.Join("/", relativeDisplayPath)}' to exist={exists}");
+
+        await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+    }
+
+    private static bool ProjectTreeContainsPath(MainWindow window, IReadOnlyList<string> relativeDisplayPath)
+    {
+        var roots = UiTestDriver.GetViewModel(window).TreeNodes;
+        if (roots.Count != 1)
+            return false;
+
+        return ContainsTreePath(roots[0].Children, relativeDisplayPath);
+    }
+
+    private static bool ContainsTreePath(IEnumerable<TreeNodeViewModel> candidates, IReadOnlyList<string> displayPath)
+    {
+        var current = candidates;
+        foreach (var segment in displayPath)
+        {
+            var match = current.FirstOrDefault(node => string.Equals(node.DisplayName, segment, StringComparison.Ordinal));
+            if (match is null)
+                return false;
+
+            current = match.Children;
+        }
+
+        return true;
     }
 }

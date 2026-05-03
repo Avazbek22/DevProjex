@@ -208,6 +208,7 @@ internal sealed class SelectionRefreshEngine(
             extensionScanRules,
             ignoreRules,
             effectiveAllowedExtensions,
+            includeDirectoryToggleProbeRoots: !ShouldSuppressAllTogglesOverride(context) && context.AllRootFoldersChecked,
             cancellationToken);
 
         var visibleExtensions = new List<string>(scan.Value.Extensions.Count);

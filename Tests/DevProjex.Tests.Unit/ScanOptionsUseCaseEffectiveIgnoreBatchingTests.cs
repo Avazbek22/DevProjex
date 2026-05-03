@@ -90,7 +90,7 @@ public sealed class ScanOptionsUseCaseEffectiveIgnoreBatchingTests
 				CreateAllowedExtensions(),
 				CreateRules(),
 				IgnoreOptionCounts.Empty,
-				cts.Token));
+				cancellationToken: cts.Token));
 	}
 
 	[Fact]
@@ -108,7 +108,7 @@ public sealed class ScanOptionsUseCaseEffectiveIgnoreBatchingTests
 				CreateAllowedExtensions(),
 				CreateRules(),
 				IgnoreOptionCounts.Empty,
-				cts.Token));
+				cancellationToken: cts.Token));
 	}
 
 	public static IEnumerable<object[]> AggregationCases()

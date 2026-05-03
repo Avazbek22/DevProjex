@@ -216,6 +216,8 @@ internal static class UiTestDriver
 
     public static async Task ClickAsync(MainWindow window, Control control)
     {
+        await EnsureControlVisibleAsync(window, control);
+
         var clickPoint = GetControlCenter(control, window);
         window.MouseMove(clickPoint, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 2);
@@ -955,6 +957,52 @@ internal static class UiTestDriver
     {
         var bounds = GetBoundsInWindow(control, topLevel);
         return bounds.Center;
+    }
+
+    private static async Task EnsureControlVisibleAsync(MainWindow window, Control control)
+    {
+        var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
+        if (scrollViewer is null)
+            return;
+
+        var scrolled = false;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var origin = control.TranslatePoint(default, scrollViewer);
+            if (!origin.HasValue)
+                return;
+
+            var viewport = scrollViewer.Viewport;
+            if (viewport.Width <= 0 || viewport.Height <= 0)
+                return;
+
+            const double Padding = 4;
+            var bounds = new Rect(origin.Value, control.Bounds.Size);
+            var offset = scrollViewer.Offset;
+            var maxX = Math.Max(0, scrollViewer.Extent.Width - viewport.Width);
+            var maxY = Math.Max(0, scrollViewer.Extent.Height - viewport.Height);
+
+            var targetX = offset.X;
+            if (bounds.Left < Padding)
+                targetX = Math.Max(0, offset.X + bounds.Left - Padding);
+            else if (bounds.Right > viewport.Width - Padding)
+                targetX = Math.Min(maxX, offset.X + bounds.Right - viewport.Width + Padding);
+
+            var targetY = offset.Y;
+            if (bounds.Top < Padding)
+                targetY = Math.Max(0, offset.Y + bounds.Top - Padding);
+            else if (bounds.Bottom > viewport.Height - Padding)
+                targetY = Math.Min(maxY, offset.Y + bounds.Bottom - viewport.Height + Padding);
+
+            if (Math.Abs(targetX - offset.X) < 0.5 && Math.Abs(targetY - offset.Y) < 0.5)
+                return;
+
+            scrollViewer.Offset = new Vector(targetX, targetY);
+            scrolled = true;
+        });
+
+        if (scrolled)
+            await WaitForSettledFramesAsync(frameCount: 6);
     }
 
     public static async Task WaitForConditionAsync(

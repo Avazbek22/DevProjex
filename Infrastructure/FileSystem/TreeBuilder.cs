@@ -240,7 +240,7 @@ public sealed class TreeBuilder : ITreeBuilder
 				return true;
 		}
 
-		if (rules.ShouldApplySmartIgnore(entry.FullPath, isDirectory: true) && rules.SmartIgnoredFolders.Contains(entry.Name))
+		if (rules.IsSmartIgnoredDirectory(entry.FullPath, entry.Name))
 			return true;
 
 		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
@@ -261,7 +261,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (gitIgnoreEvaluation.IsIgnored)
 			return true;
 
-		if (shouldApplySmartIgnoreForFiles && rules.SmartIgnoredFiles.Contains(entry.Name))
+		if (rules.IsSmartIgnoredFile(entry.FullPath, entry.Name, shouldApplySmartIgnoreForFiles))
 			return true;
 
 		if (rules.IgnoreDotFiles && entry.Name.StartsWith(".", StringComparison.Ordinal))

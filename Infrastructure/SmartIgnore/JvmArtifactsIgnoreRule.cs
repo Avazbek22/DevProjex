@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Java/Kotlin/Gradle build output folders.
 /// Activates when Maven/Gradle markers are present in the scope root.
 /// </summary>
-public sealed class JvmArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class JvmArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly string[] MarkerFiles =
 	[
@@ -22,6 +22,12 @@ public sealed class JvmArtifactsIgnoreRule : ISmartIgnoreRule
 		"build",
 		"out"
 	];
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
+		new HashSet<string>(MarkerFiles, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

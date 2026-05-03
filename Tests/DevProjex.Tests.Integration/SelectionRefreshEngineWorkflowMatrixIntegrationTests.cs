@@ -48,6 +48,21 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         Assert.Equal(firstMetrics.ContentMetrics, secondMetrics.ContentMetrics);
     }
 
+    [Fact]
+    public void ComputeFullRefreshSnapshot_ProfileAllRoots_DoesNotProbeUnselectedDotRoot()
+    {
+        var rootPath = ProjectLoadWorkflowSharedWorkspace.RootPath;
+        var services = CreateServices();
+
+        var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+            CreateProfileWithAllVisibleRootsAndUnavailableDotFolderContext(rootPath),
+            CancellationToken.None);
+
+        Assert.All(snapshot.RootOptions!, option => Assert.True(option.IsChecked));
+        Assert.DoesNotContain(snapshot.RootOptions!, option => string.Equals(option.Name, ".cache", StringComparison.Ordinal));
+        Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+    }
+
     public static IEnumerable<object[]> WorkflowCases()
     {
         foreach (var workflowCase in BuildWorkflowCases())
@@ -271,6 +286,35 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             AllExtensionsChecked: true,
             RootSelectionInitialized: true,
             RootSelectionCache: new HashSet<string>(PathComparer.Default) { "docs" },
+            ExtensionsSelectionInitialized: false,
+            ExtensionsSelectionCache: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            IgnoreSelectionInitialized: true,
+            IgnoreSelectionCache: new HashSet<IgnoreOptionId>(selectedIgnoreOptions),
+            IgnoreOptionStateCache: BuildIgnoreStateCache(selectedIgnoreOptions),
+            IgnoreAllPreference: null,
+            CurrentSnapshotState: EmptySnapshotState);
+    }
+
+    private static SelectionRefreshContext CreateProfileWithAllVisibleRootsAndUnavailableDotFolderContext(string rootPath)
+    {
+        var selectedIgnoreOptions = new[] { IgnoreOptionId.DotFolders };
+
+        return new SelectionRefreshContext(
+            Path: rootPath,
+            PreparedSelectionMode: PreparedSelectionMode.Profile,
+            AllRootFoldersChecked: true,
+            AllExtensionsChecked: true,
+            RootSelectionInitialized: true,
+            RootSelectionCache: new HashSet<string>(PathComparer.Default)
+            {
+                "docs",
+                "generated",
+                "logs",
+                "node_modules",
+                "samples",
+                "src",
+                "stealth-root"
+            },
             ExtensionsSelectionInitialized: false,
             ExtensionsSelectionCache: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             IgnoreSelectionInitialized: true,

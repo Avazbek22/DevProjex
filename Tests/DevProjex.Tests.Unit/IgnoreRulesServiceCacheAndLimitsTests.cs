@@ -70,7 +70,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		var withinTtl = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-no-git"]);
 		Assert.False(withinTtl.IncludeGitIgnore);
 
-		ExpireScopeCacheEntry(temp.Path, ["proj-no-git"]);
+		ExpireScopeCacheEntry(service, temp.Path, ["proj-no-git"]);
 
 		var afterTtl = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-no-git"]);
 
@@ -179,7 +179,10 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		}
 	}
 
-	private static void ExpireScopeCacheEntry(string rootPath, IReadOnlyCollection<string> selectedRootFolders)
+	private static void ExpireScopeCacheEntry(
+		IgnoreRulesService service,
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders)
 	{
 		var buildScopeCacheKey = typeof(IgnoreRulesService).GetMethod(
 			"BuildScopeCacheKey",
@@ -195,11 +198,11 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		Assert.False(string.IsNullOrWhiteSpace(cacheKey));
 
 		var scopeCacheField = typeof(IgnoreRulesService).GetField(
-			"ScopeCache",
-			BindingFlags.Static | BindingFlags.NonPublic);
+			"_scopeCache",
+			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(scopeCacheField);
 
-		var scopeCache = scopeCacheField.GetValue(null);
+		var scopeCache = scopeCacheField.GetValue(service);
 		Assert.NotNull(scopeCache);
 
 		var dictionaryType = scopeCache.GetType();

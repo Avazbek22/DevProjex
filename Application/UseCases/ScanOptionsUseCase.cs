@@ -321,6 +321,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		IgnoreRules extensionDiscoveryRules,
 		IgnoreRules effectiveRules,
 		IReadOnlySet<string>? effectiveAllowedExtensions,
+		bool includeDirectoryToggleProbeRoots = false,
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -342,6 +343,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				resolvedAllowedExtensions,
 				effectiveRules,
 				rawScan.Value.IgnoreOptionCounts,
+				includeDirectoryToggleProbeRoots,
 				cancellationToken);
 
 			return new ScanResult<IgnoreSectionScanData>(
@@ -455,7 +457,33 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 							rawCounts = rawCounts.Add(localAccumulator.RawIgnoreOptionCounts);
 							effectiveCounts = effectiveCounts.Add(localAccumulator.EffectiveIgnoreOptionCounts);
 						}
-					});
+				});
+			}
+		}
+
+		if (includeDirectoryToggleProbeRoots)
+		{
+			var probeExtensionDiscoveryRules = BuildDirectoryToggleProbeDiscoveryRules(extensionDiscoveryRules);
+			var probeEffectiveRules = BuildDirectoryToggleProbeEffectiveRules(effectiveRules);
+			foreach (var probeRootPath in ResolveDirectoryToggleProbeRootPaths(rootPath, rootFolders, effectiveRules))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+
+				var snapshot = provider.GetIgnoreSectionSnapshot(
+					probeRootPath,
+					probeExtensionDiscoveryRules,
+					probeEffectiveRules,
+					effectiveAllowedExtensions,
+					cancellationToken);
+
+				// Probe roots exist only to keep directory-level toggles reversible. They must not
+				// affect raw inventory or extension availability while the root folder itself is hidden.
+				effectiveCounts = effectiveCounts.Add(KeepDirectoryToggleCountsOnly(snapshot.Value.EffectiveIgnoreOptionCounts));
+
+				if (snapshot.RootAccessDenied)
+					Interlocked.Exchange(ref rootAccessDenied, 1);
+				if (snapshot.HadAccessDenied)
+					Interlocked.Exchange(ref hadAccessDenied, 1);
 			}
 		}
 
@@ -474,6 +502,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		IReadOnlySet<string> allowedExtensions,
 		IgnoreRules ignoreRules,
 		IgnoreOptionCounts rawCounts,
+		bool includeDirectoryToggleProbeRoots = false,
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -569,7 +598,28 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 						{
 							effectiveCounts = effectiveCounts.Add(localCounts);
 						}
-					});
+				});
+			}
+		}
+
+		if (includeDirectoryToggleProbeRoots)
+		{
+			var probeRules = BuildDirectoryToggleProbeEffectiveRules(ignoreRules);
+			foreach (var probeRootPath in ResolveDirectoryToggleProbeRootPaths(rootPath, rootFolders, ignoreRules))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+
+				var result = counter.GetEffectiveIgnoreOptionCounts(
+					probeRootPath,
+					allowedExtensions,
+					probeRules,
+					cancellationToken);
+				effectiveCounts = effectiveCounts.Add(KeepDirectoryToggleCountsOnly(result.Value));
+
+				if (result.RootAccessDenied)
+					Interlocked.Exchange(ref rootAccessDenied, 1);
+				if (result.HadAccessDenied)
+					Interlocked.Exchange(ref hadAccessDenied, 1);
 			}
 		}
 
@@ -614,6 +664,82 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		}
 
 		return extensions;
+	}
+
+	private static IgnoreRules BuildDirectoryToggleProbeDiscoveryRules(IgnoreRules rules)
+	{
+		return rules with
+		{
+			IgnoreDotFolders = false,
+			IgnoreHiddenFolders = false,
+			IgnoreEmptyFolders = true
+		};
+	}
+
+	private static IgnoreRules BuildDirectoryToggleProbeEffectiveRules(IgnoreRules rules)
+	{
+		return rules.IgnoreEmptyFolders
+			? rules
+			: rules with { IgnoreEmptyFolders = true };
+	}
+
+	private static IgnoreOptionCounts KeepDirectoryToggleCountsOnly(IgnoreOptionCounts counts)
+	{
+		return new IgnoreOptionCounts(
+			HiddenFolders: counts.HiddenFolders,
+			DotFolders: counts.DotFolders);
+	}
+
+	private static List<string> ResolveDirectoryToggleProbeRootPaths(
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders,
+		IgnoreRules effectiveRules)
+	{
+		if (!effectiveRules.IgnoreDotFolders && !effectiveRules.IgnoreHiddenFolders)
+			return [];
+
+		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+			return [];
+
+		var selected = new HashSet<string>(selectedRootFolders, PathComparer.Default);
+		var probeRootPaths = new List<string>();
+
+		try
+		{
+			foreach (var directoryPath in Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly))
+			{
+				var name = Path.GetFileName(directoryPath);
+				if (string.IsNullOrWhiteSpace(name) || selected.Contains(name))
+					continue;
+
+				if (effectiveRules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
+				{
+					probeRootPaths.Add(directoryPath);
+					continue;
+				}
+
+				if (effectiveRules.IgnoreHiddenFolders && HasHiddenAttribute(directoryPath))
+					probeRootPaths.Add(directoryPath);
+			}
+		}
+		catch
+		{
+			// Directory-toggle probes are best effort; normal selected roots still define the snapshot.
+		}
+
+		return probeRootPaths;
+	}
+
+	private static bool HasHiddenAttribute(string path)
+	{
+		try
+		{
+			return File.GetAttributes(path).HasFlag(FileAttributes.Hidden);
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 }

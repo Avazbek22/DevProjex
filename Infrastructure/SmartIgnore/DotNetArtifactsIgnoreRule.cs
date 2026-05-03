@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for .NET build artifacts (bin, obj folders).
 /// Activates when .sln, .csproj, .fsproj, or .vbproj files are found.
 /// </summary>
-public sealed class DotNetArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class DotNetArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly string[] MarkerExtensions =
 	[
@@ -19,6 +19,12 @@ public sealed class DotNetArtifactsIgnoreRule : ISmartIgnoreRule
 		"bin",
 		"obj"
 	];
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(MarkerExtensions, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

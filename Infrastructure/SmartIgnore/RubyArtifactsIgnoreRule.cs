@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Ruby/Rails generated and dependency folders.
 /// Activates when Gemfile or Gemfile.lock exists in the scope root.
 /// </summary>
-public sealed class RubyArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class RubyArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly string[] MarkerFiles =
 	[
@@ -19,6 +19,12 @@ public sealed class RubyArtifactsIgnoreRule : ISmartIgnoreRule
 		"log",
 		"tmp"
 	];
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
+		new HashSet<string>(MarkerFiles, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

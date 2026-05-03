@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Go dependency/build folders.
 /// Activates when go.mod or go.work exists in the scope root.
 /// </summary>
-public sealed class GoArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class GoArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly string[] MarkerFiles =
 	[
@@ -17,6 +17,12 @@ public sealed class GoArtifactsIgnoreRule : ISmartIgnoreRule
 		"vendor",
 		"bin"
 	];
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
+		new HashSet<string>(MarkerFiles, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

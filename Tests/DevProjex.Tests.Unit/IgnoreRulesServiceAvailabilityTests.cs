@@ -29,6 +29,93 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		Assert.True(availability.IncludeSmartIgnore);
 	}
 
+	[Theory]
+	[InlineData("requirements.txt")]
+	[InlineData("setup.py")]
+	[InlineData("Pipfile")]
+	[InlineData("poetry.lock")]
+	[InlineData("environment.yml")]
+	public void GetIgnoreOptionsAvailability_PythonMarkerKnownOnlyBySmartRule_ShowsSmartOption(string markerFile)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(markerFile, string.Empty);
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void Build_RootProjectMarkerWithExplicitRootSelection_KeepsRootSmartScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pyproject.toml", "[project]");
+		temp.CreateFile("src/app.py", "print('ok')");
+		temp.CreateFile("src/__pycache__/app.pyc", "binary");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+
+		var rules = service.Build(
+			temp.Path,
+			[IgnoreOptionId.SmartIgnore],
+			selectedRootFolders: ["src"]);
+
+		Assert.True(rules.UseSmartIgnore);
+		Assert.Contains(temp.Path, rules.SmartIgnoreScopeRoots, PathComparer.Default);
+		Assert.True(rules.IsSmartIgnoredDirectory(
+			Path.Combine(temp.Path, "src", "__pycache__"),
+			"__pycache__"));
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_SingleGitIgnoreProjectWithExplicitRootSelection_HidesSmartOption()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.log");
+		temp.CreateFile("pyproject.toml", "[project]");
+		temp.CreateFile("src/app.py", "print('ok')");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["src"]);
+
+		Assert.True(availability.IncludeGitIgnore);
+		Assert.False(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void Build_SingleGitIgnoreProjectWithExplicitRootSelection_UseGitIgnoreControlsSmartArtifacts()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.log");
+		temp.CreateFile("pyproject.toml", "[project]");
+		temp.CreateFile("src/app.py", "print('ok')");
+		temp.CreateFile("src/__pycache__/app.pyc", "binary");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+
+		var rules = service.Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: ["src"]);
+
+		Assert.True(rules.UseGitIgnore);
+		Assert.True(rules.UseSmartIgnore);
+		Assert.Contains(temp.Path, rules.SmartIgnoreScopeRoots, PathComparer.Default);
+		Assert.True(rules.IsSmartIgnoredDirectory(
+			Path.Combine(temp.Path, "src", "__pycache__"),
+			"__pycache__"));
+	}
+
 	[Fact]
 	public void GetIgnoreOptionsAvailability_MixedWorkspace_ShowsBothGitAndSmartOptions()
 	{

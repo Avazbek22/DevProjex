@@ -1,6 +1,6 @@
 namespace DevProjex.Infrastructure.SmartIgnore;
 
-public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly string[] MarkerFiles =
 	[
@@ -33,6 +33,12 @@ public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
 		"storybook-static",
 		"out"
 	];
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
+		new HashSet<string>(MarkerFiles, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

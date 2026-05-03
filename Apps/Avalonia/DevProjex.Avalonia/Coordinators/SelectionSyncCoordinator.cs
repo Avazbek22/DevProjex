@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using DevProjex.Application.Models;
 using DevProjex.Avalonia.Collections;
 using DevProjex.Kernel;
@@ -274,6 +275,7 @@ public sealed class SelectionSyncCoordinator(
                 extensionScanRules,
                 ignoreRules,
                 effectiveAllowedExtensions,
+                includeDirectoryToggleProbeRoots: !ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked,
                 cancellationToken);
             if (scan.RootAccessDenied)
             {
@@ -482,27 +484,53 @@ public sealed class SelectionSyncCoordinator(
         if (IsStalePathRequest(currentPath)) return;
         cancellationToken.ThrowIfCancellationRequested();
 
-        var selectedRoots = GetSelectedRootFolders();
-        var context = CreateSelectionRefreshContext(currentPath);
-        var snapshot = await Task.Run(
-            () => _selectionRefreshEngine.ComputeLiveRefreshSnapshot(context, selectedRoots, cancellationToken),
-            cancellationToken);
-        if (snapshot.RootAccessDenied)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var elevated = await Dispatcher.UIThread.InvokeAsync(() => tryElevateAndRestart(currentPath));
-            if (elevated)
-                return;
-        }
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (IsStalePathRequest(currentPath))
                 return;
 
-            ApplySelectionRefreshSnapshot(snapshot);
-        });
+            var liveInput = await RunOnUiThreadAsync(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (IsStalePathRequest(currentPath))
+                    return null;
+
+                return new LiveRefreshInput(
+                    CreateSelectionRefreshContext(currentPath),
+                    GetSelectedRootFolders());
+            });
+            if (liveInput is null)
+                return;
+
+            var snapshot = await Task.Run(
+                () => _selectionRefreshEngine.ComputeLiveRefreshSnapshot(
+                    liveInput.Context,
+                    liveInput.SelectedRoots,
+                    cancellationToken),
+                cancellationToken);
+            if (snapshot.RootAccessDenied)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var elevated = await Dispatcher.UIThread.InvokeAsync(() => tryElevateAndRestart(currentPath));
+                if (elevated)
+                    return;
+            }
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (IsStalePathRequest(currentPath))
+                    return;
+
+                ApplySelectionRefreshSnapshot(snapshot);
+            });
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
     }
 
     public async Task RefreshRootAndDependentsAsync(string currentPath, CancellationToken cancellationToken = default)
@@ -522,15 +550,25 @@ public sealed class SelectionSyncCoordinator(
             if (ShouldSkipRefreshForPreparedPath(currentPath))
                 return;
 
-            // Clear old caches when switching to another folder, unless the caller
-            // explicitly prepared a profile for this exact target path.
-            if (ShouldClearCachesForCurrentPath(currentPath))
+            var context = await RunOnUiThreadAsync(() =>
             {
-                ClearCachesForNewProject();
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (IsStalePathRequest(currentPath) && !HasPreparedSelectionForPath(currentPath))
+                    return null;
+                if (ShouldSkipRefreshForPreparedPath(currentPath))
+                    return null;
 
-            _lastLoadedPath = currentPath;
-            var context = CreateSelectionRefreshContext(currentPath);
+                // UI collections and selection caches are Avalonia-owned state. Capture and
+                // cache reset must happen on the UI thread; the expensive scan runs after this.
+                if (ShouldClearCachesForCurrentPath(currentPath))
+                    ClearCachesForNewProject();
+
+                _lastLoadedPath = currentPath;
+                return CreateSelectionRefreshContext(currentPath);
+            });
+            if (context is null)
+                return;
+
             var snapshot = await Task.Run(
                 () => _selectionRefreshEngine.ComputeFullRefreshSnapshot(context, cancellationToken),
                 cancellationToken);
@@ -1159,6 +1197,14 @@ public sealed class SelectionSyncCoordinator(
             IgnoreAllPreference: _ignoreAllPreference,
             CurrentSnapshotState: CaptureIgnoreSectionSnapshotState());
 
+    private static async Task<T> RunOnUiThreadAsync<T>(Func<T> action)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            return action();
+
+        return await Dispatcher.UIThread.InvokeAsync(action);
+    }
+
     private HashSet<string>? BuildEffectiveAllowedExtensionsForLiveCounts(
         bool forceAllExtensionsChecked)
     {
@@ -1570,4 +1616,8 @@ public sealed class SelectionSyncCoordinator(
     }
 
     private sealed record IgnoreRulesBuildCacheEntry(string Key, IgnoreRules Rules);
+
+    private sealed record LiveRefreshInput(
+        SelectionRefreshContext Context,
+        IReadOnlyCollection<string> SelectedRoots);
 }

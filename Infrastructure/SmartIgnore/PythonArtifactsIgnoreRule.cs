@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Python cache and virtual environment folders.
 /// Activates only when Python project markers are detected in the scope root.
 /// </summary>
-public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly string[] MarkerFiles =
 	[
@@ -33,6 +33,12 @@ public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule
 		".ipynb_checkpoints",
 		".pyre"
 	];
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
+		new HashSet<string>(MarkerFiles, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

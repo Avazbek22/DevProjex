@@ -85,6 +85,40 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithPythonSmartIgnoreWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, "pyproject.toml", "[project]\nname = \"ui-python\"\n");
+            WriteFile(rootPath, Path.Combine("src", "app.py"), "print('ok')\n");
+            WriteFile(rootPath, Path.Combine("src", "__pycache__", "app.pyc"), "binary");
+            WriteFile(rootPath, Path.Combine("src", ".venv", "bin", "python"), "binary");
+        });
+    }
+
+    public static UiTestProject CreateWithPythonGitIgnoreWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, ".gitignore", "*.log\n");
+            WriteFile(rootPath, "requirements.txt", "pytest\n");
+            WriteFile(rootPath, Path.Combine("src", "app.py"), "print('ok')\n");
+            WriteFile(rootPath, Path.Combine("src", "__pycache__", "app.pyc"), "binary");
+            WriteFile(rootPath, Path.Combine("logs", "app.log"), "ignored by gitignore");
+        });
+    }
+
+    public static UiTestProject CreateWithPythonSmartIgnoreAndIdeaWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, "pyproject.toml", "[project]\nname = \"ui-python-idea\"\n");
+            WriteFile(rootPath, Path.Combine("src", "app.py"), "print('ok')\n");
+            WriteFile(rootPath, Path.Combine("src", "__pycache__", "app.pyc"), "binary");
+            WriteFile(rootPath, Path.Combine(".idea", "workspace.xml"), "<project />\n");
+        });
+    }
+
     public static UiTestProject CreateWithProjectLoadWorkflowWorkspace()
     {
         return CreateForSharedWorkspace(ProjectLoadWorkflowSharedWorkspace.RootPath);

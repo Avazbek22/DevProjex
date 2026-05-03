@@ -1002,6 +1002,9 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
                 await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
                 await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
 
+                var selectedAfterToggle = UiTestDriver.GetSelectedIgnoreOptionIds(window);
+                Assert.DoesNotContain(optionId, selectedAfterToggle);
+
                 var expectedWithoutOption = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
                 AssertMetricsChanged(baseline, expectedWithoutOption, $"ignore option '{optionId}'");
 

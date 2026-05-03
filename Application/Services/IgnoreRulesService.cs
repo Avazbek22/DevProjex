@@ -11,8 +11,8 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		new(OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
 	private const int ScopeCacheLimit = 128;
 	private static readonly TimeSpan ScopeCacheTtl = TimeSpan.FromSeconds(5);
-	private static readonly object ScopeCacheSync = new();
-	private static readonly Dictionary<string, ScopeCacheEntry> ScopeCache =
+	private readonly object _scopeCacheSync = new();
+	private readonly Dictionary<string, ScopeCacheEntry> _scopeCache =
 		new(OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
 
 	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
@@ -22,15 +22,33 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 	private static readonly string[] ProjectMarkerFiles =
 	[
 		"package.json",
+		"package-lock.json",
+		"pnpm-lock.yaml",
+		"yarn.lock",
+		"bun.lockb",
+		"bun.lock",
+		"pnpm-workspace.yaml",
+		"npm-shrinkwrap.json",
 		"pyproject.toml",
+		"requirements.txt",
+		"requirements-dev.txt",
+		"setup.py",
+		"setup.cfg",
+		"Pipfile",
+		"poetry.lock",
+		"environment.yml",
 		"pom.xml",
 		"build.gradle",
 		"build.gradle.kts",
+		"settings.gradle",
+		"settings.gradle.kts",
 		"go.mod",
+		"go.work",
 		"Cargo.toml",
 		"composer.json",
 		"pubspec.yaml",
-		"Gemfile"
+		"Gemfile",
+		"Gemfile.lock"
 	];
 
 	private static readonly HashSet<string> ProjectMarkerExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -82,22 +100,24 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		IReadOnlySet<string> smartFolders;
 		IReadOnlySet<string> smartFiles;
 		IReadOnlyList<string> smartScopeRoots;
+		IReadOnlyList<ScopedSmartIgnoreMatcher> scopedSmartMatchers;
 		if (useSmartIgnore)
 		{
 			var smart = BuildScopedSmartIgnore(context.Scopes);
 			smartFolders = smart.FolderNames;
 			smartFiles = smart.FileNames;
-			// Use HashSet for O(1) deduplication
-			var uniqueRoots = new HashSet<string>(PathStringComparer);
-			foreach (var scope in context.Scopes)
-				uniqueRoots.Add(scope.RootPath);
-			smartScopeRoots = uniqueRoots.ToArray();
+			scopedSmartMatchers = smart.ScopedMatchers;
+			smartScopeRoots = smart.ScopedMatchers
+				.Select(static matcher => matcher.ScopeRootPath)
+				.Distinct(PathStringComparer)
+				.ToArray();
 		}
 		else
 		{
 			smartFolders = EmptyStringSet;
 			smartFiles = EmptyStringSet;
 			smartScopeRoots = [];
+			scopedSmartMatchers = [];
 		}
 
 		return new IgnoreRules(
@@ -115,7 +135,8 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 			UseSmartIgnore = useSmartIgnore,
 			GitIgnoreMatcher = gitIgnoreMatcher,
 			ScopedGitIgnoreMatchers = scopedMatchers,
-			SmartIgnoreScopeRoots = smartScopeRoots
+			SmartIgnoreScopeRoots = smartScopeRoots,
+			ScopedSmartIgnoreMatchers = scopedSmartMatchers
 		};
 	}
 
@@ -190,10 +211,11 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		return false;
 	}
 
-	private SmartIgnoreResult BuildScopedSmartIgnore(IReadOnlyList<ProjectScope> scopes)
+	private ScopedSmartIgnoreBuildResult BuildScopedSmartIgnore(IReadOnlyList<ProjectScope> scopes)
 	{
 		var folderNames = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
 		var fileNames = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+		var scopedMatchers = new ConcurrentBag<ScopedSmartIgnoreMatcher>();
 
 		var maxDegree = Math.Min(8, Math.Max(1, Environment.ProcessorCount / 2));
 		Parallel.ForEach(
@@ -206,11 +228,25 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 					folderNames.TryAdd(folder, 0);
 				foreach (var file in smart.FileNames)
 					fileNames.TryAdd(file, 0);
+
+				if (smart.FolderNames.Count > 0 || smart.FileNames.Count > 0)
+				{
+					scopedMatchers.Add(new ScopedSmartIgnoreMatcher(
+						scope.RootPath,
+						new HashSet<string>(smart.FolderNames, StringComparer.OrdinalIgnoreCase),
+						new HashSet<string>(smart.FileNames, StringComparer.OrdinalIgnoreCase)));
+				}
 			});
 
-		return new SmartIgnoreResult(
+		var orderedScopedMatchers = scopedMatchers
+			.OrderBy(static matcher => matcher.ScopeRootPath.Length)
+			.ThenBy(static matcher => matcher.ScopeRootPath, PathComparer.Default)
+			.ToArray();
+
+		return new ScopedSmartIgnoreBuildResult(
 			new HashSet<string>(folderNames.Keys, StringComparer.OrdinalIgnoreCase),
-			new HashSet<string>(fileNames.Keys, StringComparer.OrdinalIgnoreCase));
+			new HashSet<string>(fileNames.Keys, StringComparer.OrdinalIgnoreCase),
+			orderedScopedMatchers);
 	}
 
 	private IEnumerable<ScopedGitIgnoreMatcher> BuildScopedGitIgnoreMatchers(IReadOnlyList<ProjectScope> scopes)
@@ -257,9 +293,9 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		var cacheKey = BuildScopeCacheKey(normalizedRoot, selectedRootFolders);
 		var now = DateTime.UtcNow;
 
-		lock (ScopeCacheSync)
+		lock (_scopeCacheSync)
 		{
-			if (ScopeCache.TryGetValue(cacheKey, out var cached) &&
+			if (_scopeCache.TryGetValue(cacheKey, out var cached) &&
 			    now - cached.CachedAtUtc <= ScopeCacheTtl)
 			{
 				return cached.Context;
@@ -267,11 +303,11 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		}
 
 		var context = BuildProjectScanContext(normalizedRoot, selectedRootFolders);
-		lock (ScopeCacheSync)
+		lock (_scopeCacheSync)
 		{
-			ScopeCache[cacheKey] = new ScopeCacheEntry(now, context);
-			if (ScopeCache.Count > ScopeCacheLimit)
-				ScopeCache.Clear();
+			_scopeCache[cacheKey] = new ScopeCacheEntry(now, context);
+			if (_scopeCache.Count > ScopeCacheLimit)
+				_scopeCache.Clear();
 		}
 
 		return context;
@@ -314,7 +350,7 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		return sb.ToString();
 	}
 
-	private static ProjectScanContext BuildProjectScanContext(
+	private ProjectScanContext BuildProjectScanContext(
 		string rootPath,
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
@@ -358,14 +394,22 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 
 		if (hasExplicitRootSelection)
 		{
-			var selectedScopes = new List<ProjectScope>(expandedCandidates.Length + (rootHasGitIgnore ? 1 : 0));
-			if (rootHasGitIgnore)
+			var rootLooksLikeProject = rootHasGitIgnore || rootHasProjectMarker;
+			var selectedScopes = new List<ProjectScope>(expandedCandidates.Length + (rootLooksLikeProject ? 1 : 0));
+			if (rootLooksLikeProject)
+			{
 				selectedScopes.Add(new ProjectScope(
 					rootPath,
-					HasGitIgnore: true,
+					rootHasGitIgnore,
 					HasProjectMarker: rootHasProjectMarker,
 					LooksLikeProject: true));
-			selectedScopes.AddRange(expandedCandidates);
+				// Selected top-level folders are filters inside this project, not independent scopes.
+				selectedScopes.AddRange(expandedCandidates.Where(static scope => scope.LooksLikeProject));
+			}
+			else
+			{
+				selectedScopes.AddRange(expandedCandidates);
+			}
 
 			return ProjectScanContext.FromScopes(selectedScopes);
 		}
@@ -391,11 +435,12 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 			]);
 		}
 
-		var scopes = new List<ProjectScope>(expandedCandidates.Length + (rootHasGitIgnore ? 1 : 0));
-		if (rootHasGitIgnore)
+		var rootLooksLikeProjectForWorkspace = rootHasGitIgnore || rootHasProjectMarker;
+		var scopes = new List<ProjectScope>(expandedCandidates.Length + (rootLooksLikeProjectForWorkspace ? 1 : 0));
+		if (rootLooksLikeProjectForWorkspace)
 			scopes.Add(new ProjectScope(
 				rootPath,
-				HasGitIgnore: true,
+				rootHasGitIgnore,
 				HasProjectMarker: rootHasProjectMarker,
 				LooksLikeProject: true));
 		scopes.AddRange(expandedCandidates);
@@ -403,7 +448,7 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		return ProjectScanContext.FromScopes(scopes);
 	}
 
-	private static ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
+	private ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
 		IReadOnlyList<ProjectScope> candidates,
 		int maxDegree)
 	{
@@ -544,7 +589,7 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		}
 	}
 
-	private static bool HasProjectMarker(string directoryPath)
+	private bool HasProjectMarker(string directoryPath)
 	{
 		foreach (var markerFile in ProjectMarkerFiles)
 		{
@@ -558,6 +603,9 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 				// Continue with other marker checks.
 			}
 		}
+
+		if (smartIgnore.HasKnownProjectMarker(directoryPath))
+			return true;
 
 		try
 		{
@@ -621,6 +669,11 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 	private sealed record GitIgnoreCacheEntry(GitIgnoreSignature Signature, GitIgnoreMatcher Matcher);
 
 	private sealed record ScopeCacheEntry(DateTime CachedAtUtc, ProjectScanContext Context);
+
+	private sealed record ScopedSmartIgnoreBuildResult(
+		IReadOnlySet<string> FolderNames,
+		IReadOnlySet<string> FileNames,
+		IReadOnlyList<ScopedSmartIgnoreMatcher> ScopedMatchers);
 
 	private sealed record ProjectScope(
 		string RootPath,

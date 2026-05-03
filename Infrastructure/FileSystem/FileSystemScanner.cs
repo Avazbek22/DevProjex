@@ -197,7 +197,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 				return true;
 		}
 
-		if (rules.ShouldApplySmartIgnore(fullPath, isDirectory: true) && rules.SmartIgnoredFolders.Contains(name))
+		if (rules.IsSmartIgnoredDirectory(fullPath, name))
 			return true;
 
 		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
@@ -246,7 +246,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		if (gitIgnoreEvaluation.IsIgnored)
 			return true;
 
-		if (shouldApplySmartIgnore && rules.SmartIgnoredFiles.Contains(name))
+		if (rules.IsSmartIgnoredFile(fullPath, name, shouldApplySmartIgnore))
 			return true;
 
 		if (rules.IgnoreDotFiles && name.StartsWith(".", StringComparison.Ordinal))
@@ -284,8 +284,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			FullPath: fullPath,
 			IsHidden: isHidden,
 			IsDot: IsDotName(name),
-			IsSmartIgnored: rules.ShouldApplySmartIgnore(fullPath, isDirectory: true) &&
-			                rules.SmartIgnoredFolders.Contains(name),
+			IsSmartIgnored: rules.IsSmartIgnoredDirectory(fullPath, name),
 			GitIgnoreEvaluation: gitIgnoreEvaluation);
 	}
 
@@ -323,7 +322,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			IsDot: IsDotName(name),
 			IsEmpty: length == 0,
 			IsExtensionless: isExtensionless,
-			IsSmartIgnored: shouldApplySmartIgnoreForFiles && rules.SmartIgnoredFiles.Contains(name),
+			IsSmartIgnored: rules.IsSmartIgnoredFile(fullPath, name, shouldApplySmartIgnoreForFiles),
 			IsGitIgnored: gitIgnored);
 	}
 

@@ -38,6 +38,9 @@ public sealed record IgnoreRules(
 	public IReadOnlyList<string> SmartIgnoreScopeRoots { get; init; } =
 		[];
 
+	public IReadOnlyList<ScopedSmartIgnoreMatcher> ScopedSmartIgnoreMatchers { get; init; } =
+		[];
+
 	public readonly record struct GitIgnoreEvaluation(bool IsIgnored, bool ShouldTraverseIgnoredDirectory)
 	{
 		public static readonly GitIgnoreEvaluation NotIgnored = new(false, false);
@@ -172,6 +175,46 @@ public sealed record IgnoreRules(
 		return applies;
 	}
 
+	public bool IsSmartIgnoredDirectory(string fullPath, string name)
+	{
+		if (!ShouldApplySmartIgnore(fullPath, isDirectory: true))
+			return false;
+
+		if (!SmartIgnoredFolders.Contains(name))
+			return false;
+
+		if (ScopedSmartIgnoreMatchers.Count == 0)
+			return true;
+
+		foreach (var scoped in ScopedSmartIgnoreMatchers)
+		{
+			if (scoped.FolderNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
+				return true;
+		}
+
+		return false;
+	}
+
+	public bool IsSmartIgnoredFile(string fullPath, string name, bool shouldApplySmartIgnore)
+	{
+		if (!shouldApplySmartIgnore || !UseSmartIgnore)
+			return false;
+
+		if (!SmartIgnoredFiles.Contains(name))
+			return false;
+
+		if (ScopedSmartIgnoreMatchers.Count == 0)
+			return true;
+
+		foreach (var scoped in ScopedSmartIgnoreMatchers)
+		{
+			if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
+				return true;
+		}
+
+		return false;
+	}
+
 	private ScopedGitIgnoreMatcher[] GetApplicableGitIgnoreMatchers(string fullPath, bool isDirectory)
 	{
 		if (ScopedGitIgnoreMatchers.Count == 0 || string.IsNullOrWhiteSpace(fullPath))
@@ -250,3 +293,8 @@ public sealed record IgnoreRules(
 public sealed record ScopedGitIgnoreMatcher(
 	string ScopeRootPath,
 	GitIgnoreMatcher Matcher);
+
+public sealed record ScopedSmartIgnoreMatcher(
+	string ScopeRootPath,
+	IReadOnlySet<string> FolderNames,
+	IReadOnlySet<string> FileNames);
