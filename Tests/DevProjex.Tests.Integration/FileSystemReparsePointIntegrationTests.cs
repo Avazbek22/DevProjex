@@ -50,6 +50,27 @@ public sealed class FileSystemReparsePointIntegrationTests
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
 	}
 
+	[Fact]
+	public void TreeBuilder_DanglingDirectorySymlink_DoesNotAppearAsTraversableFolder()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.cs", "class App {}");
+
+		var linkPath = Path.Combine(temp.Path, "dangling");
+		if (!TryCreateDanglingDirectorySymlink(linkPath, Path.Combine(temp.Path, "missing-target")))
+			return;
+
+		var tree = new TreeBuilder().Build(
+			temp.Path,
+			new TreeFilterOptions(
+				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src", "dangling" },
+				IgnoreRules: CreateIgnoreRules()));
+
+		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "src", StringComparison.Ordinal));
+		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "dangling", StringComparison.Ordinal));
+	}
+
 	private static IgnoreRules CreateIgnoreRules() => new(
 		IgnoreHiddenFolders: false,
 		IgnoreHiddenFiles: false,
@@ -65,6 +86,19 @@ public sealed class FileSystemReparsePointIntegrationTests
 			Directory.CreateSymbolicLink(linkPath, targetPath);
 			return Directory.Exists(linkPath) &&
 			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private static bool TryCreateDanglingDirectorySymlink(string linkPath, string targetPath)
+	{
+		try
+		{
+			Directory.CreateSymbolicLink(linkPath, targetPath);
+			return File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
 		{

@@ -116,6 +116,7 @@ internal sealed class UiTestProject : IDisposable
             WriteFile(rootPath, Path.Combine("src", "app.py"), "print('ok')\n");
             WriteFile(rootPath, Path.Combine("src", "__pycache__", "app.pyc"), "binary");
             WriteFile(rootPath, Path.Combine(".idea", "workspace.xml"), "<project />\n");
+            WriteFile(rootPath, Path.Combine(".idea", ".gitignore"), "# JetBrains internal ignore file\n");
         });
     }
 

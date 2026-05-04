@@ -1,6 +1,6 @@
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal readonly record struct IgnoreSectionRefreshPlan(
+public readonly record struct IgnoreSectionRefreshPlan(
     bool RequiresIgnoreOptionsRefresh,
     bool RequiresSecondSnapshotPass,
     bool RequiresRootFolderRefresh,

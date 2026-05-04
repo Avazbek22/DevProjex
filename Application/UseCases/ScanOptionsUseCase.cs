@@ -2,8 +2,8 @@ namespace DevProjex.Application.UseCases;
 
 public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 {
-	// Optimal parallelism for modern multi-core CPUs (targeting developers with NVMe SSDs)
-	private static readonly int MaxParallelism = Math.Max(4, Environment.ProcessorCount);
+	// Keep local SSD scans fast while avoiding unbounded fan-out on very wide projects.
+	private static readonly int LocalStorageMaxParallelism = Math.Clamp(Environment.ProcessorCount, 4, 16);
 
 	public ScanOptionsResult Execute(ScanOptionsRequest request, CancellationToken cancellationToken = default)
 	{
@@ -119,7 +119,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				{
 					var parallelOptions = new ParallelOptions
 					{
-						MaxDegreeOfParallelism = Math.Min(MaxParallelism, rootFolders.Count),
+						MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
 						CancellationToken = cancellationToken
 					};
 
@@ -190,7 +190,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				{
 					var parallelOptions = new ParallelOptions
 					{
-						MaxDegreeOfParallelism = Math.Min(MaxParallelism, rootFolders.Count),
+						MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
 						CancellationToken = cancellationToken
 					};
 
@@ -279,7 +279,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		{
 			var parallelOptions = new ParallelOptions
 			{
-				MaxDegreeOfParallelism = Math.Min(MaxParallelism, rootFolders.Count),
+				MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
 				CancellationToken = cancellationToken
 			};
 
@@ -409,7 +409,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			{
 				var parallelOptions = new ParallelOptions
 				{
-					MaxDegreeOfParallelism = Math.Min(MaxParallelism, rootFolders.Count),
+					MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
 					CancellationToken = cancellationToken
 				};
 
@@ -463,30 +463,16 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 		if (includeDirectoryToggleProbeRoots)
 		{
-			var probeExtensionDiscoveryRules = BuildDirectoryToggleProbeDiscoveryRules(extensionDiscoveryRules);
-			var probeEffectiveRules = BuildDirectoryToggleProbeEffectiveRules(effectiveRules);
-			foreach (var probeRootPath in ResolveDirectoryToggleProbeRootPaths(rootPath, rootFolders, effectiveRules))
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-
-				var snapshot = provider.GetIgnoreSectionSnapshot(
-					probeRootPath,
-					probeExtensionDiscoveryRules,
-					probeEffectiveRules,
-					effectiveAllowedExtensions: null,
-					cancellationToken);
-
-				// Probe roots exist only to keep directory-level toggles reversible. They must not
-				// affect raw inventory or extension availability while the root folder itself is hidden.
-				// Extension filtering is intentionally disabled for the probe: a hidden root may contain
-				// extensions absent from the saved profile precisely because this toggle hid them earlier.
-				effectiveCounts = effectiveCounts.Add(KeepDirectoryToggleCountsOnly(snapshot.Value.EffectiveIgnoreOptionCounts));
-
-				if (snapshot.RootAccessDenied)
-					Interlocked.Exchange(ref rootAccessDenied, 1);
-				if (snapshot.HadAccessDenied)
-					Interlocked.Exchange(ref hadAccessDenied, 1);
-			}
+			var rootCandidateCounts = GetRootDirectoryToggleCandidateCounts(
+				rootPath,
+				rootFolders,
+				effectiveRules,
+				cancellationToken);
+			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
+			if (rootCandidateCounts.RootAccessDenied)
+				Interlocked.Exchange(ref rootAccessDenied, 1);
+			if (rootCandidateCounts.HadAccessDenied)
+				Interlocked.Exchange(ref hadAccessDenied, 1);
 		}
 
 		return new ScanResult<IgnoreSectionScanData>(
@@ -566,7 +552,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			{
 				var parallelOptions = new ParallelOptions
 				{
-					MaxDegreeOfParallelism = Math.Min(MaxParallelism, rootFolders.Count),
+					MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
 					CancellationToken = cancellationToken
 				};
 
@@ -606,29 +592,16 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 		if (includeDirectoryToggleProbeRoots)
 		{
-			var probeRules = BuildDirectoryToggleProbeEffectiveRules(ignoreRules);
-			var probeDiscoveryRules = BuildDirectoryToggleProbeDiscoveryRules(ignoreRules);
-			foreach (var probeRootPath in ResolveDirectoryToggleProbeRootPaths(rootPath, rootFolders, ignoreRules))
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-
-				var probeAllowedExtensions = scanner.GetExtensions(probeRootPath, probeDiscoveryRules, cancellationToken);
-				var result = counter.GetEffectiveIgnoreOptionCounts(
-					probeRootPath,
-					probeAllowedExtensions.Value,
-					probeRules,
-					cancellationToken);
-				effectiveCounts = effectiveCounts.Add(KeepDirectoryToggleCountsOnly(result.Value));
-
-				if (probeAllowedExtensions.RootAccessDenied)
-					Interlocked.Exchange(ref rootAccessDenied, 1);
-				if (probeAllowedExtensions.HadAccessDenied)
-					Interlocked.Exchange(ref hadAccessDenied, 1);
-				if (result.RootAccessDenied)
-					Interlocked.Exchange(ref rootAccessDenied, 1);
-				if (result.HadAccessDenied)
-					Interlocked.Exchange(ref hadAccessDenied, 1);
-			}
+			var rootCandidateCounts = GetRootDirectoryToggleCandidateCounts(
+				rootPath,
+				rootFolders,
+				ignoreRules,
+				cancellationToken);
+			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
+			if (rootCandidateCounts.RootAccessDenied)
+				Interlocked.Exchange(ref rootAccessDenied, 1);
+			if (rootCandidateCounts.HadAccessDenied)
+				Interlocked.Exchange(ref hadAccessDenied, 1);
 		}
 
 		return new ScanResult<IgnoreOptionCounts>(
@@ -674,70 +647,224 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		return extensions;
 	}
 
-	private static IgnoreRules BuildDirectoryToggleProbeDiscoveryRules(IgnoreRules rules)
-	{
-		return rules with
-		{
-			IgnoreDotFolders = false,
-			IgnoreHiddenFolders = false,
-			IgnoreEmptyFolders = true
-		};
-	}
-
-	private static IgnoreRules BuildDirectoryToggleProbeEffectiveRules(IgnoreRules rules)
-	{
-		return rules.IgnoreEmptyFolders
-			? rules
-			: rules with { IgnoreEmptyFolders = true };
-	}
-
-	private static IgnoreOptionCounts KeepDirectoryToggleCountsOnly(IgnoreOptionCounts counts)
-	{
-		return new IgnoreOptionCounts(
-			HiddenFolders: counts.HiddenFolders,
-			DotFolders: counts.DotFolders);
-	}
-
-	private static List<string> ResolveDirectoryToggleProbeRootPaths(
+	private static ScanResult<IgnoreOptionCounts> GetRootDirectoryToggleCandidateCounts(
 		string rootPath,
 		IReadOnlyCollection<string> selectedRootFolders,
-		IgnoreRules effectiveRules)
+		IgnoreRules effectiveRules,
+		CancellationToken cancellationToken)
 	{
 		if (!effectiveRules.IgnoreDotFolders && !effectiveRules.IgnoreHiddenFolders)
-			return [];
+			return new ScanResult<IgnoreOptionCounts>(IgnoreOptionCounts.Empty, RootAccessDenied: false, HadAccessDenied: false);
 
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
-			return [];
+			return new ScanResult<IgnoreOptionCounts>(IgnoreOptionCounts.Empty, RootAccessDenied: false, HadAccessDenied: false);
 
 		var selected = new HashSet<string>(selectedRootFolders, PathComparer.Default);
-		var probeRootPaths = new List<string>();
+		var hiddenFolders = 0;
+		var dotFolders = 0;
 
 		try
 		{
 			foreach (var directoryPath in Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
+
 				var name = Path.GetFileName(directoryPath);
 				if (string.IsNullOrWhiteSpace(name) || selected.Contains(name))
 					continue;
 				if (IsReparsePointDirectory(directoryPath))
 					continue;
 
+				if (IsSuppressedByNonDirectoryToggleRule(directoryPath, name, effectiveRules))
+					continue;
+
 				if (effectiveRules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
 				{
-					probeRootPaths.Add(directoryPath);
-					continue;
+					var visible = HasVisibleContentForDirectoryToggleCandidate(
+						directoryPath,
+						effectiveRules with
+						{
+							IgnoreDotFolders = false,
+							IgnoreEmptyFolders = true
+						},
+						cancellationToken);
+					if (visible.RootAccessDenied)
+						return new ScanResult<IgnoreOptionCounts>(
+							new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
+							RootAccessDenied: true,
+							HadAccessDenied: true);
+					if (visible.HadAccessDenied || visible.Value)
+						dotFolders++;
 				}
 
 				if (effectiveRules.IgnoreHiddenFolders && HasHiddenAttribute(directoryPath))
-					probeRootPaths.Add(directoryPath);
+				{
+					var visible = HasVisibleContentForDirectoryToggleCandidate(
+						directoryPath,
+						effectiveRules with
+						{
+							IgnoreHiddenFolders = false,
+							IgnoreEmptyFolders = true
+						},
+						cancellationToken);
+					if (visible.RootAccessDenied)
+						return new ScanResult<IgnoreOptionCounts>(
+							new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
+							RootAccessDenied: true,
+							HadAccessDenied: true);
+					if (visible.HadAccessDenied || visible.Value)
+						hiddenFolders++;
+				}
 			}
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return new ScanResult<IgnoreOptionCounts>(
+				new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
+				RootAccessDenied: true,
+				HadAccessDenied: true);
 		}
 		catch
 		{
-			// Directory-toggle probes are best effort; normal selected roots still define the snapshot.
+			return new ScanResult<IgnoreOptionCounts>(
+				new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
+				RootAccessDenied: false,
+				HadAccessDenied: false);
 		}
 
-		return probeRootPaths;
+		return new ScanResult<IgnoreOptionCounts>(
+			new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
+			RootAccessDenied: false,
+			HadAccessDenied: false);
+	}
+
+	private static bool IsSuppressedByNonDirectoryToggleRule(
+		string directoryPath,
+		string name,
+		IgnoreRules rules)
+	{
+		if (rules.IsSmartIgnoredDirectory(directoryPath, name))
+			return true;
+
+		if (!rules.UseGitIgnore)
+			return false;
+
+		var gitIgnore = rules.EvaluateGitIgnore(directoryPath, isDirectory: true, name);
+		return gitIgnore.IsIgnored && !gitIgnore.ShouldTraverseIgnoredDirectory;
+	}
+
+	private static ScanResult<bool> HasVisibleContentForDirectoryToggleCandidate(
+		string rootPath,
+		IgnoreRules rules,
+		CancellationToken cancellationToken)
+	{
+		if (IsDirectorySuppressedByRules(rootPath, Path.GetFileName(rootPath), rules))
+			return new ScanResult<bool>(false, RootAccessDenied: false, HadAccessDenied: false);
+
+		var hadAccessDenied = false;
+		var pending = new Stack<string>();
+		pending.Push(rootPath);
+
+		while (pending.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var currentPath = pending.Pop();
+
+			try
+			{
+				foreach (var filePath in Directory.EnumerateFiles(currentPath, "*", SearchOption.TopDirectoryOnly))
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (IsFileVisibleForDirectoryToggleCandidate(filePath, rules))
+						return new ScanResult<bool>(true, RootAccessDenied: false, HadAccessDenied: hadAccessDenied);
+				}
+
+				foreach (var directoryPath in Directory.EnumerateDirectories(currentPath, "*", SearchOption.TopDirectoryOnly))
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (IsReparsePointDirectory(directoryPath))
+						continue;
+
+					var name = Path.GetFileName(directoryPath);
+					if (string.IsNullOrWhiteSpace(name))
+						continue;
+					if (IsDirectorySuppressedByRules(directoryPath, name, rules))
+						continue;
+
+					pending.Push(directoryPath);
+				}
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				hadAccessDenied = true;
+				return new ScanResult<bool>(true, RootAccessDenied: currentPath == rootPath, HadAccessDenied: true);
+			}
+			catch
+			{
+				// Best-effort: unreadable children should not destabilize ignore availability.
+			}
+		}
+
+		return new ScanResult<bool>(false, RootAccessDenied: false, HadAccessDenied: hadAccessDenied);
+	}
+
+	private static bool IsDirectorySuppressedByRules(
+		string directoryPath,
+		string name,
+		IgnoreRules rules)
+	{
+		if (rules.IsSmartIgnoredDirectory(directoryPath, name))
+			return true;
+
+		if (rules.UseGitIgnore)
+		{
+			var gitIgnore = rules.EvaluateGitIgnore(directoryPath, isDirectory: true, name);
+			if (gitIgnore.IsIgnored && !gitIgnore.ShouldTraverseIgnoredDirectory)
+				return true;
+		}
+
+		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
+			return true;
+
+		if (rules.IgnoreHiddenFolders && HasHiddenAttribute(directoryPath))
+			return true;
+
+		return false;
+	}
+
+	private static bool IsFileVisibleForDirectoryToggleCandidate(string filePath, IgnoreRules rules)
+	{
+		var name = Path.GetFileName(filePath);
+		if (string.IsNullOrWhiteSpace(name))
+			return false;
+
+		if (rules.UseGitIgnore && rules.EvaluateGitIgnore(filePath, isDirectory: false, name).IsIgnored)
+			return false;
+
+		if (rules.IsSmartIgnoredFile(filePath, name, rules.ShouldApplySmartIgnore(filePath, isDirectory: false)))
+			return false;
+
+		if (rules.IgnoreDotFiles && name.StartsWith(".", StringComparison.Ordinal))
+			return false;
+
+		if (rules.IgnoreHiddenFiles && HasHiddenAttribute(filePath))
+			return false;
+
+		if (rules.IgnoreEmptyFiles && GetFileLength(filePath) == 0)
+			return false;
+
+		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(name))
+			return false;
+
+		return true;
 	}
 
 	private static bool IsReparsePointDirectory(string path)
@@ -752,6 +879,39 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		}
 	}
 
+	private static int ResolveMaxDegreeOfParallelism(string rootPath, int workItemCount)
+	{
+		if (workItemCount <= 0)
+			return 1;
+
+		var storageCap = IsLikelySlowStorageRoot(rootPath)
+			? 2
+			: LocalStorageMaxParallelism;
+		return Math.Max(1, Math.Min(storageCap, workItemCount));
+	}
+
+	private static bool IsLikelySlowStorageRoot(string rootPath)
+	{
+		try
+		{
+			var pathRoot = Path.GetPathRoot(rootPath);
+			if (string.IsNullOrWhiteSpace(pathRoot))
+				return false;
+
+			if (OperatingSystem.IsWindows() &&
+			    pathRoot.StartsWith(@"\\", StringComparison.Ordinal))
+			{
+				return true;
+			}
+
+			return new DriveInfo(pathRoot).DriveType == DriveType.Network;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
 	private static bool HasHiddenAttribute(string path)
 	{
 		try
@@ -762,6 +922,30 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		{
 			return false;
 		}
+	}
+
+	private static long GetFileLength(string path)
+	{
+		try
+		{
+			return new FileInfo(path).Length;
+		}
+		catch
+		{
+			return 0;
+		}
+	}
+
+	private static bool IsExtensionlessFileName(string name)
+	{
+		if (string.IsNullOrWhiteSpace(name))
+			return false;
+
+		var dotIndex = name.AsSpan().LastIndexOf('.');
+		if (dotIndex <= 0)
+			return dotIndex != 0;
+
+		return dotIndex == name.Length - 1;
 	}
 
 }

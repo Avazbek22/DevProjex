@@ -1,9 +1,9 @@
 using DevProjex.Application.Models;
 using DevProjex.Kernel;
 
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal sealed class SelectionRefreshEngine(
+public sealed class SelectionRefreshEngine(
     ScanOptionsUseCase scanOptions,
     FilterOptionSelectionService filterSelectionService,
     IgnoreOptionsService ignoreOptionsService,
@@ -96,7 +96,7 @@ internal sealed class SelectionRefreshEngine(
             previousSelections,
             ignoreRules,
             context.RootSelectionInitialized);
-        options = SelectionSyncCoordinatorPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
+        options = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
             context.PreparedSelectionMode,
             context.RootSelectionCache,
             options,
@@ -208,7 +208,7 @@ internal sealed class SelectionRefreshEngine(
             extensionScanRules,
             ignoreRules,
             effectiveAllowedExtensions,
-            includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedIgnoreOptions),
+            includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
             cancellationToken);
 
         var visibleExtensions = new List<string>(scan.Value.Extensions.Count);
@@ -219,7 +219,7 @@ internal sealed class SelectionRefreshEngine(
             context.ExtensionsSelectionInitialized
                 ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
                 : EmptyExtensionSelection);
-        extensionOptions = SelectionSyncCoordinatorPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
+        extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
             context.PreparedSelectionMode,
             context.ExtensionsSelectionCache,
             extensionOptions);
@@ -268,7 +268,7 @@ internal sealed class SelectionRefreshEngine(
             stateCacheOverride ?? context.IgnoreOptionStateCache);
         var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots, snapshotState);
         var descriptors = ignoreOptionsService.GetOptions(availability);
-        var useDefaultCheckedFallback = SelectionSyncCoordinatorPolicy.ShouldUseIgnoreDefaultFallback(
+        var useDefaultCheckedFallback = SelectionRefreshPolicy.ShouldUseIgnoreDefaultFallback(
             context.PreparedSelectionMode,
             descriptors,
             previousSelections);
@@ -489,19 +489,25 @@ internal sealed class SelectionRefreshEngine(
 
     private static bool ShouldIncludeDirectoryToggleProbeRoots(
         SelectionRefreshContext context,
+        IReadOnlyCollection<string> selectedRoots,
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions)
     {
-        if (!context.AllRootFoldersChecked)
+        var hasDirectoryToggle =
+            selectedIgnoreOptions.Contains(IgnoreOptionId.DotFolders) ||
+            selectedIgnoreOptions.Contains(IgnoreOptionId.HiddenFolders);
+
+        if (!hasDirectoryToggle)
             return false;
 
         if (!ShouldSuppressAllTogglesOverride(context))
-            return true;
+            return context.AllRootFoldersChecked || selectedRoots.Count == 0;
 
-        // Profile/default restoration must keep active directory-level toggles visible even
-        // when an "all roots" profile can only restore the visible roots left by that toggle.
-        // Partial root profiles stay scoped to their saved roots and must not probe siblings.
-        return selectedIgnoreOptions.Contains(IgnoreOptionId.DotFolders) ||
-               selectedIgnoreOptions.Contains(IgnoreOptionId.HiddenFolders);
+        // Profile/default restoration must keep active directory-level toggles visible when
+        // an "all roots" profile can only restore the visible roots left by that toggle. The
+        // selected-roots-empty branch covers root-file projects where Smart Ignore initially
+        // hid every top-level folder, so toggling Smart Ignore would otherwise make DotFolders
+        // disappear before the user can reveal folders like .idea.
+        return context.AllRootFoldersChecked || selectedRoots.Count == 0;
     }
 
     private static IgnoreOptionsAvailability CreateCountDrivenIgnoreAvailability(

@@ -141,3 +141,65 @@ jobs:
           name: test-results-${{ matrix.os_id }}-${{ matrix.suite_id }}
           path: TestResults/**/*.trx
           if-no-files-found: ignore
+
+  ignore-scanner-cross-platform:
+    name: Ignore/Scanner Matrix (${{ matrix.os_name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_name: Windows
+            runner: windows-latest
+            os_id: windows
+          - os_name: Linux
+            runner: ubuntu-latest
+            os_id: linux
+          - os_name: macOS
+            runner: macos-latest
+            os_id: macos
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.104
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-ignore-scanner-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            nuget-ignore-scanner-${{ runner.os }}-
+            nuget-${{ runner.os }}-
+
+      - name: Restore integration tests
+        shell: pwsh
+        run: dotnet restore Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
+
+      - name: Build integration tests
+        shell: pwsh
+        run: dotnet build Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj -c Release --no-restore
+
+      - name: Run ignore/scanner integration tests
+        shell: pwsh
+        run: >
+          dotnet test Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
+          -c Release
+          --no-build
+          --verbosity minimal
+          --filter "FullyQualifiedName~Ignore|FullyQualifiedName~Scanner|FullyQualifiedName~ReparsePoint|FullyQualifiedName~FileSystemMutation"
+          --logger "trx;LogFileName=ignore-scanner.trx"
+          --results-directory "TestResults/ignore-scanner"
+
+      - name: Upload ignore/scanner results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ignore-scanner-results-${{ matrix.os_id }}
+          path: TestResults/**/*.trx
+          if-no-files-found: ignore

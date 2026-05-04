@@ -18,7 +18,7 @@ public sealed class SelectionSyncCoordinatorRootFolderRefreshMatrixTests
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var options = CreateExtensionOptions(optionKind);
 
-        var actual = SelectionSyncCoordinatorPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
+        var actual = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
             ParsePreparedSelectionMode(preparedMode),
             cachedSelections,
             options);
@@ -60,7 +60,7 @@ public sealed class SelectionSyncCoordinatorRootFolderRefreshMatrixTests
         var ignoreRules = CreateIgnoreRules(ignoreDotFolders, includeSmartIgnoredFolder);
         var filterSelectionService = new FilterOptionSelectionService();
 
-        var actual = SelectionSyncCoordinatorPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
+        var actual = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
             ParsePreparedSelectionMode(preparedMode),
             cachedSelections,
             options,
@@ -101,7 +101,7 @@ public sealed class SelectionSyncCoordinatorRootFolderRefreshMatrixTests
         var previousSelections = CreatePreviousSelections(previousSelectionKind);
         var visibleOptions = CreateVisibleIgnoreOptions(visibleOptionsKind);
 
-        var actual = SelectionSyncCoordinatorPolicy.ShouldUseIgnoreDefaultFallback(
+        var actual = SelectionRefreshPolicy.ShouldUseIgnoreDefaultFallback(
             ParsePreparedSelectionMode(preparedMode),
             visibleOptions,
             previousSelections);

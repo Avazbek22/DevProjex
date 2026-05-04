@@ -1,8 +1,8 @@
 using DevProjex.Application.Models;
 
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal sealed record SelectionRefreshSnapshot(
+public sealed record SelectionRefreshSnapshot(
     IReadOnlyList<SelectionOption>? RootOptions,
     IReadOnlyList<SelectionOption> ExtensionOptions,
     IReadOnlyList<ResolvedIgnoreOptionState> IgnoreOptions,

@@ -1,16 +1,16 @@
 using DevProjex.Application.Models;
 using DevProjex.Kernel;
 
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal enum PreparedSelectionMode
+public enum PreparedSelectionMode
 {
     None = 0,
     Defaults = 1,
     Profile = 2
 }
 
-internal static class SelectionSyncCoordinatorPolicy
+public static class SelectionRefreshPolicy
 {
     public static bool ShouldClearCachesForCurrentPath(
         string? lastLoadedPath,

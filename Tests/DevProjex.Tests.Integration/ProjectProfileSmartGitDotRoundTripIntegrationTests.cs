@@ -1,4 +1,3 @@
-using DevProjex.Avalonia.Coordinators;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
@@ -83,6 +82,41 @@ public sealed class ProjectProfileSmartGitDotRoundTripIntegrationTests
 		AssertExtensionVisible(snapshot, ".xml", expectedVisible: true);
 	}
 
+	[Theory]
+	[MemberData(nameof(SupportedStackProfileCases))]
+	public void SupportedStackProfile_SmartOffDotOn_RestoresStableIgnoreState(
+		string markerPath,
+		string markerContent,
+		string sourcePath,
+		string artifactPath,
+		string artifactExtension)
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile(markerPath, markerContent);
+		project.CreateFile(sourcePath, "visible");
+		project.CreateFile(artifactPath, "smart ignored when enabled");
+		project.CreateFile(".idea/workspace.xml", "<project />\n");
+
+		var snapshot = ComputeSnapshotWithPersistedIgnoreProfile(project.Path, [IgnoreOptionId.DotFolders]);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+		AssertRootOptionVisible(snapshot, ".idea", expectedVisible: false);
+		AssertExtensionVisible(snapshot, artifactExtension, expectedVisible: true);
+	}
+
+	public static IEnumerable<object[]> SupportedStackProfileCases()
+	{
+		yield return ["package.json", "{}", "src/app.ts", "node_modules/pkg/generated.noise", ".noise"];
+		yield return ["App.csproj", "<Project />", "Program.cs", "bin/Debug/net10.0/App.dll", ".dll"];
+		yield return ["pyproject.toml", "[project]\nname = \"matrix\"\n", "src/app.py", "src/__pycache__/app.pyc", ".pyc"];
+		yield return ["pom.xml", "<project />", "src/main/java/App.java", "target/classes/App.class", ".class"];
+		yield return ["Cargo.toml", "[package]\nname = \"matrix\"\n", "src/lib.rs", "target/debug/libmatrix.rlib", ".rlib"];
+		yield return ["go.mod", "module matrix\n", "main.go", "vendor/mod/generated.sum", ".sum"];
+		yield return ["composer.json", "{}", "src/App.php", "vendor/pkg/generated.cache", ".cache"];
+		yield return ["Gemfile", "source 'https://rubygems.org'\n", "app/models/user.rb", "tmp/cache.dump", ".dump"];
+	}
+
 	private static SelectionRefreshSnapshot ComputeSnapshotWithPersistedIgnoreProfile(
 		string projectPath,
 		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions)
@@ -163,9 +197,22 @@ public sealed class ProjectProfileSmartGitDotRoundTripIntegrationTests
 			return;
 		}
 
-		var option = Assert.Single(options);
+		Assert.True(options.Length == 1, DescribeSnapshot(snapshot));
+		var option = options[0];
 		if (expectedChecked.HasValue)
 			Assert.Equal(expectedChecked.Value, option.IsChecked);
+	}
+
+	private static string DescribeSnapshot(SelectionRefreshSnapshot snapshot)
+	{
+		var roots = snapshot.RootOptions is null
+			? "<null>"
+			: string.Join(", ", snapshot.RootOptions.Select(static option => $"{option.Name}:{option.IsChecked}"));
+		var extensions = string.Join(", ", snapshot.ExtensionOptions.Select(static option => $"{option.Name}:{option.IsChecked}"));
+		var ignore = string.Join(", ", snapshot.IgnoreOptions.Select(static option => $"{option.Id}:{option.IsChecked}"));
+		var cache = string.Join(", ", snapshot.IgnoreOptionStateCache.OrderBy(static pair => pair.Key).Select(static pair => $"{pair.Key}:{pair.Value}"));
+
+		return $"Ignore=[{ignore}], Cache=[{cache}], Roots=[{roots}], Extensions=[{extensions}], Counts={snapshot.IgnoreOptionCounts}";
 	}
 
 	private static void AssertRootOptionVisible(

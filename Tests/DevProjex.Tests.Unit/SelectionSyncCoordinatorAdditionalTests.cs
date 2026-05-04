@@ -497,7 +497,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	[Fact]
 	public void ShouldClearCachesForCurrentPath_WithPreparedTargetProfile_ReturnsFalse()
 	{
-		var result = SelectionSyncCoordinatorPolicy.ShouldClearCachesForCurrentPath(
+		var result = SelectionRefreshPolicy.ShouldClearCachesForCurrentPath(
 			"C:\\ProjectA",
 			"C:\\ProjectB",
 			"C:\\ProjectB");
@@ -508,7 +508,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	[Fact]
 	public void ShouldClearCachesForCurrentPath_PathSwitchWithoutPreparedProfile_ReturnsTrue()
 	{
-		var result = SelectionSyncCoordinatorPolicy.ShouldClearCachesForCurrentPath(
+		var result = SelectionRefreshPolicy.ShouldClearCachesForCurrentPath(
 			"C:\\ProjectA",
 			null,
 			"C:\\ProjectB");
@@ -519,7 +519,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	[Fact]
 	public void ShouldClearCachesForCurrentPath_NoLastLoadedPath_ReturnsFalse()
 	{
-		var result = SelectionSyncCoordinatorPolicy.ShouldClearCachesForCurrentPath(
+		var result = SelectionRefreshPolicy.ShouldClearCachesForCurrentPath(
 			null,
 			null,
 			"C:\\ProjectA");
@@ -530,7 +530,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	[Fact]
 	public void ShouldClearCachesForCurrentPath_SamePath_ReturnsFalse()
 	{
-		var result = SelectionSyncCoordinatorPolicy.ShouldClearCachesForCurrentPath(
+		var result = SelectionRefreshPolicy.ShouldClearCachesForCurrentPath(
 			"C:\\ProjectA",
 			null,
 			"C:\\ProjectA");
@@ -541,7 +541,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	[Fact]
 	public void ShouldClearCachesForCurrentPath_PreparedPathForAnotherProject_ReturnsTrue()
 	{
-		var result = SelectionSyncCoordinatorPolicy.ShouldClearCachesForCurrentPath(
+		var result = SelectionRefreshPolicy.ShouldClearCachesForCurrentPath(
 			"C:\\ProjectA",
 			"C:\\ProjectC",
 			"C:\\ProjectB");
@@ -552,7 +552,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	[Fact]
 	public void ShouldClearCachesForCurrentPath_PreparedPathCaseDifference_UsesPlatformComparer()
 	{
-		var result = SelectionSyncCoordinatorPolicy.ShouldClearCachesForCurrentPath(
+		var result = SelectionRefreshPolicy.ShouldClearCachesForCurrentPath(
 			"C:\\ProjectA",
 			"c:\\projectb",
 			"C:\\ProjectB");
@@ -563,7 +563,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	[Fact]
 	public void ShouldSkipRefreshForPreparedPath_PreparedForAnotherProject_ReturnsTrue()
 	{
-		var shouldSkip = SelectionSyncCoordinatorPolicy.ShouldSkipRefreshForPreparedPath(
+		var shouldSkip = SelectionRefreshPolicy.ShouldSkipRefreshForPreparedPath(
 			"C:\\TargetProject",
 			"C:\\AnotherProject");
 
@@ -573,7 +573,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	[Fact]
 	public void ShouldSkipRefreshForPreparedPath_PreparedForCurrentProject_ReturnsFalse()
 	{
-		var shouldSkip = SelectionSyncCoordinatorPolicy.ShouldSkipRefreshForPreparedPath(
+		var shouldSkip = SelectionRefreshPolicy.ShouldSkipRefreshForPreparedPath(
 			"C:\\TargetProject",
 			"C:\\TargetProject");
 

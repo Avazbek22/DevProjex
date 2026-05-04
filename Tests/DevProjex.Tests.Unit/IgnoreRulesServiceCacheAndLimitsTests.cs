@@ -54,6 +54,29 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 	}
 
 	[Fact]
+	public void GetIgnoreOptionsAvailability_PythonProjectWithOnlyIdeaGitIgnore_DoesNotExposeGitIgnore()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("requirements.txt", "pytest\n");
+		temp.CreateFile("main.py", "print('ok')\n");
+		temp.CreateFile("__pycache__/main.pyc", "binary");
+		temp.CreateFile(".idea/.gitignore", "# JetBrains internal ignore file\n");
+		temp.CreateFile(".idea/workspace.xml", "<project />\n");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([new PythonArtifactsIgnoreRule()]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
+		var rules = service.Build(
+			temp.Path,
+			[IgnoreOptionId.SmartIgnore, IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: []);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+		Assert.False(rules.UseGitIgnore);
+		Assert.True(rules.UseSmartIgnore);
+	}
+
+	[Fact]
 	public void GetIgnoreOptionsAvailability_UsesScopeCacheWithinTtl_ThenRefreshes()
 	{
 		using var temp = new TemporaryDirectory();
@@ -268,7 +291,16 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		string rootPath,
 		IReadOnlyCollection<string> selectedRootFolders)
 	{
-		var buildScopeCacheKey = typeof(IgnoreRulesService).GetMethod(
+		var discoveryField = typeof(IgnoreRulesService).GetField(
+			"_projectScopeDiscovery",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(discoveryField);
+
+		var discovery = discoveryField.GetValue(service);
+		Assert.NotNull(discovery);
+
+		var discoveryType = discovery.GetType();
+		var buildScopeCacheKey = discoveryType.GetMethod(
 			"BuildScopeCacheKey",
 			BindingFlags.Static | BindingFlags.NonPublic);
 		Assert.NotNull(buildScopeCacheKey);
@@ -281,12 +313,12 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 			]);
 		Assert.False(string.IsNullOrWhiteSpace(cacheKey));
 
-		var scopeCacheField = typeof(IgnoreRulesService).GetField(
+		var scopeCacheField = discoveryType.GetField(
 			"_scopeCache",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(scopeCacheField);
 
-		var scopeCache = scopeCacheField.GetValue(service);
+		var scopeCache = scopeCacheField.GetValue(discovery);
 		Assert.NotNull(scopeCache);
 
 		var dictionaryType = scopeCache.GetType();

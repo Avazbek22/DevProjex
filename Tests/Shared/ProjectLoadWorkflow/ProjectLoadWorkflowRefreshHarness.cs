@@ -2,7 +2,6 @@ using System.Text.RegularExpressions;
 using DevProjex.Application.Services;
 using DevProjex.Application.Models;
 using DevProjex.Application.UseCases;
-using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Shared.ProjectLoadWorkflow;
@@ -106,8 +105,9 @@ internal static class ProjectLoadWorkflowRefreshHarness
         return new SelectionRefreshContext(
             Path: rootPath,
             PreparedSelectionMode: PreparedSelectionMode.Defaults,
-            AllRootFoldersChecked: snapshot.RootOptions is { Count: > 0 } rootOptions &&
-                                   rootOptions.All(option => option.IsChecked),
+            AllRootFoldersChecked: snapshot.RootOptions is null ||
+                                   snapshot.RootOptions.Count == 0 ||
+                                   snapshot.RootOptions.All(option => option.IsChecked),
             AllExtensionsChecked: snapshot.ExtensionOptions.Count > 0 &&
                                   snapshot.ExtensionOptions.All(option => option.IsChecked),
             RootSelectionInitialized: true,

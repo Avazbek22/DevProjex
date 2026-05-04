@@ -1,5 +1,4 @@
 using DevProjex.Application.Models;
-using DevProjex.Avalonia.Coordinators;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
@@ -201,8 +200,9 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
         return new SelectionRefreshContext(
             Path: rootPath,
             PreparedSelectionMode: PreparedSelectionMode.Defaults,
-            AllRootFoldersChecked: snapshot.RootOptions is { Count: > 0 } rootOptions &&
-                                   rootOptions.All(option => option.IsChecked),
+            AllRootFoldersChecked: snapshot.RootOptions is null ||
+                                   snapshot.RootOptions.Count == 0 ||
+                                   snapshot.RootOptions.All(option => option.IsChecked),
             AllExtensionsChecked: snapshot.ExtensionOptions.Count > 0 &&
                                   snapshot.ExtensionOptions.All(option => option.IsChecked),
             RootSelectionInitialized: true,

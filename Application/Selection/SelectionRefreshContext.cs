@@ -1,6 +1,6 @@
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal sealed record SelectionRefreshContext(
+public sealed record SelectionRefreshContext(
     string Path,
     PreparedSelectionMode PreparedSelectionMode,
     bool AllRootFoldersChecked,
