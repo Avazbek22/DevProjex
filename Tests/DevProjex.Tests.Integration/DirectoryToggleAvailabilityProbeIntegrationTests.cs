@@ -111,6 +111,71 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 	}
 
 	[Fact]
+	public void IgnoreSectionSnapshot_WindowsHiddenDotRoot_ExposesHiddenFoldersOnlyWhenDotFoldersNoLongerHidesIt()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.cs", "class App {}");
+		temp.CreateFile(".idea/workspace.xml", "<project />");
+		temp.CreateFile(".git/config.txt", "[core]\n");
+		MarkHidden(Path.Combine(temp.Path, ".git"));
+
+		var bothDirectoryRulesOn = BuildDirectoryToggleSnapshot(
+			temp.Path,
+			ignoreHiddenFolders: true,
+			ignoreDotFolders: true);
+		Assert.Equal(0, bothDirectoryRulesOn.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(1, bothDirectoryRulesOn.Value.EffectiveIgnoreOptionCounts.DotFolders);
+
+		var dotFoldersOff = BuildDirectoryToggleSnapshot(
+			temp.Path,
+			ignoreHiddenFolders: true,
+			ignoreDotFolders: false);
+		Assert.Equal(1, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(0, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.DotFolders);
+
+		var hiddenFoldersOff = BuildDirectoryToggleSnapshot(
+			temp.Path,
+			ignoreHiddenFolders: false,
+			ignoreDotFolders: true);
+		Assert.Equal(0, hiddenFoldersOff.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(2, hiddenFoldersOff.Value.EffectiveIgnoreOptionCounts.DotFolders);
+	}
+
+	[Fact]
+	public void IgnoreSectionSnapshot_WindowsHiddenDotRootWithFilteredContent_DoesNotExposeHiddenFolders()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.cs", "class App {}");
+		temp.CreateFile(".idea/workspace.xml", "<project />");
+		temp.CreateFile(".git/config", "[core]\n");
+		MarkHidden(Path.Combine(temp.Path, ".git"));
+
+		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+		var rules = CreateBaseRules() with
+		{
+			IgnoreHiddenFolders = true,
+			IgnoreDotFolders = false,
+			IgnoreExtensionlessFiles = true
+		};
+
+		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			[".idea", "src"],
+			BuildExtensionDiscoveryRules(rules),
+			rules,
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".xml" },
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+	}
+
+	[Fact]
 	public void IgnoreSectionSnapshot_DotRootWithOnlyFilteredNoise_DoesNotKeepDotFoldersVisible()
 	{
 		using var temp = new TemporaryDirectory();
@@ -212,5 +277,33 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			IgnoreEmptyFiles = false,
 			IgnoreExtensionlessFiles = false
 		};
+	}
+
+	private static ScanResult<IgnoreSectionScanData> BuildDirectoryToggleSnapshot(
+		string rootPath,
+		bool ignoreHiddenFolders,
+		bool ignoreDotFolders)
+	{
+		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+		var rules = CreateBaseRules() with
+		{
+			IgnoreHiddenFolders = ignoreHiddenFolders,
+			IgnoreDotFolders = ignoreDotFolders,
+			IgnoreEmptyFolders = true
+		};
+
+		return scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			rootPath,
+			["src"],
+			BuildExtensionDiscoveryRules(rules),
+			rules,
+			effectiveAllowedExtensions: null,
+			includeDirectoryToggleProbeRoots: true);
+	}
+
+	private static void MarkHidden(string path)
+	{
+		var attributes = File.GetAttributes(path);
+		File.SetAttributes(path, attributes | FileAttributes.Hidden);
 	}
 }

@@ -120,6 +120,17 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithHiddenDotFolderOverlapWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("src", "Program.cs"), BuildCSharpFile("OverlapProbe", "Program", 6));
+            WriteFile(rootPath, Path.Combine(".idea", "workspace.xml"), "<project />\n");
+            WriteFile(rootPath, Path.Combine(".git", "config.txt"), "[core]\n");
+            TryMarkHidden(Path.Combine(rootPath, ".git"));
+        });
+    }
+
     public static UiTestProject CreateWithProjectLoadWorkflowWorkspace()
     {
         return CreateForSharedWorkspace(ProjectLoadWorkflowSharedWorkspace.RootPath);
@@ -222,6 +233,20 @@ internal sealed class UiTestProject : IDisposable
             Directory.CreateDirectory(directoryPath);
 
         File.WriteAllBytes(fullPath, content);
+    }
+
+    private static void TryMarkHidden(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            File.SetAttributes(path, attributes | FileAttributes.Hidden);
+        }
+        catch
+        {
+            // Hidden attributes are platform/filesystem dependent; tests assert the contract
+            // only on platforms where the attribute is supported by the scanner.
+        }
     }
 
     private static void SeedDefaultWorkspace(string rootPath)

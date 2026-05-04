@@ -235,6 +235,81 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task HiddenDotFolderOverlap_ShowsHiddenFoldersOnlyWhenDotFoldersNoLongerHidesSameFolder()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using var project = UiTestProject.CreateWithHiddenDotFolderOverlapWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                "dot folders (1)");
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: false);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                "Hidden folders (1)");
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "config.txt");
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.HiddenFolders, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: true,
+                isChecked: false);
+            await WaitForProjectTreePathStateAsync(window, exists: true, ".git", "config.txt");
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "config.txt");
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: true,
+                isChecked: false);
+            await WaitForProjectTreePathStateAsync(window, exists: true, ".git", "config.txt");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PythonProjectWithoutGitIgnore_ShowsSmartIgnoreAndHidesSmartArtifacts()
     {
         using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
