@@ -98,6 +98,24 @@ internal static class UiTestDriver
         CleanupWindowAppData(window);
     }
 
+    public static async Task OpenFolderAsync(
+        MainWindow window,
+        string path,
+        bool fromDialog = true,
+        bool recordRecentFolder = true)
+    {
+        var method = typeof(MainWindow).GetMethod("TryOpenFolderAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var task = await Dispatcher.UIThread.InvokeAsync<Task>(() =>
+        {
+            var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder]);
+            return Assert.IsAssignableFrom<Task>(result);
+        }, DispatcherPriority.Normal);
+        await task;
+        await WaitForSelectionRefreshIdleAsync(window);
+    }
+
     public static MainWindowViewModel GetViewModel(MainWindow window)
         => Assert.IsType<MainWindowViewModel>(window.DataContext);
 

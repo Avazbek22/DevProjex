@@ -678,6 +678,44 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
     }
 
     [AvaloniaFact]
+    public async Task BurstMixedMutations_QueuedRefreshesConvergeBeforeApply()
+    {
+        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            var baseline = await ComputeExpectedAppliedMetricsAsync(window);
+            await UiTestDriver.WaitForStatusMetricsAsync(window, baseline.TreeMetrics, baseline.ContentMetrics);
+
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
+                await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
+                await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
+                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "samples");
+                await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".json");
+                await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.ExtensionlessFiles);
+            }
+
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
+
+            var pendingExpected = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
+            AssertMetricsChanged(baseline, pendingExpected, "burst mixed root/extension/ignore changes");
+
+            var appliedExpected = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
+            Assert.Equal(pendingExpected.TreeMetrics, appliedExpected.TreeMetrics);
+            Assert.Equal(pendingExpected.ContentMetrics, appliedExpected.ContentMetrics);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task LiveSectionRefresh_NeverShowsAdvancedIgnoreOptionWithoutPositiveCount()
     {
         using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();

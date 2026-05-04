@@ -103,7 +103,7 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		IReadOnlyList<ScopedSmartIgnoreMatcher> scopedSmartMatchers;
 		if (useSmartIgnore)
 		{
-			var smart = BuildScopedSmartIgnore(context.Scopes);
+			var smart = BuildScopedSmartIgnore(context);
 			smartFolders = smart.FolderNames;
 			smartFiles = smart.FileNames;
 			scopedSmartMatchers = smart.ScopedMatchers;
@@ -181,16 +181,16 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 			if (scope.HasGitIgnore)
 				continue;
 
-			if (scope.HasProjectMarker || HasSmartCandidatesInRootEntries(scope.RootPath))
+			if (scope.HasProjectMarker || HasSmartCandidatesInRootEntries(context, scope.RootPath))
 				return true;
 		}
 
 		return false;
 	}
 
-	private bool HasSmartCandidatesInRootEntries(string rootPath)
+	private bool HasSmartCandidatesInRootEntries(ProjectScanContext context, string rootPath)
 	{
-		var smart = smartIgnore.Build(rootPath);
+		var smart = context.GetSmartIgnoreResult(rootPath, smartIgnore);
 		if (smart.FolderNames.Count == 0)
 			return false;
 
@@ -211,7 +211,7 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		return false;
 	}
 
-	private ScopedSmartIgnoreBuildResult BuildScopedSmartIgnore(IReadOnlyList<ProjectScope> scopes)
+	private ScopedSmartIgnoreBuildResult BuildScopedSmartIgnore(ProjectScanContext context)
 	{
 		var folderNames = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
 		var fileNames = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
@@ -219,11 +219,11 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 
 		var maxDegree = Math.Min(8, Math.Max(1, Environment.ProcessorCount / 2));
 		Parallel.ForEach(
-			scopes,
+			context.Scopes,
 			new ParallelOptions { MaxDegreeOfParallelism = maxDegree },
 			scope =>
 			{
-				var smart = smartIgnore.Build(scope.RootPath);
+				var smart = context.GetSmartIgnoreResult(scope.RootPath, smartIgnore);
 				foreach (var folder in smart.FolderNames)
 					folderNames.TryAdd(folder, 0);
 				foreach (var file in smart.FileNames)
@@ -361,6 +361,9 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 
 		if (candidateDirectories.Count == 0)
 		{
+			if (hasExplicitRootSelection)
+				return ProjectScanContext.Empty;
+
 			return ProjectScanContext.FromScopes([
 				new ProjectScope(
 					rootPath,
@@ -529,6 +532,9 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 
 			foreach (var childPath in children)
 			{
+				if (IsReparsePointDirectory(childPath))
+					continue;
+
 				yield return childPath;
 				discovered++;
 				if (discovered >= maxDirectories)
@@ -554,7 +560,7 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 					continue;
 
 				var fullPath = Path.Combine(rootPath, folderName);
-				if (Directory.Exists(fullPath))
+				if (Directory.Exists(fullPath) && !IsReparsePointDirectory(fullPath))
 					uniqueCandidates.Add(Path.GetFullPath(fullPath));
 			}
 		}
@@ -563,7 +569,10 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 			try
 			{
 				foreach (var dir in Directory.GetDirectories(rootPath))
-					uniqueCandidates.Add(dir);
+				{
+					if (!IsReparsePointDirectory(dir))
+						uniqueCandidates.Add(dir);
+				}
 			}
 			catch
 			{
@@ -622,6 +631,19 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		}
 
 		return false;
+	}
+
+	private static bool IsReparsePointDirectory(string directoryPath)
+	{
+		try
+		{
+			return Directory.Exists(directoryPath) &&
+			       File.GetAttributes(directoryPath).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch
+		{
+			return true;
+		}
 	}
 
 	private static GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath)
@@ -685,13 +707,15 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 		IReadOnlyList<ProjectScope> Scopes,
 		bool IsSingleScopeWithGitIgnore,
 		bool HasAnyGitIgnore,
-		bool HasAnyWithoutGitIgnore)
+		bool HasAnyWithoutGitIgnore,
+		ConcurrentDictionary<string, SmartIgnoreResult> SmartIgnoreResultCache)
 	{
-		public static ProjectScanContext Empty { get; } = new(
+		public static ProjectScanContext Empty => new(
 			[],
 			IsSingleScopeWithGitIgnore: false,
 			HasAnyGitIgnore: false,
-			HasAnyWithoutGitIgnore: false);
+			HasAnyWithoutGitIgnore: false,
+			SmartIgnoreResultCache: []);
 
 		public static ProjectScanContext FromScopes(IEnumerable<ProjectScope> scopes)
 		{
@@ -734,7 +758,14 @@ public sealed class IgnoreRulesService(SmartIgnoreService smartIgnore)
 				Scopes: scopesArray,
 				IsSingleScopeWithGitIgnore: isSingleScopeWithGitIgnore,
 				HasAnyGitIgnore: hasAnyGitIgnore,
-				HasAnyWithoutGitIgnore: hasAnyWithoutGitIgnore);
+				HasAnyWithoutGitIgnore: hasAnyWithoutGitIgnore,
+				SmartIgnoreResultCache: []);
+		}
+
+		public SmartIgnoreResult GetSmartIgnoreResult(string rootPath, SmartIgnoreService smartIgnore)
+		{
+			var normalizedPath = Path.GetFullPath(rootPath);
+			return SmartIgnoreResultCache.GetOrAdd(normalizedPath, smartIgnore.Build);
 		}
 	}
 }

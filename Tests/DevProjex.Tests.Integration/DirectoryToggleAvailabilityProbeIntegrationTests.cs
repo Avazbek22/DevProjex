@@ -58,6 +58,34 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 	}
 
 	[Fact]
+	public void IgnoreSectionSnapshot_DotRootHiddenWithUnselectedExtension_KeepsToggleAvailableWithoutLeakingExtension()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.py", "print('ok')");
+		temp.CreateFile(".idea/workspace.xml", "<project />");
+
+		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+		var rules = CreateBaseRules() with
+		{
+			IgnoreDotFolders = true,
+			IgnoreEmptyFolders = true
+		};
+
+		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["src"],
+			BuildExtensionDiscoveryRules(rules),
+			rules,
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py" },
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.Equal(0, snapshot.Value.RawIgnoreOptionCounts.DotFolders);
+		Assert.Equal(1, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Contains(".py", snapshot.Value.Extensions);
+		Assert.DoesNotContain(".xml", snapshot.Value.Extensions);
+	}
+
+	[Fact]
 	public void EffectiveCounts_DotRootHiddenByDotFolders_KeepsToggleAvailableForExplicitCountPipeline()
 	{
 		using var temp = new TemporaryDirectory();

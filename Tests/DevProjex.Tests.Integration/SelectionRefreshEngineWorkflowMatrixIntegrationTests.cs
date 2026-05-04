@@ -49,7 +49,7 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
     }
 
     [Fact]
-    public void ComputeFullRefreshSnapshot_ProfileAllRoots_DoesNotProbeUnselectedDotRoot()
+    public void ComputeFullRefreshSnapshot_ProfileAllRoots_KeepsSelectedDotFolderToggleAvailable()
     {
         var rootPath = ProjectLoadWorkflowSharedWorkspace.RootPath;
         var services = CreateServices();
@@ -60,7 +60,7 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
 
         Assert.All(snapshot.RootOptions!, option => Assert.True(option.IsChecked));
         Assert.DoesNotContain(snapshot.RootOptions!, option => string.Equals(option.Name, ".cache", StringComparison.Ordinal));
-        Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+        Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
     }
 
     public static IEnumerable<object[]> WorkflowCases()

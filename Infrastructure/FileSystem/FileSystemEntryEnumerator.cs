@@ -21,7 +21,8 @@ internal static class FileSystemEntryEnumerator
 				entry.ToSpecifiedFullPath(),
 				entry.IsHidden),
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => entry.IsDirectory;
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+			entry.IsDirectory && !IsReparsePoint(ref entry);
 		return enumerable;
 	}
 
@@ -50,7 +51,13 @@ internal static class FileSystemEntryEnumerator
 				entry.IsHidden,
 				entry.IsDirectory ? 0 : entry.Length),
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry _) => true;
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+			!entry.IsDirectory || !IsReparsePoint(ref entry);
 		return enumerable;
+	}
+
+	private static bool IsReparsePoint(ref FileSystemEntry entry)
+	{
+		return (entry.Attributes & FileAttributes.ReparsePoint) != 0;
 	}
 }

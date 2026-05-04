@@ -208,7 +208,7 @@ internal sealed class SelectionRefreshEngine(
             extensionScanRules,
             ignoreRules,
             effectiveAllowedExtensions,
-            includeDirectoryToggleProbeRoots: !ShouldSuppressAllTogglesOverride(context) && context.AllRootFoldersChecked,
+            includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedIgnoreOptions),
             cancellationToken);
 
         var visibleExtensions = new List<string>(scan.Value.Extensions.Count);
@@ -486,6 +486,23 @@ internal sealed class SelectionRefreshEngine(
 
     private static bool ShouldSuppressAllTogglesOverride(SelectionRefreshContext context)
         => context.PreparedSelectionMode == PreparedSelectionMode.Profile;
+
+    private static bool ShouldIncludeDirectoryToggleProbeRoots(
+        SelectionRefreshContext context,
+        IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions)
+    {
+        if (!context.AllRootFoldersChecked)
+            return false;
+
+        if (!ShouldSuppressAllTogglesOverride(context))
+            return true;
+
+        // Profile/default restoration must keep active directory-level toggles visible even
+        // when an "all roots" profile can only restore the visible roots left by that toggle.
+        // Partial root profiles stay scoped to their saved roots and must not probe siblings.
+        return selectedIgnoreOptions.Contains(IgnoreOptionId.DotFolders) ||
+               selectedIgnoreOptions.Contains(IgnoreOptionId.HiddenFolders);
+    }
 
     private static IgnoreOptionsAvailability CreateCountDrivenIgnoreAvailability(
         bool includeGitIgnore,

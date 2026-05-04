@@ -1,3 +1,8 @@
+using DevProjex.Application.UseCases;
+using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Kernel;
+using DevProjex.Kernel.Abstractions;
+
 namespace DevProjex.Tests.UI;
 
 public sealed class MainWindowIgnoreOptionsUiTests
@@ -573,6 +578,61 @@ public sealed class MainWindowIgnoreOptionsUiTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task ProjectSwitch_BlockedStaleIgnoreRefreshDoesNotOverwriteNewProject()
+    {
+        using var projectA = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
+        using var projectB = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+        using var blockingScanner = new SwitchableBlockingFileSystemScanner(projectA.RootPath);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            projectA,
+            configureServices: services => services with
+            {
+                ScanOptionsUseCase = new ScanOptionsUseCase(blockingScanner)
+            });
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+
+            blockingScanner.EnableBlocking();
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.SmartIgnore);
+            Assert.True(
+                blockingScanner.WaitForBlockedCall(TimeSpan.FromSeconds(10)),
+                "The stale project refresh did not reach the controlled scanner block.");
+
+            var openProjectB = UiTestDriver.OpenFolderAsync(window, projectB.RootPath);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+            blockingScanner.Release();
+            await openProjectB.WaitAsync(TimeSpan.FromSeconds(40));
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: false);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "src", "app.py");
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".idea", "workspace.xml");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "src", "__pycache__", "app.pyc");
+            Assert.DoesNotContain(
+                UiTestDriver.GetViewModel(window).RootFolders,
+                option => string.Equals(option.Name, ".idea", StringComparison.Ordinal));
+        }
+        finally
+        {
+            blockingScanner.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     private static async Task AssertDynamicIgnoreOptionStateIsPreservedWhenRootSelectionRestoresIt(
         IgnoreOptionId optionId)
     {
@@ -716,5 +776,166 @@ public sealed class MainWindowIgnoreOptionsUiTests
         }
 
         return true;
+    }
+
+    private sealed class SwitchableBlockingFileSystemScanner(string blockedRootPath)
+        : IFileSystemScanner,
+            IFileSystemScannerAdvanced,
+            IFileSystemScannerEffectiveEmptyFolderCounter,
+            IFileSystemScannerEffectiveIgnoreCountsProvider,
+            IFileSystemScannerIgnoreSectionSnapshotProvider,
+            IDisposable
+    {
+        private readonly FileSystemScanner _inner = new();
+        private readonly ManualResetEventSlim _blocked = new(initialState: false);
+        private readonly ManualResetEventSlim _release = new(initialState: false);
+        private int _enabled;
+
+        public void EnableBlocking() => Volatile.Write(ref _enabled, 1);
+
+        public bool WaitForBlockedCall(TimeSpan timeout) => _blocked.Wait(timeout);
+
+        public void Release() => _release.Set();
+
+        public bool CanReadRoot(string rootPath) => _inner.CanReadRoot(rootPath);
+
+        public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetExtensions(rootPath, rules, cancellationToken);
+        }
+
+        public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetRootFileExtensions(rootPath, rules, cancellationToken);
+        }
+
+        public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetRootFolderNames(rootPath, rules, cancellationToken);
+        }
+
+        public ScanResult<ExtensionsScanData> GetExtensionsWithIgnoreOptionCounts(
+            string rootPath,
+            IgnoreRules rules,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetExtensionsWithIgnoreOptionCounts(rootPath, rules, cancellationToken);
+        }
+
+        public ScanResult<ExtensionsScanData> GetRootFileExtensionsWithIgnoreOptionCounts(
+            string rootPath,
+            IgnoreRules rules,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetRootFileExtensionsWithIgnoreOptionCounts(rootPath, rules, cancellationToken);
+        }
+
+        public ScanResult<int> GetEffectiveEmptyFolderCount(
+            string rootPath,
+            IReadOnlySet<string> allowedExtensions,
+            IgnoreRules rules,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetEffectiveEmptyFolderCount(rootPath, allowedExtensions, rules, cancellationToken);
+        }
+
+        public ScanResult<IgnoreOptionCounts> GetEffectiveIgnoreOptionCounts(
+            string rootPath,
+            IReadOnlySet<string> allowedExtensions,
+            IgnoreRules rules,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetEffectiveIgnoreOptionCounts(rootPath, allowedExtensions, rules, cancellationToken);
+        }
+
+        public ScanResult<IgnoreOptionCounts> GetEffectiveRootFileIgnoreOptionCounts(
+            string rootPath,
+            IReadOnlySet<string> allowedExtensions,
+            IgnoreRules rules,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetEffectiveRootFileIgnoreOptionCounts(rootPath, allowedExtensions, rules, cancellationToken);
+        }
+
+        public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+            string rootPath,
+            IgnoreRules extensionDiscoveryRules,
+            IgnoreRules effectiveRules,
+            IReadOnlySet<string>? effectiveAllowedExtensions,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetIgnoreSectionSnapshot(
+                rootPath,
+                extensionDiscoveryRules,
+                effectiveRules,
+                effectiveAllowedExtensions,
+                cancellationToken);
+        }
+
+        public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+            string rootPath,
+            IgnoreRules extensionDiscoveryRules,
+            IgnoreRules effectiveRules,
+            IReadOnlySet<string>? effectiveAllowedExtensions,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetRootFileIgnoreSectionSnapshot(
+                rootPath,
+                extensionDiscoveryRules,
+                effectiveRules,
+                effectiveAllowedExtensions,
+                cancellationToken);
+        }
+
+        public void Dispose()
+        {
+            _blocked.Dispose();
+            _release.Dispose();
+        }
+
+        private void MaybeBlock(string rootPath, CancellationToken cancellationToken)
+        {
+            if (Volatile.Read(ref _enabled) == 0 || !IsInsideBlockedRoot(rootPath))
+                return;
+
+            _blocked.Set();
+            var signaled = WaitHandle.WaitAny(
+                [_release.WaitHandle, cancellationToken.WaitHandle],
+                TimeSpan.FromSeconds(30));
+            if (signaled == WaitHandle.WaitTimeout)
+                throw new TimeoutException("Timed out waiting to release the controlled stale refresh.");
+
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        private bool IsInsideBlockedRoot(string path)
+        {
+            var fullPath = Path.GetFullPath(path);
+            var rootPath = Path.GetFullPath(blockedRootPath).TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar);
+
+            if (string.Equals(fullPath, rootPath, PathComparison))
+                return true;
+            if (!fullPath.StartsWith(rootPath, PathComparison))
+                return false;
+
+            var next = fullPath[rootPath.Length];
+            return next == Path.DirectorySeparatorChar || next == Path.AltDirectorySeparatorChar;
+        }
+
+        private static StringComparison PathComparison => OperatingSystem.IsLinux()
+            ? StringComparison.Ordinal
+            : StringComparison.OrdinalIgnoreCase;
     }
 }

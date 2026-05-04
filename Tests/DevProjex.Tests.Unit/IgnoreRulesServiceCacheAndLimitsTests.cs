@@ -148,6 +148,61 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		Assert.True(availability.IncludeSmartIgnore);
 	}
 
+	[Fact]
+	public void Build_AfterAvailabilityProbe_ReusesCachedSmartIgnoreResultForSameScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/node_modules/lib/index.js", "x");
+
+		var rule = new CountingSmartIgnoreRule(["node_modules"]);
+		var service = new IgnoreRulesService(new SmartIgnoreService([rule]));
+
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["workspace"]);
+
+		Assert.True(availability.IncludeSmartIgnore);
+		Assert.True(rules.UseSmartIgnore);
+		Assert.True(rules.IsSmartIgnoredDirectory(
+			Path.Combine(temp.Path, "workspace", "node_modules"),
+			"node_modules"));
+		Assert.Equal(1, rule.EvaluateCallCount);
+	}
+
+	[Fact]
+	public void Build_IgnoresReparsePointRootCandidatesDuringScopeDiscovery()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("real/package.json", "{}");
+		temp.CreateFile("real/node_modules/lib/index.js", "x");
+
+		if (!TryCreateDirectorySymlink(Path.Combine(temp.Path, "linked"), Path.Combine(temp.Path, "real")))
+			return;
+
+		var service = CreateServiceWithSmartIgnore(["node_modules"]);
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["linked"]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["linked"]);
+
+		Assert.False(availability.IncludeSmartIgnore);
+		Assert.False(rules.UseSmartIgnore);
+	}
+
+	[Fact]
+	public void Build_MissingExplicitRootCandidates_DoNotFallbackToWholeWorkspaceScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("deleted/package.json", "{}");
+		Directory.Delete(Path.Combine(temp.Path, "deleted"), recursive: true);
+		temp.CreateFile("sibling/node_modules/lib/index.js", "x");
+
+		var service = CreateServiceWithSmartIgnore(["node_modules"]);
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["deleted"]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["deleted"]);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.False(availability.IncludeSmartIgnore);
+		Assert.False(rules.UseSmartIgnore);
+	}
+
 	private static void SeedMixedWorkspace(TemporaryDirectory temp)
 	{
 		temp.CreateFile("proj-git/.gitignore", "bin/");
@@ -176,6 +231,35 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 			return new SmartIgnoreResult(
 				new HashSet<string>(folders, StringComparer.OrdinalIgnoreCase),
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		}
+	}
+
+	private sealed class CountingSmartIgnoreRule(IReadOnlyCollection<string> folders) : ISmartIgnoreRule
+	{
+		private int _evaluateCallCount;
+
+		public int EvaluateCallCount => Volatile.Read(ref _evaluateCallCount);
+
+		public SmartIgnoreResult Evaluate(string rootPath)
+		{
+			Interlocked.Increment(ref _evaluateCallCount);
+			return new SmartIgnoreResult(
+				new HashSet<string>(folders, StringComparer.OrdinalIgnoreCase),
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		}
+	}
+
+	private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+	{
+		try
+		{
+			Directory.CreateSymbolicLink(linkPath, targetPath);
+			return Directory.Exists(linkPath) &&
+			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return false;
 		}
 	}
 

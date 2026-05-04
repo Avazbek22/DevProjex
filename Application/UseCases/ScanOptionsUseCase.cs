@@ -473,11 +473,13 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 					probeRootPath,
 					probeExtensionDiscoveryRules,
 					probeEffectiveRules,
-					effectiveAllowedExtensions,
+					effectiveAllowedExtensions: null,
 					cancellationToken);
 
 				// Probe roots exist only to keep directory-level toggles reversible. They must not
 				// affect raw inventory or extension availability while the root folder itself is hidden.
+				// Extension filtering is intentionally disabled for the probe: a hidden root may contain
+				// extensions absent from the saved profile precisely because this toggle hid them earlier.
 				effectiveCounts = effectiveCounts.Add(KeepDirectoryToggleCountsOnly(snapshot.Value.EffectiveIgnoreOptionCounts));
 
 				if (snapshot.RootAccessDenied)
@@ -605,17 +607,23 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		if (includeDirectoryToggleProbeRoots)
 		{
 			var probeRules = BuildDirectoryToggleProbeEffectiveRules(ignoreRules);
+			var probeDiscoveryRules = BuildDirectoryToggleProbeDiscoveryRules(ignoreRules);
 			foreach (var probeRootPath in ResolveDirectoryToggleProbeRootPaths(rootPath, rootFolders, ignoreRules))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
+				var probeAllowedExtensions = scanner.GetExtensions(probeRootPath, probeDiscoveryRules, cancellationToken);
 				var result = counter.GetEffectiveIgnoreOptionCounts(
 					probeRootPath,
-					allowedExtensions,
+					probeAllowedExtensions.Value,
 					probeRules,
 					cancellationToken);
 				effectiveCounts = effectiveCounts.Add(KeepDirectoryToggleCountsOnly(result.Value));
 
+				if (probeAllowedExtensions.RootAccessDenied)
+					Interlocked.Exchange(ref rootAccessDenied, 1);
+				if (probeAllowedExtensions.HadAccessDenied)
+					Interlocked.Exchange(ref hadAccessDenied, 1);
 				if (result.RootAccessDenied)
 					Interlocked.Exchange(ref rootAccessDenied, 1);
 				if (result.HadAccessDenied)
@@ -711,6 +719,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				var name = Path.GetFileName(directoryPath);
 				if (string.IsNullOrWhiteSpace(name) || selected.Contains(name))
 					continue;
+				if (IsReparsePointDirectory(directoryPath))
+					continue;
 
 				if (effectiveRules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
 				{
@@ -728,6 +738,18 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		}
 
 		return probeRootPaths;
+	}
+
+	private static bool IsReparsePointDirectory(string path)
+	{
+		try
+		{
+			return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch
+		{
+			return true;
+		}
 	}
 
 	private static bool HasHiddenAttribute(string path)
