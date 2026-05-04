@@ -404,7 +404,7 @@ public sealed class SelectionRefreshEngine(
         if (stateCache.TryGetValue(option.Id, out var cachedState))
             return cachedState;
 
-        if (useDefaultCheckedFallback)
+        if (useDefaultCheckedFallback && SelectionRefreshPolicy.CanUseIgnoreDefaultFallback(option.Id))
             return option.DefaultChecked;
 
         if (!ShouldSuppressAllTogglesOverride(context) && context.IgnoreAllPreference.HasValue)

@@ -93,6 +93,31 @@ public sealed class SelectionRefreshEngineTests
 		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.DotFolders, out var isChecked) && isChecked);
 	}
 
+	[Fact]
+	public void ComputeFullRefreshSnapshot_ProfileFallback_DoesNotDefaultCheckUnselectedControllers()
+	{
+		var scanner = new ProfileFallbackVisibilityScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(scanner),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			(_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				ShowAdvancedCounts: true));
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(
+			CreateProfileContext([IgnoreOptionId.DotFolders]),
+			CancellationToken.None);
+
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && !option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore && !option.IsChecked);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.DotFolders, out var isChecked) && isChecked);
+	}
+
 	private static SelectionRefreshEngine CreateEngine(
 		IFileSystemScanner scanner)
 	{

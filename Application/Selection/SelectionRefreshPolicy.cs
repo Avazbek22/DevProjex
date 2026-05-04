@@ -110,6 +110,9 @@ public static class SelectionRefreshPolicy
         return true;
     }
 
+    public static bool CanUseIgnoreDefaultFallback(IgnoreOptionId optionId) =>
+        optionId is not IgnoreOptionId.UseGitIgnore and not IgnoreOptionId.SmartIgnore;
+
     private static bool HasPreparedSelectionForPath(string? preparedSelectionPath, string path)
     {
         return preparedSelectionPath is not null &&

@@ -1615,7 +1615,7 @@ public sealed class SelectionSyncCoordinator(
         if (_ignoreSelectionState.TryGetCachedState(option.Id, out var cachedState))
             return cachedState;
 
-        if (useDefaultCheckedFallback)
+        if (useDefaultCheckedFallback && SelectionRefreshPolicy.CanUseIgnoreDefaultFallback(option.Id))
             return option.DefaultChecked;
 
         if (!ShouldSuppressAllTogglesOverride() && _ignoreSelectionState.AllPreference.HasValue)
