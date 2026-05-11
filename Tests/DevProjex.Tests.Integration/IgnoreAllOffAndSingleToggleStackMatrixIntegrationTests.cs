@@ -268,10 +268,12 @@ public sealed class IgnoreAllOffAndSingleToggleStackMatrixIntegrationTests
 			Path.GetExtension(stackCase.ArtifactPath),
 			".env",
 			".log",
-			".secret",
 			".txt",
 			".xml"
 		};
+
+		if (OperatingSystem.IsWindows())
+			extensions.Add(".secret");
 
 		extensions.Remove(string.Empty);
 		return extensions;
