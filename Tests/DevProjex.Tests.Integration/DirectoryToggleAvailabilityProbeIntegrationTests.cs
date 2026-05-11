@@ -181,7 +181,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 		var tree = new TreeBuilder().Build(
 			temp.Path,
 			new TreeFilterOptions(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".xml" },
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".env", ".py", ".xml" },
 				new HashSet<string>(PathComparer.Default) { ".idea", "src" },
 				rules));
 		Assert.Contains(tree.Root.Children, child => child.Name == ".idea");

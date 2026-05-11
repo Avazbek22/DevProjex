@@ -35,8 +35,8 @@ public sealed class SelectionRefreshEngineHiddenDotOverlapIntegrationTests
 				}),
 			CancellationToken.None);
 		AssertVisibleOption(dotFoldersOff, IgnoreOptionId.DotFolders, isChecked: false);
-		AssertVisibleOption(dotFoldersOff, IgnoreOptionId.HiddenFolders, isChecked: true);
-		Assert.DoesNotContain(dotFoldersOff.RootOptions!, option => option.Name == ".idea");
+		AssertHiddenOption(dotFoldersOff, IgnoreOptionId.HiddenFolders);
+		Assert.Contains(dotFoldersOff.RootOptions!, option => option.Name == ".idea" && option.IsChecked);
 
 		var allDirectoryTogglesOff = services.Engine.ComputeFullRefreshSnapshot(
 			CreateContextWithIgnoreStates(
@@ -49,7 +49,7 @@ public sealed class SelectionRefreshEngineHiddenDotOverlapIntegrationTests
 				}),
 			CancellationToken.None);
 		AssertVisibleOption(allDirectoryTogglesOff, IgnoreOptionId.DotFolders, isChecked: false);
-		AssertVisibleOption(allDirectoryTogglesOff, IgnoreOptionId.HiddenFolders, isChecked: false);
+		AssertHiddenOption(allDirectoryTogglesOff, IgnoreOptionId.HiddenFolders);
 		Assert.Contains(allDirectoryTogglesOff.RootOptions!, option => option.Name == ".idea" && option.IsChecked);
 	}
 
