@@ -200,10 +200,15 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		if (rules.IsSmartIgnoredDirectory(fullPath, name))
 			return true;
 
-		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
+		var isDot = IgnoreRuleSemantics.IsDotName(name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(rules.IgnoreDotFolders, isDot))
 			return true;
 
-		if (rules.IgnoreHiddenFolders && isHidden)
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			    rules.IgnoreHiddenFolders,
+			    isHidden,
+			    isDot,
+			    rules.IgnoreDotFolders))
 			return true;
 
 		return false;
@@ -249,7 +254,8 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		if (rules.IsSmartIgnoredFile(fullPath, name, shouldApplySmartIgnore))
 			return true;
 
-		if (rules.IgnoreDotFiles && name.StartsWith(".", StringComparison.Ordinal))
+		var isDot = IgnoreRuleSemantics.IsDotName(name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotFile(rules.IgnoreDotFiles, isDot))
 			return true;
 
 		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(name))
@@ -258,7 +264,11 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		if (rules.IgnoreEmptyFiles && length == 0)
 			return true;
 
-		if (rules.IgnoreHiddenFiles && isHidden)
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenFile(
+			    rules.IgnoreHiddenFiles,
+			    isHidden,
+			    isDot,
+			    rules.IgnoreDotFiles))
 			return true;
 
 		return false;
@@ -283,7 +293,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			Name: name,
 			FullPath: fullPath,
 			IsHidden: isHidden,
-			IsDot: IsDotName(name),
+			IsDot: IgnoreRuleSemantics.IsDotName(name),
 			IsSmartIgnored: rules.IsSmartIgnoredDirectory(fullPath, name),
 			GitIgnoreEvaluation: gitIgnoreEvaluation);
 	}
@@ -319,7 +329,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			Name: name,
 			Extension: Path.GetExtension(name),
 			IsHidden: isHidden,
-			IsDot: IsDotName(name),
+			IsDot: IgnoreRuleSemantics.IsDotName(name),
 			IsEmpty: length == 0,
 			IsExtensionless: isExtensionless,
 			IsSmartIgnored: rules.IsSmartIgnoredFile(fullPath, name, shouldApplySmartIgnoreForFiles),
@@ -337,10 +347,14 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		if (facts.IsSmartIgnored)
 			return new DirectoryToggleRuleState(CanTraverseChildren: false, IsSelfIgnoredButTraversed: false);
 
-		if (ignoreDotFolders && facts.IsDot)
+		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(ignoreDotFolders, facts.IsDot))
 			return new DirectoryToggleRuleState(CanTraverseChildren: false, IsSelfIgnoredButTraversed: false);
 
-		if (ignoreHiddenFolders && facts.IsHidden)
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			    ignoreHiddenFolders,
+			    facts.IsHidden,
+			    facts.IsDot,
+			    ignoreDotFolders))
 			return new DirectoryToggleRuleState(CanTraverseChildren: false, IsSelfIgnoredButTraversed: false);
 
 		return new DirectoryToggleRuleState(
@@ -440,9 +454,13 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		bool ignoreEmptyFiles,
 		bool ignoreExtensionlessFiles)
 	{
-		if (ignoreHiddenFiles && facts.IsHidden)
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenFile(
+			    ignoreHiddenFiles,
+			    facts.IsHidden,
+			    facts.IsDot,
+			    ignoreDotFiles))
 			return false;
-		if (ignoreDotFiles && facts.IsDot)
+		if (IgnoreRuleSemantics.ShouldIgnoreDotFile(ignoreDotFiles, facts.IsDot))
 			return false;
 		if (ignoreEmptyFiles && facts.IsEmpty)
 			return false;
@@ -1345,9 +1363,11 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		DirectoryScanFacts facts,
 		IgnoreRules effectiveRules)
 	{
-		// On Unix-like systems dot directories are also reported as hidden. DotFolders owns
-		// that overlap even when HiddenFolders currently hides the same directory.
-		return effectiveRules.IgnoreHiddenFolders && !facts.IsDot;
+		return IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			effectiveRules.IgnoreHiddenFolders,
+			facts.IsHidden,
+			facts.IsDot,
+			ignoreDotFolders: !effectiveRules.IgnoreDotFolders);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1594,7 +1614,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		FileSystemDirectoryEntry entry,
 		ref MutableIgnoreOptionCounts counts)
 	{
-		if (IsDotName(entry.Name))
+		if (IgnoreRuleSemantics.IsDotName(entry.Name))
 			counts.DotFolders++;
 		if (entry.IsHidden)
 			counts.HiddenFolders++;
@@ -1609,16 +1629,10 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			counts.ExtensionlessFiles++;
 		if (entry.Length == 0)
 			counts.EmptyFiles++;
-		if (IsDotName(entry.Name))
+		if (IgnoreRuleSemantics.IsDotName(entry.Name))
 			counts.DotFiles++;
 		if (entry.IsHidden)
 			counts.HiddenFiles++;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static bool IsDotName(string name)
-	{
-		return !string.IsNullOrEmpty(name) && name[0] == '.';
 	}
 
 	private static bool HasHiddenAttribute(string fullPath)

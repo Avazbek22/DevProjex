@@ -750,10 +750,16 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 					continue;
 
 				var isHiddenFolder = HasHiddenAttribute(directoryPath);
-				var isDotFolder = name.StartsWith(".", StringComparison.Ordinal);
+				var isDotFolder = IgnoreRuleSemantics.IsDotName(name);
+				var isHiddenByCurrentHiddenFolderRule =
+					IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+						effectiveRules.IgnoreHiddenFolders,
+						isHiddenFolder,
+						isDotFolder,
+						effectiveRules.IgnoreDotFolders);
 				var shouldCountDotFolder =
 					isDotFolder &&
-					(effectiveRules.IgnoreDotFolders || (effectiveRules.IgnoreHiddenFolders && isHiddenFolder));
+					(effectiveRules.IgnoreDotFolders || !isHiddenByCurrentHiddenFolderRule);
 
 				if (shouldCountDotFolder)
 				{
@@ -775,7 +781,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 						dotFolders++;
 				}
 
-				if (effectiveRules.IgnoreHiddenFolders && isHiddenFolder)
+				if (isHiddenByCurrentHiddenFolderRule)
 				{
 					var visible = HasVisibleContentForDirectoryToggleCandidate(
 						directoryPath,
@@ -909,10 +915,15 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				return true;
 		}
 
-		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
+		var isDot = IgnoreRuleSemantics.IsDotName(name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(rules.IgnoreDotFolders, isDot))
 			return true;
 
-		if (rules.IgnoreHiddenFolders && HasHiddenAttribute(directoryPath))
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			    rules.IgnoreHiddenFolders,
+			    HasHiddenAttribute(directoryPath),
+			    isDot,
+			    rules.IgnoreDotFolders))
 			return true;
 
 		return false;
@@ -930,10 +941,15 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		if (rules.IsSmartIgnoredFile(filePath, name, rules.ShouldApplySmartIgnore(filePath, isDirectory: false)))
 			return false;
 
-		if (rules.IgnoreDotFiles && name.StartsWith(".", StringComparison.Ordinal))
+		var isDot = IgnoreRuleSemantics.IsDotName(name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotFile(rules.IgnoreDotFiles, isDot))
 			return false;
 
-		if (rules.IgnoreHiddenFiles && HasHiddenAttribute(filePath))
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenFile(
+			    rules.IgnoreHiddenFiles,
+			    HasHiddenAttribute(filePath),
+			    isDot,
+			    rules.IgnoreDotFiles))
 			return false;
 
 		if (rules.IgnoreEmptyFiles && GetFileLength(filePath) == 0)

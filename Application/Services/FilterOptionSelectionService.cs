@@ -45,7 +45,9 @@ public sealed class FilterOptionSelectionService
 		if (rules.SmartIgnoredFolders.Contains(name))
 			return true;
 
-		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
+		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(
+			    rules.IgnoreDotFolders,
+			    IgnoreRuleSemantics.IsDotName(name)))
 			return true;
 
 		return false;

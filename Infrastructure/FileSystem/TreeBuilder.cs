@@ -243,10 +243,15 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.IsSmartIgnoredDirectory(entry.FullPath, entry.Name))
 			return true;
 
-		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
+		var isDot = IgnoreRuleSemantics.IsDotName(entry.Name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(rules.IgnoreDotFolders, isDot))
 			return true;
 
-		if (rules.IgnoreHiddenFolders && entry.IsHidden)
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			    rules.IgnoreHiddenFolders,
+			    entry.IsHidden,
+			    isDot,
+			    rules.IgnoreDotFolders))
 			return true;
 
 		return false;
@@ -264,7 +269,8 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.IsSmartIgnoredFile(entry.FullPath, entry.Name, shouldApplySmartIgnoreForFiles))
 			return true;
 
-		if (rules.IgnoreDotFiles && entry.Name.StartsWith(".", StringComparison.Ordinal))
+		var isDot = IgnoreRuleSemantics.IsDotName(entry.Name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotFile(rules.IgnoreDotFiles, isDot))
 			return true;
 
 		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(entry.Name))
@@ -273,7 +279,11 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.IgnoreEmptyFiles && entry.Length == 0)
 			return true;
 
-		if (rules.IgnoreHiddenFiles && entry.IsHidden)
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenFile(
+			    rules.IgnoreHiddenFiles,
+			    entry.IsHidden,
+			    isDot,
+			    rules.IgnoreDotFiles))
 			return true;
 
 		return false;

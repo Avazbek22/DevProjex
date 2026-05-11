@@ -149,7 +149,43 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			includeDirectoryToggleProbeRoots: true);
 
 		Assert.Equal(1, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.DotFolders);
-		Assert.Equal(1, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(0, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+	}
+
+	[Fact]
+	public void ScannerAndTree_UnixDotEntriesRemainVisibleWhenDotTogglesAreOffAndHiddenTogglesAreOn()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.py", "print('ok')");
+		temp.CreateFile(".idea/workspace.xml", "<project />");
+		temp.CreateFile(".env", "APP_ENV=dev");
+
+		var rules = CreateBaseRules() with
+		{
+			IgnoreHiddenFolders = true,
+			IgnoreHiddenFiles = true,
+			IgnoreDotFolders = false,
+			IgnoreDotFiles = false
+		};
+
+		var scanner = new FileSystemScanner();
+		var rootFolders = scanner.GetRootFolderNames(temp.Path, rules);
+		Assert.Contains(".idea", rootFolders.Value);
+
+		var rootFiles = scanner.GetRootFileExtensions(temp.Path, rules);
+		Assert.Contains(".env", rootFiles.Value);
+
+		var tree = new TreeBuilder().Build(
+			temp.Path,
+			new TreeFilterOptions(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".xml" },
+				new HashSet<string>(PathComparer.Default) { ".idea", "src" },
+				rules));
+		Assert.Contains(tree.Root.Children, child => child.Name == ".idea");
+		Assert.Contains(tree.Root.Children, child => child.Name == ".env");
 	}
 
 	[Fact]
