@@ -82,6 +82,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		var mergeLock = new object();
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
+		var selectedRootPaths = ResolveSelectedRootFolderPaths(rootPath, rootFolders);
 
 		// Always scan root-level files, even when no subfolders are selected.
 		// This ensures folders containing only files (no subdirectories) work correctly.
@@ -96,15 +97,14 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			if (rootFiles.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
 
 			// For very small selections, sequential scan is faster than spinning thread-pool work.
-			if (rootFolders.Count > 0)
+			if (selectedRootPaths.Count > 0)
 			{
-				if (rootFolders.Count <= 2)
+				if (selectedRootPaths.Count <= 2)
 				{
-					foreach (var folder in rootFolders)
+					foreach (var folderPath in selectedRootPaths)
 					{
 						cancellationToken.ThrowIfCancellationRequested();
 
-						var folderPath = Path.Combine(rootPath, folder);
 						var result = advancedScanner.GetExtensionsWithIgnoreOptionCounts(folderPath, ignoreRules, cancellationToken);
 
 						foreach (var ext in result.Value.Extensions)
@@ -119,19 +119,18 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				{
 					var parallelOptions = new ParallelOptions
 					{
-						MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
+						MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
 						CancellationToken = cancellationToken
 					};
 
 					Parallel.ForEach(
-						rootFolders,
+						selectedRootPaths,
 						parallelOptions,
 						() => new LocalRootSelectionScanAccumulator(),
-						(folder, _, localAccumulator) =>
+						(folderPath, _, localAccumulator) =>
 						{
 							cancellationToken.ThrowIfCancellationRequested();
 
-							var folderPath = Path.Combine(rootPath, folder);
 							var result = advancedScanner.GetExtensionsWithIgnoreOptionCounts(folderPath, ignoreRules, cancellationToken);
 
 							foreach (var ext in result.Value.Extensions)
@@ -168,15 +167,14 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			if (rootFiles.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootFiles.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
 
-			if (rootFolders.Count > 0)
+			if (selectedRootPaths.Count > 0)
 			{
-				if (rootFolders.Count <= 2)
+				if (selectedRootPaths.Count <= 2)
 				{
-					foreach (var folder in rootFolders)
+					foreach (var folderPath in selectedRootPaths)
 					{
 						cancellationToken.ThrowIfCancellationRequested();
 
-						var folderPath = Path.Combine(rootPath, folder);
 						var result = scanner.GetExtensions(folderPath, ignoreRules, cancellationToken);
 
 						foreach (var ext in result.Value)
@@ -190,19 +188,18 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				{
 					var parallelOptions = new ParallelOptions
 					{
-						MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
+						MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
 						CancellationToken = cancellationToken
 					};
 
 					Parallel.ForEach(
-						rootFolders,
+						selectedRootPaths,
 						parallelOptions,
 						() => new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-						(folder, _, localExtensions) =>
+						(folderPath, _, localExtensions) =>
 						{
 							cancellationToken.ThrowIfCancellationRequested();
 
-							var folderPath = Path.Combine(rootPath, folder);
 							var result = scanner.GetExtensions(folderPath, ignoreRules, cancellationToken);
 
 							foreach (var ext in result.Value)
@@ -245,6 +242,10 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		if (rootFolders.Count == 0 || string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 			return new ScanResult<int>(0, RootAccessDenied: false, HadAccessDenied: false);
 
+		var selectedRootPaths = ResolveSelectedRootFolderPaths(rootPath, rootFolders);
+		if (selectedRootPaths.Count == 0)
+			return new ScanResult<int>(0, RootAccessDenied: false, HadAccessDenied: false);
+
 		if (scanner is not IFileSystemScannerEffectiveEmptyFolderCounter counter)
 		{
 			var fallback = GetExtensionsAndIgnoreCountsForRootFolders(rootPath, rootFolders, ignoreRules, cancellationToken);
@@ -259,13 +260,12 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		var hadAccessDenied = 0;
 		var mergeLock = new object();
 
-		if (rootFolders.Count <= 2)
+		if (selectedRootPaths.Count <= 2)
 		{
-			foreach (var folder in rootFolders)
+			foreach (var folderPath in selectedRootPaths)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
-				var folderPath = Path.Combine(rootPath, folder);
 				var result = counter.GetEffectiveEmptyFolderCount(folderPath, allowedExtensions, ignoreRules, cancellationToken);
 				emptyFolderCount += result.Value;
 
@@ -279,19 +279,18 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		{
 			var parallelOptions = new ParallelOptions
 			{
-				MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
+				MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
 				CancellationToken = cancellationToken
 			};
 
 			Parallel.ForEach(
-				rootFolders,
+				selectedRootPaths,
 				parallelOptions,
 				() => 0,
-				(folder, _, localCount) =>
+				(folderPath, _, localCount) =>
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 
-					var folderPath = Path.Combine(rootPath, folder);
 					var result = counter.GetEffectiveEmptyFolderCount(folderPath, allowedExtensions, ignoreRules, cancellationToken);
 					if (result.RootAccessDenied)
 						Interlocked.Exchange(ref rootAccessDenied, 1);
@@ -361,6 +360,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
 		var mergeLock = new object();
+		var selectedRootPaths = ResolveSelectedRootFolderPaths(rootPath, rootFolders);
 
 		// Root-level files participate in ignore availability even when no subfolders are selected.
 		// Keeping them in the same snapshot guarantees that extension availability and live counts
@@ -379,15 +379,14 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		if (rootFileSnapshot.HadAccessDenied)
 			Interlocked.Exchange(ref hadAccessDenied, 1);
 
-		if (rootFolders.Count > 0)
+		if (selectedRootPaths.Count > 0)
 		{
-			if (rootFolders.Count <= 2)
+			if (selectedRootPaths.Count <= 2)
 			{
-				foreach (var folder in rootFolders)
+				foreach (var folderPath in selectedRootPaths)
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 
-					var folderPath = Path.Combine(rootPath, folder);
 					var snapshot = provider.GetIgnoreSectionSnapshot(
 						folderPath,
 						extensionDiscoveryRules,
@@ -409,19 +408,18 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			{
 				var parallelOptions = new ParallelOptions
 				{
-					MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
+					MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
 					CancellationToken = cancellationToken
 				};
 
 				Parallel.ForEach(
-					rootFolders,
+					selectedRootPaths,
 					parallelOptions,
 					() => new LocalIgnoreSectionSnapshotAccumulator(),
-					(folder, _, localAccumulator) =>
+					(folderPath, _, localAccumulator) =>
 					{
 						cancellationToken.ThrowIfCancellationRequested();
 
-						var folderPath = Path.Combine(rootPath, folder);
 						var snapshot = provider.GetIgnoreSectionSnapshot(
 							folderPath,
 							extensionDiscoveryRules,
@@ -514,6 +512,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
 		var mergeLock = new object();
+		var selectedRootPaths = ResolveSelectedRootFolderPaths(rootPath, rootFolders);
 
 		var rootFileCounts = counter.GetEffectiveRootFileIgnoreOptionCounts(
 			rootPath,
@@ -526,15 +525,14 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		if (rootFileCounts.HadAccessDenied)
 			Interlocked.Exchange(ref hadAccessDenied, 1);
 
-		if (rootFolders.Count > 0)
+		if (selectedRootPaths.Count > 0)
 		{
-			if (rootFolders.Count <= 2)
+			if (selectedRootPaths.Count <= 2)
 			{
-				foreach (var folder in rootFolders)
+				foreach (var folderPath in selectedRootPaths)
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 
-					var folderPath = Path.Combine(rootPath, folder);
 					var result = counter.GetEffectiveIgnoreOptionCounts(
 						folderPath,
 						allowedExtensions,
@@ -552,19 +550,18 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			{
 				var parallelOptions = new ParallelOptions
 				{
-					MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, rootFolders.Count),
+					MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
 					CancellationToken = cancellationToken
 				};
 
 				Parallel.ForEach(
-					rootFolders,
+					selectedRootPaths,
 					parallelOptions,
 					() => IgnoreOptionCounts.Empty,
-					(folder, _, localCounts) =>
+					(folderPath, _, localCounts) =>
 					{
 						cancellationToken.ThrowIfCancellationRequested();
 
-						var folderPath = Path.Combine(rootPath, folder);
 						var result = counter.GetEffectiveIgnoreOptionCounts(
 							folderPath,
 							allowedExtensions,
@@ -620,6 +617,80 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 	}
 
 	public bool CanReadRoot(string rootPath) => scanner.CanReadRoot(rootPath);
+
+	private static List<string> ResolveSelectedRootFolderPaths(
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders)
+	{
+		var paths = new List<string>(selectedRootFolders.Count);
+		if (selectedRootFolders.Count == 0 || string.IsNullOrWhiteSpace(rootPath))
+			return paths;
+
+		if (!Directory.Exists(rootPath))
+			return BuildUncheckedSelectedRootFolderPaths(rootPath, selectedRootFolders);
+
+		string normalizedRootPath;
+		try
+		{
+			normalizedRootPath = PathUtility.Normalize(rootPath);
+		}
+		catch
+		{
+			return paths;
+		}
+
+		foreach (var selectedRootFolder in selectedRootFolders)
+		{
+			if (string.IsNullOrWhiteSpace(selectedRootFolder) || Path.IsPathRooted(selectedRootFolder))
+				continue;
+
+			string fullPath;
+			try
+			{
+				fullPath = PathUtility.Normalize(Path.Combine(rootPath, selectedRootFolder));
+			}
+			catch
+			{
+				continue;
+			}
+
+			// Stale profile/UI selections must not escape the opened root or follow symlink roots.
+			if (PathComparer.Default.Equals(fullPath, normalizedRootPath) ||
+			    !PathUtility.IsPathInside(fullPath, normalizedRootPath) ||
+			    !Directory.Exists(fullPath) ||
+			    IsReparsePointDirectory(fullPath))
+			{
+				continue;
+			}
+
+			paths.Add(fullPath);
+		}
+
+		return paths;
+	}
+
+	private static List<string> BuildUncheckedSelectedRootFolderPaths(
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders)
+	{
+		var paths = new List<string>(selectedRootFolders.Count);
+		foreach (var selectedRootFolder in selectedRootFolders)
+		{
+			if (string.IsNullOrWhiteSpace(selectedRootFolder) || Path.IsPathRooted(selectedRootFolder))
+				continue;
+
+			try
+			{
+				paths.Add(Path.Combine(rootPath, selectedRootFolder));
+			}
+			catch
+			{
+				// Invalid stale selections are ignored even when the root itself is not available.
+			}
+		}
+
+		return paths;
+	}
 
 	private sealed class LocalRootSelectionScanAccumulator
 	{

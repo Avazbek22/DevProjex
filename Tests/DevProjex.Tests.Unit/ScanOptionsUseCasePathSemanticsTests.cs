@@ -81,6 +81,38 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 			scanner.FolderPaths);
 	}
 
+	[Fact]
+	public void GetExtensionsForRootFolders_WhenRootExists_SkipsMissingRootedAndEscapingSelections()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFolder("src");
+		var rootedSelection = Path.Combine(temp.Path, "absolute");
+		var folderCalls = new List<string>();
+		var scanner = new StubFileSystemScanner
+		{
+			GetRootFileExtensionsHandler = (_, _) => new ScanResult<HashSet<string>>(
+				[],
+				RootAccessDenied: false,
+				HadAccessDenied: false),
+			GetExtensionsHandler = (path, _) =>
+			{
+				folderCalls.Add(path);
+				return new ScanResult<HashSet<string>>(
+					[],
+					RootAccessDenied: false,
+					HadAccessDenied: false);
+			}
+		};
+
+		var useCase = new ScanOptionsUseCase(scanner);
+		_ = useCase.GetExtensionsForRootFolders(
+			temp.Path,
+			["src", "missing", ".", "..", rootedSelection],
+			CreateRules());
+
+		Assert.Equal([Path.Combine(temp.Path, "src")], folderCalls);
+	}
+
 	private static string CreateRootPath() => OperatingSystem.IsWindows()
 		? @"C:\Workspace\ProjectA"
 		: "/workspace/projectA";
