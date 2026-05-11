@@ -86,7 +86,10 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var useCase = new ScanOptionsUseCase(scanner);
 		var folders = new List<string> { "src", "lib", "tests", "docs" };
 
-		var result = useCase.GetExtensionsForRootFolders("/root", folders, CreateDefaultRules());
+		var result = useCase.GetExtensionsForRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			folders,
+			CreateDefaultRules());
 
 		Assert.Equal(4, callCount);
 		Assert.Contains(".cs", result.Value);
@@ -124,7 +127,10 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var useCase = new ScanOptionsUseCase(scanner);
 		var folders = new List<string> { "src", "web", "docs" };
 
-		var result = useCase.GetExtensionsForRootFolders("/root", folders, CreateDefaultRules());
+		var result = useCase.GetExtensionsForRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			folders,
+			CreateDefaultRules());
 
 		Assert.Equal(3, result.Value.Count);
 		Assert.Contains(".cs", result.Value);
@@ -161,7 +167,10 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var useCase = new ScanOptionsUseCase(scanner);
 		var folders = new List<string> { "a", "b", "c", "d" };
 
-		var result = useCase.GetExtensionsForRootFolders("/root", folders, CreateDefaultRules());
+		var result = useCase.GetExtensionsForRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			folders,
+			CreateDefaultRules());
 
 		Assert.True(result.RootAccessDenied);
 		Assert.True(result.HadAccessDenied);
@@ -200,7 +209,10 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var useCase = new ScanOptionsUseCase(scanner);
 		var folders = new List<string> { "good1", "failing", "good2" };
 
-		var result = useCase.GetExtensionsForRootFolders("/root", folders, CreateDefaultRules());
+		var result = useCase.GetExtensionsForRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			folders,
+			CreateDefaultRules());
 
 		Assert.Equal(2, processedCount);
 		Assert.Contains(".cs", result.Value);
@@ -228,7 +240,10 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var useCase = new ScanOptionsUseCase(scanner);
 		var folders = new List<string> { "src1", "src2", "src3" };
 
-		var result = useCase.GetExtensionsForRootFolders("/root", folders, CreateDefaultRules());
+		var result = useCase.GetExtensionsForRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			folders,
+			CreateDefaultRules());
 
 		// All variations of .cs should be deduplicated to one entry
 		Assert.Single(result.Value);
@@ -260,7 +275,10 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var useCase = new ScanOptionsUseCase(scanner);
 		var folders = new List<string> { "src" };
 
-		var result = useCase.GetExtensionsForRootFolders("/root", folders, CreateDefaultRules());
+		var result = useCase.GetExtensionsForRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			folders,
+			CreateDefaultRules());
 
 		Assert.True(rootFilesCalled);
 		Assert.Contains(".root", result.Value);
@@ -342,7 +360,10 @@ public sealed class ScanOptionsUseCaseParallelTests
 		for (int i = 0; i < 100; i++)
 			folders.Add($"folder{i}");
 
-		var result = useCase.GetExtensionsForRootFolders("/root", folders, CreateDefaultRules());
+		var result = useCase.GetExtensionsForRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			folders,
+			CreateDefaultRules());
 
 		Assert.Equal(100, processedCount);
 		Assert.Contains(".cs", result.Value);

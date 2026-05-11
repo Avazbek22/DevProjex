@@ -113,9 +113,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		Assert.Equal([Path.Combine(temp.Path, "src")], folderCalls);
 	}
 
-	private static string CreateRootPath() => OperatingSystem.IsWindows()
-		? @"C:\Workspace\ProjectA"
-		: "/workspace/projectA";
+	private static string CreateRootPath() => SyntheticTestPaths.CreateMissingRoot();
 
 	private sealed class RecordingAdvancedScanner : IFileSystemScanner, IFileSystemScannerAdvanced
 	{

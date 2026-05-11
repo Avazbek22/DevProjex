@@ -749,13 +749,20 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				if (IsSuppressedByNonDirectoryToggleRule(directoryPath, name, effectiveRules))
 					continue;
 
-				if (effectiveRules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
+				var isHiddenFolder = HasHiddenAttribute(directoryPath);
+				var isDotFolder = name.StartsWith(".", StringComparison.Ordinal);
+				var shouldCountDotFolder =
+					isDotFolder &&
+					(effectiveRules.IgnoreDotFolders || (effectiveRules.IgnoreHiddenFolders && isHiddenFolder));
+
+				if (shouldCountDotFolder)
 				{
 					var visible = HasVisibleContentForDirectoryToggleCandidate(
 						directoryPath,
 						effectiveRules with
 						{
 							IgnoreDotFolders = false,
+							IgnoreHiddenFolders = false,
 							IgnoreEmptyFolders = true
 						},
 						cancellationToken);
@@ -768,7 +775,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 						dotFolders++;
 				}
 
-				if (effectiveRules.IgnoreHiddenFolders && HasHiddenAttribute(directoryPath))
+				if (effectiveRules.IgnoreHiddenFolders && isHiddenFolder)
 				{
 					var visible = HasVisibleContentForDirectoryToggleCandidate(
 						directoryPath,

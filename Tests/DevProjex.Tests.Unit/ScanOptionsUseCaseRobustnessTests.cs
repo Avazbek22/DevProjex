@@ -63,7 +63,11 @@ public sealed class ScanOptionsUseCaseRobustnessTests
         cts.Cancel();
 
         Assert.Throws<OperationCanceledException>(() =>
-            useCase.GetExtensionsForRootFolders("/root", ["src"], CreateRules(), cts.Token));
+            useCase.GetExtensionsForRootFolders(
+                SyntheticTestPaths.CreateMissingRoot(),
+                ["src"],
+                CreateRules(),
+                cts.Token));
     }
 
     [Fact]
@@ -80,7 +84,7 @@ public sealed class ScanOptionsUseCaseRobustnessTests
         var useCase = new ScanOptionsUseCase(scanner);
 
         var result = useCase.GetExtensionsForRootFolders(
-            "/root",
+            SyntheticTestPaths.CreateMissingRoot(),
             ["src", "tests", "docs", "tools"],
             CreateRules());
 

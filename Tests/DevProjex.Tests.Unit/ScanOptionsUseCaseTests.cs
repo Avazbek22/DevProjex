@@ -104,7 +104,7 @@ public sealed class ScanOptionsUseCaseTests
 		var useCase = new ScanOptionsUseCase(scanner);
 
 		var result = useCase.GetExtensionsForRootFolders(
-			"/root",
+			SyntheticTestPaths.CreateMissingRoot(),
 			new List<string> { "src", "docs" },
 			new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
@@ -180,7 +180,7 @@ public sealed class ScanOptionsUseCaseTests
 
 		var useCase = new ScanOptionsUseCase(scanner);
 		var result = useCase.GetExtensionsForRootFolders(
-			"/root",
+			SyntheticTestPaths.CreateMissingRoot(),
 			new List<string> { "src" },
 			new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
@@ -211,7 +211,7 @@ public sealed class ScanOptionsUseCaseTests
 
 		var useCase = new ScanOptionsUseCase(scanner);
 		var result = useCase.GetExtensionsForRootFolders(
-			"/root",
+			SyntheticTestPaths.CreateMissingRoot(),
 			new List<string> { "src" },
 			new IgnoreRules(IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,

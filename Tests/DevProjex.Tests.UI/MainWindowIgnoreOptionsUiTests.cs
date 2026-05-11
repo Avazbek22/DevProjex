@@ -253,7 +253,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForIgnoreOptionLabelAsync(
                 window,
                 IgnoreOptionId.DotFolders,
-                "dot folders (1)");
+                "dot folders (2)");
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.HiddenFolders,

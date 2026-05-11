@@ -111,6 +111,48 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 	}
 
 	[Fact]
+	public void IgnoreSectionSnapshot_UnixDotRootKeepsDotFoldersAvailableWhenHiddenFoldersAlsoMatches()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.py", "print('ok')");
+		temp.CreateFile(".idea/workspace.xml", "<project />");
+
+		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+		var rules = CreateBaseRules() with
+		{
+			IgnoreHiddenFolders = true,
+			IgnoreDotFolders = true,
+			IgnoreEmptyFolders = true
+		};
+
+		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["src"],
+			BuildExtensionDiscoveryRules(rules),
+			rules,
+			effectiveAllowedExtensions: null,
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.Equal(1, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+		Assert.DoesNotContain(".xml", snapshot.Value.Extensions);
+
+		var dotFoldersOff = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["src"],
+			BuildExtensionDiscoveryRules(rules with { IgnoreDotFolders = false }),
+			rules with { IgnoreDotFolders = false },
+			effectiveAllowedExtensions: null,
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.Equal(1, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(1, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+	}
+
+	[Fact]
 	public void IgnoreSectionSnapshot_WindowsHiddenDotRoot_ExposesHiddenFoldersOnlyWhenDotFoldersNoLongerHidesIt()
 	{
 		if (!OperatingSystem.IsWindows())
@@ -127,14 +169,14 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			ignoreHiddenFolders: true,
 			ignoreDotFolders: true);
 		Assert.Equal(0, bothDirectoryRulesOn.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
-		Assert.Equal(1, bothDirectoryRulesOn.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(2, bothDirectoryRulesOn.Value.EffectiveIgnoreOptionCounts.DotFolders);
 
 		var dotFoldersOff = BuildDirectoryToggleSnapshot(
 			temp.Path,
 			ignoreHiddenFolders: true,
 			ignoreDotFolders: false);
 		Assert.Equal(1, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
-		Assert.Equal(0, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(1, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.DotFolders);
 
 		var hiddenFoldersOff = BuildDirectoryToggleSnapshot(
 			temp.Path,

@@ -40,7 +40,10 @@ public sealed class ScanOptionsUseCaseAdvancedAggregationMatrixTests
 			folderHadDenied);
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.GetExtensionsAndIgnoreCountsForRootFolders("/root", folders, CreateRules());
+		var result = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			folders,
+			CreateRules());
 
 		Assert.Equal(rootRootDenied || (folderCount > 0 && folderRootDenied), result.RootAccessDenied);
 		Assert.Equal(rootHadDenied || (folderCount > 0 && folderHadDenied), result.HadAccessDenied);
@@ -83,7 +86,7 @@ public sealed class ScanOptionsUseCaseAdvancedAggregationMatrixTests
 
 		var useCase = new ScanOptionsUseCase(scanner);
 		var result = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
-			"/root",
+			SyntheticTestPaths.CreateMissingRoot(),
 			["a", "b"],
 			CreateRules());
 
@@ -100,7 +103,11 @@ public sealed class ScanOptionsUseCaseAdvancedAggregationMatrixTests
 		cts.Cancel();
 
 		Assert.Throws<OperationCanceledException>(() =>
-			useCase.GetExtensionsAndIgnoreCountsForRootFolders("/root", ["a", "b"], CreateRules(), cts.Token));
+			useCase.GetExtensionsAndIgnoreCountsForRootFolders(
+				SyntheticTestPaths.CreateMissingRoot(),
+				["a", "b"],
+				CreateRules(),
+				cts.Token));
 	}
 
 	[Theory]
@@ -113,7 +120,11 @@ public sealed class ScanOptionsUseCaseAdvancedAggregationMatrixTests
 		var useCase = new ScanOptionsUseCase(scanner);
 
 		Assert.Throws<OperationCanceledException>(() =>
-			useCase.GetExtensionsAndIgnoreCountsForRootFolders("/root", ["a", "b", "c"], CreateRules(), cts.Token));
+			useCase.GetExtensionsAndIgnoreCountsForRootFolders(
+				SyntheticTestPaths.CreateMissingRoot(),
+				["a", "b", "c"],
+				CreateRules(),
+				cts.Token));
 	}
 
 	private sealed class MatrixAdvancedScanner(

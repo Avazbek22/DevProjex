@@ -1221,7 +1221,10 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			extensionDiscoveryRules.IgnoreDotFolders);
 		var rootBaseRuleState = EvaluateDirectoryRuleState(rootFacts, effectiveRules.IgnoreHiddenFolders, effectiveRules.IgnoreDotFolders);
 		var rootHiddenFoldersRuleState = EvaluateDirectoryRuleState(rootFacts, !effectiveRules.IgnoreHiddenFolders, effectiveRules.IgnoreDotFolders);
-		var rootDotFoldersRuleState = EvaluateDirectoryRuleState(rootFacts, effectiveRules.IgnoreHiddenFolders, !effectiveRules.IgnoreDotFolders);
+		var rootDotFoldersRuleState = EvaluateDirectoryRuleState(
+			rootFacts,
+			ShouldApplyHiddenFoldersForDotFoldersVariant(rootFacts, effectiveRules),
+			!effectiveRules.IgnoreDotFolders);
 
 		if (!CanAnyVariantTraverseChildren(rootExtensionDiscoveryRuleState, rootBaseRuleState, rootHiddenFoldersRuleState, rootDotFoldersRuleState))
 			return new ScanResult<List<EffectiveIgnoreScanNode>>([], RootAccessDenied: false, HadAccessDenied: false);
@@ -1293,7 +1296,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 						effectiveRules.IgnoreDotFolders);
 					var childDotFoldersRuleState = EvaluateDirectoryRuleState(
 						childFacts,
-						effectiveRules.IgnoreHiddenFolders,
+						ShouldApplyHiddenFoldersForDotFoldersVariant(childFacts, effectiveRules),
 						!effectiveRules.IgnoreDotFolders);
 
 					if (!CanAnyVariantTraverseChildren(
@@ -1335,6 +1338,16 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		}
 
 		return new ScanResult<List<EffectiveIgnoreScanNode>>(directories, rootAccessDenied == 1, hadAccessDenied == 1);
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static bool ShouldApplyHiddenFoldersForDotFoldersVariant(
+		DirectoryScanFacts facts,
+		IgnoreRules effectiveRules)
+	{
+		// On Unix-like systems dot directories are also reported as hidden. DotFolders owns
+		// that overlap even when HiddenFolders currently hides the same directory.
+		return effectiveRules.IgnoreHiddenFolders && !facts.IsDot;
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]

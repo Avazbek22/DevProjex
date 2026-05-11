@@ -5,6 +5,55 @@ namespace DevProjex.Tests.Integration;
 public sealed class SelectionRefreshEngineHiddenDotOverlapIntegrationTests
 {
 	[Fact]
+	public void ComputeFullRefreshSnapshot_UnixDotRoot_KeepsDotFoldersVisibleWhenHiddenFoldersAlsoMatches()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("requirements.txt", string.Empty);
+		temp.CreateFile("src/app.py", "print('ok')");
+		temp.CreateFile("__pycache__/app.pyc", "binary");
+		temp.CreateFile(".idea/workspace.xml", "<project />");
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path),
+			CancellationToken.None);
+		AssertVisibleOption(baseline, IgnoreOptionId.SmartIgnore, isChecked: true);
+		AssertVisibleOption(baseline, IgnoreOptionId.DotFolders, isChecked: true);
+		AssertHiddenOption(baseline, IgnoreOptionId.HiddenFolders);
+		Assert.DoesNotContain(baseline.RootOptions!, option => option.Name == ".idea");
+
+		var dotFoldersOff = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithIgnoreStates(
+				temp.Path,
+				baseline,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.DotFolders] = false
+				}),
+			CancellationToken.None);
+		AssertVisibleOption(dotFoldersOff, IgnoreOptionId.DotFolders, isChecked: false);
+		AssertVisibleOption(dotFoldersOff, IgnoreOptionId.HiddenFolders, isChecked: true);
+		Assert.DoesNotContain(dotFoldersOff.RootOptions!, option => option.Name == ".idea");
+
+		var allDirectoryTogglesOff = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithIgnoreStates(
+				temp.Path,
+				dotFoldersOff,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.DotFolders] = false,
+					[IgnoreOptionId.HiddenFolders] = false
+				}),
+			CancellationToken.None);
+		AssertVisibleOption(allDirectoryTogglesOff, IgnoreOptionId.DotFolders, isChecked: false);
+		AssertVisibleOption(allDirectoryTogglesOff, IgnoreOptionId.HiddenFolders, isChecked: false);
+		Assert.Contains(allDirectoryTogglesOff.RootOptions!, option => option.Name == ".idea" && option.IsChecked);
+	}
+
+	[Fact]
 	public void ComputeFullRefreshSnapshot_WindowsHiddenDotRoot_DotToggleExposesCheckedHiddenToggle()
 	{
 		if (!OperatingSystem.IsWindows())
