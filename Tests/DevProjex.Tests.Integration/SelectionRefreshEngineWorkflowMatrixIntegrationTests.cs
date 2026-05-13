@@ -198,6 +198,9 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         CreateDefaultsContext(rootPath) with
         {
             IgnoreSelectionInitialized = true,
+            IgnoreSelectionCache = new HashSet<IgnoreOptionId>(),
+            IgnoreOptionStateCache = Enum.GetValues<IgnoreOptionId>()
+                .ToDictionary(optionId => optionId, _ => false),
             IgnoreAllPreference = false
         };
 
@@ -405,8 +408,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         SelectionRefreshSnapshot secondSnapshot,
         string workflowCaseName)
     {
-        Assert.NotEqual(firstSnapshot.IgnoreOptions, secondSnapshot.IgnoreOptions);
-
         // Deferred reconciliation is allowed to reshuffle which dynamic ignore options are
         // visible after the first pass, because the updated root/ignore state can expose a
         // different effective tree shape on the follow-up snapshot. What must stay stable is

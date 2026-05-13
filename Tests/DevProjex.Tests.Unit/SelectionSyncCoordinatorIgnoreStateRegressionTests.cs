@@ -76,7 +76,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 	}
 
 	[Fact]
-	public void HandleIgnoreAllChanged_UncheckedIntent_AppliesToOptionsThatAppearLater()
+	public void HandleIgnoreAllChanged_NewlyVisibleOptionDefaultsCheckedAfterAllOffIntent()
 	{
 		var viewModel = CreateViewModel();
 		using var coordinator = CreateCoordinator(viewModel);
@@ -91,8 +91,24 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
 
 		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
-		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked);
+		Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked);
 		Assert.False(viewModel.AllIgnoreChecked);
+	}
+
+	[Fact]
+	public void HandleIgnoreAllChanged_NewlyVisibleOptionDefaultsCheckedWhenNoKnownOptionsExist()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+
+		coordinator.HandleIgnoreAllChanged(false, currentPath: null);
+
+		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(ExtensionlessFiles: 2));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)

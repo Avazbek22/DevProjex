@@ -95,7 +95,8 @@ public sealed class SelectionRefreshEngine(
             scan.Value,
             previousSelections,
             ignoreRules,
-            context.RootSelectionInitialized);
+            context.RootSelectionInitialized,
+            ResolveSelectionStateCache(context.PreparedSelectionMode, context.RootOptionStateCache));
         options = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
             context.PreparedSelectionMode,
             context.RootSelectionCache,
@@ -218,7 +219,8 @@ public sealed class SelectionRefreshEngine(
             visibleExtensions,
             context.ExtensionsSelectionInitialized
                 ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
-                : EmptyExtensionSelection);
+                : EmptyExtensionSelection,
+            ResolveSelectionStateCache(context.PreparedSelectionMode, context.ExtensionOptionStateCache));
         extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
             context.PreparedSelectionMode,
             context.ExtensionsSelectionCache,
@@ -226,6 +228,36 @@ public sealed class SelectionRefreshEngine(
 
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
             extensionOptions = ForceAllChecked(extensionOptions);
+
+        var resolvedAllowedExtensions = BuildEffectiveAllowedExtensions(context, extensionOptions);
+        if (!AreExtensionSelectionsEquivalent(effectiveAllowedExtensions, resolvedAllowedExtensions))
+        {
+            scan = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+                context.Path,
+                selectedRoots,
+                extensionScanRules,
+                ignoreRules,
+                resolvedAllowedExtensions,
+                includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
+                cancellationToken);
+
+            visibleExtensions = new List<string>(scan.Value.Extensions.Count);
+            extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+
+            extensionOptions = filterSelectionService.BuildExtensionOptions(
+                visibleExtensions,
+                context.ExtensionsSelectionInitialized
+                    ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
+                    : EmptyExtensionSelection,
+                ResolveSelectionStateCache(context.PreparedSelectionMode, context.ExtensionOptionStateCache));
+            extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
+                context.PreparedSelectionMode,
+                context.ExtensionsSelectionCache,
+                extensionOptions);
+
+            if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
+                extensionOptions = ForceAllChecked(extensionOptions);
+        }
 
         var snapshotState = CreateSnapshotState(scan.Value.EffectiveIgnoreOptionCounts);
         var ignoreState = BuildIgnoreOptionState(
@@ -363,6 +395,16 @@ public sealed class SelectionRefreshEngine(
         return updated;
     }
 
+    private static IReadOnlyDictionary<string, bool>? ResolveSelectionStateCache(
+        PreparedSelectionMode preparedSelectionMode,
+        IReadOnlyDictionary<string, bool>? stateCache)
+    {
+        if (preparedSelectionMode == PreparedSelectionMode.Profile && stateCache is { Count: 0 })
+            return null;
+
+        return stateCache;
+    }
+
     private static HashSet<string>? BuildEffectiveAllowedExtensions(SelectionRefreshContext context)
     {
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
@@ -372,6 +414,33 @@ public sealed class SelectionRefreshEngine(
             return new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase);
 
         return null;
+    }
+
+    private static HashSet<string>? BuildEffectiveAllowedExtensions(
+        SelectionRefreshContext context,
+        IReadOnlyList<SelectionOption> extensionOptions)
+    {
+        if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
+            return null;
+
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in extensionOptions)
+        {
+            if (option.IsChecked)
+                selected.Add(option.Name);
+        }
+
+        return selected;
+    }
+
+    private static bool AreExtensionSelectionsEquivalent(
+        IReadOnlySet<string>? left,
+        IReadOnlySet<string>? right)
+    {
+        if (left is null || right is null)
+            return left is null && right is null;
+
+        return left.SetEquals(right);
     }
 
     private static IgnoreRules BuildExtensionAvailabilityScanRules(IgnoreRules rules)
@@ -406,9 +475,6 @@ public sealed class SelectionRefreshEngine(
 
         if (useDefaultCheckedFallback && SelectionRefreshPolicy.CanUseIgnoreDefaultFallback(option.Id))
             return option.DefaultChecked;
-
-        if (!ShouldSuppressAllTogglesOverride(context) && context.IgnoreAllPreference.HasValue)
-            return context.IgnoreAllPreference.Value;
 
         if (context.PreparedSelectionMode == PreparedSelectionMode.Profile && hasPreviousSelections)
             return previousSelections.Contains(option.Id);

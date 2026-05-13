@@ -156,7 +156,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
                 {
                     IgnoreSelectionInitialized = true,
                     IgnoreSelectionCache = selectedIgnoreOptions,
-                    IgnoreOptionStateCache = BuildIgnoreStateCache(selectedIgnoreOptions),
+                    IgnoreOptionStateCache = BuildIgnoreStateCache(selectedIgnoreOptions, [optionId]),
                     IgnoreAllPreference = false
                 };
             },
@@ -241,11 +241,19 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
         new(
             snapshot.IgnoreOptionStateCache.Where(pair => pair.Value).Select(pair => pair.Key));
 
-    private static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(IEnumerable<IgnoreOptionId> selectedIgnoreOptions)
+    private static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(
+        IEnumerable<IgnoreOptionId> selectedIgnoreOptions,
+        IEnumerable<IgnoreOptionId>? explicitlyDisabledIgnoreOptions = null)
     {
         var cache = new Dictionary<IgnoreOptionId, bool>();
         foreach (var optionId in selectedIgnoreOptions)
             cache[optionId] = true;
+
+        if (explicitlyDisabledIgnoreOptions is not null)
+        {
+            foreach (var optionId in explicitlyDisabledIgnoreOptions)
+                cache[optionId] = false;
+        }
 
         return cache;
     }

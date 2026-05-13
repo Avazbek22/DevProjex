@@ -122,7 +122,9 @@ internal static class ProjectLoadWorkflowRefreshHarness
                 snapshot.HasIgnoreOptionCounts,
                 snapshot.IgnoreOptionCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
-                snapshot.ExtensionlessEntriesCount));
+                snapshot.ExtensionlessEntriesCount),
+            RootOptionStateCache: BuildRootOptionStateCache(snapshot),
+            ExtensionOptionStateCache: BuildExtensionOptionStateCache(snapshot));
     }
 
     public static SelectionRefreshContext ApplyScenarioStep(
@@ -139,13 +141,15 @@ internal static class ProjectLoadWorkflowRefreshHarness
             {
                 AllRootFoldersChecked = targetScenario.RootScenario == WorkflowRootScenario.AllVisible,
                 RootSelectionInitialized = targetScenario.RootScenario != WorkflowRootScenario.AllVisible,
-                RootSelectionCache = new HashSet<string>(targetScenario.RequestedRootNames, PathComparer.Default)
+                RootSelectionCache = new HashSet<string>(targetScenario.RequestedRootNames, PathComparer.Default),
+                RootOptionStateCache = BuildRootOptionStateCache(snapshot, targetScenario)
             },
             WorkflowMutationStep.Extensions => context with
             {
                 AllExtensionsChecked = targetScenario.ExtensionScenario == WorkflowExtensionScenario.AllVisible,
                 ExtensionsSelectionInitialized = targetScenario.ExtensionScenario != WorkflowExtensionScenario.AllVisible,
-                ExtensionsSelectionCache = new HashSet<string>(targetScenario.RequestedExtensionNames, StringComparer.OrdinalIgnoreCase)
+                ExtensionsSelectionCache = new HashSet<string>(targetScenario.RequestedExtensionNames, StringComparer.OrdinalIgnoreCase),
+                ExtensionOptionStateCache = BuildExtensionOptionStateCache(snapshot, targetScenario)
             },
             WorkflowMutationStep.Ignore => context with
             {
@@ -319,7 +323,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
         }
     }
 
-    private static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(
+    public static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(
         IEnumerable<IgnoreOptionId> selectedIgnoreOptions,
         IEnumerable<IgnoreOptionId>? explicitlyDisabledIgnoreOptions = null)
     {
@@ -332,6 +336,54 @@ internal static class ProjectLoadWorkflowRefreshHarness
             foreach (var optionId in explicitlyDisabledIgnoreOptions)
                 cache[optionId] = false;
         }
+
+        return cache;
+    }
+
+    public static Dictionary<string, bool> BuildRootOptionStateCache(SelectionRefreshSnapshot snapshot)
+    {
+        var cache = new Dictionary<string, bool>(PathComparer.Default);
+        if (snapshot.RootOptions is null)
+            return cache;
+
+        foreach (var option in snapshot.RootOptions)
+            cache[option.Name] = option.IsChecked;
+
+        return cache;
+    }
+
+    private static Dictionary<string, bool> BuildRootOptionStateCache(
+        SelectionRefreshSnapshot snapshot,
+        SelectionRefreshScenario scenario)
+    {
+        var cache = new Dictionary<string, bool>(PathComparer.Default);
+        if (snapshot.RootOptions is null)
+            return cache;
+
+        var allVisible = scenario.RootScenario == WorkflowRootScenario.AllVisible;
+        foreach (var option in snapshot.RootOptions)
+            cache[option.Name] = allVisible || scenario.RequestedRootNames.Contains(option.Name);
+
+        return cache;
+    }
+
+    public static Dictionary<string, bool> BuildExtensionOptionStateCache(SelectionRefreshSnapshot snapshot)
+    {
+        var cache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in snapshot.ExtensionOptions)
+            cache[option.Name] = option.IsChecked;
+
+        return cache;
+    }
+
+    private static Dictionary<string, bool> BuildExtensionOptionStateCache(
+        SelectionRefreshSnapshot snapshot,
+        SelectionRefreshScenario scenario)
+    {
+        var cache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var allVisible = scenario.ExtensionScenario == WorkflowExtensionScenario.AllVisible;
+        foreach (var option in snapshot.ExtensionOptions)
+            cache[option.Name] = allVisible || scenario.RequestedExtensionNames.Contains(option.Name);
 
         return cache;
     }
