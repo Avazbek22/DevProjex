@@ -1,5 +1,4 @@
 using DevProjex.Application.Models;
-using DevProjex.Avalonia.Coordinators;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
@@ -157,7 +156,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
                 {
                     IgnoreSelectionInitialized = true,
                     IgnoreSelectionCache = selectedIgnoreOptions,
-                    IgnoreOptionStateCache = BuildIgnoreStateCache(selectedIgnoreOptions),
+                    IgnoreOptionStateCache = BuildIgnoreStateCache(selectedIgnoreOptions, [optionId]),
                     IgnoreAllPreference = false
                 };
             },
@@ -201,8 +200,9 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
         return new SelectionRefreshContext(
             Path: rootPath,
             PreparedSelectionMode: PreparedSelectionMode.Defaults,
-            AllRootFoldersChecked: snapshot.RootOptions is { Count: > 0 } rootOptions &&
-                                   rootOptions.All(option => option.IsChecked),
+            AllRootFoldersChecked: snapshot.RootOptions is null ||
+                                   snapshot.RootOptions.Count == 0 ||
+                                   snapshot.RootOptions.All(option => option.IsChecked),
             AllExtensionsChecked: snapshot.ExtensionOptions.Count > 0 &&
                                   snapshot.ExtensionOptions.All(option => option.IsChecked),
             RootSelectionInitialized: true,
@@ -241,11 +241,19 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
         new(
             snapshot.IgnoreOptionStateCache.Where(pair => pair.Value).Select(pair => pair.Key));
 
-    private static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(IEnumerable<IgnoreOptionId> selectedIgnoreOptions)
+    private static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(
+        IEnumerable<IgnoreOptionId> selectedIgnoreOptions,
+        IEnumerable<IgnoreOptionId>? explicitlyDisabledIgnoreOptions = null)
     {
         var cache = new Dictionary<IgnoreOptionId, bool>();
         foreach (var optionId in selectedIgnoreOptions)
             cache[optionId] = true;
+
+        if (explicitlyDisabledIgnoreOptions is not null)
+        {
+            foreach (var optionId in explicitlyDisabledIgnoreOptions)
+                cache[optionId] = false;
+        }
 
         return cache;
     }

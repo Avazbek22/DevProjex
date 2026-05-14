@@ -6,53 +6,51 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// </summary>
 public sealed class DotNetArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
-	private static readonly string[] MarkerExtensions =
-	[
+	private static readonly IReadOnlySet<string> MarkerExtensions = SmartIgnoreRuleSet.Create(
 		".sln",
 		".csproj",
 		".fsproj",
-		".vbproj"
-	];
+		".vbproj");
 
-	private static readonly string[] FolderNames =
-	[
+	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
 		"bin",
-		"obj"
-	];
+		"obj");
 
-	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(MarkerExtensions, StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+	private static readonly SmartIgnoreResult MatchResult =
+		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } =
+		SmartIgnoreRuleSet.Descriptor(markerExtensions: MarkerExtensions, folderNames: FolderNames);
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{
 		if (!Directory.Exists(rootPath))
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			return SmartIgnoreResult.Empty;
 
 		bool hasMarker;
 		try
 		{
-			hasMarker = MarkerExtensions.Any(ext =>
-				Directory.EnumerateFiles(rootPath, "*" + ext, SearchOption.TopDirectoryOnly).Any());
+			hasMarker = HasAnyMarkerExtension(rootPath);
 		}
 		catch
 		{
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			return SmartIgnoreResult.Empty;
 		}
 
 		if (!hasMarker)
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			return SmartIgnoreResult.Empty;
 
-		return new SmartIgnoreResult(
-			new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
-			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		return MatchResult;
+	}
+
+	private static bool HasAnyMarkerExtension(string rootPath)
+	{
+		foreach (var extension in MarkerExtensions)
+		{
+			if (Directory.EnumerateFiles(rootPath, "*" + extension, SearchOption.TopDirectoryOnly).Any())
+				return true;
+		}
+
+		return false;
 	}
 }

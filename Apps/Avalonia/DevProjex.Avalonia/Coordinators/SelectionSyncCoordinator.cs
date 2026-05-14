@@ -30,14 +30,12 @@ public sealed class SelectionSyncCoordinator(
     private static readonly HashSet<string> EmptyStringSet = new(PathComparer.Default);
 
     private IReadOnlyList<IgnoreOptionDescriptor> _ignoreOptions = [];
-    private HashSet<IgnoreOptionId> _ignoreSelectionCache = [];
-    // Persist dynamic ignore-option state independently from the current visible list.
-    private Dictionary<IgnoreOptionId, bool> _ignoreOptionStateCache = [];
-    private bool _ignoreSelectionInitialized;
-    private bool? _ignoreAllPreference;
+    private readonly IgnoreSelectionState _ignoreSelectionState = new();
     private HashSet<string> _rootSelectionCache = new(PathComparer.Default);
+    private Dictionary<string, bool> _rootOptionStateCache = new(PathComparer.Default);
     private bool _rootSelectionInitialized;
     private HashSet<string> _extensionsSelectionCache = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _extensionOptionStateCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _extensionsSelectionInitialized;
     private bool _hasExtensionlessExtensionEntries;
     private int _extensionlessExtensionEntriesCount;
@@ -66,6 +64,7 @@ public sealed class SelectionSyncCoordinator(
     private int _fullRefreshRequestVersion;
     private readonly object _ignoreRulesBuildCacheSync = new();
     private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
+    private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
     private readonly SelectionRefreshEngine _selectionRefreshEngine = new(
         scanOptions,
         filterSelectionService,
@@ -225,9 +224,9 @@ public sealed class SelectionSyncCoordinator(
     {
         if (_suppressIgnoreAllCheck) return;
 
-        _ignoreSelectionInitialized = true;
-        _ignoreAllPreference = isChecked;
-        ApplyIgnoreAllPreferenceToKnownStates(isChecked);
+        _ignoreSelectionState.IsInitialized = true;
+        _ignoreSelectionState.AllPreference = isChecked;
+        _ignoreSelectionState.ApplyAllPreferenceToKnownStates(isChecked);
 
         _suppressIgnoreAllCheck = true;
         viewModel.AllIgnoreChecked = isChecked;
@@ -253,6 +252,7 @@ public sealed class SelectionSyncCoordinator(
         var prev = _extensionsSelectionInitialized
             ? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var previousExtensionStates = SnapshotExtensionOptionStateCacheOrNull(_extensionsSelectionInitialized);
 
         // Always scan extensions, even when rootFolders.Count == 0.
         // ScanOptionsUseCase.GetExtensionsForRootFolders will include root-level files.
@@ -260,7 +260,8 @@ public sealed class SelectionSyncCoordinator(
         var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, rootFolders);
         var extensionScanRules = BuildExtensionAvailabilityScanRules(ignoreRules);
         var forceAllExtensionsChecked = !ShouldSuppressAllTogglesOverride() && viewModel.AllExtensionsChecked;
-        var effectiveAllowedExtensions = BuildEffectiveAllowedExtensionsForLiveCounts(forceAllExtensionsChecked);
+        var includeDirectoryToggleProbeRoots = !ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked;
+        var effectiveExtensionPolicy = BuildEffectiveExtensionPolicyForLiveCounts(forceAllExtensionsChecked);
         return Task.Run(async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -274,8 +275,8 @@ public sealed class SelectionSyncCoordinator(
                 rootFolders,
                 extensionScanRules,
                 ignoreRules,
-                effectiveAllowedExtensions,
-                includeDirectoryToggleProbeRoots: !ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked,
+                effectiveExtensionPolicy,
+                includeDirectoryToggleProbeRoots,
                 cancellationToken);
             if (scan.RootAccessDenied)
             {
@@ -287,8 +288,30 @@ public sealed class SelectionSyncCoordinator(
             cancellationToken.ThrowIfCancellationRequested();
             var visibleExtensions = new List<string>(scan.Value.Extensions.Count);
             var extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
-            var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
+            var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev, previousExtensionStates);
+            var usedProfileFallback = SelectionRefreshPolicy.ShouldApplyMissingProfileSelectionsFallback(
+                _preparedSelectionMode,
+                _extensionsSelectionCache,
+                options);
             options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
+
+            if (usedProfileFallback)
+            {
+                scan = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+                    path,
+                    rootFolders,
+                    extensionScanRules,
+                    ignoreRules,
+                    BuildResolvedExtensionPolicy(options),
+                    includeDirectoryToggleProbeRoots,
+                    cancellationToken);
+
+                visibleExtensions = new List<string>(scan.Value.Extensions.Count);
+                extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+                options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev, previousExtensionStates);
+                options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
+            }
+
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -313,6 +336,7 @@ public sealed class SelectionSyncCoordinator(
         var prev = hasPreviousSelections
             ? new HashSet<string>(_rootSelectionCache, PathComparer.Default)
             : new HashSet<string>(PathComparer.Default);
+        var previousRootStates = SnapshotRootOptionStateCacheOrNull(hasPreviousSelections);
 
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
         var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, null);
@@ -335,7 +359,8 @@ public sealed class SelectionSyncCoordinator(
                 scan.Value,
                 prev,
                 ignoreRules,
-                hasPreviousSelections);
+                hasPreviousSelections,
+                previousRootStates);
             options = ApplyMissingProfileSelectionsFallbackToRootFolders(options, scan.Value, ignoreRules);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -354,7 +379,8 @@ public sealed class SelectionSyncCoordinator(
                     SetAllChecked(viewModel.RootFolders, true, ref _suppressRootItemCheck);
 
                 SyncAllCheckbox(viewModel.RootFolders, ref _suppressRootAllCheck,
-                    value => viewModel.AllRootFoldersChecked = value);
+                    value => viewModel.AllRootFoldersChecked = value,
+                    emptyValue: true);
                 UpdateRootSelectionCache();
                 _rootSelectionInitialized = true;
             });
@@ -366,8 +392,8 @@ public sealed class SelectionSyncCoordinator(
         string? currentPath = null,
         CancellationToken cancellationToken = default)
     {
-        var previousSelections = new HashSet<IgnoreOptionId>(_ignoreSelectionCache);
-        var hasPreviousSelections = _ignoreSelectionInitialized;
+        var previousSelections = _ignoreSelectionState.SnapshotSelectedOptions();
+        var hasPreviousSelections = _ignoreSelectionState.IsInitialized;
         var path = string.IsNullOrWhiteSpace(currentPath) ? currentPathProvider() : currentPath;
         if (!string.IsNullOrWhiteSpace(path) && IsStalePathRequest(path))
             return;
@@ -394,8 +420,8 @@ public sealed class SelectionSyncCoordinator(
         IReadOnlyCollection<string> rootFolders,
         string? currentPath = null)
     {
-        var previousSelections = new HashSet<IgnoreOptionId>(_ignoreSelectionCache);
-        var hasPreviousSelections = _ignoreSelectionInitialized;
+        var previousSelections = _ignoreSelectionState.SnapshotSelectedOptions();
+        var hasPreviousSelections = _ignoreSelectionState.IsInitialized;
         var path = string.IsNullOrWhiteSpace(currentPath) ? currentPathProvider() : currentPath;
         if (!string.IsNullOrWhiteSpace(path) && IsStalePathRequest(path))
             return;
@@ -409,8 +435,8 @@ public sealed class SelectionSyncCoordinator(
     {
         var path = string.IsNullOrWhiteSpace(currentPath) ? currentPathProvider() : currentPath;
         var selectedRoots = GetSelectedRootFolders();
-        var previousSelections = new HashSet<IgnoreOptionId>(_ignoreSelectionCache);
-        var hasPreviousSelections = _ignoreSelectionInitialized;
+        var previousSelections = _ignoreSelectionState.SnapshotSelectedOptions();
+        var hasPreviousSelections = _ignoreSelectionState.IsInitialized;
         var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots);
         var options = ignoreOptionsService.GetOptions(availability);
         ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
@@ -437,18 +463,15 @@ public sealed class SelectionSyncCoordinator(
         _rootSelectionCache = new HashSet<string>(
             profile.SelectedRootFolders,
             PathComparer.Default);
+        _rootOptionStateCache.Clear();
 
         _extensionsSelectionInitialized = true;
         _extensionsSelectionCache = new HashSet<string>(
             profile.SelectedExtensions,
             StringComparer.OrdinalIgnoreCase);
+        _extensionOptionStateCache.Clear();
 
-        _ignoreAllPreference = null;
-        _ignoreSelectionInitialized = true;
-        _ignoreSelectionCache = new HashSet<IgnoreOptionId>(profile.SelectedIgnoreOptions);
-        _ignoreOptionStateCache = [];
-        foreach (var id in _ignoreSelectionCache)
-            _ignoreOptionStateCache[id] = true;
+        _ignoreSelectionState.RestoreProfileSelection(profile.SelectedIgnoreOptions);
     }
 
     public void ResetProjectProfileSelections(string projectPath)
@@ -464,36 +487,52 @@ public sealed class SelectionSyncCoordinator(
         _rootSelectionInitialized = false;
         _rootSelectionCache.Clear();
         _rootSelectionCache.TrimExcess();
+        _rootOptionStateCache.Clear();
+        _rootOptionStateCache.TrimExcess();
 
         _extensionsSelectionInitialized = false;
         _extensionsSelectionCache.Clear();
         _extensionsSelectionCache.TrimExcess();
+        _extensionOptionStateCache.Clear();
+        _extensionOptionStateCache.TrimExcess();
 
-        _ignoreAllPreference = null;
-        _ignoreSelectionInitialized = false;
-        _ignoreSelectionCache.Clear();
-        _ignoreSelectionCache.TrimExcess();
-        _ignoreOptionStateCache.Clear();
+        _ignoreSelectionState.Reset(trimExcess: true);
     }
 
     public async Task UpdateLiveOptionsFromRootSelectionAsync(
         string? currentPath,
         CancellationToken cancellationToken = default)
     {
+        await UpdateLiveOptionsFromRootSelectionCoreAsync(
+            currentPath,
+            expectedRequestVersion: null,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task UpdateLiveOptionsFromRootSelectionCoreAsync(
+        string? currentPath,
+        int? expectedRequestVersion,
+        CancellationToken cancellationToken)
+    {
         if (string.IsNullOrEmpty(currentPath)) return;
         if (IsStalePathRequest(currentPath)) return;
+        if (IsSupersededLiveOptionsRequest(expectedRequestVersion)) return;
         cancellationToken.ThrowIfCancellationRequested();
 
         await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (IsSupersededLiveOptionsRequest(expectedRequestVersion))
+                return;
             if (IsStalePathRequest(currentPath))
                 return;
 
             var liveInput = await RunOnUiThreadAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (IsSupersededLiveOptionsRequest(expectedRequestVersion))
+                    return null;
                 if (IsStalePathRequest(currentPath))
                     return null;
 
@@ -510,9 +549,13 @@ public sealed class SelectionSyncCoordinator(
                     liveInput.SelectedRoots,
                     cancellationToken),
                 cancellationToken);
+            if (IsSupersededLiveOptionsRequest(expectedRequestVersion))
+                return;
             if (snapshot.RootAccessDenied)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (IsSupersededLiveOptionsRequest(expectedRequestVersion))
+                    return;
                 var elevated = await Dispatcher.UIThread.InvokeAsync(() => tryElevateAndRestart(currentPath));
                 if (elevated)
                     return;
@@ -521,6 +564,8 @@ public sealed class SelectionSyncCoordinator(
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (IsSupersededLiveOptionsRequest(expectedRequestVersion))
+                    return;
                 if (IsStalePathRequest(currentPath))
                     return;
 
@@ -535,11 +580,24 @@ public sealed class SelectionSyncCoordinator(
 
     public async Task RefreshRootAndDependentsAsync(string currentPath, CancellationToken cancellationToken = default)
     {
+        await RefreshRootAndDependentsCoreAsync(
+            currentPath,
+            expectedRequestVersion: null,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task RefreshRootAndDependentsCoreAsync(
+        string currentPath,
+        int? expectedRequestVersion,
+        CancellationToken cancellationToken)
+    {
         // Serialize refresh operations to prevent race conditions
         await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (IsSupersededFullRefreshRequest(expectedRequestVersion))
+                return;
 
             if (IsStalePathRequest(currentPath) && !HasPreparedSelectionForPath(currentPath))
                 return;
@@ -553,6 +611,8 @@ public sealed class SelectionSyncCoordinator(
             var context = await RunOnUiThreadAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (IsSupersededFullRefreshRequest(expectedRequestVersion))
+                    return null;
                 if (IsStalePathRequest(currentPath) && !HasPreparedSelectionForPath(currentPath))
                     return null;
                 if (ShouldSkipRefreshForPreparedPath(currentPath))
@@ -572,9 +632,13 @@ public sealed class SelectionSyncCoordinator(
             var snapshot = await Task.Run(
                 () => _selectionRefreshEngine.ComputeFullRefreshSnapshot(context, cancellationToken),
                 cancellationToken);
+            if (IsSupersededFullRefreshRequest(expectedRequestVersion))
+                return;
             if (snapshot.RootAccessDenied)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (IsSupersededFullRefreshRequest(expectedRequestVersion))
+                    return;
                 var elevated = await Dispatcher.UIThread.InvokeAsync(() => tryElevateAndRestart(currentPath));
                 if (elevated)
                     return;
@@ -583,6 +647,8 @@ public sealed class SelectionSyncCoordinator(
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (IsSupersededFullRefreshRequest(expectedRequestVersion))
+                    return;
                 if (IsStalePathRequest(currentPath) && !HasPreparedSelectionForPath(currentPath))
                     return;
                 if (ShouldSkipRefreshForPreparedPath(currentPath))
@@ -652,23 +718,22 @@ public sealed class SelectionSyncCoordinator(
 
         _rootSelectionCache.Clear();
         _rootSelectionCache.TrimExcess();
+        _rootOptionStateCache.Clear();
+        _rootOptionStateCache.TrimExcess();
         _rootSelectionInitialized = false;
 
         // Clear extension selection cache
         _extensionsSelectionCache.Clear();
         _extensionsSelectionCache.TrimExcess();
+        _extensionOptionStateCache.Clear();
+        _extensionOptionStateCache.TrimExcess();
         _extensionsSelectionInitialized = false;
         _hasExtensionlessExtensionEntries = false;
         _extensionlessExtensionEntriesCount = 0;
         _hasIgnoreOptionCounts = false;
         _ignoreOptionCounts = IgnoreOptionCounts.Empty;
 
-        // Clear ignore selection cache
-        _ignoreAllPreference = null;
-        _ignoreSelectionCache.Clear();
-        _ignoreSelectionCache.TrimExcess();
-        _ignoreOptionStateCache.Clear();
-        _ignoreSelectionInitialized = false;
+        _ignoreSelectionState.Reset(trimExcess: true);
 
         // Clear ignore options
         _ignoreOptions = [];
@@ -695,23 +760,19 @@ public sealed class SelectionSyncCoordinator(
     {
         EnsureIgnoreSelectionCache();
         UpdateIgnoreSelectionCache();
-        return _ignoreSelectionCache;
+        return _ignoreSelectionState.SnapshotSelectedOptions();
     }
 
     private void EnsureIgnoreSelectionCache()
     {
-        if (_ignoreSelectionInitialized || _ignoreSelectionCache.Count > 0)
+        if (_ignoreSelectionState.IsInitialized || _ignoreSelectionState.SelectedOptions.Count > 0)
             return;
 
         var path = currentPathProvider() ?? _lastLoadedPath;
         var selectedRoots = GetSelectedRootFolders();
         var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots);
         _ignoreOptions = ignoreOptionsService.GetOptions(availability);
-        _ignoreOptionStateCache = [];
-        foreach (var option in _ignoreOptions)
-            _ignoreOptionStateCache[option.Id] = option.DefaultChecked;
-
-        _ignoreSelectionCache = BuildSelectedIgnoreOptionSet();
+        _ignoreSelectionState.EnsureDefaults(_ignoreOptions);
     }
 
     private IgnoreOptionsAvailability ResolveIgnoreOptionsAvailability(
@@ -844,11 +905,10 @@ public sealed class SelectionSyncCoordinator(
 
     public void UpdateExtensionsSelectionCache()
     {
-        if (viewModel.Extensions.Count == 0)
-            return;
-
         _extensionsSelectionInitialized = true;
         _extensionsSelectionCache = CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
+        foreach (var option in viewModel.Extensions)
+            _extensionOptionStateCache[option.Name] = option.IsChecked;
     }
 
     internal void ApplyExtensionScan(IReadOnlyCollection<string> extensions)
@@ -858,8 +918,9 @@ public sealed class SelectionSyncCoordinator(
         var prev = _extensionsSelectionInitialized
             ? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var previousExtensionStates = SnapshotExtensionOptionStateCacheOrNull(_extensionsSelectionInitialized);
 
-        var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
+        var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev, previousExtensionStates);
         options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
         ApplyExtensionOptions(
             options,
@@ -870,13 +931,10 @@ public sealed class SelectionSyncCoordinator(
 
     public void UpdateIgnoreSelectionCache(IReadOnlySet<IgnoreOptionId>? preserveMissingFrom = null)
     {
-        if (preserveMissingFrom is not null && preserveMissingFrom.Count > 0)
-            PreserveMissingIgnoreSelections(preserveMissingFrom);
-
-        foreach (var option in viewModel.IgnoreOptions)
-            _ignoreOptionStateCache[option.Id] = option.IsChecked;
-
-        _ignoreSelectionCache = BuildSelectedIgnoreOptionSet();
+        _ignoreSelectionState.UpdateFromVisibleOptions(
+            viewModel.IgnoreOptions.Select(static option => (option.Id, option.IsChecked)),
+            preserveMissingFrom,
+            _ignoreOptions.Select(static option => option.Id));
     }
 
     public void SyncIgnoreAllCheckbox()
@@ -896,7 +954,8 @@ public sealed class SelectionSyncCoordinator(
 
             _rootSelectionInitialized = true;
             SyncAllCheckbox(viewModel.RootFolders, ref _suppressRootAllCheck,
-                value => viewModel.AllRootFoldersChecked = value);
+                value => viewModel.AllRootFoldersChecked = value,
+                emptyValue: true);
             UpdateRootSelectionCache();
 
             QueueLiveOptionsRefresh(currentPathProvider());
@@ -918,8 +977,8 @@ public sealed class SelectionSyncCoordinator(
     {
         if (_suppressIgnoreItemCheck) return;
 
-        _ignoreSelectionInitialized = true;
-        _ignoreAllPreference = null;
+        _ignoreSelectionState.IsInitialized = true;
+        _ignoreSelectionState.AllPreference = null;
 
         SyncAllCheckbox(viewModel.IgnoreOptions, ref _suppressIgnoreAllCheck,
             value => viewModel.AllIgnoreChecked = value);
@@ -963,7 +1022,7 @@ public sealed class SelectionSyncCoordinator(
         }
 
         DisposeCancellationSourceWhenTaskCompletes(previousCts, previousTask);
-        FireAndForgetSafe(queuedTask);
+        FireAndForgetSafe(queuedTask, "live-options refresh");
     }
 
     /// <summary>
@@ -976,6 +1035,8 @@ public sealed class SelectionSyncCoordinator(
 
         CancellationTokenSource? previousCts;
         Task previousTask;
+        CancellationTokenSource? invalidatedLiveCts;
+        Task invalidatedLiveTask;
         Task queuedTask;
         CancellationToken token;
         int version;
@@ -983,6 +1044,15 @@ public sealed class SelectionSyncCoordinator(
         {
             if (_disposed)
                 return;
+
+            invalidatedLiveCts = _liveOptionsRefreshCts;
+            invalidatedLiveTask = _latestLiveOptionsRefreshTask;
+            if (invalidatedLiveCts is not null)
+            {
+                invalidatedLiveCts.Cancel();
+                _liveOptionsRefreshCts = null;
+                _liveOptionsRequestVersion = unchecked(_liveOptionsRequestVersion + 1);
+            }
 
             previousCts = _fullRefreshRequestCts;
             previousTask = _latestFullRefreshTask;
@@ -995,8 +1065,9 @@ public sealed class SelectionSyncCoordinator(
             _latestFullRefreshTask = queuedTask;
         }
 
+        DisposeCancellationSourceWhenTaskCompletes(invalidatedLiveCts, invalidatedLiveTask);
         DisposeCancellationSourceWhenTaskCompletes(previousCts, previousTask);
-        FireAndForgetSafe(queuedTask);
+        FireAndForgetSafe(queuedTask, "full selection refresh");
     }
 
     private async Task RunQueuedLiveOptionsRefreshAsync(
@@ -1009,7 +1080,10 @@ public sealed class SelectionSyncCoordinator(
         if (version != Volatile.Read(ref _liveOptionsRequestVersion))
             return;
 
-        await UpdateLiveOptionsFromRootSelectionAsync(currentPath, cancellationToken).ConfigureAwait(false);
+        await UpdateLiveOptionsFromRootSelectionCoreAsync(
+            currentPath,
+            version,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task RunQueuedFullRefreshAsync(
@@ -1022,13 +1096,17 @@ public sealed class SelectionSyncCoordinator(
         if (version != Volatile.Read(ref _fullRefreshRequestVersion))
             return;
 
-        await RefreshRootAndDependentsAsync(currentPath, cancellationToken).ConfigureAwait(false);
+        await RefreshRootAndDependentsCoreAsync(
+            currentPath,
+            version,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static void SyncAllCheckbox<T>(
         IEnumerable<T> options,
         ref bool suppressFlag,
-        Action<bool> setValue)
+        Action<bool> setValue,
+        bool emptyValue = false)
         where T : class
     {
         suppressFlag = true;
@@ -1052,7 +1130,7 @@ public sealed class SelectionSyncCoordinator(
                     break;
                 }
             }
-            setValue(hasItems && allChecked);
+            setValue(hasItems ? allChecked : emptyValue);
         }
         finally
         {
@@ -1109,7 +1187,8 @@ public sealed class SelectionSyncCoordinator(
             SetAllChecked(viewModel.RootFolders, true, ref _suppressRootItemCheck);
 
         SyncAllCheckbox(viewModel.RootFolders, ref _suppressRootAllCheck,
-            value => viewModel.AllRootFoldersChecked = value);
+            value => viewModel.AllRootFoldersChecked = value,
+            emptyValue: true);
         UpdateRootSelectionCache();
         _rootSelectionInitialized = true;
     }
@@ -1137,9 +1216,7 @@ public sealed class SelectionSyncCoordinator(
             _suppressIgnoreItemCheck = false;
         }
 
-        _ignoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>(stateCache);
-        _ignoreSelectionCache = BuildSelectedIgnoreOptionSet();
-        _ignoreSelectionInitialized = true;
+        _ignoreSelectionState.ReplaceStateCache(stateCache);
         SyncIgnoreAllCheckbox();
     }
 
@@ -1213,11 +1290,13 @@ public sealed class SelectionSyncCoordinator(
             RootSelectionCache: new HashSet<string>(_rootSelectionCache, PathComparer.Default),
             ExtensionsSelectionInitialized: _extensionsSelectionInitialized,
             ExtensionsSelectionCache: new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase),
-            IgnoreSelectionInitialized: _ignoreSelectionInitialized,
-            IgnoreSelectionCache: new HashSet<IgnoreOptionId>(_ignoreSelectionCache),
-            IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>(_ignoreOptionStateCache),
-            IgnoreAllPreference: _ignoreAllPreference,
-            CurrentSnapshotState: CaptureIgnoreSectionSnapshotState());
+            IgnoreSelectionInitialized: _ignoreSelectionState.IsInitialized,
+            IgnoreSelectionCache: _ignoreSelectionState.SnapshotSelectedOptions(),
+            IgnoreOptionStateCache: _ignoreSelectionState.SnapshotStateCache(),
+            IgnoreAllPreference: _ignoreSelectionState.AllPreference,
+            CurrentSnapshotState: CaptureIgnoreSectionSnapshotState(),
+            RootOptionStateCache: SnapshotRootOptionStateCacheOrNull(isInitialized: true),
+            ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true));
 
     private static async Task<T> RunOnUiThreadAsync<T>(Func<T> action)
     {
@@ -1227,19 +1306,58 @@ public sealed class SelectionSyncCoordinator(
         return await Dispatcher.UIThread.InvokeAsync(action);
     }
 
-    private HashSet<string>? BuildEffectiveAllowedExtensionsForLiveCounts(
+    private IExtensionInclusionPolicy? BuildEffectiveExtensionPolicyForLiveCounts(
         bool forceAllExtensionsChecked)
     {
         if (forceAllExtensionsChecked)
             return null;
 
-        if (_extensionsSelectionInitialized)
-            return new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase);
-
-        if (viewModel.Extensions.Count == 0)
+        if (!_extensionsSelectionInitialized && viewModel.Extensions.Count == 0)
             return null;
 
-        return CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
+		var previousSelections = _extensionsSelectionInitialized
+			? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
+			: CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
+		var stateCache = SnapshotExtensionOptionStateCacheOrNull(_extensionsSelectionInitialized);
+
+		return new ExtensionSelectionInclusionPolicy(
+            new SelectionStateResolver(previousSelections, stateCache),
+            defaultForNewExtension: stateCache is not null);
+    }
+
+    private static IExtensionInclusionPolicy BuildResolvedExtensionPolicy(
+        IReadOnlyList<SelectionOption> extensionOptions)
+    {
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in extensionOptions)
+        {
+            if (option.IsChecked)
+                selected.Add(option.Name);
+        }
+
+        return new ExtensionSetInclusionPolicy(selected);
+    }
+
+    private IReadOnlyDictionary<string, bool>? SnapshotRootOptionStateCacheOrNull(bool isInitialized)
+    {
+        if (!isInitialized)
+            return null;
+
+        if (ShouldSuppressAllTogglesOverride() && _rootOptionStateCache.Count == 0)
+            return null;
+
+        return new Dictionary<string, bool>(_rootOptionStateCache, PathComparer.Default);
+    }
+
+    private IReadOnlyDictionary<string, bool>? SnapshotExtensionOptionStateCacheOrNull(bool isInitialized)
+    {
+        if (!isInitialized)
+            return null;
+
+        if (ShouldSuppressAllTogglesOverride() && _extensionOptionStateCache.Count == 0)
+            return null;
+
+        return new Dictionary<string, bool>(_extensionOptionStateCache, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool IsExtensionlessEntry(string value)
@@ -1420,10 +1538,10 @@ public sealed class SelectionSyncCoordinator(
     }
 
     /// <summary>
-    /// Fire-and-forget wrapper that suppresses exceptions.
-    /// Used for background refresh triggered by UI events where errors are non-critical.
+    /// Fire-and-forget wrapper for coalesced background refreshes.
+    /// Cancellation is expected; real failures are traced so silent UI refresh loss is diagnosable.
     /// </summary>
-    private static async void FireAndForgetSafe(Task task)
+    private static async void FireAndForgetSafe(Task task, string operationName)
     {
         try
         {
@@ -1435,7 +1553,14 @@ public sealed class SelectionSyncCoordinator(
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[WARN] Selection refresh task failed: {ex}");
+            RefreshTraceSource.TraceEvent(
+                TraceEventType.Warning,
+                0,
+                "Selection refresh task '{0}' failed: {1}",
+                operationName,
+                ex);
+            RefreshTraceSource.Flush();
+            Debug.WriteLine($"[WARN] Selection refresh task '{operationName}' failed: {ex}");
         }
     }
 
@@ -1509,10 +1634,10 @@ public sealed class SelectionSyncCoordinator(
 
         // Clear caches
         _rootSelectionCache.Clear();
-        _ignoreSelectionCache.Clear();
-        _ignoreOptionStateCache.Clear();
+        _rootOptionStateCache.Clear();
+        _ignoreSelectionState.Reset(trimExcess: true);
         _extensionsSelectionCache.Clear();
-        _ignoreAllPreference = null;
+        _extensionOptionStateCache.Clear();
         _preparedSelectionPath = null;
         _ignoreOptions = [];
 
@@ -1521,7 +1646,7 @@ public sealed class SelectionSyncCoordinator(
     }
 
     private bool ShouldClearCachesForCurrentPath(string currentPath)
-        => SelectionSyncCoordinatorPolicy.ShouldClearCachesForCurrentPath(
+        => SelectionRefreshPolicy.ShouldClearCachesForCurrentPath(
             _lastLoadedPath,
             _preparedSelectionPath,
             currentPath);
@@ -1533,7 +1658,15 @@ public sealed class SelectionSyncCoordinator(
     }
 
     private bool ShouldSkipRefreshForPreparedPath(string currentPath)
-        => SelectionSyncCoordinatorPolicy.ShouldSkipRefreshForPreparedPath(_preparedSelectionPath, currentPath);
+        => SelectionRefreshPolicy.ShouldSkipRefreshForPreparedPath(_preparedSelectionPath, currentPath);
+
+    private bool IsSupersededLiveOptionsRequest(int? expectedRequestVersion) =>
+        expectedRequestVersion.HasValue &&
+        expectedRequestVersion.Value != Volatile.Read(ref _liveOptionsRequestVersion);
+
+    private bool IsSupersededFullRefreshRequest(int? expectedRequestVersion) =>
+        expectedRequestVersion.HasValue &&
+        expectedRequestVersion.Value != Volatile.Read(ref _fullRefreshRequestVersion);
 
     private bool IsStalePathRequest(string path)
     {
@@ -1560,14 +1693,11 @@ public sealed class SelectionSyncCoordinator(
     {
         // Resolution order keeps explicit runtime state first, then applies the last
         // "All ignore" intent, then profile selections, and only then falls back to defaults.
-        if (_ignoreOptionStateCache.TryGetValue(option.Id, out var cachedState))
+        if (_ignoreSelectionState.TryGetCachedState(option.Id, out var cachedState))
             return cachedState;
 
-        if (useDefaultCheckedFallback)
+        if (useDefaultCheckedFallback && SelectionRefreshPolicy.CanUseIgnoreDefaultFallback(option.Id))
             return option.DefaultChecked;
-
-        if (!ShouldSuppressAllTogglesOverride() && _ignoreAllPreference.HasValue)
-            return _ignoreAllPreference.Value;
 
         if (_preparedSelectionMode == PreparedSelectionMode.Profile && hasPreviousSelections)
             return previousSelections.Contains(option.Id);
@@ -1580,7 +1710,7 @@ public sealed class SelectionSyncCoordinator(
 
     private IReadOnlyList<SelectionOption> ApplyMissingProfileSelectionsFallbackToExtensions(
         IReadOnlyList<SelectionOption> options) =>
-        SelectionSyncCoordinatorPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
+        SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
             _preparedSelectionMode,
             _extensionsSelectionCache,
             options);
@@ -1589,7 +1719,7 @@ public sealed class SelectionSyncCoordinator(
         IReadOnlyList<SelectionOption> options,
         IReadOnlyList<string> scannedRootFolders,
         IgnoreRules ignoreRules) =>
-        SelectionSyncCoordinatorPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
+        SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
             _preparedSelectionMode,
             _rootSelectionCache,
             options,
@@ -1601,61 +1731,16 @@ public sealed class SelectionSyncCoordinator(
     private bool ShouldUseIgnoreDefaultFallback(
         IReadOnlyList<IgnoreOptionDescriptor> options,
         IReadOnlySet<IgnoreOptionId> previousSelections) =>
-        SelectionSyncCoordinatorPolicy.ShouldUseIgnoreDefaultFallback(
+        SelectionRefreshPolicy.ShouldUseIgnoreDefaultFallback(
             _preparedSelectionMode,
             options,
             previousSelections);
 
-    private void ApplyIgnoreAllPreferenceToKnownStates(bool isChecked)
-    {
-        if (_ignoreOptionStateCache.Count == 0)
-            return;
-
-        var knownIds = new List<IgnoreOptionId>(_ignoreOptionStateCache.Count);
-        foreach (var id in _ignoreOptionStateCache.Keys)
-            knownIds.Add(id);
-
-        foreach (var id in knownIds)
-            _ignoreOptionStateCache[id] = isChecked;
-    }
-
-    private void PreserveMissingIgnoreSelections(IReadOnlySet<IgnoreOptionId> preserveMissingFrom)
-    {
-        // Hidden options must keep their last known state even while they are temporarily absent
-        // from the visible list, otherwise dynamic availability would silently erase choices.
-        var visibleIds = new HashSet<IgnoreOptionId>();
-        foreach (var option in _ignoreOptions)
-            visibleIds.Add(option.Id);
-
-        foreach (var id in preserveMissingFrom)
-        {
-            if (!visibleIds.Contains(id) && !_ignoreOptionStateCache.ContainsKey(id))
-                _ignoreOptionStateCache[id] = true;
-        }
-    }
-
-    private HashSet<IgnoreOptionId> BuildSelectedIgnoreOptionSet()
-    {
-        var selected = new HashSet<IgnoreOptionId>();
-        foreach (var (id, isChecked) in _ignoreOptionStateCache)
-        {
-            if (isChecked)
-                selected.Add(id);
-        }
-
-        return selected;
-    }
-
     private void UpdateRootSelectionCache()
     {
-        if (viewModel.RootFolders.Count == 0)
-        {
-            _rootSelectionCache.Clear();
-            _rootSelectionCache.TrimExcess();
-            return;
-        }
-
         _rootSelectionCache = CollectCheckedSelectionNames(viewModel.RootFolders, PathComparer.Default);
+        foreach (var option in viewModel.RootFolders)
+            _rootOptionStateCache[option.Name] = option.IsChecked;
     }
 
     private sealed record IgnoreRulesBuildCacheEntry(string Key, IgnoreRules Rules);

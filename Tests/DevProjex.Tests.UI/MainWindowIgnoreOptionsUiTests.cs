@@ -235,6 +235,81 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task HiddenDotFolderOverlap_ShowsHiddenFoldersOnlyWhenDotFoldersNoLongerHidesSameFolder()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using var project = UiTestProject.CreateWithHiddenDotFolderOverlapWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                "dot folders (2)");
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: false);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                "Hidden folders (1)");
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "config.txt");
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.HiddenFolders, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: true,
+                isChecked: false);
+            await WaitForProjectTreePathStateAsync(window, exists: true, ".git", "config.txt");
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "config.txt");
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HiddenFolders,
+                visible: true,
+                isChecked: false);
+            await WaitForProjectTreePathStateAsync(window, exists: true, ".git", "config.txt");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PythonProjectWithoutGitIgnore_ShowsSmartIgnoreAndHidesSmartArtifacts()
     {
         using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
@@ -324,6 +399,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.DotFolders,
                 visible: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: false);
 
             if (UiTestDriver.GetViewModel(window).IgnoreOptions.Single(option => option.Id == IgnoreOptionId.DotFolders).IsChecked is false)
             {
@@ -362,6 +441,58 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
 
             await WaitForProjectTreePathStateAsync(window, exists: true, ".idea", "workspace.xml");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PythonProjectWithIdeaGitIgnore_DoesNotExposeGitIgnoreOptionAcrossSmartAndDotToggles()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: false);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: false);
+            await AssertPythonIdeaWorkspaceStateAsync(
+                window,
+                smartChecked: false,
+                dotChecked: true,
+                ideaVisible: false,
+                pycacheVisible: true);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: false);
+            await AssertPythonIdeaWorkspaceStateAsync(
+                window,
+                smartChecked: false,
+                dotChecked: false,
+                ideaVisible: true,
+                pycacheVisible: true);
         }
         finally
         {
@@ -579,6 +710,55 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task PythonProjectWithIdeaFolder_BlockedStaleSmartRefreshCannotRestoreOldIgnoreChecks()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
+        using var blockingScanner = new SwitchableBlockingFileSystemScanner(
+            project.RootPath,
+            ignoreCancellation: true);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            configureServices: services => services with
+            {
+                ScanOptionsUseCase = new ScanOptionsUseCase(blockingScanner)
+            });
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            blockingScanner.EnableBlocking();
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+            Assert.True(
+                blockingScanner.WaitForBlockedCall(TimeSpan.FromSeconds(10)),
+                "The stale Python smart-ignore refresh did not reach the controlled scanner block.");
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+            blockingScanner.Release();
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await AssertPythonIdeaWorkspaceStateAsync(
+                window,
+                smartChecked: false,
+                dotChecked: false,
+                ideaVisible: true,
+                pycacheVisible: true);
+            await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            blockingScanner.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task ProjectSwitch_BlockedStaleIgnoreRefreshDoesNotOverwriteNewProject()
     {
         using var projectA = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
@@ -778,17 +958,21 @@ public sealed class MainWindowIgnoreOptionsUiTests
         return true;
     }
 
-    private sealed class SwitchableBlockingFileSystemScanner(string blockedRootPath)
+    private sealed class SwitchableBlockingFileSystemScanner(
+        string blockedRootPath,
+        bool ignoreCancellation = false)
         : IFileSystemScanner,
             IFileSystemScannerAdvanced,
             IFileSystemScannerEffectiveEmptyFolderCounter,
             IFileSystemScannerEffectiveIgnoreCountsProvider,
             IFileSystemScannerIgnoreSectionSnapshotProvider,
+            IFileSystemScannerExtensionPolicySnapshotProvider,
             IDisposable
     {
         private readonly FileSystemScanner _inner = new();
         private readonly ManualResetEventSlim _blocked = new(initialState: false);
         private readonly ManualResetEventSlim _release = new(initialState: false);
+        private readonly bool _ignoreCancellation = ignoreCancellation;
         private int _enabled;
 
         public void EnableBlocking() => Volatile.Write(ref _enabled, 1);
@@ -802,19 +986,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
         public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
         {
             MaybeBlock(rootPath, cancellationToken);
-            return _inner.GetExtensions(rootPath, rules, cancellationToken);
+            return _inner.GetExtensions(rootPath, rules, EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
         {
             MaybeBlock(rootPath, cancellationToken);
-            return _inner.GetRootFileExtensions(rootPath, rules, cancellationToken);
+            return _inner.GetRootFileExtensions(rootPath, rules, EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
         {
             MaybeBlock(rootPath, cancellationToken);
-            return _inner.GetRootFolderNames(rootPath, rules, cancellationToken);
+            return _inner.GetRootFolderNames(rootPath, rules, EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<ExtensionsScanData> GetExtensionsWithIgnoreOptionCounts(
@@ -823,7 +1007,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             CancellationToken cancellationToken = default)
         {
             MaybeBlock(rootPath, cancellationToken);
-            return _inner.GetExtensionsWithIgnoreOptionCounts(rootPath, rules, cancellationToken);
+            return _inner.GetExtensionsWithIgnoreOptionCounts(rootPath, rules, EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<ExtensionsScanData> GetRootFileExtensionsWithIgnoreOptionCounts(
@@ -832,7 +1016,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             CancellationToken cancellationToken = default)
         {
             MaybeBlock(rootPath, cancellationToken);
-            return _inner.GetRootFileExtensionsWithIgnoreOptionCounts(rootPath, rules, cancellationToken);
+            return _inner.GetRootFileExtensionsWithIgnoreOptionCounts(rootPath, rules, EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<int> GetEffectiveEmptyFolderCount(
@@ -842,7 +1026,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             CancellationToken cancellationToken = default)
         {
             MaybeBlock(rootPath, cancellationToken);
-            return _inner.GetEffectiveEmptyFolderCount(rootPath, allowedExtensions, rules, cancellationToken);
+            return _inner.GetEffectiveEmptyFolderCount(rootPath, allowedExtensions, rules, EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<IgnoreOptionCounts> GetEffectiveIgnoreOptionCounts(
@@ -852,7 +1036,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             CancellationToken cancellationToken = default)
         {
             MaybeBlock(rootPath, cancellationToken);
-            return _inner.GetEffectiveIgnoreOptionCounts(rootPath, allowedExtensions, rules, cancellationToken);
+            return _inner.GetEffectiveIgnoreOptionCounts(rootPath, allowedExtensions, rules, EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<IgnoreOptionCounts> GetEffectiveRootFileIgnoreOptionCounts(
@@ -862,7 +1046,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             CancellationToken cancellationToken = default)
         {
             MaybeBlock(rootPath, cancellationToken);
-            return _inner.GetEffectiveRootFileIgnoreOptionCounts(rootPath, allowedExtensions, rules, cancellationToken);
+            return _inner.GetEffectiveRootFileIgnoreOptionCounts(rootPath, allowedExtensions, rules, EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
@@ -878,7 +1062,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 extensionDiscoveryRules,
                 effectiveRules,
                 effectiveAllowedExtensions,
-                cancellationToken);
+                EffectiveCancellationToken(cancellationToken));
         }
 
         public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
@@ -894,7 +1078,39 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 extensionDiscoveryRules,
                 effectiveRules,
                 effectiveAllowedExtensions,
-                cancellationToken);
+                EffectiveCancellationToken(cancellationToken));
+        }
+
+        public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+            string rootPath,
+            IgnoreRules extensionDiscoveryRules,
+            IgnoreRules effectiveRules,
+            IExtensionInclusionPolicy? effectiveExtensionPolicy,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetIgnoreSectionSnapshot(
+                rootPath,
+                extensionDiscoveryRules,
+                effectiveRules,
+                effectiveExtensionPolicy,
+                EffectiveCancellationToken(cancellationToken));
+        }
+
+        public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+            string rootPath,
+            IgnoreRules extensionDiscoveryRules,
+            IgnoreRules effectiveRules,
+            IExtensionInclusionPolicy? effectiveExtensionPolicy,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetRootFileIgnoreSectionSnapshot(
+                rootPath,
+                extensionDiscoveryRules,
+                effectiveRules,
+                effectiveExtensionPolicy,
+                EffectiveCancellationToken(cancellationToken));
         }
 
         public void Dispose()
@@ -909,6 +1125,13 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 return;
 
             _blocked.Set();
+            if (_ignoreCancellation)
+            {
+                if (!_release.Wait(TimeSpan.FromSeconds(30)))
+                    throw new TimeoutException("Timed out waiting to release the controlled stale refresh.");
+                return;
+            }
+
             var signaled = WaitHandle.WaitAny(
                 [_release.WaitHandle, cancellationToken.WaitHandle],
                 TimeSpan.FromSeconds(30));
@@ -917,6 +1140,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 
             cancellationToken.ThrowIfCancellationRequested();
         }
+
+        private CancellationToken EffectiveCancellationToken(CancellationToken cancellationToken) =>
+            _ignoreCancellation ? CancellationToken.None : cancellationToken;
 
         private bool IsInsideBlockedRoot(string path)
         {

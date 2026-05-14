@@ -80,7 +80,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreOptionMatrixTests
 
 	[Theory]
 	[MemberData(nameof(DynamicOptionIds))]
-	public void DynamicIgnoreOptionMatrix_AllIgnoreIntent_AppliesToOptionsThatAppearLater(
+	public void DynamicIgnoreOptionMatrix_NewlyVisibleOptionDefaultsCheckedAfterAllOffIntent(
 		IgnoreOptionId dynamicOptionId)
 	{
 		var viewModel = CreateViewModel();
@@ -94,7 +94,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreOptionMatrixTests
 		ApplyIgnoreCounts(coordinator, BuildCounts(dynamicOptionId, dynamicVisible: true, IgnoreOptionId.HiddenFolders));
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
 
-		Assert.False(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
+		Assert.True(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
 		Assert.False(viewModel.AllIgnoreChecked);
 	}

@@ -8,25 +8,21 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 public sealed class CommonSmartIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
 	// System-generated files that should always be filtered
-	private static readonly string[] FileNames =
-	[
+	private static readonly IReadOnlySet<string> FileNames = SmartIgnoreRuleSet.Create(
 		".ds_store",
 		"thumbs.db",
-		"desktop.ini"
-	];
+		"desktop.ini");
 
-	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(FileNames, StringComparer.OrdinalIgnoreCase));
+	private static readonly SmartIgnoreResult RuleResult =
+		SmartIgnoreRuleSet.Result(fileNames: FileNames);
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } =
+		SmartIgnoreRuleSet.Descriptor(fileNames: FileNames);
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{
 		// No folders in CommonSmartIgnore - all folders (.git, .vs, .idea, etc.)
 		// are now controlled via DotFolders filter for predictable user control
-		var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var files = new HashSet<string>(FileNames, StringComparer.OrdinalIgnoreCase);
-		return new SmartIgnoreResult(folders, files);
+		return RuleResult;
 	}
 }

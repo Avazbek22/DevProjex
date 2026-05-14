@@ -44,10 +44,61 @@ public sealed class FileSystemReparsePointIntegrationTests
 			rules,
 			effectiveAllowedExtensions: null,
 			includeDirectoryToggleProbeRoots: true);
+		var extensionScan = scanOptions.GetExtensionsForRootFolders(temp.Path, ["linked"], rules);
+		var effectiveCounts = scanOptions.GetEffectiveIgnoreOptionCountsForRootFolders(
+			temp.Path,
+			["linked"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+			rules,
+			IgnoreOptionCounts.Empty,
+			includeDirectoryToggleProbeRoots: true);
 
 		Assert.DoesNotContain("linked", rootFolders);
 		Assert.Empty(snapshot.Value.Extensions);
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Empty(extensionScan.Value);
+		Assert.Equal(IgnoreOptionCounts.Empty, effectiveCounts.Value);
+	}
+
+	[Fact]
+	public void TreeBuilder_DanglingDirectorySymlink_DoesNotAppearAsTraversableFolder()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.cs", "class App {}");
+
+		var linkPath = Path.Combine(temp.Path, "dangling");
+		if (!TryCreateDanglingDirectorySymlink(linkPath, Path.Combine(temp.Path, "missing-target")))
+			return;
+
+		var tree = new TreeBuilder().Build(
+			temp.Path,
+			new TreeFilterOptions(
+				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src", "dangling" },
+				IgnoreRules: CreateIgnoreRules()));
+
+		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "src", StringComparison.Ordinal));
+		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "dangling", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void TreeBuilder_FileSymlink_DoesNotAppearAsRegularFile()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("real/app.cs", "class App {}");
+
+		if (!TryCreateFileSymlink(Path.Combine(temp.Path, "linked.cs"), Path.Combine(temp.Path, "real", "app.cs")))
+			return;
+
+		var tree = new TreeBuilder().Build(
+			temp.Path,
+			new TreeFilterOptions(
+				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "real" },
+				IgnoreRules: CreateIgnoreRules()));
+
+		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "real", StringComparison.Ordinal));
+		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "linked.cs", StringComparison.Ordinal));
 	}
 
 	private static IgnoreRules CreateIgnoreRules() => new(
@@ -64,6 +115,33 @@ public sealed class FileSystemReparsePointIntegrationTests
 		{
 			Directory.CreateSymbolicLink(linkPath, targetPath);
 			return Directory.Exists(linkPath) &&
+			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private static bool TryCreateDanglingDirectorySymlink(string linkPath, string targetPath)
+	{
+		try
+		{
+			Directory.CreateSymbolicLink(linkPath, targetPath);
+			return File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private static bool TryCreateFileSymlink(string linkPath, string targetPath)
+	{
+		try
+		{
+			File.CreateSymbolicLink(linkPath, targetPath);
+			return File.Exists(linkPath) &&
 			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)

@@ -1,16 +1,16 @@
 using DevProjex.Application.Models;
 using DevProjex.Kernel;
 
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal enum PreparedSelectionMode
+public enum PreparedSelectionMode
 {
     None = 0,
     Defaults = 1,
     Profile = 2
 }
 
-internal static class SelectionSyncCoordinatorPolicy
+public static class SelectionRefreshPolicy
 {
     public static bool ShouldClearCachesForCurrentPath(
         string? lastLoadedPath,
@@ -33,28 +33,32 @@ internal static class SelectionSyncCoordinatorPolicy
         IReadOnlyCollection<string> cachedSelections,
         IReadOnlyList<SelectionOption> options)
     {
-        if (preparedSelectionMode != PreparedSelectionMode.Profile)
-            return options;
-        if (cachedSelections.Count == 0 || options.Count == 0)
-            return options;
-
-        var hasAnyMatchedSelection = false;
-        foreach (var option in options)
-        {
-            if (option.IsChecked)
-            {
-                hasAnyMatchedSelection = true;
-                break;
-            }
-        }
-
-        if (hasAnyMatchedSelection)
+        if (!ShouldApplyMissingProfileSelectionsFallback(preparedSelectionMode, cachedSelections, options))
             return options;
 
         var fallback = new List<SelectionOption>(options.Count);
         foreach (var option in options)
             fallback.Add(option with { IsChecked = true });
         return fallback;
+    }
+
+    public static bool ShouldApplyMissingProfileSelectionsFallback(
+        PreparedSelectionMode preparedSelectionMode,
+        IReadOnlyCollection<string> cachedSelections,
+        IReadOnlyList<SelectionOption> options)
+    {
+        if (preparedSelectionMode != PreparedSelectionMode.Profile)
+            return false;
+        if (cachedSelections.Count == 0 || options.Count == 0)
+            return false;
+
+        foreach (var option in options)
+        {
+            if (option.IsChecked)
+                return false;
+        }
+
+        return true;
     }
 
     public static IReadOnlyList<SelectionOption> ApplyMissingProfileSelectionsFallbackToRootFolders(
@@ -109,6 +113,9 @@ internal static class SelectionSyncCoordinatorPolicy
 
         return true;
     }
+
+    public static bool CanUseIgnoreDefaultFallback(IgnoreOptionId optionId) =>
+        optionId is not IgnoreOptionId.UseGitIgnore and not IgnoreOptionId.SmartIgnore;
 
     private static bool HasPreparedSelectionForPath(string? preparedSelectionPath, string path)
     {

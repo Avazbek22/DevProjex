@@ -1,6 +1,6 @@
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal static class IgnoreSectionRefreshPlanBuilder
+public static class IgnoreSectionRefreshPlanBuilder
 {
     /// <summary>
     /// Builds the minimal follow-up work after a live snapshot refresh.

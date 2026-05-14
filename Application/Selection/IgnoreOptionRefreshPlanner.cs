@@ -1,6 +1,6 @@
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal static class IgnoreOptionRefreshPlanner
+public static class IgnoreOptionRefreshPlanner
 {
     public static IgnoreOptionRefreshImpact ClassifyChangedSelection(
         IReadOnlySet<IgnoreOptionId> beforeSelection,

@@ -1,6 +1,6 @@
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal sealed record SelectionRefreshContext(
+public sealed record SelectionRefreshContext(
     string Path,
     PreparedSelectionMode PreparedSelectionMode,
     bool AllRootFoldersChecked,
@@ -13,4 +13,6 @@ internal sealed record SelectionRefreshContext(
     IReadOnlySet<IgnoreOptionId> IgnoreSelectionCache,
     IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreOptionStateCache,
     bool? IgnoreAllPreference,
-    IgnoreSectionSnapshotState CurrentSnapshotState);
+    IgnoreSectionSnapshotState CurrentSnapshotState,
+    IReadOnlyDictionary<string, bool>? RootOptionStateCache = null,
+    IReadOnlyDictionary<string, bool>? ExtensionOptionStateCache = null);

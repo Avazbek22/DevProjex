@@ -4,8 +4,6 @@ public sealed class TreeBuilder : ITreeBuilder
 {
 	// Pre-allocated comparer instance to avoid allocation per sort
 	private static readonly FileSystemTreeEntryComparer EntryComparer = new();
-	private static readonly int RootBuildParallelism =
-		Math.Clamp(Environment.ProcessorCount, min: 2, max: 16);
 
 	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
@@ -67,7 +65,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
 		var shouldApplySmartIgnoreForFiles = options.IgnoreRules.ShouldApplySmartIgnore(path, isDirectory: true);
 
-		if (isRoot && entries.Count > 1)
+		if (isRoot)
 		{
 			BuildRootChildrenInParallel(
 				entries,
@@ -107,12 +105,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		CancellationToken cancellationToken)
 	{
 		var nodes = new FileSystemNode?[entries.Count];
-		var maxDegree = Math.Min(RootBuildParallelism, entries.Count);
-		var parallelOptions = new ParallelOptions
-		{
-			MaxDegreeOfParallelism = maxDegree,
-			CancellationToken = cancellationToken
-		};
+		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 
 		Parallel.For(0, entries.Count, parallelOptions, i =>
 		{
@@ -243,10 +236,15 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.IsSmartIgnoredDirectory(entry.FullPath, entry.Name))
 			return true;
 
-		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
+		var isDot = IgnoreRuleSemantics.IsDotName(entry.Name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(rules.IgnoreDotFolders, isDot))
 			return true;
 
-		if (rules.IgnoreHiddenFolders && entry.IsHidden)
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			    rules.IgnoreHiddenFolders,
+			    entry.IsHidden,
+			    isDot,
+			    rules.IgnoreDotFolders))
 			return true;
 
 		return false;
@@ -264,7 +262,8 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.IsSmartIgnoredFile(entry.FullPath, entry.Name, shouldApplySmartIgnoreForFiles))
 			return true;
 
-		if (rules.IgnoreDotFiles && entry.Name.StartsWith(".", StringComparison.Ordinal))
+		var isDot = IgnoreRuleSemantics.IsDotName(entry.Name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotFile(rules.IgnoreDotFiles, isDot))
 			return true;
 
 		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(entry.Name))
@@ -273,7 +272,11 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (rules.IgnoreEmptyFiles && entry.Length == 0)
 			return true;
 
-		if (rules.IgnoreHiddenFiles && entry.IsHidden)
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenFile(
+			    rules.IgnoreHiddenFiles,
+			    entry.IsHidden,
+			    isDot,
+			    rules.IgnoreDotFiles))
 			return true;
 
 		return false;

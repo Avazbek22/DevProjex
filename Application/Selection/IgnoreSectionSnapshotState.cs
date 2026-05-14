@@ -1,6 +1,6 @@
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Selection;
 
-internal readonly record struct IgnoreSectionSnapshotState(
+public readonly record struct IgnoreSectionSnapshotState(
     bool HasIgnoreOptionCounts,
     IgnoreOptionCounts IgnoreOptionCounts,
     bool HasExtensionlessEntries,

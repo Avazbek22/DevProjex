@@ -10,6 +10,7 @@ global using DevProjex.Avalonia;
 global using DevProjex.Avalonia.Services;
 global using DevProjex.Avalonia.ViewModels;
 global using DevProjex.Avalonia.Views;
+global using DevProjex.Application.Selection;
 global using DevProjex.Kernel;
 global using DevProjex.Kernel.Models;
 global using Xunit;

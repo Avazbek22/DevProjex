@@ -36,7 +36,8 @@ internal static class FileSystemEntryEnumerator
 				entry.IsHidden,
 				entry.Length),
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => !entry.IsDirectory;
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+			!entry.IsDirectory && !IsReparsePoint(ref entry);
 		return enumerable;
 	}
 
@@ -51,8 +52,7 @@ internal static class FileSystemEntryEnumerator
 				entry.IsHidden,
 				entry.IsDirectory ? 0 : entry.Length),
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
-			!entry.IsDirectory || !IsReparsePoint(ref entry);
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => !IsReparsePoint(ref entry);
 		return enumerable;
 	}
 

@@ -1,3 +1,4 @@
+using DevProjex.Application.Selection;
 using DevProjex.Application.Models;
 
 namespace DevProjex.Application.Services;
@@ -8,11 +9,20 @@ public sealed class FilterOptionSelectionService
 		IEnumerable<string> extensions,
 		IReadOnlySet<string> previousSelections)
 	{
+		return BuildExtensionOptions(extensions, previousSelections, previousStateCache: null);
+	}
+
+	public IReadOnlyList<SelectionOption> BuildExtensionOptions(
+		IEnumerable<string> extensions,
+		IReadOnlySet<string> previousSelections,
+		IReadOnlyDictionary<string, bool>? previousStateCache)
+	{
 		var list = new List<SelectionOption>();
 		var ordered = extensions.OrderBy(e => e, StringComparer.OrdinalIgnoreCase).ToList();
+		var resolver = new SelectionStateResolver(previousSelections, previousStateCache);
 		foreach (var ext in ordered)
 		{
-			bool isChecked = previousSelections.Contains(ext);
+			var isChecked = resolver.Resolve(ext, defaultForNewEntry: true);
 
 			list.Add(new SelectionOption(ext, isChecked));
 		}
@@ -24,15 +34,18 @@ public sealed class FilterOptionSelectionService
 		IEnumerable<string> rootFolders,
 		IReadOnlySet<string> previousSelections,
 		IgnoreRules ignoreRules,
-		bool hasPreviousSelections = false)
+		bool hasPreviousSelections = false,
+		IReadOnlyDictionary<string, bool>? previousStateCache = null)
 	{
 		var list = new List<SelectionOption>();
-		bool hasPrevious = hasPreviousSelections || previousSelections.Count > 0;
+		var resolver = new SelectionStateResolver(previousSelections, previousStateCache);
+		var hasPrevious = hasPreviousSelections || previousSelections.Count > 0;
 
 		foreach (var name in rootFolders)
 		{
-			bool isChecked = previousSelections.Contains(name) ||
-				(!hasPrevious && !IsIgnoredByRules(name, ignoreRules));
+			var isChecked = previousStateCache is not null
+				? resolver.Resolve(name, defaultForNewEntry: !IsIgnoredByRules(name, ignoreRules))
+				: previousSelections.Contains(name) || (!hasPrevious && !IsIgnoredByRules(name, ignoreRules));
 
 			list.Add(new SelectionOption(name, isChecked));
 		}
@@ -45,7 +58,9 @@ public sealed class FilterOptionSelectionService
 		if (rules.SmartIgnoredFolders.Contains(name))
 			return true;
 
-		if (rules.IgnoreDotFolders && name.StartsWith(".", StringComparison.Ordinal))
+		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(
+			    rules.IgnoreDotFolders,
+			    IgnoreRuleSemantics.IsDotName(name)))
 			return true;
 
 		return false;

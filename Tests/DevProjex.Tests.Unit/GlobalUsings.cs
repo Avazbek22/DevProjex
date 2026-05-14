@@ -1,5 +1,6 @@
 global using Xunit;
 global using DevProjex.Application.Services;
+global using DevProjex.Application.Selection;
 global using DevProjex.Application.UseCases;
 global using DevProjex.Avalonia;
 global using DevProjex.Avalonia.Coordinators;

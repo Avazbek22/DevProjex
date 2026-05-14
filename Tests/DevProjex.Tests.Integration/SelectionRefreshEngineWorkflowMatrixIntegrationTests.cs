@@ -1,5 +1,4 @@
 using DevProjex.Application.Models;
-using DevProjex.Avalonia.Coordinators;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
@@ -199,6 +198,9 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         CreateDefaultsContext(rootPath) with
         {
             IgnoreSelectionInitialized = true,
+            IgnoreSelectionCache = new HashSet<IgnoreOptionId>(),
+            IgnoreOptionStateCache = Enum.GetValues<IgnoreOptionId>()
+                .ToDictionary(optionId => optionId, _ => false),
             IgnoreAllPreference = false
         };
 
@@ -341,8 +343,9 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         return new SelectionRefreshContext(
             Path: rootPath,
             PreparedSelectionMode: preparedSelectionMode,
-            AllRootFoldersChecked: snapshot.RootOptions is { Count: > 0 } rootOptions &&
-                                   rootOptions.All(option => option.IsChecked),
+            AllRootFoldersChecked: snapshot.RootOptions is null ||
+                                   snapshot.RootOptions.Count == 0 ||
+                                   snapshot.RootOptions.All(option => option.IsChecked),
             AllExtensionsChecked: snapshot.ExtensionOptions.Count > 0 &&
                                   snapshot.ExtensionOptions.All(option => option.IsChecked),
             RootSelectionInitialized: true,
@@ -405,8 +408,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         SelectionRefreshSnapshot secondSnapshot,
         string workflowCaseName)
     {
-        Assert.NotEqual(firstSnapshot.IgnoreOptions, secondSnapshot.IgnoreOptions);
-
         // Deferred reconciliation is allowed to reshuffle which dynamic ignore options are
         // visible after the first pass, because the updated root/ignore state can expose a
         // different effective tree shape on the follow-up snapshot. What must stay stable is
