@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 
 namespace DevProjex.Application.Services;
@@ -10,7 +11,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	private const int NestedProjectProbeMaxDepth = 2;
 	private const int NestedProjectProbeMaxDirectoriesPerScope = 256;
 
-	private static readonly HashSet<string> NonProjectScopeDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
+	private static readonly FrozenSet<string> NonProjectScopeDirectoryNames = new[]
 	{
 		".git",
 		".hg",
@@ -19,10 +20,10 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		".vscode",
 		".vs",
 		".fleet"
-	};
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-	private static readonly string[] ProjectMarkerFiles =
-	[
+	private static readonly FrozenSet<string> ProjectMarkerFiles = new[]
+	{
 		"package.json",
 		"package-lock.json",
 		"pnpm-lock.yaml",
@@ -51,16 +52,16 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		"pubspec.yaml",
 		"Gemfile",
 		"Gemfile.lock"
-	];
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-	private static readonly HashSet<string> ProjectMarkerExtensions = new(StringComparer.OrdinalIgnoreCase)
+	private static readonly FrozenSet<string> ProjectMarkerExtensions = new[]
 	{
 		".sln",
 		".csproj",
 		".fsproj",
 		".vbproj",
 		".vcxproj"
-	};
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
 		? StringComparer.Ordinal
@@ -161,10 +162,9 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		}
 
 		var scopedCandidates = new ConcurrentBag<ProjectScope>();
-		var maxDegree = Math.Min(8, Math.Max(1, Environment.ProcessorCount / 2));
 		Parallel.ForEach(
 			candidateDirectories,
-			new ParallelOptions { MaxDegreeOfParallelism = maxDegree },
+			ScanParallelismPolicy.CreateOptions(),
 			directoryPath =>
 			{
 				var hasGitIgnore = HasGitIgnoreFile(directoryPath);
@@ -180,7 +180,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			});
 
 		var candidates = SortScopes(scopedCandidates).ToArray();
-		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates, maxDegree);
+		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates);
 
 		if (hasExplicitRootSelection)
 		{
@@ -229,18 +229,16 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	}
 
 	private ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
-		IReadOnlyList<ProjectScope> candidates,
-		int maxDegree)
+		IReadOnlyList<ProjectScope> candidates)
 	{
 		if (candidates.Count == 0)
 			return [];
 
 		var allScopes = new ConcurrentBag<ProjectScope>();
-		var parallelDegree = Math.Min(4, Math.Max(1, maxDegree));
 
 		Parallel.ForEach(
 			candidates,
-			new ParallelOptions { MaxDegreeOfParallelism = parallelDegree },
+			ScanParallelismPolicy.CreateOptions(),
 			candidate =>
 			{
 				allScopes.Add(candidate);

@@ -170,10 +170,9 @@ public sealed class IgnoreRulesService(
 		var fileNames = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
 		var scopedMatchers = new ConcurrentBag<ScopedSmartIgnoreMatcher>();
 
-		var maxDegree = Math.Min(8, Math.Max(1, Environment.ProcessorCount / 2));
 		Parallel.ForEach(
 			context.Scopes,
-			new ParallelOptions { MaxDegreeOfParallelism = maxDegree },
+			ScanParallelismPolicy.CreateOptions(),
 			scope =>
 			{
 				var smart = context.GetSmartIgnoreResult(scope.RootPath, smartIgnore);

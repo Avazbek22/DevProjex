@@ -2,9 +2,6 @@ namespace DevProjex.Application.UseCases;
 
 public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 {
-	// Keep local SSD scans fast while avoiding unbounded fan-out on very wide projects.
-	private static readonly int LocalStorageMaxParallelism = Math.Clamp(Environment.ProcessorCount, 4, 16);
-
 	public ScanOptionsResult Execute(ScanOptionsRequest request, CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -15,7 +12,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		Parallel.Invoke(
 			new ParallelOptions
 			{
-				MaxDegreeOfParallelism = 2,
+				MaxDegreeOfParallelism = ScanParallelismPolicy.MaxDegreeOfParallelism,
 				CancellationToken = cancellationToken
 			},
 			() => extensions = scanner.GetExtensions(request.RootPath, request.IgnoreRules, cancellationToken),
@@ -96,66 +93,45 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			if (rootFiles.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootFiles.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
 
-			// For very small selections, sequential scan is faster than spinning thread-pool work.
 			if (selectedRootPaths.Count > 0)
 			{
-				if (selectedRootPaths.Count <= 2)
-				{
-					foreach (var folderPath in selectedRootPaths)
-					{
-						cancellationToken.ThrowIfCancellationRequested();
+				var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 
-						var result = advancedScanner.GetExtensionsWithIgnoreOptionCounts(folderPath, ignoreRules, cancellationToken);
+				Parallel.ForEach(
+					selectedRootPaths,
+					parallelOptions,
+					() => new LocalRootSelectionScanAccumulator(),
+					(folderPath, _, localAccumulator) =>
+					{
+						parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
+						var result = advancedScanner.GetExtensionsWithIgnoreOptionCounts(
+							folderPath,
+							ignoreRules,
+							parallelOptions.CancellationToken);
 
 						foreach (var ext in result.Value.Extensions)
-							extensions.Add(ext);
-						ignoreCounts = ignoreCounts.Add(result.Value.IgnoreOptionCounts);
+							localAccumulator.Extensions.Add(ext);
+						localAccumulator.IgnoreOptionCounts =
+							localAccumulator.IgnoreOptionCounts.Add(result.Value.IgnoreOptionCounts);
 
 						if (result.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
 						if (result.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
-					}
-				}
-				else
-				{
-					var parallelOptions = new ParallelOptions
+
+						return localAccumulator;
+					},
+					localAccumulator =>
 					{
-						MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
-						CancellationToken = cancellationToken
-					};
+						if (localAccumulator.Extensions.Count == 0 &&
+						    localAccumulator.IgnoreOptionCounts == IgnoreOptionCounts.Empty)
+							return;
 
-					Parallel.ForEach(
-						selectedRootPaths,
-						parallelOptions,
-						() => new LocalRootSelectionScanAccumulator(),
-						(folderPath, _, localAccumulator) =>
+						lock (mergeLock)
 						{
-							cancellationToken.ThrowIfCancellationRequested();
-
-							var result = advancedScanner.GetExtensionsWithIgnoreOptionCounts(folderPath, ignoreRules, cancellationToken);
-
-							foreach (var ext in result.Value.Extensions)
-								localAccumulator.Extensions.Add(ext);
-							localAccumulator.IgnoreOptionCounts =
-								localAccumulator.IgnoreOptionCounts.Add(result.Value.IgnoreOptionCounts);
-
-							if (result.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
-							if (result.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
-
-							return localAccumulator;
-						},
-						localAccumulator =>
-						{
-							if (localAccumulator.Extensions.Count == 0 &&
-							    localAccumulator.IgnoreOptionCounts == IgnoreOptionCounts.Empty)
-								return;
-
-							lock (mergeLock)
-							{
-								extensions.UnionWith(localAccumulator.Extensions);
-								ignoreCounts = ignoreCounts.Add(localAccumulator.IgnoreOptionCounts);
-							}
-						});
-				}
+							extensions.UnionWith(localAccumulator.Extensions);
+							ignoreCounts = ignoreCounts.Add(localAccumulator.IgnoreOptionCounts);
+						}
+					});
 			}
 		}
 		else
@@ -169,58 +145,39 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 			if (selectedRootPaths.Count > 0)
 			{
-				if (selectedRootPaths.Count <= 2)
-				{
-					foreach (var folderPath in selectedRootPaths)
-					{
-						cancellationToken.ThrowIfCancellationRequested();
+				var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 
-						var result = scanner.GetExtensions(folderPath, ignoreRules, cancellationToken);
+				Parallel.ForEach(
+					selectedRootPaths,
+					parallelOptions,
+					() => new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+					(folderPath, _, localExtensions) =>
+					{
+						parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
+						var result = scanner.GetExtensions(
+							folderPath,
+							ignoreRules,
+							parallelOptions.CancellationToken);
 
 						foreach (var ext in result.Value)
-							extensions.Add(ext);
+							localExtensions.Add(ext);
 
 						if (result.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
 						if (result.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
-					}
-				}
-				else
-				{
-					var parallelOptions = new ParallelOptions
+
+						return localExtensions;
+					},
+					localExtensions =>
 					{
-						MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
-						CancellationToken = cancellationToken
-					};
+						if (localExtensions.Count == 0)
+							return;
 
-					Parallel.ForEach(
-						selectedRootPaths,
-						parallelOptions,
-						() => new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-						(folderPath, _, localExtensions) =>
+						lock (mergeLock)
 						{
-							cancellationToken.ThrowIfCancellationRequested();
-
-							var result = scanner.GetExtensions(folderPath, ignoreRules, cancellationToken);
-
-							foreach (var ext in result.Value)
-								localExtensions.Add(ext);
-
-							if (result.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
-							if (result.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
-
-							return localExtensions;
-						},
-						localExtensions =>
-						{
-							if (localExtensions.Count == 0)
-								return;
-
-							lock (mergeLock)
-							{
-								extensions.UnionWith(localExtensions);
-							}
-						});
-				}
+							extensions.UnionWith(localExtensions);
+						}
+					});
 			}
 		}
 
@@ -260,56 +217,38 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		var hadAccessDenied = 0;
 		var mergeLock = new object();
 
-		if (selectedRootPaths.Count <= 2)
-		{
-			foreach (var folderPath in selectedRootPaths)
+		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+
+		Parallel.ForEach(
+			selectedRootPaths,
+			parallelOptions,
+			() => 0,
+			(folderPath, _, localCount) =>
 			{
-				cancellationToken.ThrowIfCancellationRequested();
+				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
-				var result = counter.GetEffectiveEmptyFolderCount(folderPath, allowedExtensions, ignoreRules, cancellationToken);
-				emptyFolderCount += result.Value;
-
+				var result = counter.GetEffectiveEmptyFolderCount(
+					folderPath,
+					allowedExtensions,
+					ignoreRules,
+					parallelOptions.CancellationToken);
 				if (result.RootAccessDenied)
 					Interlocked.Exchange(ref rootAccessDenied, 1);
 				if (result.HadAccessDenied)
 					Interlocked.Exchange(ref hadAccessDenied, 1);
-			}
-		}
-		else
-		{
-			var parallelOptions = new ParallelOptions
+
+				return localCount + result.Value;
+			},
+			localCount =>
 			{
-				MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
-				CancellationToken = cancellationToken
-			};
+				if (localCount == 0)
+					return;
 
-			Parallel.ForEach(
-				selectedRootPaths,
-				parallelOptions,
-				() => 0,
-				(folderPath, _, localCount) =>
+				lock (mergeLock)
 				{
-					cancellationToken.ThrowIfCancellationRequested();
-
-					var result = counter.GetEffectiveEmptyFolderCount(folderPath, allowedExtensions, ignoreRules, cancellationToken);
-					if (result.RootAccessDenied)
-						Interlocked.Exchange(ref rootAccessDenied, 1);
-					if (result.HadAccessDenied)
-						Interlocked.Exchange(ref hadAccessDenied, 1);
-
-					return localCount + result.Value;
-				},
-				localCount =>
-				{
-					if (localCount == 0)
-						return;
-
-					lock (mergeLock)
-					{
-						emptyFolderCount += localCount;
-					}
-				});
-		}
+					emptyFolderCount += localCount;
+				}
+			});
 
 		return new ScanResult<int>(emptyFolderCount, rootAccessDenied == 1, hadAccessDenied == 1);
 	}
@@ -455,82 +394,52 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 		if (selectedRootPaths.Count > 0)
 		{
-			if (selectedRootPaths.Count <= 2)
-			{
-				foreach (var folderPath in selectedRootPaths)
+			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+
+			Parallel.ForEach(
+				selectedRootPaths,
+				parallelOptions,
+				() => new LocalIgnoreSectionSnapshotAccumulator(),
+				(folderPath, _, localAccumulator) =>
 				{
-					cancellationToken.ThrowIfCancellationRequested();
+					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
 					var snapshot = getFolderSnapshot(
 						folderPath,
 						extensionDiscoveryRules,
 						effectiveRules,
 						effectiveExtensionPolicy,
-						cancellationToken);
+						parallelOptions.CancellationToken);
 
-					aggregatedExtensions.UnionWith(snapshot.Value.Extensions);
-					rawCounts = rawCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
-					effectiveCounts = effectiveCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
+					localAccumulator.Extensions.UnionWith(snapshot.Value.Extensions);
+					localAccumulator.RawIgnoreOptionCounts =
+						localAccumulator.RawIgnoreOptionCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
+					localAccumulator.EffectiveIgnoreOptionCounts =
+						localAccumulator.EffectiveIgnoreOptionCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
 
 					if (snapshot.RootAccessDenied)
 						Interlocked.Exchange(ref rootAccessDenied, 1);
 					if (snapshot.HadAccessDenied)
 						Interlocked.Exchange(ref hadAccessDenied, 1);
-				}
-			}
-			else
-			{
-				var parallelOptions = new ParallelOptions
+
+					return localAccumulator;
+				},
+				localAccumulator =>
 				{
-					MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
-					CancellationToken = cancellationToken
-				};
-
-				Parallel.ForEach(
-					selectedRootPaths,
-					parallelOptions,
-					() => new LocalIgnoreSectionSnapshotAccumulator(),
-					(folderPath, _, localAccumulator) =>
+					if (localAccumulator.Extensions.Count == 0 &&
+					    localAccumulator.RawIgnoreOptionCounts == IgnoreOptionCounts.Empty &&
+					    localAccumulator.EffectiveIgnoreOptionCounts == IgnoreOptionCounts.Empty)
 					{
-						cancellationToken.ThrowIfCancellationRequested();
+						return;
+					}
 
-						var snapshot = getFolderSnapshot(
-							folderPath,
-							extensionDiscoveryRules,
-							effectiveRules,
-							effectiveExtensionPolicy,
-							cancellationToken);
-
-						localAccumulator.Extensions.UnionWith(snapshot.Value.Extensions);
-						localAccumulator.RawIgnoreOptionCounts =
-							localAccumulator.RawIgnoreOptionCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
-						localAccumulator.EffectiveIgnoreOptionCounts =
-							localAccumulator.EffectiveIgnoreOptionCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
-
-						if (snapshot.RootAccessDenied)
-							Interlocked.Exchange(ref rootAccessDenied, 1);
-						if (snapshot.HadAccessDenied)
-							Interlocked.Exchange(ref hadAccessDenied, 1);
-
-						return localAccumulator;
-					},
-					localAccumulator =>
+					lock (mergeLock)
 					{
-						if (localAccumulator.Extensions.Count == 0 &&
-						    localAccumulator.RawIgnoreOptionCounts == IgnoreOptionCounts.Empty &&
-						    localAccumulator.EffectiveIgnoreOptionCounts == IgnoreOptionCounts.Empty)
-						{
-							return;
-						}
-
-						lock (mergeLock)
-						{
-							aggregatedExtensions.UnionWith(localAccumulator.Extensions);
-							rawCounts = rawCounts.Add(localAccumulator.RawIgnoreOptionCounts);
-							effectiveCounts = effectiveCounts.Add(localAccumulator.EffectiveIgnoreOptionCounts);
-						}
+						aggregatedExtensions.UnionWith(localAccumulator.Extensions);
+						rawCounts = rawCounts.Add(localAccumulator.RawIgnoreOptionCounts);
+						effectiveCounts = effectiveCounts.Add(localAccumulator.EffectiveIgnoreOptionCounts);
+					}
 				});
-			}
 		}
 
 		if (includeDirectoryToggleProbeRoots)
@@ -601,64 +510,38 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 		if (selectedRootPaths.Count > 0)
 		{
-			if (selectedRootPaths.Count <= 2)
-			{
-				foreach (var folderPath in selectedRootPaths)
+			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+
+			Parallel.ForEach(
+				selectedRootPaths,
+				parallelOptions,
+				() => IgnoreOptionCounts.Empty,
+				(folderPath, _, localCounts) =>
 				{
-					cancellationToken.ThrowIfCancellationRequested();
+					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
 					var result = counter.GetEffectiveIgnoreOptionCounts(
 						folderPath,
 						allowedExtensions,
 						ignoreRules,
-						cancellationToken);
-					effectiveCounts = effectiveCounts.Add(result.Value);
-
+						parallelOptions.CancellationToken);
 					if (result.RootAccessDenied)
 						Interlocked.Exchange(ref rootAccessDenied, 1);
 					if (result.HadAccessDenied)
 						Interlocked.Exchange(ref hadAccessDenied, 1);
-				}
-			}
-			else
-			{
-				var parallelOptions = new ParallelOptions
+
+					return localCounts.Add(result.Value);
+				},
+				localCounts =>
 				{
-					MaxDegreeOfParallelism = ResolveMaxDegreeOfParallelism(rootPath, selectedRootPaths.Count),
-					CancellationToken = cancellationToken
-				};
+					if (localCounts == IgnoreOptionCounts.Empty)
+						return;
 
-				Parallel.ForEach(
-					selectedRootPaths,
-					parallelOptions,
-					() => IgnoreOptionCounts.Empty,
-					(folderPath, _, localCounts) =>
+					lock (mergeLock)
 					{
-						cancellationToken.ThrowIfCancellationRequested();
-
-						var result = counter.GetEffectiveIgnoreOptionCounts(
-							folderPath,
-							allowedExtensions,
-							ignoreRules,
-							cancellationToken);
-						if (result.RootAccessDenied)
-							Interlocked.Exchange(ref rootAccessDenied, 1);
-						if (result.HadAccessDenied)
-							Interlocked.Exchange(ref hadAccessDenied, 1);
-
-						return localCounts.Add(result.Value);
-					},
-					localCounts =>
-					{
-						if (localCounts == IgnoreOptionCounts.Empty)
-							return;
-
-						lock (mergeLock)
-						{
-							effectiveCounts = effectiveCounts.Add(localCounts);
-						}
+						effectiveCounts = effectiveCounts.Add(localCounts);
+					}
 				});
-			}
 		}
 
 		if (includeDirectoryToggleProbeRoots)
@@ -779,6 +662,13 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		public IgnoreOptionCounts EffectiveIgnoreOptionCounts { get; set; } = IgnoreOptionCounts.Empty;
 	}
 
+	private sealed class RootDirectoryToggleCandidateAccumulator
+	{
+		public int HiddenFolders { get; set; }
+		public int DotFolders { get; set; }
+		public bool IsEmpty => HiddenFolders == 0 && DotFolders == 0;
+	}
+
 	private static HashSet<string> BuildAllDiscoveredExtensionsSet(IReadOnlyCollection<string> discoveredEntries)
 	{
 		return BuildAllowedExtensionsSet(discoveredEntries, effectiveExtensionPolicy: null);
@@ -817,21 +707,53 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		var selected = new HashSet<string>(selectedRootFolders, PathComparer.Default);
 		var hiddenFolders = 0;
 		var dotFolders = 0;
+		var rootAccessDenied = 0;
+		var hadAccessDenied = 0;
+		var directoryPaths = new List<string>();
 
 		try
 		{
 			foreach (var directoryPath in Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				directoryPaths.Add(directoryPath);
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return new ScanResult<IgnoreOptionCounts>(
+				new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
+				RootAccessDenied: true,
+				HadAccessDenied: true);
+		}
+		catch
+		{
+			return new ScanResult<IgnoreOptionCounts>(
+				new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
 
+		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+		Parallel.ForEach(
+			directoryPaths,
+			parallelOptions,
+			() => new RootDirectoryToggleCandidateAccumulator(),
+			(directoryPath, _, localCounts) =>
+			{
+				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 				var name = Path.GetFileName(directoryPath);
 				if (string.IsNullOrWhiteSpace(name) || selected.Contains(name))
-					continue;
+					return localCounts;
 				if (IsReparsePointDirectory(directoryPath))
-					continue;
+					return localCounts;
 
 				if (IsSuppressedByNonDirectoryToggleRule(directoryPath, name, effectiveRules))
-					continue;
+					return localCounts;
 
 				var isHiddenFolder = HasHiddenAttribute(directoryPath);
 				var isDotFolder = IgnoreRuleSemantics.IsDotName(name);
@@ -855,14 +777,17 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 							IgnoreHiddenFolders = false,
 							IgnoreEmptyFolders = true
 						},
-						cancellationToken);
+						parallelOptions.CancellationToken);
 					if (visible.RootAccessDenied)
-						return new ScanResult<IgnoreOptionCounts>(
-							new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
-							RootAccessDenied: true,
-							HadAccessDenied: true);
+					{
+						Interlocked.Exchange(ref rootAccessDenied, 1);
+						Interlocked.Exchange(ref hadAccessDenied, 1);
+						return localCounts;
+					}
+					if (visible.HadAccessDenied)
+						Interlocked.Exchange(ref hadAccessDenied, 1);
 					if (visible.HadAccessDenied || visible.Value)
-						dotFolders++;
+						localCounts.DotFolders++;
 				}
 
 				if (isHiddenByCurrentHiddenFolderRule)
@@ -874,40 +799,34 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 							IgnoreHiddenFolders = false,
 							IgnoreEmptyFolders = true
 						},
-						cancellationToken);
+						parallelOptions.CancellationToken);
 					if (visible.RootAccessDenied)
-						return new ScanResult<IgnoreOptionCounts>(
-							new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
-							RootAccessDenied: true,
-							HadAccessDenied: true);
+					{
+						Interlocked.Exchange(ref rootAccessDenied, 1);
+						Interlocked.Exchange(ref hadAccessDenied, 1);
+						return localCounts;
+					}
+					if (visible.HadAccessDenied)
+						Interlocked.Exchange(ref hadAccessDenied, 1);
 					if (visible.HadAccessDenied || visible.Value)
-						hiddenFolders++;
+						localCounts.HiddenFolders++;
 				}
-			}
-		}
-		catch (OperationCanceledException)
-		{
-			throw;
-		}
-		catch (UnauthorizedAccessException)
-		{
-			return new ScanResult<IgnoreOptionCounts>(
-				new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
-				RootAccessDenied: true,
-				HadAccessDenied: true);
-		}
-		catch
-		{
-			return new ScanResult<IgnoreOptionCounts>(
-				new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
-				RootAccessDenied: false,
-				HadAccessDenied: false);
-		}
+
+				return localCounts;
+			},
+			localCounts =>
+			{
+				if (localCounts.IsEmpty)
+					return;
+
+				Interlocked.Add(ref hiddenFolders, localCounts.HiddenFolders);
+				Interlocked.Add(ref dotFolders, localCounts.DotFolders);
+			});
 
 		return new ScanResult<IgnoreOptionCounts>(
 			new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
-			RootAccessDenied: false,
-			HadAccessDenied: false);
+			RootAccessDenied: rootAccessDenied == 1,
+			HadAccessDenied: hadAccessDenied == 1);
 	}
 
 	private static bool IsSuppressedByNonDirectoryToggleRule(
@@ -1054,39 +973,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		catch
 		{
 			return true;
-		}
-	}
-
-	private static int ResolveMaxDegreeOfParallelism(string rootPath, int workItemCount)
-	{
-		if (workItemCount <= 0)
-			return 1;
-
-		var storageCap = IsLikelySlowStorageRoot(rootPath)
-			? 2
-			: LocalStorageMaxParallelism;
-		return Math.Max(1, Math.Min(storageCap, workItemCount));
-	}
-
-	private static bool IsLikelySlowStorageRoot(string rootPath)
-	{
-		try
-		{
-			var pathRoot = Path.GetPathRoot(rootPath);
-			if (string.IsNullOrWhiteSpace(pathRoot))
-				return false;
-
-			if (OperatingSystem.IsWindows() &&
-			    pathRoot.StartsWith(@"\\", StringComparison.Ordinal))
-			{
-				return true;
-			}
-
-			return new DriveInfo(pathRoot).DriveType == DriveType.Network;
-		}
-		catch
-		{
-			return false;
 		}
 	}
 

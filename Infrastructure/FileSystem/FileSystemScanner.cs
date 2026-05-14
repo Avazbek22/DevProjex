@@ -2,10 +2,6 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
 {
-	// Optimal parallelism for modern multi-core CPUs with NVMe SSDs
-	private static readonly int MaxParallelism = Math.Max(4, Environment.ProcessorCount);
-	private const int SequentialDirectoryScanThreshold = 24;
-
 	public bool CanReadRoot(string rootPath)
 	{
 		try
@@ -643,24 +639,27 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		for (var i = 0; i < directories.Count; i++)
 			isAccessDeniedByDirectory[i] = directories[i].IsAccessDenied;
 
-		if (directories.Count < SequentialDirectoryScanThreshold)
-		{
-			for (var index = 0; index < directories.Count; index++)
+		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+		Parallel.For(
+			0,
+			directories.Count,
+			parallelOptions,
+			() => new LocalExtensionScanState(),
+			(index, _, localState) =>
 			{
-				cancellationToken.ThrowIfCancellationRequested();
+				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 				var dir = directories[index].Path;
 				var shouldApplySmartIgnoreForFiles = rules.ShouldApplySmartIgnore(dir, isDirectory: true);
 
-				var localCounts = default(MutableIgnoreOptionCounts);
 				var hasVisibleFiles = false;
 				try
 				{
 					foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(dir))
 					{
-						cancellationToken.ThrowIfCancellationRequested();
+						parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
 						if (collectIgnoreOptionCounts)
-							AccumulateFileIgnoreOptionCounts(file, ref localCounts);
+							AccumulateFileIgnoreOptionCounts(file, ref localState.Counts);
 
 						var fileGitIgnore = useGitIgnore
 							? rules.EvaluateGitIgnore(file.FullPath, isDirectory: false, file.Name)
@@ -678,9 +677,9 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 						hasVisibleFiles = true;
 						var ext = Path.GetExtension(file.Name);
 						if (IsExtensionlessFileName(file.Name))
-							uniqueExtensions.Add(file.Name);
+							localState.Extensions.Add(file.Name);
 						else if (!string.IsNullOrWhiteSpace(ext))
-							uniqueExtensions.Add(ext);
+							localState.Extensions.Add(ext);
 					}
 				}
 				catch (OperationCanceledException)
@@ -691,100 +690,29 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 				{
 					Interlocked.Exchange(ref hadAccessDenied, 1);
 					isAccessDeniedByDirectory[index] = true;
-					continue;
+					return localState;
 				}
 				catch
 				{
-					continue;
+					return localState;
 				}
 
 				hasVisibleFilesByDirectory[index] = hasVisibleFiles;
-				if (collectIgnoreOptionCounts)
-					fileCounts.Add(localCounts);
-			}
-		}
-		else
-		{
-			var parallelOptions = new ParallelOptions
+				return localState;
+			},
+			localState =>
 			{
-				MaxDegreeOfParallelism = Math.Min(MaxParallelism, directories.Count),
-				CancellationToken = cancellationToken
-			};
+				if (localState.Extensions.Count == 0 && !collectIgnoreOptionCounts)
+					return;
 
-			Parallel.For(
-				0,
-				directories.Count,
-				parallelOptions,
-				() => new LocalExtensionScanState(),
-				(index, _, localState) =>
+				lock (mergeLock)
 				{
-					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
-					var dir = directories[index].Path;
-					var shouldApplySmartIgnoreForFiles = rules.ShouldApplySmartIgnore(dir, isDirectory: true);
-
-					var hasVisibleFiles = false;
-					try
-					{
-						foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(dir))
-						{
-							parallelOptions.CancellationToken.ThrowIfCancellationRequested();
-
-							if (collectIgnoreOptionCounts)
-								AccumulateFileIgnoreOptionCounts(file, ref localState.Counts);
-
-							var fileGitIgnore = useGitIgnore
-								? rules.EvaluateGitIgnore(file.FullPath, isDirectory: false, file.Name)
-								: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
-							if (ShouldSkipFileByName(
-								    file.Name,
-								    file.FullPath,
-								    file.IsHidden,
-								    file.Length,
-								    rules,
-								    shouldApplySmartIgnoreForFiles,
-								    fileGitIgnore))
-								continue;
-
-							hasVisibleFiles = true;
-							var ext = Path.GetExtension(file.Name);
-							if (IsExtensionlessFileName(file.Name))
-								localState.Extensions.Add(file.Name);
-							else if (!string.IsNullOrWhiteSpace(ext))
-								localState.Extensions.Add(ext);
-						}
-					}
-					catch (OperationCanceledException)
-					{
-						throw;
-					}
-					catch (UnauthorizedAccessException)
-					{
-						Interlocked.Exchange(ref hadAccessDenied, 1);
-						isAccessDeniedByDirectory[index] = true;
-						return localState;
-					}
-					catch
-					{
-						return localState;
-					}
-
-					hasVisibleFilesByDirectory[index] = hasVisibleFiles;
-					return localState;
-				},
-				localState =>
-				{
-					if (localState.Extensions.Count == 0 && !collectIgnoreOptionCounts)
-						return;
-
-					lock (mergeLock)
-					{
-						if (localState.Extensions.Count > 0)
-							uniqueExtensions.UnionWith(localState.Extensions);
-						if (collectIgnoreOptionCounts)
-							fileCounts.Add(localState.Counts);
-					}
-				});
-		}
+					if (localState.Extensions.Count > 0)
+						uniqueExtensions.UnionWith(localState.Extensions);
+					if (collectIgnoreOptionCounts)
+						fileCounts.Add(localState.Counts);
+				}
+			});
 
 		var emptyFolderCount = 0;
 		if (collectIgnoreOptionCounts && directories.Count > 0)
@@ -1171,56 +1099,36 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			return localMetrics;
 		}
 
-		if (directories.Count < SequentialDirectoryScanThreshold)
-		{
-			for (var index = 0; index < directories.Count; index++)
+		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+		Parallel.For(
+			0,
+			directories.Count,
+			parallelOptions,
+			() => new IgnoreSectionSnapshotLocalState(),
+			(index, _, localState) =>
 			{
-				var localRawCounts = default(MutableIgnoreOptionCounts);
-				var localExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-				fileMetrics[index] = ScanDirectoryFiles(index, cancellationToken, localExtensions, ref localRawCounts);
-				rawCounts.Add(localRawCounts);
-				if (localExtensions.Count > 0)
-					extensions.UnionWith(localExtensions);
-			}
-		}
-		else
-		{
-			var parallelOptions = new ParallelOptions
+				fileMetrics[index] = ScanDirectoryFiles(
+					index,
+					parallelOptions.CancellationToken,
+					localState.Extensions,
+					ref localState.RawCounts);
+				return localState;
+			},
+			localState =>
 			{
-				MaxDegreeOfParallelism = Math.Min(MaxParallelism, directories.Count),
-				CancellationToken = cancellationToken
-			};
-
-			Parallel.For(
-				0,
-				directories.Count,
-				parallelOptions,
-				() => new IgnoreSectionSnapshotLocalState(),
-				(index, _, localState) =>
+				if (localState.Extensions.Count == 0 &&
+				    localState.RawCounts.IsEmpty)
 				{
-					fileMetrics[index] = ScanDirectoryFiles(
-						index,
-						parallelOptions.CancellationToken,
-						localState.Extensions,
-						ref localState.RawCounts);
-					return localState;
-				},
-				localState =>
-				{
-					if (localState.Extensions.Count == 0 &&
-					    localState.RawCounts.IsEmpty)
-					{
-						return;
-					}
+					return;
+				}
 
-					lock (mergeLock)
-					{
-						rawCounts.Add(localState.RawCounts);
-						if (localState.Extensions.Count > 0)
-							extensions.UnionWith(localState.Extensions);
-					}
-				});
-		}
+				lock (mergeLock)
+				{
+					rawCounts.Add(localState.RawCounts);
+					if (localState.Extensions.Count > 0)
+						extensions.UnionWith(localState.Extensions);
+				}
+			});
 
 		for (var index = 0; index < directories.Count; index++)
 		{

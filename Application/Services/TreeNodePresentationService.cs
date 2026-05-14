@@ -2,9 +2,6 @@ namespace DevProjex.Application.Services;
 
 public sealed class TreeNodePresentationService(LocalizationService localization, IIconMapper iconMapper)
 {
-	private static readonly int RootProjectionParallelism =
-		Math.Clamp(Environment.ProcessorCount, min: 2, max: 16);
-
 	public TreeNodeDescriptor Build(FileSystemNode root)
 	{
 		return BuildNode(root, isRoot: true);
@@ -39,7 +36,7 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 		// Descriptor projection is a full second pass over the tree after filesystem scan.
 		// Parallelizing only the first level keeps the implementation predictable while
 		// shaving CPU time on large workspaces with many top-level branches.
-		if (allowParallelAtThisLevel && children.Count > 1)
+		if (allowParallelAtThisLevel)
 		{
 			var projectedChildren = new TreeNodeDescriptor[children.Count];
 			Parallel.For(
@@ -47,7 +44,7 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 				children.Count,
 				new ParallelOptions
 				{
-					MaxDegreeOfParallelism = Math.Min(RootProjectionParallelism, children.Count)
+					MaxDegreeOfParallelism = ScanParallelismPolicy.MaxDegreeOfParallelism
 				},
 				index => projectedChildren[index] = BuildNode(children[index], isRoot: false));
 

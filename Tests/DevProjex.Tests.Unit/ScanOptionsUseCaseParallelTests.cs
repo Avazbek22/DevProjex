@@ -445,4 +445,304 @@ public sealed class ScanOptionsUseCaseParallelTests
 		Assert.Equal([".A", ".m", ".z"], result.Extensions);
 		Assert.Equal(["A", "m", "z"], result.RootFolders);
 	}
+
+	[Fact]
+	public async Task GetExtensionsForRootFolders_LegacyScanner_TwoFoldersStartBeforeFirstCompletes()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFolder("src");
+		temp.CreateFolder("tests");
+		using var scanner = new BlockingLegacyRootScanner(expectedFolderCalls: 2);
+		var useCase = new ScanOptionsUseCase(scanner);
+
+		var scanTask = Task.Run(() => useCase.GetExtensionsForRootFolders(
+			temp.Path,
+			["src", "tests"],
+			CreateDefaultRules()));
+
+		var allFoldersStarted = scanner.WaitForAllFolderCalls(TimeSpan.FromSeconds(2));
+		scanner.Release();
+		var result = await scanTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+		Assert.True(allFoldersStarted);
+		Assert.Equal(2, scanner.FolderCallCount);
+		Assert.Contains(".folder", result.Value);
+	}
+
+	[Theory]
+	[InlineData(BlockingScanOperation.ExtensionsWithCounts)]
+	[InlineData(BlockingScanOperation.EffectiveEmptyFolders)]
+	[InlineData(BlockingScanOperation.IgnoreSectionSnapshot)]
+	[InlineData(BlockingScanOperation.EffectiveIgnoreCounts)]
+	public async Task RootFolderScanOperations_TwoFoldersStartBeforeFirstCompletes(
+		BlockingScanOperation operation)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFolder("src");
+		temp.CreateFolder("tests");
+		using var scanner = new BlockingAdvancedRootScanner(operation, expectedFolderCalls: 2);
+		var useCase = new ScanOptionsUseCase(scanner);
+
+		var scanTask = Task.Run(() => ExecuteBlockingOperation(useCase, operation, temp.Path));
+
+		var allFoldersStarted = scanner.WaitForAllFolderCalls(TimeSpan.FromSeconds(2));
+		scanner.Release();
+		await scanTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+		Assert.True(allFoldersStarted);
+		Assert.Equal(2, scanner.FolderCallCount);
+	}
+
+	[Fact]
+	public void ScanParallelismPolicy_UsesOneCpuWideMaximumEverywhere()
+	{
+		var options = ScanParallelismPolicy.CreateOptions();
+
+		Assert.True(ScanParallelismPolicy.MaxDegreeOfParallelism >= Math.Max(1, Environment.ProcessorCount));
+		Assert.Equal(ScanParallelismPolicy.MaxDegreeOfParallelism, options.MaxDegreeOfParallelism);
+	}
+
+	private static object ExecuteBlockingOperation(
+		ScanOptionsUseCase useCase,
+		BlockingScanOperation operation,
+		string rootPath)
+	{
+		return operation switch
+		{
+			BlockingScanOperation.ExtensionsWithCounts => useCase.GetExtensionsAndIgnoreCountsForRootFolders(
+				rootPath,
+				["src", "tests"],
+				CreateDefaultRules()),
+			BlockingScanOperation.EffectiveEmptyFolders => useCase.GetEffectiveEmptyFolderCountForRootFolders(
+				rootPath,
+				["src", "tests"],
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+				CreateDefaultRules()),
+			BlockingScanOperation.IgnoreSectionSnapshot => useCase.GetIgnoreSectionSnapshotForRootFolders(
+				rootPath,
+				["src", "tests"],
+				CreateDefaultRules(),
+				CreateDefaultRules(),
+				effectiveExtensionPolicy: null),
+			BlockingScanOperation.EffectiveIgnoreCounts => useCase.GetEffectiveIgnoreOptionCountsForRootFolders(
+				rootPath,
+				["src", "tests"],
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+				CreateDefaultRules(),
+				IgnoreOptionCounts.Empty),
+			_ => throw new ArgumentOutOfRangeException(nameof(operation), operation, null)
+		};
+	}
+
+	public enum BlockingScanOperation
+	{
+		ExtensionsWithCounts,
+		EffectiveEmptyFolders,
+		IgnoreSectionSnapshot,
+		EffectiveIgnoreCounts
+	}
+
+	private sealed class BlockingLegacyRootScanner(int expectedFolderCalls) : IFileSystemScanner, IDisposable
+	{
+		private readonly CountdownEvent _allFolderCallsStarted = new(expectedFolderCalls);
+		private readonly ManualResetEventSlim _release = new();
+		private int _folderCallCount;
+
+		public int FolderCallCount => Volatile.Read(ref _folderCallCount);
+
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			SignalAndWait(cancellationToken);
+			return new ScanResult<HashSet<string>>(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".folder" },
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			return new ScanResult<HashSet<string>>(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".root" },
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			return new ScanResult<List<string>>(["src", "tests"], false, false);
+		}
+
+		public bool WaitForAllFolderCalls(TimeSpan timeout) => _allFolderCallsStarted.Wait(timeout);
+
+		public void Release() => _release.Set();
+
+		public void Dispose()
+		{
+			_release.Dispose();
+			_allFolderCallsStarted.Dispose();
+		}
+
+		private void SignalAndWait(CancellationToken cancellationToken)
+		{
+			Interlocked.Increment(ref _folderCallCount);
+			_allFolderCallsStarted.Signal();
+			_release.Wait(cancellationToken);
+		}
+	}
+
+	private sealed class BlockingAdvancedRootScanner(
+		BlockingScanOperation operation,
+		int expectedFolderCalls)
+		: IFileSystemScanner,
+			IFileSystemScannerAdvanced,
+			IFileSystemScannerEffectiveEmptyFolderCounter,
+			IFileSystemScannerEffectiveIgnoreCountsProvider,
+			IFileSystemScannerExtensionPolicySnapshotProvider,
+			IDisposable
+	{
+		private readonly CountdownEvent _allFolderCallsStarted = new(expectedFolderCalls);
+		private readonly ManualResetEventSlim _release = new();
+		private int _folderCallCount;
+
+		public int FolderCallCount => Volatile.Read(ref _folderCallCount);
+
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) => new([], false, false);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) => new([], false, false);
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) => new(["src", "tests"], false, false);
+
+		public ScanResult<ExtensionsScanData> GetExtensionsWithIgnoreOptionCounts(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			BlockWhen(BlockingScanOperation.ExtensionsWithCounts, cancellationToken);
+			return new ScanResult<ExtensionsScanData>(
+				new ExtensionsScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { $".{Path.GetFileName(rootPath)}" },
+					new IgnoreOptionCounts(EmptyFolders: 1)),
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		public ScanResult<ExtensionsScanData> GetRootFileExtensionsWithIgnoreOptionCounts(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			return new ScanResult<ExtensionsScanData>(
+				new ExtensionsScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".root" },
+					IgnoreOptionCounts.Empty),
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		public ScanResult<int> GetEffectiveEmptyFolderCount(
+			string rootPath,
+			IReadOnlySet<string> allowedExtensions,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			BlockWhen(BlockingScanOperation.EffectiveEmptyFolders, cancellationToken);
+			return new ScanResult<int>(1, RootAccessDenied: false, HadAccessDenied: false);
+		}
+
+		public ScanResult<IgnoreOptionCounts> GetEffectiveIgnoreOptionCounts(
+			string rootPath,
+			IReadOnlySet<string> allowedExtensions,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			BlockWhen(BlockingScanOperation.EffectiveIgnoreCounts, cancellationToken);
+			return new ScanResult<IgnoreOptionCounts>(
+				new IgnoreOptionCounts(EmptyFolders: 1),
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		public ScanResult<IgnoreOptionCounts> GetEffectiveRootFileIgnoreOptionCounts(
+			string rootPath,
+			IReadOnlySet<string> allowedExtensions,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			return new ScanResult<IgnoreOptionCounts>(IgnoreOptionCounts.Empty, false, false);
+		}
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default)
+		{
+			BlockWhen(BlockingScanOperation.IgnoreSectionSnapshot, cancellationToken);
+			return CreateSnapshot($".{Path.GetFileName(rootPath)}");
+		}
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default)
+		{
+			return CreateSnapshot(".root");
+		}
+
+		public bool WaitForAllFolderCalls(TimeSpan timeout) => _allFolderCallsStarted.Wait(timeout);
+
+		public void Release() => _release.Set();
+
+		public void Dispose()
+		{
+			_release.Dispose();
+			_allFolderCallsStarted.Dispose();
+		}
+
+		private void BlockWhen(BlockingScanOperation expectedOperation, CancellationToken cancellationToken)
+		{
+			if (operation != expectedOperation)
+				return;
+
+			Interlocked.Increment(ref _folderCallCount);
+			_allFolderCallsStarted.Signal();
+			_release.Wait(cancellationToken);
+		}
+
+		private static ScanResult<IgnoreSectionScanData> CreateSnapshot(string extension)
+		{
+			return new ScanResult<IgnoreSectionScanData>(
+				new IgnoreSectionScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { extension },
+					new IgnoreOptionCounts(EmptyFolders: 1),
+					new IgnoreOptionCounts(EmptyFolders: 1)),
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+	}
 }
