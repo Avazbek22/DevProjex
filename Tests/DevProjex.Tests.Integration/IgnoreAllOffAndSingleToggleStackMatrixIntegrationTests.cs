@@ -21,7 +21,7 @@ public sealed class IgnoreAllOffAndSingleToggleStackMatrixIntegrationTests
 			temp.Path,
 			CreateAllIgnoreOptionsOffContext(temp.Path, defaults));
 
-		Assert.Empty(allOff.IgnoreOptions.Where(option => option.IsChecked));
+		Assert.DoesNotContain(allOff.IgnoreOptions, option => option.IsChecked);
 		AssertRootOptionsVisibleAndChecked(temp.Path, allOff, ExpectedAllRootFolders(stackCase));
 		AssertExtensionOptionsVisibleAndChecked(allOff, ExpectedAllExtensions(stackCase));
 		Assert.True(allOff.ExtensionlessEntriesCount > 0);

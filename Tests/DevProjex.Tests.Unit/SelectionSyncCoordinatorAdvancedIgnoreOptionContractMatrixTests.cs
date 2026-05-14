@@ -114,7 +114,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			hasIgnoreCounts: true);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
-		var target = Assert.Single(viewModel.IgnoreOptions.Where(item => item.Id == optionCase.Id));
+		var target = Assert.Single(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
 		target.IsChecked = false;
 		coordinator.UpdateIgnoreSelectionCache();
 		coordinator.SyncIgnoreAllCheckbox();
@@ -147,7 +147,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			hasIgnoreCounts: true);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
-		var target = Assert.Single(viewModel.IgnoreOptions.Where(item => item.Id == optionCase.Id));
+		var target = Assert.Single(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
 		target.IsChecked = false;
 		coordinator.UpdateIgnoreSelectionCache();
 		coordinator.SyncIgnoreAllCheckbox();
@@ -165,7 +165,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			hasIgnoreCounts: true);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
-		target = Assert.Single(viewModel.IgnoreOptions.Where(item => item.Id == optionCase.Id));
+		target = Assert.Single(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
 		Assert.False(target.IsChecked);
 		Assert.False(viewModel.AllIgnoreChecked);
 	}

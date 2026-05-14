@@ -276,25 +276,28 @@ public sealed class IgnoreRulesService(
 
 		try
 		{
-			var fileInfo = new FileInfo(gitIgnorePath);
-			var cacheKey = fileInfo.FullName;
-			var signature = new GitIgnoreSignature(fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length);
-
-			lock (CacheSync)
+			var hasSignature = TryGetGitIgnoreSignature(gitIgnorePath, out var cacheKey, out var signature);
+			if (hasSignature)
 			{
-				if (GitIgnoreCache.TryGetValue(cacheKey, out var cached) &&
-					cached.Signature.Equals(signature))
+				lock (CacheSync)
 				{
-					return cached.Matcher;
+					if (GitIgnoreCache.TryGetValue(cacheKey, out var cached) &&
+						cached.Signature.Equals(signature))
+					{
+						return cached.Matcher;
+					}
 				}
 			}
 
 			var matcher = GitIgnoreMatcher.Build(rootPath, File.ReadLines(gitIgnorePath));
-			lock (CacheSync)
+			if (hasSignature)
 			{
-				GitIgnoreCache[cacheKey] = new GitIgnoreCacheEntry(signature, matcher);
-				if (GitIgnoreCache.Count > CacheLimit)
-					GitIgnoreCache.Clear();
+				lock (CacheSync)
+				{
+					GitIgnoreCache[cacheKey] = new GitIgnoreCacheEntry(signature, matcher);
+					if (GitIgnoreCache.Count > CacheLimit)
+						GitIgnoreCache.Clear();
+				}
 			}
 
 			return matcher;
@@ -305,7 +308,47 @@ public sealed class IgnoreRulesService(
 		}
 	}
 
-	private sealed record GitIgnoreSignature(long LastWriteTicksUtc, long LengthBytes);
+	private static bool TryGetGitIgnoreSignature(
+		string gitIgnorePath,
+		out string cacheKey,
+		out GitIgnoreSignature signature)
+	{
+		cacheKey = Path.GetFullPath(gitIgnorePath);
+		signature = default;
+
+		try
+		{
+			var linkInfo = new FileInfo(gitIgnorePath);
+			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+			{
+				// A symlinked .gitignore is valid project input. Use target metadata for cache
+				// invalidation, but keep the link path as the cache key so rules stay scoped
+				// to the project root that owns the .gitignore entry.
+				var resolvedTarget = linkInfo.ResolveLinkTarget(returnFinalTarget: true);
+				if (resolvedTarget is not FileInfo targetInfo || !targetInfo.Exists)
+					return false;
+
+				targetInfo.Refresh();
+				signature = new GitIgnoreSignature(
+					targetInfo.LastWriteTimeUtc.Ticks,
+					targetInfo.Length,
+					linkInfo.LinkTarget ?? string.Empty);
+				return true;
+			}
+
+			signature = new GitIgnoreSignature(
+				linkInfo.LastWriteTimeUtc.Ticks,
+				linkInfo.Length,
+				LinkTarget: string.Empty);
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private readonly record struct GitIgnoreSignature(long LastWriteTicksUtc, long LengthBytes, string LinkTarget);
 
 	private sealed record GitIgnoreCacheEntry(GitIgnoreSignature Signature, GitIgnoreMatcher Matcher);
 

@@ -231,6 +231,39 @@ public sealed class FileSystemReparsePointIntegrationTests
 		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "logs", StringComparison.Ordinal));
 	}
 
+	[Fact]
+	public void SymlinkedGitIgnore_TargetMutationInvalidatesMatcherCache()
+	{
+		using var temp = new TemporaryDirectory();
+		var targetPath = Path.Combine(temp.Path, "gitignore-target");
+		temp.CreateFile("gitignore-target", "ignored/\n");
+		temp.CreateFile("src/app.cs", "class App {}");
+		temp.CreateFile("ignored/noise.cs", "class Noise {}");
+
+		if (!TryCreateFileSymlink(Path.Combine(temp.Path, ".gitignore"), targetPath))
+			return;
+
+		var ignoreRulesService = new IgnoreRulesService(new SmartIgnoreService([]));
+
+		var firstRules = ignoreRulesService.Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: ["src", "ignored"]);
+		var firstTree = BuildGitIgnoreSymlinkTree(temp.Path, firstRules);
+		Assert.DoesNotContain(firstTree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));
+
+		File.WriteAllText(targetPath, "# no ignores now\n");
+		File.SetLastWriteTimeUtc(targetPath, DateTime.UtcNow.AddMinutes(1));
+
+		var secondRules = ignoreRulesService.Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: ["src", "ignored"]);
+		var secondTree = BuildGitIgnoreSymlinkTree(temp.Path, secondRules);
+
+		Assert.Contains(secondTree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));
+	}
+
 	private static IgnoreRules CreateIgnoreRules() => new(
 		IgnoreHiddenFolders: false,
 		IgnoreHiddenFiles: false,
@@ -271,14 +304,49 @@ public sealed class FileSystemReparsePointIntegrationTests
 		try
 		{
 			File.CreateSymbolicLink(linkPath, targetPath);
-			return File.Exists(linkPath) &&
-			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+			return IsReadableFileSymlink(linkPath);
 		}
 		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
 		{
 			return false;
 		}
 	}
+
+	private static bool IsReadableFileSymlink(string linkPath)
+	{
+		try
+		{
+			if (!File.Exists(linkPath))
+				return false;
+
+			if (!File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint))
+				return false;
+
+			var linkInfo = new FileInfo(linkPath);
+			if (string.IsNullOrWhiteSpace(linkInfo.LinkTarget))
+				return false;
+
+			if (linkInfo.ResolveLinkTarget(returnFinalTarget: true) is not FileInfo { Exists: true })
+				return false;
+
+			// The production path reads the symlink as .gitignore. Validate that exact
+			// operation before running assertions so unsupported platforms exit cleanly.
+			using var stream = File.Open(linkPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+			return stream.CanRead;
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private static TreeBuildResult BuildGitIgnoreSymlinkTree(string rootPath, IgnoreRules rules) =>
+		new TreeBuilder().Build(
+			rootPath,
+			new TreeFilterOptions(
+				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src", "ignored" },
+				IgnoreRules: rules));
 
 	private static bool TryCreateDirectoryJunction(string linkPath, string targetPath)
 	{

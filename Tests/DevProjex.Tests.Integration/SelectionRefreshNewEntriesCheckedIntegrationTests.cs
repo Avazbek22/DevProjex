@@ -507,8 +507,8 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 		string name,
 		bool expectedChecked)
 	{
-		var option = Assert.Single(options.Where(option =>
-			string.Equals(option.Name, name, StringComparison.OrdinalIgnoreCase)));
+		var option = Assert.Single(options, option =>
+			string.Equals(option.Name, name, StringComparison.OrdinalIgnoreCase));
 		Assert.Equal(expectedChecked, option.IsChecked);
 	}
 
@@ -517,7 +517,7 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 		IgnoreOptionId optionId,
 		bool expectedChecked)
 	{
-		var option = Assert.Single(snapshot.IgnoreOptions.Where(option => option.Id == optionId));
+		var option = Assert.Single(snapshot.IgnoreOptions, option => option.Id == optionId);
 		Assert.Equal(expectedChecked, option.IsChecked);
 		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(optionId, out var cachedState));
 		Assert.Equal(expectedChecked, cachedState);

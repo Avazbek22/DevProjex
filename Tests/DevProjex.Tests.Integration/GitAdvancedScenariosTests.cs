@@ -89,7 +89,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
             // Assert
             Assert.NotEmpty(branches);
             Assert.Contains(branches, b => b.Name.Equals("master", StringComparison.OrdinalIgnoreCase));
-            Assert.Single(branches.Where(b => b.IsActive));
+            Assert.Single(branches, b => b.IsActive);
 
             var activeBranch = branches.First(b => b.IsActive);
             Assert.Equal("master", activeBranch.Name, StringComparer.OrdinalIgnoreCase);
@@ -156,7 +156,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
             var updatedBranches = await _gitService.GetBranchesAsync(cacheDir);
 
             // Assert
-            Assert.Single(updatedBranches.Where(b => b.IsActive));
+            Assert.Single(updatedBranches, b => b.IsActive);
 
             var activeBranch = updatedBranches.First(b => b.IsActive);
             Assert.Equal(targetBranch.Name, activeBranch.Name, StringComparer.OrdinalIgnoreCase);
