@@ -202,10 +202,11 @@ public sealed class FileSystemReparsePointIntegrationTests
 	public void SymlinkedGitIgnore_IsParsedWithoutTraversingSymlinkedContentAsProjectFiles()
 	{
 		using var temp = new TemporaryDirectory();
-		temp.CreateFile("gitignore-target", "ignored/\n*.log\n");
+		temp.CreateFile("gitignore-target", "ignored/\nlogs/\n*.log\n");
 		temp.CreateFile("src/app.cs", "class App {}");
 		temp.CreateFile("ignored/noise.cs", "class Noise {}");
 		temp.CreateFile("logs/runtime.log", "ignored log");
+		temp.CreateFile("runtime.log", "ignored root log");
 
 		if (!TryCreateFileSymlink(
 			    Path.Combine(temp.Path, ".gitignore"),
@@ -229,6 +230,30 @@ public sealed class FileSystemReparsePointIntegrationTests
 		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "src", StringComparison.Ordinal));
 		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));
 		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "logs", StringComparison.Ordinal));
+		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "runtime.log", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void GitIgnoreFilePattern_RemovesMatchingFileButKeepsNowEmptyDirectoryUntilEmptyFoldersToggleIsEnabled()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.log\n");
+		temp.CreateFile("logs/runtime.log", "ignored log");
+
+		var rules = new IgnoreRulesService(new SmartIgnoreService([])).Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: ["logs"]);
+		var tree = new TreeBuilder().Build(
+			temp.Path,
+			new TreeFilterOptions(
+				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".log" },
+				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "logs" },
+				IgnoreRules: rules));
+
+		// A file-only gitignore pattern must not behave like "logs/".
+		var logs = Assert.Single(tree.Root.Children, node => string.Equals(node.Name, "logs", StringComparison.Ordinal));
+		Assert.Empty(logs.Children);
 	}
 
 	[Fact]
