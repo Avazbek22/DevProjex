@@ -236,6 +236,54 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
+	public void SaveProfile_RoundTripsExplicitOptionStatesForRefreshProfileRestoration()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoStates");
+
+			store.SaveProfile(
+				projectPath,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: ["src"],
+					SelectedExtensions: [".cs"],
+					SelectedIgnoreOptions: [IgnoreOptionId.DotFiles],
+					RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+					{
+						["src"] = true,
+						["docs"] = false
+					},
+					ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+					{
+						[".cs"] = true,
+						[".csv"] = false
+					},
+					IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.DotFiles] = true,
+						[IgnoreOptionId.EmptyFiles] = false
+					}));
+
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.NotNull(loaded.RootFolderStates);
+			Assert.NotNull(loaded.ExtensionStates);
+			Assert.NotNull(loaded.IgnoreOptionStates);
+			Assert.True(loaded.RootFolderStates!["src"]);
+			Assert.False(loaded.RootFolderStates!["docs"]);
+			Assert.True(loaded.ExtensionStates![".cs"]);
+			Assert.False(loaded.ExtensionStates![".csv"]);
+			Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.DotFiles]);
+			Assert.False(loaded.IgnoreOptionStates![IgnoreOptionId.EmptyFiles]);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void SaveProfile_EmptyCollections_RoundTripAsEmpty()
 	{
 		var tempRoot = CreateTempDirectory();

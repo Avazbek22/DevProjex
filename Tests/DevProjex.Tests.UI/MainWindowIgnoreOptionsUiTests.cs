@@ -310,6 +310,98 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task RefreshProject_AfterExternalMutation_ChecksNewEntriesAcrossSectionsAndPreservesUncheckedState()
+    {
+        using var project = UiTestProject.CreateWithExternalRefreshMutationWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".csv", visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.EmptyFiles,
+                visible: true,
+                isChecked: true);
+
+            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
+            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".csv");
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: false);
+            await WaitForExtensionStateAsync(window, ".csv", visible: true, isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.EmptyFiles,
+                visible: true,
+                isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            MutateExternalRefreshWorkspace(project.RootPath);
+            await UiTestDriver.RefreshProjectAsync(window);
+
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: false);
+            await WaitForRootFolderStateAsync(window, "api", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "web", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "generated", visible: true, isChecked: true);
+
+            await WaitForExtensionStateAsync(window, ".csv", visible: true, isChecked: false);
+            await WaitForExtensionStateAsync(window, ".cs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".ts", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".log", visible: true, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.EmptyFiles,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFiles,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.EmptyFolders,
+                visible: true,
+                isChecked: true);
+
+            await WaitForProjectTreePathStateAsync(window, exists: true, "src", "App.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "api", "src", "Program.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "web", "src", "app.ts");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "generated", "report.log");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "docs", "notes.md");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "data.csv");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "api", "logs", "runtime.log");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "web", "node_modules", "pkg", "index.js");
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".idea", "workspace.xml");
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".env");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "empty-root");
+            await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PythonProjectWithoutGitIgnore_ShowsSmartIgnoreAndHidesSmartArtifacts()
     {
         using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
@@ -855,6 +947,72 @@ public sealed class MainWindowIgnoreOptionsUiTests
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static async Task WaitForRootFolderStateAsync(
+        MainWindow window,
+        string rootFolderName,
+        bool visible,
+        bool? isChecked = null)
+    {
+        await UiTestDriver.WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var option = UiTestDriver.GetViewModel(window).RootFolders
+                    .FirstOrDefault(candidate => string.Equals(candidate.Name, rootFolderName, StringComparison.Ordinal));
+                if (!visible)
+                    return option is null;
+
+                return option is not null && (isChecked is null || option.IsChecked == isChecked);
+            },
+            $"root folder option '{rootFolderName}' to be visible={visible}, checked={isChecked?.ToString() ?? "<any>"}");
+    }
+
+    private static async Task WaitForExtensionStateAsync(
+        MainWindow window,
+        string extensionName,
+        bool visible,
+        bool? isChecked = null)
+    {
+        await UiTestDriver.WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var option = UiTestDriver.GetViewModel(window).Extensions
+                    .FirstOrDefault(candidate => string.Equals(candidate.Name, extensionName, StringComparison.OrdinalIgnoreCase));
+                if (!visible)
+                    return option is null;
+
+                return option is not null && (isChecked is null || option.IsChecked == isChecked);
+            },
+            $"extension option '{extensionName}' to be visible={visible}, checked={isChecked?.ToString() ?? "<any>"}");
+    }
+
+    private static void MutateExternalRefreshWorkspace(string rootPath)
+    {
+        WriteTextFile(rootPath, Path.Combine("api", ".gitignore"), "logs/\n");
+        WriteTextFile(rootPath, Path.Combine("api", "App.csproj"), "<Project />\n");
+        WriteTextFile(rootPath, Path.Combine("api", "src", "Program.cs"), "class Program {}\n");
+        WriteTextFile(rootPath, Path.Combine("api", "logs", "runtime.log"), "ignored by nested gitignore\n");
+        WriteTextFile(rootPath, Path.Combine("web", "package.json"), "{}\n");
+        WriteTextFile(rootPath, Path.Combine("web", "src", "app.ts"), "export const app = true;\n");
+        WriteTextFile(rootPath, Path.Combine("web", "node_modules", "pkg", "index.js"), "module.exports = {};\n");
+        WriteTextFile(rootPath, Path.Combine("generated", "report.log"), "new visible log\n");
+        WriteTextFile(rootPath, "new-data.csv", "2,updated\n");
+        WriteTextFile(rootPath, Path.Combine(".idea", "workspace.xml"), "<project />\n");
+        WriteTextFile(rootPath, ".env", "APP_ENV=test\n");
+        Directory.CreateDirectory(Path.Combine(rootPath, "empty-root"));
+    }
+
+    private static void WriteTextFile(string rootPath, string relativePath, string content)
+    {
+        var fullPath = Path.Combine(rootPath, relativePath);
+        var directoryPath = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+            Directory.CreateDirectory(directoryPath);
+
+        File.WriteAllText(fullPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
     private static async Task AssertPythonIdeaWorkspaceStateAsync(

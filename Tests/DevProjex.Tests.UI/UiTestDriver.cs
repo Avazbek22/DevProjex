@@ -116,6 +116,22 @@ internal static class UiTestDriver
         await WaitForSelectionRefreshIdleAsync(window);
     }
 
+    public static async Task RefreshProjectAsync(MainWindow window)
+    {
+        var method = typeof(MainWindow).GetMethod("OnRefresh", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            method!.Invoke(window, [window, new RoutedEventArgs()]);
+        }, DispatcherPriority.Normal);
+
+        // OnRefresh is an async-void UI event handler. Waiting through the same public
+        // idle contract used by real interactions makes the test exercise the full refresh
+        // pipeline without relying on implementation-specific task handles.
+        await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(40));
+    }
+
     public static MainWindowViewModel GetViewModel(MainWindow window)
         => Assert.IsType<MainWindowViewModel>(window.DataContext);
 

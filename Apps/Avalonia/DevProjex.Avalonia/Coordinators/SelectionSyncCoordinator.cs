@@ -31,6 +31,7 @@ public sealed class SelectionSyncCoordinator(
 
     private IReadOnlyList<IgnoreOptionDescriptor> _ignoreOptions = [];
     private readonly IgnoreSelectionState _ignoreSelectionState = new();
+    private bool _ignoreOptionStateCacheIsComplete;
     private HashSet<string> _rootSelectionCache = new(PathComparer.Default);
     private Dictionary<string, bool> _rootOptionStateCache = new(PathComparer.Default);
     private bool _rootSelectionInitialized;
@@ -464,14 +465,33 @@ public sealed class SelectionSyncCoordinator(
             profile.SelectedRootFolders,
             PathComparer.Default);
         _rootOptionStateCache.Clear();
+        if (profile.RootFolderStates is not null)
+        {
+            foreach (var (name, isChecked) in profile.RootFolderStates)
+                _rootOptionStateCache[name] = isChecked;
+        }
 
         _extensionsSelectionInitialized = true;
         _extensionsSelectionCache = new HashSet<string>(
             profile.SelectedExtensions,
             StringComparer.OrdinalIgnoreCase);
         _extensionOptionStateCache.Clear();
+        if (profile.ExtensionStates is not null)
+        {
+            foreach (var (name, isChecked) in profile.ExtensionStates)
+                _extensionOptionStateCache[name] = isChecked;
+        }
 
-        _ignoreSelectionState.RestoreProfileSelection(profile.SelectedIgnoreOptions);
+        if (profile.IgnoreOptionStates is not null)
+        {
+            _ignoreSelectionState.ReplaceStateCache(profile.IgnoreOptionStates);
+            _ignoreOptionStateCacheIsComplete = true;
+        }
+        else
+        {
+            _ignoreSelectionState.RestoreProfileSelection(profile.SelectedIgnoreOptions);
+            _ignoreOptionStateCacheIsComplete = false;
+        }
     }
 
     public void ResetProjectProfileSelections(string projectPath)
@@ -497,6 +517,7 @@ public sealed class SelectionSyncCoordinator(
         _extensionOptionStateCache.TrimExcess();
 
         _ignoreSelectionState.Reset(trimExcess: true);
+        _ignoreOptionStateCacheIsComplete = false;
     }
 
     public async Task UpdateLiveOptionsFromRootSelectionAsync(
@@ -884,7 +905,9 @@ public sealed class SelectionSyncCoordinator(
             _suppressIgnoreItemCheck = false;
         }
 
-        UpdateIgnoreSelectionCache(hasPreviousSelections ? previousSelections : null);
+        UpdateIgnoreSelectionCache(
+            hasPreviousSelections ? previousSelections : null,
+            markStateCacheComplete: false);
         SyncIgnoreAllCheckbox();
     }
 
@@ -929,12 +952,16 @@ public sealed class SelectionSyncCoordinator(
             hasIgnoreOptionCounts: false);
     }
 
-    public void UpdateIgnoreSelectionCache(IReadOnlySet<IgnoreOptionId>? preserveMissingFrom = null)
+    public void UpdateIgnoreSelectionCache(
+        IReadOnlySet<IgnoreOptionId>? preserveMissingFrom = null,
+        bool markStateCacheComplete = true)
     {
         _ignoreSelectionState.UpdateFromVisibleOptions(
             viewModel.IgnoreOptions.Select(static option => (option.Id, option.IsChecked)),
             preserveMissingFrom,
             _ignoreOptions.Select(static option => option.Id));
+        if (markStateCacheComplete)
+            _ignoreOptionStateCacheIsComplete = true;
     }
 
     public void SyncIgnoreAllCheckbox()
@@ -1217,6 +1244,7 @@ public sealed class SelectionSyncCoordinator(
         }
 
         _ignoreSelectionState.ReplaceStateCache(stateCache);
+        _ignoreOptionStateCacheIsComplete = true;
         SyncIgnoreAllCheckbox();
     }
 
@@ -1296,7 +1324,8 @@ public sealed class SelectionSyncCoordinator(
             IgnoreAllPreference: _ignoreSelectionState.AllPreference,
             CurrentSnapshotState: CaptureIgnoreSectionSnapshotState(),
             RootOptionStateCache: SnapshotRootOptionStateCacheOrNull(isInitialized: true),
-            ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true));
+            ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
+            IgnoreOptionStateCacheIsComplete: _ignoreOptionStateCacheIsComplete);
 
     private static async Task<T> RunOnUiThreadAsync<T>(Func<T> action)
     {
@@ -1695,6 +1724,9 @@ public sealed class SelectionSyncCoordinator(
         // "All ignore" intent, then profile selections, and only then falls back to defaults.
         if (_ignoreSelectionState.TryGetCachedState(option.Id, out var cachedState))
             return cachedState;
+
+        if (_ignoreOptionStateCacheIsComplete)
+            return option.DefaultChecked;
 
         if (useDefaultCheckedFallback && SelectionRefreshPolicy.CanUseIgnoreDefaultFallback(option.Id))
             return option.DefaultChecked;

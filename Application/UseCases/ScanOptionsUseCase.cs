@@ -473,7 +473,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		{
 			var rootCandidateCounts = GetRootDirectoryToggleCandidateCounts(
 				rootPath,
-				rootFolders,
 				effectiveRules,
 				cancellationToken);
 			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
@@ -575,7 +574,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		{
 			var rootCandidateCounts = GetRootDirectoryToggleCandidateCounts(
 				rootPath,
-				rootFolders,
 				ignoreRules,
 				cancellationToken);
 			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
@@ -721,17 +719,12 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 	private static ScanResult<IgnoreOptionCounts> GetRootDirectoryToggleCandidateCounts(
 		string rootPath,
-		IReadOnlyCollection<string> selectedRootFolders,
 		IgnoreRules effectiveRules,
 		CancellationToken cancellationToken)
 	{
-		if (!effectiveRules.IgnoreDotFolders && !effectiveRules.IgnoreHiddenFolders)
-			return new ScanResult<IgnoreOptionCounts>(IgnoreOptionCounts.Empty, RootAccessDenied: false, HadAccessDenied: false);
-
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 			return new ScanResult<IgnoreOptionCounts>(IgnoreOptionCounts.Empty, RootAccessDenied: false, HadAccessDenied: false);
 
-		var selected = new HashSet<string>(selectedRootFolders, PathComparer.Default);
 		var hiddenFolders = 0;
 		var dotFolders = 0;
 		var rootAccessDenied = 0;
@@ -774,7 +767,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			{
 				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 				var name = Path.GetFileName(directoryPath);
-				if (string.IsNullOrWhiteSpace(name) || selected.Contains(name))
+				if (string.IsNullOrWhiteSpace(name))
 					return localCounts;
 				if (IsReparsePointDirectory(directoryPath))
 					return localCounts;
@@ -792,7 +785,10 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 						effectiveRules.IgnoreDotFolders);
 				var shouldCountDotFolder =
 					isDotFolder &&
-					(effectiveRules.IgnoreDotFolders || !isHiddenByCurrentHiddenFolderRule);
+					!isHiddenByCurrentHiddenFolderRule;
+				var shouldCountHiddenFolder =
+					isHiddenFolder &&
+					!IgnoreRuleSemantics.ShouldIgnoreDotDirectory(effectiveRules.IgnoreDotFolders, isDotFolder);
 
 				if (shouldCountDotFolder)
 				{
@@ -817,7 +813,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 						localCounts.DotFolders++;
 				}
 
-				if (isHiddenByCurrentHiddenFolderRule)
+				if (shouldCountHiddenFolder)
 				{
 					var visible = HasVisibleContentForDirectoryToggleCandidate(
 						directoryPath,

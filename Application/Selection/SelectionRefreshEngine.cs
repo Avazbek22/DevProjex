@@ -319,6 +319,7 @@ public sealed class SelectionRefreshEngine(
                 context.IgnoreSelectionInitialized,
                 stateCache,
                 context,
+                context.IgnoreOptionStateCacheIsComplete,
                 useDefaultCheckedFallback);
             stateCache[option.Id] = isChecked;
             resolved.Add(new ResolvedIgnoreOptionState(option.Id, option.Label, option.DefaultChecked, isChecked));
@@ -464,10 +465,14 @@ public sealed class SelectionRefreshEngine(
         bool hasPreviousSelections,
         IReadOnlyDictionary<IgnoreOptionId, bool> stateCache,
         SelectionRefreshContext context,
+        bool stateCacheIsComplete,
         bool useDefaultCheckedFallback)
     {
         if (stateCache.TryGetValue(option.Id, out var cachedState))
             return cachedState;
+
+        if (stateCacheIsComplete)
+            return option.DefaultChecked;
 
         if (useDefaultCheckedFallback && SelectionRefreshPolicy.CanUseIgnoreDefaultFallback(option.Id))
             return option.DefaultChecked;
@@ -557,19 +562,49 @@ public sealed class SelectionRefreshEngine(
         var hasDirectoryToggle =
             selectedIgnoreOptions.Contains(IgnoreOptionId.DotFolders) ||
             selectedIgnoreOptions.Contains(IgnoreOptionId.HiddenFolders);
+        var canDiscoverNewRootLevelToggle =
+            context.AllRootFoldersChecked ||
+            HasCompleteSelectionStateForNewRootLevelToggles(context);
 
         if (!hasDirectoryToggle)
-            return false;
+        {
+            // Root-level directory toggles are different from nested candidates: a newly
+            // discovered .idea/.git/hidden root can be selected before DotFolders/HiddenFolders
+            // exists in the ignore section. The probe must still run so the new ignore option
+            // can appear checked by default instead of forcing the user to discover it manually.
+            return canDiscoverNewRootLevelToggle ||
+                   ContainsDotDirectoryName(context.RootSelectionCache) ||
+                   ContainsDotDirectoryName(selectedRoots);
+        }
 
-        if (!ShouldSuppressAllTogglesOverride(context))
-            return context.AllRootFoldersChecked || selectedRoots.Count == 0;
+        // Once a directory-level toggle is active, the probe must remain enabled even when
+        // that toggle hides its own root-level evidence. Without this, DotFolders can appear
+        // checked for one pass and then disappear on the convergence pass that hides .idea.
+        if (canDiscoverNewRootLevelToggle || !ShouldSuppressAllTogglesOverride(context))
+            return true;
 
-        // Profile/default restoration must keep active directory-level toggles visible when
-        // an "all roots" profile can only restore the visible roots left by that toggle. The
-        // selected-roots-empty branch covers root-file projects where Smart Ignore initially
-        // hid every top-level folder, so toggling Smart Ignore would otherwise make DotFolders
-        // disappear before the user can reveal folders like .idea.
-        return context.AllRootFoldersChecked || selectedRoots.Count == 0;
+        // Profile/default restoration has the same requirement: preserve the active toggle
+        // until the user explicitly changes it, but legacy selected-only profiles cannot
+        // promote an unselected .cache/.idea root into the ignore section.
+        return ContainsDotDirectoryName(context.RootSelectionCache) ||
+               ContainsDotDirectoryName(selectedRoots) ||
+               selectedRoots.Count < context.RootSelectionCache.Count;
+    }
+
+    private static bool HasCompleteSelectionStateForNewRootLevelToggles(SelectionRefreshContext context) =>
+        context.PreparedSelectionMode != PreparedSelectionMode.Profile ||
+        context.RootOptionStateCache is not null ||
+        context.IgnoreOptionStateCacheIsComplete;
+
+    private static bool ContainsDotDirectoryName(IEnumerable<string> names)
+    {
+        foreach (var name in names)
+        {
+            if (IgnoreRuleSemantics.IsDotName(name))
+                return true;
+        }
+
+        return false;
     }
 
     private static IgnoreOptionsAvailability CreateCountDrivenIgnoreAvailability(
