@@ -455,16 +455,19 @@ public sealed class ScanOptionsUseCaseParallelTests
 		using var scanner = new BlockingLegacyRootScanner(expectedFolderCalls: 2);
 		var useCase = new ScanOptionsUseCase(scanner);
 
-		var scanTask = Task.Run(() => useCase.GetExtensionsForRootFolders(
+		EnsureThreadPoolCapacityForBlockingParallelism();
+		var scanTask = RunBlockingScanOnDedicatedThread(() => useCase.GetExtensionsForRootFolders(
 			temp.Path,
 			["src", "tests"],
 			CreateDefaultRules()));
 
-		var allFoldersStarted = scanner.WaitForAllFolderCalls(TimeSpan.FromSeconds(2));
+		var allFoldersStarted = scanner.WaitForAllFolderCalls(BlockingParallelismTimeout);
 		scanner.Release();
-		var result = await scanTask.WaitAsync(TimeSpan.FromSeconds(2));
+		var result = await scanTask.WaitAsync(BlockingParallelismTimeout);
 
-		Assert.True(allFoldersStarted);
+		Assert.True(
+			allFoldersStarted,
+			$"Expected both root-folder scans to start before release; observed {scanner.FolderCallCount}.");
 		Assert.Equal(2, scanner.FolderCallCount);
 		Assert.Contains(".folder", result.Value);
 	}
@@ -483,13 +486,16 @@ public sealed class ScanOptionsUseCaseParallelTests
 		using var scanner = new BlockingAdvancedRootScanner(operation, expectedFolderCalls: 2);
 		var useCase = new ScanOptionsUseCase(scanner);
 
-		var scanTask = Task.Run(() => ExecuteBlockingOperation(useCase, operation, temp.Path));
+		EnsureThreadPoolCapacityForBlockingParallelism();
+		var scanTask = RunBlockingScanOnDedicatedThread(() => ExecuteBlockingOperation(useCase, operation, temp.Path));
 
-		var allFoldersStarted = scanner.WaitForAllFolderCalls(TimeSpan.FromSeconds(2));
+		var allFoldersStarted = scanner.WaitForAllFolderCalls(BlockingParallelismTimeout);
 		scanner.Release();
-		await scanTask.WaitAsync(TimeSpan.FromSeconds(2));
+		await scanTask.WaitAsync(BlockingParallelismTimeout);
 
-		Assert.True(allFoldersStarted);
+		Assert.True(
+			allFoldersStarted,
+			$"Expected both {operation} root-folder scans to start before release; observed {scanner.FolderCallCount}.");
 		Assert.Equal(2, scanner.FolderCallCount);
 	}
 
@@ -532,6 +538,41 @@ public sealed class ScanOptionsUseCaseParallelTests
 				IgnoreOptionCounts.Empty),
 			_ => throw new ArgumentOutOfRangeException(nameof(operation), operation, null)
 		};
+	}
+
+	private const int RequiredBlockingParallelismWorkerThreads = 4;
+	private static readonly TimeSpan BlockingParallelismTimeout = TimeSpan.FromSeconds(10);
+
+	private static void EnsureThreadPoolCapacityForBlockingParallelism()
+	{
+		ThreadPool.GetMinThreads(out var workerThreads, out var completionPortThreads);
+		if (workerThreads < RequiredBlockingParallelismWorkerThreads)
+			ThreadPool.SetMinThreads(RequiredBlockingParallelismWorkerThreads, completionPortThreads);
+	}
+
+	private static Task<T> RunBlockingScanOnDedicatedThread<T>(Func<T> action)
+	{
+		// The scan body intentionally blocks inside Parallel.ForEach. Running it on
+		// a ThreadPool worker can starve small CI runners before the second folder
+		// worker is injected, turning a parallelism contract test into a timing race.
+		var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var thread = new Thread(() =>
+		{
+			try
+			{
+				completion.SetResult(action());
+			}
+			catch (Exception ex)
+			{
+				completion.SetException(ex);
+			}
+		})
+		{
+			IsBackground = true,
+			Name = "ScanOptionsUseCase blocking parallelism test worker"
+		};
+		thread.Start();
+		return completion.Task;
 	}
 
 	public enum BlockingScanOperation
