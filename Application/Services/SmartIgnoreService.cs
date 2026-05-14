@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace DevProjex.Application.Services;
 
 public sealed class SmartIgnoreService
@@ -40,7 +42,12 @@ public sealed class SmartIgnoreService
 				files.Add(file);
 		}
 
-		return new SmartIgnoreResult(folders, files);
+		if (folders.Count == 0 && files.Count == 0)
+			return SmartIgnoreResult.Empty;
+
+		return new SmartIgnoreResult(
+			FreezeOrEmpty(folders, SmartIgnoreResult.Empty.FolderNames),
+			FreezeOrEmpty(files, SmartIgnoreResult.Empty.FileNames));
 	}
 
 	public bool HasKnownProjectMarker(string rootPath)
@@ -83,4 +90,11 @@ public sealed class SmartIgnoreService
 
 		return false;
 	}
+
+	private static IReadOnlySet<string> FreezeOrEmpty(
+		HashSet<string> values,
+		IReadOnlySet<string> emptySet) =>
+		values.Count == 0
+			? emptySet
+			: values.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 }

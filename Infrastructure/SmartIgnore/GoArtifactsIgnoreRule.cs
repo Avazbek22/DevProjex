@@ -6,39 +6,31 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// </summary>
 public sealed class GoArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
-	private static readonly string[] MarkerFiles =
-	[
+	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
 		"go.mod",
-		"go.work"
-	];
+		"go.work");
 
-	private static readonly string[] FolderNames =
-	[
+	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
 		"vendor",
-		"bin"
-	];
+		"bin");
 
-	public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
-		new HashSet<string>(MarkerFiles, StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+	private static readonly SmartIgnoreResult MatchResult =
+		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } =
+		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{
 		if (!Directory.Exists(rootPath))
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			return SmartIgnoreResult.Empty;
 
-		bool hasMarker = MarkerFiles.Any(marker => File.Exists(Path.Combine(rootPath, marker)));
-		if (!hasMarker)
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		foreach (var marker in MarkerFiles)
+		{
+			if (File.Exists(Path.Combine(rootPath, marker)))
+				return MatchResult;
+		}
 
-		return new SmartIgnoreResult(
-			new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
-			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		return SmartIgnoreResult.Empty;
 	}
 }

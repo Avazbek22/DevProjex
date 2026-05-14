@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace DevProjex.Kernel.Models;
 
 public sealed record SmartIgnoreRuleDescriptor(
@@ -6,9 +8,12 @@ public sealed record SmartIgnoreRuleDescriptor(
 	IReadOnlySet<string> FolderNames,
 	IReadOnlySet<string> FileNames)
 {
+	private static readonly FrozenSet<string> EmptyNames =
+		Array.Empty<string>().ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
 	public static SmartIgnoreRuleDescriptor Empty { get; } = new(
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		EmptyNames,
+		EmptyNames,
+		EmptyNames,
+		EmptyNames);
 }

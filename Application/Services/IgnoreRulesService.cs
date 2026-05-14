@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Collections.Frozen;
 
 namespace DevProjex.Application.Services;
 
@@ -28,7 +28,7 @@ public sealed class IgnoreRulesService(
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
 		var availability = BuildRuntimeIgnoreOptionsAvailability(context);
 		var requestedGitIgnore = availability.IncludeGitIgnore &&
-		                         selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
+								 selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 
 		// Smart ignore is hidden for single-project gitignore scenario and follows UseGitIgnore toggle there.
 		var useSmartIgnore = availability.IncludeSmartIgnore
@@ -102,7 +102,7 @@ public sealed class IgnoreRulesService(
 	}
 
 	private static readonly IReadOnlySet<string> EmptyStringSet =
-		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		Array.Empty<string>().ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	private static IgnoreOptionsAvailability BuildRuntimeIgnoreOptionsAvailability(ProjectScanContext context)
 	{
@@ -121,8 +121,8 @@ public sealed class IgnoreRulesService(
 
 		var includeGitIgnore = context.HasAnyGitIgnore;
 		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore &&
-		                         context.HasAnyWithoutGitIgnore &&
-		                         HasRelevantSmartIgnoreCandidates(context);
+								 context.HasAnyWithoutGitIgnore &&
+								 HasRelevantSmartIgnoreCandidates(context);
 		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
 	}
 
@@ -166,27 +166,43 @@ public sealed class IgnoreRulesService(
 
 	private ScopedSmartIgnoreBuildResult BuildScopedSmartIgnore(ProjectScanContext context)
 	{
-		var folderNames = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
-		var fileNames = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
-		var scopedMatchers = new ConcurrentBag<ScopedSmartIgnoreMatcher>();
+		var mergeSync = new object();
+		var folderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var fileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var scopedMatchers = new List<ScopedSmartIgnoreMatcher>(context.Scopes.Count);
 
 		Parallel.ForEach(
 			context.Scopes,
 			ScanParallelismPolicy.CreateOptions(),
-			scope =>
+			static () => new LocalSmartIgnoreBuildState(),
+			(scope, _, localState) =>
 			{
 				var smart = context.GetSmartIgnoreResult(scope.RootPath, smartIgnore);
 				foreach (var folder in smart.FolderNames)
-					folderNames.TryAdd(folder, 0);
+					localState.FolderNames.Add(folder);
 				foreach (var file in smart.FileNames)
-					fileNames.TryAdd(file, 0);
+					localState.FileNames.Add(file);
 
 				if (smart.FolderNames.Count > 0 || smart.FileNames.Count > 0)
 				{
-					scopedMatchers.Add(new ScopedSmartIgnoreMatcher(
+					localState.ScopedMatchers.Add(new ScopedSmartIgnoreMatcher(
 						scope.RootPath,
-						new HashSet<string>(smart.FolderNames, StringComparer.OrdinalIgnoreCase),
-						new HashSet<string>(smart.FileNames, StringComparer.OrdinalIgnoreCase)));
+						FreezeOrEmpty(smart.FolderNames),
+						FreezeOrEmpty(smart.FileNames)));
+				}
+
+				return localState;
+			},
+			localState =>
+			{
+				if (localState.IsEmpty)
+					return;
+
+				lock (mergeSync)
+				{
+					folderNames.UnionWith(localState.FolderNames);
+					fileNames.UnionWith(localState.FileNames);
+					scopedMatchers.AddRange(localState.ScopedMatchers);
 				}
 			});
 
@@ -196,10 +212,20 @@ public sealed class IgnoreRulesService(
 			.ToArray();
 
 		return new ScopedSmartIgnoreBuildResult(
-			new HashSet<string>(folderNames.Keys, StringComparer.OrdinalIgnoreCase),
-			new HashSet<string>(fileNames.Keys, StringComparer.OrdinalIgnoreCase),
+			FreezeOrEmpty(folderNames),
+			FreezeOrEmpty(fileNames),
 			orderedScopedMatchers);
 	}
+
+	private static IReadOnlySet<string> FreezeOrEmpty(HashSet<string> values) =>
+		values.Count == 0
+			? EmptyStringSet
+			: values.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	private static IReadOnlySet<string> FreezeOrEmpty(IReadOnlySet<string> values) =>
+		values.Count == 0
+			? EmptyStringSet
+			: values.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	private IEnumerable<ScopedGitIgnoreMatcher> BuildScopedGitIgnoreMatchers(IReadOnlyList<ProjectScope> scopes)
 	{
@@ -257,7 +283,7 @@ public sealed class IgnoreRulesService(
 			lock (CacheSync)
 			{
 				if (GitIgnoreCache.TryGetValue(cacheKey, out var cached) &&
-				    cached.Signature.Equals(signature))
+					cached.Signature.Equals(signature))
 				{
 					return cached.Matcher;
 				}
@@ -287,4 +313,18 @@ public sealed class IgnoreRulesService(
 		IReadOnlySet<string> FolderNames,
 		IReadOnlySet<string> FileNames,
 		IReadOnlyList<ScopedSmartIgnoreMatcher> ScopedMatchers);
+
+	private sealed class LocalSmartIgnoreBuildState
+	{
+		public HashSet<string> FolderNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+		public HashSet<string> FileNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+		public List<ScopedSmartIgnoreMatcher> ScopedMatchers { get; } = [];
+
+		public bool IsEmpty =>
+			FolderNames.Count == 0 &&
+			FileNames.Count == 0 &&
+			ScopedMatchers.Count == 0;
+	}
 }

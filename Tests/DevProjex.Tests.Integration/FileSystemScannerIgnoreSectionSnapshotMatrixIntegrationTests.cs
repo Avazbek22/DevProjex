@@ -28,7 +28,7 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 			[testCase.RootRelativePath],
 			discoveryRules);
 		var resolvedAllowedExtensions = testCase.AllowedExtensions ??
-		                                BuildAllDiscoveredExtensionsSet(legacyRawScan.Value.Extensions);
+										BuildAllDiscoveredExtensionsSet(legacyRawScan.Value.Extensions);
 		var legacyEffectiveScan = useCase.GetEffectiveIgnoreOptionCountsForRootFolders(
 			temp.Path,
 			[testCase.RootRelativePath],
@@ -99,6 +99,60 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 		Assert.Equal(
 			legacyRawScan.HadAccessDenied || legacyEffectiveScan.HadAccessDenied,
 			snapshot.HadAccessDenied);
+	}
+
+	[Fact]
+	public void GetIgnoreSectionSnapshotForRootFolders_RepeatedDifferentSizedWorkspaces_DoesNotLeakPooledState()
+	{
+		using var large = new TemporaryDirectory();
+		using var small = new TemporaryDirectory();
+		SeedPooledStressWorkspace(large.Path);
+		WriteFile(small.Path, "src/App.cs", "class App {}");
+
+		var useCase = new ScanOptionsUseCase(new FileSystemScanner());
+		var largeRules = CreateBaseRules() with
+		{
+			IgnoreDotFolders = true,
+			IgnoreDotFiles = true,
+			IgnoreEmptyFiles = true,
+			IgnoreEmptyFolders = true
+		};
+		var smallRules = CreateBaseRules() with
+		{
+			IgnoreDotFolders = true,
+			IgnoreDotFiles = true,
+			IgnoreEmptyFiles = true,
+			IgnoreEmptyFolders = true
+		};
+
+		_ = useCase.GetIgnoreSectionSnapshotForRootFolders(
+			large.Path,
+			["src"],
+			BuildExtensionDiscoveryRules(largeRules),
+			largeRules,
+			effectiveAllowedExtensions: null);
+
+		var snapshot = useCase.GetIgnoreSectionSnapshotForRootFolders(
+			small.Path,
+			["src"],
+			BuildExtensionDiscoveryRules(smallRules),
+			smallRules,
+			effectiveAllowedExtensions: null);
+		var legacyRawScan = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
+			small.Path,
+			["src"],
+			BuildExtensionDiscoveryRules(smallRules));
+		var legacyEffectiveScan = useCase.GetEffectiveIgnoreOptionCountsForRootFolders(
+			small.Path,
+			["src"],
+			BuildAllDiscoveredExtensionsSet(legacyRawScan.Value.Extensions),
+			smallRules,
+			legacyRawScan.Value.IgnoreOptionCounts);
+
+		AssertSetEquals(legacyRawScan.Value.Extensions, snapshot.Value.Extensions);
+		Assert.Equal(legacyRawScan.Value.IgnoreOptionCounts, snapshot.Value.RawIgnoreOptionCounts);
+		Assert.Equal(legacyEffectiveScan.Value, snapshot.Value.EffectiveIgnoreOptionCounts);
+		Assert.Equal([".cs"], snapshot.Value.Extensions.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
 	}
 
 	public static IEnumerable<object[]> SnapshotCases()
@@ -356,6 +410,17 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 		WriteFile(rootPath, "node_modules/pkg/index.js", "module.exports = {};");
 		WriteFile(rootPath, "ignored-root/ignored.log", "ignored");
 		WriteFile(rootPath, "scratch.tmp", "ignored by git");
+	}
+
+	private static void SeedPooledStressWorkspace(string rootPath)
+	{
+		for (var index = 0; index < 750; index++)
+		{
+			WriteFile(rootPath, $"src/module-{index:D4}/App{index:D4}.cs", "class App {}");
+			WriteFile(rootPath, $"src/module-{index:D4}/.env", "dot");
+			WriteFile(rootPath, $"src/module-{index:D4}/empty.txt", string.Empty);
+			Directory.CreateDirectory(Path.Combine(rootPath, "src", $"module-{index:D4}", ".cache", "empty-leaf"));
+		}
 	}
 
 	private static IgnoreRules BuildPolicyEffectiveRules(string rootPath)

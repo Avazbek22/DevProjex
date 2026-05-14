@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Frozen;
 
 namespace DevProjex.Application.Services;
 
@@ -30,7 +31,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	private const int StreamingBufferSize = 8192;
 
 	// Known binary extensions - skip file read entirely (fast path)
-	private static readonly HashSet<string> KnownBinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
+	private static readonly FrozenSet<string> KnownBinaryExtensions = new[]
 	{
 		// Images
 		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
@@ -48,7 +49,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		".ttf", ".otf", ".woff", ".woff2", ".eot",
 		// Other binary
 		".bin", ".dat", ".db", ".sqlite", ".mdb"
-	};
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	/// <inheritdoc />
 	public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
