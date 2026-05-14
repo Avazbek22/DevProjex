@@ -2,12 +2,11 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class TreeBuilder : ITreeBuilder
 {
-	// Pre-allocated comparer instance to avoid allocation per sort
-	private static readonly FileSystemTreeEntryComparer EntryComparer = new();
-
 	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
 		var state = new BuildState();
+		var extensionLookup = new AllowedExtensionLookup(options.AllowedExtensions);
+		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootPath);
 
 		var rootInfo = new DirectoryInfo(rootPath);
 		var root = new FileSystemNode(
@@ -20,7 +19,10 @@ public sealed class TreeBuilder : ITreeBuilder
 		BuildChildren(
 			parent: root,
 			path: rootPath,
+			relativePath: string.Empty,
 			options: options,
+			allowedExtensions: extensionLookup,
+			gitIgnoreContext: gitIgnoreContext,
 			isRoot: true,
 			state: state,
 			cancellationToken: cancellationToken);
@@ -31,33 +33,24 @@ public sealed class TreeBuilder : ITreeBuilder
 	private static void BuildChildren(
 		FileSystemNode parent,
 		string path,
+		string relativePath,
 		TreeFilterOptions options,
+		AllowedExtensionLookup allowedExtensions,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool isRoot,
 		BuildState state,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		var entries = new List<FileSystemTreeEntry>(capacity: 32);
-		try
+		var snapshot = ProjectInventorySnapshot.ReadDirectory(path, relativePath, isRoot, cancellationToken);
+		if (snapshot.HadAccessDenied)
 		{
-			// Tree building is on the project-load hot path, so avoid FileSystemInfo materialization.
-			// The lightweight entry snapshots already carry the metadata we need for sorting/filtering.
-			foreach (var entry in FileSystemEntryEnumerator.EnumerateEntries(path))
-				entries.Add(entry);
-			entries.Sort(EntryComparer);
-		}
-		catch (UnauthorizedAccessException)
-		{
-			if (isRoot)
+			if (snapshot.RootAccessDenied)
 				state.MarkRootAccessDenied();
 			else
 				state.MarkAccessDenied();
 			parent.IsAccessDenied = true;
-			return;
-		}
-		catch
-		{
 			return;
 		}
 
@@ -68,9 +61,11 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (isRoot)
 		{
 			BuildRootChildrenInParallel(
-				entries,
+				snapshot.Entries,
 				children,
 				options,
+				allowedExtensions,
+				gitIgnoreContext,
 				hasNameFilter,
 				shouldApplySmartIgnoreForFiles,
 				state,
@@ -78,13 +73,15 @@ public sealed class TreeBuilder : ITreeBuilder
 			return;
 		}
 
-		foreach (var entry in entries)
+		foreach (var entry in snapshot.Entries)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
 			var node = BuildNodeForEntry(
 				entry,
 				options,
+				allowedExtensions,
+				gitIgnoreContext,
 				isRoot,
 				hasNameFilter,
 				shouldApplySmartIgnoreForFiles,
@@ -99,6 +96,8 @@ public sealed class TreeBuilder : ITreeBuilder
 		IReadOnlyList<FileSystemTreeEntry> entries,
 		List<FileSystemNode> children,
 		TreeFilterOptions options,
+		AllowedExtensionLookup allowedExtensions,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool hasNameFilter,
 		bool shouldApplySmartIgnoreForFiles,
 		BuildState state,
@@ -113,6 +112,8 @@ public sealed class TreeBuilder : ITreeBuilder
 			nodes[i] = BuildNodeForEntry(
 				entry,
 				options,
+				allowedExtensions,
+				gitIgnoreContext,
 				isRoot: true,
 				hasNameFilter,
 				shouldApplySmartIgnoreForFiles,
@@ -131,6 +132,8 @@ public sealed class TreeBuilder : ITreeBuilder
 	private static FileSystemNode? BuildNodeForEntry(
 		FileSystemTreeEntry entry,
 		TreeFilterOptions options,
+		AllowedExtensionLookup allowedExtensions,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool isRoot,
 		bool hasNameFilter,
 		bool shouldApplySmartIgnoreForFiles,
@@ -147,7 +150,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (isDir)
 		{
 			var directoryGitIgnore = ignore.UseGitIgnore
-				? ignore.EvaluateGitIgnore(entry.FullPath, isDirectory: true, name)
+				? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, name)
 				: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 			if (ShouldSkipDirectory(entry, ignore, directoryGitIgnore))
 				return null;
@@ -159,7 +162,16 @@ public sealed class TreeBuilder : ITreeBuilder
 				isAccessDenied: false,
 				children: new List<FileSystemNode>());
 
-			BuildChildren(dirNode, entry.FullPath, options, isRoot: false, state, cancellationToken);
+			BuildChildren(
+				dirNode,
+				entry.FullPath,
+				entry.RelativePath,
+				options,
+				allowedExtensions,
+				gitIgnoreContext,
+				isRoot: false,
+				state,
+				cancellationToken);
 
 			if (ignore.IgnoreEmptyFolders &&
 			    dirNode.Children.Count == 0 &&
@@ -192,7 +204,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		}
 
 		var fileGitIgnore = ignore.UseGitIgnore
-			? ignore.EvaluateGitIgnore(entry.FullPath, isDirectory: false, name)
+			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: false, name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 		if (ShouldSkipFile(entry, ignore, shouldApplySmartIgnoreForFiles, fileGitIgnore))
 			return null;
@@ -203,11 +215,10 @@ public sealed class TreeBuilder : ITreeBuilder
 		}
 		else
 		{
-			if (options.AllowedExtensions.Count == 0)
+			if (allowedExtensions.IsEmpty)
 				return null;
 
-			var ext = Path.GetExtension(name);
-			if (!options.AllowedExtensions.Contains(ext))
+			if (!allowedExtensions.AllowsFileName(name))
 				return null;
 		}
 
@@ -287,8 +298,11 @@ public sealed class TreeBuilder : ITreeBuilder
 		if (string.IsNullOrWhiteSpace(fileName))
 			return false;
 
-		var extension = Path.GetExtension(fileName);
-		return string.IsNullOrEmpty(extension) || extension == ".";
+		var dotIndex = fileName.AsSpan().LastIndexOf('.');
+		if (dotIndex <= 0)
+			return dotIndex != 0;
+
+		return dotIndex == fileName.Length - 1;
 	}
 
 	private sealed class BuildState
@@ -313,20 +327,26 @@ public sealed class TreeBuilder : ITreeBuilder
 		}
 	}
 
-	/// <summary>
-	/// Sorts lightweight tree entries without allocating FileSystemInfo wrappers.
-	/// The tree keeps directories first to match the long-standing UI contract.
-	/// </summary>
-	private sealed class FileSystemTreeEntryComparer : IComparer<FileSystemTreeEntry>
+	private readonly struct AllowedExtensionLookup(IReadOnlySet<string> allowedExtensions)
 	{
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public int Compare(FileSystemTreeEntry x, FileSystemTreeEntry y)
-		{
-			if (x.IsDirectory != y.IsDirectory)
-				return x.IsDirectory ? -1 : 1;
+		private readonly HashSet<string>? _hashSet = allowedExtensions as HashSet<string>;
 
-			// Then by name, case-insensitive ordinal (fastest string comparison)
-			return string.Compare(x.Name, y.Name, StringComparison.OrdinalIgnoreCase);
+		public bool IsEmpty => allowedExtensions.Count == 0;
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public bool AllowsFileName(string fileName)
+		{
+			var extension = Path.GetExtension(fileName.AsSpan());
+			if (extension.IsWhiteSpace())
+				return false;
+
+			if (_hashSet is not null &&
+			    _hashSet.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup))
+			{
+				return lookup.Contains(extension);
+			}
+
+			return allowedExtensions.Contains(extension.ToString());
 		}
 	}
 }

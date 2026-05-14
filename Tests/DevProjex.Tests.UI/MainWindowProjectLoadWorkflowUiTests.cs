@@ -1118,7 +1118,7 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         {
             current.IsExpanded = true;
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
-            current = Assert.Single(current.Children.Where(child => string.Equals(child.DisplayName, segment, StringComparison.Ordinal)));
+            current = Assert.Single(current.Children, child => string.Equals(child.DisplayName, segment, StringComparison.Ordinal));
         }
 
         current.IsExpanded = true;

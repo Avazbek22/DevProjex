@@ -282,6 +282,73 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 	}
 
 	[Fact]
+	public void IgnoreSectionSnapshot_EmptyUnselectedDotRoot_DoesNotKeepDotFoldersVisible()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.py", "print('ok')");
+		temp.CreateDirectory(".empty-cache");
+
+		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+		var rules = CreateBaseRules() with
+		{
+			IgnoreDotFolders = true,
+			IgnoreEmptyFolders = true
+		};
+
+		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["src"],
+			BuildExtensionDiscoveryRules(rules),
+			rules,
+			effectiveAllowedExtensions: null,
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Contains(".py", snapshot.Value.Extensions);
+	}
+
+	[Fact]
+	public void IgnoreSectionSnapshot_DotFolderMaskedByEmptyParent_AppearsOnlyAfterEmptyFolderMaskIsRemoved()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.py", "print('ok')");
+		temp.CreateFile("generated/.cache/settings.json", "{}");
+
+		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+		var maskedRules = CreateBaseRules() with
+		{
+			IgnoreDotFolders = true,
+			IgnoreEmptyFolders = true
+		};
+
+		var masked = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["src"],
+			BuildExtensionDiscoveryRules(maskedRules),
+			maskedRules,
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".json" },
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.Equal(0, masked.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(0, masked.Value.EffectiveIgnoreOptionCounts.EmptyFolders);
+
+		var unmaskedRules = maskedRules with { IgnoreEmptyFolders = false };
+		var unmasked = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["src", "generated"],
+			BuildExtensionDiscoveryRules(unmaskedRules),
+			unmaskedRules,
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".json" },
+			includeDirectoryToggleProbeRoots: true);
+
+		// EmptyFolders can mask a parent before nested dot folders participate in the
+		// effective tree. Once that parent is selected, both toggles are real decisions:
+		// DotFolders hides .cache, then EmptyFolders can hide the now-empty parent.
+		Assert.Equal(1, unmasked.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(1, unmasked.Value.EffectiveIgnoreOptionCounts.EmptyFolders);
+	}
+
+	[Fact]
 	public void IgnoreSectionSnapshot_GitIgnoredDotRoot_DoesNotKeepDotFoldersVisible()
 	{
 		using var temp = new TemporaryDirectory();

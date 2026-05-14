@@ -8,4 +8,5 @@ namespace DevProjex.Infrastructure.FileSystem;
 internal readonly record struct FileSystemDirectoryEntry(
 	string Name,
 	string FullPath,
+	string RelativePath,
 	bool IsHidden);

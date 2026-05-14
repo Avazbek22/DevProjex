@@ -122,10 +122,22 @@ public sealed class GitIgnoreMatcher
 
     public IgnoreEvaluation Evaluate(string fullPath, bool isDirectory, string name)
     {
-        var relativePath = GetRelativePath(fullPath);
-        if (relativePath is null)
+        if (!TryGetRelativePath(fullPath, out var relativePath))
             return default;
 
+        return EvaluateRelativeCore(relativePath, isDirectory, name);
+    }
+
+    public IgnoreEvaluation EvaluateRelative(string relativePath, bool isDirectory, string name)
+    {
+        if (_rules.Count == 0 || string.IsNullOrWhiteSpace(relativePath))
+            return default;
+
+        return EvaluateRelativeCore(NormalizeRelativePath(relativePath), isDirectory, name);
+    }
+
+    private IgnoreEvaluation EvaluateRelativeCore(string relativePath, bool isDirectory, string name)
+    {
         var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath) : name;
         var ignored = false;
         var hasMatch = false;
@@ -173,10 +185,22 @@ public sealed class GitIgnoreMatcher
         if (!HasNegationRules)
             return false;
 
-        var relativePath = GetRelativePath(fullPath);
-        if (relativePath is null)
+        if (!TryGetRelativePath(fullPath, out var relativePath))
             return false;
 
+        return ShouldTraverseIgnoredDirectoryRelativeCore(relativePath, name);
+    }
+
+    public bool ShouldTraverseIgnoredDirectoryRelative(string relativePath, string name)
+    {
+        if (!HasNegationRules || string.IsNullOrWhiteSpace(relativePath))
+            return false;
+
+        return ShouldTraverseIgnoredDirectoryRelativeCore(NormalizeRelativePath(relativePath), name);
+    }
+
+    private bool ShouldTraverseIgnoredDirectoryRelativeCore(string relativePath, string name)
+    {
         // If the directory itself is ignored by an explicit directory rule (e.g. "bin/"),
         // name-only negation (e.g. "!Directory.Build.rsp") cannot re-include descendants
         // unless a path-based negation re-includes the directory chain.
@@ -234,17 +258,25 @@ public sealed class GitIgnoreMatcher
         return false;
     }
 
-    private string? GetRelativePath(string fullPath)
+    public bool TryGetRelativePath(string fullPath, out string relativePath, bool allowRoot = false)
     {
+        relativePath = string.Empty;
+
         if (_rules.Count == 0 || string.IsNullOrWhiteSpace(fullPath))
-            return null;
+            return false;
 
         var normalizedFullPath = NormalizePath(fullPath);
         if (!normalizedFullPath.StartsWith(_normalizedRootPath, _pathComparison))
-            return null;
+            return false;
 
-        var relativePath = normalizedFullPath[_normalizedRootPath.Length..].TrimStart('/');
-        return relativePath.Length == 0 ? null : relativePath;
+        if (normalizedFullPath.Length == _normalizedRootPath.Length)
+            return allowRoot;
+
+        if (normalizedFullPath[_normalizedRootPath.Length] != '/')
+            return false;
+
+        relativePath = normalizedFullPath[(_normalizedRootPath.Length + 1)..];
+        return relativePath.Length > 0 || allowRoot;
     }
 
     private static string BuildPathRegex(string globRegex, bool anchored, bool directoryOnly)
@@ -384,6 +416,16 @@ public sealed class GitIgnoreMatcher
             return path;
 
         return path.Replace('\\', '/');
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string NormalizeRelativePath(string path)
+    {
+        var span = path.AsSpan().TrimStart('/');
+        if (span.IndexOf('\\') < 0)
+            return span.Length == path.Length ? path : span.ToString();
+
+        return span.ToString().Replace('\\', '/');
     }
 
     private enum RuleMatchKind

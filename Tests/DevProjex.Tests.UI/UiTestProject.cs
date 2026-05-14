@@ -131,6 +131,17 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithExternalRefreshMutationWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("src", "App.cs"), BuildCSharpFile("RefreshMutation", "App", 4));
+            WriteFile(rootPath, Path.Combine("docs", "notes.md"), BuildMarkdown("Refresh notes", 4));
+            WriteFile(rootPath, "data.csv", "id,value\n1,initial\n");
+            WriteFile(rootPath, "empty.txt", string.Empty);
+        });
+    }
+
     public static UiTestProject CreateWithProjectLoadWorkflowWorkspace()
     {
         return CreateForSharedWorkspace(ProjectLoadWorkflowSharedWorkspace.RootPath);

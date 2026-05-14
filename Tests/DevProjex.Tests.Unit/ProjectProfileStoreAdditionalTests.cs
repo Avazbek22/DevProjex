@@ -236,6 +236,119 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
+	public void SaveProfile_RoundTripsExplicitOptionStatesForRefreshProfileRestoration()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoStates");
+
+			store.SaveProfile(
+				projectPath,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: ["src"],
+					SelectedExtensions: [".cs"],
+					SelectedIgnoreOptions: [IgnoreOptionId.DotFiles],
+					RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+					{
+						["src"] = true,
+						["docs"] = false
+					},
+					ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+					{
+						[".cs"] = true,
+						[".csv"] = false
+					},
+					IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.DotFiles] = true,
+						[IgnoreOptionId.EmptyFiles] = false
+					}));
+
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.NotNull(loaded.RootFolderStates);
+			Assert.NotNull(loaded.ExtensionStates);
+			Assert.NotNull(loaded.IgnoreOptionStates);
+			Assert.True(loaded.RootFolderStates!["src"]);
+			Assert.False(loaded.RootFolderStates!["docs"]);
+			Assert.True(loaded.ExtensionStates![".cs"]);
+			Assert.False(loaded.ExtensionStates![".csv"]);
+			Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.DotFiles]);
+			Assert.False(loaded.IgnoreOptionStates![IgnoreOptionId.EmptyFiles]);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void LegacySelectedOnlyProfile_LoadThenSave_UpgradesToFullStateSchemaV2()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "LegacyRepo");
+			Directory.CreateDirectory(projectPath);
+
+			WriteLegacySelectedOnlyProfile(store, projectPath);
+
+			Assert.True(store.TryLoadProfile(projectPath, out var legacyProfile));
+			Assert.Contains("docs", legacyProfile.SelectedRootFolders);
+			Assert.Contains(".csv", legacyProfile.SelectedExtensions);
+			Assert.Contains(IgnoreOptionId.EmptyFiles, legacyProfile.SelectedIgnoreOptions);
+			Assert.Null(legacyProfile.RootFolderStates);
+			Assert.Null(legacyProfile.ExtensionStates);
+			Assert.Null(legacyProfile.IgnoreOptionStates);
+
+			// A legacy selected-only profile is converted only after the app saves the
+			// complete UI state. That keeps old profiles backward compatible until the
+			// user explicitly produces a v2 snapshot.
+			store.SaveProfile(
+				projectPath,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: ["src"],
+					SelectedExtensions: [".cs"],
+					SelectedIgnoreOptions: [IgnoreOptionId.DotFiles],
+					RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+					{
+						["src"] = true,
+						["docs"] = false
+					},
+					ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+					{
+						[".cs"] = true,
+						[".csv"] = false
+					},
+					IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.DotFiles] = true,
+						[IgnoreOptionId.EmptyFiles] = false
+					}));
+
+			using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
+			var root = document.RootElement;
+			Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
+			var persisted = root.GetProperty("profiles").GetProperty(PathUtility.Normalize(projectPath));
+			Assert.False(persisted.GetProperty("rootFolderStates").GetProperty("docs").GetBoolean());
+			Assert.False(persisted.GetProperty("extensionStates").GetProperty(".csv").GetBoolean());
+			Assert.False(persisted.GetProperty("ignoreOptionStates").GetProperty("emptyFiles").GetBoolean());
+
+			var reloaded = CreateStore(tempRoot);
+			Assert.True(reloaded.TryLoadProfile(projectPath, out var fullStateProfile));
+			Assert.False(fullStateProfile.RootFolderStates!["docs"]);
+			Assert.False(fullStateProfile.ExtensionStates![".csv"]);
+			Assert.False(fullStateProfile.IgnoreOptionStates![IgnoreOptionId.EmptyFiles]);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void SaveProfile_EmptyCollections_RoundTripAsEmpty()
 	{
 		var tempRoot = CreateTempDirectory();
@@ -489,6 +602,27 @@ public sealed class ProjectProfileStoreAdditionalTests
 	{
 		var appDataRoot = Path.Combine(tempRoot, "appdata");
 		return new ProjectProfileStore(() => appDataRoot);
+	}
+
+	private static void WriteLegacySelectedOnlyProfile(ProjectProfileStore store, string projectPath)
+	{
+		var storagePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(storagePath)!);
+		var projectKey = JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+		var json = $$"""
+			{
+			  "schemaVersion": 1,
+			  "profiles": {
+			    {{projectKey}}: {
+			      "selectedRootFolders": [ "docs" ],
+			      "selectedExtensions": [ ".csv" ],
+			      "selectedIgnoreOptions": [ "emptyFiles" ],
+			      "updatedUtc": "2026-05-01T00:00:00+00:00"
+			    }
+			  }
+			}
+			""";
+		File.WriteAllText(storagePath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 	}
 
 	private static string CreateTempDirectory()

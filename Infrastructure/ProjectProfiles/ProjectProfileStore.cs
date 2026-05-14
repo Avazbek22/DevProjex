@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.ProjectProfiles;
 
 public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null) : IProjectProfileStore
 {
-	private const int CurrentSchemaVersion = 1;
+	private const int CurrentSchemaVersion = 2;
 	private const int MaxProfiles = 500;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
@@ -211,6 +211,9 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.SelectedRootFolders ??= [];
 		profile.SelectedExtensions ??= [];
 		profile.SelectedIgnoreOptions ??= [];
+		profile.RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default);
+		profile.ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
+		profile.IgnoreOptionStates ??= [];
 
 		profile.SelectedRootFolders = profile.SelectedRootFolders
 			.Where(static item => !string.IsNullOrWhiteSpace(item))
@@ -245,6 +248,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			SelectedIgnoreOptions = profile.SelectedIgnoreOptions
 				.Distinct()
 				.ToList(),
+			RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default),
+			ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
+			IgnoreOptionStates = profile.IgnoreOptionStates is null
+				? []
+				: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates),
 			UpdatedUtc = updatedUtc
 		};
 	}
@@ -254,11 +262,40 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		var rootFolders = new HashSet<string>(profile.SelectedRootFolders, PathComparer.Default);
 		var extensions = new HashSet<string>(profile.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
 		var ignoreOptions = new HashSet<IgnoreOptionId>(profile.SelectedIgnoreOptions);
+		var rootStates = profile.RootFolderStates.Count == 0
+			? null
+			: new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default);
+		var extensionStates = profile.ExtensionStates.Count == 0
+			? null
+			: new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
+		var ignoreStates = profile.IgnoreOptionStates.Count == 0
+			? null
+			: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
 
 		return new ProjectSelectionProfile(
 			SelectedRootFolders: rootFolders,
 			SelectedExtensions: extensions,
-			SelectedIgnoreOptions: ignoreOptions);
+			SelectedIgnoreOptions: ignoreOptions,
+			RootFolderStates: rootStates,
+			ExtensionStates: extensionStates,
+			IgnoreOptionStates: ignoreStates);
+	}
+
+	private static Dictionary<string, bool> NormalizeStringStateDictionary(
+		IEnumerable<KeyValuePair<string, bool>>? states,
+		StringComparer comparer)
+	{
+		var normalized = new Dictionary<string, bool>(comparer);
+		if (states is null)
+			return normalized;
+
+		foreach (var (name, isChecked) in states)
+		{
+			if (!string.IsNullOrWhiteSpace(name))
+				normalized[name] = isChecked;
+		}
+
+		return normalized;
 	}
 
 	private static void PruneProfiles(ProjectProfileDb db)
@@ -334,6 +371,9 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		public List<string> SelectedRootFolders { get; set; } = [];
 		public List<string> SelectedExtensions { get; set; } = [];
 		public List<IgnoreOptionId> SelectedIgnoreOptions { get; set; } = [];
+		public Dictionary<string, bool> RootFolderStates { get; set; } = new(PathComparer.Default);
+		public Dictionary<string, bool> ExtensionStates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+		public Dictionary<IgnoreOptionId, bool> IgnoreOptionStates { get; set; } = [];
 		public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 	}
 }

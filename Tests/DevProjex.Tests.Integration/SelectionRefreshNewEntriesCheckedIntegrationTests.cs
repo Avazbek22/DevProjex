@@ -146,6 +146,59 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 	}
 
 	[Fact]
+	public void FullRefresh_ExternalControllerMutation_ChecksNewControllersAndKeepsKnownUncheckedEntries()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedExternalControllerInitialWorkspace(temp);
+
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path),
+			CancellationToken.None);
+		var manualContext = CreateExternalControllerManualContext(temp.Path, baseline);
+
+		MutateExternalControllersAndDynamicEntries(temp);
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(manualContext, CancellationToken.None);
+
+		AssertSelection(snapshot.RootOptions!, "src", expectedChecked: true);
+		AssertSelection(snapshot.RootOptions!, "docs", expectedChecked: false);
+		AssertSelection(snapshot.RootOptions!, "api", expectedChecked: true);
+		AssertSelection(snapshot.RootOptions!, "web", expectedChecked: true);
+		AssertSelection(snapshot.RootOptions!, "generated", expectedChecked: true);
+
+		AssertSelection(snapshot.ExtensionOptions, ".cs", expectedChecked: true);
+		AssertSelection(snapshot.ExtensionOptions, ".csv", expectedChecked: false);
+		AssertSelection(snapshot.ExtensionOptions, ".ts", expectedChecked: true);
+		AssertSelection(snapshot.ExtensionOptions, ".log", expectedChecked: true);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.EmptyFiles, expectedChecked: false);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFolders, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFiles, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.EmptyFolders, expectedChecked: true);
+
+		var tree = BuildTreeFromSnapshot(temp.Path, snapshot);
+		AssertPathVisible(tree, "src/App.cs");
+		AssertPathVisible(tree, "api/src/Program.cs");
+		AssertPathVisible(tree, "web/src/app.ts");
+		AssertPathVisible(tree, "generated/report.log");
+		AssertPathHidden(tree, "docs/notes.md");
+		AssertPathHidden(tree, "data.csv");
+		AssertPathHidden(tree, "api/logs/runtime.log");
+		AssertPathHidden(tree, "web/node_modules/pkg/index.js");
+		AssertPathHidden(tree, ".idea/workspace.xml");
+		AssertPathHidden(tree, ".env");
+		AssertPathHidden(tree, "empty-root");
+
+		var converged = services.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(temp.Path, snapshot),
+			CancellationToken.None);
+		ProjectLoadWorkflowRefreshHarness.AssertEquivalentSnapshots(snapshot, converged);
+	}
+
+	[Fact]
 	public void FullRefresh_ProfileWithUnavailableExtensions_RescansCountsAfterFallback()
 	{
 		using var temp = new TemporaryDirectory();
@@ -183,6 +236,30 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 		temp.CreateFile("Program.cs", "class Program {}");
 		temp.CreateFile("data.csv", "id,value");
 		temp.CreateFile("empty.txt", string.Empty);
+	}
+
+	private static void SeedExternalControllerInitialWorkspace(TemporaryDirectory temp)
+	{
+		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateFile("docs/notes.md", "# Notes");
+		temp.CreateFile("data.csv", "id,value");
+		temp.CreateFile("empty.txt", string.Empty);
+	}
+
+	private static void MutateExternalControllersAndDynamicEntries(TemporaryDirectory temp)
+	{
+		temp.CreateFile("api/.gitignore", "logs/\n");
+		temp.CreateFile("api/App.csproj", "<Project />");
+		temp.CreateFile("api/src/Program.cs", "class Program {}");
+		temp.CreateFile("api/logs/runtime.log", "ignored by nested gitignore");
+		temp.CreateFile("web/package.json", "{}");
+		temp.CreateFile("web/src/app.ts", "export const app = true;");
+		temp.CreateFile("web/node_modules/pkg/index.js", "module.exports = {};");
+		temp.CreateFile("generated/report.log", "new visible log");
+		temp.CreateFile("new-data.csv", "2,updated");
+		temp.CreateFile(".idea/workspace.xml", "<project />");
+		temp.CreateFile(".env", "APP_ENV=test");
+		temp.CreateDirectory("empty-root");
 	}
 
 	private static void MutateWorkspaceBeforeRefresh(TemporaryDirectory temp)
@@ -252,6 +329,44 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 			AllExtensionsChecked = false,
 			ExtensionsSelectionInitialized = true,
 			ExtensionsSelectionCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt" },
+			ExtensionOptionStateCache = extensionStates,
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = ignoreStates
+				.Where(static pair => pair.Value)
+				.Select(static pair => pair.Key)
+				.ToHashSet(),
+			IgnoreOptionStateCache = ignoreStates,
+			IgnoreAllPreference = null
+		};
+	}
+
+	private static SelectionRefreshContext CreateExternalControllerManualContext(
+		string rootPath,
+		SelectionRefreshSnapshot baseline)
+	{
+		var rootStates = ProjectLoadWorkflowRefreshHarness.BuildRootOptionStateCache(baseline);
+		rootStates["src"] = true;
+		rootStates["docs"] = false;
+
+		var extensionStates = ProjectLoadWorkflowRefreshHarness.BuildExtensionOptionStateCache(baseline);
+		extensionStates[".cs"] = true;
+		extensionStates[".md"] = true;
+		extensionStates[".csv"] = false;
+
+		var ignoreStates = new Dictionary<IgnoreOptionId, bool>(baseline.IgnoreOptionStateCache)
+		{
+			[IgnoreOptionId.EmptyFiles] = false
+		};
+
+		return ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(rootPath, baseline) with
+		{
+			AllRootFoldersChecked = false,
+			RootSelectionInitialized = true,
+			RootSelectionCache = new HashSet<string>(PathComparer.Default) { "src" },
+			RootOptionStateCache = rootStates,
+			AllExtensionsChecked = false,
+			ExtensionsSelectionInitialized = true,
+			ExtensionsSelectionCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".md" },
 			ExtensionOptionStateCache = extensionStates,
 			IgnoreSelectionInitialized = true,
 			IgnoreSelectionCache = ignoreStates
@@ -392,8 +507,8 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 		string name,
 		bool expectedChecked)
 	{
-		var option = Assert.Single(options.Where(option =>
-			string.Equals(option.Name, name, StringComparison.OrdinalIgnoreCase)));
+		var option = Assert.Single(options, option =>
+			string.Equals(option.Name, name, StringComparison.OrdinalIgnoreCase));
 		Assert.Equal(expectedChecked, option.IsChecked);
 	}
 
@@ -402,7 +517,7 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 		IgnoreOptionId optionId,
 		bool expectedChecked)
 	{
-		var option = Assert.Single(snapshot.IgnoreOptions.Where(option => option.Id == optionId));
+		var option = Assert.Single(snapshot.IgnoreOptions, option => option.Id == optionId);
 		Assert.Equal(expectedChecked, option.IsChecked);
 		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(optionId, out var cachedState));
 		Assert.Equal(expectedChecked, cachedState);

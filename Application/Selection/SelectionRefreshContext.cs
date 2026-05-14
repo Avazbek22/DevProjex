@@ -15,4 +15,5 @@ public sealed record SelectionRefreshContext(
     bool? IgnoreAllPreference,
     IgnoreSectionSnapshotState CurrentSnapshotState,
     IReadOnlyDictionary<string, bool>? RootOptionStateCache = null,
-    IReadOnlyDictionary<string, bool>? ExtensionOptionStateCache = null);
+    IReadOnlyDictionary<string, bool>? ExtensionOptionStateCache = null,
+    bool IgnoreOptionStateCacheIsComplete = false);

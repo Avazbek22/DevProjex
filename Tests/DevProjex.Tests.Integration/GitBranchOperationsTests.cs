@@ -202,7 +202,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
         Assert.Equal(branches.Count, finalBranches.Count);
 
         // Exactly one should be active
-        Assert.Single(finalBranches.Where(b => b.IsActive));
+        Assert.Single(finalBranches, b => b.IsActive);
     }
 
     [Fact]

@@ -6930,7 +6930,10 @@ public partial class MainWindow : Window
         return new ProjectSelectionProfile(
             SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default),
             SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
-            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray());
+            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray(),
+            RootFolderStates: CollectOptionStates(_viewModel.RootFolders, PathComparer.Default),
+            ExtensionStates: CollectOptionStates(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
+            IgnoreOptionStates: CollectIgnoreOptionStates(_viewModel.IgnoreOptions));
     }
 
     private static ProjectSelectionProfile CloneProjectSelectionProfile(ProjectSelectionProfile profile)
@@ -6938,7 +6941,16 @@ public partial class MainWindow : Window
         return new ProjectSelectionProfile(
             SelectedRootFolders: profile.SelectedRootFolders.ToArray(),
             SelectedExtensions: profile.SelectedExtensions.ToArray(),
-            SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray());
+            SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray(),
+            RootFolderStates: profile.RootFolderStates is null
+                ? null
+                : new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default),
+            ExtensionStates: profile.ExtensionStates is null
+                ? null
+                : new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
+            IgnoreOptionStates: profile.IgnoreOptionStates is null
+                ? null
+                : new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates));
     }
 
     private void FlushPersistedStateOnWindowClose()
@@ -8187,6 +8199,27 @@ public partial class MainWindow : Window
         }
 
         return selected;
+    }
+
+    private static Dictionary<string, bool> CollectOptionStates(
+        IEnumerable<SelectionOptionViewModel> options,
+        StringComparer comparer)
+    {
+        var states = new Dictionary<string, bool>(comparer);
+        foreach (var option in options)
+            states[option.Name] = option.IsChecked;
+
+        return states;
+    }
+
+    private static Dictionary<IgnoreOptionId, bool> CollectIgnoreOptionStates(
+        IEnumerable<IgnoreOptionViewModel> options)
+    {
+        var states = new Dictionary<IgnoreOptionId, bool>();
+        foreach (var option in options)
+            states[option.Id] = option.IsChecked;
+
+        return states;
     }
 
     private HashSet<string> GetCheckedPaths()
