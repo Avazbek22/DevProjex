@@ -2,7 +2,7 @@ using System.Buffers;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
-public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
+public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
 {
 	public bool CanReadRoot(string rootPath)
 	{
@@ -147,12 +147,120 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			cancellationToken);
 	}
 
+	public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders,
+		IgnoreRules extensionDiscoveryRules,
+		IgnoreRules effectiveRules,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		bool includeDirectoryToggleProbeRoots = false,
+		CancellationToken cancellationToken = default)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+
+		var scanPlan = BuildRootSelectionScanPlan(
+			rootPath,
+			selectedRootFolders,
+			effectiveRules,
+			includeDirectoryToggleProbeRoots,
+			cancellationToken);
+
+		var aggregatedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var rawCounts = IgnoreOptionCounts.Empty;
+		var effectiveCounts = IgnoreOptionCounts.Empty;
+		var rootAccessDenied = scanPlan.RootAccessDenied ? 1 : 0;
+		var hadAccessDenied = scanPlan.HadAccessDenied ? 1 : 0;
+		var mergeLock = new object();
+
+		var rootFileSnapshot = ScanRootFileIgnoreSectionSnapshotCore(
+			rootPath,
+			extensionDiscoveryRules,
+			effectiveRules,
+			effectiveExtensionPolicy,
+			cancellationToken);
+		aggregatedExtensions.UnionWith(rootFileSnapshot.Value.Extensions);
+		rawCounts = rawCounts.Add(rootFileSnapshot.Value.RawIgnoreOptionCounts);
+		effectiveCounts = effectiveCounts.Add(rootFileSnapshot.Value.EffectiveIgnoreOptionCounts);
+		if (rootFileSnapshot.RootAccessDenied)
+			Interlocked.Exchange(ref rootAccessDenied, 1);
+		if (rootFileSnapshot.HadAccessDenied)
+			Interlocked.Exchange(ref hadAccessDenied, 1);
+
+		if (scanPlan.SelectedRootPaths.Count > 0)
+		{
+			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+			Parallel.ForEach(
+				scanPlan.SelectedRootPaths,
+				parallelOptions,
+				() => new IgnoreSectionSnapshotLocalState(),
+				(folderPath, _, localState) =>
+				{
+					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
+					var snapshot = ScanIgnoreSectionSnapshotCore(
+						folderPath,
+						extensionDiscoveryRules,
+						effectiveRules,
+						effectiveExtensionPolicy,
+						includeRootDirectoryInRawCounts: true,
+						parallelOptions.CancellationToken);
+
+					localState.Extensions.UnionWith(snapshot.Value.Extensions);
+					localState.RawCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
+					localState.EffectiveCounts = localState.EffectiveCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
+
+					if (snapshot.RootAccessDenied)
+						Interlocked.Exchange(ref rootAccessDenied, 1);
+					if (snapshot.HadAccessDenied)
+						Interlocked.Exchange(ref hadAccessDenied, 1);
+
+					return localState;
+				},
+				localState =>
+				{
+					if (localState.Extensions.Count == 0 &&
+					    localState.RawCounts.IsEmpty &&
+					    localState.EffectiveCounts == IgnoreOptionCounts.Empty)
+					{
+						return;
+					}
+
+					lock (mergeLock)
+					{
+						if (localState.Extensions.Count > 0)
+							aggregatedExtensions.UnionWith(localState.Extensions);
+						rawCounts = rawCounts.Add(localState.RawCounts.ToImmutable());
+						effectiveCounts = effectiveCounts.Add(localState.EffectiveCounts);
+					}
+				});
+		}
+
+		if (includeDirectoryToggleProbeRoots && scanPlan.DirectoryToggleCandidates.Count > 0)
+		{
+			var rootCandidateCounts = CountRootDirectoryToggleCandidates(
+				scanPlan.DirectoryToggleCandidates,
+				effectiveRules,
+				cancellationToken);
+			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
+			if (rootCandidateCounts.RootAccessDenied)
+				Interlocked.Exchange(ref rootAccessDenied, 1);
+			if (rootCandidateCounts.HadAccessDenied)
+				Interlocked.Exchange(ref hadAccessDenied, 1);
+		}
+
+		return new ScanResult<IgnoreSectionScanData>(
+			new IgnoreSectionScanData(aggregatedExtensions, rawCounts, effectiveCounts),
+			rootAccessDenied == 1,
+			hadAccessDenied == 1);
+	}
+
 	public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var names = new List<string>();
 		var useGitIgnore = rules.UseGitIgnore;
+		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
 
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 			return new ScanResult<List<string>>(names, false, false);
@@ -165,7 +273,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 				var dirName = dir.Name;
 				var directoryGitIgnore = useGitIgnore
-					? rules.EvaluateGitIgnore(dir.FullPath, isDirectory: true, dirName)
+					? gitIgnoreContext.Evaluate(dir.FullPath, dir.RelativePath, isDirectory: true, dirName)
 					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 				if (ShouldSkipDirectoryByName(dirName, dir.FullPath, dir.IsHidden, rules, directoryGitIgnore))
 					continue;
@@ -302,24 +410,38 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		return false;
 	}
 
-	private static DirectoryScanFacts AnalyzeDirectory(string fullPath, string name, IgnoreRules rules)
+	private static DirectoryScanFacts AnalyzeDirectory(
+		string fullPath,
+		string relativePath,
+		string name,
+		IgnoreRules rules,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
 	{
-		return AnalyzeDirectory(fullPath, name, HasHiddenAttribute(fullPath), rules);
+		return AnalyzeDirectory(
+			fullPath,
+			relativePath,
+			name,
+			HasHiddenAttribute(fullPath),
+			rules,
+			gitIgnoreContext);
 	}
 
 	private static DirectoryScanFacts AnalyzeDirectory(
 		string fullPath,
+		string relativePath,
 		string name,
 		bool isHidden,
-		IgnoreRules rules)
+		IgnoreRules rules,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
 	{
 		var gitIgnoreEvaluation = rules.UseGitIgnore
-			? rules.EvaluateGitIgnore(fullPath, isDirectory: true, name)
+			? gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: true, name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 
 		return new DirectoryScanFacts(
 			Name: name,
 			FullPath: fullPath,
+			RelativePath: relativePath,
 			IsHidden: isHidden,
 			IsDot: IgnoreRuleSemantics.IsDotName(name),
 			IsSmartIgnored: rules.IsSmartIgnoredDirectory(fullPath, name),
@@ -328,33 +450,40 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 	private static FileScanFacts AnalyzeFile(
 		string fullPath,
+		string relativePath,
 		string name,
 		bool shouldApplySmartIgnoreForFiles,
-		IgnoreRules rules)
+		IgnoreRules rules,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
 	{
 		return AnalyzeFile(
 			fullPath,
+			relativePath,
 			name,
 			HasHiddenAttribute(fullPath),
 			GetFileLength(fullPath),
 			shouldApplySmartIgnoreForFiles,
-			rules);
+			rules,
+			gitIgnoreContext);
 	}
 
 	private static FileScanFacts AnalyzeFile(
 		string fullPath,
+		string relativePath,
 		string name,
 		bool isHidden,
 		long length,
 		bool shouldApplySmartIgnoreForFiles,
-		IgnoreRules rules)
+		IgnoreRules rules,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
 	{
 		var isExtensionless = IsExtensionlessFileName(name);
 		var gitIgnored = rules.UseGitIgnore &&
-		                 rules.EvaluateGitIgnore(fullPath, isDirectory: false, name).IsIgnored;
+		                 gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: false, name).IsIgnored;
 
 		return new FileScanFacts(
 			Name: name,
+			RelativePath: relativePath,
 			Extension: Path.GetExtension(name),
 			IsHidden: isHidden,
 			IsDot: IgnoreRuleSemantics.IsDotName(name),
@@ -473,7 +602,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			       !string.IsNullOrWhiteSpace(facts.Extension);
 
 		return !string.IsNullOrWhiteSpace(facts.Extension) &&
-		       extensionPolicy.AllowsExtension(facts.Extension);
+		       extensionPolicy.AllowsExtension(facts.Extension.AsSpan());
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -547,6 +676,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 		var uniqueExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var useGitIgnore = rules.UseGitIgnore;
+		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<ExtensionsScanData>(
@@ -558,7 +688,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		var normalizedRootPath = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		var rootName = Path.GetFileName(normalizedRootPath);
 		var rootGitIgnore = useGitIgnore
-			? rules.EvaluateGitIgnore(rootPath, isDirectory: true, rootName)
+			? gitIgnoreContext.Evaluate(rootPath, string.Empty, isDirectory: true, rootName)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 
 		// Selected root folders must obey the same directory-level rules as the tree itself.
@@ -579,27 +709,27 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		var directoryCounts = default(MutableIgnoreOptionCounts);
 
 		// First pass: collect all traversable directories and parent links.
-		var pending = new Stack<(string Path, int ParentIndex, bool IsRootDirectory)>();
-		pending.Push((rootPath, ParentIndex: -1, IsRootDirectory: true));
+		var pending = new Stack<(string Path, string RelativePath, int ParentIndex, bool IsRootDirectory)>();
+		pending.Push((rootPath, RelativePath: string.Empty, ParentIndex: -1, IsRootDirectory: true));
 
 		while (pending.Count > 0)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
-			var (dir, parentIndex, isRootDirectory) = pending.Pop();
+			var (dir, relativePath, parentIndex, isRootDirectory) = pending.Pop();
 			var currentDirectoryIndex = directories.Count;
-			directories.Add(new DirectoryScanNode(dir, parentIndex, isAccessDenied: false));
+			directories.Add(new DirectoryScanNode(dir, relativePath, parentIndex, isAccessDenied: false));
 
 			if (collectIgnoreOptionCounts && isRootDirectory && includeRootDirectoryInCounts)
 			{
 				AccumulateDirectoryIgnoreOptionCounts(
-					new FileSystemDirectoryEntry(Path.GetFileName(dir), dir, HasHiddenAttribute(dir)),
+					new FileSystemDirectoryEntry(Path.GetFileName(dir), dir, relativePath, HasHiddenAttribute(dir)),
 					ref directoryCounts);
 			}
 
 			try
 			{
-				foreach (var sd in FileSystemEntryEnumerator.EnumerateDirectories(dir))
+				foreach (var sd in FileSystemEntryEnumerator.EnumerateDirectories(dir, relativePath))
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 
@@ -607,12 +737,12 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 						AccumulateDirectoryIgnoreOptionCounts(sd, ref directoryCounts);
 
 					var directoryGitIgnore = useGitIgnore
-						? rules.EvaluateGitIgnore(sd.FullPath, isDirectory: true, sd.Name)
+						? gitIgnoreContext.Evaluate(sd.FullPath, sd.RelativePath, isDirectory: true, sd.Name)
 						: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 					if (ShouldSkipDirectoryByName(sd.Name, sd.FullPath, sd.IsHidden, rules, directoryGitIgnore))
 						continue;
 
-					pending.Push((sd.FullPath, currentDirectoryIndex, IsRootDirectory: false));
+					pending.Push((sd.FullPath, sd.RelativePath, currentDirectoryIndex, IsRootDirectory: false));
 				}
 			}
 			catch (OperationCanceledException)
@@ -656,12 +786,13 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 				{
 					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 					var dir = directories[index].Path;
+					var relativePath = directories[index].RelativePath;
 					var shouldApplySmartIgnoreForFiles = rules.ShouldApplySmartIgnore(dir, isDirectory: true);
 
 					var hasVisibleFiles = false;
 					try
 					{
-						foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(dir))
+						foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(dir, relativePath))
 						{
 							parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
@@ -669,7 +800,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 								AccumulateFileIgnoreOptionCounts(file, ref localState.Counts);
 
 							var fileGitIgnore = useGitIgnore
-								? rules.EvaluateGitIgnore(file.FullPath, isDirectory: false, file.Name)
+								? gitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
 								: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 							if (ShouldSkipFileByName(
 								    file.Name,
@@ -780,6 +911,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 		var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var useGitIgnore = rules.UseGitIgnore;
+		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<ExtensionsScanData>(
@@ -800,7 +932,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 					AccumulateFileIgnoreOptionCounts(file, ref counts);
 
 				var fileGitIgnore = useGitIgnore
-					? rules.EvaluateGitIgnore(file.FullPath, isDirectory: false, file.Name)
+					? gitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
 					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 				if (ShouldSkipFileByName(
 					    file.Name,
@@ -907,6 +1039,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		// The combined ignore-section path intentionally reuses one file-fact record.
 		// This keeps the snapshot cheap enough for live refreshes, so the caller must
 		// keep structural ignore semantics aligned between discovery and effective rules.
+		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
 		var shouldApplySmartIgnoreForFiles = effectiveRules.ShouldApplySmartIgnore(rootPath, isDirectory: true);
 
 		try
@@ -919,11 +1052,13 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 				var facts = AnalyzeFile(
 					file.FullPath,
+					file.RelativePath,
 					file.Name,
 					file.IsHidden,
 					file.Length,
 					shouldApplySmartIgnoreForFiles,
-					effectiveRules);
+					effectiveRules,
+					effectiveGitIgnoreContext);
 				var passesDiscovery = PassesExtensionDiscoveryRules(facts, extensionDiscoveryRules);
 				if (passesDiscovery)
 					AddExtensionEntry(file.Name, facts.Extension, facts.IsExtensionless, extensions);
@@ -999,6 +1134,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		Array.Clear(visibilityStates, 0, directories.Count);
 		var hadAccessDenied = discovery.HadAccessDenied ? 1 : 0;
 		var mergeLock = new object();
+		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
 
 		try
 		{
@@ -1036,17 +1172,19 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 				try
 				{
-					foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(node.Path))
+					foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(node.Path, node.RelativePath))
 					{
 						token.ThrowIfCancellationRequested();
 
 						var facts = AnalyzeFile(
 							file.FullPath,
+							file.RelativePath,
 							file.Name,
 							file.IsHidden,
 							file.Length,
 							shouldApplySmartIgnoreForFiles,
-							effectiveRules);
+							effectiveRules,
+							effectiveGitIgnoreContext);
 						if (extensionDiscoveryVisible)
 							AccumulateFileIgnoreOptionCounts(file, ref localRawCounts);
 
@@ -1228,7 +1366,14 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			return new ScanResult<List<EffectiveIgnoreScanNode>>([], RootAccessDenied: false, HadAccessDenied: false);
 
 		var rootName = Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-		var rootFacts = AnalyzeDirectory(rootPath, rootName, HasHiddenAttribute(rootPath), effectiveRules);
+		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
+		var rootFacts = AnalyzeDirectory(
+			rootPath,
+			string.Empty,
+			rootName,
+			HasHiddenAttribute(rootPath),
+			effectiveRules,
+			effectiveGitIgnoreContext);
 		var rootExtensionDiscoveryRuleState = EvaluateDirectoryRuleState(
 			rootFacts,
 			extensionDiscoveryRules.IgnoreHiddenFolders,
@@ -1272,6 +1417,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			var currentDirectoryIndex = directories.Count;
 			directories.Add(new EffectiveIgnoreScanNode(
 				facts.FullPath,
+				facts.RelativePath,
 				facts.Name,
 				parentIndex,
 				isAccessDenied: false,
@@ -1287,15 +1433,17 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 			try
 			{
-				foreach (var childDirectory in FileSystemEntryEnumerator.EnumerateDirectories(facts.FullPath))
+				foreach (var childDirectory in FileSystemEntryEnumerator.EnumerateDirectories(facts.FullPath, facts.RelativePath))
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 
 					var childFacts = AnalyzeDirectory(
 						childDirectory.FullPath,
+						childDirectory.RelativePath,
 						childDirectory.Name,
 						childDirectory.IsHidden,
-						effectiveRules);
+						effectiveRules,
+						effectiveGitIgnoreContext);
 					var childExtensionDiscoveryRuleState = EvaluateDirectoryRuleState(
 						childFacts,
 						extensionDiscoveryRules.IgnoreHiddenFolders,
@@ -1605,6 +1753,414 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		return new ScanResult<int>(scan.Value.EmptyFolders, scan.RootAccessDenied, scan.HadAccessDenied);
 	}
 
+	private static RootSelectionScanPlan BuildRootSelectionScanPlan(
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders,
+		IgnoreRules effectiveRules,
+		bool includeDirectoryToggleProbeRoots,
+		CancellationToken cancellationToken)
+	{
+		var selectedRootPaths = new List<string>(selectedRootFolders.Count);
+		var directoryToggleCandidates = new List<FileSystemDirectoryEntry>();
+		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		{
+			return new RootSelectionScanPlan(
+				selectedRootPaths,
+				directoryToggleCandidates,
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		var selectedNames = new HashSet<string>(PathComparer.Default);
+		foreach (var selectedRootFolder in selectedRootFolders)
+		{
+			if (!IsSafeRelativeRootFolderName(selectedRootFolder))
+				continue;
+
+			selectedNames.Add(selectedRootFolder);
+		}
+
+		try
+		{
+			foreach (var directory in FileSystemEntryEnumerator.EnumerateDirectories(rootPath))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+
+				if (selectedNames.Contains(directory.Name))
+				{
+					selectedRootPaths.Add(directory.FullPath);
+					continue;
+				}
+
+				if (includeDirectoryToggleProbeRoots &&
+				    IsPotentialDirectoryToggleCandidate(directory, effectiveRules))
+				{
+					directoryToggleCandidates.Add(directory);
+				}
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (UnauthorizedAccessException)
+		{
+			AddSelectedRootPathsByName(rootPath, selectedNames, selectedRootPaths);
+			return new RootSelectionScanPlan(
+				selectedRootPaths,
+				directoryToggleCandidates,
+				RootAccessDenied: true,
+				HadAccessDenied: true);
+		}
+		catch
+		{
+			AddSelectedRootPathsByName(rootPath, selectedNames, selectedRootPaths);
+		}
+
+		return new RootSelectionScanPlan(
+			selectedRootPaths,
+			directoryToggleCandidates,
+			RootAccessDenied: false,
+			HadAccessDenied: false);
+	}
+
+	private static void AddSelectedRootPathsByName(
+		string rootPath,
+		IReadOnlyCollection<string> selectedNames,
+		List<string> selectedRootPaths)
+	{
+		if (selectedNames.Count == 0)
+			return;
+
+		string normalizedRootPath;
+		try
+		{
+			normalizedRootPath = PathUtility.Normalize(rootPath);
+		}
+		catch
+		{
+			return;
+		}
+
+		foreach (var selectedName in selectedNames)
+		{
+			try
+			{
+				var fullPath = PathUtility.Normalize(Path.Combine(rootPath, selectedName));
+				if (PathComparer.Default.Equals(fullPath, normalizedRootPath) ||
+				    !PathUtility.IsPathInside(fullPath, normalizedRootPath) ||
+				    !Directory.Exists(fullPath) ||
+				    IsReparsePointDirectory(fullPath))
+				{
+					continue;
+				}
+
+				selectedRootPaths.Add(fullPath);
+			}
+			catch
+			{
+				// Invalid stale root-folder selections are ignored by design.
+			}
+		}
+	}
+
+	private static bool IsSafeRelativeRootFolderName(string? selectedRootFolder)
+	{
+		return !string.IsNullOrWhiteSpace(selectedRootFolder) &&
+		       !Path.IsPathRooted(selectedRootFolder) &&
+		       selectedRootFolder.IndexOf(Path.DirectorySeparatorChar) < 0 &&
+		       selectedRootFolder.IndexOf(Path.AltDirectorySeparatorChar) < 0;
+	}
+
+	private static bool IsPotentialDirectoryToggleCandidate(
+		FileSystemDirectoryEntry directory,
+		IgnoreRules effectiveRules)
+	{
+		if (!effectiveRules.IgnoreDotFolders && !effectiveRules.IgnoreHiddenFolders)
+			return false;
+
+		var isDotFolder = IgnoreRuleSemantics.IsDotName(directory.Name);
+		var isHiddenByCurrentHiddenFolderRule = IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			effectiveRules.IgnoreHiddenFolders,
+			directory.IsHidden,
+			isDotFolder,
+			effectiveRules.IgnoreDotFolders);
+		if (isDotFolder &&
+		    (effectiveRules.IgnoreDotFolders || !isHiddenByCurrentHiddenFolderRule))
+		{
+			return true;
+		}
+
+		return isHiddenByCurrentHiddenFolderRule;
+	}
+
+	private static ScanResult<IgnoreOptionCounts> CountRootDirectoryToggleCandidates(
+		IReadOnlyList<FileSystemDirectoryEntry> candidateDirectories,
+		IgnoreRules effectiveRules,
+		CancellationToken cancellationToken)
+	{
+		if (candidateDirectories.Count == 0 ||
+		    (!effectiveRules.IgnoreDotFolders && !effectiveRules.IgnoreHiddenFolders))
+		{
+			return new ScanResult<IgnoreOptionCounts>(
+				IgnoreOptionCounts.Empty,
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		var hiddenFolders = 0;
+		var dotFolders = 0;
+		var rootAccessDenied = 0;
+		var hadAccessDenied = 0;
+		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+
+		Parallel.ForEach(
+			candidateDirectories,
+			parallelOptions,
+			() => new RootDirectoryToggleCandidateAccumulator(),
+			(directory, _, localCounts) =>
+			{
+				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+				if (IsSuppressedByNonDirectoryToggleRule(directory.FullPath, directory.Name, effectiveRules))
+					return localCounts;
+
+				var isDotFolder = IgnoreRuleSemantics.IsDotName(directory.Name);
+				var isHiddenByCurrentHiddenFolderRule =
+					IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+						effectiveRules.IgnoreHiddenFolders,
+						directory.IsHidden,
+						isDotFolder,
+						effectiveRules.IgnoreDotFolders);
+				var shouldCountDotFolder =
+					isDotFolder &&
+					(effectiveRules.IgnoreDotFolders || !isHiddenByCurrentHiddenFolderRule);
+
+				if (shouldCountDotFolder)
+				{
+					var visible = HasVisibleContentForDirectoryToggleCandidate(
+						directory.FullPath,
+						effectiveRules with
+						{
+							IgnoreDotFolders = false,
+							IgnoreHiddenFolders = false,
+							IgnoreEmptyFolders = true
+						},
+						parallelOptions.CancellationToken);
+					if (visible.RootAccessDenied)
+					{
+						Interlocked.Exchange(ref rootAccessDenied, 1);
+						Interlocked.Exchange(ref hadAccessDenied, 1);
+						return localCounts;
+					}
+
+					if (visible.HadAccessDenied)
+						Interlocked.Exchange(ref hadAccessDenied, 1);
+					if (visible.HadAccessDenied || visible.Value)
+						localCounts.DotFolders++;
+				}
+
+				if (isHiddenByCurrentHiddenFolderRule)
+				{
+					var visible = HasVisibleContentForDirectoryToggleCandidate(
+						directory.FullPath,
+						effectiveRules with
+						{
+							IgnoreHiddenFolders = false,
+							IgnoreEmptyFolders = true
+						},
+						parallelOptions.CancellationToken);
+					if (visible.RootAccessDenied)
+					{
+						Interlocked.Exchange(ref rootAccessDenied, 1);
+						Interlocked.Exchange(ref hadAccessDenied, 1);
+						return localCounts;
+					}
+
+					if (visible.HadAccessDenied)
+						Interlocked.Exchange(ref hadAccessDenied, 1);
+					if (visible.HadAccessDenied || visible.Value)
+						localCounts.HiddenFolders++;
+				}
+
+				return localCounts;
+			},
+			localCounts =>
+			{
+				if (localCounts.IsEmpty)
+					return;
+
+				Interlocked.Add(ref hiddenFolders, localCounts.HiddenFolders);
+				Interlocked.Add(ref dotFolders, localCounts.DotFolders);
+			});
+
+		return new ScanResult<IgnoreOptionCounts>(
+			new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
+			RootAccessDenied: rootAccessDenied == 1,
+			HadAccessDenied: hadAccessDenied == 1);
+	}
+
+	private static bool IsSuppressedByNonDirectoryToggleRule(
+		string directoryPath,
+		string name,
+		IgnoreRules rules)
+	{
+		if (rules.IsSmartIgnoredDirectory(directoryPath, name))
+			return true;
+
+		if (!rules.UseGitIgnore)
+			return false;
+
+		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(directoryPath);
+		var gitIgnore = gitIgnoreContext.Evaluate(directoryPath, string.Empty, isDirectory: true, name);
+		return gitIgnore.IsIgnored && !gitIgnore.ShouldTraverseIgnoredDirectory;
+	}
+
+	private static ScanResult<bool> HasVisibleContentForDirectoryToggleCandidate(
+		string rootPath,
+		IgnoreRules rules,
+		CancellationToken cancellationToken)
+	{
+		var rootName = Path.GetFileName(rootPath);
+		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
+		if (IsDirectorySuppressedByRules(
+			    rootPath,
+			    relativePath: string.Empty,
+			    rootName,
+			    HasHiddenAttribute(rootPath),
+			    rules,
+			    gitIgnoreContext))
+		{
+			return new ScanResult<bool>(false, RootAccessDenied: false, HadAccessDenied: false);
+		}
+
+		var hadAccessDenied = false;
+		var pending = new Stack<(string Path, string RelativePath)>();
+		pending.Push((rootPath, RelativePath: string.Empty));
+
+		while (pending.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var (currentPath, relativePath) = pending.Pop();
+
+			try
+			{
+				foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(currentPath, relativePath))
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (IsFileVisibleForDirectoryToggleCandidate(file, rules, gitIgnoreContext))
+						return new ScanResult<bool>(true, RootAccessDenied: false, HadAccessDenied: hadAccessDenied);
+				}
+
+				foreach (var directory in FileSystemEntryEnumerator.EnumerateDirectories(currentPath, relativePath))
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (IsDirectorySuppressedByRules(
+						    directory.FullPath,
+						    directory.RelativePath,
+						    directory.Name,
+						    directory.IsHidden,
+						    rules,
+						    gitIgnoreContext))
+					{
+						continue;
+					}
+
+					pending.Push((directory.FullPath, directory.RelativePath));
+				}
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				hadAccessDenied = true;
+				return new ScanResult<bool>(true, RootAccessDenied: currentPath == rootPath, HadAccessDenied: true);
+			}
+			catch
+			{
+				// Best-effort: unreadable children should not destabilize ignore availability.
+			}
+		}
+
+		return new ScanResult<bool>(false, RootAccessDenied: false, HadAccessDenied: hadAccessDenied);
+	}
+
+	private static bool IsDirectorySuppressedByRules(
+		string directoryPath,
+		string relativePath,
+		string name,
+		bool isHidden,
+		IgnoreRules rules,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
+	{
+		if (rules.IsSmartIgnoredDirectory(directoryPath, name))
+			return true;
+
+		if (rules.UseGitIgnore)
+		{
+			var gitIgnore = gitIgnoreContext.Evaluate(directoryPath, relativePath, isDirectory: true, name);
+			if (gitIgnore.IsIgnored && !gitIgnore.ShouldTraverseIgnoredDirectory)
+				return true;
+		}
+
+		var isDot = IgnoreRuleSemantics.IsDotName(name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(rules.IgnoreDotFolders, isDot))
+			return true;
+
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			    rules.IgnoreHiddenFolders,
+			    isHidden,
+			    isDot,
+			    rules.IgnoreDotFolders))
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	private static bool IsFileVisibleForDirectoryToggleCandidate(
+		FileSystemFileEntry file,
+		IgnoreRules rules,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
+	{
+		if (rules.UseGitIgnore &&
+		    gitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name).IsIgnored)
+		{
+			return false;
+		}
+
+		if (rules.IsSmartIgnoredFile(
+			    file.FullPath,
+			    file.Name,
+			    rules.ShouldApplySmartIgnore(file.FullPath, isDirectory: false)))
+		{
+			return false;
+		}
+
+		var isDot = IgnoreRuleSemantics.IsDotName(file.Name);
+		if (IgnoreRuleSemantics.ShouldIgnoreDotFile(rules.IgnoreDotFiles, isDot))
+			return false;
+
+		if (IgnoreRuleSemantics.ShouldIgnoreHiddenFile(
+			    rules.IgnoreHiddenFiles,
+			    file.IsHidden,
+			    isDot,
+			    rules.IgnoreDotFiles))
+		{
+			return false;
+		}
+
+		if (rules.IgnoreEmptyFiles && file.Length == 0)
+			return false;
+
+		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(file.Name))
+			return false;
+
+		return true;
+	}
+
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static void AccumulateDirectoryIgnoreOptionCounts(
 		FileSystemDirectoryEntry entry,
@@ -1640,6 +2196,18 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		catch
 		{
 			return false;
+		}
+	}
+
+	private static bool IsReparsePointDirectory(string path)
+	{
+		try
+		{
+			return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch
+		{
+			return true;
 		}
 	}
 
@@ -1683,11 +2251,26 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 	{
 		public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
 		public MutableIgnoreOptionCounts RawCounts;
+		public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
 	}
 
-	private struct DirectoryScanNode(string path, int parentIndex, bool isAccessDenied)
+	private sealed record RootSelectionScanPlan(
+		List<string> SelectedRootPaths,
+		List<FileSystemDirectoryEntry> DirectoryToggleCandidates,
+		bool RootAccessDenied,
+		bool HadAccessDenied);
+
+	private sealed class RootDirectoryToggleCandidateAccumulator
+	{
+		public int HiddenFolders { get; set; }
+		public int DotFolders { get; set; }
+		public bool IsEmpty => HiddenFolders == 0 && DotFolders == 0;
+	}
+
+	private struct DirectoryScanNode(string path, string relativePath, int parentIndex, bool isAccessDenied)
 	{
 		public string Path { get; } = path;
+		public string RelativePath { get; } = relativePath;
 		public int ParentIndex { get; } = parentIndex;
 		public bool IsAccessDenied { get; set; } = isAccessDenied;
 	}
@@ -1699,6 +2282,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 	private readonly record struct DirectoryScanFacts(
 		string Name,
 		string FullPath,
+		string RelativePath,
 		bool IsHidden,
 		bool IsDot,
 		bool IsSmartIgnored,
@@ -1706,6 +2290,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 	private readonly record struct FileScanFacts(
 		string Name,
+		string RelativePath,
 		string Extension,
 		bool IsHidden,
 		bool IsDot,
@@ -1723,6 +2308,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 	private struct EffectiveIgnoreScanNode(
 		string path,
+		string relativePath,
 		string name,
 		int parentIndex,
 		bool isAccessDenied,
@@ -1734,6 +2320,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		DirectoryToggleRuleState dotFoldersRuleState)
 	{
 		public string Path { get; } = path;
+		public string RelativePath { get; } = relativePath;
 		public string Name { get; } = name;
 		public int ParentIndex { get; } = parentIndex;
 		public bool IsAccessDenied { get; set; } = isAccessDenied;
@@ -1821,6 +2408,18 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public void Add(in MutableIgnoreOptionCounts other)
+		{
+			HiddenFolders += other.HiddenFolders;
+			HiddenFiles += other.HiddenFiles;
+			DotFolders += other.DotFolders;
+			DotFiles += other.DotFiles;
+			EmptyFolders += other.EmptyFolders;
+			EmptyFiles += other.EmptyFiles;
+			ExtensionlessFiles += other.ExtensionlessFiles;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Add(in IgnoreOptionCounts other)
 		{
 			HiddenFolders += other.HiddenFolders;
 			HiddenFiles += other.HiddenFiles;

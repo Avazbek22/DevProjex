@@ -131,6 +131,40 @@ public sealed class TreeBuilderTests
 		Assert.Contains(result.Root.Children, child => child.Name == "note.txt");
 	}
 
+	[Fact]
+	public void Build_UsesRelativeGitIgnoreEvaluationForSelectedRootFolders()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "/src/generated/");
+		temp.CreateFile("src/app.cs", "class App {}");
+		temp.CreateFile("src/generated/noise.cs", "class Noise {}");
+
+		var matcher = GitIgnoreMatcher.Build(temp.Path, ["/src/generated/"]);
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(),
+			SmartIgnoredFiles: new HashSet<string>())
+		{
+			UseGitIgnore = true,
+			GitIgnoreMatcher = matcher,
+			ScopedGitIgnoreMatchers = [new ScopedGitIgnoreMatcher(temp.Path, matcher)]
+		};
+
+		var options = new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+			AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src" },
+			IgnoreRules: rules);
+
+		var result = new TreeBuilder().Build(temp.Path, options);
+
+		var src = result.Root.Children.Single(child => child.Name == "src");
+		Assert.Contains(src.Children, child => child.Name == "app.cs");
+		Assert.DoesNotContain(src.Children, child => child.Name == "generated");
+	}
+
 	// Verifies name filter keeps matching root files and matching descendants only.
 	[Fact]
 	public void Build_NameFilter_FiltersFilesAndDirectoriesBySubstring()

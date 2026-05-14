@@ -8,4 +8,8 @@ public sealed class ExtensionSelectionInclusionPolicy(
 	public bool AllowsExtension(string extension) =>
 		!string.IsNullOrWhiteSpace(extension) &&
 		selectionStateResolver.Resolve(extension, defaultForNewExtension);
+
+	public bool AllowsExtension(ReadOnlySpan<char> extension) =>
+		!extension.IsWhiteSpace() &&
+		selectionStateResolver.Resolve(extension.ToString(), defaultForNewExtension);
 }

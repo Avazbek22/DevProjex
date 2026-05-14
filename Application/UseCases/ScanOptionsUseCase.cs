@@ -264,6 +264,21 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
+		if (scanner is IFileSystemScannerRootSelectionSnapshotProvider rootSelectionProvider)
+		{
+			var effectiveExtensionPolicy = effectiveAllowedExtensions is null
+				? null
+				: new ExtensionSetInclusionPolicy(effectiveAllowedExtensions);
+			return rootSelectionProvider.GetIgnoreSectionSnapshotForRootSelection(
+				rootPath,
+				rootFolders,
+				extensionDiscoveryRules,
+				effectiveRules,
+				effectiveExtensionPolicy,
+				includeDirectoryToggleProbeRoots,
+				cancellationToken);
+		}
+
 		if (scanner is not IFileSystemScannerIgnoreSectionSnapshotProvider provider)
 		{
 			var rawScan = GetExtensionsAndIgnoreCountsForRootFolders(
@@ -313,6 +328,18 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+
+		if (scanner is IFileSystemScannerRootSelectionSnapshotProvider rootSelectionProvider)
+		{
+			return rootSelectionProvider.GetIgnoreSectionSnapshotForRootSelection(
+				rootPath,
+				rootFolders,
+				extensionDiscoveryRules,
+				effectiveRules,
+				effectiveExtensionPolicy,
+				includeDirectoryToggleProbeRoots,
+				cancellationToken);
+		}
 
 		if (scanner is not IFileSystemScannerExtensionPolicySnapshotProvider policyProvider)
 		{

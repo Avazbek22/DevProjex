@@ -7,4 +7,6 @@ namespace DevProjex.Kernel;
 public interface IExtensionInclusionPolicy
 {
 	bool AllowsExtension(string extension);
+
+	bool AllowsExtension(ReadOnlySpan<char> extension);
 }

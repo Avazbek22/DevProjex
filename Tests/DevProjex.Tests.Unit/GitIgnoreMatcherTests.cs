@@ -422,6 +422,24 @@ public sealed class GitIgnoreMatcherTests
 		Assert.False(matcher.IsIgnored("/different/repo/file.log", false, "file.log"));
 	}
 
+	[Fact]
+	public void IsIgnored_PathWithSameRootPrefixButOutsideRoot_ReturnsFalse()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", ["*.log"]);
+
+		Assert.False(matcher.IsIgnored("/repo2/debug.log", false, "debug.log"));
+	}
+
+	[Fact]
+	public void EvaluateRelative_MatchesSameRulesWithoutFullPathNormalization()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", ["/src/generated/", "*.tmp"]);
+
+		Assert.True(matcher.EvaluateRelative("src/generated/app.cs", isDirectory: false, "app.cs").IsIgnored);
+		Assert.True(matcher.EvaluateRelative(@"src\debug.tmp", isDirectory: false, "debug.tmp").IsIgnored);
+		Assert.False(matcher.EvaluateRelative("lib/generated/app.cs", isDirectory: false, "app.cs").IsIgnored);
+	}
+
 	#endregion
 
 	#region Real-World .gitignore Patterns - Visual Studio / .NET
