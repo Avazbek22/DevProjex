@@ -6,7 +6,7 @@ public sealed class SelectionSyncCoordinatorEffectiveEmptyFolderCountsTests
 {
 	[Theory]
 	[MemberData(nameof(ExtensionSelectionCases))]
-	public void BuildEffectiveAllowedExtensionsForLiveCounts_UsesSelectionAwareAllowedExtensions(
+	public void BuildEffectiveExtensionPolicyForLiveCounts_UsesSelectionAwareExtensionPolicy(
 		string scenario,
 		IReadOnlyList<SelectionOption> extensionOptions,
 		int expectedEmptyFolders)
@@ -16,22 +16,37 @@ public sealed class SelectionSyncCoordinatorEffectiveEmptyFolderCountsTests
 		Assert.True(expectedEmptyFolders >= 0);
 
 		ApplyPreviousExtensionSelection(viewModel, coordinator, extensionOptions);
-		var allowedExtensions = ResolveAllowedExtensions(coordinator, forceAllExtensionsChecked: false);
+		var policy = ResolveExtensionPolicy(coordinator, forceAllExtensionsChecked: false);
 
-		var expectedAllowedExtensions = scenario switch
+		var expectedKnownSelections = scenario switch
 		{
-			"all-visible" => [".cs", ".md"],
-			"markdown-hidden" => [".cs"],
-			"all-unchecked" => Array.Empty<string>(),
+			"all-visible" => new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = true,
+				[".md"] = true
+			},
+			"markdown-hidden" => new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = true,
+				[".md"] = false
+			},
+			"all-unchecked" => new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = false,
+				[".md"] = false
+			},
 			_ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null)
 		};
 
-		Assert.NotNull(allowedExtensions);
-		Assert.True(allowedExtensions!.SequenceEqual(expectedAllowedExtensions));
+		Assert.NotNull(policy);
+		foreach (var (extension, expectedAllowed) in expectedKnownSelections)
+			Assert.Equal(expectedAllowed, policy!.AllowsExtension(extension));
+
+		Assert.True(policy!.AllowsExtension(".json"));
 	}
 
 	[Fact]
-	public void BuildEffectiveAllowedExtensionsForLiveCounts_WhenAllExtensionsToggleIsForced_ReturnsNull()
+	public void BuildEffectiveExtensionPolicyForLiveCounts_WhenAllExtensionsToggleIsForced_ReturnsNull()
 	{
 		var viewModel = CreateViewModel();
 		using var coordinator = CreateCoordinator(viewModel, currentPath: "/workspace");
@@ -43,9 +58,9 @@ public sealed class SelectionSyncCoordinatorEffectiveEmptyFolderCountsTests
 				new SelectionOption(".md", false)
 			]);
 
-		var allowedExtensions = ResolveAllowedExtensions(coordinator, forceAllExtensionsChecked: true);
+		var policy = ResolveExtensionPolicy(coordinator, forceAllExtensionsChecked: true);
 
-		Assert.Null(allowedExtensions);
+		Assert.Null(policy);
 	}
 
 	[Theory]
@@ -134,22 +149,16 @@ public sealed class SelectionSyncCoordinatorEffectiveEmptyFolderCountsTests
 		viewModel.AllExtensionsChecked = options.All(option => option.IsChecked);
 	}
 
-	private static string[]? ResolveAllowedExtensions(
+	private static IExtensionInclusionPolicy? ResolveExtensionPolicy(
 		SelectionSyncCoordinator coordinator,
 		bool forceAllExtensionsChecked)
 	{
 		var method = typeof(SelectionSyncCoordinator).GetMethod(
-			"BuildEffectiveAllowedExtensionsForLiveCounts",
+			"BuildEffectiveExtensionPolicyForLiveCounts",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
 
-		var result = method!.Invoke(coordinator, [forceAllExtensionsChecked]);
-		if (result is null)
-			return null;
-
-		return Assert.IsType<HashSet<string>>(result)
-			.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-			.ToArray();
+		return (IExtensionInclusionPolicy?)method!.Invoke(coordinator, [forceAllExtensionsChecked]);
 	}
 
 	private static void ApplyExtensionScanState(

@@ -1,6 +1,6 @@
 namespace DevProjex.Infrastructure.FileSystem;
 
-public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider
+public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
 {
 	// Optimal parallelism for modern multi-core CPUs with NVMe SSDs
 	private static readonly int MaxParallelism = Math.Max(4, Environment.ProcessorCount);
@@ -95,11 +95,26 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		IReadOnlySet<string>? effectiveAllowedExtensions,
 		CancellationToken cancellationToken = default)
 	{
+		return GetIgnoreSectionSnapshot(
+			rootPath,
+			extensionDiscoveryRules,
+			effectiveRules,
+			CreateExtensionPolicy(effectiveAllowedExtensions),
+			cancellationToken);
+	}
+
+	public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+		string rootPath,
+		IgnoreRules extensionDiscoveryRules,
+		IgnoreRules effectiveRules,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		CancellationToken cancellationToken = default)
+	{
 		return ScanIgnoreSectionSnapshotCore(
 			rootPath,
 			extensionDiscoveryRules,
 			effectiveRules,
-			effectiveAllowedExtensions,
+			effectiveExtensionPolicy,
 			includeRootDirectoryInRawCounts: true,
 			cancellationToken);
 	}
@@ -111,11 +126,26 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		IReadOnlySet<string>? effectiveAllowedExtensions,
 		CancellationToken cancellationToken = default)
 	{
+		return GetRootFileIgnoreSectionSnapshot(
+			rootPath,
+			extensionDiscoveryRules,
+			effectiveRules,
+			CreateExtensionPolicy(effectiveAllowedExtensions),
+			cancellationToken);
+	}
+
+	public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+		string rootPath,
+		IgnoreRules extensionDiscoveryRules,
+		IgnoreRules effectiveRules,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		CancellationToken cancellationToken = default)
+	{
 		return ScanRootFileIgnoreSectionSnapshotCore(
 			rootPath,
 			extensionDiscoveryRules,
 			effectiveRules,
-			effectiveAllowedExtensions,
+			effectiveExtensionPolicy,
 			cancellationToken);
 	}
 
@@ -384,13 +414,13 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 	private static EffectiveFileVisibilityProfile EvaluateFileVisibilityProfile(
 		in FileScanFacts facts,
-		IReadOnlySet<string>? allowedExtensions,
+		IExtensionInclusionPolicy? extensionPolicy,
 		IgnoreRules rules,
 		bool allowWhenExtensionsAreDiscovered)
 	{
 		if (facts.IsGitIgnored ||
 		    facts.IsSmartIgnored ||
-		    !PassesExtensionFilter(facts, allowedExtensions, allowWhenExtensionsAreDiscovered))
+		    !PassesExtensionFilter(facts, extensionPolicy, allowWhenExtensionsAreDiscovered))
 		{
 			return default;
 		}
@@ -431,19 +461,21 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static bool PassesExtensionFilter(
 		in FileScanFacts facts,
-		IReadOnlySet<string>? allowedExtensions,
+		IExtensionInclusionPolicy? extensionPolicy,
 		bool allowWhenExtensionsAreDiscovered)
 	{
 		if (facts.IsExtensionless)
 			return true;
 
-		if (allowedExtensions is null)
+		if (!allowWhenExtensionsAreDiscovered)
+			return false;
+
+		if (extensionPolicy is null)
 			return allowWhenExtensionsAreDiscovered &&
 			       !string.IsNullOrWhiteSpace(facts.Extension);
 
-		return allowedExtensions.Count > 0 &&
-		       !string.IsNullOrWhiteSpace(facts.Extension) &&
-		       allowedExtensions.Contains(facts.Extension);
+		return !string.IsNullOrWhiteSpace(facts.Extension) &&
+		       extensionPolicy.AllowsExtension(facts.Extension);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -470,6 +502,15 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		return true;
 	}
 
+	private static IExtensionInclusionPolicy? CreateExtensionPolicy(
+		IReadOnlySet<string>? allowedExtensions)
+	{
+		if (allowedExtensions is null)
+			return null;
+
+		return new ExtensionSetInclusionPolicy(allowedExtensions);
+	}
+
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static bool PassesExtensionDiscoveryRules(in FileScanFacts facts, IgnoreRules rules)
 	{
@@ -481,6 +522,20 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			       rules.IgnoreDotFiles,
 			       rules.IgnoreEmptyFiles,
 			       rules.IgnoreExtensionlessFiles);
+	}
+
+	private static IgnoreRules BuildEffectiveCountDiscoveryRules(IgnoreRules rules)
+	{
+		// Effective counters measure what each basic file rule changes from the current tree.
+		// Keep Git/Smart exclusions, but leave file-level toggles open so the rule that hides
+		// a file can still be counted as the active cause.
+		return rules with
+		{
+			IgnoreHiddenFiles = false,
+			IgnoreDotFiles = false,
+			IgnoreEmptyFiles = false,
+			IgnoreExtensionlessFiles = false
+		};
 	}
 
 	private ScanResult<ExtensionsScanData> ScanExtensionsCore(
@@ -846,11 +901,12 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		IgnoreRules rules,
 		CancellationToken cancellationToken)
 	{
+		var effectiveCountDiscoveryRules = BuildEffectiveCountDiscoveryRules(rules);
 		var scan = ScanRootFileIgnoreSectionSnapshotCore(
 			rootPath,
+			effectiveCountDiscoveryRules,
 			rules,
-			rules,
-			allowedExtensions,
+			CreateExtensionPolicy(allowedExtensions),
 			cancellationToken);
 		return new ScanResult<IgnoreOptionCounts>(
 			scan.Value.EffectiveIgnoreOptionCounts,
@@ -864,11 +920,12 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		IgnoreRules rules,
 		CancellationToken cancellationToken)
 	{
+		var effectiveCountDiscoveryRules = BuildEffectiveCountDiscoveryRules(rules);
 		var scan = ScanIgnoreSectionSnapshotCore(
 			rootPath,
+			effectiveCountDiscoveryRules,
 			rules,
-			rules,
-			allowedExtensions,
+			CreateExtensionPolicy(allowedExtensions),
 			includeRootDirectoryInRawCounts: true,
 			cancellationToken);
 		return new ScanResult<IgnoreOptionCounts>(
@@ -881,7 +938,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		string rootPath,
 		IgnoreRules extensionDiscoveryRules,
 		IgnoreRules effectiveRules,
-		IReadOnlySet<string>? effectiveAllowedExtensions,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -924,7 +981,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 				var visibility = EvaluateFileVisibilityProfile(
 					facts,
-					effectiveAllowedExtensions,
+					effectiveExtensionPolicy,
 					effectiveRules,
 					passesDiscovery);
 				AccumulateDirectFileDelta(facts.IsHidden, visibility.BaseVisible, visibility.HiddenFilesVisible, ref effectiveCounts.HiddenFiles);
@@ -969,7 +1026,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		string rootPath,
 		IgnoreRules extensionDiscoveryRules,
 		IgnoreRules effectiveRules,
-		IReadOnlySet<string>? effectiveAllowedExtensions,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		bool includeRootDirectoryInRawCounts,
 		CancellationToken cancellationToken)
 	{
@@ -1053,7 +1110,7 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 					var visibility = EvaluateFileVisibilityProfile(
 						facts,
-						effectiveAllowedExtensions,
+						effectiveExtensionPolicy,
 						effectiveRules,
 						passesDiscovery);
 

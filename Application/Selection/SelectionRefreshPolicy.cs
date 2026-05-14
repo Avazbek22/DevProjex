@@ -33,28 +33,32 @@ public static class SelectionRefreshPolicy
         IReadOnlyCollection<string> cachedSelections,
         IReadOnlyList<SelectionOption> options)
     {
-        if (preparedSelectionMode != PreparedSelectionMode.Profile)
-            return options;
-        if (cachedSelections.Count == 0 || options.Count == 0)
-            return options;
-
-        var hasAnyMatchedSelection = false;
-        foreach (var option in options)
-        {
-            if (option.IsChecked)
-            {
-                hasAnyMatchedSelection = true;
-                break;
-            }
-        }
-
-        if (hasAnyMatchedSelection)
+        if (!ShouldApplyMissingProfileSelectionsFallback(preparedSelectionMode, cachedSelections, options))
             return options;
 
         var fallback = new List<SelectionOption>(options.Count);
         foreach (var option in options)
             fallback.Add(option with { IsChecked = true });
         return fallback;
+    }
+
+    public static bool ShouldApplyMissingProfileSelectionsFallback(
+        PreparedSelectionMode preparedSelectionMode,
+        IReadOnlyCollection<string> cachedSelections,
+        IReadOnlyList<SelectionOption> options)
+    {
+        if (preparedSelectionMode != PreparedSelectionMode.Profile)
+            return false;
+        if (cachedSelections.Count == 0 || options.Count == 0)
+            return false;
+
+        foreach (var option in options)
+        {
+            if (option.IsChecked)
+                return false;
+        }
+
+        return true;
     }
 
     public static IReadOnlyList<SelectionOption> ApplyMissingProfileSelectionsFallbackToRootFolders(

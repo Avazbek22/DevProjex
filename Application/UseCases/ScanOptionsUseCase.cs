@@ -327,8 +327,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 		if (scanner is not IFileSystemScannerIgnoreSectionSnapshotProvider provider)
 		{
-			// Keep the legacy fallback behavior exact. The optimized snapshot path must stay
-			// semantically interchangeable with the older raw-scan + effective-scan pipeline.
 			var rawScan = GetExtensionsAndIgnoreCountsForRootFolders(
 				rootPath,
 				rootFolders,
@@ -354,6 +352,82 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				rawScan.HadAccessDenied || effectiveScan.HadAccessDenied);
 		}
 
+		return GetIgnoreSectionSnapshotForRootFoldersCore(
+			rootPath,
+			rootFolders,
+			extensionDiscoveryRules,
+			effectiveRules,
+			effectiveAllowedExtensions,
+			includeDirectoryToggleProbeRoots,
+			cancellationToken,
+			provider.GetRootFileIgnoreSectionSnapshot,
+			provider.GetIgnoreSectionSnapshot);
+	}
+
+	public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootFolders(
+		string rootPath,
+		IReadOnlyCollection<string> rootFolders,
+		IgnoreRules extensionDiscoveryRules,
+		IgnoreRules effectiveRules,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		bool includeDirectoryToggleProbeRoots = false,
+		CancellationToken cancellationToken = default)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+
+		if (scanner is not IFileSystemScannerExtensionPolicySnapshotProvider policyProvider)
+		{
+			// Keep the legacy fallback behavior exact. The optimized snapshot path must stay
+			// semantically interchangeable with the older raw-scan + effective-scan pipeline.
+			var rawScan = GetExtensionsAndIgnoreCountsForRootFolders(
+				rootPath,
+				rootFolders,
+				extensionDiscoveryRules,
+				cancellationToken);
+			var resolvedAllowedExtensions = BuildAllowedExtensionsSet(
+				rawScan.Value.Extensions,
+				effectiveExtensionPolicy);
+			var effectiveScan = GetEffectiveIgnoreOptionCountsForRootFolders(
+				rootPath,
+				rootFolders,
+				resolvedAllowedExtensions,
+				effectiveRules,
+				rawScan.Value.IgnoreOptionCounts,
+				includeDirectoryToggleProbeRoots,
+				cancellationToken);
+
+			return new ScanResult<IgnoreSectionScanData>(
+				new IgnoreSectionScanData(
+					rawScan.Value.Extensions,
+					rawScan.Value.IgnoreOptionCounts,
+					effectiveScan.Value),
+				rawScan.RootAccessDenied || effectiveScan.RootAccessDenied,
+				rawScan.HadAccessDenied || effectiveScan.HadAccessDenied);
+		}
+
+		return GetIgnoreSectionSnapshotForRootFoldersCore(
+			rootPath,
+			rootFolders,
+			extensionDiscoveryRules,
+			effectiveRules,
+			effectiveExtensionPolicy,
+			includeDirectoryToggleProbeRoots,
+			cancellationToken,
+			policyProvider.GetRootFileIgnoreSectionSnapshot,
+			policyProvider.GetIgnoreSectionSnapshot);
+	}
+
+	private ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootFoldersCore<TPolicy>(
+		string rootPath,
+		IReadOnlyCollection<string> rootFolders,
+		IgnoreRules extensionDiscoveryRules,
+		IgnoreRules effectiveRules,
+		TPolicy effectiveExtensionPolicy,
+		bool includeDirectoryToggleProbeRoots,
+		CancellationToken cancellationToken,
+		Func<string, IgnoreRules, IgnoreRules, TPolicy, CancellationToken, ScanResult<IgnoreSectionScanData>> getRootFileSnapshot,
+		Func<string, IgnoreRules, IgnoreRules, TPolicy, CancellationToken, ScanResult<IgnoreSectionScanData>> getFolderSnapshot)
+	{
 		var aggregatedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var rawCounts = IgnoreOptionCounts.Empty;
 		var effectiveCounts = IgnoreOptionCounts.Empty;
@@ -365,11 +439,11 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		// Root-level files participate in ignore availability even when no subfolders are selected.
 		// Keeping them in the same snapshot guarantees that extension availability and live counts
 		// come from one coherent filesystem view.
-		var rootFileSnapshot = provider.GetRootFileIgnoreSectionSnapshot(
+		var rootFileSnapshot = getRootFileSnapshot(
 			rootPath,
 			extensionDiscoveryRules,
 			effectiveRules,
-			effectiveAllowedExtensions,
+			effectiveExtensionPolicy,
 			cancellationToken);
 		aggregatedExtensions.UnionWith(rootFileSnapshot.Value.Extensions);
 		rawCounts = rawCounts.Add(rootFileSnapshot.Value.RawIgnoreOptionCounts);
@@ -387,11 +461,11 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 
-					var snapshot = provider.GetIgnoreSectionSnapshot(
+					var snapshot = getFolderSnapshot(
 						folderPath,
 						extensionDiscoveryRules,
 						effectiveRules,
-						effectiveAllowedExtensions,
+						effectiveExtensionPolicy,
 						cancellationToken);
 
 					aggregatedExtensions.UnionWith(snapshot.Value.Extensions);
@@ -420,11 +494,11 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 					{
 						cancellationToken.ThrowIfCancellationRequested();
 
-						var snapshot = provider.GetIgnoreSectionSnapshot(
+						var snapshot = getFolderSnapshot(
 							folderPath,
 							extensionDiscoveryRules,
 							effectiveRules,
-							effectiveAllowedExtensions,
+							effectiveExtensionPolicy,
 							cancellationToken);
 
 						localAccumulator.Extensions.UnionWith(snapshot.Value.Extensions);
@@ -707,12 +781,22 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 	private static HashSet<string> BuildAllDiscoveredExtensionsSet(IReadOnlyCollection<string> discoveredEntries)
 	{
+		return BuildAllowedExtensionsSet(discoveredEntries, effectiveExtensionPolicy: null);
+	}
+
+	private static HashSet<string> BuildAllowedExtensionsSet(
+		IReadOnlyCollection<string> discoveredEntries,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy)
+	{
 		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		foreach (var entry in discoveredEntries)
 		{
 			var extension = Path.GetExtension(entry);
-			if (!string.IsNullOrWhiteSpace(extension))
+			if (!string.IsNullOrWhiteSpace(extension) &&
+			    (effectiveExtensionPolicy is null || effectiveExtensionPolicy.AllowsExtension(extension)))
+			{
 				extensions.Add(extension);
+			}
 		}
 
 		return extensions;

@@ -199,7 +199,7 @@ public sealed class SelectionRefreshEngine(
     {
         var ignoreRules = buildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
         var extensionScanRules = BuildExtensionAvailabilityScanRules(ignoreRules);
-        var effectiveAllowedExtensions = BuildEffectiveAllowedExtensions(context);
+        var effectiveExtensionPolicy = BuildEffectiveExtensionPolicy(context);
 
         // Extension availability and effective ignore counts must come from the same snapshot.
         // Otherwise the UI can briefly show mismatched counts/options after dynamic toggles appear.
@@ -208,7 +208,7 @@ public sealed class SelectionRefreshEngine(
             selectedRoots,
             extensionScanRules,
             ignoreRules,
-            effectiveAllowedExtensions,
+            effectiveExtensionPolicy,
             includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
             cancellationToken);
 
@@ -221,6 +221,10 @@ public sealed class SelectionRefreshEngine(
                 ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
                 : EmptyExtensionSelection,
             ResolveSelectionStateCache(context.PreparedSelectionMode, context.ExtensionOptionStateCache));
+        var usedProfileFallback = SelectionRefreshPolicy.ShouldApplyMissingProfileSelectionsFallback(
+            context.PreparedSelectionMode,
+            context.ExtensionsSelectionCache,
+            extensionOptions);
         extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
             context.PreparedSelectionMode,
             context.ExtensionsSelectionCache,
@@ -229,15 +233,14 @@ public sealed class SelectionRefreshEngine(
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
             extensionOptions = ForceAllChecked(extensionOptions);
 
-        var resolvedAllowedExtensions = BuildEffectiveAllowedExtensions(context, extensionOptions);
-        if (!AreExtensionSelectionsEquivalent(effectiveAllowedExtensions, resolvedAllowedExtensions))
+        if (usedProfileFallback)
         {
             scan = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
                 context.Path,
                 selectedRoots,
                 extensionScanRules,
                 ignoreRules,
-                resolvedAllowedExtensions,
+                BuildResolvedExtensionPolicy(extensionOptions),
                 includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
                 cancellationToken);
 
@@ -405,24 +408,27 @@ public sealed class SelectionRefreshEngine(
         return stateCache;
     }
 
-    private static HashSet<string>? BuildEffectiveAllowedExtensions(SelectionRefreshContext context)
+    private static IExtensionInclusionPolicy? BuildEffectiveExtensionPolicy(SelectionRefreshContext context)
     {
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
             return null;
 
-        if (context.ExtensionsSelectionInitialized)
-            return new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase);
+		if (!context.ExtensionsSelectionInitialized)
+			return null;
 
-        return null;
+		var previousSelections = new HashSet<string>(
+			context.ExtensionsSelectionCache,
+			StringComparer.OrdinalIgnoreCase);
+		var stateCache = ResolveSelectionStateCache(context.PreparedSelectionMode, context.ExtensionOptionStateCache);
+
+		return new ExtensionSelectionInclusionPolicy(
+            new SelectionStateResolver(previousSelections, stateCache),
+            defaultForNewExtension: stateCache is not null);
     }
 
-    private static HashSet<string>? BuildEffectiveAllowedExtensions(
-        SelectionRefreshContext context,
+    private static IExtensionInclusionPolicy BuildResolvedExtensionPolicy(
         IReadOnlyList<SelectionOption> extensionOptions)
     {
-        if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
-            return null;
-
         var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var option in extensionOptions)
         {
@@ -430,17 +436,7 @@ public sealed class SelectionRefreshEngine(
                 selected.Add(option.Name);
         }
 
-        return selected;
-    }
-
-    private static bool AreExtensionSelectionsEquivalent(
-        IReadOnlySet<string>? left,
-        IReadOnlySet<string>? right)
-    {
-        if (left is null || right is null)
-            return left is null && right is null;
-
-        return left.SetEquals(right);
+        return new ExtensionSetInclusionPolicy(selected);
     }
 
     private static IgnoreRules BuildExtensionAvailabilityScanRules(IgnoreRules rules)
