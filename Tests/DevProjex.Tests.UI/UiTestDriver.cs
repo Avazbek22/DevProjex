@@ -85,17 +85,23 @@ internal static class UiTestDriver
         return window;
     }
 
-    public static async Task CloseWindowAsync(MainWindow window)
+    public static async Task CloseWindowAsync(MainWindow window, bool cleanupAppData = true)
     {
         if (!window.IsVisible)
         {
-            CleanupWindowAppData(window);
+            if (cleanupAppData)
+                CleanupWindowAppData(window);
+            else
+                WindowAppDataPaths.TryRemove(window, out _);
             return;
         }
 
         window.Close();
         await WaitForSettledFramesAsync(frameCount: 6);
-        CleanupWindowAppData(window);
+        if (cleanupAppData)
+            CleanupWindowAppData(window);
+        else
+            WindowAppDataPaths.TryRemove(window, out _);
     }
 
     public static async Task OpenFolderAsync(

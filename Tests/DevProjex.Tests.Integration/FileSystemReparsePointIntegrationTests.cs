@@ -101,6 +101,136 @@ public sealed class FileSystemReparsePointIntegrationTests
 		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "linked.cs", StringComparison.Ordinal));
 	}
 
+	[Fact]
+	public void NestedDirectorySymlink_IsNotTraversedByTreeOrIgnoreSectionScan()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("real/app.cs", "class App {}");
+		temp.CreateFile("external/generated.ts", "export {}");
+		Directory.CreateDirectory(Path.Combine(temp.Path, "real", "nested"));
+
+		if (!TryCreateDirectorySymlink(
+			    Path.Combine(temp.Path, "real", "nested", "linked-external"),
+			    Path.Combine(temp.Path, "external")))
+		{
+			return;
+		}
+
+		var rules = CreateIgnoreRules();
+		var tree = new TreeBuilder().Build(
+			temp.Path,
+			new TreeFilterOptions(
+				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".ts" },
+				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "real" },
+				IgnoreRules: rules));
+		var snapshot = new ScanOptionsUseCase(new FileSystemScanner()).GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["real"],
+			rules,
+			rules,
+			effectiveAllowedExtensions: null,
+			includeDirectoryToggleProbeRoots: true);
+
+		var real = Assert.Single(tree.Root.Children, node => string.Equals(node.Name, "real", StringComparison.Ordinal));
+		var nested = Assert.Single(real.Children, node => string.Equals(node.Name, "nested", StringComparison.Ordinal));
+		Assert.DoesNotContain(nested.Children, node => string.Equals(node.Name, "linked-external", StringComparison.Ordinal));
+		Assert.Contains(".cs", snapshot.Value.Extensions);
+		Assert.DoesNotContain(".ts", snapshot.Value.Extensions);
+		Assert.False(snapshot.RootAccessDenied);
+	}
+
+	[Fact]
+	public void ScanOptions_DanglingDirectorySymlinkSelectedRoot_DoesNotReportExtensionsOrAccessDenied()
+	{
+		using var temp = new TemporaryDirectory();
+
+		if (!TryCreateDanglingDirectorySymlink(
+			    Path.Combine(temp.Path, "dangling"),
+			    Path.Combine(temp.Path, "missing-target")))
+		{
+			return;
+		}
+
+		var rules = CreateIgnoreRules();
+		var snapshot = new ScanOptionsUseCase(new FileSystemScanner()).GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["dangling"],
+			rules,
+			rules,
+			effectiveAllowedExtensions: null,
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.Empty(snapshot.Value.Extensions);
+		Assert.False(snapshot.RootAccessDenied);
+		Assert.False(snapshot.HadAccessDenied);
+	}
+
+	[Fact]
+	public void ScanOptions_WindowsJunctionRoot_DoesNotBecomeRootFolderOrSelectedScanSource()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("real/app.cs", "class App {}");
+		temp.CreateFile("target/generated.ts", "export {}");
+
+		if (!TryCreateDirectoryJunction(
+			    Path.Combine(temp.Path, "junction"),
+			    Path.Combine(temp.Path, "target")))
+		{
+			return;
+		}
+
+		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+		var rules = CreateIgnoreRules();
+		var rootFolders = scanOptions.GetRootFolders(temp.Path, rules).Value;
+		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			["junction"],
+			rules,
+			rules,
+			effectiveAllowedExtensions: null,
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.DoesNotContain("junction", rootFolders);
+		Assert.Empty(snapshot.Value.Extensions);
+		Assert.False(snapshot.RootAccessDenied);
+	}
+
+	[Fact]
+	public void SymlinkedGitIgnore_IsParsedWithoutTraversingSymlinkedContentAsProjectFiles()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("gitignore-target", "ignored/\n*.log\n");
+		temp.CreateFile("src/app.cs", "class App {}");
+		temp.CreateFile("ignored/noise.cs", "class Noise {}");
+		temp.CreateFile("logs/runtime.log", "ignored log");
+
+		if (!TryCreateFileSymlink(
+			    Path.Combine(temp.Path, ".gitignore"),
+			    Path.Combine(temp.Path, "gitignore-target")))
+		{
+			return;
+		}
+
+		var rules = new IgnoreRulesService(new SmartIgnoreService([])).Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: ["src", "ignored", "logs"]);
+		var tree = new TreeBuilder().Build(
+			temp.Path,
+			new TreeFilterOptions(
+				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".log" },
+				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src", "ignored", "logs" },
+				IgnoreRules: rules));
+
+		Assert.True(rules.UseGitIgnore);
+		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "src", StringComparison.Ordinal));
+		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));
+		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "logs", StringComparison.Ordinal));
+	}
+
 	private static IgnoreRules CreateIgnoreRules() => new(
 		IgnoreHiddenFolders: false,
 		IgnoreHiddenFiles: false,
@@ -145,6 +275,39 @@ public sealed class FileSystemReparsePointIntegrationTests
 			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private static bool TryCreateDirectoryJunction(string linkPath, string targetPath)
+	{
+		try
+		{
+			var startInfo = new ProcessStartInfo(
+				"cmd.exe",
+				$"/c mklink /J \"{linkPath}\" \"{targetPath}\"")
+			{
+				CreateNoWindow = true,
+				UseShellExecute = false,
+				RedirectStandardError = true,
+				RedirectStandardOutput = true
+			};
+			using var process = Process.Start(startInfo);
+			if (process is null)
+				return false;
+
+			if (!process.WaitForExit(5000))
+			{
+				process.Kill(entireProcessTree: true);
+				return false;
+			}
+
+			return process.ExitCode == 0 &&
+			       Directory.Exists(linkPath) &&
+			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch
 		{
 			return false;
 		}

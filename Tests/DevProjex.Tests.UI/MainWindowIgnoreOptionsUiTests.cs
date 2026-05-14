@@ -402,6 +402,97 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task ReopenProject_WithPersistedFullState_PreservesUncheckedItemsAndChecksNewEntries()
+    {
+        using var project = UiTestProject.CreateWithExternalRefreshMutationWorkspace();
+        var appDataPath = Path.Combine(project.AppDataPath, "persisted-full-state");
+        MainWindow? firstWindow = null;
+        MainWindow? secondWindow = null;
+
+        try
+        {
+            firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(project, appDataPathOverride: appDataPath);
+
+            await WaitForRootFolderStateAsync(firstWindow, "docs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(firstWindow, ".csv", visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                firstWindow,
+                IgnoreOptionId.EmptyFiles,
+                visible: true,
+                isChecked: true);
+
+            await UiTestDriver.ClickRootFolderCheckBoxAsync(firstWindow, "docs");
+            await UiTestDriver.ClickExtensionCheckBoxAsync(firstWindow, ".csv");
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(firstWindow, IgnoreOptionId.EmptyFiles);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(firstWindow);
+
+            await WaitForRootFolderStateAsync(firstWindow, "docs", visible: true, isChecked: false);
+            await WaitForExtensionStateAsync(firstWindow, ".csv", visible: true, isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                firstWindow,
+                IgnoreOptionId.EmptyFiles,
+                visible: true,
+                isChecked: false);
+
+            await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+            firstWindow = null;
+
+            MutateExternalRefreshWorkspace(project.RootPath);
+            secondWindow = await UiTestDriver.CreateLoadedMainWindowAsync(project, appDataPathOverride: appDataPath);
+
+            // Persisted full-state must win for known entries, while entries first seen
+            // after reopen keep the product default: checked and immediately useful.
+            await WaitForRootFolderStateAsync(secondWindow, "docs", visible: true, isChecked: false);
+            await WaitForRootFolderStateAsync(secondWindow, "api", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(secondWindow, "web", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(secondWindow, "generated", visible: true, isChecked: true);
+
+            await WaitForExtensionStateAsync(secondWindow, ".csv", visible: true, isChecked: false);
+            await WaitForExtensionStateAsync(secondWindow, ".cs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(secondWindow, ".ts", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(secondWindow, ".log", visible: true, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.EmptyFiles,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
+
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: true, "api", "src", "Program.cs");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: true, "web", "src", "app.ts");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: true, "generated", "report.log");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, "docs", "notes.md");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, "data.csv");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, "new-data.csv");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: true, "empty.txt");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, "empty-root");
+            await AssertIgnoreOptionsStayStableAsync(secondWindow);
+        }
+        finally
+        {
+            if (secondWindow is not null)
+                await UiTestDriver.CloseWindowAsync(secondWindow);
+            if (firstWindow is not null)
+                await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PythonProjectWithoutGitIgnore_ShowsSmartIgnoreAndHidesSmartArtifacts()
     {
         using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
