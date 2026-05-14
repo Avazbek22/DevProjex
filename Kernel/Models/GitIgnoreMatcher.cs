@@ -85,13 +85,21 @@ public sealed class GitIgnoreMatcher
             var hasSlash = line.Contains('/');
             var matchByNameOnly = !anchored && !hasSlash && !directoryOnly;
 
-            var globRegex = GlobToRegex(line);
-            var regexPattern = matchByNameOnly
-                ? $"^{globRegex}$"
-                : BuildPathRegex(globRegex, anchored, directoryOnly);
+            var matchKind = GetRuleMatchKind(line, anchored, directoryOnly, matchByNameOnly);
+            Regex? pattern = null;
+            if (matchKind == RuleMatchKind.Regex)
+            {
+                var globRegex = GlobToRegex(line);
+                var regexPattern = matchByNameOnly
+                    ? $"^{globRegex}$"
+                    : BuildPathRegex(globRegex, anchored, directoryOnly);
+                pattern = new Regex(regexPattern, regexOptions);
+            }
 
             rules.Add(new Rule(
-                new Regex(regexPattern, regexOptions),
+                pattern,
+                line,
+                matchKind,
                 isNegation,
                 directoryOnly,
                 matchByNameOnly,
@@ -124,12 +132,7 @@ public sealed class GitIgnoreMatcher
 
         foreach (var rule in _rules)
         {
-            var target = rule.MatchByNameOnly
-                ? normalizedName
-                : rule.DirectoryOnly && isDirectory
-                    ? relativePath + "/"
-                    : relativePath;
-            if (!rule.Pattern.IsMatch(target))
+            if (!rule.IsMatch(relativePath, normalizedName, isDirectory, _pathComparison))
                 continue;
 
             ignored = !rule.IsNegation;
@@ -148,7 +151,7 @@ public sealed class GitIgnoreMatcher
                 if (rule.DirectoryOnly || rule.MatchByNameOnly)
                     continue;
 
-                if (rule.Pattern.IsMatch(testChildPath))
+                if (rule.IsMatch(testChildPath, "_", isDirectory: false, _pathComparison))
                 {
                     ignored = true;
                     hasMatch = true;
@@ -224,8 +227,7 @@ public sealed class GitIgnoreMatcher
             if (rule.IsNegation || !rule.DirectoryOnly)
                 continue;
 
-            var target = rule.MatchByNameOnly ? name : relativePath + "/";
-            if (rule.Pattern.IsMatch(target))
+            if (rule.IsMatch(relativePath, name, isDirectory: true, _pathComparison))
                 return true;
         }
 
@@ -251,6 +253,30 @@ public sealed class GitIgnoreMatcher
         // Directory-only rules must match directories (or their descendants), not plain files.
         var suffix = directoryOnly ? "/.*$" : "$";
         return $"{prefix}{globRegex}{suffix}";
+    }
+
+    private static RuleMatchKind GetRuleMatchKind(
+        string pattern,
+        bool anchored,
+        bool directoryOnly,
+        bool matchByNameOnly)
+    {
+        // Literal rules dominate real .gitignore files. Keeping them out of Regex
+        // reduces allocations at build time and avoids a Regex call for every path.
+        if (pattern.AsSpan().IndexOfAny(GlobSpecialChars) >= 0)
+            return RuleMatchKind.Regex;
+
+        if (matchByNameOnly)
+            return RuleMatchKind.NameLiteral;
+
+        if (directoryOnly)
+            return anchored
+                ? RuleMatchKind.AnchoredDirectoryLiteral
+                : RuleMatchKind.UnanchoredDirectoryLiteral;
+
+        return anchored
+            ? RuleMatchKind.AnchoredPathLiteral
+            : RuleMatchKind.UnanchoredPathLiteral;
     }
 
     private static string GlobToRegex(string pattern)
@@ -360,10 +386,125 @@ public sealed class GitIgnoreMatcher
         return path.Replace('\\', '/');
     }
 
+    private enum RuleMatchKind
+    {
+        Regex,
+        NameLiteral,
+        AnchoredPathLiteral,
+        UnanchoredPathLiteral,
+        AnchoredDirectoryLiteral,
+        UnanchoredDirectoryLiteral
+    }
+
     private sealed record Rule(
-        Regex Pattern,
+        Regex? Pattern,
+        string LiteralPattern,
+        RuleMatchKind MatchKind,
         bool IsNegation,
         bool DirectoryOnly,
         bool MatchByNameOnly,
-        string StaticPrefix);
+        string StaticPrefix)
+    {
+        public bool IsMatch(
+            string relativePath,
+            string normalizedName,
+            bool isDirectory,
+            StringComparison comparison) =>
+            MatchKind switch
+            {
+                RuleMatchKind.NameLiteral => string.Equals(normalizedName, LiteralPattern, comparison),
+                RuleMatchKind.AnchoredPathLiteral => string.Equals(relativePath, LiteralPattern, comparison),
+                RuleMatchKind.UnanchoredPathLiteral => MatchesUnanchoredPathLiteral(relativePath, LiteralPattern, comparison),
+                RuleMatchKind.AnchoredDirectoryLiteral => MatchesAnchoredDirectoryLiteral(relativePath, LiteralPattern, isDirectory, comparison),
+                RuleMatchKind.UnanchoredDirectoryLiteral => MatchesUnanchoredDirectoryLiteral(relativePath, LiteralPattern, isDirectory, comparison),
+                _ => Pattern!.IsMatch(GetRegexTarget(relativePath, normalizedName, isDirectory))
+            };
+
+        private string GetRegexTarget(string relativePath, string normalizedName, bool isDirectory) =>
+            MatchByNameOnly
+                ? normalizedName
+                : DirectoryOnly && isDirectory
+                    ? relativePath + "/"
+                    : relativePath;
+
+        private static bool MatchesUnanchoredPathLiteral(
+            string relativePath,
+            string literalPattern,
+            StringComparison comparison) =>
+            string.Equals(relativePath, literalPattern, comparison) ||
+            HasPathSegmentSuffix(relativePath, literalPattern, comparison);
+
+        private static bool MatchesAnchoredDirectoryLiteral(
+            string relativePath,
+            string literalPattern,
+            bool isDirectory,
+            StringComparison comparison) =>
+            isDirectory && string.Equals(relativePath, literalPattern, comparison) ||
+            StartsWithDirectorySegment(relativePath, literalPattern, comparison);
+
+        private static bool MatchesUnanchoredDirectoryLiteral(
+            string relativePath,
+            string literalPattern,
+            bool isDirectory,
+            StringComparison comparison)
+        {
+            if (string.Equals(relativePath, literalPattern, comparison) ||
+                HasPathSegmentSuffix(relativePath, literalPattern, comparison))
+            {
+                return isDirectory;
+            }
+
+            if (StartsWithDirectorySegment(relativePath, literalPattern, comparison))
+                return true;
+
+            return ContainsDirectorySegment(relativePath, literalPattern, comparison);
+        }
+
+        private static bool HasPathSegmentSuffix(
+            string relativePath,
+            string literalPattern,
+            StringComparison comparison)
+        {
+            if (relativePath.Length <= literalPattern.Length)
+                return false;
+
+            var start = relativePath.Length - literalPattern.Length;
+            return relativePath[start - 1] == '/' &&
+                   relativePath.AsSpan(start).Equals(literalPattern.AsSpan(), comparison);
+        }
+
+        private static bool StartsWithDirectorySegment(
+            string relativePath,
+            string literalPattern,
+            StringComparison comparison)
+        {
+            return relativePath.Length > literalPattern.Length &&
+                   relativePath[literalPattern.Length] == '/' &&
+                   relativePath.AsSpan(0, literalPattern.Length).Equals(literalPattern.AsSpan(), comparison);
+        }
+
+        private static bool ContainsDirectorySegment(
+            string relativePath,
+            string literalPattern,
+            StringComparison comparison)
+        {
+            var searchStart = 0;
+            while (searchStart < relativePath.Length)
+            {
+                var index = relativePath.IndexOf(literalPattern, searchStart, comparison);
+                if (index < 0)
+                    return false;
+
+                var hasLeadingSeparator = index > 0 && relativePath[index - 1] == '/';
+                var nextIndex = index + literalPattern.Length;
+                var hasTrailingSeparator = nextIndex < relativePath.Length && relativePath[nextIndex] == '/';
+                if (hasLeadingSeparator && hasTrailingSeparator)
+                    return true;
+
+                searchStart = index + 1;
+            }
+
+            return false;
+        }
+    }
 }

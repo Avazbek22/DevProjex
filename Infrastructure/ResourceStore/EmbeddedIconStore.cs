@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class EmbeddedIconStore : IIconStore
@@ -38,10 +40,10 @@ public sealed class EmbeddedIconStore : IIconStore
 			map[entry.Key] = resourceName;
 		}
 
-		return new IconPack(assembly, map);
+		return new IconPack(assembly, map.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase));
 	}
 
 	private sealed record IconManifest(Dictionary<string, string> Icons);
 
-	private sealed record IconPack(Assembly Assembly, Dictionary<string, string> IconMap);
+	private sealed record IconPack(Assembly Assembly, FrozenDictionary<string, string> IconMap);
 }

@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class JsonLocalizationCatalog : ILocalizationCatalog
@@ -23,7 +25,7 @@ public sealed class JsonLocalizationCatalog : ILocalizationCatalog
 			[AppLanguage.Fr] = Load(assembly, "fr"),
 			[AppLanguage.De] = Load(assembly, "de"),
 			[AppLanguage.It] = Load(assembly, "it")
-		};
+		}.ToFrozenDictionary();
 	}
 
 	private static IReadOnlyDictionary<string, string> Load(Assembly assembly, string code)
@@ -35,6 +37,9 @@ public sealed class JsonLocalizationCatalog : ILocalizationCatalog
 		var data = JsonSerializer.Deserialize<Dictionary<string, string>>(stream)
 			?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-		return new Dictionary<string, string>(data, StringComparer.OrdinalIgnoreCase);
+		return data.ToFrozenDictionary(
+			static pair => pair.Key,
+			static pair => pair.Value,
+			StringComparer.OrdinalIgnoreCase);
 	}
 }

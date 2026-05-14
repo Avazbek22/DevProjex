@@ -67,6 +67,18 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 		Assert.Equal(new[] { ".A", ".aa", ".b", ".c" }, ordered);
 	}
 
+	[Fact]
+	public void BuildExtensionOptions_EmptyStateCacheDefaultsDiscoveredExtensionsChecked()
+	{
+		var service = new FilterOptionSelectionService();
+		var options = service.BuildExtensionOptions(
+			[".cs", ".json"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase));
+
+		Assert.All(options, option => Assert.True(option.IsChecked));
+	}
+
 	[Theory]
 	// Verifies ignored folders are unchecked when no previous selections exist.
 	[InlineData("bin", true)]
@@ -129,6 +141,28 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 		var target = options.Single(option => option.Name.Equals(folderName, StringComparison.OrdinalIgnoreCase));
 
 		Assert.Equal(expectedChecked, target.IsChecked);
+	}
+
+	[Fact]
+	public void BuildRootFolderOptions_EmptyStateCacheDefaultsDiscoveredRootsChecked()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+		var options = service.BuildRootFolderOptions(
+			["src", "docs"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			rules,
+			hasPreviousSelections: true,
+			previousStateCache: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase));
+
+		Assert.All(options, option => Assert.True(option.IsChecked));
 	}
 }
 

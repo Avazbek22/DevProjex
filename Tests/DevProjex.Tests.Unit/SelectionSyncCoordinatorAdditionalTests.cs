@@ -163,6 +163,25 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void ApplyExtensionScan_NewExtensionDefaultsCheckedWhileKnownUncheckedStaysUnchecked()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", false));
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".md", true));
+		viewModel.AllExtensionsChecked = false;
+
+		var coordinator = CreateCoordinator(viewModel);
+		coordinator.UpdateExtensionsSelectionCache();
+
+		coordinator.ApplyExtensionScan([".cs", ".md", ".json"]);
+
+		Assert.False(viewModel.Extensions.Single(option => option.Name == ".cs").IsChecked);
+		Assert.True(viewModel.Extensions.Single(option => option.Name == ".md").IsChecked);
+		Assert.True(viewModel.Extensions.Single(option => option.Name == ".json").IsChecked);
+		Assert.False(viewModel.AllExtensionsChecked);
+	}
+
+	[Fact]
 	public void ApplyExtensionScan_WhenCacheNotInitialized_RestoresDefaultCheckedState()
 	{
 		var viewModel = CreateViewModel();

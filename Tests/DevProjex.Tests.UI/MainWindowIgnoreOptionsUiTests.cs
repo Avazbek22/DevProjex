@@ -966,6 +966,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             IFileSystemScannerEffectiveEmptyFolderCounter,
             IFileSystemScannerEffectiveIgnoreCountsProvider,
             IFileSystemScannerIgnoreSectionSnapshotProvider,
+            IFileSystemScannerExtensionPolicySnapshotProvider,
             IDisposable
     {
         private readonly FileSystemScanner _inner = new();
@@ -1077,6 +1078,38 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 extensionDiscoveryRules,
                 effectiveRules,
                 effectiveAllowedExtensions,
+                EffectiveCancellationToken(cancellationToken));
+        }
+
+        public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+            string rootPath,
+            IgnoreRules extensionDiscoveryRules,
+            IgnoreRules effectiveRules,
+            IExtensionInclusionPolicy? effectiveExtensionPolicy,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetIgnoreSectionSnapshot(
+                rootPath,
+                extensionDiscoveryRules,
+                effectiveRules,
+                effectiveExtensionPolicy,
+                EffectiveCancellationToken(cancellationToken));
+        }
+
+        public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+            string rootPath,
+            IgnoreRules extensionDiscoveryRules,
+            IgnoreRules effectiveRules,
+            IExtensionInclusionPolicy? effectiveExtensionPolicy,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(rootPath, cancellationToken);
+            return _inner.GetRootFileIgnoreSectionSnapshot(
+                rootPath,
+                extensionDiscoveryRules,
+                effectiveRules,
+                effectiveExtensionPolicy,
                 EffectiveCancellationToken(cancellationToken));
         }
 

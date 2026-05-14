@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 
 namespace DevProjex.Application.Services;
@@ -10,7 +11,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	private const int NestedProjectProbeMaxDepth = 2;
 	private const int NestedProjectProbeMaxDirectoriesPerScope = 256;
 
-	private static readonly HashSet<string> NonProjectScopeDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
+	private static readonly FrozenSet<string> NonProjectScopeDirectoryNames = new[]
 	{
 		".git",
 		".hg",
@@ -19,10 +20,10 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		".vscode",
 		".vs",
 		".fleet"
-	};
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-	private static readonly string[] ProjectMarkerFiles =
-	[
+	private static readonly FrozenSet<string> ProjectMarkerFiles = new[]
+	{
 		"package.json",
 		"package-lock.json",
 		"pnpm-lock.yaml",
@@ -51,16 +52,16 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		"pubspec.yaml",
 		"Gemfile",
 		"Gemfile.lock"
-	];
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-	private static readonly HashSet<string> ProjectMarkerExtensions = new(StringComparer.OrdinalIgnoreCase)
+	private static readonly FrozenSet<string> ProjectMarkerExtensions = new[]
 	{
 		".sln",
 		".csproj",
 		".fsproj",
 		".vbproj",
 		".vcxproj"
-	};
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
 		? StringComparer.Ordinal
@@ -83,7 +84,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		lock (_scopeCacheSync)
 		{
 			if (_scopeCache.TryGetValue(cacheKey, out var cached) &&
-			    now - cached.CachedAtUtc <= ScopeCacheTtl)
+				now - cached.CachedAtUtc <= ScopeCacheTtl)
 			{
 				return cached.Context;
 			}
@@ -160,27 +161,37 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			]);
 		}
 
-		var scopedCandidates = new ConcurrentBag<ProjectScope>();
-		var maxDegree = Math.Min(8, Math.Max(1, Environment.ProcessorCount / 2));
+		var scopedCandidates = new List<ProjectScope>(candidateDirectories.Count);
+		var scopedCandidatesSync = new object();
 		Parallel.ForEach(
 			candidateDirectories,
-			new ParallelOptions { MaxDegreeOfParallelism = maxDegree },
-			directoryPath =>
+			ScanParallelismPolicy.CreateOptions(),
+			static () => new List<ProjectScope>(),
+			(directoryPath, _, localCandidates) =>
 			{
 				var hasGitIgnore = HasGitIgnoreFile(directoryPath);
 				var hasMarker = HasProjectMarker(directoryPath);
 				if (ShouldSkipProjectScopeCandidate(directoryPath, hasGitIgnore, hasMarker))
-					return;
+					return localCandidates;
 
-				scopedCandidates.Add(new ProjectScope(
+				localCandidates.Add(new ProjectScope(
 					directoryPath,
 					hasGitIgnore,
 					HasProjectMarker: hasMarker,
 					LooksLikeProject: hasGitIgnore || hasMarker));
+				return localCandidates;
+			},
+			localCandidates =>
+			{
+				if (localCandidates.Count == 0)
+					return;
+
+				lock (scopedCandidatesSync)
+					scopedCandidates.AddRange(localCandidates);
 			});
 
 		var candidates = SortScopes(scopedCandidates).ToArray();
-		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates, maxDegree);
+		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates);
 
 		if (hasExplicitRootSelection)
 		{
@@ -229,26 +240,26 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	}
 
 	private ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
-		IReadOnlyList<ProjectScope> candidates,
-		int maxDegree)
+		IReadOnlyList<ProjectScope> candidates)
 	{
 		if (candidates.Count == 0)
 			return [];
 
-		var allScopes = new ConcurrentBag<ProjectScope>();
-		var parallelDegree = Math.Min(4, Math.Max(1, maxDegree));
+		var allScopes = new List<ProjectScope>(candidates.Count);
+		var allScopesSync = new object();
 
 		Parallel.ForEach(
 			candidates,
-			new ParallelOptions { MaxDegreeOfParallelism = parallelDegree },
-			candidate =>
+			ScanParallelismPolicy.CreateOptions(),
+			static () => new List<ProjectScope>(),
+			(candidate, _, localScopes) =>
 			{
-				allScopes.Add(candidate);
+				localScopes.Add(candidate);
 
 				foreach (var childPath in EnumerateDescendantDirectoriesSafe(
-					         candidate.RootPath,
-					         NestedProjectProbeMaxDepth,
-					         NestedProjectProbeMaxDirectoriesPerScope))
+							 candidate.RootPath,
+							 NestedProjectProbeMaxDepth,
+							 NestedProjectProbeMaxDirectoriesPerScope))
 				{
 					var hasGitIgnore = HasGitIgnoreFile(childPath);
 					var hasMarker = HasProjectMarker(childPath);
@@ -257,19 +268,27 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 					if (!hasGitIgnore && !hasMarker)
 						continue;
 
-					allScopes.Add(new ProjectScope(
+					localScopes.Add(new ProjectScope(
 						childPath,
 						hasGitIgnore,
 						HasProjectMarker: hasMarker,
 						LooksLikeProject: true));
 				}
+				return localScopes;
+			},
+			localScopes =>
+			{
+				if (localScopes.Count == 0)
+					return;
+
+				lock (allScopesSync)
+					allScopes.AddRange(localScopes);
 			});
 
 		var uniqueScopes = new Dictionary<string, ProjectScope>(PathStringComparer);
 		foreach (var scope in allScopes)
 		{
-			if (!uniqueScopes.ContainsKey(scope.RootPath))
-				uniqueScopes[scope.RootPath] = scope;
+			uniqueScopes.TryAdd(scope.RootPath, scope);
 		}
 
 		return SortScopes(uniqueScopes.Values).ToArray();
@@ -405,7 +424,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	{
 		var name = GetDirectoryName(directoryPath);
 		return !string.IsNullOrWhiteSpace(name) &&
-		       NonProjectScopeDirectoryNames.Contains(name);
+			   NonProjectScopeDirectoryNames.Contains(name);
 	}
 
 	private static string GetDirectoryName(string directoryPath)
@@ -456,7 +475,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		try
 		{
 			return Directory.Exists(directoryPath) &&
-			       File.GetAttributes(directoryPath).HasFlag(FileAttributes.ReparsePoint);
+				   File.GetAttributes(directoryPath).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch
 		{
@@ -497,8 +516,7 @@ public sealed record ProjectScanContext(
 		foreach (var scope in scopes)
 		{
 			var normalizedPath = Path.GetFullPath(scope.RootPath);
-			if (!uniqueScopes.ContainsKey(normalizedPath))
-				uniqueScopes[normalizedPath] = scope with { RootPath = normalizedPath };
+			uniqueScopes.TryAdd(normalizedPath, scope with { RootPath = normalizedPath });
 		}
 
 		if (uniqueScopes.Count == 0)

@@ -4,8 +4,6 @@ public sealed class TreeBuilder : ITreeBuilder
 {
 	// Pre-allocated comparer instance to avoid allocation per sort
 	private static readonly FileSystemTreeEntryComparer EntryComparer = new();
-	private static readonly int RootBuildParallelism =
-		Math.Clamp(Environment.ProcessorCount, min: 2, max: 16);
 
 	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
@@ -67,7 +65,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
 		var shouldApplySmartIgnoreForFiles = options.IgnoreRules.ShouldApplySmartIgnore(path, isDirectory: true);
 
-		if (isRoot && entries.Count > 1)
+		if (isRoot)
 		{
 			BuildRootChildrenInParallel(
 				entries,
@@ -107,12 +105,7 @@ public sealed class TreeBuilder : ITreeBuilder
 		CancellationToken cancellationToken)
 	{
 		var nodes = new FileSystemNode?[entries.Count];
-		var maxDegree = Math.Min(RootBuildParallelism, entries.Count);
-		var parallelOptions = new ParallelOptions
-		{
-			MaxDegreeOfParallelism = maxDegree,
-			CancellationToken = cancellationToken
-		};
+		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 
 		Parallel.For(0, entries.Count, parallelOptions, i =>
 		{

@@ -32,8 +32,10 @@ public sealed class SelectionSyncCoordinator(
     private IReadOnlyList<IgnoreOptionDescriptor> _ignoreOptions = [];
     private readonly IgnoreSelectionState _ignoreSelectionState = new();
     private HashSet<string> _rootSelectionCache = new(PathComparer.Default);
+    private Dictionary<string, bool> _rootOptionStateCache = new(PathComparer.Default);
     private bool _rootSelectionInitialized;
     private HashSet<string> _extensionsSelectionCache = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _extensionOptionStateCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _extensionsSelectionInitialized;
     private bool _hasExtensionlessExtensionEntries;
     private int _extensionlessExtensionEntriesCount;
@@ -250,6 +252,7 @@ public sealed class SelectionSyncCoordinator(
         var prev = _extensionsSelectionInitialized
             ? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var previousExtensionStates = SnapshotExtensionOptionStateCacheOrNull(_extensionsSelectionInitialized);
 
         // Always scan extensions, even when rootFolders.Count == 0.
         // ScanOptionsUseCase.GetExtensionsForRootFolders will include root-level files.
@@ -257,7 +260,8 @@ public sealed class SelectionSyncCoordinator(
         var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, rootFolders);
         var extensionScanRules = BuildExtensionAvailabilityScanRules(ignoreRules);
         var forceAllExtensionsChecked = !ShouldSuppressAllTogglesOverride() && viewModel.AllExtensionsChecked;
-        var effectiveAllowedExtensions = BuildEffectiveAllowedExtensionsForLiveCounts(forceAllExtensionsChecked);
+        var includeDirectoryToggleProbeRoots = !ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked;
+        var effectiveExtensionPolicy = BuildEffectiveExtensionPolicyForLiveCounts(forceAllExtensionsChecked);
         return Task.Run(async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -271,8 +275,8 @@ public sealed class SelectionSyncCoordinator(
                 rootFolders,
                 extensionScanRules,
                 ignoreRules,
-                effectiveAllowedExtensions,
-                includeDirectoryToggleProbeRoots: !ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked,
+                effectiveExtensionPolicy,
+                includeDirectoryToggleProbeRoots,
                 cancellationToken);
             if (scan.RootAccessDenied)
             {
@@ -284,8 +288,30 @@ public sealed class SelectionSyncCoordinator(
             cancellationToken.ThrowIfCancellationRequested();
             var visibleExtensions = new List<string>(scan.Value.Extensions.Count);
             var extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
-            var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
+            var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev, previousExtensionStates);
+            var usedProfileFallback = SelectionRefreshPolicy.ShouldApplyMissingProfileSelectionsFallback(
+                _preparedSelectionMode,
+                _extensionsSelectionCache,
+                options);
             options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
+
+            if (usedProfileFallback)
+            {
+                scan = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+                    path,
+                    rootFolders,
+                    extensionScanRules,
+                    ignoreRules,
+                    BuildResolvedExtensionPolicy(options),
+                    includeDirectoryToggleProbeRoots,
+                    cancellationToken);
+
+                visibleExtensions = new List<string>(scan.Value.Extensions.Count);
+                extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+                options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev, previousExtensionStates);
+                options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
+            }
+
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -310,6 +336,7 @@ public sealed class SelectionSyncCoordinator(
         var prev = hasPreviousSelections
             ? new HashSet<string>(_rootSelectionCache, PathComparer.Default)
             : new HashSet<string>(PathComparer.Default);
+        var previousRootStates = SnapshotRootOptionStateCacheOrNull(hasPreviousSelections);
 
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
         var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, null);
@@ -332,7 +359,8 @@ public sealed class SelectionSyncCoordinator(
                 scan.Value,
                 prev,
                 ignoreRules,
-                hasPreviousSelections);
+                hasPreviousSelections,
+                previousRootStates);
             options = ApplyMissingProfileSelectionsFallbackToRootFolders(options, scan.Value, ignoreRules);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -435,11 +463,13 @@ public sealed class SelectionSyncCoordinator(
         _rootSelectionCache = new HashSet<string>(
             profile.SelectedRootFolders,
             PathComparer.Default);
+        _rootOptionStateCache.Clear();
 
         _extensionsSelectionInitialized = true;
         _extensionsSelectionCache = new HashSet<string>(
             profile.SelectedExtensions,
             StringComparer.OrdinalIgnoreCase);
+        _extensionOptionStateCache.Clear();
 
         _ignoreSelectionState.RestoreProfileSelection(profile.SelectedIgnoreOptions);
     }
@@ -457,10 +487,14 @@ public sealed class SelectionSyncCoordinator(
         _rootSelectionInitialized = false;
         _rootSelectionCache.Clear();
         _rootSelectionCache.TrimExcess();
+        _rootOptionStateCache.Clear();
+        _rootOptionStateCache.TrimExcess();
 
         _extensionsSelectionInitialized = false;
         _extensionsSelectionCache.Clear();
         _extensionsSelectionCache.TrimExcess();
+        _extensionOptionStateCache.Clear();
+        _extensionOptionStateCache.TrimExcess();
 
         _ignoreSelectionState.Reset(trimExcess: true);
     }
@@ -684,11 +718,15 @@ public sealed class SelectionSyncCoordinator(
 
         _rootSelectionCache.Clear();
         _rootSelectionCache.TrimExcess();
+        _rootOptionStateCache.Clear();
+        _rootOptionStateCache.TrimExcess();
         _rootSelectionInitialized = false;
 
         // Clear extension selection cache
         _extensionsSelectionCache.Clear();
         _extensionsSelectionCache.TrimExcess();
+        _extensionOptionStateCache.Clear();
+        _extensionOptionStateCache.TrimExcess();
         _extensionsSelectionInitialized = false;
         _hasExtensionlessExtensionEntries = false;
         _extensionlessExtensionEntriesCount = 0;
@@ -867,11 +905,10 @@ public sealed class SelectionSyncCoordinator(
 
     public void UpdateExtensionsSelectionCache()
     {
-        if (viewModel.Extensions.Count == 0)
-            return;
-
         _extensionsSelectionInitialized = true;
         _extensionsSelectionCache = CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
+        foreach (var option in viewModel.Extensions)
+            _extensionOptionStateCache[option.Name] = option.IsChecked;
     }
 
     internal void ApplyExtensionScan(IReadOnlyCollection<string> extensions)
@@ -881,8 +918,9 @@ public sealed class SelectionSyncCoordinator(
         var prev = _extensionsSelectionInitialized
             ? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var previousExtensionStates = SnapshotExtensionOptionStateCacheOrNull(_extensionsSelectionInitialized);
 
-        var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev);
+        var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev, previousExtensionStates);
         options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
         ApplyExtensionOptions(
             options,
@@ -1256,7 +1294,9 @@ public sealed class SelectionSyncCoordinator(
             IgnoreSelectionCache: _ignoreSelectionState.SnapshotSelectedOptions(),
             IgnoreOptionStateCache: _ignoreSelectionState.SnapshotStateCache(),
             IgnoreAllPreference: _ignoreSelectionState.AllPreference,
-            CurrentSnapshotState: CaptureIgnoreSectionSnapshotState());
+            CurrentSnapshotState: CaptureIgnoreSectionSnapshotState(),
+            RootOptionStateCache: SnapshotRootOptionStateCacheOrNull(isInitialized: true),
+            ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true));
 
     private static async Task<T> RunOnUiThreadAsync<T>(Func<T> action)
     {
@@ -1266,19 +1306,58 @@ public sealed class SelectionSyncCoordinator(
         return await Dispatcher.UIThread.InvokeAsync(action);
     }
 
-    private HashSet<string>? BuildEffectiveAllowedExtensionsForLiveCounts(
+    private IExtensionInclusionPolicy? BuildEffectiveExtensionPolicyForLiveCounts(
         bool forceAllExtensionsChecked)
     {
         if (forceAllExtensionsChecked)
             return null;
 
-        if (_extensionsSelectionInitialized)
-            return new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase);
-
-        if (viewModel.Extensions.Count == 0)
+        if (!_extensionsSelectionInitialized && viewModel.Extensions.Count == 0)
             return null;
 
-        return CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
+		var previousSelections = _extensionsSelectionInitialized
+			? new HashSet<string>(_extensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
+			: CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
+		var stateCache = SnapshotExtensionOptionStateCacheOrNull(_extensionsSelectionInitialized);
+
+		return new ExtensionSelectionInclusionPolicy(
+            new SelectionStateResolver(previousSelections, stateCache),
+            defaultForNewExtension: stateCache is not null);
+    }
+
+    private static IExtensionInclusionPolicy BuildResolvedExtensionPolicy(
+        IReadOnlyList<SelectionOption> extensionOptions)
+    {
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in extensionOptions)
+        {
+            if (option.IsChecked)
+                selected.Add(option.Name);
+        }
+
+        return new ExtensionSetInclusionPolicy(selected);
+    }
+
+    private IReadOnlyDictionary<string, bool>? SnapshotRootOptionStateCacheOrNull(bool isInitialized)
+    {
+        if (!isInitialized)
+            return null;
+
+        if (ShouldSuppressAllTogglesOverride() && _rootOptionStateCache.Count == 0)
+            return null;
+
+        return new Dictionary<string, bool>(_rootOptionStateCache, PathComparer.Default);
+    }
+
+    private IReadOnlyDictionary<string, bool>? SnapshotExtensionOptionStateCacheOrNull(bool isInitialized)
+    {
+        if (!isInitialized)
+            return null;
+
+        if (ShouldSuppressAllTogglesOverride() && _extensionOptionStateCache.Count == 0)
+            return null;
+
+        return new Dictionary<string, bool>(_extensionOptionStateCache, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool IsExtensionlessEntry(string value)
@@ -1555,8 +1634,10 @@ public sealed class SelectionSyncCoordinator(
 
         // Clear caches
         _rootSelectionCache.Clear();
+        _rootOptionStateCache.Clear();
         _ignoreSelectionState.Reset(trimExcess: true);
         _extensionsSelectionCache.Clear();
+        _extensionOptionStateCache.Clear();
         _preparedSelectionPath = null;
         _ignoreOptions = [];
 
@@ -1618,9 +1699,6 @@ public sealed class SelectionSyncCoordinator(
         if (useDefaultCheckedFallback && SelectionRefreshPolicy.CanUseIgnoreDefaultFallback(option.Id))
             return option.DefaultChecked;
 
-        if (!ShouldSuppressAllTogglesOverride() && _ignoreSelectionState.AllPreference.HasValue)
-            return _ignoreSelectionState.AllPreference.Value;
-
         if (_preparedSelectionMode == PreparedSelectionMode.Profile && hasPreviousSelections)
             return previousSelections.Contains(option.Id);
 
@@ -1660,14 +1738,9 @@ public sealed class SelectionSyncCoordinator(
 
     private void UpdateRootSelectionCache()
     {
-        if (viewModel.RootFolders.Count == 0)
-        {
-            _rootSelectionCache.Clear();
-            _rootSelectionCache.TrimExcess();
-            return;
-        }
-
         _rootSelectionCache = CollectCheckedSelectionNames(viewModel.RootFolders, PathComparer.Default);
+        foreach (var option in viewModel.RootFolders)
+            _rootOptionStateCache[option.Name] = option.IsChecked;
     }
 
     private sealed record IgnoreRulesBuildCacheEntry(string Key, IgnoreRules Rules);

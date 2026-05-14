@@ -67,6 +67,22 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
+	public void ComputeFullRefreshSnapshot_NewCheckedExtensionUsesSinglePolicyAwareSnapshotPass()
+	{
+		var scanner = new NewExtensionPolicyScanner();
+		var engine = CreateEngine(scanner);
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(
+			CreateNewExtensionPolicyContext(),
+			CancellationToken.None);
+
+		Assert.Contains(snapshot.ExtensionOptions, option => option.Name == ".cs" && option.IsChecked);
+		Assert.Contains(snapshot.ExtensionOptions, option => option.Name == ".md" && option.IsChecked);
+		Assert.Equal(1, snapshot.IgnoreOptionCounts.EmptyFiles);
+		Assert.Equal(2, scanner.PolicySnapshotCallCount);
+	}
+
+	[Fact]
 	public void ComputeFullRefreshSnapshot_PropagatesCancellationFromDynamicFollowUpPass()
 	{
 		var scanner = new CancelOnSecondDynamicPassScanner();
@@ -150,6 +166,29 @@ public sealed class SelectionRefreshEngineTests
 				HasExtensionlessEntries: false,
 				ExtensionlessEntriesCount: 0));
 
+	private static SelectionRefreshContext CreateNewExtensionPolicyContext() =>
+		CreateDefaultsContext() with
+		{
+			AllExtensionsChecked = false,
+			ExtensionsSelectionInitialized = true,
+			ExtensionsSelectionCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+			ExtensionOptionStateCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = true
+			},
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId> { IgnoreOptionId.EmptyFiles },
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.EmptyFiles] = true
+			},
+			CurrentSnapshotState = new IgnoreSectionSnapshotState(
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: new IgnoreOptionCounts(EmptyFiles: 1),
+				HasExtensionlessEntries: false,
+				ExtensionlessEntriesCount: 0)
+		};
+
 	private static SelectionRefreshContext CreateProfileContext(
 		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions) =>
 		new(
@@ -223,7 +262,7 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	private sealed class DotFolderNoiseScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
 	{
 		public bool CanReadRoot(string rootPath) => true;
 
@@ -290,10 +329,26 @@ public sealed class SelectionRefreshEngineTests
 				false,
 				false);
 		}
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
 	}
 
 	private sealed class CountingDirectoryLevelScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
 	{
 		public int RootFolderScanCount { get; private set; }
 		public int IgnoreSnapshotCallCount { get; private set; }
@@ -359,10 +414,26 @@ public sealed class SelectionRefreshEngineTests
 				false,
 				false);
 		}
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
 	}
 
 	private sealed class CountingFileLevelScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
 	{
 		public int RootFolderScanCount { get; private set; }
 		public int IgnoreSnapshotCallCount { get; private set; }
@@ -417,10 +488,81 @@ public sealed class SelectionRefreshEngineTests
 				false,
 				false);
 		}
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+	}
+
+	private sealed class NewExtensionPolicyScanner
+		: IFileSystemScanner, IFileSystemScannerExtensionPolicySnapshotProvider
+	{
+		public int PolicySnapshotCallCount { get; private set; }
+
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+			=> new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+			=> new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+			=> new(new List<string> { "src" }, false, false);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default)
+		{
+			PolicySnapshotCallCount++;
+			var counts = effectiveExtensionPolicy?.AllowsExtension(".md") == true
+				? new IgnoreOptionCounts(EmptyFiles: 1)
+				: IgnoreOptionCounts.Empty;
+			return new ScanResult<IgnoreSectionScanData>(
+				new IgnoreSectionScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".md" },
+					IgnoreOptionCounts.Empty,
+					counts),
+				false,
+				false);
+		}
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default)
+		{
+			PolicySnapshotCallCount++;
+			return new ScanResult<IgnoreSectionScanData>(
+				new IgnoreSectionScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+					IgnoreOptionCounts.Empty,
+					IgnoreOptionCounts.Empty),
+				false,
+				false);
+		}
+
 	}
 
 	private sealed class CancelOnSecondDynamicPassScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
 	{
 		public int IgnoreSnapshotCallCount { get; private set; }
 
@@ -471,10 +613,26 @@ public sealed class SelectionRefreshEngineTests
 				false,
 				false);
 		}
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
 	}
 
 	private sealed class ProfileFallbackVisibilityScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
 	{
 		public bool CanReadRoot(string rootPath) => true;
 
@@ -541,5 +699,21 @@ public sealed class SelectionRefreshEngineTests
 				false,
 				false);
 		}
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
 	}
 }
