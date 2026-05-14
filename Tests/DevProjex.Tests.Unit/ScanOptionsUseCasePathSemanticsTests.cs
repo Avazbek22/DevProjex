@@ -35,7 +35,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 	public void GetExtensionsForRootFolders_PassesOriginalFolderPathsToScanner()
 	{
 		var rootPath = CreateRootPath();
-		var folderCalls = new List<string>();
+		var folderCalls = new System.Collections.Concurrent.ConcurrentBag<string>();
 		var scanner = new StubFileSystemScanner
 		{
 			GetRootFileExtensionsHandler = (_, _) => new ScanResult<HashSet<string>>(
@@ -55,7 +55,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		var useCase = new ScanOptionsUseCase(scanner);
 		_ = useCase.GetExtensionsForRootFolders(rootPath, ["Src", "docs"], CreateRules());
 
-		Assert.Equal(
+		AssertSamePathsIgnoringParallelOrder(
 			[
 				Path.Combine(rootPath, "Src"),
 				Path.Combine(rootPath, "docs")
@@ -73,7 +73,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		_ = useCase.GetExtensionsAndIgnoreCountsForRootFolders(rootPath, ["Src", "docs"], CreateRules());
 
 		Assert.Equal(rootPath, scanner.RootFilePath);
-		Assert.Equal(
+		AssertSamePathsIgnoringParallelOrder(
 			[
 				Path.Combine(rootPath, "Src"),
 				Path.Combine(rootPath, "docs")
@@ -113,12 +113,22 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		Assert.Equal([Path.Combine(temp.Path, "src")], folderCalls);
 	}
 
+	private static void AssertSamePathsIgnoringParallelOrder(
+		IEnumerable<string> expected,
+		IEnumerable<string> actual)
+	{
+		// Folder scans run in parallel, so call order is intentionally not part of this contract.
+		Assert.Equal(
+			expected.OrderBy(static path => path, PathComparer.Default),
+			actual.OrderBy(static path => path, PathComparer.Default));
+	}
+
 	private static string CreateRootPath() => SyntheticTestPaths.CreateMissingRoot();
 
 	private sealed class RecordingAdvancedScanner : IFileSystemScanner, IFileSystemScannerAdvanced
 	{
 		public string? RootFilePath { get; private set; }
-		public List<string> FolderPaths { get; } = [];
+		public System.Collections.Concurrent.ConcurrentBag<string> FolderPaths { get; } = [];
 
 		public bool CanReadRoot(string rootPath) => true;
 
