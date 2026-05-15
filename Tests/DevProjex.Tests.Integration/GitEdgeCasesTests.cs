@@ -31,17 +31,17 @@ public class GitEdgeCasesTests : IAsyncLifetime
         _tempDir = new TemporaryDirectory();
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         if (_gitAvailable)
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _tempDir.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     #region Repository State Edge Cases

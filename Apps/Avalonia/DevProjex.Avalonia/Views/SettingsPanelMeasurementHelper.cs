@@ -36,10 +36,9 @@ internal static class SettingsPanelMeasurementHelper
         var desiredWidth = control.DesiredSize.Width > 0
             ? control.DesiredSize.Width
             : 0;
-        var boundsWidth = control.Bounds.Width > 0
-            ? control.Bounds.Width
-            : 0;
-        var baseWidth = Math.Max(control.MinWidth, Math.Max(explicitWidth, Math.Max(desiredWidth, boundsWidth)));
+        // Bounds.Width is layout output, not intrinsic content width. Using it here can feed a
+        // stretched parent width back into the panel minimum and permanently lock the splitter.
+        var baseWidth = Math.Max(control.MinWidth, Math.Max(explicitWidth, desiredWidth));
         return baseWidth + control.Margin.Left + control.Margin.Right;
     }
 }

@@ -23,7 +23,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     private string TestRepoUrl => _testRepository!.RepositoryUrl;
     private string TestRepoName => _testRepository!.RepositoryName;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         _tempDir = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitTests", Guid.NewGuid().ToString("N"));
@@ -32,7 +32,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         // Cleanup with retry for locked git files
         if (_tempDir != null && Directory.Exists(_tempDir))

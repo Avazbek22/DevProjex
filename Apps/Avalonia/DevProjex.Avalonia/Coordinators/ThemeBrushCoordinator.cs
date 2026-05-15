@@ -25,7 +25,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         Dispatcher.UIThread.Post(() =>
         {
             // Guard: if the element is already detached from the visual tree (menu/window closed), do nothing.
-            if (menuItem.GetVisualRoot() is null)
+            if (TopLevel.GetTopLevel(menuItem) is null)
                 return;
 
             ApplyBrushesToMenuItemPopup(menuItem);
@@ -298,7 +298,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         if (popup.Child is null)
             return;
 
-        if (popup.Child.GetVisualRoot() is null)
+        if (TopLevel.GetTopLevel(popup.Child) is null)
             return;
 
         if (TopLevel.GetTopLevel(popup.Child) is not TopLevel topLevel)

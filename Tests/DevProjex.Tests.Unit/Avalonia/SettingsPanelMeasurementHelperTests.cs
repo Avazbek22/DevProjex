@@ -29,6 +29,23 @@ public sealed class SettingsPanelMeasurementHelperTests
     }
 
     [Fact]
+    public void MeasureControlWidth_DoesNotTreatLayoutBoundsAsIntrinsicWidth_WhenFallbackRuns()
+    {
+        var control = new ToggleBrokenMeasureControl(42)
+        {
+            MinWidth = 42,
+            Margin = new Thickness(3, 0, 5, 0)
+        };
+        control.Measure(new Size(400, 24));
+        control.Arrange(new Rect(0, 0, 400, 24));
+        control.ThrowOnMeasure = true;
+
+        var width = SettingsPanelMeasurementHelper.MeasureControlWidth(control);
+
+        Assert.True(width < 400);
+    }
+
+    [Fact]
     public void MeasureControlWidth_UsesDesiredSize_WhenMeasurementSucceeds()
     {
         var control = new FixedMeasureControl(96)
@@ -52,5 +69,15 @@ public sealed class SettingsPanelMeasurementHelperTests
     {
         protected override Size MeasureOverride(Size availableSize)
             => new(width, 20);
+    }
+
+    private sealed class ToggleBrokenMeasureControl(double width) : Control
+    {
+        public bool ThrowOnMeasure { get; set; }
+
+        protected override Size MeasureOverride(Size availableSize)
+            => ThrowOnMeasure
+                ? throw new KeyNotFoundException("The given key 'fonts:SystemFonts' was not present in the dictionary.")
+                : new Size(width, 24);
     }
 }

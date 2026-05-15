@@ -478,7 +478,9 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
             var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
             var widthBefore = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 220);
             var widthCollapsed = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
@@ -486,12 +488,23 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.DragAsync(window, splitter, deltaX: -140);
             var widthExpanded = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
 
-            var diagnostic = $"Before={widthBefore:F2}, Collapsed={widthCollapsed:F2}, Expanded={widthExpanded:F2}";
-            Assert.True(widthCollapsed < widthBefore - 1, diagnostic);
-            Assert.InRange(widthCollapsed, 240, 321);
-            Assert.True(widthExpanded > widthBefore + 1, diagnostic);
-            Assert.True(widthExpanded > widthCollapsed + 5, diagnostic);
-            Assert.InRange(widthExpanded, widthCollapsed, 321);
+            var diagnostic =
+                $"Before={widthBefore:F2}, Collapsed={widthCollapsed:F2}, Expanded={widthExpanded:F2}, " +
+                $"RequiredMinimum={requiredMinimum:F2}";
+
+            Assert.True(widthCollapsed >= requiredMinimum - 1, diagnostic);
+            if (requiredMinimum < widthBefore - 1)
+            {
+                Assert.True(widthCollapsed < widthBefore - 1, diagnostic);
+                Assert.True(widthExpanded > widthCollapsed + 5, diagnostic);
+            }
+            else
+            {
+                // Long localized labels can legitimately raise the content minimum above the
+                // normal resize range. In that state the splitter must pin instead of clipping.
+                Assert.InRange(widthCollapsed, requiredMinimum - 1, requiredMinimum + 1);
+                Assert.InRange(widthExpanded, requiredMinimum - 1, requiredMinimum + 1);
+            }
         }
         finally
         {
@@ -632,6 +645,8 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
             var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
+            var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 2_000);
             var collapsedWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
@@ -639,8 +654,12 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.DragAsync(window, splitter, deltaX: -2_000);
             var expandedWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
 
-            Assert.InRange(collapsedWidth, 240, 321);
-            Assert.InRange(expandedWidth, collapsedWidth, 421);
+            Assert.True(
+                collapsedWidth >= requiredMinimum - 1,
+                $"Collapsed={collapsedWidth:F2}, Expanded={expandedWidth:F2}, RequiredMinimum={requiredMinimum:F2}");
+            Assert.True(
+                expandedWidth >= collapsedWidth - 1,
+                $"Collapsed={collapsedWidth:F2}, Expanded={expandedWidth:F2}, RequiredMinimum={requiredMinimum:F2}");
         }
         finally
         {

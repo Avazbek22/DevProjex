@@ -2820,7 +2820,7 @@ public partial class MainWindow : Window
 
     private void ApplyPreviewToolTipBackdrop(ToolTip toolTip)
     {
-        if (toolTip.GetVisualRoot() is null)
+        if (TopLevel.GetTopLevel(toolTip) is null)
             return;
 
         if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
@@ -6870,6 +6870,10 @@ public partial class MainWindow : Window
                 _viewModel.SelectedFontFamily = pending;
             }
 
+            // Apply must observe the latest converged section state. A user can click Apply
+            // while an earlier ignore refresh is still finishing; rebuilding the tree first
+            // would capture stale root-folder availability and keep newly revealed folders hidden.
+            await _selectionCoordinator.WaitForPendingRefreshesAsync();
             await RefreshTreeAsync();
             // Keep dynamic ignore counts aligned with the tree that was just applied.
             await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionAsync(_currentPath);

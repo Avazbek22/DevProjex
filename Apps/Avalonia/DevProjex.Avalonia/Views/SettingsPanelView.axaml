@@ -44,7 +44,7 @@
           <TextBlock Name="IgnoreHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
           <CheckBox Name="IgnoreAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"
                     IsChecked="{Binding AllIgnoreChecked, Mode=TwoWay}"
-                    Checked="OnIgnoreAllChanged" Unchecked="OnIgnoreAllChanged" />
+                    IsCheckedChanged="OnIgnoreAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"
@@ -83,7 +83,7 @@
           <TextBlock Name="ExtensionsHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsExtensions}" Margin="0" FontSize="15"/>
           <CheckBox Name="ExtensionsAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllExtensions}"
                     IsChecked="{Binding AllExtensionsChecked, Mode=TwoWay}"
-                    Checked="OnExtensionsAllChanged" Unchecked="OnExtensionsAllChanged" />
+                    IsCheckedChanged="OnExtensionsAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"
@@ -114,7 +114,7 @@
           <CheckBox Name="RootFoldersAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"
                     IsChecked="{Binding AllRootFoldersChecked, Mode=TwoWay}"
                     IsEnabled="{Binding HasRootFolderOptions}"
-                    Checked="OnRootAllChanged" Unchecked="OnRootAllChanged" />
+                    IsCheckedChanged="OnRootAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"

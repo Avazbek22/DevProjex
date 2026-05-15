@@ -35,7 +35,7 @@
       <TextBox Grid.Row="2"
                Name="UrlTextBox"
                Text="{Binding GitCloneUrl, Mode=TwoWay}"
-               Watermark="{Binding GitCloneUrlPlaceholder}"
+               PlaceholderText="{Binding GitCloneUrlPlaceholder}"
                Margin="0,0,0,16"
                IsVisible="{Binding !GitCloneInProgress}"
                KeyDown="OnUrlKeyDown" />

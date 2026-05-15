@@ -29,14 +29,14 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         _tempDir = new TemporaryDirectory();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _zipService.Dispose();
         // _gitService.Dispose();
         _tempDir.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     #region Platform-Specific Tests

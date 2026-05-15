@@ -7,14 +7,11 @@ namespace DevProjex.Tests.Unit.Avalonia;
 [Collection("AvaloniaUI")]
 public sealed class MessageDialogBehaviorTests
 {
-    [Fact]
+    [AvaloniaFact]
     public void BuildConfirmationContent_UsesProvidedMessageAndButtonLabels()
     {
-        var content = AvaloniaUiTestFixture.RunOnUiThread(() =>
-        {
-            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            return InvokeBuildConfirmationContent("Reset project data?", "Reset", "Cancel", completion);
-        });
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var content = InvokeBuildConfirmationContent("Reset project data?", "Reset", "Cancel", completion);
 
         var (_, _, messageText) = ExtractConfirmationElements(content);
         var (confirmButton, cancelButton, _) = ExtractConfirmationElements(content);
@@ -24,31 +21,27 @@ public sealed class MessageDialogBehaviorTests
         Assert.Equal("Cancel", cancelButton.Content);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task BuildConfirmationContent_ConfirmClick_CompletesWithTrue()
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var content = AvaloniaUiTestFixture.RunOnUiThread(() =>
-            InvokeBuildConfirmationContent("Message", "Confirm", "Cancel", completion));
+        var content = InvokeBuildConfirmationContent("Message", "Confirm", "Cancel", completion);
 
         var (confirmButton, _, _) = ExtractConfirmationElements(content);
-        AvaloniaUiTestFixture.RunOnUiThread(() =>
-            confirmButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+        confirmButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
         var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(1));
         Assert.True(result);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task BuildConfirmationContent_CancelClick_CompletesWithFalse()
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var content = AvaloniaUiTestFixture.RunOnUiThread(() =>
-            InvokeBuildConfirmationContent("Message", "Confirm", "Cancel", completion));
+        var content = InvokeBuildConfirmationContent("Message", "Confirm", "Cancel", completion);
 
         var (_, cancelButton, _) = ExtractConfirmationElements(content);
-        AvaloniaUiTestFixture.RunOnUiThread(() =>
-            cancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+        cancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
         var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(1));
         Assert.False(result);

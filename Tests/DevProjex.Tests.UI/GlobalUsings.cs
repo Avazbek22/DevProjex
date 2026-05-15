@@ -5,6 +5,7 @@ global using Avalonia.Controls;
 global using Avalonia.Headless;
 global using Avalonia.Headless.XUnit;
 global using Avalonia.Input;
+global using Avalonia.Input.Platform;
 global using Avalonia.Threading;
 global using DevProjex.Avalonia;
 global using DevProjex.Avalonia.Services;

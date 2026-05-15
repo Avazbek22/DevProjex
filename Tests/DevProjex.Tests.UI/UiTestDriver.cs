@@ -96,8 +96,12 @@ internal static class UiTestDriver
             return;
         }
 
+        // Closing immediately after section mutations can leave coalesced refresh tasks
+        // queued on the dispatcher. Drain the public idle contract first so headless test
+        // teardown does not race app work that would still be running for a real user.
+        await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
-        await WaitForSettledFramesAsync(frameCount: 6);
+        await WaitForSettledFramesAsync(frameCount: 10);
         if (cleanupAppData)
             CleanupWindowAppData(window);
         else
@@ -113,7 +117,7 @@ internal static class UiTestDriver
         var method = typeof(MainWindow).GetMethod("TryOpenFolderAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
 
-        var task = await Dispatcher.UIThread.InvokeAsync<Task>(() =>
+        var task = await window.Dispatcher.InvokeAsync<Task>(() =>
         {
             var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder]);
             return Assert.IsAssignableFrom<Task>(result);
@@ -127,7 +131,7 @@ internal static class UiTestDriver
         var method = typeof(MainWindow).GetMethod("OnRefresh", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
 
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await window.Dispatcher.InvokeAsync(() =>
         {
             method!.Invoke(window, [window, new RoutedEventArgs()]);
         }, DispatcherPriority.Normal);
@@ -1006,7 +1010,7 @@ internal static class UiTestDriver
             return;
 
         var scrolled = false;
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await window.Dispatcher.InvokeAsync(() =>
         {
             var origin = control.TranslatePoint(default, scrollViewer);
             if (!origin.HasValue)
@@ -1076,8 +1080,9 @@ internal static class UiTestDriver
         {
             // Drive both dispatcher queues and the headless render timer so tests observe
             // the same visual state users would see after an animation or layout pass.
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            await dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
             AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
             await Task.Delay(FrameDelay);
         }

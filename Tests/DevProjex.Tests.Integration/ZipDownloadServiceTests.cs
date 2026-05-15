@@ -24,14 +24,14 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     private const string TestRepoUrl = "https://github.com/octocat/Hello-World";
     private const string TestRepoName = "Hello-World";
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "ZipTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDir);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         // Cleanup temp directory
         if (_tempDir != null && Directory.Exists(_tempDir))
@@ -47,7 +47,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         }
 
         _service.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     #region URL Detection Tests

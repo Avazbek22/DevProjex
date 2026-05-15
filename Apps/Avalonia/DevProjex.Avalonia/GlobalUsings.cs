@@ -3,6 +3,7 @@ global using Avalonia.Controls;
 global using Avalonia.Controls.Primitives;
 global using Avalonia.Data.Converters;
 global using Avalonia.Input;
+global using Avalonia.Input.Platform;
 global using Avalonia.Interactivity;
 global using Avalonia.Layout;
 global using Avalonia.Markup.Xaml;
