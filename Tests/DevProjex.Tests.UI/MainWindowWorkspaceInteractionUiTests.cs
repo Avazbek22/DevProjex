@@ -135,8 +135,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 },
                 "project to finish loading with a transient recent-projects save failure");
 
-            window.Close();
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
             var filePath = Path.Combine(appDataPath, "DevProjex", "recent-projects.json");
             Assert.True(File.Exists(filePath));
@@ -149,7 +148,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         finally
         {
             if (window.IsVisible)
-                window.Close();
+                await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
             try
             {
@@ -218,8 +217,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 "apply settings operation to finish after the profile save attempt");
             Assert.Equal(1, flakyStore.SaveAttemptCount);
 
-            window.Close();
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
             Assert.True(File.Exists(flakyStore.StoragePath));
             Assert.True(flakyStore.TryLoadProfile(workspace.Project.RootPath, out var profile));
@@ -228,7 +226,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         finally
         {
             if (window.IsVisible)
-                window.Close();
+                await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
             try
             {
@@ -360,8 +358,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             }
             finally
             {
-                cloneWindow.Close();
-                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+                await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
             }
         }
         finally

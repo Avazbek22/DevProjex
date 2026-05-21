@@ -1,10 +1,10 @@
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Kernel;
 using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.UI;
 
+[Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowIgnoreOptionsUiTests
 {
     [AvaloniaFact]

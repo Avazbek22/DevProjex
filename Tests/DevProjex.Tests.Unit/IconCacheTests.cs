@@ -1,4 +1,3 @@
-using DevProjex.Tests.Unit.Avalonia;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit;

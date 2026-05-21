@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 using DevProjex.Application.Models;
 using DevProjex.Avalonia.Collections;
 using DevProjex.Kernel;

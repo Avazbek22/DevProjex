@@ -1,9 +1,10 @@
 namespace DevProjex.Tests.UI;
 
+[Collection(UiWorkspaceCollection.Name)]
 public sealed class AvaloniaHeadlessHarnessSmokeTests
 {
     [AvaloniaFact]
-    public void HeadlessHarness_CreatesAndClosesWindow()
+    public async Task HeadlessHarness_CreatesAndClosesWindow()
     {
         Assert.Same(Dispatcher.UIThread, Dispatcher.CurrentDispatcher);
 
@@ -12,7 +13,7 @@ public sealed class AvaloniaHeadlessHarnessSmokeTests
         window.Show();
         Assert.True(window.IsVisible);
 
-        window.Close();
+        await UiTestDriver.CloseTopLevelWindowAsync(window);
         Assert.False(window.IsVisible);
     }
 }

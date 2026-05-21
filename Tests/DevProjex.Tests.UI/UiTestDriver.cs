@@ -108,6 +108,14 @@ internal static class UiTestDriver
             WindowAppDataPaths.TryRemove(window, out _);
     }
 
+    public static async Task CloseTopLevelWindowAsync(Window window)
+    {
+        if (window.IsVisible)
+            window.Close();
+
+        await WaitForSettledFramesAsync(frameCount: 6);
+    }
+
     public static async Task OpenFolderAsync(
         MainWindow window,
         string path,
@@ -1079,14 +1087,23 @@ internal static class UiTestDriver
 
         for (var index = 0; index < effectiveFrameCount; index++)
         {
-            // Drive both dispatcher queues and the headless render timer so tests observe
-            // the same visual state users would see after an animation or layout pass.
-            await dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Background);
-            await dispatcher.InvokeAsync(
-                static () => AvaloniaHeadlessPlatform.ForceRenderTimerTick(1),
-                DispatcherPriority.Render);
+            if (dispatcher.CheckAccess())
+                PumpHeadlessFrame(dispatcher);
+            else
+                await dispatcher.InvokeAsync(static () => PumpHeadlessFrame(Dispatcher.UIThread), DispatcherPriority.Background);
+
             await Task.Delay(FrameDelay);
         }
+    }
+
+    private static void PumpHeadlessFrame(Dispatcher dispatcher)
+    {
+        // RunJobs drains Avalonia's queued dispatcher work immediately. Pairing it with
+        // the headless render timer keeps layout/animation assertions deterministic
+        // without adding real-time sleeps to every UI test frame.
+        dispatcher.RunJobs(DispatcherPriority.Background);
+        AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+        dispatcher.RunJobs(DispatcherPriority.Background);
     }
 
     private static string DescribeState(MainWindow window)

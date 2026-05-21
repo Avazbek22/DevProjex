@@ -1,5 +1,4 @@
 using System.Text.RegularExpressions;
-using DevProjex.Avalonia.Services;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;

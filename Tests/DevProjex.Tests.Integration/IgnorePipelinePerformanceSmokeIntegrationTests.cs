@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
@@ -13,6 +11,28 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		Assert.True(
 			elapsed < TimeSpan.FromSeconds(30),
 			$"10k ignore snapshot smoke exceeded budget: {elapsed}.");
+	}
+
+	[Fact]
+	public void IgnoreSectionSnapshot_RepeatedLargeScans_DoNotRetainWorkspaceSizedManagedMemory()
+	{
+		using var temp = CreateSyntheticWorkspace(fileCount: 10_000);
+
+		// Warm up JIT/static caches before measuring retained memory. The assertion is about
+		// scan result lifetime, not one-time runtime initialization costs.
+		RunIgnoreSnapshot(temp.Path);
+		ForceFullCollection();
+		var baselineBytes = GC.GetTotalMemory(forceFullCollection: true);
+
+		for (var attempt = 0; attempt < 3; attempt++)
+			RunIgnoreSnapshot(temp.Path);
+
+		ForceFullCollection();
+		var retainedBytes = Math.Max(0, GC.GetTotalMemory(forceFullCollection: true) - baselineBytes);
+
+		Assert.True(
+			retainedBytes < 128L * 1024 * 1024,
+			$"Repeated ignore scans retained too much managed memory: {retainedBytes:N0} bytes.");
 	}
 
 	[Theory]
@@ -40,8 +60,31 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 
 	private static TimeSpan MeasureIgnoreSnapshot(string rootPath)
 	{
+		var stopwatch = Stopwatch.StartNew();
+		RunIgnoreSnapshot(rootPath);
+		stopwatch.Stop();
+
+		return stopwatch.Elapsed;
+	}
+
+	private static void RunIgnoreSnapshot(string rootPath)
+	{
 		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
-		var rules = new IgnoreRules(
+		var rules = CreateIgnoreRules();
+		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			rootPath,
+			["src", "docs", "tests"],
+			rules,
+			rules,
+			effectiveAllowedExtensions: null,
+			includeDirectoryToggleProbeRoots: true);
+
+		Assert.Contains(".cs", snapshot.Value.Extensions);
+		Assert.True(snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders >= 1);
+	}
+
+	private static IgnoreRules CreateIgnoreRules()
+		=> new(
 			IgnoreHiddenFolders: false,
 			IgnoreHiddenFiles: false,
 			IgnoreDotFolders: true,
@@ -55,19 +98,11 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 			UseSmartIgnore = true
 		};
 
-		var stopwatch = Stopwatch.StartNew();
-		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
-			rootPath,
-			["src", "docs", "tests"],
-			rules,
-			rules,
-			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
-		stopwatch.Stop();
-
-		Assert.Contains(".cs", snapshot.Value.Extensions);
-		Assert.True(snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders >= 1);
-		return stopwatch.Elapsed;
+	private static void ForceFullCollection()
+	{
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
 	}
 
 	private static TemporaryDirectory CreateSyntheticWorkspace(int fileCount)

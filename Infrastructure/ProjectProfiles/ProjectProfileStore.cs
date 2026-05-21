@@ -13,6 +13,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 		WriteIndented = true,
+		TypeInfoResolver = InfrastructureJsonSerializerContext.Default,
 		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 	};
 
@@ -358,22 +359,5 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		{
 			return false;
 		}
-	}
-
-	private sealed class ProjectProfileDb
-	{
-		public int SchemaVersion { get; set; }
-		public Dictionary<string, PersistedProjectProfile> Profiles { get; set; } = new(PathComparer.Default);
-	}
-
-	private sealed class PersistedProjectProfile
-	{
-		public List<string> SelectedRootFolders { get; set; } = [];
-		public List<string> SelectedExtensions { get; set; } = [];
-		public List<IgnoreOptionId> SelectedIgnoreOptions { get; set; } = [];
-		public Dictionary<string, bool> RootFolderStates { get; set; } = new(PathComparer.Default);
-		public Dictionary<string, bool> ExtensionStates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-		public Dictionary<IgnoreOptionId, bool> IgnoreOptionStates { get; set; } = [];
-		public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 	}
 }
