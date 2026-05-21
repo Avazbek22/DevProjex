@@ -122,7 +122,7 @@ public sealed class CancellationPatternTests
 				return;
 
 			uiUpdated = true;
-		});
+		}, TestContext.Current.CancellationToken);
 
 		await task;
 
