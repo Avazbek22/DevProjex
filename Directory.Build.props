@@ -10,6 +10,7 @@
     <AssemblyVersion>$(DevProjexAssemblyVersion)</AssemblyVersion>
     <FileVersion>$(DevProjexFileVersion)</FileVersion>
     <InformationalVersion>$(DevProjexInformationalVersion)</InformationalVersion>
+    <TestTfmsInParallel>false</TestTfmsInParallel>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='ReleaseStore'">

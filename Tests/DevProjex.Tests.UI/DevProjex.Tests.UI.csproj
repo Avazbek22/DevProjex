@@ -23,4 +23,8 @@
   <ItemGroup>
     <Compile Include="..\Shared\ProjectLoadWorkflow\**\*.cs" LinkBase="ProjectLoadWorkflow" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

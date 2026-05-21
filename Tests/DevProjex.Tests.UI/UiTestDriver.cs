@@ -1075,15 +1075,16 @@ internal static class UiTestDriver
         var effectiveFrameCount = FastTimingsEnabled
             ? Math.Max(1, (int)Math.Ceiling(frameCount * 0.35))
             : frameCount;
+        var dispatcher = Dispatcher.UIThread;
 
         for (var index = 0; index < effectiveFrameCount; index++)
         {
             // Drive both dispatcher queues and the headless render timer so tests observe
             // the same visual state users would see after an animation or layout pass.
-            var dispatcher = Dispatcher.CurrentDispatcher;
             await dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Background);
-            await dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            await dispatcher.InvokeAsync(
+                static () => AvaloniaHeadlessPlatform.ForceRenderTimerTick(1),
+                DispatcherPriority.Render);
             await Task.Delay(FrameDelay);
         }
     }
