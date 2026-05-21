@@ -166,8 +166,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     {
         // Test progress reporting during download
         var targetDir = Path.Combine(_tempDir!, "progress-test");
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, progress);
         if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
@@ -175,10 +174,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
 
-        // Should report percentages and phase transition marker
-        Assert.NotEmpty(progressReports);
-        Assert.Contains(progressReports, r => r.EndsWith("%"));
-        Assert.Contains(progressReports, r => r == "::EXTRACTING::");
+        ProgressAssertions.AssertCompletedZipDownload(progress.Reports);
     }
 
     [Fact]

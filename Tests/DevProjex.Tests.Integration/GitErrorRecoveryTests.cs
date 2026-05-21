@@ -380,12 +380,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
             return;
 
         var targetDir = _tempDir.CreateDirectory("progress-test");
-        var progressMessages = new List<string>();
-        var progress = new Progress<string>(msg =>
-        {
-            // Collect progress messages
-            progressMessages.Add(msg);
-        });
+        var progress = new ProgressRecorder();
 
         var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress);
 

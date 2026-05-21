@@ -277,14 +277,13 @@ public class GitBranchOperationsTests : IAsyncLifetime
         if (branches.Count < 2)
             return;
 
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var targetBranch = branches.First(b => !b.IsActive).Name;
         await _service.SwitchBranchAsync(repoPath, targetBranch, progress);
 
         // Progress callback should not cause errors (might or might not report)
-        Assert.NotNull(progressReports);
+        Assert.NotNull(progress.Reports);
     }
 
     [Fact]

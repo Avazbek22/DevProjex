@@ -152,8 +152,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Test that progress callback receives updates
         var targetDir = _tempDir.CreateDirectory("progress-zip");
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var result = await _zipService.DownloadAndExtractAsync(
             TestRepoUrl,
@@ -163,14 +162,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         if (!result.Success)
             return;
 
-        // Should have received progress updates
-        Assert.NotEmpty(progressReports);
-
-        // Should have percentages during download
-        Assert.Contains(progressReports, r => r.EndsWith("%"));
-
-        // Should have extraction marker
-        Assert.Contains(progressReports, r => r == "::EXTRACTING::");
+        ProgressAssertions.AssertCompletedZipDownload(progress.Reports);
     }
 
     [Fact]
@@ -328,7 +320,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         // This avoids flaky timing windows on fast CI runners.
         var targetDir = _tempDir.CreateDirectory("cancel-download");
         using var cts = new CancellationTokenSource();
-        var progress = new ImmediateProgress(_ => cts.Cancel());
+        var progress = new ProgressRecorder(_ => cts.Cancel());
 
         var downloadTask = _zipService.DownloadAndExtractAsync(
             TestRepoUrl,
@@ -347,7 +339,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         // Time-based CancelAfter(...) is flaky on fast runners.
         var targetDir = _tempDir.CreateDirectory("cancel-cleanup");
         using var cts = new CancellationTokenSource();
-        var progress = new ImmediateProgress(_ =>
+        var progress = new ProgressRecorder(_ =>
         {
             if (!cts.IsCancellationRequested)
                 cts.Cancel();
@@ -521,8 +513,4 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
 
     #endregion
 
-    private sealed class ImmediateProgress(Action<string> onReport) : IProgress<string>
-    {
-        public void Report(string value) => onReport(value);
-    }
 }

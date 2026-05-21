@@ -83,6 +83,9 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                 var buffer = new byte[81920];
                 long totalRead = 0;
                 int bytesRead;
+                var lastDownloadPercent = -1;
+
+                ReportPercent(progress, 0, ref lastDownloadPercent);
 
                 while ((bytesRead = await contentStream.ReadAsync(buffer, cancellationToken)) > 0)
                 {
@@ -92,10 +95,14 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                     if (totalBytes.HasValue && totalBytes.Value > 0)
                     {
                         var percent = (int)(totalRead * 100 / totalBytes.Value);
-                        // Report only percentage - caller shows localized "Downloading..." message
-                        progress?.Report($"{percent}%");
+                        // Report only percentage - caller shows localized "Downloading..." message.
+                        ReportPercent(progress, percent, ref lastDownloadPercent);
                     }
                 }
+
+                // Some servers do not send Content-Length, so the loop cannot calculate a
+                // percentage. Always close a successful download with 100% for stable UI/tests.
+                ReportPercent(progress, 100, ref lastDownloadPercent);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -113,6 +120,9 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                 string? rootFolder = null;
                 var totalEntries = archive.Entries.Count;
                 var processedEntries = 0;
+                var lastExtractionPercent = -1;
+
+                ReportPercent(progress, 0, ref lastExtractionPercent);
 
                 foreach (var entry in archive.Entries)
                 {
@@ -149,10 +159,12 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                     if (totalEntries > 0 && processedEntries % 50 == 0)
                     {
                         var percent = (int)(processedEntries * 100 / totalEntries);
-                        // Report only percentage - caller shows localized "Extracting..." message
-                        progress?.Report($"{percent}%");
+                        // Report only percentage - caller shows localized "Extracting..." message.
+                        ReportPercent(progress, percent, ref lastExtractionPercent);
                     }
                 }
+
+                ReportPercent(progress, 100, ref lastExtractionPercent);
             }
 
             return new GitCloneResult(
@@ -292,5 +304,18 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
         return value.StartsWith(folderName, StringComparison.Ordinal) &&
                value[folderName.Length] == '/';
+    }
+
+    private static void ReportPercent(IProgress<string>? progress, int percent, ref int lastReportedPercent)
+    {
+        if (progress is null)
+            return;
+
+        var normalizedPercent = Math.Clamp(percent, 0, 100);
+        if (normalizedPercent == lastReportedPercent)
+            return;
+
+        lastReportedPercent = normalizedPercent;
+        progress.Report($"{normalizedPercent}%");
     }
 }
