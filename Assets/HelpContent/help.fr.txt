@@ -251,6 +251,8 @@ Important :
 * les profils sont enregistrés uniquement pour les projets locaux ;
 * pour les projets ouverts via Git Clone, les profils ne sont pas enregistrés ;
 * si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués.
+* si l’actualisation ou la réouverture fait apparaître un nouveau dossier de premier niveau, un nouveau type de fichiers ou une nouvelle option dans « Ignorer », cet élément est activé par défaut ;
+* les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
 
 ## 11) Ignorer
 La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
@@ -267,6 +269,7 @@ Ordre des options :
 * Fichiers sans extension
 
 Les options des règles de base (cachés, avec point, vides, sans extension) sont affichées uniquement si des éléments correspondants existent.
+Quand une option dans « Ignorer » devient disponible pour la première fois, elle est activée par défaut. Une option explicitement désactivée auparavant conserve cet état lorsqu’elle redevient disponible.
 
 La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
 

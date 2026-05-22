@@ -251,6 +251,8 @@ Important:
 * profiles are saved only for local projects;
 * for projects opened via Git Clone, profiles are not saved;
 * if some saved options are no longer available in the current project, they are skipped, and the remaining parameters are applied.
+* if refresh or reopening reveals a new top-level folder, file type, or option in "Ignore", it is enabled by default;
+* options already seen keep the user's explicit choice: new files of a disabled type do not enable that type again.
 
 ## 11) Ignore
 The "Ignore" list is built automatically from the current path and selected top-level folders.
@@ -267,6 +269,7 @@ Option order:
 * Files without extension
 
 Basic-rule options (hidden, dot-prefixed, empty, extensionless) are shown only when matching elements exist.
+When an option in "Ignore" becomes available for the first time, it is enabled by default. An option explicitly disabled earlier keeps that state when it becomes available again.
 
 The separator under "Use .gitignore" splits Git/Smart rules from basic visibility rules.
 
