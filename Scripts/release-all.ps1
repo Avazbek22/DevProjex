@@ -576,6 +576,8 @@ function Build-GitHubArtifactsInWorkspace([string]$version, [string]$configurati
             "--self-contained", "true",
             "/p:PublishSingleFile=true",
             "/p:IncludeNativeLibrariesForSelfExtract=true",
+            # ReadyToRun reduces JIT work for packaged RID-specific desktop binaries.
+            "/p:PublishReadyToRun=true",
             "/p:PublishTrimmed=false",
             "/p:DebugType=None",
             "/p:DebugSymbols=false",

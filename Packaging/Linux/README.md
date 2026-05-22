@@ -17,6 +17,7 @@ dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj \
     -r linux-x64 \
     --self-contained true \
     /p:PublishSingleFile=true \
+    /p:PublishReadyToRun=true \
     /p:PublishTrimmed=false \
     -o ./publish/linux-x64
 ```

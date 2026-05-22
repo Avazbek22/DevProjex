@@ -3,6 +3,7 @@
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
              xmlns:converters="using:DevProjex.Avalonia.Converters"
              x:Class="DevProjex.Avalonia.Views.SettingsPanelView"
+             Name="SettingsPanelViewRoot"
              x:DataType="vm:MainWindowViewModel">
   <UserControl.Resources>
     <converters:FontFamilyDisplayNameConverter x:Key="FontFamilyDisplayNameConverter" />
@@ -50,11 +51,11 @@
           <ScrollViewer IsScrollInertiaEnabled="True"
                         VerticalScrollBarVisibility="Auto"
                         HorizontalScrollBarVisibility="Disabled">
-            <!-- Compact spacing is handled by a custom ItemsPanel in the settings lists. -->
+            <!-- ItemsPanelTemplate changes data scope, so keep Rider and XAML compilation on an explicit typed root. -->
             <ItemsControl ItemsSource="{Binding IgnoreOptions}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Spacing="{CompiledBinding #SettingsPanelViewRoot.((vm:MainWindowViewModel)DataContext).SettingsListSpacing}" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
@@ -93,7 +94,7 @@
             <ItemsControl ItemsSource="{Binding Extensions}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Spacing="{CompiledBinding #SettingsPanelViewRoot.((vm:MainWindowViewModel)DataContext).SettingsListSpacing}" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
@@ -124,7 +125,7 @@
             <ItemsControl ItemsSource="{Binding RootFolders}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Spacing="{CompiledBinding #SettingsPanelViewRoot.((vm:MainWindowViewModel)DataContext).SettingsListSpacing}" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>

@@ -102,6 +102,7 @@ jobs:
 
       - name: Publish
         shell: pwsh
+        # ReadyToRun validates the same startup-oriented publish shape as release artifacts.
         run: >
           dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj
           -c Release
@@ -109,6 +110,7 @@ jobs:
           --self-contained true
           /p:PublishSingleFile=true
           /p:IncludeNativeLibrariesForSelfExtract=true
+          /p:PublishReadyToRun=true
           /p:PublishTrimmed=false
           /p:DebugType=None
           /p:DebugSymbols=false
