@@ -226,7 +226,7 @@ public sealed class CancellationPatternTests
 			}
 
 			Assert.Fail("Should have caught OperationCanceledException");
-		});
+		}, TestContext.Current.CancellationToken);
 
 		await task;
 
