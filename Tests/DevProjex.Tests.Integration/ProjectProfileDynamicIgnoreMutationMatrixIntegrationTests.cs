@@ -84,16 +84,38 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 		switch (mutationMode)
 		{
 			case ProfileMutationMode.SelectedDynamicOnly:
-				store.SaveProfile(savePath, CreateProfile([dynamicOptionId]));
+				store.SaveProfile(savePath, CreateProfile(
+					[dynamicOptionId],
+					new Dictionary<IgnoreOptionId, bool> { [dynamicOptionId] = true }));
 				break;
 			case ProfileMutationMode.EmptySelection:
-				store.SaveProfile(savePath, CreateProfile([]));
+				store.SaveProfile(savePath, CreateProfile(
+					[],
+					new Dictionary<IgnoreOptionId, bool>
+					{
+						[dynamicOptionId] = false,
+						[IgnoreOptionId.HiddenFolders] = false
+					}));
 				break;
 			case ProfileMutationMode.UnavailableOnly:
-				store.SaveProfile(savePath, CreateProfile([IgnoreOptionId.UseGitIgnore]));
+				store.SaveProfile(savePath, CreateProfile(
+					[IgnoreOptionId.UseGitIgnore],
+					new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.UseGitIgnore] = true,
+						[dynamicOptionId] = false,
+						[IgnoreOptionId.HiddenFolders] = false
+					}));
 				break;
 			case ProfileMutationMode.MixedVisibleSelection:
-				store.SaveProfile(savePath, CreateProfile([dynamicOptionId, IgnoreOptionId.HiddenFiles]));
+				store.SaveProfile(savePath, CreateProfile(
+					[dynamicOptionId, IgnoreOptionId.HiddenFiles],
+					new Dictionary<IgnoreOptionId, bool>
+					{
+						[dynamicOptionId] = true,
+						[IgnoreOptionId.HiddenFolders] = false,
+						[IgnoreOptionId.HiddenFiles] = true
+					}));
 				break;
 			case ProfileMutationMode.ClearedAfterSave:
 				store.SaveProfile(savePath, CreateProfile([dynamicOptionId]));
@@ -235,12 +257,15 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, true]);
 	}
 
-	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions)
+	private static ProjectSelectionProfile CreateProfile(
+		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
+		IReadOnlyDictionary<IgnoreOptionId, bool>? ignoreOptionStates = null)
 	{
 		return new ProjectSelectionProfile(
 			SelectedRootFolders: [],
 			SelectedExtensions: [],
-			SelectedIgnoreOptions: selectedIgnoreOptions);
+			SelectedIgnoreOptions: selectedIgnoreOptions,
+			IgnoreOptionStates: ignoreOptionStates);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(

@@ -299,13 +299,15 @@ public sealed class ProjectProfileStoreAdditionalTests
 			Assert.Contains("docs", legacyProfile.SelectedRootFolders);
 			Assert.Contains(".csv", legacyProfile.SelectedExtensions);
 			Assert.Contains(IgnoreOptionId.EmptyFiles, legacyProfile.SelectedIgnoreOptions);
-			Assert.Null(legacyProfile.RootFolderStates);
-			Assert.Null(legacyProfile.ExtensionStates);
-			Assert.Null(legacyProfile.IgnoreOptionStates);
+			Assert.NotNull(legacyProfile.RootFolderStates);
+			Assert.NotNull(legacyProfile.ExtensionStates);
+			Assert.NotNull(legacyProfile.IgnoreOptionStates);
+			Assert.Empty(legacyProfile.RootFolderStates);
+			Assert.Empty(legacyProfile.ExtensionStates);
+			Assert.Empty(legacyProfile.IgnoreOptionStates);
 
-			// A legacy selected-only profile is converted only after the app saves the
-			// complete UI state. That keeps old profiles backward compatible until the
-			// user explicitly produces a v2 snapshot.
+			// Empty legacy state maps keep checked legacy entries available but allow
+			// entries first seen after reopen to use the current checked defaults.
 			store.SaveProfile(
 				projectPath,
 				new ProjectSelectionProfile(

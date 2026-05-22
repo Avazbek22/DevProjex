@@ -263,15 +263,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		var rootFolders = new HashSet<string>(profile.SelectedRootFolders, PathComparer.Default);
 		var extensions = new HashSet<string>(profile.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
 		var ignoreOptions = new HashSet<IgnoreOptionId>(profile.SelectedIgnoreOptions);
-		var rootStates = profile.RootFolderStates.Count == 0
-			? null
-			: new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default);
-		var extensionStates = profile.ExtensionStates.Count == 0
-			? null
-			: new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
-		var ignoreStates = profile.IgnoreOptionStates.Count == 0
-			? null
-			: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
+		// Empty state maps still carry v2 semantics: options first seen after reopen
+		// use current defaults instead of being treated as unchecked legacy misses.
+		var rootStates = new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default);
+		var extensionStates = new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
+		var ignoreStates = new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
 
 		return new ProjectSelectionProfile(
 			SelectedRootFolders: rootFolders,

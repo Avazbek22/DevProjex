@@ -83,10 +83,18 @@ public sealed class ProjectProfileDynamicIgnoreNegativeMutationIntegrationTests
 		switch (mutationMode)
 		{
 			case NegativeMutationMode.EmptySelection:
-				store.SaveProfile(canonicalPath, CreateProfile([]));
+				store.SaveProfile(canonicalPath, CreateProfile(
+					[],
+					new Dictionary<IgnoreOptionId, bool> { [dynamicOptionId] = false }));
 				break;
 			case NegativeMutationMode.UnavailableOnly:
-				store.SaveProfile(canonicalPath, CreateProfile([IgnoreOptionId.UseGitIgnore]));
+				store.SaveProfile(canonicalPath, CreateProfile(
+					[IgnoreOptionId.UseGitIgnore],
+					new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.UseGitIgnore] = true,
+						[dynamicOptionId] = false
+					}));
 				break;
 			case NegativeMutationMode.ManualFileRemoval:
 				store.SaveProfile(canonicalPath, CreateProfile([dynamicOptionId]));
@@ -129,12 +137,15 @@ public sealed class ProjectProfileDynamicIgnoreNegativeMutationIntegrationTests
 		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, true]);
 	}
 
-	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions)
+	private static ProjectSelectionProfile CreateProfile(
+		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
+		IReadOnlyDictionary<IgnoreOptionId, bool>? ignoreOptionStates = null)
 	{
 		return new ProjectSelectionProfile(
 			SelectedRootFolders: [],
 			SelectedExtensions: [],
-			SelectedIgnoreOptions: selectedIgnoreOptions);
+			SelectedIgnoreOptions: selectedIgnoreOptions,
+			IgnoreOptionStates: ignoreOptionStates);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(

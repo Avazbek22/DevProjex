@@ -74,9 +74,12 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Contains("src", loaded.SelectedRootFolders);
 		Assert.Contains(".cs", loaded.SelectedExtensions);
 		Assert.Contains(IgnoreOptionId.SmartIgnore, loaded.SelectedIgnoreOptions);
-		Assert.Null(loaded.RootFolderStates);
-		Assert.Null(loaded.ExtensionStates);
-		Assert.Null(loaded.IgnoreOptionStates);
+		Assert.NotNull(loaded.RootFolderStates);
+		Assert.NotNull(loaded.ExtensionStates);
+		Assert.NotNull(loaded.IgnoreOptionStates);
+		Assert.Empty(loaded.RootFolderStates);
+		Assert.Empty(loaded.ExtensionStates);
+		Assert.Empty(loaded.IgnoreOptionStates);
 
 		store.SaveProfile(projectPath, loaded);
 

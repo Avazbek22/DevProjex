@@ -493,6 +493,86 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task ReopenProject_WithLegacySelectedOnlyProfile_ChecksEntriesFirstSeenAfterReopenAcrossSections()
+    {
+        using var project = UiTestProject.CreateWithExternalRefreshMutationWorkspace();
+        var appDataPath = Path.Combine(project.AppDataPath, "legacy-selected-only");
+        MainWindow? window = null;
+
+        try
+        {
+            WriteLegacySelectedOnlyProjectProfile(appDataPath, project.RootPath);
+            MutateExternalRefreshWorkspace(project.RootPath);
+
+            window = await UiTestDriver.CreateLoadedMainWindowAsync(project, appDataPathOverride: appDataPath);
+
+            await WaitForRootFolderStateAsync(window, "src", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "api", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "web", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "generated", visible: true, isChecked: true);
+
+            await WaitForExtensionStateAsync(window, ".cs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".csv", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".ts", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".log", visible: true, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.EmptyFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.EmptyFolders, visible: true, isChecked: true);
+        }
+        finally
+        {
+            if (window is not null)
+                await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ReopenProject_WithEmptyFullStateProfile_ChecksEntriesFirstSeenAfterReopenAcrossSections()
+    {
+        using var project = UiTestProject.CreateWithExternalRefreshMutationWorkspace();
+        var appDataPath = Path.Combine(project.AppDataPath, "empty-full-state");
+        MainWindow? window = null;
+
+        try
+        {
+            WriteEmptyFullStateProjectProfile(appDataPath, project.RootPath);
+            MutateExternalRefreshWorkspace(project.RootPath);
+
+            window = await UiTestDriver.CreateLoadedMainWindowAsync(project, appDataPathOverride: appDataPath);
+
+            // This shape is produced when selected-only profiles were rewritten before
+            // the UI had observed every option that can appear after a later reopen.
+            await WaitForRootFolderStateAsync(window, "src", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "api", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "web", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "generated", visible: true, isChecked: true);
+
+            await WaitForExtensionStateAsync(window, ".cs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".csv", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".ts", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".log", visible: true, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.EmptyFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.EmptyFolders, visible: true, isChecked: true);
+        }
+        finally
+        {
+            if (window is not null)
+                await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PythonProjectWithoutGitIgnore_ShowsSmartIgnoreAndHidesSmartArtifacts()
     {
         using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
@@ -1094,6 +1174,53 @@ public sealed class MainWindowIgnoreOptionsUiTests
         WriteTextFile(rootPath, Path.Combine(".idea", "workspace.xml"), "<project />\n");
         WriteTextFile(rootPath, ".env", "APP_ENV=test\n");
         Directory.CreateDirectory(Path.Combine(rootPath, "empty-root"));
+    }
+
+    private static void WriteLegacySelectedOnlyProjectProfile(string appDataPath, string projectPath)
+    {
+        var storePath = Path.Combine(appDataPath, "DevProjex", "project-profiles.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+        var projectKey = System.Text.Json.JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+        var json = $$"""
+            {
+              "schemaVersion": 1,
+              "profiles": {
+                {{projectKey}}: {
+                  "selectedRootFolders": [ "src" ],
+                  "selectedExtensions": [ ".cs" ],
+                  "selectedIgnoreOptions": [ "emptyFiles" ],
+                  "updatedUtc": "2026-05-01T00:00:00+00:00"
+                }
+              }
+            }
+            """;
+
+        File.WriteAllText(storePath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    private static void WriteEmptyFullStateProjectProfile(string appDataPath, string projectPath)
+    {
+        var storePath = Path.Combine(appDataPath, "DevProjex", "project-profiles.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+        var projectKey = System.Text.Json.JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+        var json = $$"""
+            {
+              "schemaVersion": 2,
+              "profiles": {
+                {{projectKey}}: {
+                  "selectedRootFolders": [ "src" ],
+                  "selectedExtensions": [ ".cs" ],
+                  "selectedIgnoreOptions": [ "emptyFiles" ],
+                  "rootFolderStates": {},
+                  "extensionStates": {},
+                  "ignoreOptionStates": {},
+                  "updatedUtc": "2026-05-01T00:00:00+00:00"
+                }
+              }
+            }
+            """;
+
+        File.WriteAllText(storePath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
     private static void WriteTextFile(string rootPath, string relativePath, string content)
