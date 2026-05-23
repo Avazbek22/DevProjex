@@ -122,7 +122,7 @@ public sealed class CancellationPatternTests
 				return;
 
 			uiUpdated = true;
-		});
+		}, TestContext.Current.CancellationToken);
 
 		await task;
 
@@ -226,7 +226,7 @@ public sealed class CancellationPatternTests
 			}
 
 			Assert.Fail("Should have caught OperationCanceledException");
-		});
+		}, TestContext.Current.CancellationToken);
 
 		await task;
 

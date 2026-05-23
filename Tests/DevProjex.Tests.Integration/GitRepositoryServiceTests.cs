@@ -23,7 +23,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     private string TestRepoUrl => _testRepository!.RepositoryUrl;
     private string TestRepoName => _testRepository!.RepositoryName;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         _tempDir = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitTests", Guid.NewGuid().ToString("N"));
@@ -32,7 +32,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         // Cleanup with retry for locked git files
         if (_tempDir != null && Directory.Exists(_tempDir))
@@ -189,8 +189,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "progress-test");
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress);
 
@@ -363,8 +362,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         var otherBranch = branches.FirstOrDefault(b => !b.IsActive);
         SkipIf(otherBranch is null, "No other branch available");
 
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var success = await _service.SwitchBranchAsync(targetDir, otherBranch!.Name, progress);
 
@@ -425,8 +423,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var success = await _service.PullUpdatesAsync(targetDir, progress);
 

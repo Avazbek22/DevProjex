@@ -23,14 +23,14 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
         _tempDir = new TemporaryDirectory();
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         if (_gitAvailable)
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     public void Dispose()
     {

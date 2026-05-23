@@ -23,17 +23,17 @@ public class GitErrorRecoveryTests : IAsyncLifetime
         _tempDir = new TemporaryDirectory();
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         if (_gitAvailable)
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _tempDir.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
@@ -380,12 +380,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
             return;
 
         var targetDir = _tempDir.CreateDirectory("progress-test");
-        var progressMessages = new List<string>();
-        var progress = new Progress<string>(msg =>
-        {
-            // Collect progress messages
-            progressMessages.Add(msg);
-        });
+        var progress = new ProgressRecorder();
 
         var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress);
 

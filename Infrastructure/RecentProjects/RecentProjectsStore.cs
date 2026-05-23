@@ -18,6 +18,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 		WriteIndented = true,
+		TypeInfoResolver = InfrastructureJsonSerializerContext.Default,
 		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 	};
 

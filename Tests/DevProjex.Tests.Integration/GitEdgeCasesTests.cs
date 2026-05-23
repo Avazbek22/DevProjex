@@ -31,17 +31,17 @@ public class GitEdgeCasesTests : IAsyncLifetime
         _tempDir = new TemporaryDirectory();
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         if (_gitAvailable)
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _tempDir.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     #region Repository State Edge Cases
@@ -444,14 +444,13 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var targetDir = _tempDir.CreateDirectory("progress-test");
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress);
         Assert.True(result.Success);
 
         // Progress callback should not cause errors (number of reports may vary)
-        Assert.NotNull(progressReports);
+        Assert.NotNull(progress.Reports);
     }
 
     [Fact]
@@ -473,13 +472,12 @@ public class GitEdgeCasesTests : IAsyncLifetime
         if (targetBranch == null)
             return;
 
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var exception = await Record.ExceptionAsync(() => _service.SwitchBranchAsync(repoPath, targetBranch, progress));
 
         Assert.Null(exception);
-        Assert.All(progressReports, report => Assert.False(string.IsNullOrWhiteSpace(report)));
+        Assert.All(progress.Reports, report => Assert.False(string.IsNullOrWhiteSpace(report)));
     }
 
     #endregion

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Net;
 using System.Text.RegularExpressions;
@@ -10,6 +11,9 @@ namespace DevProjex.Infrastructure.Git;
 /// </summary>
 public sealed partial class ZipDownloadService : IZipDownloadService, IDisposable
 {
+    private const int StreamBufferSize = 81920;
+    private const int ExtractionProgressReportInterval = 50;
+
     private readonly HttpClient _httpClient;
     private bool _disposed;
 
@@ -75,26 +79,41 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
             using (response)
             {
-
                 var totalBytes = response.Content.Headers.ContentLength;
-                await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                await using var fileStream = File.Create(tempZipPath);
+                await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                await using var fileStream = OpenAsyncFileForWrite(tempZipPath);
 
-                var buffer = new byte[81920];
+                var buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
                 long totalRead = 0;
-                int bytesRead;
+                var lastDownloadPercent = -1;
 
-                while ((bytesRead = await contentStream.ReadAsync(buffer, cancellationToken)) > 0)
+                try
                 {
-                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-                    totalRead += bytesRead;
+                    ReportPercent(progress, 0, ref lastDownloadPercent);
 
-                    if (totalBytes.HasValue && totalBytes.Value > 0)
+                    int bytesRead;
+                    while ((bytesRead = await contentStream
+                               .ReadAsync(buffer.AsMemory(0, StreamBufferSize), cancellationToken)
+                               .ConfigureAwait(false)) > 0)
                     {
-                        var percent = (int)(totalRead * 100 / totalBytes.Value);
-                        // Report only percentage - caller shows localized "Downloading..." message
-                        progress?.Report($"{percent}%");
+                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
+                        totalRead += bytesRead;
+
+                        if (totalBytes.HasValue && totalBytes.Value > 0)
+                        {
+                            var percent = (int)(totalRead * 100 / totalBytes.Value);
+                            // Report only percentage - caller shows localized "Downloading..." message.
+                            ReportPercent(progress, percent, ref lastDownloadPercent);
+                        }
                     }
+
+                    // Some servers do not send Content-Length, so the loop cannot calculate a
+                    // percentage. Always close a successful download with 100% for stable UI/tests.
+                    ReportPercent(progress, 100, ref lastDownloadPercent);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
                 }
             }
 
@@ -103,16 +122,24 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
             // Notify caller that we're switching to extraction phase
             progress?.Report("::EXTRACTING::");
 
-            // Extract ZIP
             Directory.CreateDirectory(targetDirectory);
 
-            using (var archive = ZipFile.OpenRead(tempZipPath))
+            await using (var archiveStream = OpenAsyncFileForRead(tempZipPath))
+            using (var archive = await ZipArchive.CreateAsync(
+                       archiveStream,
+                       ZipArchiveMode.Read,
+                       leaveOpen: false,
+                       entryNameEncoding: null,
+                       cancellationToken).ConfigureAwait(false))
             {
                 // GitHub ZIPs usually have a root folder like "repo-main/".
                 // Detect it once and strip it from extracted paths.
                 string? rootFolder = null;
                 var totalEntries = archive.Entries.Count;
                 var processedEntries = 0;
+                var lastExtractionPercent = -1;
+
+                ReportPercent(progress, 0, ref lastExtractionPercent);
 
                 foreach (var entry in archive.Entries)
                 {
@@ -129,10 +156,9 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                     if (string.IsNullOrEmpty(entryPath))
                         continue;
 
-                    var destinationPath = Path.Combine(targetDirectory, entryPath.Replace('/', Path.DirectorySeparatorChar));
+                    var destinationPath = ResolveSafeDestinationPath(targetDirectory, entryPath);
 
-                    // Create directory or extract file
-                    if (entry.FullName.EndsWith('/'))
+                    if (IsDirectoryEntry(entry))
                     {
                         Directory.CreateDirectory(destinationPath);
                     }
@@ -142,17 +168,20 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                         if (!string.IsNullOrEmpty(directory))
                             Directory.CreateDirectory(directory);
 
-                        entry.ExtractToFile(destinationPath, overwrite: true);
+                        await entry.ExtractToFileAsync(destinationPath, overwrite: true, cancellationToken)
+                            .ConfigureAwait(false);
                     }
 
                     processedEntries++;
-                    if (totalEntries > 0 && processedEntries % 50 == 0)
+                    if (totalEntries > 0 && processedEntries % ExtractionProgressReportInterval == 0)
                     {
                         var percent = (int)(processedEntries * 100 / totalEntries);
-                        // Report only percentage - caller shows localized "Extracting..." message
-                        progress?.Report($"{percent}%");
+                        // Report only percentage - caller shows localized "Extracting..." message.
+                        ReportPercent(progress, percent, ref lastExtractionPercent);
                     }
                 }
+
+                ReportPercent(progress, 100, ref lastExtractionPercent);
             }
 
             return new GitCloneResult(
@@ -292,5 +321,71 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
         return value.StartsWith(folderName, StringComparison.Ordinal) &&
                value[folderName.Length] == '/';
+    }
+
+    internal static string ResolveSafeDestinationPath(string targetDirectory, string entryPath)
+    {
+        var normalizedEntryPath = entryPath
+            .Replace('/', Path.DirectorySeparatorChar)
+            .Replace('\\', Path.DirectorySeparatorChar);
+        var targetRoot = Path.GetFullPath(targetDirectory);
+        var destinationPath = Path.GetFullPath(Path.Combine(targetRoot, normalizedEntryPath));
+
+        // ZIP entry names are external input. Keep extraction read-only outside the
+        // selected target even if an archive contains "../" or absolute-like entries.
+        if (!IsPathWithinDirectory(destinationPath, targetRoot))
+            throw new InvalidDataException($"ZIP entry points outside the target directory: {entryPath}");
+
+        return destinationPath;
+    }
+
+    private static bool IsDirectoryEntry(ZipArchiveEntry entry)
+        => entry.FullName.EndsWith("/", StringComparison.Ordinal) ||
+           entry.FullName.EndsWith("\\", StringComparison.Ordinal) ||
+           string.IsNullOrEmpty(entry.Name);
+
+    private static bool IsPathWithinDirectory(string path, string directory)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var separator = Path.DirectorySeparatorChar.ToString();
+        var normalizedDirectory = directory.EndsWith(separator, StringComparison.Ordinal)
+            ? directory
+            : directory + separator;
+
+        return path.Equals(directory, comparison) ||
+               path.StartsWith(normalizedDirectory, comparison);
+    }
+
+    private static FileStream OpenAsyncFileForRead(string path)
+        => new(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            StreamBufferSize,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+    private static FileStream OpenAsyncFileForWrite(string path)
+        => new(
+            path,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            StreamBufferSize,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+    private static void ReportPercent(IProgress<string>? progress, int percent, ref int lastReportedPercent)
+    {
+        if (progress is null)
+            return;
+
+        var normalizedPercent = Math.Clamp(percent, 0, 100);
+        if (normalizedPercent == lastReportedPercent)
+            return;
+
+        lastReportedPercent = normalizedPercent;
+        progress.Report($"{normalizedPercent}%");
     }
 }

@@ -2,9 +2,10 @@ using DevProjex.Application.Services;
 
 namespace DevProjex.Tests.UI;
 
+[Collection(UiWorkspaceCollection.Name)]
 public sealed class UiTestDriverStatusMetricsParsingTests
 {
-    [Theory]
+    [AvaloniaTheory]
     [InlineData("[Lines: 23 | Chars: 4,698 | ~Tokens: 1,175]", 23, 4698, 1175)]
     [InlineData("[Lines: 23 | Chars: 4 698 | ~Tokens: 1 175]", 23, 4698, 1175)]
     [InlineData("[Lines: 23 | Chars: 4\u00A0698 | ~Tokens: 1\u00A0175]", 23, 4698, 1175)]
@@ -20,7 +21,7 @@ public sealed class UiTestDriverStatusMetricsParsingTests
         Assert.Equal(new ExportOutputMetrics(expectedLines, expectedChars, expectedTokens), metrics);
     }
 
-    [Theory]
+    [AvaloniaTheory]
     [InlineData("[Lines: 12.3K | Chars: 1.5M | ~Tokens: 2.5K]", 12300, 1500000, 2500)]
     [InlineData("[Lines: 12,3K | Chars: 1,5M | ~Tokens: 2,5K]", 12300, 1500000, 2500)]
     public void TryParseStatusMetrics_CompactMetricSuffixes_ParsesCorrectly(

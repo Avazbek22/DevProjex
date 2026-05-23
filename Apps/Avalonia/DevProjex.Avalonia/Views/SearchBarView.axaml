@@ -10,7 +10,7 @@
     <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="8" Margin="12,6">
       <TextBox Name="SearchBox"
                Grid.Column="0"
-               Watermark="{Binding MenuSearch}"
+               PlaceholderText="{Binding MenuSearch}"
                Text="{Binding SearchQuery, Mode=TwoWay}"
                Width="260"
                FocusAdorner="{x:Null}"

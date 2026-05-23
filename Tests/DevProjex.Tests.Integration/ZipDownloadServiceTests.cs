@@ -24,14 +24,14 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     private const string TestRepoUrl = "https://github.com/octocat/Hello-World";
     private const string TestRepoName = "Hello-World";
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "ZipTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDir);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         // Cleanup temp directory
         if (_tempDir != null && Directory.Exists(_tempDir))
@@ -47,7 +47,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         }
 
         _service.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     #region URL Detection Tests
@@ -166,8 +166,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     {
         // Test progress reporting during download
         var targetDir = Path.Combine(_tempDir!, "progress-test");
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, progress);
         if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
@@ -175,10 +174,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
 
-        // Should report percentages and phase transition marker
-        Assert.NotEmpty(progressReports);
-        Assert.Contains(progressReports, r => r.EndsWith("%"));
-        Assert.Contains(progressReports, r => r == "::EXTRACTING::");
+        ProgressAssertions.AssertCompletedZipDownload(progress.Reports);
     }
 
     [Fact]

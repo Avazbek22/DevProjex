@@ -251,6 +251,8 @@ Muhim:
 * profillar faqat mahalliy loyihalar uchun saqlanadi;
 * Git Clone orqali ochilgan loyihalar uchun profillar saqlanmaydi;
 * agar joriy loyihada saqlangan ayrim bandlar endi mavjud bo‘lmasa, ular o‘tkazib yuboriladi, qolgan parametrlar qo‘llanadi.
+* yangilash yoki qayta ochishdan keyin yangi yuqori darajadagi jild, yangi fayl turi yoki «E’tiborsiz qoldirish» ichida yangi band paydo bo‘lsa, u odatda yoqilgan bo‘ladi;
+* avvaldan ma’lum bandlar foydalanuvchining aniq tanlovini saqlaydi: o‘chirilgan turdagi yangi fayllar bu turni qayta yoqmaydi.
 
 ## 11) Ignorlash
 "Ignorlash" roʻyxati joriy yoʻl va tanlangan yuqori darajadagi papkalar asosida avtomatik shakllanadi.
@@ -267,6 +269,7 @@ Variantlar tartibi:
 * Kengaytmasiz fayllar
 
 Asosiy qoidalar bandlari (yashirin, nuqtali, bo‘sh, kengaytmasiz) faqat mos elementlar mavjud bo‘lganda ko‘rsatiladi.
+«E’tiborsiz qoldirish» ichidagi band birinchi marta mavjud bo‘lsa, u odatda yoqilgan bo‘ladi. Avval aniq o‘chirilgan band qayta mavjud bo‘lganda o‘sha holatini saqlaydi.
 
 ".gitignore dan foydalanish" ostidagi chiziq Git/Smart qoidalarni asosiy ko‘rinish qoidalaridan ajratadi.
 

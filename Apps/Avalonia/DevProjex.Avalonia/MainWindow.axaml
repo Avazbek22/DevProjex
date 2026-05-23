@@ -13,17 +13,17 @@
         TransparencyLevelHint="Mica, AcrylicBlur, Blur"
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>
-    <Style Selector="TreeViewItem">
-      <Setter Property="IsExpanded" Value="{ReflectionBinding IsExpanded, Mode=TwoWay}" />
-      <Setter Property="IsSelected" Value="{ReflectionBinding IsSelected, Mode=TwoWay}" />
+    <Style Selector="TreeViewItem" x:DataType="vm:TreeNodeViewModel">
+      <Setter Property="IsExpanded" Value="{CompiledBinding IsExpanded, Mode=TwoWay}" />
+      <Setter Property="IsSelected" Value="{CompiledBinding IsSelected, Mode=TwoWay}" />
       <Setter Property="Padding" Value="{DynamicResource TreeItemPaddingResource}" />
     </Style>
     <!-- Fix for virtualization cache bug: the :empty pseudo-class may not update correctly
          when VirtualizingStackPanel recycles TreeViewItem containers. We use Opacity binding
          instead of IsVisible to hide the expander while preserving layout space for alignment. -->
-    <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron">
-      <Setter Property="Opacity" Value="{ReflectionBinding DataContext.HasChildren,
-        RelativeSource={RelativeSource AncestorType=TreeViewItem},
+    <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron"
+           x:DataType="vm:TreeNodeViewModel">
+      <Setter Property="Opacity" Value="{CompiledBinding HasChildren,
         Converter={x:Static converters:BoolToOpacityConverter.Instance}}" />
     </Style>
 
@@ -897,7 +897,7 @@
           </ItemsPanelTemplate>
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
-          <DataTemplate>
+          <DataTemplate x:DataType="vm:ToastMessageViewModel">
             <Border Background="{DynamicResource ToastSurfaceBrush}"
                     CornerRadius="8"
                     Padding="14,10"

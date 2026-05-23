@@ -688,7 +688,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(TreeItemSpacing));
         RaisePropertyChanged(nameof(TreeItemPadding));
         RaisePropertyChanged(nameof(TreeTextMargin));
-        RaisePropertyChanged(nameof(SettingsListSpacing));
     }
 
     // Methods for toggle behavior (click on active = disable)
@@ -812,6 +811,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_gitCloneUrl == value) return;
             _gitCloneUrl = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanStartGitClone));
         }
     }
 
@@ -834,6 +834,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_gitCloneInProgress == value) return;
             _gitCloneInProgress = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanStartGitClone));
             RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
         }
     }
@@ -1026,9 +1027,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // virtualized trees rely on stable item measurement for correct scroll extents.
     public Thickness TreeItemPadding => IsCompactModeEffective ? new Thickness(0) : new Thickness(4, 1);
 
-    // Settings lists use an ItemsPanel with explicit Spacing (can go negative to tighten).
-    public double SettingsListSpacing => IsCompactModeEffective ? -5 : -3;
-
     public void UpdateSearchMatchSummary(int currentIndex, int totalMatches)
     {
         var normalizedTotal = Math.Max(0, totalMatches);
@@ -1114,6 +1112,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Hide the clone recent list while cloning is in progress to avoid
     // exposing stale selections during the active git operation.
     public bool GitCloneRecentRepositoriesVisible => !GitCloneInProgress && HasRecentRepositories;
+
+    public bool CanStartGitClone => !GitCloneInProgress && !string.IsNullOrWhiteSpace(GitCloneUrl);
 
     public bool AllIgnoreChecked
     {

@@ -215,6 +215,34 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 	}
 
 	[Fact]
+	public void BuildRootFolderOptions_StateCacheKeepsSelectedLegacyIgnoredRootWhenItHasNoStateEntry()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+		var options = service.BuildRootFolderOptions(
+			["src", "docs", "generated", "node_modules"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "src", "node_modules" },
+			rules,
+			hasPreviousSelections: true,
+			previousStateCache: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				["docs"] = false
+			});
+
+		Assert.True(options.Single(option => option.Name == "src").IsChecked);
+		Assert.False(options.Single(option => option.Name == "docs").IsChecked);
+		Assert.True(options.Single(option => option.Name == "generated").IsChecked);
+		Assert.True(options.Single(option => option.Name == "node_modules").IsChecked);
+	}
+
+	[Fact]
 	public void BuildRootFolderOptions_EmptyStateCacheKeepsIgnoredNewRootsUnchecked()
 	{
 		var service = new FilterOptionSelectionService();

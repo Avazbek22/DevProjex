@@ -35,7 +35,7 @@
       <TextBox Grid.Row="2"
                Name="UrlTextBox"
                Text="{Binding GitCloneUrl, Mode=TwoWay}"
-               Watermark="{Binding GitCloneUrlPlaceholder}"
+               PlaceholderText="{Binding GitCloneUrlPlaceholder}"
                Margin="0,0,0,16"
                IsVisible="{Binding !GitCloneInProgress}"
                KeyDown="OnUrlKeyDown" />
@@ -61,7 +61,7 @@
                 MinWidth="80"
                 Click="OnStartClone"
                 IsVisible="{Binding !GitCloneInProgress}"
-                IsEnabled="{Binding GitCloneUrl.Length}" />
+                IsEnabled="{Binding CanStartGitClone}" />
         <Button Content="{Binding DialogCancel}"
                 Click="OnCancel" />
       </StackPanel>

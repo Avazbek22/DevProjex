@@ -118,7 +118,7 @@ public static class MessageDialog
         panel.Children.Add(text);
 
         button.Click += (_, _) =>
-            (panel.GetVisualRoot() as Window)?.Close();
+            (TopLevel.GetTopLevel(panel) as Window)?.Close();
 
         return panel;
     }
@@ -175,13 +175,13 @@ public static class MessageDialog
         confirmButton.Click += (_, _) =>
         {
             completion.TrySetResult(true);
-            (panel.GetVisualRoot() as Window)?.Close();
+            (TopLevel.GetTopLevel(panel) as Window)?.Close();
         };
 
         cancelButton.Click += (_, _) =>
         {
             completion.TrySetResult(false);
-            (panel.GetVisualRoot() as Window)?.Close();
+            (TopLevel.GetTopLevel(panel) as Window)?.Close();
         };
 
         return panel;

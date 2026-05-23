@@ -328,7 +328,7 @@ public partial class TopMenuBarView : UserControl
         DetachHelpPopupHandlers();
     }
 
-    private void OnTopLevelGotFocus(object? sender, GotFocusEventArgs e)
+    private void OnTopLevelGotFocus(object? sender, FocusChangedEventArgs e)
     {
         if (HelpPopup?.IsOpen != true)
             return;
@@ -399,7 +399,7 @@ public partial class TopMenuBarView : UserControl
         DetachHelpDocsPopupHandlers();
     }
 
-    private void OnTopLevelHelpDocsGotFocus(object? sender, GotFocusEventArgs e)
+    private void OnTopLevelHelpDocsGotFocus(object? sender, FocusChangedEventArgs e)
     {
         if (HelpDocsPopup?.IsOpen != true)
             return;
@@ -548,7 +548,7 @@ public partial class TopMenuBarView : UserControl
         if (popup?.Child is null)
             return;
 
-        if (popup.Child.GetVisualRoot() is null)
+        if (TopLevel.GetTopLevel(popup.Child) is null)
             return;
 
         if (TopLevel.GetTopLevel(popup.Child) is not TopLevel popupLevel)
@@ -591,7 +591,7 @@ public partial class TopMenuBarView : UserControl
 
     private void ApplyToolTipBackdrop(ToolTip toolTip)
     {
-        if (toolTip.GetVisualRoot() is null)
+        if (TopLevel.GetTopLevel(toolTip) is null)
             return;
 
         if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)

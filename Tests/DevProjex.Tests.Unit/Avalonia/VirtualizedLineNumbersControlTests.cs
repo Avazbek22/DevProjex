@@ -6,26 +6,23 @@ namespace DevProjex.Tests.Unit.Avalonia;
 [Collection("AvaloniaUI")]
 public sealed class VirtualizedLineNumbersControlTests
 {
-    [Fact]
+    [AvaloniaFact]
     public void Defaults_AreStable()
     {
-        AvaloniaUiTestFixture.RunOnUiThread(() =>
-        {
-            var control = new VirtualizedLineNumbersControl();
+        var control = new VirtualizedLineNumbersControl();
 
-            Assert.Equal(1, control.LineCount);
-            Assert.Equal(0, control.VerticalOffset, 3);
-            Assert.Equal(10, control.TopPadding, 3);
-            Assert.Equal(10, control.BottomPadding, 3);
-            Assert.Equal(10, control.LeftPadding, 3);
-            Assert.Equal(8, control.RightPadding, 3);
-            Assert.Equal(15, control.NumberFontSize, 3);
-            Assert.Equal(0, control.ExtentHeight, 3);
-            Assert.Equal(0, control.ViewportHeight, 3);
-        });
+        Assert.Equal(1, control.LineCount);
+        Assert.Equal(0, control.VerticalOffset, 3);
+        Assert.Equal(10, control.TopPadding, 3);
+        Assert.Equal(10, control.BottomPadding, 3);
+        Assert.Equal(10, control.LeftPadding, 3);
+        Assert.Equal(8, control.RightPadding, 3);
+        Assert.Equal(15, control.NumberFontSize, 3);
+        Assert.Equal(0, control.ExtentHeight, 3);
+        Assert.Equal(0, control.ViewportHeight, 3);
     }
 
-    [Theory]
+    [AvaloniaTheory]
     [InlineData(1000, 2020, 10, 10, 2.0)]
     [InlineData(500, 1510, 5, 5, 3.0)]
     [InlineData(200, 600, 0, 0, 3.0)]
@@ -36,42 +33,36 @@ public sealed class VirtualizedLineNumbersControlTests
         double bottomPadding,
         double expected)
     {
-        AvaloniaUiTestFixture.RunOnUiThread(() =>
+        var control = new VirtualizedLineNumbersControl
         {
-            var control = new VirtualizedLineNumbersControl
-            {
-                LineCount = lineCount,
-                ExtentHeight = extentHeight,
-                TopPadding = topPadding,
-                BottomPadding = bottomPadding
-            };
+            LineCount = lineCount,
+            ExtentHeight = extentHeight,
+            TopPadding = topPadding,
+            BottomPadding = bottomPadding
+        };
 
-            var height = InvokeResolveLineHeight(control, lineCount);
+        var height = InvokeResolveLineHeight(control, lineCount);
 
-            Assert.Equal(expected, height, 6);
-        });
+        Assert.Equal(expected, height, 6);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void ResolveLineHeight_HandlesLargeLineCountsWithoutOverflow()
     {
-        AvaloniaUiTestFixture.RunOnUiThread(() =>
+        var control = new VirtualizedLineNumbersControl
         {
-            var control = new VirtualizedLineNumbersControl
-            {
-                LineCount = 500000,
-                ExtentHeight = 5_000_020,
-                TopPadding = 10,
-                BottomPadding = 10
-            };
+            LineCount = 500000,
+            ExtentHeight = 5_000_020,
+            TopPadding = 10,
+            BottomPadding = 10
+        };
 
-            var height = InvokeResolveLineHeight(control, 500000);
+        var height = InvokeResolveLineHeight(control, 500000);
 
-            Assert.Equal(10.0, height, 6);
-        });
+        Assert.Equal(10.0, height, 6);
     }
 
-    [Theory]
+    [AvaloniaTheory]
     [InlineData(1000, 0, 10, 10)]
     [InlineData(1000, 10, 10, 10)]
     [InlineData(1000, 100, 1000, 1000)]
@@ -81,18 +72,15 @@ public sealed class VirtualizedLineNumbersControlTests
         double topPadding,
         double bottomPadding)
     {
-        AvaloniaUiTestFixture.RunOnUiThread(() =>
+        var control = new VirtualizedLineNumbersControl
         {
-            var control = new VirtualizedLineNumbersControl
-            {
-                LineCount = lineCount,
-                ExtentHeight = extentHeight,
-                TopPadding = topPadding,
-                BottomPadding = bottomPadding
-            };
+            LineCount = lineCount,
+            ExtentHeight = extentHeight,
+            TopPadding = topPadding,
+            BottomPadding = bottomPadding
+        };
 
-            Assert.False(TryCalculateExtentLineHeight(control, lineCount, out _));
-        });
+        Assert.False(TryCalculateExtentLineHeight(control, lineCount, out _));
     }
 
     private static double InvokeResolveLineHeight(VirtualizedLineNumbersControl control, int lineCount)

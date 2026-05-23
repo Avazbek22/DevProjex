@@ -10,7 +10,7 @@
     <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8" Margin="12,6">
       <TextBox Name="FilterBox"
                Grid.Column="0"
-               Watermark="{Binding FilterByNamePlaceholder}"
+               PlaceholderText="{Binding FilterByNamePlaceholder}"
                Text="{Binding NameFilter, Mode=TwoWay}"
                Width="260"
                FocusAdorner="{x:Null}"

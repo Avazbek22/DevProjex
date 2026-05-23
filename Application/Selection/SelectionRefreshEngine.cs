@@ -1,5 +1,4 @@
 using DevProjex.Application.Models;
-using DevProjex.Kernel;
 
 namespace DevProjex.Application.Selection;
 
@@ -96,7 +95,7 @@ public sealed class SelectionRefreshEngine(
             previousSelections,
             ignoreRules,
             context.RootSelectionInitialized,
-            ResolveSelectionStateCache(context.PreparedSelectionMode, context.RootOptionStateCache));
+            context.RootOptionStateCache);
         options = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
             context.PreparedSelectionMode,
             context.RootSelectionCache,
@@ -220,7 +219,7 @@ public sealed class SelectionRefreshEngine(
             context.ExtensionsSelectionInitialized
                 ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
                 : EmptyExtensionSelection,
-            ResolveSelectionStateCache(context.PreparedSelectionMode, context.ExtensionOptionStateCache));
+            context.ExtensionOptionStateCache);
         var usedProfileFallback = SelectionRefreshPolicy.ShouldApplyMissingProfileSelectionsFallback(
             context.PreparedSelectionMode,
             context.ExtensionsSelectionCache,
@@ -252,7 +251,7 @@ public sealed class SelectionRefreshEngine(
                 context.ExtensionsSelectionInitialized
                     ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
                     : EmptyExtensionSelection,
-                ResolveSelectionStateCache(context.PreparedSelectionMode, context.ExtensionOptionStateCache));
+                context.ExtensionOptionStateCache);
             extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
                 context.PreparedSelectionMode,
                 context.ExtensionsSelectionCache,
@@ -399,16 +398,6 @@ public sealed class SelectionRefreshEngine(
         return updated;
     }
 
-    private static IReadOnlyDictionary<string, bool>? ResolveSelectionStateCache(
-        PreparedSelectionMode preparedSelectionMode,
-        IReadOnlyDictionary<string, bool>? stateCache)
-    {
-        if (preparedSelectionMode == PreparedSelectionMode.Profile && stateCache is { Count: 0 })
-            return null;
-
-        return stateCache;
-    }
-
     private static IExtensionInclusionPolicy? BuildEffectiveExtensionPolicy(SelectionRefreshContext context)
     {
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
@@ -420,7 +409,7 @@ public sealed class SelectionRefreshEngine(
 		var previousSelections = new HashSet<string>(
 			context.ExtensionsSelectionCache,
 			StringComparer.OrdinalIgnoreCase);
-		var stateCache = ResolveSelectionStateCache(context.PreparedSelectionMode, context.ExtensionOptionStateCache);
+		var stateCache = context.ExtensionOptionStateCache;
 
 		return new ExtensionSelectionInclusionPolicy(
             new SelectionStateResolver(previousSelections, stateCache),

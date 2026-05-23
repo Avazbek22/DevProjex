@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 using DevProjex.Application.Models;
 using DevProjex.Avalonia.Collections;
 using DevProjex.Kernel;
@@ -34,9 +33,13 @@ public sealed class SelectionSyncCoordinator(
     private bool _ignoreOptionStateCacheIsComplete;
     private HashSet<string> _rootSelectionCache = new(PathComparer.Default);
     private Dictionary<string, bool> _rootOptionStateCache = new(PathComparer.Default);
+    // An explicitly empty state cache means "default future entries"; null means
+    // selected-only legacy behavior. The dictionaries alone cannot keep that boundary.
+    private bool _hasRootOptionStateCache;
     private bool _rootSelectionInitialized;
     private HashSet<string> _extensionsSelectionCache = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, bool> _extensionOptionStateCache = new(StringComparer.OrdinalIgnoreCase);
+    private bool _hasExtensionOptionStateCache;
     private bool _extensionsSelectionInitialized;
     private bool _hasExtensionlessExtensionEntries;
     private int _extensionlessExtensionEntriesCount;
@@ -465,6 +468,7 @@ public sealed class SelectionSyncCoordinator(
             profile.SelectedRootFolders,
             PathComparer.Default);
         _rootOptionStateCache.Clear();
+        _hasRootOptionStateCache = profile.RootFolderStates is not null;
         if (profile.RootFolderStates is not null)
         {
             foreach (var (name, isChecked) in profile.RootFolderStates)
@@ -476,6 +480,7 @@ public sealed class SelectionSyncCoordinator(
             profile.SelectedExtensions,
             StringComparer.OrdinalIgnoreCase);
         _extensionOptionStateCache.Clear();
+        _hasExtensionOptionStateCache = profile.ExtensionStates is not null;
         if (profile.ExtensionStates is not null)
         {
             foreach (var (name, isChecked) in profile.ExtensionStates)
@@ -509,12 +514,14 @@ public sealed class SelectionSyncCoordinator(
         _rootSelectionCache.TrimExcess();
         _rootOptionStateCache.Clear();
         _rootOptionStateCache.TrimExcess();
+        _hasRootOptionStateCache = false;
 
         _extensionsSelectionInitialized = false;
         _extensionsSelectionCache.Clear();
         _extensionsSelectionCache.TrimExcess();
         _extensionOptionStateCache.Clear();
         _extensionOptionStateCache.TrimExcess();
+        _hasExtensionOptionStateCache = false;
 
         _ignoreSelectionState.Reset(trimExcess: true);
         _ignoreOptionStateCacheIsComplete = false;
@@ -741,6 +748,7 @@ public sealed class SelectionSyncCoordinator(
         _rootSelectionCache.TrimExcess();
         _rootOptionStateCache.Clear();
         _rootOptionStateCache.TrimExcess();
+        _hasRootOptionStateCache = false;
         _rootSelectionInitialized = false;
 
         // Clear extension selection cache
@@ -748,6 +756,7 @@ public sealed class SelectionSyncCoordinator(
         _extensionsSelectionCache.TrimExcess();
         _extensionOptionStateCache.Clear();
         _extensionOptionStateCache.TrimExcess();
+        _hasExtensionOptionStateCache = false;
         _extensionsSelectionInitialized = false;
         _hasExtensionlessExtensionEntries = false;
         _extensionlessExtensionEntriesCount = 0;
@@ -782,6 +791,24 @@ public sealed class SelectionSyncCoordinator(
         EnsureIgnoreSelectionCache();
         UpdateIgnoreSelectionCache();
         return _ignoreSelectionState.SnapshotSelectedOptions();
+    }
+
+    public IReadOnlyDictionary<string, bool>? SnapshotRootOptionStatesForPersistence() =>
+        SnapshotRootOptionStateCacheOrNull(_rootSelectionInitialized);
+
+    public IReadOnlyDictionary<string, bool>? SnapshotExtensionOptionStatesForPersistence() =>
+        SnapshotExtensionOptionStateCacheOrNull(_extensionsSelectionInitialized);
+
+    public IReadOnlyDictionary<IgnoreOptionId, bool>? SnapshotIgnoreOptionStatesForPersistence()
+    {
+        if (!_ignoreSelectionState.IsInitialized &&
+            _ignoreSelectionState.SelectedOptions.Count == 0 &&
+            _ignoreSelectionState.OptionStateCache.Count == 0)
+        {
+            return null;
+        }
+
+        return _ignoreSelectionState.SnapshotStateCache();
     }
 
     private void EnsureIgnoreSelectionCache()
@@ -929,6 +956,7 @@ public sealed class SelectionSyncCoordinator(
     public void UpdateExtensionsSelectionCache()
     {
         _extensionsSelectionInitialized = true;
+        _hasExtensionOptionStateCache = true;
         _extensionsSelectionCache = CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
         foreach (var option in viewModel.Extensions)
             _extensionOptionStateCache[option.Name] = option.IsChecked;
@@ -1372,7 +1400,7 @@ public sealed class SelectionSyncCoordinator(
         if (!isInitialized)
             return null;
 
-        if (ShouldSuppressAllTogglesOverride() && _rootOptionStateCache.Count == 0)
+        if (ShouldSuppressAllTogglesOverride() && !_hasRootOptionStateCache)
             return null;
 
         return new Dictionary<string, bool>(_rootOptionStateCache, PathComparer.Default);
@@ -1383,7 +1411,7 @@ public sealed class SelectionSyncCoordinator(
         if (!isInitialized)
             return null;
 
-        if (ShouldSuppressAllTogglesOverride() && _extensionOptionStateCache.Count == 0)
+        if (ShouldSuppressAllTogglesOverride() && !_hasExtensionOptionStateCache)
             return null;
 
         return new Dictionary<string, bool>(_extensionOptionStateCache, StringComparer.OrdinalIgnoreCase);
@@ -1664,9 +1692,11 @@ public sealed class SelectionSyncCoordinator(
         // Clear caches
         _rootSelectionCache.Clear();
         _rootOptionStateCache.Clear();
+        _hasRootOptionStateCache = false;
         _ignoreSelectionState.Reset(trimExcess: true);
         _extensionsSelectionCache.Clear();
         _extensionOptionStateCache.Clear();
+        _hasExtensionOptionStateCache = false;
         _preparedSelectionPath = null;
         _ignoreOptions = [];
 
@@ -1770,6 +1800,7 @@ public sealed class SelectionSyncCoordinator(
 
     private void UpdateRootSelectionCache()
     {
+        _hasRootOptionStateCache = true;
         _rootSelectionCache = CollectCheckedSelectionNames(viewModel.RootFolders, PathComparer.Default);
         foreach (var option in viewModel.RootFolders)
             _rootOptionStateCache[option.Name] = option.IsChecked;

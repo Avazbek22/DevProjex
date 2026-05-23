@@ -11,6 +11,11 @@ public sealed class SelectionStateResolver(
 			if (previousStateCache.TryGetValue(name, out var cachedState))
 				return cachedState;
 
+			// Older profiles only persisted checked entries. Keep those selections while
+			// letting missing entries use the current product default for new options.
+			if (previousSelections.Contains(name))
+				return true;
+
 			return defaultForNewEntry;
 		}
 

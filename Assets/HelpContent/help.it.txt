@@ -251,6 +251,8 @@ Importante:
 * i profili vengono salvati solo per i progetti locali;
 * per i progetti aperti tramite Git Clone, i profili non vengono salvati;
 * se alcune opzioni salvate non sono più disponibili nel progetto corrente, vengono ignorate e gli altri parametri vengono applicati.
+* se l’aggiornamento o la riapertura mostra una nuova cartella di primo livello, un nuovo tipo di file o una nuova opzione in « Ignora », quel punto viene attivato per impostazione predefinita;
+* i punti già noti mantengono la scelta esplicita dell’utente: nuovi file di un tipo disattivato non riattivano quel tipo.
 
 ## 11) Ignora
 L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
@@ -267,6 +269,7 @@ Ordine delle opzioni:
 * File senza estensione
 
 Le opzioni delle regole base (nascosti, con punto, vuoti, senza estensione) vengono mostrate solo se esistono elementi corrispondenti.
+Quando un’opzione in « Ignora » diventa disponibile per la prima volta, viene attivata per impostazione predefinita. Un’opzione disattivata esplicitamente in precedenza mantiene quello stato quando torna disponibile.
 
 La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
 

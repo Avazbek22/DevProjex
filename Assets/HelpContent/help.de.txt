@@ -251,6 +251,8 @@ Wichtig:
 * Profile werden nur für lokale Projekte gespeichert;
 * für Projekte, die über Git Clone geöffnet wurden, werden keine Profile gespeichert;
 * wenn einzelne gespeicherte Punkte im aktuellen Projekt nicht mehr verfügbar sind, werden sie übersprungen, die übrigen Parameter werden angewendet.
+* wenn nach Aktualisieren oder erneutem Öffnen ein neuer Ordner der obersten Ebene, ein neuer Dateityp oder eine neue Option in „Ignorieren“ erscheint, ist dieser Punkt standardmäßig aktiviert;
+* bereits bekannte Punkte behalten die ausdrückliche Auswahl des Benutzers: neue Dateien eines deaktivierten Typs aktivieren diesen Typ nicht erneut.
 
 ## 11) Ignore
 Die Liste „Ignorieren“ wird automatisch aus dem aktuellen Pfad und den ausgewählten Ordnern der obersten Ebene aufgebaut.
@@ -267,6 +269,7 @@ Reihenfolge der Optionen:
 * Dateien ohne Erweiterung
 
 Optionen der Grundregeln (versteckt, mit Punkt, leer, ohne Erweiterung) werden nur angezeigt, wenn passende Elemente vorhanden sind.
+Wenn eine Option in „Ignorieren“ erstmals verfügbar wird, ist sie standardmäßig aktiviert. Eine zuvor ausdrücklich deaktivierte Option behält diesen Zustand, wenn sie wieder verfügbar wird.
 
 Die Trennlinie unter „.gitignore verwenden“ trennt Git/Smart-Regeln von den grundlegenden Sichtbarkeitsregeln.
 

@@ -14,11 +14,13 @@ namespace DevProjex.Tests.UI;
 internal static class UiTestDriver
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
+    private static readonly ConcurrentDictionary<Window, byte> TrackedWindows = new();
     private static readonly ConcurrentDictionary<MainWindow, string> WindowAppDataPaths = new();
     private static readonly bool FastTimingsEnabled =
         string.Equals(Environment.GetEnvironmentVariable("DEVPROJEX_FAST_UI_TESTS"), "1", StringComparison.Ordinal);
     private static readonly TimeSpan PollDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(15);
     private static readonly TimeSpan FrameDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(6);
+    private const double FastSettledFrameScale = 0.25;
 
     public static async Task<MainWindow> CreateLoadedMainWindowAsync(
         UiTestProject project,
@@ -39,6 +41,7 @@ internal static class UiTestDriver
             Width = 1500,
             Height = 920
         };
+        TrackTopLevelWindow(window);
         WindowAppDataPaths[window] = appDataPath;
 
         window.Show();
@@ -89,6 +92,7 @@ internal static class UiTestDriver
     {
         if (!window.IsVisible)
         {
+            UntrackTopLevelWindow(window);
             if (cleanupAppData)
                 CleanupWindowAppData(window);
             else
@@ -96,12 +100,84 @@ internal static class UiTestDriver
             return;
         }
 
+        // Closing immediately after section mutations can leave coalesced refresh tasks
+        // queued on the dispatcher. Drain the public idle contract first so headless test
+        // teardown does not race app work that would still be running for a real user.
+        await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
-        await WaitForSettledFramesAsync(frameCount: 6);
+        await WaitForSettledFramesAsync(frameCount: 10);
+        UntrackTopLevelWindow(window);
         if (cleanupAppData)
             CleanupWindowAppData(window);
         else
             WindowAppDataPaths.TryRemove(window, out _);
+    }
+
+    public static async Task CloseTopLevelWindowAsync(Window window)
+    {
+        if (window.IsVisible)
+            window.Close();
+
+        await WaitForSettledFramesAsync(frameCount: 6);
+        UntrackTopLevelWindow(window);
+    }
+
+    public static void TrackTopLevelWindow(Window window)
+    {
+        if (TrackedWindows.TryAdd(window, 0))
+            window.Closed += OnTrackedWindowClosed;
+    }
+
+    public static void CleanupHeadlessState()
+    {
+        try
+        {
+            var dispatcher = Dispatcher.UIThread;
+            if (dispatcher.CheckAccess())
+                CleanupHeadlessStateOnUiThread();
+            else
+                dispatcher.InvokeAsync(CleanupHeadlessStateOnUiThread, DispatcherPriority.Send).GetAwaiter().GetResult();
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("idle test context", StringComparison.OrdinalIgnoreCase))
+        {
+            // Avalonia may already be tearing down the current headless context.
+            // In that case there is no UI state left for our safety cleanup to own.
+        }
+        finally
+        {
+            CleanupTrackedAppData();
+            TrackedWindows.Clear();
+        }
+    }
+
+    public static int TrackedWindowCount => TrackedWindows.Count;
+
+    private static void CleanupHeadlessStateOnUiThread()
+    {
+        foreach (var window in TrackedWindows.Keys.ToArray())
+        {
+            if (window.IsVisible)
+                window.Close();
+
+            UntrackTopLevelWindow(window);
+        }
+
+        for (var frame = 0; frame < 4; frame++)
+            PumpHeadlessFrame(Dispatcher.UIThread);
+    }
+
+    private static void OnTrackedWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is not Window window)
+            return;
+
+        UntrackTopLevelWindow(window);
+    }
+
+    private static void UntrackTopLevelWindow(Window window)
+    {
+        if (TrackedWindows.TryRemove(window, out _))
+            window.Closed -= OnTrackedWindowClosed;
     }
 
     public static async Task OpenFolderAsync(
@@ -113,7 +189,7 @@ internal static class UiTestDriver
         var method = typeof(MainWindow).GetMethod("TryOpenFolderAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
 
-        var task = await Dispatcher.UIThread.InvokeAsync<Task>(() =>
+        var task = await window.Dispatcher.InvokeAsync<Task>(() =>
         {
             var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder]);
             return Assert.IsAssignableFrom<Task>(result);
@@ -127,7 +203,7 @@ internal static class UiTestDriver
         var method = typeof(MainWindow).GetMethod("OnRefresh", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
 
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await window.Dispatcher.InvokeAsync(() =>
         {
             method!.Invoke(window, [window, new RoutedEventArgs()]);
         }, DispatcherPriority.Normal);
@@ -220,6 +296,7 @@ internal static class UiTestDriver
         {
             DataContext = GetViewModel(window)
         };
+        TrackTopLevelWindow(cloneWindow);
 
         cloneWindow.Show(window);
 
@@ -1006,7 +1083,7 @@ internal static class UiTestDriver
             return;
 
         var scrolled = false;
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await window.Dispatcher.InvokeAsync(() =>
         {
             var origin = control.TranslatePoint(default, scrollViewer);
             if (!origin.HasValue)
@@ -1069,18 +1146,29 @@ internal static class UiTestDriver
     public static async Task WaitForSettledFramesAsync(int frameCount)
     {
         var effectiveFrameCount = FastTimingsEnabled
-            ? Math.Max(1, (int)Math.Ceiling(frameCount * 0.35))
+            ? Math.Max(1, (int)Math.Ceiling(frameCount * FastSettledFrameScale))
             : frameCount;
+        var dispatcher = Dispatcher.UIThread;
 
         for (var index = 0; index < effectiveFrameCount; index++)
         {
-            // Drive both dispatcher queues and the headless render timer so tests observe
-            // the same visual state users would see after an animation or layout pass.
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            if (dispatcher.CheckAccess())
+                PumpHeadlessFrame(dispatcher);
+            else
+                await dispatcher.InvokeAsync(static () => PumpHeadlessFrame(Dispatcher.UIThread), DispatcherPriority.Background);
+
             await Task.Delay(FrameDelay);
         }
+    }
+
+    private static void PumpHeadlessFrame(Dispatcher dispatcher)
+    {
+        // RunJobs drains Avalonia's queued dispatcher work immediately. Pairing it with
+        // the headless render timer keeps layout/animation assertions deterministic
+        // without adding real-time sleeps to every UI test frame.
+        dispatcher.RunJobs(DispatcherPriority.Background);
+        AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+        dispatcher.RunJobs(DispatcherPriority.Background);
     }
 
     private static string DescribeState(MainWindow window)
@@ -1269,6 +1357,20 @@ internal static class UiTestDriver
         if (!WindowAppDataPaths.TryRemove(window, out var appDataPath))
             return;
 
+        DeleteAppDataDirectory(appDataPath);
+    }
+
+    private static void CleanupTrackedAppData()
+    {
+        foreach (var window in WindowAppDataPaths.Keys.ToArray())
+        {
+            if (WindowAppDataPaths.TryRemove(window, out var appDataPath))
+                DeleteAppDataDirectory(appDataPath);
+        }
+    }
+
+    private static void DeleteAppDataDirectory(string appDataPath)
+    {
         try
         {
             if (Directory.Exists(appDataPath))

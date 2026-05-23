@@ -11,7 +11,7 @@
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
         Background="Transparent"
-        SystemDecorations="None"
+        WindowDecorations="None"
         TransparencyLevelHint="AcrylicBlur, Blur, None"
         Icon="avares://DevProjex/AppIcon/icon-256.png">
   <Window.Styles>
@@ -81,7 +81,7 @@
       <TextBox Grid.Row="2"
                Name="UrlTextBox"
                Text="{Binding GitCloneUrl, Mode=TwoWay}"
-               Watermark="{Binding GitCloneUrlPlaceholder}"
+               PlaceholderText="{Binding GitCloneUrlPlaceholder}"
                Margin="0,0,0,16"
                IsVisible="{Binding !GitCloneInProgress}"
                KeyDown="OnUrlKeyDown" />
@@ -137,7 +137,7 @@
                 HorizontalContentAlignment="Center"
                 Click="OnStartClone"
                 IsVisible="{Binding !GitCloneInProgress}"
-                IsEnabled="{Binding GitCloneUrl.Length}" />
+                IsEnabled="{Binding CanStartGitClone}" />
         <Button Content="{Binding DialogCancel}"
                 Click="OnCancel" />
       </StackPanel>

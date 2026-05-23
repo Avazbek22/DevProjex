@@ -81,6 +81,8 @@ public sealed class VirtualizedPreviewTextControl : Control
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(ClearSelectionMenuHeader), "Clear selection");
 
     private const int RenderBufferLines = 3;
+    private const int MaxFallbackVisibleLines = 120;
+    private const int MaxRenderedVisibleLines = 512;
     private const double AutoScrollEdgeThreshold = 28.0;
     private static readonly TimeSpan AutoScrollTickInterval = TimeSpan.FromMilliseconds(16);
     private readonly List<int> _lineStarts = [0];
@@ -382,10 +384,12 @@ public sealed class VirtualizedPreviewTextControl : Control
             return;
 
         var viewportTop = Math.Max(0, VerticalOffset);
-        var viewportHeight = ViewportHeight > 0 ? ViewportHeight : Bounds.Height;
+        var viewportHeight = ResolveViewportHeightForRendering(lineHeight);
         var contentTopPadding = ResolveContentTopPadding();
         var firstVisibleLine = Math.Max(1, (int)Math.Floor((viewportTop - contentTopPadding) / lineHeight) + 1);
-        var visibleLineCount = Math.Max(1, (int)Math.Ceiling(viewportHeight / lineHeight));
+        var visibleLineCount = double.IsFinite(viewportHeight)
+            ? (int)Math.Clamp(Math.Ceiling(viewportHeight / lineHeight), 1, MaxRenderedVisibleLines)
+            : MaxRenderedVisibleLines;
         var lastVisibleLine = Math.Min(lineCount, firstVisibleLine + visibleLineCount - 1);
 
         firstVisibleLine = Math.Max(1, firstVisibleLine - RenderBufferLines);
@@ -398,11 +402,18 @@ public sealed class VirtualizedPreviewTextControl : Control
             return;
 
         var origin = new Point(LeftPadding, contentTopPadding + (firstVisibleLine - 1) * lineHeight);
-        var formattedText = BuildFormattedText(visibleWindow.Text, typeface);
 
         DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight);
 
-        if (TryGetVisibleSelectionRange(visibleWindow, out var selectionStart, out var selectionLength))
+        if (!TryGetVisibleSelectionRange(visibleWindow, out var selectionStart, out var selectionLength))
+        {
+            DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
+            DrawStickyHeader(context, typeface);
+            return;
+        }
+
+        var formattedText = BuildFormattedText(visibleWindow.Text, typeface);
+        if (selectionLength > 0)
         {
             var (selectionBackground, selectionForeground) = ResolveSelectionBrushes();
             if (selectionForeground is not null)
@@ -412,6 +423,22 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         context.DrawText(formattedText, origin);
         DrawStickyHeader(context, typeface);
+    }
+
+    private void DrawVisibleTextLines(
+        DrawingContext context,
+        string visibleText,
+        Point origin,
+        Typeface typeface,
+        double lineHeight)
+    {
+        var lineIndex = 0;
+        foreach (var line in visibleText.Split('\n'))
+        {
+            var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
+            context.DrawText(BuildFormattedText(line, typeface), lineOrigin);
+            lineIndex++;
+        }
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -602,6 +629,20 @@ public sealed class VirtualizedPreviewTextControl : Control
         _cachedVisibleWindowFirstLine = firstVisibleLine;
         _cachedVisibleWindowLastLine = lastVisibleLine;
         return _cachedVisibleWindow;
+    }
+
+    private double ResolveViewportHeightForRendering(double lineHeight)
+    {
+        if (ViewportHeight > 0)
+            return ViewportHeight;
+
+        // Before the owner ScrollViewer reports its viewport, Bounds.Height can be the
+        // full document extent instead of the visible surface. Keep the bootstrap render
+        // bounded so the control stays virtualized from the first frame onward.
+        var boundedFallbackHeight = Math.Max(lineHeight, MaxFallbackVisibleLines * lineHeight);
+        return Bounds.Height > 0
+            ? Math.Min(Bounds.Height, boundedFallbackHeight)
+            : lineHeight;
     }
 
     private string BuildVisibleLinesText(int firstVisibleLine, int lastVisibleLine)
@@ -1230,7 +1271,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private void ApplyContextMenuBackdrop()
     {
-        if (_contextMenu?.GetVisualRoot() is not TopLevel popupLevel)
+        if (_contextMenu is null || TopLevel.GetTopLevel(_contextMenu) is not TopLevel popupLevel)
             return;
 
         var host = TopLevel.GetTopLevel(this);

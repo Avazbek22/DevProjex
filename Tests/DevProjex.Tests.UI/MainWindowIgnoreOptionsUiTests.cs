@@ -1,10 +1,10 @@
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Kernel;
 using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.UI;
 
+[Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowIgnoreOptionsUiTests
 {
     [AvaloniaFact]
@@ -489,6 +489,181 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 await UiTestDriver.CloseWindowAsync(secondWindow);
             if (firstWindow is not null)
                 await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ReopenThenRefresh_WithPersistedFullState_ChecksOnlyEntriesFirstSeenAtEachStage()
+    {
+        using var project = UiTestProject.CreateWithExternalRefreshMutationWorkspace();
+        var appDataPath = Path.Combine(project.AppDataPath, "persisted-full-state-refresh-stage");
+        MainWindow? firstWindow = null;
+        MainWindow? secondWindow = null;
+
+        try
+        {
+            firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(project, appDataPathOverride: appDataPath);
+
+            await UiTestDriver.ClickRootFolderCheckBoxAsync(firstWindow, "docs");
+            await UiTestDriver.ClickExtensionCheckBoxAsync(firstWindow, ".csv");
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(firstWindow, IgnoreOptionId.EmptyFiles);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(firstWindow);
+
+            await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+            firstWindow = null;
+
+            MutateExternalRefreshWorkspace(project.RootPath);
+            secondWindow = await UiTestDriver.CreateLoadedMainWindowAsync(project, appDataPathOverride: appDataPath);
+
+            await WaitForRootFolderStateAsync(secondWindow, "docs", visible: true, isChecked: false);
+            await WaitForRootFolderStateAsync(secondWindow, "generated", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(secondWindow, ".csv", visible: true, isChecked: false);
+            await WaitForExtensionStateAsync(secondWindow, ".log", visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.EmptyFiles,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.EmptyFolders,
+                visible: true,
+                isChecked: true);
+
+            // The second stage makes newly discovered entries "known" and then turns
+            // some of them off. The next refresh must preserve those manual choices.
+            UiTestDriver.GetViewModel(secondWindow).Extensions.Single(option => option.Name == ".log").IsChecked = false;
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(secondWindow);
+            await UiTestDriver.ClickRootFolderCheckBoxAsync(secondWindow, "generated");
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(secondWindow, IgnoreOptionId.EmptyFolders);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(secondWindow);
+
+            MutateExternalRefreshWorkspaceSecondWave(project.RootPath);
+            await UiTestDriver.RefreshProjectAsync(secondWindow);
+
+            await WaitForRootFolderStateAsync(secondWindow, "docs", visible: true, isChecked: false);
+            await WaitForRootFolderStateAsync(secondWindow, "generated", visible: true, isChecked: false);
+            await WaitForRootFolderStateAsync(secondWindow, "cli", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(secondWindow, "scripts", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(secondWindow, "second-empty-root", visible: true, isChecked: true);
+
+            await WaitForExtensionStateAsync(secondWindow, ".csv", visible: true, isChecked: false);
+            await WaitForExtensionStateAsync(secondWindow, ".log", visible: true, isChecked: false);
+            await WaitForExtensionStateAsync(secondWindow, ".go", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(secondWindow, ".py", visible: true, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.EmptyFiles,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.EmptyFolders,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.ExtensionlessFiles,
+                visible: true,
+                isChecked: true);
+
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: true, "cli", "main.go");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: true, "scripts", "run.py");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: true, "second-empty-root");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, "docs", "notes.md");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, "generated", "report.log");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, "new-data.csv");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, "Dockerfile");
+            await WaitForProjectTreePathStateAsync(secondWindow, exists: false, ".vscode", "settings.json");
+            await AssertIgnoreOptionsStayStableAsync(secondWindow);
+        }
+        finally
+        {
+            if (secondWindow is not null)
+                await UiTestDriver.CloseWindowAsync(secondWindow);
+            if (firstWindow is not null)
+                await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ReopenProject_WithLegacySelectedOnlyProfile_ChecksEntriesFirstSeenAfterReopenAcrossSections()
+    {
+        using var project = UiTestProject.CreateWithExternalRefreshMutationWorkspace();
+        var appDataPath = Path.Combine(project.AppDataPath, "legacy-selected-only");
+        MainWindow? window = null;
+
+        try
+        {
+            WriteLegacySelectedOnlyProjectProfile(appDataPath, project.RootPath);
+            MutateExternalRefreshWorkspace(project.RootPath);
+
+            window = await UiTestDriver.CreateLoadedMainWindowAsync(project, appDataPathOverride: appDataPath);
+
+            await WaitForRootFolderStateAsync(window, "src", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "api", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "web", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "generated", visible: true, isChecked: true);
+
+            await WaitForExtensionStateAsync(window, ".cs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".csv", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".ts", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".log", visible: true, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.EmptyFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.EmptyFolders, visible: true, isChecked: true);
+        }
+        finally
+        {
+            if (window is not null)
+                await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ReopenProject_WithEmptyFullStateProfile_ChecksEntriesFirstSeenAfterReopenAcrossSections()
+    {
+        using var project = UiTestProject.CreateWithExternalRefreshMutationWorkspace();
+        var appDataPath = Path.Combine(project.AppDataPath, "empty-full-state");
+        MainWindow? window = null;
+
+        try
+        {
+            WriteEmptyFullStateProjectProfile(appDataPath, project.RootPath);
+            MutateExternalRefreshWorkspace(project.RootPath);
+
+            window = await UiTestDriver.CreateLoadedMainWindowAsync(project, appDataPathOverride: appDataPath);
+
+            // This shape is produced when selected-only profiles were rewritten before
+            // the UI had observed every option that can appear after a later reopen.
+            await WaitForRootFolderStateAsync(window, "src", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "api", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "web", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "generated", visible: true, isChecked: true);
+
+            await WaitForExtensionStateAsync(window, ".cs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".csv", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".ts", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".log", visible: true, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.EmptyFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.EmptyFolders, visible: true, isChecked: true);
+        }
+        finally
+        {
+            if (window is not null)
+                await UiTestDriver.CloseWindowAsync(window);
         }
     }
 
@@ -1094,6 +1269,64 @@ public sealed class MainWindowIgnoreOptionsUiTests
         WriteTextFile(rootPath, Path.Combine(".idea", "workspace.xml"), "<project />\n");
         WriteTextFile(rootPath, ".env", "APP_ENV=test\n");
         Directory.CreateDirectory(Path.Combine(rootPath, "empty-root"));
+    }
+
+    private static void MutateExternalRefreshWorkspaceSecondWave(string rootPath)
+    {
+        WriteTextFile(rootPath, Path.Combine("cli", "go.mod"), "module refreshstage\n");
+        WriteTextFile(rootPath, Path.Combine("cli", "main.go"), "package main\nfunc main() {}\n");
+        WriteTextFile(rootPath, Path.Combine("scripts", "run.py"), "print('refresh stage')\n");
+        WriteTextFile(rootPath, Path.Combine("scripts", "debug.log"), "manual extension state must survive refresh\n");
+        WriteTextFile(rootPath, Path.Combine(".vscode", "settings.json"), "{}\n");
+        WriteTextFile(rootPath, "Dockerfile", "FROM scratch\n");
+        Directory.CreateDirectory(Path.Combine(rootPath, "second-empty-root"));
+    }
+
+    private static void WriteLegacySelectedOnlyProjectProfile(string appDataPath, string projectPath)
+    {
+        var storePath = Path.Combine(appDataPath, "DevProjex", "project-profiles.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+        var projectKey = System.Text.Json.JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+        var json = $$"""
+            {
+              "schemaVersion": 1,
+              "profiles": {
+                {{projectKey}}: {
+                  "selectedRootFolders": [ "src" ],
+                  "selectedExtensions": [ ".cs" ],
+                  "selectedIgnoreOptions": [ "emptyFiles" ],
+                  "updatedUtc": "2026-05-01T00:00:00+00:00"
+                }
+              }
+            }
+            """;
+
+        File.WriteAllText(storePath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    private static void WriteEmptyFullStateProjectProfile(string appDataPath, string projectPath)
+    {
+        var storePath = Path.Combine(appDataPath, "DevProjex", "project-profiles.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+        var projectKey = System.Text.Json.JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+        var json = $$"""
+            {
+              "schemaVersion": 2,
+              "profiles": {
+                {{projectKey}}: {
+                  "selectedRootFolders": [ "src" ],
+                  "selectedExtensions": [ ".cs" ],
+                  "selectedIgnoreOptions": [ "emptyFiles" ],
+                  "rootFolderStates": {},
+                  "extensionStates": {},
+                  "ignoreOptionStates": {},
+                  "updatedUtc": "2026-05-01T00:00:00+00:00"
+                }
+              }
+            }
+            """;
+
+        File.WriteAllText(storePath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
     private static void WriteTextFile(string rootPath, string relativePath, string content)

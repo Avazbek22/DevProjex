@@ -199,6 +199,44 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 	}
 
 	[Fact]
+	public void FullRefresh_ProfileWithEmptyStateMaps_ChecksNewEntriesAcrossAllSections()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedExternalControllerInitialWorkspace(temp);
+
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path),
+			CancellationToken.None);
+		var profileContext = CreateProfileWithEmptyStateMapsContext(temp.Path, baseline);
+
+		MutateExternalControllersAndDynamicEntries(temp);
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(profileContext, CancellationToken.None);
+
+		// Legacy profiles can name checked entries but cannot identify manually unchecked
+		// entries. Empty v2 state maps therefore reopen with current checked defaults.
+		AssertSelection(snapshot.RootOptions!, "src", expectedChecked: true);
+		AssertSelection(snapshot.RootOptions!, "docs", expectedChecked: true);
+		AssertSelection(snapshot.RootOptions!, "api", expectedChecked: true);
+		AssertSelection(snapshot.RootOptions!, "web", expectedChecked: true);
+		AssertSelection(snapshot.RootOptions!, "generated", expectedChecked: true);
+
+		AssertSelection(snapshot.ExtensionOptions, ".cs", expectedChecked: true);
+		AssertSelection(snapshot.ExtensionOptions, ".csv", expectedChecked: true);
+		AssertSelection(snapshot.ExtensionOptions, ".md", expectedChecked: true);
+		AssertSelection(snapshot.ExtensionOptions, ".ts", expectedChecked: true);
+		AssertSelection(snapshot.ExtensionOptions, ".log", expectedChecked: true);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.EmptyFiles, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFolders, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFiles, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.EmptyFolders, expectedChecked: true);
+	}
+
+	[Fact]
 	public void FullRefresh_ProfileWithUnavailableExtensions_RescansCountsAfterFallback()
 	{
 		using var temp = new TemporaryDirectory();
@@ -374,6 +412,29 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 				.Select(static pair => pair.Key)
 				.ToHashSet(),
 			IgnoreOptionStateCache = ignoreStates,
+			IgnoreAllPreference = null
+		};
+	}
+
+	private static SelectionRefreshContext CreateProfileWithEmptyStateMapsContext(
+		string rootPath,
+		SelectionRefreshSnapshot baseline)
+	{
+		return ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(rootPath, baseline) with
+		{
+			PreparedSelectionMode = PreparedSelectionMode.Profile,
+			AllRootFoldersChecked = false,
+			RootSelectionInitialized = true,
+			RootSelectionCache = new HashSet<string>(PathComparer.Default) { "src" },
+			RootOptionStateCache = new Dictionary<string, bool>(PathComparer.Default),
+			AllExtensionsChecked = false,
+			ExtensionsSelectionInitialized = true,
+			ExtensionsSelectionCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+			ExtensionOptionStateCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase),
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId> { IgnoreOptionId.EmptyFiles },
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>(),
+			IgnoreOptionStateCacheIsComplete = true,
 			IgnoreAllPreference = null
 		};
 	}

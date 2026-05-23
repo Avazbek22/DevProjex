@@ -1,12 +1,22 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+             xmlns:media="using:Avalonia.Media"
              xmlns:converters="using:DevProjex.Avalonia.Converters"
              x:Class="DevProjex.Avalonia.Views.SettingsPanelView"
+             Name="SettingsPanelViewRoot"
              x:DataType="vm:MainWindowViewModel">
   <UserControl.Resources>
     <converters:FontFamilyDisplayNameConverter x:Key="FontFamilyDisplayNameConverter" />
   </UserControl.Resources>
+  <UserControl.Styles>
+    <Style Selector="StackPanel.settings-list-panel">
+      <Setter Property="Spacing" Value="-3" />
+    </Style>
+    <Style Selector="Window.compact-mode StackPanel.settings-list-panel">
+      <Setter Property="Spacing" Value="-5" />
+    </Style>
+  </UserControl.Styles>
   <Border Name="PanelRoot"
           MinWidth="240"
           HorizontalAlignment="Stretch"
@@ -21,7 +31,7 @@
         <ComboBox Name="FontComboBox" ItemsSource="{Binding FontFamilies}" SelectedItem="{Binding PendingFontFamily, Mode=TwoWay}"
                   Tag="{Binding SettingsFontDefault}">
           <ComboBox.ItemTemplate>
-            <DataTemplate>
+            <DataTemplate x:DataType="media:FontFamily">
               <TextBlock>
                 <TextBlock.Text>
                   <MultiBinding Converter="{StaticResource FontFamilyDisplayNameConverter}">
@@ -44,21 +54,20 @@
           <TextBlock Name="IgnoreHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
           <CheckBox Name="IgnoreAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"
                     IsChecked="{Binding AllIgnoreChecked, Mode=TwoWay}"
-                    Checked="OnIgnoreAllChanged" Unchecked="OnIgnoreAllChanged" />
+                    IsCheckedChanged="OnIgnoreAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"
                         VerticalScrollBarVisibility="Auto"
                         HorizontalScrollBarVisibility="Disabled">
-            <!-- Compact spacing is handled by a custom ItemsPanel in the settings lists. -->
             <ItemsControl ItemsSource="{Binding IgnoreOptions}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Classes="settings-list-panel" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="vm:IgnoreOptionViewModel">
                   <Border Classes="ignore-option-item">
                     <Grid RowDefinitions="Auto,Auto">
                       <CheckBox Grid.Row="0"
@@ -83,21 +92,20 @@
           <TextBlock Name="ExtensionsHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsExtensions}" Margin="0" FontSize="15"/>
           <CheckBox Name="ExtensionsAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllExtensions}"
                     IsChecked="{Binding AllExtensionsChecked, Mode=TwoWay}"
-                    Checked="OnExtensionsAllChanged" Unchecked="OnExtensionsAllChanged" />
+                    IsCheckedChanged="OnExtensionsAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"
                         VerticalScrollBarVisibility="Auto"
                         HorizontalScrollBarVisibility="Disabled">
-            <!-- Keep list spacing centralized so compact mode does not rely on control templates. -->
             <ItemsControl ItemsSource="{Binding Extensions}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Classes="settings-list-panel" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="vm:SelectionOptionViewModel">
                   <CheckBox Classes="list-item" Content="{Binding Name}"
                             IsChecked="{Binding IsChecked, Mode=TwoWay}" />
                 </DataTemplate>
@@ -114,21 +122,20 @@
           <CheckBox Name="RootFoldersAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"
                     IsChecked="{Binding AllRootFoldersChecked, Mode=TwoWay}"
                     IsEnabled="{Binding HasRootFolderOptions}"
-                    Checked="OnRootAllChanged" Unchecked="OnRootAllChanged" />
+                    IsCheckedChanged="OnRootAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"
                         VerticalScrollBarVisibility="Auto"
                         HorizontalScrollBarVisibility="Disabled">
-            <!-- Root folders share the same spacing logic as other settings lists. -->
             <ItemsControl ItemsSource="{Binding RootFolders}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Classes="settings-list-panel" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="vm:SelectionOptionViewModel">
                   <CheckBox Classes="list-item" Content="{Binding Name}"
                             IsChecked="{Binding IsChecked, Mode=TwoWay}" />
                 </DataTemplate>

@@ -748,39 +748,7 @@ public partial class MainWindow : Window
         Activated -= OnActivated;
         Deactivated -= OnDeactivated;
 
-        // Cancel metrics calculation
-        _metricsCalculationCts?.Cancel();
-        _metricsCalculationCts?.Dispose();
-        _recalculateMetricsCts?.Cancel();
-        _recalculateMetricsCts?.Dispose();
-        // Properly clean up debounce timers
-        if (_metricsDebounceTimer is not null)
-        {
-            _metricsDebounceTimer.Stop();
-            _metricsDebounceTimer.Tick -= OnMetricsDebounceTimerTick;
-        }
-        CancelBackgroundMemoryCleanup();
-        _previewSelectionMetricsCts?.Cancel();
-        _previewSelectionMetricsCts?.Dispose();
-        if (_previewSelectionMetricsDebounceTimer is not null)
-        {
-            _previewSelectionMetricsDebounceTimer.Stop();
-            _previewSelectionMetricsDebounceTimer.Tick -= OnPreviewSelectionMetricsDebounceTick;
-        }
-
-        _previewBuildCts?.Cancel();
-        _previewBuildCts?.Dispose();
-        if (_previewDebounceTimer is not null)
-        {
-            _previewDebounceTimer.Stop();
-            _previewDebounceTimer.Tick -= OnPreviewDebounceTick;
-        }
-        _previewMemoryCleanupCts?.Cancel();
-        _previewMemoryCleanupCts?.Dispose();
-        _searchMemoryCleanupCts?.Cancel();
-        _searchMemoryCleanupCts?.Dispose();
-        _previewModeSwitchCts?.Cancel();
-        _previewModeSwitchCts?.Dispose();
+        CancelAndDisposeWindowOperations();
 
         // Dispose coordinators
         _searchCoordinator.Dispose();
@@ -790,18 +758,6 @@ public partial class MainWindow : Window
 
         // Dispose ViewModel to clean up collection event handlers
         _viewModel.Dispose();
-
-        // Cancel and dispose refresh token
-        _projectOperationCts?.Cancel();
-        _projectOperationCts?.Dispose();
-        _refreshCts?.Cancel();
-        _refreshCts?.Dispose();
-
-        // Cancel and dispose git clone token
-        _gitCloneCts?.Cancel();
-        _gitCloneCts?.Dispose();
-        _gitOperationCts?.Cancel();
-        _gitOperationCts?.Dispose();
 
         // Dispose icon cache to release bitmap resources
         _iconCache.Dispose();
@@ -2820,7 +2776,7 @@ public partial class MainWindow : Window
 
     private void ApplyPreviewToolTipBackdrop(ToolTip toolTip)
     {
-        if (toolTip.GetVisualRoot() is null)
+        if (TopLevel.GetTopLevel(toolTip) is null)
             return;
 
         if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
@@ -6870,6 +6826,10 @@ public partial class MainWindow : Window
                 _viewModel.SelectedFontFamily = pending;
             }
 
+            // Apply must observe the latest converged section state. A user can click Apply
+            // while an earlier ignore refresh is still finishing; rebuilding the tree first
+            // would capture stale root-folder availability and keep newly revealed folders hidden.
+            await _selectionCoordinator.WaitForPendingRefreshesAsync();
             await RefreshTreeAsync();
             // Keep dynamic ignore counts aligned with the tree that was just applied.
             await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionAsync(_currentPath);
@@ -6927,13 +6887,28 @@ public partial class MainWindow : Window
 
     private ProjectSelectionProfile CaptureCurrentProjectSelectionProfile()
     {
+        // Options can temporarily disappear when another section hides their evidence.
+        // Persist the coordinator caches and overlay currently visible values so hidden
+        // manual choices are not erased during Apply, refresh, or window close.
+        var rootFolderStates = MergeOptionStates(
+            _selectionCoordinator.SnapshotRootOptionStatesForPersistence(),
+            _viewModel.RootFolders,
+            PathComparer.Default);
+        var extensionStates = MergeOptionStates(
+            _selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
+            _viewModel.Extensions,
+            StringComparer.OrdinalIgnoreCase);
+        var ignoreOptionStates = MergeIgnoreOptionStates(
+            _selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
+            _viewModel.IgnoreOptions);
+
         return new ProjectSelectionProfile(
             SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default),
             SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
             SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray(),
-            RootFolderStates: CollectOptionStates(_viewModel.RootFolders, PathComparer.Default),
-            ExtensionStates: CollectOptionStates(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
-            IgnoreOptionStates: CollectIgnoreOptionStates(_viewModel.IgnoreOptions));
+            RootFolderStates: rootFolderStates,
+            ExtensionStates: extensionStates,
+            IgnoreOptionStates: ignoreOptionStates);
     }
 
     private static ProjectSelectionProfile CloneProjectSelectionProfile(ProjectSelectionProfile profile)
@@ -8201,21 +8176,29 @@ public partial class MainWindow : Window
         return selected;
     }
 
-    private static Dictionary<string, bool> CollectOptionStates(
+    private static Dictionary<string, bool> MergeOptionStates(
+        IReadOnlyDictionary<string, bool>? cachedStates,
         IEnumerable<SelectionOptionViewModel> options,
         StringComparer comparer)
     {
-        var states = new Dictionary<string, bool>(comparer);
+        var states = cachedStates is null
+            ? new Dictionary<string, bool>(comparer)
+            : new Dictionary<string, bool>(cachedStates, comparer);
+
         foreach (var option in options)
             states[option.Name] = option.IsChecked;
 
         return states;
     }
 
-    private static Dictionary<IgnoreOptionId, bool> CollectIgnoreOptionStates(
+    private static Dictionary<IgnoreOptionId, bool> MergeIgnoreOptionStates(
+        IReadOnlyDictionary<IgnoreOptionId, bool>? cachedStates,
         IEnumerable<IgnoreOptionViewModel> options)
     {
-        var states = new Dictionary<IgnoreOptionId, bool>();
+        var states = cachedStates is null
+            ? []
+            : new Dictionary<IgnoreOptionId, bool>(cachedStates);
+
         foreach (var option in options)
             states[option.Id] = option.IsChecked;
 
