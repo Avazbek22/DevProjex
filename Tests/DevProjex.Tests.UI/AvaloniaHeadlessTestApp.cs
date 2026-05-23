@@ -1,4 +1,5 @@
 [assembly: AvaloniaTestApplication(typeof(DevProjex.Tests.UI.AvaloniaHeadlessTestApp))]
+[assembly: AvaloniaTestIsolation(AvaloniaTestIsolationLevel.PerAssembly)]
 [assembly: CollectionBehavior(DisableTestParallelization = true, MaxParallelThreads = 1)]
 
 namespace DevProjex.Tests.UI;

@@ -897,7 +897,7 @@
           </ItemsPanelTemplate>
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
-          <DataTemplate>
+          <DataTemplate x:DataType="vm:ToastMessageViewModel">
             <Border Background="{DynamicResource ToastSurfaceBrush}"
                     CornerRadius="8"
                     Padding="14,10"

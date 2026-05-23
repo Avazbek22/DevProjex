@@ -31,6 +31,43 @@ public sealed class ZipDownloadServiceInternalHelpersTests
         Assert.Equal(expected, actual);
     }
 
+    [Fact]
+    public void ResolveSafeDestinationPath_AllowsNestedEntryInsideTarget()
+    {
+        using var temp = new TemporaryDirectory();
+
+        var actual = ZipDownloadService.ResolveSafeDestinationPath(temp.Path, "repo-main/src/app.cs");
+
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(temp.Path, "repo-main", "src", "app.cs")),
+            actual);
+    }
+
+    [Theory]
+    [InlineData("../outside.txt")]
+    [InlineData(@"..\outside.txt")]
+    [InlineData("repo-main/../../outside.txt")]
+    [InlineData(@"repo-main\..\..\outside.txt")]
+    [InlineData("repo-main/src/../../../outside.txt")]
+    public void ResolveSafeDestinationPath_RejectsTraversalOutsideTarget(string entryPath)
+    {
+        using var temp = new TemporaryDirectory();
+
+        Assert.Throws<InvalidDataException>(() =>
+            ZipDownloadService.ResolveSafeDestinationPath(temp.Path, entryPath));
+    }
+
+    [Fact]
+    public void ResolveSafeDestinationPath_DoesNotConfuseSiblingPrefixWithTarget()
+    {
+        using var temp = new TemporaryDirectory();
+        var siblingPrefix = temp.Path + "-sibling";
+        var entryPath = Path.Combine("..", Path.GetFileName(siblingPrefix), "payload.txt");
+
+        Assert.Throws<InvalidDataException>(() =>
+            ZipDownloadService.ResolveSafeDestinationPath(temp.Path, entryPath));
+    }
+
     private static MethodInfo GetPrivateStaticMethod(string name)
     {
         var method = typeof(ZipDownloadService).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static);

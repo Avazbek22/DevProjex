@@ -19,6 +19,7 @@ internal static class UiTestDriver
         string.Equals(Environment.GetEnvironmentVariable("DEVPROJEX_FAST_UI_TESTS"), "1", StringComparison.Ordinal);
     private static readonly TimeSpan PollDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(15);
     private static readonly TimeSpan FrameDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(6);
+    private const double FastSettledFrameScale = 0.25;
 
     public static async Task<MainWindow> CreateLoadedMainWindowAsync(
         UiTestProject project,
@@ -1081,7 +1082,7 @@ internal static class UiTestDriver
     public static async Task WaitForSettledFramesAsync(int frameCount)
     {
         var effectiveFrameCount = FastTimingsEnabled
-            ? Math.Max(1, (int)Math.Ceiling(frameCount * 0.35))
+            ? Math.Max(1, (int)Math.Ceiling(frameCount * FastSettledFrameScale))
             : frameCount;
         var dispatcher = Dispatcher.UIThread;
 

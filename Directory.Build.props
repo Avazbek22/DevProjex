@@ -10,6 +10,7 @@
     <AssemblyVersion>$(DevProjexAssemblyVersion)</AssemblyVersion>
     <FileVersion>$(DevProjexFileVersion)</FileVersion>
     <InformationalVersion>$(DevProjexInformationalVersion)</InformationalVersion>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <TestTfmsInParallel>false</TestTfmsInParallel>
   </PropertyGroup>
 

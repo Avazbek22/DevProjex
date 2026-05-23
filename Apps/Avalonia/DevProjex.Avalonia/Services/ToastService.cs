@@ -3,9 +3,9 @@ namespace DevProjex.Avalonia.Services;
 public sealed class ToastService : IToastService, IDisposable
 {
 	private const int MaxToasts = 3;
-	private static readonly TimeSpan DisplayDuration = TimeSpan.FromSeconds(2);
-	private static readonly TimeSpan FadeDuration = TimeSpan.FromMilliseconds(200);
-	private static readonly TimeSpan UiAnimationDelay = TimeSpan.FromMilliseconds(10);
+	private static readonly TimeSpan DisplayDuration = UiTimingProfile.Scale(TimeSpan.FromSeconds(2));
+	private static readonly TimeSpan FadeDuration = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(200));
+	private static readonly TimeSpan UiAnimationDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(10));
 
 	private readonly Dictionary<ToastMessageViewModel, CancellationTokenSource> _dismissTokens = new();
 
