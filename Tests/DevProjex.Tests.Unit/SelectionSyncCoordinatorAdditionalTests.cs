@@ -127,6 +127,27 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void SnapshotExtensionOptionStatesForPersistence_KeepsHiddenManualStates()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".log", false));
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+
+		var coordinator = CreateCoordinator(viewModel);
+		coordinator.UpdateExtensionsSelectionCache();
+
+		coordinator.ApplyExtensionScan([".cs"]);
+
+		var states = coordinator.SnapshotExtensionOptionStatesForPersistence();
+
+		Assert.NotNull(states);
+		Assert.True(states!.TryGetValue(".log", out var logChecked));
+		Assert.False(logChecked);
+		Assert.True(states.TryGetValue(".cs", out var csChecked));
+		Assert.True(csChecked);
+	}
+
+	[Fact]
 	public void ApplyExtensionScan_UpdatesExtensionsFromScanResults()
 	{
 		var viewModel = CreateViewModel();

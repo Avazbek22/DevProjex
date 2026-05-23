@@ -793,6 +793,24 @@ public sealed class SelectionSyncCoordinator(
         return _ignoreSelectionState.SnapshotSelectedOptions();
     }
 
+    public IReadOnlyDictionary<string, bool>? SnapshotRootOptionStatesForPersistence() =>
+        SnapshotRootOptionStateCacheOrNull(_rootSelectionInitialized);
+
+    public IReadOnlyDictionary<string, bool>? SnapshotExtensionOptionStatesForPersistence() =>
+        SnapshotExtensionOptionStateCacheOrNull(_extensionsSelectionInitialized);
+
+    public IReadOnlyDictionary<IgnoreOptionId, bool>? SnapshotIgnoreOptionStatesForPersistence()
+    {
+        if (!_ignoreSelectionState.IsInitialized &&
+            _ignoreSelectionState.SelectedOptions.Count == 0 &&
+            _ignoreSelectionState.OptionStateCache.Count == 0)
+        {
+            return null;
+        }
+
+        return _ignoreSelectionState.SnapshotStateCache();
+    }
+
     private void EnsureIgnoreSelectionCache()
     {
         if (_ignoreSelectionState.IsInitialized || _ignoreSelectionState.SelectedOptions.Count > 0)

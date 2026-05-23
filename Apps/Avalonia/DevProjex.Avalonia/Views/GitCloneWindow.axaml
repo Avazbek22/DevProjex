@@ -137,7 +137,7 @@
                 HorizontalContentAlignment="Center"
                 Click="OnStartClone"
                 IsVisible="{Binding !GitCloneInProgress}"
-                IsEnabled="{Binding GitCloneUrl.Length}" />
+                IsEnabled="{Binding CanStartGitClone}" />
         <Button Content="{Binding DialogCancel}"
                 Click="OnCancel" />
       </StackPanel>

@@ -811,6 +811,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_gitCloneUrl == value) return;
             _gitCloneUrl = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanStartGitClone));
         }
     }
 
@@ -833,6 +834,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_gitCloneInProgress == value) return;
             _gitCloneInProgress = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanStartGitClone));
             RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
         }
     }
@@ -1110,6 +1112,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Hide the clone recent list while cloning is in progress to avoid
     // exposing stale selections during the active git operation.
     public bool GitCloneRecentRepositoriesVisible => !GitCloneInProgress && HasRecentRepositories;
+
+    public bool CanStartGitClone => !GitCloneInProgress && !string.IsNullOrWhiteSpace(GitCloneUrl);
 
     public bool AllIgnoreChecked
     {

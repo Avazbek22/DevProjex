@@ -14,6 +14,7 @@ namespace DevProjex.Tests.UI;
 internal static class UiTestDriver
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
+    private static readonly ConcurrentDictionary<Window, byte> TrackedWindows = new();
     private static readonly ConcurrentDictionary<MainWindow, string> WindowAppDataPaths = new();
     private static readonly bool FastTimingsEnabled =
         string.Equals(Environment.GetEnvironmentVariable("DEVPROJEX_FAST_UI_TESTS"), "1", StringComparison.Ordinal);
@@ -40,6 +41,7 @@ internal static class UiTestDriver
             Width = 1500,
             Height = 920
         };
+        TrackTopLevelWindow(window);
         WindowAppDataPaths[window] = appDataPath;
 
         window.Show();
@@ -90,6 +92,7 @@ internal static class UiTestDriver
     {
         if (!window.IsVisible)
         {
+            UntrackTopLevelWindow(window);
             if (cleanupAppData)
                 CleanupWindowAppData(window);
             else
@@ -103,6 +106,7 @@ internal static class UiTestDriver
         await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
         await WaitForSettledFramesAsync(frameCount: 10);
+        UntrackTopLevelWindow(window);
         if (cleanupAppData)
             CleanupWindowAppData(window);
         else
@@ -115,6 +119,65 @@ internal static class UiTestDriver
             window.Close();
 
         await WaitForSettledFramesAsync(frameCount: 6);
+        UntrackTopLevelWindow(window);
+    }
+
+    public static void TrackTopLevelWindow(Window window)
+    {
+        if (TrackedWindows.TryAdd(window, 0))
+            window.Closed += OnTrackedWindowClosed;
+    }
+
+    public static void CleanupHeadlessState()
+    {
+        try
+        {
+            var dispatcher = Dispatcher.UIThread;
+            if (dispatcher.CheckAccess())
+                CleanupHeadlessStateOnUiThread();
+            else
+                dispatcher.InvokeAsync(CleanupHeadlessStateOnUiThread, DispatcherPriority.Send).GetAwaiter().GetResult();
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("idle test context", StringComparison.OrdinalIgnoreCase))
+        {
+            // Avalonia may already be tearing down the current headless context.
+            // In that case there is no UI state left for our safety cleanup to own.
+        }
+        finally
+        {
+            CleanupTrackedAppData();
+            TrackedWindows.Clear();
+        }
+    }
+
+    public static int TrackedWindowCount => TrackedWindows.Count;
+
+    private static void CleanupHeadlessStateOnUiThread()
+    {
+        foreach (var window in TrackedWindows.Keys.ToArray())
+        {
+            if (window.IsVisible)
+                window.Close();
+
+            UntrackTopLevelWindow(window);
+        }
+
+        for (var frame = 0; frame < 4; frame++)
+            PumpHeadlessFrame(Dispatcher.UIThread);
+    }
+
+    private static void OnTrackedWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is not Window window)
+            return;
+
+        UntrackTopLevelWindow(window);
+    }
+
+    private static void UntrackTopLevelWindow(Window window)
+    {
+        if (TrackedWindows.TryRemove(window, out _))
+            window.Closed -= OnTrackedWindowClosed;
     }
 
     public static async Task OpenFolderAsync(
@@ -233,6 +296,7 @@ internal static class UiTestDriver
         {
             DataContext = GetViewModel(window)
         };
+        TrackTopLevelWindow(cloneWindow);
 
         cloneWindow.Show(window);
 
@@ -1293,6 +1357,20 @@ internal static class UiTestDriver
         if (!WindowAppDataPaths.TryRemove(window, out var appDataPath))
             return;
 
+        DeleteAppDataDirectory(appDataPath);
+    }
+
+    private static void CleanupTrackedAppData()
+    {
+        foreach (var window in WindowAppDataPaths.Keys.ToArray())
+        {
+            if (WindowAppDataPaths.TryRemove(window, out var appDataPath))
+                DeleteAppDataDirectory(appDataPath);
+        }
+    }
+
+    private static void DeleteAppDataDirectory(string appDataPath)
+    {
         try
         {
             if (Directory.Exists(appDataPath))

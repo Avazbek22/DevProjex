@@ -7,6 +7,9 @@
     <IsPackable>false</IsPackable>
     <AssemblyName>DevProjex.Tests.UI</AssemblyName>
     <RootNamespace>DevProjex.Tests.UI</RootNamespace>
+    <!-- Avalonia Headless + xUnit v3 is more stable on MTP than on the VSTest cleanup path. -->
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
 
   <ItemGroup>

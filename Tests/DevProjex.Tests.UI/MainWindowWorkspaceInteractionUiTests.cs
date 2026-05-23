@@ -119,6 +119,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Width = 1500,
             Height = 920
         };
+        UiTestDriver.TrackTopLevelWindow(window);
 
         try
         {
@@ -180,6 +181,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Width = 1500,
             Height = 920
         };
+        UiTestDriver.TrackTopLevelWindow(window);
 
         try
         {
