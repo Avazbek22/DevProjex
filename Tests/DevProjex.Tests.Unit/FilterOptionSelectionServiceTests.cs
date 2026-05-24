@@ -51,7 +51,10 @@ public sealed class FilterOptionSelectionServiceTests
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "logs" },
-			SmartIgnoredFiles: new HashSet<string>());
+			SmartIgnoredFiles: new HashSet<string>())
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(["bin", "obj", "logs", ".cache", "src"], new HashSet<string>(), rules);
 
@@ -179,7 +182,10 @@ public sealed class FilterOptionSelectionServiceTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Cache" },
-			SmartIgnoredFiles: new HashSet<string>());
+			SmartIgnoredFiles: new HashSet<string>())
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(["cache", "src"], new HashSet<string>(), rules);
 

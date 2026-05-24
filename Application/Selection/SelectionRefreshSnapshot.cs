@@ -9,6 +9,7 @@ public sealed record SelectionRefreshSnapshot(
     int ExtensionlessEntriesCount,
     bool HasIgnoreOptionCounts,
     IgnoreOptionCounts IgnoreOptionCounts,
+    IgnoreControllerImpactCounts ControllerImpactCounts,
     IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreOptionStateCache,
     bool RootAccessDenied,
     bool HadAccessDenied);

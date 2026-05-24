@@ -130,7 +130,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             {
                 Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "docs", StringComparison.Ordinal) && option.IsChecked);
                 Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "src", StringComparison.Ordinal) && option.IsChecked);
-                Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && option.IsChecked);
                 Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFiles && option.IsChecked);
                 Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.EmptyFolders && option.IsChecked);
             }),
@@ -366,6 +365,7 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             CurrentSnapshotState: new IgnoreSectionSnapshotState(
                 snapshot.HasIgnoreOptionCounts,
                 snapshot.IgnoreOptionCounts,
+                snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
                 snapshot.ExtensionlessEntriesCount));
     }
@@ -523,7 +523,7 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
     }
 
     private static readonly IgnoreSectionSnapshotState EmptySnapshotState =
-        new(false, IgnoreOptionCounts.Empty, false, 0);
+        new(false, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty, false, 0);
 
     private sealed record WorkflowCase(
         string Name,

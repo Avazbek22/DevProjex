@@ -216,6 +216,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
             CurrentSnapshotState: new IgnoreSectionSnapshotState(
                 snapshot.HasIgnoreOptionCounts,
                 snapshot.IgnoreOptionCounts,
+                snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
                 snapshot.ExtensionlessEntriesCount));
     }
@@ -368,7 +369,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
     }
 
     private static readonly IgnoreSectionSnapshotState EmptySnapshotState =
-        new(false, IgnoreOptionCounts.Empty, false, 0);
+        new(false, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty, false, 0);
 
     private sealed record MutationCase(
         string Name,

@@ -45,6 +45,7 @@ public sealed class SelectionSyncCoordinator(
     private int _extensionlessExtensionEntriesCount;
     private bool _hasIgnoreOptionCounts;
     private IgnoreOptionCounts _ignoreOptionCounts;
+    private IgnoreControllerImpactCounts _ignoreControllerImpactCounts;
     private string? _lastLoadedPath;
     private string? _preparedSelectionPath;
     private PreparedSelectionMode _preparedSelectionMode;
@@ -281,7 +282,8 @@ public sealed class SelectionSyncCoordinator(
                 ignoreRules,
                 effectiveExtensionPolicy,
                 includeDirectoryToggleProbeRoots,
-                cancellationToken);
+                cancellationToken,
+                includeControllerImpactProbeRoots: includeDirectoryToggleProbeRoots);
             if (scan.RootAccessDenied)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -308,7 +310,8 @@ public sealed class SelectionSyncCoordinator(
                     ignoreRules,
                     BuildResolvedExtensionPolicy(options),
                     includeDirectoryToggleProbeRoots,
-                    cancellationToken);
+                    cancellationToken,
+                    includeControllerImpactProbeRoots: includeDirectoryToggleProbeRoots);
 
                 visibleExtensions = new List<string>(scan.Value.Extensions.Count);
                 extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
@@ -325,6 +328,7 @@ public sealed class SelectionSyncCoordinator(
                     options,
                     extensionlessEntriesCount,
                     scan.Value.EffectiveIgnoreOptionCounts,
+                    scan.Value.ControllerImpactCounts,
                     hasIgnoreOptionCounts: true);
             });
         }, cancellationToken);
@@ -762,6 +766,7 @@ public sealed class SelectionSyncCoordinator(
         _extensionlessExtensionEntriesCount = 0;
         _hasIgnoreOptionCounts = false;
         _ignoreOptionCounts = IgnoreOptionCounts.Empty;
+        _ignoreControllerImpactCounts = IgnoreControllerImpactCounts.Empty;
 
         _ignoreSelectionState.Reset(trimExcess: true);
 
@@ -837,6 +842,10 @@ public sealed class SelectionSyncCoordinator(
             {
                 return availability with
                 {
+                    IncludeGitIgnore = availability.IncludeGitIgnore &&
+                                       _ignoreControllerImpactCounts.GitIgnore > 0,
+                    IncludeSmartIgnore = availability.IncludeSmartIgnore &&
+                                         _ignoreControllerImpactCounts.SmartIgnore > 0,
                     IncludeHiddenFolders = _ignoreOptionCounts.HiddenFolders > 0,
                     HiddenFoldersCount = _ignoreOptionCounts.HiddenFolders,
                     IncludeHiddenFiles = _ignoreOptionCounts.HiddenFiles > 0,
@@ -977,6 +986,7 @@ public sealed class SelectionSyncCoordinator(
             options,
             extensionlessEntriesCount,
             IgnoreOptionCounts.Empty,
+            IgnoreControllerImpactCounts.Empty,
             hasIgnoreOptionCounts: false);
     }
 
@@ -1197,6 +1207,7 @@ public sealed class SelectionSyncCoordinator(
         IReadOnlyList<SelectionOption> options,
         int extensionlessEntriesCount,
         IgnoreOptionCounts ignoreOptionCounts,
+        IgnoreControllerImpactCounts controllerImpactCounts,
         bool hasIgnoreOptionCounts)
     {
         var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
@@ -1210,6 +1221,9 @@ public sealed class SelectionSyncCoordinator(
         _extensionlessExtensionEntriesCount = effectiveExtensionlessCount;
         _hasExtensionlessExtensionEntries = effectiveExtensionlessCount > 0;
         _ignoreOptionCounts = ignoreOptionCounts;
+        _ignoreControllerImpactCounts = hasIgnoreOptionCounts
+            ? controllerImpactCounts
+            : IgnoreControllerImpactCounts.Empty;
         _hasIgnoreOptionCounts = hasIgnoreOptionCounts;
 
         _suppressExtensionItemCheck = true;
@@ -1285,6 +1299,7 @@ public sealed class SelectionSyncCoordinator(
             snapshot.ExtensionOptions,
             snapshot.ExtensionlessEntriesCount,
             snapshot.IgnoreOptionCounts,
+            snapshot.ControllerImpactCounts,
             snapshot.HasIgnoreOptionCounts);
 
         ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
@@ -1430,6 +1445,7 @@ public sealed class SelectionSyncCoordinator(
         new(
             _hasIgnoreOptionCounts,
             _ignoreOptionCounts,
+            _ignoreControllerImpactCounts,
             _hasExtensionlessExtensionEntries,
             _extensionlessExtensionEntriesCount);
 

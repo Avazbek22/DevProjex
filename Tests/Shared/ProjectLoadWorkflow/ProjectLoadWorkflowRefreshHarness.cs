@@ -121,6 +121,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
             CurrentSnapshotState: new IgnoreSectionSnapshotState(
                 snapshot.HasIgnoreOptionCounts,
                 snapshot.IgnoreOptionCounts,
+                snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
                 snapshot.ExtensionlessEntriesCount),
             RootOptionStateCache: BuildRootOptionStateCache(snapshot),
@@ -211,6 +212,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
         Assert.Equal(expected.ExtensionlessEntriesCount, actual.ExtensionlessEntriesCount);
         Assert.Equal(expected.HasIgnoreOptionCounts, actual.HasIgnoreOptionCounts);
         Assert.Equal(expected.IgnoreOptionCounts, actual.IgnoreOptionCounts);
+        Assert.Equal(expected.ControllerImpactCounts, actual.ControllerImpactCounts);
         Assert.Equal(expected.IgnoreOptionStateCache.Count, actual.IgnoreOptionStateCache.Count);
         foreach (var pair in expected.IgnoreOptionStateCache.OrderBy(pair => pair.Key))
         {
@@ -231,6 +233,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
         Assert.Equal(expected.ExtensionlessEntriesCount, actual.ExtensionlessEntriesCount);
         Assert.Equal(expected.HasIgnoreOptionCounts, actual.HasIgnoreOptionCounts);
         Assert.Equal(expected.IgnoreOptionCounts, actual.IgnoreOptionCounts);
+        Assert.Equal(expected.ControllerImpactCounts, actual.ControllerImpactCounts);
         Assert.Equal(expected.RootAccessDenied, actual.RootAccessDenied);
         Assert.Equal(expected.HadAccessDenied, actual.HadAccessDenied);
     }
@@ -512,7 +515,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
     }
 
     internal static readonly IgnoreSectionSnapshotState EmptySnapshotState =
-        new(false, IgnoreOptionCounts.Empty, false, 0);
+        new(false, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty, false, 0);
 
     internal enum WorkflowRootScenario
     {

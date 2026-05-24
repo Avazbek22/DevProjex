@@ -96,6 +96,25 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithCleanPythonSmartWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, "pyproject.toml", "[project]\nname = \"ui-clean-python\"\n");
+            WriteFile(rootPath, Path.Combine("src", "app.py"), "print('ok')\n");
+        });
+    }
+
+    public static UiTestProject CreateWithCleanGitAndSmartWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, ".gitignore", "bin/\nobj/\nlogs/\n*.user\n");
+            WriteFile(rootPath, "App.csproj", "<Project />\n");
+            WriteFile(rootPath, "Program.cs", "Console.WriteLine(\"ok\");\n");
+        });
+    }
+
     public static UiTestProject CreateWithPythonGitIgnoreWorkspace()
     {
         return Create(static rootPath =>

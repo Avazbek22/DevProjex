@@ -31,24 +31,33 @@ public sealed class IgnoreRulesService(
 								 selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 
 		// Smart ignore is hidden for single-project gitignore scenario and follows UseGitIgnore toggle there.
+		var smartIgnoreFollowsGitIgnore = !availability.IncludeSmartIgnore &&
+		                                  context.IsSingleScopeWithGitIgnore;
 		var useSmartIgnore = availability.IncludeSmartIgnore
 			? selectedOptions.Contains(IgnoreOptionId.SmartIgnore)
 			: context.IsSingleScopeWithGitIgnore && requestedGitIgnore;
 
-		var gitIgnoreMatcher = GitIgnoreMatcher.Empty;
-		var scopedMatchers = Array.Empty<ScopedGitIgnoreMatcher>();
-		var useGitIgnore = false;
-		if (requestedGitIgnore)
-		{
-			scopedMatchers = BuildScopedGitIgnoreMatchers(context.Scopes)
-				.ToArray();
-			if (scopedMatchers.Length > 0)
-			{
-				useGitIgnore = true;
-				if (scopedMatchers.Length == 1)
-					gitIgnoreMatcher = scopedMatchers[0].Matcher;
-			}
-		}
+		var candidateScopedGitMatchers = availability.IncludeGitIgnore
+			? BuildScopedGitIgnoreMatchers(context.Scopes).ToArray()
+			: [];
+		var candidateGitIgnoreMatcher = candidateScopedGitMatchers.Length == 1
+			? candidateScopedGitMatchers[0].Matcher
+			: GitIgnoreMatcher.Empty;
+		var useGitIgnore = requestedGitIgnore && candidateScopedGitMatchers.Length > 0;
+		var scopedMatchers = useGitIgnore
+			? candidateScopedGitMatchers
+			: Array.Empty<ScopedGitIgnoreMatcher>();
+		var gitIgnoreMatcher = useGitIgnore && scopedMatchers.Length == 1
+			? scopedMatchers[0].Matcher
+			: GitIgnoreMatcher.Empty;
+
+		var smartCandidate = availability.IncludeSmartIgnore || smartIgnoreFollowsGitIgnore
+			? BuildScopedSmartIgnore(context)
+			: ScopedSmartIgnoreBuildResult.Empty;
+		var candidateSmartScopeRoots = smartCandidate.ScopedMatchers
+			.Select(static matcher => matcher.ScopeRootPath)
+			.Distinct(PathStringComparer)
+			.ToArray();
 
 		IReadOnlySet<string> smartFolders;
 		IReadOnlySet<string> smartFiles;
@@ -56,14 +65,12 @@ public sealed class IgnoreRulesService(
 		IReadOnlyList<ScopedSmartIgnoreMatcher> scopedSmartMatchers;
 		if (useSmartIgnore)
 		{
-			var smart = BuildScopedSmartIgnore(context);
-			smartFolders = smart.FolderNames;
-			smartFiles = smart.FileNames;
-			scopedSmartMatchers = smart.ScopedMatchers;
-			smartScopeRoots = smart.ScopedMatchers
-				.Select(static matcher => matcher.ScopeRootPath)
-				.Distinct(PathStringComparer)
-				.ToArray();
+			// Active smart rules reuse the candidate set built for impact probing. This keeps
+			// the selection refresh deterministic and avoids rebuilding stack descriptors.
+			smartFolders = smartCandidate.FolderNames;
+			smartFiles = smartCandidate.FileNames;
+			scopedSmartMatchers = smartCandidate.ScopedMatchers;
+			smartScopeRoots = candidateSmartScopeRoots;
 		}
 		else
 		{
@@ -88,8 +95,15 @@ public sealed class IgnoreRulesService(
 			UseSmartIgnore = useSmartIgnore,
 			GitIgnoreMatcher = gitIgnoreMatcher,
 			ScopedGitIgnoreMatchers = scopedMatchers,
+			GitIgnoreCandidateMatcher = candidateGitIgnoreMatcher,
+			ScopedGitIgnoreCandidateMatchers = candidateScopedGitMatchers,
 			SmartIgnoreScopeRoots = smartScopeRoots,
-			ScopedSmartIgnoreMatchers = scopedSmartMatchers
+			ScopedSmartIgnoreMatchers = scopedSmartMatchers,
+			SmartIgnoreCandidateScopeRoots = candidateSmartScopeRoots,
+			ScopedSmartIgnoreCandidateMatchers = smartCandidate.ScopedMatchers,
+			SmartIgnoreCandidateFolders = smartCandidate.FolderNames,
+			SmartIgnoreCandidateFiles = smartCandidate.FileNames,
+			SmartIgnoreFollowsGitIgnore = smartIgnoreFollowsGitIgnore
 		};
 	}
 
@@ -355,7 +369,11 @@ public sealed class IgnoreRulesService(
 	private sealed record ScopedSmartIgnoreBuildResult(
 		IReadOnlySet<string> FolderNames,
 		IReadOnlySet<string> FileNames,
-		IReadOnlyList<ScopedSmartIgnoreMatcher> ScopedMatchers);
+		IReadOnlyList<ScopedSmartIgnoreMatcher> ScopedMatchers)
+	{
+		public static readonly ScopedSmartIgnoreBuildResult Empty =
+			new(EmptyStringSet, EmptyStringSet, []);
+	}
 
 	private sealed class LocalSmartIgnoreBuildState
 	{
