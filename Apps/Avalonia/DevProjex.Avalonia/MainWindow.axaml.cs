@@ -675,6 +675,7 @@ public partial class MainWindow : Window
 
         // Hook menu item submenu opening to apply brushes directly
         AddHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened, RoutingStrategies.Bubble);
+        AddHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened, RoutingStrategies.Bubble);
     }
 
     private void EnsureAppStateStoresExist()
@@ -743,6 +744,7 @@ public partial class MainWindow : Window
         RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
         RemoveHandler(KeyDownEvent, OnKeyDown);
         RemoveHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened);
+        RemoveHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened);
 
         // Unsubscribe from window lifecycle events
         Opened -= OnOpened;
@@ -5720,6 +5722,7 @@ public partial class MainWindow : Window
         // Clear old items - they will be garbage collected since they have no external references
         // and we're using a named handler method instead of lambda captures
         branchMenuItem.Items.Clear();
+        GitBranchMenuScrollBehavior.SetScrollable(branchMenuItem, _viewModel.GitBranches.Count);
 
         foreach (var branch in _viewModel.GitBranches)
             branchMenuItem.Items.Add(CreateBranchMenuItem(branch));

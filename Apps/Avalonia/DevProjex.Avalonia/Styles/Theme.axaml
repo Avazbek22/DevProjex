@@ -963,16 +963,51 @@
         <Setter Property="Padding" Value="4" />
     </Style>
 
-    <Style Selector="MenuItem.git-branch-menu /template/ Popup > Border">
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup > Border">
         <!-- 15 branch rows: (32px row + 2px vertical margin) * 15, plus popup padding. -->
         <Setter Property="MaxHeight" Value="518" />
     </Style>
 
-    <Style Selector="MenuItem.git-branch-menu /template/ Popup ScrollViewer">
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup ScrollViewer">
         <!-- Keep real MenuItem containers for correct hover/selection while the popup scrolls. -->
         <Setter Property="MaxHeight" Value="510" />
+        <Setter Property="AllowAutoHide" Value="False" />
         <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
-        <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        <Setter Property="VerticalScrollBarVisibility" Value="Visible" />
+    </Style>
+
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup ScrollBar:vertical">
+        <Setter Property="AllowAutoHide" Value="False" />
+        <Setter Property="MinWidth" Value="12" />
+    </Style>
+
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup ScrollBar:vertical /template/ Thumb">
+        <Setter Property="Background" Value="{DynamicResource AppMutedTextBrush}" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="RenderTransform" Value="none" />
+    </Style>
+
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup ScrollBar:vertical /template/ Thumb:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <Style Selector="Grid.git-branch-external-scrollbar">
+        <Setter Property="Width" Value="12" />
+        <Setter Property="MinWidth" Value="12" />
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Border.git-branch-scroll-indicator-track">
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="Border.git-branch-scroll-indicator-thumb">
+        <Setter Property="Background" Value="{DynamicResource AppMutedTextBrush}" />
+        <Setter Property="MinHeight" Value="32" />
+    </Style>
+
+    <Style Selector="Grid.git-branch-external-scrollbar:pointerover Border.git-branch-scroll-indicator-thumb">
+        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
     <!-- Submenu item backgrounds -->
