@@ -25,6 +25,8 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow : Window
 {
+    private const double BranchMenuItemHeight = 32;
+
     private enum WorkspaceDisplayMode
     {
         Tree = 0,
@@ -5720,18 +5722,21 @@ public partial class MainWindow : Window
         branchMenuItem.Items.Clear();
 
         foreach (var branch in _viewModel.GitBranches)
+            branchMenuItem.Items.Add(CreateBranchMenuItem(branch));
+    }
+
+    private MenuItem CreateBranchMenuItem(GitBranch branch)
+    {
+        var item = new MenuItem
         {
-            var item = new MenuItem
-            {
-                Header = branch.IsActive ? $"✓ {branch.Name}" : $"   {branch.Name}",
-                Tag = branch.Name
-            };
+            Header = branch.IsActive ? $"✓ {branch.Name}" : $"   {branch.Name}",
+            Tag = branch.Name,
+            MinHeight = BranchMenuItemHeight
+        };
 
-            // Use named handler to avoid closure capture memory leaks
-            item.Click += OnBranchMenuItemClick;
-
-            branchMenuItem.Items.Add(item);
-        }
+        // Use a named handler to avoid closure captures and keep menu rebuilds cheap.
+        item.Click += OnBranchMenuItemClick;
+        return item;
     }
 
     private void OnBranchMenuItemClick(object? sender, RoutedEventArgs e)

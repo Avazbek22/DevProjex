@@ -27,7 +27,7 @@ public enum PreviewWorkspaceMode
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    public const string TitleVersion = "4.8.5";
+    public const string TitleVersion = "4.9";
     public const string BaseTitle = "DevProjex v" + TitleVersion;
     public const string BaseTitleWithAuthor = "DevProjex by Olimoff v" + TitleVersion;
     public const double DefaultTreeFontSize = 15;

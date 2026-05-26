@@ -5,7 +5,7 @@ namespace DevProjex.Infrastructure.RecentProjects;
 public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null)
 {
 	private const int CurrentSchemaVersion = 1;
-	private const int MaxRecentFolders = 10;
+	private const int MaxRecentFolders = 15;
 	private const int MaxRecentRepositories = 7;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "recent-projects.json";

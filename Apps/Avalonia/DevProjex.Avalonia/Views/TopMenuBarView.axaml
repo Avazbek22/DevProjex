@@ -27,7 +27,10 @@
       </MenuItem>
       <MenuItem Name="GitMenuItem" Header="Git">
         <MenuItem Header="{Binding MenuGitClone}" Click="OnGitClone" />
-        <MenuItem Name="GitBranchMenuItem" Header="{Binding MenuGitBranch}" IsEnabled="{Binding IsGitMode}">
+        <MenuItem Name="GitBranchMenuItem"
+                  Classes="git-branch-menu"
+                  Header="{Binding MenuGitBranch}"
+                  IsEnabled="{Binding IsGitMode}">
           <!-- Branch items will be populated dynamically -->
         </MenuItem>
         <MenuItem Header="{Binding MenuGitGetUpdates}" Click="OnGitGetUpdates" IsEnabled="{Binding IsGitMode}" />
