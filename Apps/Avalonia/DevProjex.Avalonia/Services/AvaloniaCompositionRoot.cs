@@ -63,6 +63,9 @@ public static class AvaloniaCompositionRoot
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();
+        ITaskbarProgressService taskbarProgressService = OperatingSystem.IsWindows()
+            ? new WindowsTaskbarProgressService()
+            : new NoopTaskbarProgressService();
 
         return new AvaloniaAppServices(
             Localization: localization,
@@ -88,6 +91,7 @@ public static class AvaloniaCompositionRoot
             GitRepositoryService: gitRepositoryService,
             RepoCacheService: repoCacheService,
             ZipDownloadService: zipDownloadService,
-            FileContentAnalyzer: fileContentAnalyzer);
+            FileContentAnalyzer: fileContentAnalyzer,
+            TaskbarProgressService: taskbarProgressService);
     }
 }

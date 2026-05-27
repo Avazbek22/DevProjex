@@ -159,6 +159,7 @@ public partial class MainWindow : Window
     private readonly IZipDownloadService _zipDownloadService;
     private readonly IFileContentAnalyzer _fileContentAnalyzer;
     private readonly RecentProjectsStore _recentProjectsStore;
+    private readonly ITaskbarProgressService _taskbarProgressService;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
@@ -425,6 +426,7 @@ public partial class MainWindow : Window
         _zipDownloadService = services.ZipDownloadService;
         _fileContentAnalyzer = services.FileContentAnalyzer;
         _recentProjectsStore = services.RecentProjectsStore;
+        _taskbarProgressService = services.TaskbarProgressService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _viewModel.SetToastItems(_toastService.Items);
@@ -639,6 +641,10 @@ public partial class MainWindow : Window
                 HandleThemePopoverStateChange();
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
                 UpdateDropZoneFloatAnimationState();
+            else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
+                     or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
+                     or nameof(MainWindowViewModel.StatusProgressValue))
+                SyncTaskbarProgressWithStatusBar();
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
             {
                 RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
@@ -788,6 +794,9 @@ public partial class MainWindow : Window
         // Clean up repository cache on exit
         _repoCacheService.ClearAllCache();
 
+        _taskbarProgressService.Clear();
+        _taskbarProgressService.Dispose();
+
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
             disposable.Dispose();
@@ -930,6 +939,9 @@ public partial class MainWindow : Window
     {
         try
         {
+            _taskbarProgressService.Attach(this);
+            SyncTaskbarProgressWithStatusBar();
+
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
             ApplyStartupThemePreset();
 
@@ -957,6 +969,23 @@ public partial class MainWindow : Window
         {
             await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private void SyncTaskbarProgressWithStatusBar()
+    {
+        if (!_viewModel.StatusBusy)
+        {
+            _taskbarProgressService.Clear();
+            return;
+        }
+
+        if (_viewModel.StatusProgressIsIndeterminate)
+        {
+            _taskbarProgressService.SetIndeterminate();
+            return;
+        }
+
+        _taskbarProgressService.SetProgress(_viewModel.StatusProgressValue);
     }
 
     #region Drop Zone Handlers
