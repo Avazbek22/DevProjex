@@ -22,7 +22,7 @@ public sealed class ScanOptionsUseCaseRobustnessTests
         var useCase = new ScanOptionsUseCase(scanner);
 
         var ex = Assert.ThrowsAny<Exception>(() =>
-            useCase.Execute(new ScanOptionsRequest("/root", CreateRules())));
+            useCase.Execute(new ScanOptionsRequest("/root", CreateRules()), cancellationToken: TestContext.Current.CancellationToken));
         AssertContainsInnerError(ex, "extensions failed");
     }
 
@@ -38,7 +38,7 @@ public sealed class ScanOptionsUseCaseRobustnessTests
         var useCase = new ScanOptionsUseCase(scanner);
 
         var ex = Assert.ThrowsAny<Exception>(() =>
-            useCase.Execute(new ScanOptionsRequest("/root", CreateRules())));
+            useCase.Execute(new ScanOptionsRequest("/root", CreateRules()), cancellationToken: TestContext.Current.CancellationToken));
         AssertContainsInnerError(ex, "roots failed");
     }
 
@@ -86,7 +86,7 @@ public sealed class ScanOptionsUseCaseRobustnessTests
         var result = useCase.GetExtensionsForRootFolders(
             SyntheticTestPaths.CreateMissingRoot(),
             ["src", "tests", "docs", "tools"],
-            CreateRules());
+            CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(3, result.Value.Count);
         Assert.Contains(".cs", result.Value);
@@ -107,7 +107,7 @@ public sealed class ScanOptionsUseCaseRobustnessTests
         };
 
         var useCase = new ScanOptionsUseCase(scanner);
-        var result = useCase.Execute(new ScanOptionsRequest("/root", CreateRules()));
+        var result = useCase.Execute(new ScanOptionsRequest("/root", CreateRules()), cancellationToken: TestContext.Current.CancellationToken);
 
         var expectedRootFolders = returnedRootFolders.ToList();
         expectedRootFolders.Sort(PathComparer.Default);

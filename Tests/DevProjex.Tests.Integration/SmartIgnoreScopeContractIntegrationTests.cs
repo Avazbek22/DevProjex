@@ -23,7 +23,7 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 		var tree = new TreeBuilder().Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".pyc" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "src" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(availability.IncludeSmartIgnore);
 		Assert.True(rules.UseSmartIgnore);
@@ -53,7 +53,7 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 		var tree = new TreeBuilder().Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".pyc" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "python-worker", "plain-data" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(rules.UseSmartIgnore);
 		Assert.True(ContainsPath(tree.Root, "python-worker/app.py"));
@@ -87,7 +87,7 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 				"plain-data",
 				"src"
 			},
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(rules.UseSmartIgnore);
 		Assert.Contains(temp.Path, rules.SmartIgnoreScopeRoots, PathComparer.Default);

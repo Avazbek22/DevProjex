@@ -49,7 +49,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.Execute(new ScanOptionsRequest("/root", CreateDefaultRules()));
+		var result = useCase.Execute(new ScanOptionsRequest("/root", CreateDefaultRules()), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, extensionsCalled);
 		Assert.Equal(1, foldersCalled);
@@ -89,7 +89,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var result = useCase.GetExtensionsForRootFolders(
 			SyntheticTestPaths.CreateMissingRoot(),
 			folders,
-			CreateDefaultRules());
+			CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(4, callCount);
 		Assert.Contains(".cs", result.Value);
@@ -130,7 +130,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var result = useCase.GetExtensionsForRootFolders(
 			SyntheticTestPaths.CreateMissingRoot(),
 			folders,
-			CreateDefaultRules());
+			CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(3, result.Value.Count);
 		Assert.Contains(".cs", result.Value);
@@ -170,7 +170,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var result = useCase.GetExtensionsForRootFolders(
 			SyntheticTestPaths.CreateMissingRoot(),
 			folders,
-			CreateDefaultRules());
+			CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result.RootAccessDenied);
 		Assert.True(result.HadAccessDenied);
@@ -212,7 +212,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var result = useCase.GetExtensionsForRootFolders(
 			SyntheticTestPaths.CreateMissingRoot(),
 			folders,
-			CreateDefaultRules());
+			CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(2, processedCount);
 		Assert.Contains(".cs", result.Value);
@@ -243,7 +243,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var result = useCase.GetExtensionsForRootFolders(
 			SyntheticTestPaths.CreateMissingRoot(),
 			folders,
-			CreateDefaultRules());
+			CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		// All variations of .cs should be deduplicated to one entry
 		Assert.Single(result.Value);
@@ -278,7 +278,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var result = useCase.GetExtensionsForRootFolders(
 			SyntheticTestPaths.CreateMissingRoot(),
 			folders,
-			CreateDefaultRules());
+			CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(rootFilesCalled);
 		Assert.Contains(".root", result.Value);
@@ -304,7 +304,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.Execute(new ScanOptionsRequest("/root", CreateDefaultRules()));
+		var result = useCase.Execute(new ScanOptionsRequest("/root", CreateDefaultRules()), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result.RootAccessDenied);
 		Assert.True(result.HadAccessDenied);
@@ -327,7 +327,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 
 		var useCase = new ScanOptionsUseCase(scanner);
 
-		var result = useCase.GetExtensionsForRootFolders("/root", new List<string>(), CreateDefaultRules());
+		var result = useCase.GetExtensionsForRootFolders("/root", new List<string>(), CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Value);
 		Assert.Contains(".readme", result.Value);
@@ -363,7 +363,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		var result = useCase.GetExtensionsForRootFolders(
 			SyntheticTestPaths.CreateMissingRoot(),
 			folders,
-			CreateDefaultRules());
+			CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(100, processedCount);
 		Assert.Contains(".cs", result.Value);
@@ -439,7 +439,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.Execute(new ScanOptionsRequest("/root", CreateDefaultRules()));
+		var result = useCase.Execute(new ScanOptionsRequest("/root", CreateDefaultRules()), cancellationToken: TestContext.Current.CancellationToken);
 
 		// Verify case-insensitive alphabetical sorting
 		Assert.Equal([".A", ".m", ".z"], result.Extensions);
@@ -463,7 +463,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 
 		var allFoldersStarted = scanner.WaitForAllFolderCalls(BlockingParallelismTimeout);
 		scanner.Release();
-		var result = await scanTask.WaitAsync(BlockingParallelismTimeout);
+		var result = await scanTask.WaitAsync(BlockingParallelismTimeout, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(
 			allFoldersStarted,
@@ -491,7 +491,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 
 		var allFoldersStarted = scanner.WaitForAllFolderCalls(BlockingParallelismTimeout);
 		scanner.Release();
-		await scanTask.WaitAsync(BlockingParallelismTimeout);
+		await scanTask.WaitAsync(BlockingParallelismTimeout, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(
 			allFoldersStarted,
@@ -502,7 +502,7 @@ public sealed class ScanOptionsUseCaseParallelTests
 	[Fact]
 	public void ScanParallelismPolicy_UsesOneCpuWideMaximumEverywhere()
 	{
-		var options = ScanParallelismPolicy.CreateOptions();
+		var options = ScanParallelismPolicy.CreateOptions(cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(ScanParallelismPolicy.MaxDegreeOfParallelism >= Math.Max(1, Environment.ProcessorCount));
 		Assert.Equal(ScanParallelismPolicy.MaxDegreeOfParallelism, options.MaxDegreeOfParallelism);

@@ -144,7 +144,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // This test requires network access - skip if no internet
         var targetDir = Path.Combine(_tempDir!, "download-test");
 
-        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
             return;
 
@@ -168,7 +168,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var targetDir = Path.Combine(_tempDir!, "progress-test");
         var progress = new ProgressRecorder();
 
-        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, progress);
+        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, progress, cancellationToken: TestContext.Current.CancellationToken);
         if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
             return;
 
@@ -200,7 +200,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         var result = await _service.DownloadAndExtractAsync(
             "https://github.com/nonexistent-user-xyz123/nonexistent-repo-abc456",
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -213,7 +213,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // We should extract without it (flatten structure)
         var targetDir = Path.Combine(_tempDir!, "no-root-test");
 
-        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
             return;
 
@@ -232,7 +232,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Test repository name extraction
         var targetDir = Path.Combine(_tempDir!, "name-test");
 
-        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
             return;
 
@@ -246,7 +246,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Test that repository URL is stored in result
         var targetDir = Path.Combine(_tempDir!, "url-storage-test");
 
-        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
             return;
 
@@ -266,7 +266,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         var result = await _service.DownloadAndExtractAsync(
             "https://example.com/user/repo",
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -279,7 +279,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Test empty URL handling
         var targetDir = Path.Combine(_tempDir!, "empty-url-test");
 
-        var result = await _service.DownloadAndExtractAsync("", targetDir);
+        var result = await _service.DownloadAndExtractAsync("", targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -293,7 +293,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         var result = await _service.DownloadAndExtractAsync(
             "https://github.com/user-that-definitely-does-not-exist-xyz/repo",
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -310,8 +310,8 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var targetDir1 = Path.Combine(_tempDir!, "parallel-1");
         var targetDir2 = Path.Combine(_tempDir!, "parallel-2");
 
-        var task1 = _service.DownloadAndExtractAsync(TestRepoUrl, targetDir1);
-        var task2 = _service.DownloadAndExtractAsync(TestRepoUrl, targetDir2);
+        var task1 = _service.DownloadAndExtractAsync(TestRepoUrl, targetDir1, cancellationToken: TestContext.Current.CancellationToken);
+        var task2 = _service.DownloadAndExtractAsync(TestRepoUrl, targetDir2, cancellationToken: TestContext.Current.CancellationToken);
 
         var results = await Task.WhenAll(task1, task2);
         if (ShouldSkipForTransientNetworkFailure(results[0].Success, results[0].ErrorMessage) ||
@@ -342,7 +342,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var targetDir = Path.Combine(_tempDir!, "timeout-test");
 
         // Use a fast download that should complete within timeout
-        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         // Should succeed if network is available
         if (result.Success)
@@ -362,7 +362,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var targetDir = Path.Combine(_tempDir!, "url-preservation-test");
         var originalUrl = "https://github.com/octocat/Hello-World.git";
 
-        var result = await _service.DownloadAndExtractAsync(originalUrl, targetDir);
+        var result = await _service.DownloadAndExtractAsync(originalUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         if (result.Success)
         {
@@ -380,7 +380,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Verify that temporary ZIP file is deleted after extraction
         var targetDir = Path.Combine(_tempDir!, "cleanup-success-test");
 
-        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         if (result.Success)
         {
@@ -402,7 +402,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         var result = await _service.DownloadAndExtractAsync(
             "https://github.com/nonexistent/repo",
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
 

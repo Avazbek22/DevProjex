@@ -30,7 +30,7 @@ public sealed class FileSystemScannerParallelTests
 		}
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", result.Value);
 		Assert.Contains(".txt", result.Value);
@@ -55,7 +55,7 @@ public sealed class FileSystemScannerParallelTests
 		}
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		// Should have only 2 unique extensions (case-insensitive)
 		Assert.Equal(2, result.Value.Count);
@@ -77,7 +77,7 @@ public sealed class FileSystemScannerParallelTests
 		temp.CreateFile("shallow.txt", "shallow");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", result.Value);
 		Assert.Contains(".txt", result.Value);
@@ -98,7 +98,7 @@ public sealed class FileSystemScannerParallelTests
 		}
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		// Should have 5 unique extensions (.ext0 through .ext4)
 		Assert.Equal(5, result.Value.Count);
@@ -115,7 +115,7 @@ public sealed class FileSystemScannerParallelTests
 	public void GetExtensions_ReturnsEmptyForNonExistentPath()
 	{
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions("/non/existent/path/12345", CreateDefaultRules());
+		var result = scanner.GetExtensions("/non/existent/path/12345", CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Empty(result.Value);
 		Assert.False(result.RootAccessDenied);
@@ -138,7 +138,7 @@ public sealed class FileSystemScannerParallelTests
 		temp.CreateFile("hasfile/file.cs", "code");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Value);
 		Assert.Contains(".cs", result.Value);
@@ -169,7 +169,7 @@ public sealed class FileSystemScannerParallelTests
 			SmartIgnoredFolders: new HashSet<string>(),
 			SmartIgnoredFiles: new HashSet<string>());
 
-		var result = scanner.GetExtensions(temp.Path, rules);
+		var result = scanner.GetExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Value);
 		Assert.Contains(".txt", result.Value);
@@ -195,7 +195,7 @@ public sealed class FileSystemScannerParallelTests
 		temp.CreateFile("tests/test.cs", "test");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(3, result.Value.Count);
 		Assert.Contains(".cs", result.Value);
@@ -246,7 +246,7 @@ public sealed class FileSystemScannerParallelTests
 		temp.CreateFile("folder_with_underscores/file.md", "markdown");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(3, result.Value.Count);
 		Assert.Contains(".cs", result.Value);
@@ -270,7 +270,7 @@ public sealed class FileSystemScannerParallelTests
 		}
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		// Extensionless files are returned as named entries; regular files by extension.
 		Assert.Equal(3, result.Value.Count);
@@ -310,7 +310,7 @@ public sealed class FileSystemScannerParallelTests
 			UseSmartIgnore = true
 		};
 
-		var result = scanner.GetExtensions(temp.Path, rules);
+		var result = scanner.GetExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Value);
 		Assert.Contains(".cs", result.Value);
@@ -331,7 +331,7 @@ public sealed class FileSystemScannerParallelTests
 		temp.CreateDirectory("123");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetRootFolderNames(temp.Path, CreateDefaultRules());
+		var result = scanner.GetRootFolderNames(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(4, result.Value.Count);
 		Assert.Equal("123", result.Value[0]);
@@ -356,7 +356,7 @@ public sealed class FileSystemScannerParallelTests
 		temp.CreateFile("nested/deeper/verydeep.md", "verydeep");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetRootFileExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetRootFileExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Value);
 		Assert.Contains(".cs", result.Value);
@@ -397,7 +397,7 @@ public sealed class FileSystemScannerParallelTests
 		}
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules());
+		var result = scanner.GetExtensions(temp.Path, CreateDefaultRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		// Should have 10 unique extensions (.ext0 through .ext9)
 		Assert.Equal(10, result.Value.Count);

@@ -66,7 +66,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
             currentCachedRepoPath = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
 
             // Step 2: Clone repository
-            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, currentCachedRepoPath);
+            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, currentCachedRepoPath, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert - clone succeeded
             Assert.True(cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
@@ -83,7 +83,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
             Assert.NotEmpty(files);
 
             // Step 4: Simulate loading Git branches (MainWindow does this)
-            var branches = await _gitService.GetBranchesAsync(projectPath);
+            var branches = await _gitService.GetBranchesAsync(projectPath, cancellationToken: TestContext.Current.CancellationToken);
             Assert.NotEmpty(branches);
 
             // At this point, currentCachedRepoPath should NOT be deleted yet
@@ -112,7 +112,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
             currentCachedRepoPath = _cacheService.CreateRepositoryDirectory(invalidUrl);
 
             // Step 2: Attempt to clone (should fail)
-            var cloneResult = await _gitService.CloneAsync(invalidUrl, currentCachedRepoPath);
+            var cloneResult = await _gitService.CloneAsync(invalidUrl, currentCachedRepoPath, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert - clone failed
             Assert.False(cloneResult.Success);
@@ -260,7 +260,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
         {
             // Step 1: Clone repository
             currentCachedRepoPath = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
-            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, currentCachedRepoPath);
+            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, currentCachedRepoPath, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(cloneResult.Success);
 
             // Step 2: User opens a local folder (via File → Open)
@@ -299,7 +299,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
         {
             // Step 1: Clone repository
             currentCachedRepoPath = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
-            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, currentCachedRepoPath);
+            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, currentCachedRepoPath, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(cloneResult.Success);
 
             // Step 2: Get initial file state
@@ -307,18 +307,18 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
             Assert.NotEmpty(initialFiles);
 
             // Step 3: Try to switch branches
-            var branches = await _gitService.GetBranchesAsync(currentCachedRepoPath);
+            var branches = await _gitService.GetBranchesAsync(currentCachedRepoPath, cancellationToken: TestContext.Current.CancellationToken);
             if (branches.Count < 2)
                 return; // Skip if repo doesn't have multiple branches
 
-            var currentBranch = await _gitService.GetCurrentBranchAsync(currentCachedRepoPath);
+            var currentBranch = await _gitService.GetCurrentBranchAsync(currentCachedRepoPath, cancellationToken: TestContext.Current.CancellationToken);
             var targetBranch = branches[0].Name != currentBranch ? branches[0].Name : branches[1].Name;
 
-            var switched = await _gitService.SwitchBranchAsync(currentCachedRepoPath, targetBranch);
+            var switched = await _gitService.SwitchBranchAsync(currentCachedRepoPath, targetBranch, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(switched);
 
             // Step 4: Verify branch changed
-            var newBranch = await _gitService.GetCurrentBranchAsync(currentCachedRepoPath);
+            var newBranch = await _gitService.GetCurrentBranchAsync(currentCachedRepoPath, cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal(targetBranch, newBranch);
 
             // Step 5: Verify files still accessible (might be different content)
@@ -347,7 +347,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
         {
             // Clone 1
             cache1 = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
-            var result1 = await _gitService.CloneAsync(TestRepoUrl, cache1);
+            var result1 = await _gitService.CloneAsync(TestRepoUrl, cache1, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(result1.Success);
             Assert.True(Directory.Exists(cache1));
 
@@ -356,7 +356,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
 
             // Clone 2 (new session)
             cache2 = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
-            var result2 = await _gitService.CloneAsync(TestRepoUrl, cache2);
+            var result2 = await _gitService.CloneAsync(TestRepoUrl, cache2, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(result2.Success);
             Assert.True(Directory.Exists(cache2));
 
@@ -365,7 +365,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
 
             // Clone 3 (new session)
             cache3 = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
-            var result3 = await _gitService.CloneAsync(TestRepoUrl, cache3);
+            var result3 = await _gitService.CloneAsync(TestRepoUrl, cache3, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(result3.Success);
             Assert.True(Directory.Exists(cache3));
 

@@ -1,4 +1,4 @@
-﻿namespace DevProjex.Tests.Integration;
+namespace DevProjex.Tests.Integration;
 
 public sealed class TreeBuilderTests
 {
@@ -18,7 +18,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>()));
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var children = result.Root.Children.Select(c => c.Name).ToList();
 		Assert.Contains("docs", children);
@@ -44,7 +44,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>()));
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal("folder", result.Root.Children.First().Name);
 		Assert.False(result.Root.Children.Last().IsDirectory);
@@ -64,7 +64,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>()));
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, child => !child.IsDirectory);
 	}
@@ -83,7 +83,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: new IgnoreRules(false, false, true, false, new HashSet<string>(), new HashSet<string>()));
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, child => child.Name == ".cache");
 	}
@@ -107,7 +107,7 @@ public sealed class TreeBuilderTests
 			});
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, child => child.Name == "ignored");
 		Assert.Contains(result.Root.Children, child => child.Name == "keep");
@@ -126,7 +126,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>()));
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, child => child.Name == "note.txt");
 	}
@@ -158,7 +158,7 @@ public sealed class TreeBuilderTests
 			AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src" },
 			IgnoreRules: rules);
 
-		var result = new TreeBuilder().Build(temp.Path, options);
+		var result = new TreeBuilder().Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var src = result.Root.Children.Single(child => child.Name == "src");
 		Assert.Contains(src.Children, child => child.Name == "app.cs");
@@ -182,7 +182,7 @@ public sealed class TreeBuilderTests
 			NameFilter: "order");
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var rootNames = result.Root.Children.Select(c => c.Name).ToList();
 		Assert.Contains("order.cs", rootNames);
@@ -208,7 +208,7 @@ public sealed class TreeBuilderTests
 			NameFilter: "invoice");
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var domain = result.Root.Children.Single(c => c.Name == "domain");
 		Assert.Single(domain.Children);
@@ -229,7 +229,7 @@ public sealed class TreeBuilderTests
 			NameFilter: "order");
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, child => child.Name == "services");
 	}
@@ -248,7 +248,7 @@ public sealed class TreeBuilderTests
 			NameFilter: "orders");
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var orders = result.Root.Children.Single(c => c.Name == "orders");
 		Assert.Empty(orders.Children);
@@ -269,7 +269,7 @@ public sealed class TreeBuilderTests
 			NameFilter: "order");
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var src = result.Root.Children.Single(c => c.Name == "src");
 		Assert.Single(src.Children);
@@ -290,7 +290,7 @@ public sealed class TreeBuilderTests
 			NameFilter: "order");
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, child => child.Name == "orders");
 	}
@@ -309,7 +309,7 @@ public sealed class TreeBuilderTests
 			NameFilter: "order");
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, child => child.Name == "root.txt");
 	}
@@ -335,7 +335,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var build = result.Root.Children.Single(child => child.Name == "build");
 		Assert.Contains(build.Children, child => child.Name == "keep.txt");
@@ -371,7 +371,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var myProject = result.Root.Children
 			.Single(c => c.Name == "src").Children
@@ -413,7 +413,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		// Project1 should have src.cs but bin should be excluded
 		var project1 = result.Root.Children.Single(c => c.Name == "Project1");
@@ -449,7 +449,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == "node_modules");
 		Assert.Contains(result.Root.Children, c => c.Name == "src");
@@ -490,7 +490,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == "main.py");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == "__pycache__");
@@ -527,7 +527,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == "target");
 		Assert.Contains(result.Root.Children, c => c.Name == "src");
@@ -559,7 +559,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == "main.go");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == "vendor");
@@ -592,7 +592,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == "app");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == "log");
@@ -624,7 +624,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == "src");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == "target");
@@ -662,7 +662,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		// .git is ignored by gitignore
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == ".git");
@@ -689,7 +689,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == ".config");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == ".vscode");
@@ -720,7 +720,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == "src");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == "ignored"); // Smart-ignored
@@ -753,7 +753,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == "src");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == ".hidden");
@@ -781,7 +781,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotEmpty(result.Root.Children);
 	}
@@ -801,7 +801,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == "документы");
 		Assert.Contains(result.Root.Children, c => c.Name == "文档");
@@ -822,7 +822,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == "my folder");
 		Assert.Contains(result.Root.Children, c => c.Name == "another folder");
@@ -851,7 +851,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == ".gitignore");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == ".env");
@@ -877,7 +877,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(result.Root.Children, c => c.Name == ".gitignore");
 		Assert.Contains(result.Root.Children, c => c.Name == ".env");
@@ -909,7 +909,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == "Thumbs.db");
 		Assert.DoesNotContain(result.Root.Children, c => c.Name == ".DS_Store");
@@ -935,7 +935,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var empty = result.Root.Children.Single(c => c.Name == "empty");
 		Assert.Empty(empty.Children);
@@ -955,7 +955,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var current = result.Root.Children.Single(c => c.Name == "a");
 		foreach (var name in new[] { "b", "c", "d", "e", "f", "g", "h", "i", "j" })
@@ -984,7 +984,7 @@ public sealed class TreeBuilderTests
 			IgnoreRules: rules);
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 
 		var src = result.Root.Children.Single(c => c.Name == "src");
 		Assert.Equal(2, src.Children.Count);

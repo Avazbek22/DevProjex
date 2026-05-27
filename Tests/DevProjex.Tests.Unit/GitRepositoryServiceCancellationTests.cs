@@ -7,7 +7,7 @@ public sealed class GitRepositoryServiceCancellationTests
     {
         var service = new GitRepositoryService();
 
-        if (!await service.IsGitAvailableAsync())
+        if (!await service.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken))
             return;
 
         using var cts = new CancellationTokenSource();

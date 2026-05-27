@@ -10,7 +10,7 @@ public sealed class ExtensionlessScanningMatrixIntegrationTests
 		temp.CreateFile(fileName, "content");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetRootFileExtensions(temp.Path, CreateRules(ignoreExtensionlessFiles: false));
+		var result = scanner.GetRootFileExtensions(temp.Path, CreateRules(ignoreExtensionlessFiles: false), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Value);
 		Assert.Contains(expectedToken, result.Value);
@@ -27,7 +27,7 @@ public sealed class ExtensionlessScanningMatrixIntegrationTests
 		temp.CreateFile(fileName, "content");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetRootFileExtensions(temp.Path, CreateRules(ignoreExtensionlessFiles: true));
+		var result = scanner.GetRootFileExtensions(temp.Path, CreateRules(ignoreExtensionlessFiles: true), cancellationToken: TestContext.Current.CancellationToken);
 
 		if (shouldRemain)
 		{

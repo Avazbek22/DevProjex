@@ -18,7 +18,7 @@ public sealed class FileSystemScannerEffectiveIgnoreBatchMatrixIntegrationTests
 		var result = scanner.GetEffectiveIgnoreOptionCounts(
 			Path.Combine(temp.Path, testCase.RootRelativePath),
 			testCase.AllowedExtensions,
-			rules);
+			rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(testCase.ExpectedCounts, result.Value);
 	}

@@ -28,7 +28,7 @@ public sealed class EmptyFoldersTreeFilterMatrixIntegrationTests
 				"target"
 			},
 			IgnoreRules: CreateRules(ignoreDotFiles, ignoreDotFolders, ignoreExtensionlessFiles, ignoreEmptyFolders),
-			NameFilter: null));
+			NameFilter: null), cancellationToken: TestContext.Current.CancellationToken);
 
 		var targetNode = result.Root.Children.SingleOrDefault(x => x.Name == "target");
 		var shouldContainTarget = ShouldContainTarget(

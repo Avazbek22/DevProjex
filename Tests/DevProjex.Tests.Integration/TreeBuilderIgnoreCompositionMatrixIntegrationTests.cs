@@ -42,7 +42,7 @@ public sealed class TreeBuilderIgnoreCompositionMatrixIntegrationTests
 		var tree = builder.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".json", ".js" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "proj-git", "proj-no-git" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var gitProject = tree.Root.Children.Single(node => node.Name == "proj-git");
 		var noGitProject = tree.Root.Children.Single(node => node.Name == "proj-no-git");
@@ -78,7 +78,7 @@ public sealed class TreeBuilderIgnoreCompositionMatrixIntegrationTests
 		var tree = builder.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "proj-git" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var gitProject = tree.Root.Children.Single(node => node.Name == "proj-git");
 		var generated = gitProject.Children.Single(node => node.Name == "generated");

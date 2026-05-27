@@ -34,13 +34,13 @@ public sealed class UserSettingsPersistenceIntegrationTests
         {
             startGate.Wait();
             storeA.Save(firstSnapshot);
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         var secondSaveTask = Task.Run(() =>
         {
             startGate.Wait();
             storeB.Save(secondSnapshot);
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         startGate.Set();
         await Task.WhenAll(firstSaveTask, secondSaveTask);

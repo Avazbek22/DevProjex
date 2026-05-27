@@ -18,13 +18,13 @@ public sealed class ProjectProfileMultiInstanceIntegrationTests
         {
             startGate.Wait();
             storeA.SaveProfile(firstProjectPath, firstProfile);
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         var secondSaveTask = Task.Run(() =>
         {
             startGate.Wait();
             storeB.SaveProfile(secondProjectPath, secondProfile);
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         startGate.Set();
         await Task.WhenAll(firstSaveTask, secondSaveTask);

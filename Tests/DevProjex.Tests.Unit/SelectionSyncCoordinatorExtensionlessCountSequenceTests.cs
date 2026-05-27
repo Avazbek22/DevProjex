@@ -87,17 +87,17 @@ public sealed class SelectionSyncCoordinatorExtensionlessCountSequenceTests
 		var coordinator = CreateCoordinator(viewModel, () => projectPath, scanner);
 		var scanOptions = new ScanOptionsUseCase(scanner);
 
-		var rootOnlyScan = scanOptions.GetExtensionsForRootFolders(projectPath, [], ignoreRules);
+		var rootOnlyScan = scanOptions.GetExtensionsForRootFolders(projectPath, [], ignoreRules, cancellationToken: TestContext.Current.CancellationToken);
 		coordinator.ApplyExtensionScan(rootOnlyScan.Value);
 		coordinator.PopulateIgnoreOptionsForRootSelection([], projectPath);
 		AssertExtensionlessOptionState(viewModel, expectedCount: 1, expectChecked: true);
 
-		var srcScan = scanOptions.GetExtensionsForRootFolders(projectPath, ["src"], ignoreRules);
+		var srcScan = scanOptions.GetExtensionsForRootFolders(projectPath, ["src"], ignoreRules, cancellationToken: TestContext.Current.CancellationToken);
 		coordinator.ApplyExtensionScan(srcScan.Value);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], projectPath);
 		AssertExtensionlessOptionState(viewModel, expectedCount: 2, expectChecked: true);
 
-		var srcAndTestsScan = scanOptions.GetExtensionsForRootFolders(projectPath, ["src", "tests"], ignoreRules);
+		var srcAndTestsScan = scanOptions.GetExtensionsForRootFolders(projectPath, ["src", "tests"], ignoreRules, cancellationToken: TestContext.Current.CancellationToken);
 		coordinator.ApplyExtensionScan(srcAndTestsScan.Value);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src", "tests"], projectPath);
 		AssertExtensionlessOptionState(viewModel, expectedCount: 3, expectChecked: true);

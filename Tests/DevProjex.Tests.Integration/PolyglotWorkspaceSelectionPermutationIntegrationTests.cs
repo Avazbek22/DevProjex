@@ -54,7 +54,7 @@ public sealed class PolyglotWorkspaceSelectionPermutationIntegrationTests
 				".rs", ".tsx", ".ts", ".cs", ".py", ".go", ".json", ".toml", ".dll", ".pyc", ".js", ".cache"
 			},
 			AllowedRootFolders: new HashSet<string>(selectedRoots, StringComparer.OrdinalIgnoreCase),
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		AssertOnlySelectedRootsArePresent(tree.Root, selectedRoots);
 		AssertSourceFileVisibility(tree.Root, selectedRoots);
@@ -76,7 +76,7 @@ public sealed class PolyglotWorkspaceSelectionPermutationIntegrationTests
 		AssertFileState(tree.Root, selectedRoots, "service-dotnet", "hot.cache", shouldExist: !rules.UseGitIgnore);
 
 		var extensions = new ScanOptionsUseCase(new FileSystemScanner())
-			.GetExtensionsForRootFolders(openedRoot, selectedRoots, rules)
+			.GetExtensionsForRootFolders(openedRoot, selectedRoots, rules, cancellationToken: TestContext.Current.CancellationToken)
 			.Value;
 		if (hideStandardArtifacts)
 		{

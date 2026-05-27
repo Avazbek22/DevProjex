@@ -12,7 +12,7 @@ public sealed class FileSystemScannerEntryEnumerationMetadataIntegrationTests
 		WriteFile(temp.Path, "empty.txt", string.Empty);
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetRootFileExtensionsWithIgnoreOptionCounts(temp.Path, CreateBaseRules());
+		var result = scanner.GetRootFileExtensionsWithIgnoreOptionCounts(temp.Path, CreateBaseRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		AssertSetEquals(
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -40,7 +40,7 @@ public sealed class FileSystemScannerEntryEnumerationMetadataIntegrationTests
 		var scanner = new FileSystemScanner();
 		var result = scanner.GetExtensionsWithIgnoreOptionCounts(
 			Path.Combine(temp.Path, "src"),
-			CreateBaseRules());
+			CreateBaseRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		AssertSetEquals(
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -66,7 +66,7 @@ public sealed class FileSystemScannerEntryEnumerationMetadataIntegrationTests
 		var scanner = new FileSystemScanner();
 		var rules = CreateBaseRules() with { IgnoreDotFolders = true };
 
-		var result = scanner.GetRootFolderNames(temp.Path, rules);
+		var result = scanner.GetRootFolderNames(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(["src"], result.Value);
 	}
@@ -86,7 +86,7 @@ public sealed class FileSystemScannerEntryEnumerationMetadataIntegrationTests
 		var scanner = new FileSystemScanner();
 		var rules = CreateBaseRules() with { IgnoreHiddenFolders = true };
 
-		var result = scanner.GetRootFolderNames(temp.Path, rules);
+		var result = scanner.GetRootFolderNames(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(["src"], result.Value);
 	}
@@ -112,7 +112,7 @@ public sealed class FileSystemScannerEntryEnumerationMetadataIntegrationTests
 			temp.Path,
 			discoveryRules,
 			effectiveRules,
-			effectiveAllowedExtensions: null);
+			effectiveAllowedExtensions: null, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(new IgnoreOptionCounts(DotFiles: 1, ExtensionlessFiles: 1, EmptyFiles: 1), result.Value.EffectiveIgnoreOptionCounts);
 	}
