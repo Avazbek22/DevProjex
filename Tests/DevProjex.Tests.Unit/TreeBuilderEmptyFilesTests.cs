@@ -13,7 +13,7 @@ public sealed class TreeBuilderEmptyFilesTests
 
 		var builder = new TreeBuilder();
 
-		var result = builder.Build(temp.Path, CreateOptions([".txt"], [], ignoreEmptyFiles: false, ignoreEmptyFolders: false));
+		var result = builder.Build(temp.Path, CreateOptions([".txt"], [], ignoreEmptyFiles: false, ignoreEmptyFolders: false), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(2, result.Root.Children.Count);
 		Assert.Contains(result.Root.Children, child => child.Name == "empty.txt");
@@ -29,7 +29,7 @@ public sealed class TreeBuilderEmptyFilesTests
 
 		var builder = new TreeBuilder();
 
-		var result = builder.Build(temp.Path, CreateOptions([".txt"], [], ignoreEmptyFiles: true, ignoreEmptyFolders: false));
+		var result = builder.Build(temp.Path, CreateOptions([".txt"], [], ignoreEmptyFiles: true, ignoreEmptyFolders: false), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Root.Children);
 		Assert.Equal("filled.txt", result.Root.Children[0].Name);
@@ -43,7 +43,7 @@ public sealed class TreeBuilderEmptyFilesTests
 
 		var builder = new TreeBuilder();
 
-		var result = builder.Build(temp.Path, CreateOptions([".txt"], ["src"], ignoreEmptyFiles: true, ignoreEmptyFolders: false));
+		var result = builder.Build(temp.Path, CreateOptions([".txt"], ["src"], ignoreEmptyFiles: true, ignoreEmptyFolders: false), cancellationToken: TestContext.Current.CancellationToken);
 
 		var src = Assert.Single(result.Root.Children);
 		Assert.Equal("src", src.Name);
@@ -58,7 +58,7 @@ public sealed class TreeBuilderEmptyFilesTests
 
 		var builder = new TreeBuilder();
 
-		var result = builder.Build(temp.Path, CreateOptions([".txt"], ["src"], ignoreEmptyFiles: true, ignoreEmptyFolders: true));
+		var result = builder.Build(temp.Path, CreateOptions([".txt"], ["src"], ignoreEmptyFiles: true, ignoreEmptyFolders: true), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Empty(result.Root.Children);
 	}

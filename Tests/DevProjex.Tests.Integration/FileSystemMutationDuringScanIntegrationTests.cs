@@ -19,7 +19,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", snapshot.Value.Extensions);
 		Assert.DoesNotContain(".ts", snapshot.Value.Extensions);
@@ -35,7 +35,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 		Directory.Delete(Path.Combine(temp.Path, "deleted"), recursive: true);
 
 		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
-		var roots = scanOptions.GetRootFolders(temp.Path, CreateIgnoreRules()).Value;
+		var roots = scanOptions.GetRootFolders(temp.Path, CreateIgnoreRules(), cancellationToken: TestContext.Current.CancellationToken).Value;
 
 		Assert.Contains("src", roots);
 		Assert.DoesNotContain("deleted", roots);
@@ -58,7 +58,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", snapshot.Value.Extensions);
 		Assert.DoesNotContain(".ts", snapshot.Value.Extensions);
@@ -88,7 +88,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", snapshot.Value.Extensions);
 		Assert.Contains(".log", snapshot.Value.Extensions);
@@ -119,7 +119,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 			rulesBeforeMutation,
 			rulesBeforeMutation,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".log", currentSnapshot.Value.Extensions);
 		Assert.False(currentSnapshot.RootAccessDenied);
@@ -134,7 +134,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 			rulesAfterMutation,
 			rulesAfterMutation,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(".log", nextSnapshot.Value.Extensions);
 	}
@@ -156,7 +156,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", snapshot.Value.Extensions);
 		Assert.DoesNotContain(".ts", snapshot.Value.Extensions);
@@ -192,7 +192,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", snapshot.Value.Extensions);
 		Assert.Contains(".ts", snapshot.Value.Extensions);

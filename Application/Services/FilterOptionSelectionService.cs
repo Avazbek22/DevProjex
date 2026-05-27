@@ -55,7 +55,7 @@ public sealed class FilterOptionSelectionService
 
 	private static bool IsIgnoredByRules(string name, IgnoreRules rules)
 	{
-		if (rules.SmartIgnoredFolders.Contains(name))
+		if (rules.UseSmartIgnore && rules.SmartIgnoredFolders.Contains(name))
 			return true;
 
 		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(

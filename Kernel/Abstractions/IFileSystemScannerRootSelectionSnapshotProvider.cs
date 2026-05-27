@@ -9,5 +9,6 @@ public interface IFileSystemScannerRootSelectionSnapshotProvider
 		IgnoreRules effectiveRules,
 		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		bool includeDirectoryToggleProbeRoots = false,
-		CancellationToken cancellationToken = default);
+		CancellationToken cancellationToken = default,
+		bool includeControllerImpactProbeRoots = false);
 }

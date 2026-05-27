@@ -118,7 +118,10 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: true,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules", ".idea", ".vscode" },
-			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(
 			["bin", "obj", ".git", "node_modules", "src", "docs", "build", "Assets", ".idea", ".vscode"],
@@ -148,7 +151,10 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: true,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
-			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(
 			["bin", "obj", ".git", "node_modules", "src", "docs"],
@@ -194,7 +200,10 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
-			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(
 			["src", "docs", "generated", "node_modules", ".idea"],
@@ -224,7 +233,10 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
-			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(
 			["src", "docs", "generated", "node_modules"],
@@ -252,7 +264,10 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vendor" },
-			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(
 			["src", ".idea", "vendor"],

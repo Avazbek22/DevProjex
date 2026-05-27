@@ -22,7 +22,7 @@ public sealed class ScanOptionsUseCaseRootFoldersTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.GetRootFolders("/root", CreateRules());
+		var result = useCase.GetRootFolders("/root", CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(["Alpha", "beta", "zeta"], result.Value);
 		Assert.True(result.RootAccessDenied);
@@ -62,7 +62,7 @@ public sealed class ScanOptionsUseCaseRootFoldersTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.GetRootFolders("/root", CreateRules());
+		var result = useCase.GetRootFolders("/root", CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Value);
 		Assert.Equal("src", result.Value[0]);
@@ -81,7 +81,7 @@ public sealed class ScanOptionsUseCaseRootFoldersTests
 		var useCase = new ScanOptionsUseCase(scanner);
 
 		var ex = Assert.Throws<InvalidOperationException>(() =>
-			useCase.GetRootFolders("/root", CreateRules()));
+			useCase.GetRootFolders("/root", CreateRules(), cancellationToken: TestContext.Current.CancellationToken));
 		Assert.Contains("root scan failed", ex.Message, StringComparison.OrdinalIgnoreCase);
 	}
 }

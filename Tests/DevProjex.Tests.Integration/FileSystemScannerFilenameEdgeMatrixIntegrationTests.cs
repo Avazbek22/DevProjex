@@ -24,8 +24,8 @@ public sealed class FileSystemScannerFilenameEdgeMatrixIntegrationTests
 		var rules = CreateRules(ignoreExtensionless);
 		var scanner = new FileSystemScanner();
 
-		var rootResult = scanner.GetRootFileExtensionsWithIgnoreOptionCounts(temp.Path, rules);
-		var fullResult = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, rules);
+		var rootResult = scanner.GetRootFileExtensionsWithIgnoreOptionCounts(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
+		var fullResult = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		var expectedCount = expectedExtensionless ? 1 : 0;
 		Assert.Equal(expectedCount, rootResult.Value.IgnoreOptionCounts.ExtensionlessFiles);
@@ -94,7 +94,7 @@ public sealed class FileSystemScannerFilenameEdgeMatrixIntegrationTests
 		};
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, rules);
+		var result = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		// Inventory counters should not depend on visibility toggles.
 		Assert.Equal(1, result.Value.IgnoreOptionCounts.ExtensionlessFiles);

@@ -63,13 +63,13 @@ public sealed class MultiStackIgnoreLeakMatrixIntegrationTests
 				".rs", ".ts", ".tsx", ".json", ".toml", ".cs", ".py", ".js", ".dll", ".pyc", ".md"
 			},
 			AllowedRootFolders: new HashSet<string>(selectedRootFolders, StringComparer.OrdinalIgnoreCase),
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var scanner = new FileSystemScanner();
 		var extensionScan = new ScanOptionsUseCase(scanner).GetExtensionsForRootFolders(
 			openedRootPath,
 			selectedRootFolders,
-			rules);
+			rules, cancellationToken: TestContext.Current.CancellationToken);
 		var scannedExtensions = extensionScan.Value;
 
 		AssertProjectState(

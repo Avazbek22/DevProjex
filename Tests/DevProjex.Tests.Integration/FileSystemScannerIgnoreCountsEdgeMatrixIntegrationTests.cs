@@ -29,7 +29,7 @@ public sealed class FileSystemScannerIgnoreCountsEdgeMatrixIntegrationTests
 		var rootPath = CreateScenario(temp, scenario);
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensionsWithIgnoreOptionCounts(rootPath, BaselineRules);
+		var result = scanner.GetExtensionsWithIgnoreOptionCounts(rootPath, BaselineRules, cancellationToken: TestContext.Current.CancellationToken);
 		var counts = result.Value.IgnoreOptionCounts;
 
 		var expected = GetExpectedForFullScan(scenario);
@@ -49,7 +49,7 @@ public sealed class FileSystemScannerIgnoreCountsEdgeMatrixIntegrationTests
 		var rootPath = CreateScenario(temp, scenario);
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetRootFileExtensionsWithIgnoreOptionCounts(rootPath, BaselineRules);
+		var result = scanner.GetRootFileExtensionsWithIgnoreOptionCounts(rootPath, BaselineRules, cancellationToken: TestContext.Current.CancellationToken);
 		var counts = result.Value.IgnoreOptionCounts;
 
 		var expected = GetExpectedForRootFileScan(scenario);
@@ -90,7 +90,7 @@ public sealed class FileSystemScannerIgnoreCountsEdgeMatrixIntegrationTests
 
 		var scanner = new FileSystemScanner();
 		var rules = CreateRules(ignoreDotFolders, ignoreDotFiles, ignoreExtensionlessFiles, ignoreEmptyFolders);
-		var result = scanner.GetExtensionsWithIgnoreOptionCounts(rootPath, rules);
+		var result = scanner.GetExtensionsWithIgnoreOptionCounts(rootPath, rules, cancellationToken: TestContext.Current.CancellationToken);
 		var counts = result.Value.IgnoreOptionCounts;
 
 		// Dot and extensionless counters are inventory metrics.
@@ -128,7 +128,7 @@ public sealed class FileSystemScannerIgnoreCountsEdgeMatrixIntegrationTests
 		var result = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			selectedRoots,
-			BaselineRules);
+			BaselineRules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(expectedExtensionless, result.Value.IgnoreOptionCounts.ExtensionlessFiles);
 		Assert.Equal(expectedDotFiles, result.Value.IgnoreOptionCounts.DotFiles);

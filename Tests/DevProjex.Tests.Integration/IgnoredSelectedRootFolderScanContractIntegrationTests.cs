@@ -12,7 +12,7 @@ public sealed class IgnoredSelectedRootFolderScanContractIntegrationTests
 		var (enabledOptions, expectedIgnoredRootName, ignoreRulesService) = CreateScenario(temp, scenario);
 		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
 		var initialRules = ignoreRulesService.Build(temp.Path, []);
-		var initialRoots = scanOptions.GetRootFolders(temp.Path, initialRules).Value;
+		var initialRoots = scanOptions.GetRootFolders(temp.Path, initialRules, cancellationToken: TestContext.Current.CancellationToken).Value;
 
 		Assert.Contains(expectedIgnoredRootName, initialRoots, StringComparer.Ordinal);
 
@@ -20,13 +20,13 @@ public sealed class IgnoredSelectedRootFolderScanContractIntegrationTests
 		var rawScan = scanOptions.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			initialRoots,
-			enabledRules);
+			enabledRules, cancellationToken: TestContext.Current.CancellationToken);
 		var effectiveScan = scanOptions.GetEffectiveIgnoreOptionCountsForRootFolders(
 			temp.Path,
 			initialRoots,
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
 			enabledRules,
-			rawScan.Value.IgnoreOptionCounts);
+			rawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, rawScan.Value.IgnoreOptionCounts.ExtensionlessFiles);
 		Assert.Equal(1, effectiveScan.Value.ExtensionlessFiles);

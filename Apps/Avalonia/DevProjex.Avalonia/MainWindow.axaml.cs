@@ -25,6 +25,8 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow : Window
 {
+    private const double BranchMenuItemHeight = 32;
+
     private enum WorkspaceDisplayMode
     {
         Tree = 0,
@@ -157,6 +159,7 @@ public partial class MainWindow : Window
     private readonly IZipDownloadService _zipDownloadService;
     private readonly IFileContentAnalyzer _fileContentAnalyzer;
     private readonly RecentProjectsStore _recentProjectsStore;
+    private readonly ITaskbarProgressService _taskbarProgressService;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
@@ -228,6 +231,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
+    private bool _gitCloneTaskbarProgressActive;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
     private bool _projectProfilePersistencePending;
@@ -423,6 +427,7 @@ public partial class MainWindow : Window
         _zipDownloadService = services.ZipDownloadService;
         _fileContentAnalyzer = services.FileContentAnalyzer;
         _recentProjectsStore = services.RecentProjectsStore;
+        _taskbarProgressService = services.TaskbarProgressService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _viewModel.SetToastItems(_toastService.Items);
@@ -637,6 +642,10 @@ public partial class MainWindow : Window
                 HandleThemePopoverStateChange();
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
                 UpdateDropZoneFloatAnimationState();
+            else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
+                     or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
+                     or nameof(MainWindowViewModel.StatusProgressValue))
+                SyncTaskbarProgressWithStatusBar();
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
             {
                 RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
@@ -673,6 +682,7 @@ public partial class MainWindow : Window
 
         // Hook menu item submenu opening to apply brushes directly
         AddHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened, RoutingStrategies.Bubble);
+        AddHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened, RoutingStrategies.Bubble);
     }
 
     private void EnsureAppStateStoresExist()
@@ -741,6 +751,7 @@ public partial class MainWindow : Window
         RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
         RemoveHandler(KeyDownEvent, OnKeyDown);
         RemoveHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened);
+        RemoveHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened);
 
         // Unsubscribe from window lifecycle events
         Opened -= OnOpened;
@@ -783,6 +794,9 @@ public partial class MainWindow : Window
 
         // Clean up repository cache on exit
         _repoCacheService.ClearAllCache();
+
+        _taskbarProgressService.Clear();
+        _taskbarProgressService.Dispose();
 
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
@@ -926,6 +940,9 @@ public partial class MainWindow : Window
     {
         try
         {
+            _taskbarProgressService.Attach(this);
+            SyncTaskbarProgressWithStatusBar();
+
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
             ApplyStartupThemePreset();
 
@@ -953,6 +970,61 @@ public partial class MainWindow : Window
         {
             await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private void SyncTaskbarProgressWithStatusBar()
+    {
+        if (!_viewModel.StatusBusy)
+        {
+            _taskbarProgressService.Clear();
+            return;
+        }
+
+        if (_viewModel.StatusProgressIsIndeterminate)
+        {
+            _taskbarProgressService.SetIndeterminate();
+            return;
+        }
+
+        _taskbarProgressService.SetProgress(_viewModel.StatusProgressValue);
+    }
+
+    private void BeginGitCloneTaskbarProgress()
+    {
+        _gitCloneTaskbarProgressActive = true;
+        // The clone dialog is owner-only and hidden from the taskbar, so progress belongs
+        // to the main window icon even while the dialog is the active surface.
+        _taskbarProgressService.Attach(this);
+        _taskbarProgressService.SetIndeterminate();
+    }
+
+    private void UpdateGitCloneTaskbarProgress(string status)
+    {
+        if (!_gitCloneTaskbarProgressActive)
+            return;
+
+        if (TryParseTrailingPercent(status, out var percent))
+        {
+            _taskbarProgressService.SetProgress(percent);
+            return;
+        }
+
+        _taskbarProgressService.SetIndeterminate();
+    }
+
+    private void MarkGitCloneTaskbarProgressError()
+    {
+        if (_gitCloneTaskbarProgressActive)
+            _taskbarProgressService.SetError();
+    }
+
+    private void CompleteGitCloneTaskbarProgress()
+    {
+        if (!_gitCloneTaskbarProgressActive)
+            return;
+
+        _gitCloneTaskbarProgressActive = false;
+        SyncTaskbarProgressWithStatusBar();
     }
 
     #region Drop Zone Handlers
@@ -5379,6 +5451,7 @@ public partial class MainWindow : Window
 
         _viewModel.GitCloneInProgress = true;
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
+        BeginGitCloneTaskbarProgress();
 
         string? targetPath = null;
 
@@ -5391,6 +5464,7 @@ public partial class MainWindow : Window
                 _viewModel.GitCloneInProgress = false;
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
+                MarkGitCloneTaskbarProgressError();
                 await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
                 return;
             }
@@ -5411,6 +5485,8 @@ public partial class MainWindow : Window
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    UpdateGitCloneTaskbarProgress(status);
+
                     // Handle phase transition markers
                     if (status == "::EXTRACTING::")
                     {
@@ -5441,6 +5517,7 @@ public partial class MainWindow : Window
             {
                 currentOperation = _viewModel.GitCloneProgressCloning;
                 _viewModel.GitCloneStatus = currentOperation;
+                _taskbarProgressService.SetIndeterminate();
                 result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
             }
             else
@@ -5451,6 +5528,7 @@ public partial class MainWindow : Window
 
                 currentOperation = _viewModel.GitCloneProgressDownloading;
                 _viewModel.GitCloneStatus = currentOperation;
+                _taskbarProgressService.SetIndeterminate();
                 result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
             }
 
@@ -5462,6 +5540,7 @@ public partial class MainWindow : Window
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
+                MarkGitCloneTaskbarProgressError();
                 await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
                 _toastService.Show(_localization["Toast.Git.CloneError"]);
                 return;
@@ -5510,12 +5589,14 @@ public partial class MainWindow : Window
 
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
+            MarkGitCloneTaskbarProgressError();
             await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
             _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
         {
             _viewModel.GitCloneInProgress = false;
+            CompleteGitCloneTaskbarProgress();
             DisposeIfCurrent(ref _gitCloneCts, gitCloneCts);
         }
 
@@ -5540,6 +5621,7 @@ public partial class MainWindow : Window
     {
         _gitCloneCts?.Cancel();
         _viewModel.GitCloneInProgress = false;
+        CompleteGitCloneTaskbarProgress();
     }
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
@@ -5718,20 +5800,24 @@ public partial class MainWindow : Window
         // Clear old items - they will be garbage collected since they have no external references
         // and we're using a named handler method instead of lambda captures
         branchMenuItem.Items.Clear();
+        GitBranchMenuScrollBehavior.SetScrollable(branchMenuItem, _viewModel.GitBranches.Count);
 
         foreach (var branch in _viewModel.GitBranches)
+            branchMenuItem.Items.Add(CreateBranchMenuItem(branch));
+    }
+
+    private MenuItem CreateBranchMenuItem(GitBranch branch)
+    {
+        var item = new MenuItem
         {
-            var item = new MenuItem
-            {
-                Header = branch.IsActive ? $"✓ {branch.Name}" : $"   {branch.Name}",
-                Tag = branch.Name
-            };
+            Header = branch.IsActive ? $"✓ {branch.Name}" : $"   {branch.Name}",
+            Tag = branch.Name,
+            MinHeight = BranchMenuItemHeight
+        };
 
-            // Use named handler to avoid closure capture memory leaks
-            item.Click += OnBranchMenuItemClick;
-
-            branchMenuItem.Items.Add(item);
-        }
+        // Use a named handler to avoid closure captures and keep menu rebuilds cheap.
+        item.Click += OnBranchMenuItemClick;
+        return item;
     }
 
     private void OnBranchMenuItemClick(object? sender, RoutedEventArgs e)

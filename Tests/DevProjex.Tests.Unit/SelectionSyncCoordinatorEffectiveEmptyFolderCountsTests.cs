@@ -171,7 +171,7 @@ public sealed class SelectionSyncCoordinatorEffectiveEmptyFolderCountsTests
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [options, 0, ignoreCounts, hasIgnoreCounts]);
+		method!.Invoke(coordinator, [options, 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, hasIgnoreCounts]);
 	}
 
 	private static IgnoreRules CreateRules() => new(

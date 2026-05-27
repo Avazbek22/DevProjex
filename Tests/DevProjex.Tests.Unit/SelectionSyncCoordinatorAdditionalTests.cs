@@ -57,7 +57,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		var coordinator = CreateCoordinator(viewModel);
 
-		await coordinator.PopulateExtensionsForRootSelectionAsync(string.Empty, new List<string> { "src" });
+		await coordinator.PopulateExtensionsForRootSelectionAsync(string.Empty, new List<string> { "src" }, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(viewModel.Extensions);
 		Assert.Equal(".cs", viewModel.Extensions[0].Name);
@@ -71,7 +71,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		var coordinator = CreateCoordinator(viewModel);
 
-		await coordinator.PopulateRootFoldersAsync(string.Empty);
+		await coordinator.PopulateRootFoldersAsync(string.Empty, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(viewModel.RootFolders);
 		Assert.Equal("src", viewModel.RootFolders[0].Name);
@@ -86,7 +86,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		var coordinator = CreateCoordinator(viewModel);
 
-		await coordinator.UpdateLiveOptionsFromRootSelectionAsync(null);
+		await coordinator.UpdateLiveOptionsFromRootSelectionAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(viewModel.Extensions);
 		Assert.Single(viewModel.IgnoreOptions);
@@ -646,7 +646,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		};
 		var coordinator = CreateCoordinator(viewModel, scanner, () => currentPath);
 
-		await coordinator.PopulateRootFoldersAsync("C:\\ProjectA");
+		await coordinator.PopulateRootFoldersAsync("C:\\ProjectA", cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Empty(viewModel.RootFolders);
 	}
@@ -666,7 +666,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		};
 		var coordinator = CreateCoordinator(viewModel, scanner, () => currentPath);
 
-		await coordinator.PopulateExtensionsForRootSelectionAsync("C:\\ProjectA", []);
+		await coordinator.PopulateExtensionsForRootSelectionAsync("C:\\ProjectA", [], cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(viewModel.Extensions);
 		Assert.Equal(".keep", viewModel.Extensions[0].Name);
@@ -761,7 +761,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, true]);
+		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, true]);
 	}
 
 	private static void SetPrivateField(SelectionSyncCoordinator coordinator, string fieldName, string? value)

@@ -34,7 +34,7 @@ public sealed class ScanOptionsUseCaseEffectiveIgnoreBatchingTests
 				DotFiles: 96,
 				EmptyFolders: 95,
 				ExtensionlessFiles: 94,
-				EmptyFiles: 93));
+				EmptyFiles: 93), cancellationToken: TestContext.Current.CancellationToken);
 
 		var expectedFolderCounts = Enumerable.Range(1, folderCount)
 			.Select(EffectiveIgnoreBatchScanner.BuildFolderCounts)
@@ -67,7 +67,7 @@ public sealed class ScanOptionsUseCaseEffectiveIgnoreBatchingTests
 			selectedRoots,
 			allowedExtensions,
 			CreateRules(),
-			IgnoreOptionCounts.Empty);
+			IgnoreOptionCounts.Empty, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(scanner.RootFileAllowedExtensionsSnapshots);
 		Assert.Equal(3, scanner.FolderAllowedExtensionsSnapshots.ToArray().Length);

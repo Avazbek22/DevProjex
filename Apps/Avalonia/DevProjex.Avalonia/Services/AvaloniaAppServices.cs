@@ -27,4 +27,5 @@ public sealed record AvaloniaAppServices(
     IGitRepositoryService GitRepositoryService,
     IRepoCacheService RepoCacheService,
     IZipDownloadService ZipDownloadService,
-    IFileContentAnalyzer FileContentAnalyzer);
+    IFileContentAnalyzer FileContentAnalyzer,
+    ITaskbarProgressService TaskbarProgressService);

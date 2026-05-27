@@ -201,6 +201,64 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task CleanGitAndSmartControllers_RemainHiddenUntilTheyAffectVisibleContent()
+    {
+        using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: false);
+
+            var artifactPath = Path.Combine(project.RootPath, "bin", "Debug", "net10.0", "App.dll");
+            Directory.CreateDirectory(Path.GetDirectoryName(artifactPath)!);
+            await File.WriteAllTextAsync(artifactPath, "binary");
+
+            await UiTestDriver.RefreshProjectAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: false);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task CleanPythonSmartController_RemainsHiddenUntilSmartArtifactAppears()
+    {
+        using var project = UiTestProject.CreateWithCleanPythonSmartWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: false);
+
+            var artifactPath = Path.Combine(project.RootPath, "src", "__pycache__", "app.cpython-310.pyc");
+            Directory.CreateDirectory(Path.GetDirectoryName(artifactPath)!);
+            await File.WriteAllTextAsync(artifactPath, "binary");
+
+            await UiTestDriver.RefreshProjectAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task DotFolderExtensionlessNoise_RecomputesExtensionlessCounterAfterDynamicIgnoreOptionsAppear()
     {
         using var project = UiTestProject.CreateWithDotFolderExtensionlessNoise();

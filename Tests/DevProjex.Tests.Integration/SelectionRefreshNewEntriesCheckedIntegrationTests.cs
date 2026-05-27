@@ -134,6 +134,7 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 		AssertPathVisible(tree, "worker/app.py");
 		AssertPathHidden(tree, "docs/guide.md");
 		AssertPathHidden(tree, "api/bin/Debug/App.dll");
+		AssertPathHidden(tree, "api/logs/runtime.log");
 		AssertPathHidden(tree, "web/node_modules/pkg/index.js");
 		AssertPathHidden(tree, "worker/__pycache__/app.pyc");
 		AssertPathHidden(tree, ".idea/workspace.xml");
@@ -310,7 +311,7 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 
 	private static void SeedDeepPolyglotWorkspace(TemporaryDirectory temp)
 	{
-		temp.CreateFile(".gitignore", "ignored-root/\n*.tmp\n");
+		temp.CreateFile(".gitignore", "ignored-root/\n*.tmp\napi/logs/\n");
 		temp.CreateFile("api/App.csproj", "<Project />");
 		temp.CreateFile("api/src/Program.cs", "class Program {}");
 		temp.CreateFile("api/docs/design.md", "# Design");
@@ -332,6 +333,7 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 	{
 		temp.CreateFile("generated/reports/new-empty.log", string.Empty);
 		temp.CreateFile("generated/reports/summary.log", "summary");
+		temp.CreateFile("api/logs/runtime.log", "ignored by root gitignore");
 		temp.CreateFile("worker/requirements.txt", "pytest\n");
 		temp.CreateFile("worker/app.py", "print('ok')");
 		temp.CreateFile("worker/__pycache__/app.pyc", "binary");

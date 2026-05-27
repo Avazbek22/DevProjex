@@ -3,6 +3,7 @@ namespace DevProjex.Application.Selection;
 public readonly record struct IgnoreSectionSnapshotState(
     bool HasIgnoreOptionCounts,
     IgnoreOptionCounts IgnoreOptionCounts,
+    IgnoreControllerImpactCounts ControllerImpactCounts,
     bool HasExtensionlessEntries,
     int ExtensionlessEntriesCount)
 {
@@ -12,6 +13,7 @@ public readonly record struct IgnoreSectionSnapshotState(
     {
         return HasIgnoreOptionCounts != other.HasIgnoreOptionCounts ||
                IgnoreOptionCounts != other.IgnoreOptionCounts ||
+               ControllerImpactCounts != other.ControllerImpactCounts ||
                HasExtensionlessEntries != other.HasExtensionlessEntries ||
                ExtensionlessEntriesCount != other.ExtensionlessEntriesCount;
     }

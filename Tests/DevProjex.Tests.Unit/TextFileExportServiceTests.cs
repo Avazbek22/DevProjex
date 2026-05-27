@@ -8,7 +8,7 @@ public sealed class TextFileExportServiceTests
 		var service = new TextFileExportService();
 		await using var stream = new MemoryStream();
 
-		await service.WriteAsync(stream, "ASCII");
+		await service.WriteAsync(stream, "ASCII", cancellationToken: TestContext.Current.CancellationToken);
 
 		var bytes = stream.ToArray();
 		Assert.False(StartsWithUtf8Bom(bytes));
@@ -21,7 +21,7 @@ public sealed class TextFileExportServiceTests
 		var service = new TextFileExportService();
 		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("very long stale content"));
 
-		await service.WriteAsync(stream, "ok");
+		await service.WriteAsync(stream, "ok", cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal("ok", Encoding.UTF8.GetString(stream.ToArray()));
 	}
@@ -33,7 +33,7 @@ public sealed class TextFileExportServiceTests
 		await using var stream = new MemoryStream();
 		const string content = "line1\nline2\nline3";
 
-		await service.WriteAsync(stream, content);
+		await service.WriteAsync(stream, content, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(content, Encoding.UTF8.GetString(stream.ToArray()));
 	}
@@ -45,7 +45,7 @@ public sealed class TextFileExportServiceTests
 		await using var stream = new MemoryStream();
 		const string content = "line1\r\nline2\r\nline3";
 
-		await service.WriteAsync(stream, content);
+		await service.WriteAsync(stream, content, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(content, Encoding.UTF8.GetString(stream.ToArray()));
 	}
@@ -57,7 +57,7 @@ public sealed class TextFileExportServiceTests
 		await using var stream = new MemoryStream();
 		const string content = "Привет, мир! こんにちは";
 
-		await service.WriteAsync(stream, content);
+		await service.WriteAsync(stream, content, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(content, Encoding.UTF8.GetString(stream.ToArray()));
 	}
@@ -68,7 +68,7 @@ public sealed class TextFileExportServiceTests
 		var service = new TextFileExportService();
 		await using var stream = new MemoryStream();
 
-		await service.WriteAsync(stream, "hello");
+		await service.WriteAsync(stream, "hello", cancellationToken: TestContext.Current.CancellationToken);
 		stream.WriteByte((byte)'!');
 
 		Assert.Equal("hello!", Encoding.UTF8.GetString(stream.ToArray()));
@@ -80,7 +80,7 @@ public sealed class TextFileExportServiceTests
 		var service = new TextFileExportService();
 		using var nonSeekable = new NonSeekableWriteStream();
 
-		await service.WriteAsync(nonSeekable, "content");
+		await service.WriteAsync(nonSeekable, "content", cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal("content", nonSeekable.GetWrittenText());
 	}
@@ -91,7 +91,7 @@ public sealed class TextFileExportServiceTests
 		var service = new TextFileExportService();
 		await using var readOnly = new MemoryStream(new byte[16], writable: false);
 
-		await Assert.ThrowsAsync<InvalidOperationException>(() => service.WriteAsync(readOnly, "data"));
+		await Assert.ThrowsAsync<InvalidOperationException>(() => service.WriteAsync(readOnly, "data", cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact]
@@ -99,7 +99,7 @@ public sealed class TextFileExportServiceTests
 	{
 		var service = new TextFileExportService();
 
-		await Assert.ThrowsAsync<ArgumentNullException>(() => service.WriteAsync(null!, "data"));
+		await Assert.ThrowsAsync<ArgumentNullException>(() => service.WriteAsync(null!, "data", cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact]
@@ -108,7 +108,7 @@ public sealed class TextFileExportServiceTests
 		var service = new TextFileExportService();
 		await using var stream = new MemoryStream();
 
-		await Assert.ThrowsAsync<ArgumentNullException>(() => service.WriteAsync(stream, null!));
+		await Assert.ThrowsAsync<ArgumentNullException>(() => service.WriteAsync(stream, null!, cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact]

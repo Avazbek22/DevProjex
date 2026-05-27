@@ -208,7 +208,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [options, 0, ignoreCounts, hasIgnoreCounts]);
+		method!.Invoke(coordinator, [options, 0, ignoreCounts, new IgnoreControllerImpactCounts(GitIgnore: 1), hasIgnoreCounts]);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(

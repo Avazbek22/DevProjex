@@ -22,7 +22,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules),
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, snapshot.Value.RawIgnoreOptionCounts.DotFolders);
 		Assert.Equal(1, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
@@ -49,7 +49,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			["src"],
 			BuildExtensionDiscoveryRules(rules),
 			rules,
-			effectiveAllowedExtensions: null);
+			effectiveAllowedExtensions: null, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, snapshot.Value.RawIgnoreOptionCounts.DotFolders);
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
@@ -77,7 +77,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules),
 			rules,
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py" },
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, snapshot.Value.RawIgnoreOptionCounts.DotFolders);
 		Assert.Equal(1, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
@@ -105,7 +105,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".xml" },
 			rules,
 			IgnoreOptionCounts.Empty,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, counts.Value.DotFolders);
 	}
@@ -134,7 +134,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules),
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
@@ -146,7 +146,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules with { IgnoreDotFolders = false }),
 			rules with { IgnoreDotFolders = false },
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.Equal(0, dotFoldersOff.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
@@ -172,10 +172,10 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 		};
 
 		var scanner = new FileSystemScanner();
-		var rootFolders = scanner.GetRootFolderNames(temp.Path, rules);
+		var rootFolders = scanner.GetRootFolderNames(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(".idea", rootFolders.Value);
 
-		var rootFiles = scanner.GetRootFileExtensions(temp.Path, rules);
+		var rootFiles = scanner.GetRootFileExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(".env", rootFiles.Value);
 
 		var tree = new TreeBuilder().Build(
@@ -183,7 +183,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			new TreeFilterOptions(
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".env", ".py", ".xml" },
 				new HashSet<string>(PathComparer.Default) { ".idea", "src" },
-				rules));
+				rules), cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(tree.Root.Children, child => child.Name == ".idea");
 		Assert.Contains(tree.Root.Children, child => child.Name == ".env");
 	}
@@ -248,7 +248,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules),
 			rules,
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".xml" },
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
 	}
@@ -273,7 +273,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules),
 			rules,
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py" },
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -301,7 +301,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules),
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.Contains(".py", snapshot.Value.Extensions);
@@ -327,7 +327,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(maskedRules),
 			maskedRules,
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".json" },
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, masked.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.Equal(0, masked.Value.EffectiveIgnoreOptionCounts.EmptyFolders);
@@ -339,7 +339,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(unmaskedRules),
 			unmaskedRules,
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".json" },
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		// EmptyFolders can mask a parent before nested dot folders participate in the
 		// effective tree. Once that parent is selected, both toggles are real decisions:
@@ -371,7 +371,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules),
 			rules,
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".xml" },
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.DoesNotContain(".xml", snapshot.Value.Extensions);
@@ -399,7 +399,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			BuildExtensionDiscoveryRules(rules),
 			rules,
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py", ".cfg" },
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.DoesNotContain(".cfg", snapshot.Value.Extensions);

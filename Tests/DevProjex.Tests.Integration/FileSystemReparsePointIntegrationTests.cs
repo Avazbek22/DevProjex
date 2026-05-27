@@ -16,7 +16,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			new TreeFilterOptions(
 				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
 				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "real" },
-				IgnoreRules: CreateIgnoreRules()));
+				IgnoreRules: CreateIgnoreRules()), cancellationToken: TestContext.Current.CancellationToken);
 
 		var real = Assert.Single(tree.Root.Children, node => string.Equals(node.Name, "real", StringComparison.Ordinal));
 		Assert.Contains(real.Children, node => string.Equals(node.Name, "app.cs", StringComparison.Ordinal));
@@ -36,22 +36,22 @@ public sealed class FileSystemReparsePointIntegrationTests
 		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
 		var rules = CreateIgnoreRules() with { IgnoreDotFolders = true };
 
-		var rootFolders = scanOptions.GetRootFolders(temp.Path, rules).Value;
+		var rootFolders = scanOptions.GetRootFolders(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken).Value;
 		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
 			temp.Path,
 			["linked"],
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
-		var extensionScan = scanOptions.GetExtensionsForRootFolders(temp.Path, ["linked"], rules);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
+		var extensionScan = scanOptions.GetExtensionsForRootFolders(temp.Path, ["linked"], rules, cancellationToken: TestContext.Current.CancellationToken);
 		var effectiveCounts = scanOptions.GetEffectiveIgnoreOptionCountsForRootFolders(
 			temp.Path,
 			["linked"],
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
 			rules,
 			IgnoreOptionCounts.Empty,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain("linked", rootFolders);
 		Assert.Empty(snapshot.Value.Extensions);
@@ -75,7 +75,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			new TreeFilterOptions(
 				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
 				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src", "dangling" },
-				IgnoreRules: CreateIgnoreRules()));
+				IgnoreRules: CreateIgnoreRules()), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "src", StringComparison.Ordinal));
 		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "dangling", StringComparison.Ordinal));
@@ -95,7 +95,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			new TreeFilterOptions(
 				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
 				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "real" },
-				IgnoreRules: CreateIgnoreRules()));
+				IgnoreRules: CreateIgnoreRules()), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "real", StringComparison.Ordinal));
 		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "linked.cs", StringComparison.Ordinal));
@@ -122,14 +122,14 @@ public sealed class FileSystemReparsePointIntegrationTests
 			new TreeFilterOptions(
 				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".ts" },
 				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "real" },
-				IgnoreRules: rules));
+				IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 		var snapshot = new ScanOptionsUseCase(new FileSystemScanner()).GetIgnoreSectionSnapshotForRootFolders(
 			temp.Path,
 			["real"],
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		var real = Assert.Single(tree.Root.Children, node => string.Equals(node.Name, "real", StringComparison.Ordinal));
 		var nested = Assert.Single(real.Children, node => string.Equals(node.Name, "nested", StringComparison.Ordinal));
@@ -158,7 +158,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Empty(snapshot.Value.Extensions);
 		Assert.False(snapshot.RootAccessDenied);
@@ -184,14 +184,14 @@ public sealed class FileSystemReparsePointIntegrationTests
 
 		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
 		var rules = CreateIgnoreRules();
-		var rootFolders = scanOptions.GetRootFolders(temp.Path, rules).Value;
+		var rootFolders = scanOptions.GetRootFolders(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken).Value;
 		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
 			temp.Path,
 			["junction"],
 			rules,
 			rules,
 			effectiveAllowedExtensions: null,
-			includeDirectoryToggleProbeRoots: true);
+			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain("junction", rootFolders);
 		Assert.Empty(snapshot.Value.Extensions);
@@ -224,7 +224,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			new TreeFilterOptions(
 				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".log" },
 				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src", "ignored", "logs" },
-				IgnoreRules: rules));
+				IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(rules.UseGitIgnore);
 		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "src", StringComparison.Ordinal));
@@ -249,7 +249,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			new TreeFilterOptions(
 				AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".log" },
 				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "logs" },
-				IgnoreRules: rules));
+				IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		// A file-only gitignore pattern must not behave like "logs/".
 		var logs = Assert.Single(tree.Root.Children, node => string.Equals(node.Name, "logs", StringComparison.Ordinal));

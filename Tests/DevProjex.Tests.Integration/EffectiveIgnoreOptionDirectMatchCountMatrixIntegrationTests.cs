@@ -19,13 +19,13 @@ public sealed class EffectiveIgnoreOptionDirectMatchCountMatrixIntegrationTests
 		var rawScan = scanOptions.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			[target.RootName],
-			rules);
+			rules, cancellationToken: TestContext.Current.CancellationToken);
 		var effectiveScan = scanOptions.GetEffectiveIgnoreOptionCountsForRootFolders(
 			temp.Path,
 			[target.RootName],
 			target.AllowedExtensions,
 			rules,
-			rawScan.Value.IgnoreOptionCounts);
+			rawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 
 		var toggledRules = target.BuildRules(temp.Path, !ruleEnabled);
 		var currentTree = BuildTreeDescriptor(temp.Path, target.RootName, target.AllowedExtensions, rules);

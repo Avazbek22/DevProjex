@@ -20,13 +20,13 @@ public sealed class RecentProjectsMultiInstanceIntegrationTests
         {
             startGate.Wait();
             storeA.AddFolder(snapshotA, folderPath);
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         var repositoryTask = Task.Run(() =>
         {
             startGate.Wait();
             storeB.AddRepository(snapshotB, repositoryUrl);
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         startGate.Set();
         await Task.WhenAll(folderTask, repositoryTask);

@@ -49,7 +49,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
         try
         {
             // Act
-            var result = await _gitService.CloneAsync(TestRepoUrl, cacheDir);
+            var result = await _gitService.CloneAsync(TestRepoUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert
             Assert.True(result.Success, $"Clone failed: {result.ErrorMessage}");
@@ -78,7 +78,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
         try
         {
             // Act
-            var result = await _gitService.CloneAsync(invalidUrl, cacheDir);
+            var result = await _gitService.CloneAsync(invalidUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert - clone should fail
             Assert.False(result.Success);
@@ -141,7 +141,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
         try
         {
             // Act - Clone first repo
-            var result1 = await _gitService.CloneAsync(TestRepoUrl, cache1);
+            var result1 = await _gitService.CloneAsync(TestRepoUrl, cache1, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(result1.Success);
             Assert.True(Directory.Exists(cache1));
 
@@ -151,7 +151,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
             _cacheService.DeleteRepositoryDirectory(cache1);
 
             // Clone second repo
-            var result2 = await _gitService.CloneAsync(TestRepoUrl, cache2);
+            var result2 = await _gitService.CloneAsync(TestRepoUrl, cache2, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(result2.Success);
 
             // Assert - new cache exists and paths are different
@@ -207,10 +207,10 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
         try
         {
             // Act
-            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, cacheDir);
+            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(cloneResult.Success);
 
-            var branches = await _gitService.GetBranchesAsync(cacheDir);
+            var branches = await _gitService.GetBranchesAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert
             Assert.NotEmpty(branches);
@@ -234,28 +234,28 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
         try
         {
             // Act
-            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, cacheDir);
+            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Skip if clone failed (might be network/rate limiting issue)
             if (!cloneResult.Success)
                 return;
 
-            var branches = await _gitService.GetBranchesAsync(cacheDir);
+            var branches = await _gitService.GetBranchesAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
             if (branches.Count < 2)
                 return; // Skip if repo doesn't have multiple branches
 
-            var currentBranch = await _gitService.GetCurrentBranchAsync(cacheDir);
+            var currentBranch = await _gitService.GetCurrentBranchAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
             var otherBranch = branches.FirstOrDefault(b => b.Name != currentBranch)?.Name;
 
             if (otherBranch is null)
                 return; // Skip if no other branch available
 
-            var switched = await _gitService.SwitchBranchAsync(cacheDir, otherBranch);
+            var switched = await _gitService.SwitchBranchAsync(cacheDir, otherBranch, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert - if switch succeeded, verify branch changed
             if (switched)
             {
-                var newBranch = await _gitService.GetCurrentBranchAsync(cacheDir);
+                var newBranch = await _gitService.GetCurrentBranchAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
                 Assert.Equal(otherBranch, newBranch);
             }
             // If switch failed, that's acceptable (might be shallow clone limitation)

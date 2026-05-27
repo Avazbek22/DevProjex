@@ -32,6 +32,7 @@ public sealed class SelectionRefreshEngineTests
 				CurrentSnapshotState: new IgnoreSectionSnapshotState(
 					HasIgnoreOptionCounts: false,
 					IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+					ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 					HasExtensionlessEntries: false,
 					ExtensionlessEntriesCount: 0)),
 			CancellationToken.None);
@@ -112,7 +113,9 @@ public sealed class SelectionRefreshEngineTests
 	[Fact]
 	public void ComputeFullRefreshSnapshot_ProfileFallback_DoesNotDefaultCheckUnselectedControllers()
 	{
-		var scanner = new ProfileFallbackVisibilityScanner();
+		var scanner = new ProfileFallbackVisibilityScanner(new IgnoreControllerImpactCounts(
+			GitIgnore: 1,
+			SmartIgnore: 1));
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var engine = new SelectionRefreshEngine(
 			new ScanOptionsUseCase(scanner),
@@ -132,6 +135,29 @@ public sealed class SelectionRefreshEngineTests
 		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && !option.IsChecked);
 		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore && !option.IsChecked);
 		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.DotFolders, out var isChecked) && isChecked);
+	}
+
+	[Fact]
+	public void ComputeFullRefreshSnapshot_ControllerMetadataWithoutImpact_HidesControllers()
+	{
+		var scanner = new ProfileFallbackVisibilityScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(scanner),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			(_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				ShowAdvancedCounts: true));
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(
+			CreateDefaultsContext(),
+			CancellationToken.None);
+
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore);
 	}
 
 	private static SelectionRefreshEngine CreateEngine(
@@ -163,6 +189,7 @@ public sealed class SelectionRefreshEngineTests
 			CurrentSnapshotState: new IgnoreSectionSnapshotState(
 				HasIgnoreOptionCounts: false,
 				IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 				HasExtensionlessEntries: false,
 				ExtensionlessEntriesCount: 0));
 
@@ -185,6 +212,7 @@ public sealed class SelectionRefreshEngineTests
 			CurrentSnapshotState = new IgnoreSectionSnapshotState(
 				HasIgnoreOptionCounts: true,
 				IgnoreOptionCounts: new IgnoreOptionCounts(EmptyFiles: 1),
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 				HasExtensionlessEntries: false,
 				ExtensionlessEntriesCount: 0)
 		};
@@ -207,6 +235,7 @@ public sealed class SelectionRefreshEngineTests
 			CurrentSnapshotState: new IgnoreSectionSnapshotState(
 				HasIgnoreOptionCounts: false,
 				IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 				HasExtensionlessEntries: false,
 				ExtensionlessEntriesCount: 0));
 
@@ -634,6 +663,14 @@ public sealed class SelectionRefreshEngineTests
 	private sealed class ProfileFallbackVisibilityScanner
 		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
 	{
+		private readonly IgnoreControllerImpactCounts _controllerImpactCounts;
+
+		public ProfileFallbackVisibilityScanner(
+			IgnoreControllerImpactCounts controllerImpactCounts = default)
+		{
+			_controllerImpactCounts = controllerImpactCounts;
+		}
+
 		public bool CanReadRoot(string rootPath) => true;
 
 		public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
@@ -695,7 +732,8 @@ public sealed class SelectionRefreshEngineTests
 				new IgnoreSectionScanData(
 					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 					IgnoreOptionCounts.Empty,
-					IgnoreOptionCounts.Empty),
+					IgnoreOptionCounts.Empty,
+					_controllerImpactCounts),
 				false,
 				false);
 		}

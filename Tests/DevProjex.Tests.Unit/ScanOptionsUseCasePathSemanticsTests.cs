@@ -23,7 +23,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.GetRootFolders(CreateRootPath(), CreateRules());
+		var result = useCase.GetRootFolders(CreateRootPath(), CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		var expected = returnedFolders.ToList();
 		expected.Sort(PathComparer.Default);
@@ -53,7 +53,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		_ = useCase.GetExtensionsForRootFolders(rootPath, ["Src", "docs"], CreateRules());
+		_ = useCase.GetExtensionsForRootFolders(rootPath, ["Src", "docs"], CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		AssertSamePathsIgnoringParallelOrder(
 			[
@@ -70,7 +70,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		var scanner = new RecordingAdvancedScanner();
 		var useCase = new ScanOptionsUseCase(scanner);
 
-		_ = useCase.GetExtensionsAndIgnoreCountsForRootFolders(rootPath, ["Src", "docs"], CreateRules());
+		_ = useCase.GetExtensionsAndIgnoreCountsForRootFolders(rootPath, ["Src", "docs"], CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(rootPath, scanner.RootFilePath);
 		AssertSamePathsIgnoringParallelOrder(
@@ -108,7 +108,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		_ = useCase.GetExtensionsForRootFolders(
 			temp.Path,
 			["src", "missing", ".", "..", rootedSelection],
-			CreateRules());
+			CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal([Path.Combine(temp.Path, "src")], folderCalls);
 	}

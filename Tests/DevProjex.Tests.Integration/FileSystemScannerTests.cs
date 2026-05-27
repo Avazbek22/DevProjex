@@ -14,7 +14,7 @@ public sealed class FileSystemScannerTests
 		var scanner = new FileSystemScanner();
 		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
-		var result = scanner.GetExtensions(temp.Path, rules);
+		var result = scanner.GetExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", result.Value);
 		Assert.Contains(".md", result.Value);
@@ -34,7 +34,7 @@ public sealed class FileSystemScannerTests
 		var scanner = new FileSystemScanner();
 		var rules = new IgnoreRules(false, true, false, true, new HashSet<string>(), new HashSet<string>());
 
-		var result = scanner.GetExtensions(temp.Path, rules);
+		var result = scanner.GetExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(string.Empty, result.Value);
 		Assert.Single(result.Value);
@@ -52,7 +52,7 @@ public sealed class FileSystemScannerTests
 		var scanner = new FileSystemScanner();
 		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
-		var result = scanner.GetRootFileExtensions(temp.Path, rules);
+		var result = scanner.GetRootFileExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", result.Value);
 		Assert.DoesNotContain(".txt", result.Value);
@@ -69,7 +69,7 @@ public sealed class FileSystemScannerTests
 		var scanner = new FileSystemScanner();
 		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
-		var result = scanner.GetRootFolderNames(temp.Path, rules);
+		var result = scanner.GetRootFolderNames(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("bin", result.Value);
 		Assert.Contains("src", result.Value);
@@ -92,7 +92,7 @@ public sealed class FileSystemScannerTests
 		var scanner = new FileSystemScanner();
 		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
-		var result = scanner.GetExtensions("/path/does/not/exist", rules);
+		var result = scanner.GetExtensions("/path/does/not/exist", rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Empty(result.Value);
 		Assert.False(result.RootAccessDenied);
@@ -118,7 +118,7 @@ public sealed class FileSystemScannerTests
 			UseSmartIgnore = true
 		};
 
-		var result = scanner.GetExtensions(temp.Path, rules);
+		var result = scanner.GetExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(".txt", result.Value);
 		Assert.Contains(".md", result.Value);
@@ -140,7 +140,7 @@ public sealed class FileSystemScannerTests
 			SmartIgnoredFolders: new HashSet<string>(),
 			SmartIgnoredFiles: new HashSet<string>());
 
-		var result = scanner.GetExtensions(temp.Path, rules);
+		var result = scanner.GetExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".txt", result.Value);
 		Assert.Single(result.Value);
@@ -157,7 +157,7 @@ public sealed class FileSystemScannerTests
 		var scanner = new FileSystemScanner();
 		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
 
-		var result = scanner.GetRootFolderNames(temp.Path, rules);
+		var result = scanner.GetRootFolderNames(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal("A", result.Value[0]);
 		Assert.Equal("b", result.Value[1]);
@@ -174,7 +174,7 @@ public sealed class FileSystemScannerTests
 		var scanner = new FileSystemScanner();
 		var rules = new IgnoreRules(false, false, false, true, new HashSet<string>(), new HashSet<string>());
 
-		var result = scanner.GetRootFileExtensions(temp.Path, rules);
+		var result = scanner.GetRootFileExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".txt", result.Value);
 		Assert.DoesNotContain(".cs", result.Value);
@@ -195,7 +195,7 @@ public sealed class FileSystemScannerTests
 		};
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(temp.Path, rules);
+		var result = scanner.GetExtensions(temp.Path, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".txt", result.Value);
 		Assert.DoesNotContain(".log", result.Value);
@@ -226,7 +226,7 @@ public sealed class FileSystemScannerTests
 			selectedRootFolders: ["Documents"]);
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(Path.Combine(temp.Path, "Documents"), rules);
+		var result = scanner.GetExtensions(Path.Combine(temp.Path, "Documents"), rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", result.Value);
 		Assert.Equal(!useSmartIgnore, result.Value.Contains(".exe"));
@@ -253,7 +253,7 @@ public sealed class FileSystemScannerTests
 			selectedRootFolders: ["Documents"]);
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetExtensions(Path.Combine(temp.Path, "Documents"), rules);
+		var result = scanner.GetExtensions(Path.Combine(temp.Path, "Documents"), rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(".cs", result.Value);
 		Assert.DoesNotContain(".exe", result.Value);

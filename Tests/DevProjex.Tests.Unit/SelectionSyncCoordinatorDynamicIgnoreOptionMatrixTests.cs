@@ -199,7 +199,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreOptionMatrixTests
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, true]);
+		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, true]);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(MainWindowViewModel viewModel)

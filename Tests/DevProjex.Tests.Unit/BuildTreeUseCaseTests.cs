@@ -1,4 +1,4 @@
-﻿namespace DevProjex.Tests.Unit;
+namespace DevProjex.Tests.Unit;
 
 public sealed class BuildTreeUseCaseTests
 {
@@ -31,7 +31,7 @@ public sealed class BuildTreeUseCaseTests
 			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
-				SmartIgnoredFiles: new HashSet<string>()))));
+				SmartIgnoredFiles: new HashSet<string>()))), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal("root", result.Root.DisplayName);
 		Assert.Equal("folder", result.Root.IconKey);
@@ -66,7 +66,7 @@ public sealed class BuildTreeUseCaseTests
 			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
-				SmartIgnoredFiles: new HashSet<string>()))));
+				SmartIgnoredFiles: new HashSet<string>()))), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result.RootAccessDenied);
 		Assert.True(result.HadAccessDenied);

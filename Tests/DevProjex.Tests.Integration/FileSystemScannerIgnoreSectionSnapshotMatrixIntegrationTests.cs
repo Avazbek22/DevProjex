@@ -21,12 +21,12 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 			[testCase.RootRelativePath],
 			discoveryRules,
 			effectiveRules,
-			testCase.AllowedExtensions);
+			testCase.AllowedExtensions, cancellationToken: TestContext.Current.CancellationToken);
 
 		var legacyRawScan = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			[testCase.RootRelativePath],
-			discoveryRules);
+			discoveryRules, cancellationToken: TestContext.Current.CancellationToken);
 		var resolvedAllowedExtensions = testCase.AllowedExtensions ??
 										BuildAllDiscoveredExtensionsSet(legacyRawScan.Value.Extensions);
 		var legacyEffectiveScan = useCase.GetEffectiveIgnoreOptionCountsForRootFolders(
@@ -34,7 +34,7 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 			[testCase.RootRelativePath],
 			resolvedAllowedExtensions,
 			effectiveRules,
-			legacyRawScan.Value.IgnoreOptionCounts);
+			legacyRawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 
 		AssertSetEquals(legacyRawScan.Value.Extensions, snapshot.Value.Extensions);
 		Assert.Equal(legacyRawScan.Value.IgnoreOptionCounts, snapshot.Value.RawIgnoreOptionCounts);
@@ -72,19 +72,19 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 			selectedRoots,
 			discoveryRules,
 			effectiveRules,
-			policy);
+			policy, cancellationToken: TestContext.Current.CancellationToken);
 
 		var legacyRawScan = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			selectedRoots,
-			discoveryRules);
+			discoveryRules, cancellationToken: TestContext.Current.CancellationToken);
 		var legacyAllowedExtensions = BuildPolicyAllowedExtensionsSet(legacyRawScan.Value.Extensions, policy);
 		var legacyEffectiveScan = useCase.GetEffectiveIgnoreOptionCountsForRootFolders(
 			temp.Path,
 			selectedRoots,
 			legacyAllowedExtensions,
 			effectiveRules,
-			legacyRawScan.Value.IgnoreOptionCounts);
+			legacyRawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 
 		AssertSetEquals(legacyRawScan.Value.Extensions, snapshot.Value.Extensions);
 		Assert.Equal(legacyRawScan.Value.IgnoreOptionCounts, snapshot.Value.RawIgnoreOptionCounts);
@@ -130,24 +130,24 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 			["src"],
 			BuildExtensionDiscoveryRules(largeRules),
 			largeRules,
-			effectiveAllowedExtensions: null);
+			effectiveAllowedExtensions: null, cancellationToken: TestContext.Current.CancellationToken);
 
 		var snapshot = useCase.GetIgnoreSectionSnapshotForRootFolders(
 			small.Path,
 			["src"],
 			BuildExtensionDiscoveryRules(smallRules),
 			smallRules,
-			effectiveAllowedExtensions: null);
+			effectiveAllowedExtensions: null, cancellationToken: TestContext.Current.CancellationToken);
 		var legacyRawScan = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
 			small.Path,
 			["src"],
-			BuildExtensionDiscoveryRules(smallRules));
+			BuildExtensionDiscoveryRules(smallRules), cancellationToken: TestContext.Current.CancellationToken);
 		var legacyEffectiveScan = useCase.GetEffectiveIgnoreOptionCountsForRootFolders(
 			small.Path,
 			["src"],
 			BuildAllDiscoveredExtensionsSet(legacyRawScan.Value.Extensions),
 			smallRules,
-			legacyRawScan.Value.IgnoreOptionCounts);
+			legacyRawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 
 		AssertSetEquals(legacyRawScan.Value.Extensions, snapshot.Value.Extensions);
 		Assert.Equal(legacyRawScan.Value.IgnoreOptionCounts, snapshot.Value.RawIgnoreOptionCounts);

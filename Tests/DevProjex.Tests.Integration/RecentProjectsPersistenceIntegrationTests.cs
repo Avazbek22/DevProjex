@@ -26,13 +26,13 @@ public sealed class RecentProjectsPersistenceIntegrationTests
     }
 
     [Fact]
-    public void Store_PersistsOnlyTheTenMostRecentFoldersAcrossInstances()
+    public void Store_PersistsOnlyTheFifteenMostRecentFoldersAcrossInstances()
     {
         using var temp = new TemporaryDirectory();
         var firstStore = new RecentProjectsStore(() => temp.Path);
         var db = firstStore.Load();
 
-        var folderPaths = Enumerable.Range(0, 12)
+        var folderPaths = Enumerable.Range(0, 17)
             .Select(index => temp.CreateDirectory($"Folders/Folder{index}"))
             .ToArray();
 
@@ -42,10 +42,10 @@ public sealed class RecentProjectsPersistenceIntegrationTests
         var secondStore = new RecentProjectsStore(() => temp.Path);
         var reloaded = secondStore.Load();
 
-        Assert.Equal(10, reloaded.RecentFolders.Count);
-        Assert.Equal(PathUtility.Normalize(folderPaths[11]), reloaded.RecentFolders[0].Path);
-        Assert.Equal(PathUtility.Normalize(folderPaths[10]), reloaded.RecentFolders[1].Path);
-        Assert.Equal(PathUtility.Normalize(folderPaths[2]), reloaded.RecentFolders[9].Path);
+        Assert.Equal(15, reloaded.RecentFolders.Count);
+        Assert.Equal(PathUtility.Normalize(folderPaths[16]), reloaded.RecentFolders[0].Path);
+        Assert.Equal(PathUtility.Normalize(folderPaths[15]), reloaded.RecentFolders[1].Path);
+        Assert.Equal(PathUtility.Normalize(folderPaths[2]), reloaded.RecentFolders[14].Path);
         Assert.DoesNotContain(reloaded.RecentFolders, entry => entry.Path == PathUtility.Normalize(folderPaths[0]));
         Assert.DoesNotContain(reloaded.RecentFolders, entry => entry.Path == PathUtility.Normalize(folderPaths[1]));
     }

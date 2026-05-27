@@ -14,7 +14,7 @@ public sealed class FileSystemScannerEmptyFilesTests
 
 		var scanner = new FileSystemScanner();
 
-		var result = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, CreateRules(ignoreEmptyFiles: false));
+		var result = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, CreateRules(ignoreEmptyFiles: false), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result.Value.Extensions.SetEquals([".txt", ".md", ".cs"]));
 		Assert.Equal(2, result.Value.IgnoreOptionCounts.EmptyFiles);
@@ -30,7 +30,7 @@ public sealed class FileSystemScannerEmptyFilesTests
 
 		var scanner = new FileSystemScanner();
 
-		var result = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, CreateRules(ignoreEmptyFiles: true));
+		var result = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, CreateRules(ignoreEmptyFiles: true), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result.Value.Extensions.SetEquals([".cs"]));
 		Assert.Equal(2, result.Value.IgnoreOptionCounts.EmptyFiles);
@@ -45,7 +45,7 @@ public sealed class FileSystemScannerEmptyFilesTests
 
 		var scanner = new FileSystemScanner();
 
-		var result = scanner.GetRootFileExtensionsWithIgnoreOptionCounts(temp.Path, CreateRules(ignoreEmptyFiles: true));
+		var result = scanner.GetRootFileExtensionsWithIgnoreOptionCounts(temp.Path, CreateRules(ignoreEmptyFiles: true), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result.Value.Extensions.SetEquals([".cs"]));
 		Assert.Equal(1, result.Value.IgnoreOptionCounts.EmptyFiles);

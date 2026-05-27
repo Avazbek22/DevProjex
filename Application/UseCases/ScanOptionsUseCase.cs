@@ -260,7 +260,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		IgnoreRules effectiveRules,
 		IReadOnlySet<string>? effectiveAllowedExtensions,
 		bool includeDirectoryToggleProbeRoots = false,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		bool includeControllerImpactProbeRoots = false)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -276,7 +277,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				effectiveRules,
 				effectiveExtensionPolicy,
 				includeDirectoryToggleProbeRoots,
-				cancellationToken);
+				cancellationToken,
+				includeControllerImpactProbeRoots);
 		}
 
 		if (scanner is not IFileSystemScannerIgnoreSectionSnapshotProvider provider)
@@ -325,7 +327,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		IgnoreRules effectiveRules,
 		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		bool includeDirectoryToggleProbeRoots = false,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		bool includeControllerImpactProbeRoots = false)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -338,7 +341,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				effectiveRules,
 				effectiveExtensionPolicy,
 				includeDirectoryToggleProbeRoots,
-				cancellationToken);
+				cancellationToken,
+				includeControllerImpactProbeRoots);
 		}
 
 		if (scanner is not IFileSystemScannerExtensionPolicySnapshotProvider policyProvider)
@@ -397,6 +401,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		var aggregatedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var rawCounts = IgnoreOptionCounts.Empty;
 		var effectiveCounts = IgnoreOptionCounts.Empty;
+		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
 		var mergeLock = new object();
@@ -414,6 +419,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		aggregatedExtensions.UnionWith(rootFileSnapshot.Value.Extensions);
 		rawCounts = rawCounts.Add(rootFileSnapshot.Value.RawIgnoreOptionCounts);
 		effectiveCounts = effectiveCounts.Add(rootFileSnapshot.Value.EffectiveIgnoreOptionCounts);
+		controllerImpactCounts = controllerImpactCounts.Add(rootFileSnapshot.Value.ControllerImpactCounts);
 		if (rootFileSnapshot.RootAccessDenied)
 			Interlocked.Exchange(ref rootAccessDenied, 1);
 		if (rootFileSnapshot.HadAccessDenied)
@@ -443,6 +449,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 						localAccumulator.RawIgnoreOptionCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
 					localAccumulator.EffectiveIgnoreOptionCounts =
 						localAccumulator.EffectiveIgnoreOptionCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
+					localAccumulator.ControllerImpactCounts =
+						localAccumulator.ControllerImpactCounts.Add(snapshot.Value.ControllerImpactCounts);
 
 					if (snapshot.RootAccessDenied)
 						Interlocked.Exchange(ref rootAccessDenied, 1);
@@ -455,7 +463,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				{
 					if (localAccumulator.Extensions.Count == 0 &&
 					    localAccumulator.RawIgnoreOptionCounts == IgnoreOptionCounts.Empty &&
-					    localAccumulator.EffectiveIgnoreOptionCounts == IgnoreOptionCounts.Empty)
+					    localAccumulator.EffectiveIgnoreOptionCounts == IgnoreOptionCounts.Empty &&
+					    localAccumulator.ControllerImpactCounts == IgnoreControllerImpactCounts.Empty)
 					{
 						return;
 					}
@@ -465,6 +474,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 						aggregatedExtensions.UnionWith(localAccumulator.Extensions);
 						rawCounts = rawCounts.Add(localAccumulator.RawIgnoreOptionCounts);
 						effectiveCounts = effectiveCounts.Add(localAccumulator.EffectiveIgnoreOptionCounts);
+						controllerImpactCounts = controllerImpactCounts.Add(localAccumulator.ControllerImpactCounts);
 					}
 				});
 		}
@@ -486,7 +496,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			new IgnoreSectionScanData(
 				aggregatedExtensions,
 				rawCounts,
-				effectiveCounts),
+				effectiveCounts,
+				controllerImpactCounts),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1);
 	}
@@ -685,6 +696,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
 		public IgnoreOptionCounts RawIgnoreOptionCounts { get; set; } = IgnoreOptionCounts.Empty;
 		public IgnoreOptionCounts EffectiveIgnoreOptionCounts { get; set; } = IgnoreOptionCounts.Empty;
+		public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
 	}
 
 	private sealed class RootDirectoryToggleCandidateAccumulator

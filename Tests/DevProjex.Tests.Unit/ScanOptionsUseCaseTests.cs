@@ -1,4 +1,4 @@
-﻿namespace DevProjex.Tests.Unit;
+namespace DevProjex.Tests.Unit;
 
 public sealed class ScanOptionsUseCaseTests
 {
@@ -24,7 +24,7 @@ public sealed class ScanOptionsUseCaseTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(),
-			SmartIgnoredFiles: new HashSet<string>())));
+			SmartIgnoredFiles: new HashSet<string>())), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal([".a", ".b"], result.Extensions);
 		Assert.Equal(["a", "z"], result.RootFolders);
@@ -51,7 +51,7 @@ public sealed class ScanOptionsUseCaseTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(),
-			SmartIgnoredFiles: new HashSet<string>()));
+			SmartIgnoredFiles: new HashSet<string>()), cancellationToken: TestContext.Current.CancellationToken);
 
 		// Root files should be scanned even with empty folder selection
 		Assert.Equal(2, result.Value.Count);
@@ -73,7 +73,7 @@ public sealed class ScanOptionsUseCaseTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(),
-			SmartIgnoredFiles: new HashSet<string>()));
+			SmartIgnoredFiles: new HashSet<string>()), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Empty(result.Value);
 		Assert.False(result.RootAccessDenied);
@@ -111,7 +111,7 @@ public sealed class ScanOptionsUseCaseTests
 			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
-				SmartIgnoredFiles: new HashSet<string>()));
+				SmartIgnoredFiles: new HashSet<string>()), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(3, result.Value.Count);
 		Assert.Contains(".root", result.Value);
@@ -154,7 +154,7 @@ public sealed class ScanOptionsUseCaseTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(),
-			SmartIgnoredFiles: new HashSet<string>())));
+			SmartIgnoredFiles: new HashSet<string>())), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Empty(result.Extensions);
 		Assert.Empty(result.RootFolders);
@@ -187,7 +187,7 @@ public sealed class ScanOptionsUseCaseTests
 			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
-				SmartIgnoredFiles: new HashSet<string>()));
+				SmartIgnoredFiles: new HashSet<string>()), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result.RootAccessDenied);
 		Assert.True(result.HadAccessDenied);
@@ -218,7 +218,7 @@ public sealed class ScanOptionsUseCaseTests
 			IgnoreDotFolders: false,
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
-				SmartIgnoredFiles: new HashSet<string>()));
+				SmartIgnoredFiles: new HashSet<string>()), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(result.Value);
 		Assert.Contains(".cs", result.Value);
