@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace DevProjex.Tests.UI;
 
 public sealed class MainWindowTaskbarProgressUiTests
@@ -34,6 +36,52 @@ public sealed class MainWindowTaskbarProgressUiTests
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    [AvaloniaFact]
+    public async Task GitCloneDialogProgress_UsesMainTaskbarIcon()
+    {
+        using var project = UiTestProject.CreateDefault();
+        var taskbarProgress = new RecordingTaskbarProgressService();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            configureServices: services => services with { TaskbarProgressService = taskbarProgress });
+
+        try
+        {
+            taskbarProgress.Calls.Clear();
+            var initialAttachCount = taskbarProgress.AttachCount;
+
+            InvokeGitCloneTaskbarMethod(window, "BeginGitCloneTaskbarProgress");
+            InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "Receiving objects: 42%");
+            InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "::EXTRACTING::");
+            InvokeGitCloneTaskbarMethod(window, "MarkGitCloneTaskbarProgressError");
+            InvokeGitCloneTaskbarMethod(window, "CompleteGitCloneTaskbarProgress");
+
+            Assert.Equal(initialAttachCount + 1, taskbarProgress.AttachCount);
+            Assert.Equal(
+            [
+                TaskbarProgressCall.Indeterminate(),
+                TaskbarProgressCall.Progress(42),
+                TaskbarProgressCall.Indeterminate(),
+                TaskbarProgressCall.Error(),
+                TaskbarProgressCall.Clear()
+            ], taskbarProgress.Calls);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    private static void InvokeGitCloneTaskbarMethod(MainWindow window, string methodName, params object[] args)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        method.Invoke(window, args);
     }
 
     private sealed class RecordingTaskbarProgressService : ITaskbarProgressService

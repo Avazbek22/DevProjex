@@ -231,6 +231,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
+    private bool _gitCloneTaskbarProgressActive;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
     private bool _projectProfilePersistencePending;
@@ -986,6 +987,44 @@ public partial class MainWindow : Window
         }
 
         _taskbarProgressService.SetProgress(_viewModel.StatusProgressValue);
+    }
+
+    private void BeginGitCloneTaskbarProgress()
+    {
+        _gitCloneTaskbarProgressActive = true;
+        // The clone dialog is owner-only and hidden from the taskbar, so progress belongs
+        // to the main window icon even while the dialog is the active surface.
+        _taskbarProgressService.Attach(this);
+        _taskbarProgressService.SetIndeterminate();
+    }
+
+    private void UpdateGitCloneTaskbarProgress(string status)
+    {
+        if (!_gitCloneTaskbarProgressActive)
+            return;
+
+        if (TryParseTrailingPercent(status, out var percent))
+        {
+            _taskbarProgressService.SetProgress(percent);
+            return;
+        }
+
+        _taskbarProgressService.SetIndeterminate();
+    }
+
+    private void MarkGitCloneTaskbarProgressError()
+    {
+        if (_gitCloneTaskbarProgressActive)
+            _taskbarProgressService.SetError();
+    }
+
+    private void CompleteGitCloneTaskbarProgress()
+    {
+        if (!_gitCloneTaskbarProgressActive)
+            return;
+
+        _gitCloneTaskbarProgressActive = false;
+        SyncTaskbarProgressWithStatusBar();
     }
 
     #region Drop Zone Handlers
@@ -5412,6 +5451,7 @@ public partial class MainWindow : Window
 
         _viewModel.GitCloneInProgress = true;
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
+        BeginGitCloneTaskbarProgress();
 
         string? targetPath = null;
 
@@ -5424,6 +5464,7 @@ public partial class MainWindow : Window
                 _viewModel.GitCloneInProgress = false;
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
+                MarkGitCloneTaskbarProgressError();
                 await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
                 return;
             }
@@ -5444,6 +5485,8 @@ public partial class MainWindow : Window
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    UpdateGitCloneTaskbarProgress(status);
+
                     // Handle phase transition markers
                     if (status == "::EXTRACTING::")
                     {
@@ -5474,6 +5517,7 @@ public partial class MainWindow : Window
             {
                 currentOperation = _viewModel.GitCloneProgressCloning;
                 _viewModel.GitCloneStatus = currentOperation;
+                _taskbarProgressService.SetIndeterminate();
                 result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
             }
             else
@@ -5484,6 +5528,7 @@ public partial class MainWindow : Window
 
                 currentOperation = _viewModel.GitCloneProgressDownloading;
                 _viewModel.GitCloneStatus = currentOperation;
+                _taskbarProgressService.SetIndeterminate();
                 result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
             }
 
@@ -5495,6 +5540,7 @@ public partial class MainWindow : Window
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
+                MarkGitCloneTaskbarProgressError();
                 await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
                 _toastService.Show(_localization["Toast.Git.CloneError"]);
                 return;
@@ -5543,12 +5589,14 @@ public partial class MainWindow : Window
 
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
+            MarkGitCloneTaskbarProgressError();
             await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
             _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
         {
             _viewModel.GitCloneInProgress = false;
+            CompleteGitCloneTaskbarProgress();
             DisposeIfCurrent(ref _gitCloneCts, gitCloneCts);
         }
 
@@ -5573,6 +5621,7 @@ public partial class MainWindow : Window
     {
         _gitCloneCts?.Cancel();
         _viewModel.GitCloneInProgress = false;
+        CompleteGitCloneTaskbarProgress();
     }
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
