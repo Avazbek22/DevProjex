@@ -906,6 +906,112 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task NestedPolyglotWorkspace_AllOffAndSingleIgnoreTogglesStayScoped()
+    {
+        using var project = UiTestProject.CreateWithNestedPolyglotIgnoreMatrixWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
+
+            await SetVisibleIgnoreOptionsCheckedAsync(window, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
+            Assert.DoesNotContain(UiTestDriver.GetViewModel(window).IgnoreOptions, option => option.IsChecked);
+            await AssertNestedPolyglotTreeStateAsync(
+                window,
+                visiblePaths:
+                [
+                    ["api", "bin", "Debug", "app.dll"],
+                    ["api", "logs", "runtime.log"],
+                    ["web", "node_modules", "pkg", "index.js"],
+                    ["python", "__pycache__", "app.pyc"],
+                    [".idea", "workspace.xml"],
+                    [".env"],
+                    ["README"],
+                    ["empty.txt"],
+                    ["empty-root"]
+                ],
+                hiddenPaths: []);
+            await AssertIgnoreOptionsStayStableAsync(window);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await AssertNestedPolyglotTreeStateAsync(
+                window,
+                visiblePaths:
+                [
+                    ["api", "logs", "runtime.log"],
+                    [".idea", "workspace.xml"],
+                    [".env"],
+                    ["README"],
+                    ["empty.txt"],
+                    ["empty-root"]
+                ],
+                hiddenPaths:
+                [
+                    ["api", "bin", "Debug", "app.dll"],
+                    ["web", "node_modules", "pkg", "index.js"],
+                    ["python", "__pycache__", "app.pyc"]
+                ]);
+            await AssertIgnoreOptionsStayStableAsync(window);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.UseGitIgnore, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await AssertNestedPolyglotTreeStateAsync(
+                window,
+                visiblePaths:
+                [
+                    ["api", "bin", "Debug", "app.dll"],
+                    ["web", "node_modules", "pkg", "index.js"],
+                    ["python", "__pycache__", "app.pyc"],
+                    [".idea", "workspace.xml"],
+                    [".env"],
+                    ["README"],
+                    ["empty.txt"],
+                    ["empty-root"]
+                ],
+                hiddenPaths: [["api", "logs", "runtime.log"]]);
+            await AssertIgnoreOptionsStayStableAsync(window);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.UseGitIgnore, isChecked: false);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFiles, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await AssertNestedPolyglotTreeStateAsync(
+                window,
+                visiblePaths:
+                [
+                    ["api", "bin", "Debug", "app.dll"],
+                    ["api", "logs", "runtime.log"],
+                    ["web", "node_modules", "pkg", "index.js"],
+                    ["python", "__pycache__", "app.pyc"],
+                    ["README"],
+                    ["empty.txt"],
+                    ["empty-root"]
+                ],
+                hiddenPaths:
+                [
+                    [".idea", "workspace.xml"],
+                    [".env"]
+                ]);
+            await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PythonProjectWithIdeaGitIgnore_DoesNotExposeGitIgnoreOptionAcrossSmartAndDotToggles()
     {
         using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
@@ -1496,10 +1602,29 @@ public sealed class MainWindowIgnoreOptionsUiTests
             isChecked: isChecked);
     }
 
+    private static async Task SetVisibleIgnoreOptionsCheckedAsync(
+        MainWindow window,
+        bool isChecked)
+    {
+        foreach (var optionId in UiTestDriver.GetViewModel(window).IgnoreOptions.Select(option => option.Id).ToArray())
+            await SetIgnoreOptionCheckedAsync(window, optionId, isChecked);
+    }
+
     private static async Task ApplySettingsAndWaitForIgnoreRefreshAsync(MainWindow window)
     {
         await UiTestDriver.ClickApplySettingsAsync(window);
         await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+    }
+
+    private static async Task AssertNestedPolyglotTreeStateAsync(
+        MainWindow window,
+        IReadOnlyCollection<string[]> visiblePaths,
+        IReadOnlyCollection<string[]> hiddenPaths)
+    {
+        foreach (var visiblePath in visiblePaths)
+            await WaitForProjectTreePathStateAsync(window, exists: true, visiblePath);
+        foreach (var hiddenPath in hiddenPaths)
+            await WaitForProjectTreePathStateAsync(window, exists: false, hiddenPath);
     }
 
     private static async Task WaitForProjectTreePathStateAsync(

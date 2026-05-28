@@ -137,6 +137,49 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 		Assert.Empty(viewModel.IgnoreOptions);
 	}
 
+	[Fact]
+	public void GetSelectedIgnoreOptionIds_MixedVisibleAndHiddenCachedStatesReturnsOnlyVisibleCheckedOptions()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel);
+
+		var profile = new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions:
+			[
+				IgnoreOptionId.DotFiles,
+				IgnoreOptionId.DotFolders,
+				IgnoreOptionId.EmptyFolders,
+				IgnoreOptionId.ExtensionlessFiles
+			],
+			IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.DotFiles] = true,
+				[IgnoreOptionId.DotFolders] = true,
+				[IgnoreOptionId.EmptyFolders] = true,
+				[IgnoreOptionId.ExtensionlessFiles] = true
+			});
+		coordinator.ApplyProjectProfileSelections(ProjectPath, profile);
+
+		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(DotFiles: 1, ExtensionlessFiles: 2));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		var selected = coordinator.GetSelectedIgnoreOptionIds();
+		Assert.Contains(IgnoreOptionId.DotFiles, selected);
+		Assert.Contains(IgnoreOptionId.ExtensionlessFiles, selected);
+		Assert.DoesNotContain(IgnoreOptionId.DotFolders, selected);
+		Assert.DoesNotContain(IgnoreOptionId.EmptyFolders, selected);
+
+		GetIgnoreOption(viewModel, IgnoreOptionId.DotFiles).IsChecked = false;
+		GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked = false;
+
+		selected = coordinator.GetSelectedIgnoreOptionIds();
+		Assert.Empty(selected);
+		Assert.True(coordinator.SnapshotIgnoreOptionStatesForPersistence()![IgnoreOptionId.DotFolders]);
+		Assert.True(coordinator.SnapshotIgnoreOptionStatesForPersistence()![IgnoreOptionId.EmptyFolders]);
+	}
+
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)
 	{
 		return Assert.Single(viewModel.IgnoreOptions, option => option.Id == id);
