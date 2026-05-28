@@ -223,7 +223,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 	}
 
 	[Fact]
-	public void IgnoreSectionSnapshot_WindowsHiddenDotRootWithFilteredContent_DoesNotExposeHiddenFolders()
+	public void IgnoreSectionSnapshot_WindowsHiddenDotRootWithFilteredContent_KeepsHiddenFoldersVisibleWhenDotFoldersAreOff()
 	{
 		if (!OperatingSystem.IsWindows())
 			return;
@@ -250,11 +250,11 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".xml" },
 			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(1, snapshot.Value.EffectiveIgnoreOptionCounts.HiddenFolders);
 	}
 
 	[Fact]
-	public void IgnoreSectionSnapshot_DotRootWithOnlyFilteredNoise_DoesNotKeepDotFoldersVisible()
+	public void IgnoreSectionSnapshot_DotRootWithOnlyFilteredNoise_KeepsDotFoldersVisibleWhenEmptyFoldersAreOff()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("src/app.py", "print('ok')");
@@ -275,7 +275,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".py" },
 			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(1, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
 		Assert.Contains(".py", snapshot.Value.Extensions);
 		Assert.DoesNotContain("README", snapshot.Value.Extensions);

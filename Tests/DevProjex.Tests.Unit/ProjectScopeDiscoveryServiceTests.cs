@@ -85,6 +85,48 @@ public sealed class ProjectScopeDiscoveryServiceTests
 		Assert.DoesNotContain(context.Scopes, scope => scope.RootPath.EndsWith(Path.Combine("level2", "level3")));
 	}
 
+	[Fact]
+	public void Discover_SmartDescriptorMarkerFile_DetectsCustomProjectScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("custom/custom.project", "marker");
+
+		var discovery = new ProjectScopeDiscoveryService(new SmartIgnoreService([
+			new DescriptorOnlySmartIgnoreRule(markerFiles: ["custom.project"])
+		]));
+		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.Contains(context.Scopes, scope => scope.RootPath.EndsWith("custom", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void Discover_SmartDescriptorMarkerExtension_DetectsCustomProjectScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("custom/app.xproj", "marker");
+
+		var discovery = new ProjectScopeDiscoveryService(new SmartIgnoreService([
+			new DescriptorOnlySmartIgnoreRule(markerExtensions: [".xproj"])
+		]));
+		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.Contains(context.Scopes, scope => scope.RootPath.EndsWith("custom", StringComparison.OrdinalIgnoreCase));
+	}
+
 	private static ProjectScopeDiscoveryService CreateDiscovery() =>
 		new(new SmartIgnoreService([]));
+
+	private sealed class DescriptorOnlySmartIgnoreRule(
+		IEnumerable<string>? markerFiles = null,
+		IEnumerable<string>? markerExtensions = null)
+		: ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
+	{
+		public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
+			(markerFiles ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase),
+			(markerExtensions ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase),
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+		public SmartIgnoreResult Evaluate(string rootPath) => SmartIgnoreResult.Empty;
+	}
 }

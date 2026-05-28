@@ -1,3 +1,4 @@
+using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
 namespace DevProjex.Tests.Integration;
@@ -222,6 +223,49 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
         AssertExtensionOptionVisible(dotOff, ".xml", expectedVisible: true);
     }
 
+    [Fact]
+    public void ComputeFullRefreshSnapshot_NestedPythonRoot_DoesNotLetHiddenProfileIgnoreStatesSuppressDotFolders()
+    {
+        using var temp = new TemporaryDirectory();
+        temp.CreateFile("lab2/requirements.txt", "pytest\n");
+        temp.CreateFile("lab2/main.py", "print('ok')\n");
+        temp.CreateFile("lab2/report_lab2.txt", "report\n");
+        temp.CreateFile("lab2/var06.csv", "value\n");
+        temp.CreateFile("lab2/__pycache__/main.cpython-312.pyc", "binary");
+        temp.CreateFile("lab2/.idea/workspace.xml", "<project />\n");
+        temp.CreateFile("lab2/.idea/lab2.iml", "<module />\n");
+        temp.CreateFile("lab2 Peredelanniy.rar", "archive\n");
+
+        var services = CreateServices();
+        var snapshot = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateNestedPythonProfileContextWithStaleHiddenIgnoreStates(temp.Path));
+
+        AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+        AssertIgnoreOption(snapshot, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+        Assert.Contains(snapshot.IgnoreOptionStateCache, item => item.Key == IgnoreOptionId.EmptyFolders && item.Value);
+
+        var smartOnly = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateManualIgnoreContext(
+                temp.Path,
+                snapshot,
+                new Dictionary<IgnoreOptionId, bool>
+                {
+                    [IgnoreOptionId.SmartIgnore] = true,
+                    [IgnoreOptionId.DotFolders] = false,
+                    [IgnoreOptionId.EmptyFolders] = false
+                }));
+
+        AssertIgnoreOption(smartOnly, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+        AssertIgnoreOption(smartOnly, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: false);
+        var tree = BuildTreeFromSnapshot(temp.Path, smartOnly);
+        AssertPathVisible(tree, "lab2/.idea/workspace.xml");
+        AssertPathHidden(tree, "lab2/__pycache__");
+    }
+
     public static IEnumerable<object[]> StackCases()
     {
         yield return ["frontend", "package.json", "node_modules", "index.js"];
@@ -317,6 +361,82 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
             IgnoreOptionStateCache = stateCache,
             IgnoreAllPreference = null
         };
+    }
+
+    private static SelectionRefreshContext CreateNestedPythonProfileContextWithStaleHiddenIgnoreStates(string rootPath) =>
+        new(
+            Path: rootPath,
+            PreparedSelectionMode: PreparedSelectionMode.Profile,
+            AllRootFoldersChecked: false,
+            AllExtensionsChecked: false,
+            RootSelectionInitialized: true,
+            RootSelectionCache: new HashSet<string>(PathComparer.Default) { "lab2" },
+            ExtensionsSelectionInitialized: true,
+            ExtensionsSelectionCache: new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".py",
+                ".txt",
+                ".csv",
+                ".rar"
+            },
+            IgnoreSelectionInitialized: true,
+            IgnoreSelectionCache: new HashSet<IgnoreOptionId> { IgnoreOptionId.SmartIgnore },
+            IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>
+            {
+                [IgnoreOptionId.SmartIgnore] = true,
+                [IgnoreOptionId.DotFolders] = true,
+                [IgnoreOptionId.EmptyFolders] = true
+            },
+            IgnoreAllPreference: null,
+            CurrentSnapshotState: EmptySnapshotState,
+            RootOptionStateCache: new Dictionary<string, bool>(PathComparer.Default)
+            {
+                ["lab2"] = true
+            },
+            ExtensionOptionStateCache: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                [".py"] = true,
+                [".txt"] = true,
+                [".csv"] = true,
+                [".rar"] = true
+            },
+            IgnoreOptionStateCacheIsComplete: true);
+
+    private static TreeBuildResult BuildTreeFromSnapshot(string rootPath, SelectionRefreshSnapshot snapshot)
+    {
+        var rules = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService()
+            .Build(rootPath, CollectCheckedIgnoreOptionIds(snapshot), CollectCheckedRootNames(snapshot));
+
+        return new TreeBuilder().Build(rootPath, new TreeFilterOptions(
+            AllowedExtensions: CollectCheckedExtensionNames(snapshot),
+            AllowedRootFolders: CollectCheckedRootNames(snapshot),
+            IgnoreRules: rules));
+    }
+
+    private static void AssertPathVisible(TreeBuildResult tree, string relativePath)
+    {
+        Assert.True(ContainsPath(tree.Root, relativePath), $"Expected path '{relativePath}' to be visible.");
+    }
+
+    private static void AssertPathHidden(TreeBuildResult tree, string relativePath)
+    {
+        Assert.False(ContainsPath(tree.Root, relativePath), $"Expected path '{relativePath}' to be hidden.");
+    }
+
+    private static bool ContainsPath(FileSystemNode root, string relativePath)
+    {
+        var current = root;
+        foreach (var segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var next = current.Children.FirstOrDefault(
+                child => string.Equals(child.Name, segment, StringComparison.Ordinal));
+            if (next is null)
+                return false;
+
+            current = next;
+        }
+
+        return true;
     }
 
     private static void AssertSmartAndDotState(

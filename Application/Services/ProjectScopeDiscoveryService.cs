@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.IO.Enumeration;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace DevProjex.Application.Services;
 
@@ -10,6 +12,13 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	private static readonly TimeSpan ScopeCacheTtl = TimeSpan.FromSeconds(5);
 	private const int NestedProjectProbeMaxDepth = 2;
 	private const int NestedProjectProbeMaxDirectoriesPerScope = 256;
+	private static readonly EnumerationOptions TopLevelEnumerationOptions = new()
+	{
+		RecurseSubdirectories = false,
+		ReturnSpecialDirectories = false,
+		AttributesToSkip = 0,
+		IgnoreInaccessible = false
+	};
 
 	private static readonly FrozenSet<string> NonProjectScopeDirectoryNames = new[]
 	{
@@ -288,7 +297,12 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		var uniqueScopes = new Dictionary<string, ProjectScope>(PathStringComparer);
 		foreach (var scope in allScopes)
 		{
-			uniqueScopes.TryAdd(scope.RootPath, scope);
+			ref var cachedScope = ref CollectionsMarshal.GetValueRefOrAddDefault(
+				uniqueScopes,
+				scope.RootPath,
+				out var exists);
+			if (!exists)
+				cachedScope = scope;
 		}
 
 		return SortScopes(uniqueScopes.Values).ToArray();
@@ -319,22 +333,10 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			if (currentDepth >= maxDepth)
 				continue;
 
-			string[] children;
-			try
-			{
-				// Materialize eagerly so access errors are handled inside this try/catch
-				// and don't escape later from deferred enumeration in parallel scan.
-				children = Directory.GetDirectories(currentPath, "*", SearchOption.TopDirectoryOnly);
-			}
-			catch
-			{
-				continue;
-			}
+			var children = GetChildDirectoriesSafe(currentPath);
 
 			foreach (var childPath in children)
 			{
-				if (IsReparsePointDirectory(childPath))
-					continue;
 				if (ShouldSkipProjectScopeTraversal(childPath))
 					continue;
 
@@ -368,18 +370,8 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		}
 		else
 		{
-			try
-			{
-				foreach (var dir in Directory.GetDirectories(rootPath))
-				{
-					if (!IsReparsePointDirectory(dir))
-						uniqueCandidates.Add(dir);
-				}
-			}
-			catch
-			{
-				// Ignore scan errors and return best-effort list.
-			}
+			foreach (var dir in GetChildDirectoriesSafe(rootPath))
+				uniqueCandidates.Add(Path.GetFullPath(dir));
 		}
 
 		var candidates = new List<string>(uniqueCandidates);
@@ -437,6 +429,32 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 
 	private bool HasProjectMarker(string directoryPath)
 	{
+		try
+		{
+			foreach (var file in EnumerateTopLevelFiles(directoryPath))
+			{
+				if (ProjectMarkerFiles.Contains(file.FileName))
+					return true;
+				if (!string.IsNullOrWhiteSpace(file.Extension) &&
+				    ProjectMarkerExtensions.Contains(file.Extension))
+				{
+					return true;
+				}
+				if (smartIgnore.IsKnownProjectMarker(file.FileName, file.Extension))
+					return true;
+			}
+		}
+		catch
+		{
+			// Fall back to the older targeted probe when full enumeration is unavailable.
+			return HasProjectMarkerByTargetedProbe(directoryPath);
+		}
+
+		return false;
+	}
+
+	private bool HasProjectMarkerByTargetedProbe(string directoryPath)
+	{
 		foreach (var markerFile in ProjectMarkerFiles)
 		{
 			try
@@ -455,11 +473,13 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 
 		try
 		{
-			foreach (var filePath in Directory.EnumerateFiles(directoryPath, "*", SearchOption.TopDirectoryOnly))
+			foreach (var file in EnumerateTopLevelFiles(directoryPath))
 			{
-				var extension = Path.GetExtension(filePath);
-				if (!string.IsNullOrWhiteSpace(extension) && ProjectMarkerExtensions.Contains(extension))
+				if (!string.IsNullOrWhiteSpace(file.Extension) &&
+				    ProjectMarkerExtensions.Contains(file.Extension))
+				{
 					return true;
+				}
 			}
 		}
 		catch
@@ -468,6 +488,48 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		}
 
 		return false;
+	}
+
+	private static List<string> GetChildDirectoriesSafe(string rootPath)
+	{
+		var directories = new List<string>();
+		try
+		{
+			foreach (var directoryPath in EnumerateChildDirectories(rootPath))
+				directories.Add(directoryPath);
+		}
+		catch
+		{
+			// Scope discovery is best-effort: inaccessible children must not break project load.
+		}
+
+		return directories;
+	}
+
+	private static IEnumerable<string> EnumerateChildDirectories(string rootPath)
+	{
+		var enumerable = new FileSystemEnumerable<string>(
+			rootPath,
+			static (ref FileSystemEntry entry) => entry.ToSpecifiedFullPath(),
+			TopLevelEnumerationOptions);
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+			entry.IsDirectory && !IsReparsePoint(ref entry);
+		return enumerable;
+	}
+
+	private static IEnumerable<ProjectMarkerFileCandidate> EnumerateTopLevelFiles(string rootPath)
+	{
+		var enumerable = new FileSystemEnumerable<ProjectMarkerFileCandidate>(
+			rootPath,
+			static (ref FileSystemEntry entry) =>
+			{
+				var fileName = entry.FileName.ToString();
+				return new ProjectMarkerFileCandidate(fileName, Path.GetExtension(fileName));
+			},
+			TopLevelEnumerationOptions);
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+			!entry.IsDirectory && !IsReparsePoint(ref entry);
+		return enumerable;
 	}
 
 	private static bool IsReparsePointDirectory(string directoryPath)
@@ -483,7 +545,13 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		}
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static bool IsReparsePoint(ref FileSystemEntry entry) =>
+		(entry.Attributes & FileAttributes.ReparsePoint) != 0;
+
 	private sealed record ScopeCacheEntry(DateTime CachedAtUtc, ProjectScanContext Context);
+
+	private readonly record struct ProjectMarkerFileCandidate(string FileName, string Extension);
 }
 
 public sealed record ProjectScope(
@@ -516,7 +584,12 @@ public sealed record ProjectScanContext(
 		foreach (var scope in scopes)
 		{
 			var normalizedPath = Path.GetFullPath(scope.RootPath);
-			uniqueScopes.TryAdd(normalizedPath, scope with { RootPath = normalizedPath });
+			ref var cachedScope = ref CollectionsMarshal.GetValueRefOrAddDefault(
+				uniqueScopes,
+				normalizedPath,
+				out var exists);
+			if (!exists)
+				cachedScope = scope with { RootPath = normalizedPath };
 		}
 
 		if (uniqueScopes.Count == 0)

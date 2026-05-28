@@ -41,6 +41,18 @@ public sealed class DotNetArtifactsIgnoreRuleTests : IDisposable
 	}
 
 	[Fact]
+	public void Evaluate_WithUppercaseProjectExtension_ReturnsBinAndObj()
+	{
+		File.WriteAllText(Path.Combine(_tempRoot, "Test.CSPROJ"), "");
+		var rule = new DotNetArtifactsIgnoreRule();
+
+		var result = rule.Evaluate(_tempRoot);
+
+		Assert.Contains("bin", result.FolderNames, StringComparer.OrdinalIgnoreCase);
+		Assert.Contains("obj", result.FolderNames, StringComparer.OrdinalIgnoreCase);
+	}
+
+	[Fact]
 	public void Evaluate_WithFsprojFile_ReturnsBinAndObj()
 	{
 		File.WriteAllText(Path.Combine(_tempRoot, "Test.fsproj"), "");

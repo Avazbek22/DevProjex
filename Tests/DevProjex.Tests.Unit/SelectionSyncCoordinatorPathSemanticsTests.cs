@@ -25,13 +25,14 @@ public sealed class SelectionSyncCoordinatorPathSemanticsTests
 	[Fact]
 	public void BuildIgnoreRulesCacheKey_RootSelectionCaseVariants_FollowPathComparer()
 	{
-		var method = typeof(SelectionSyncCoordinator).GetMethod(
-			"BuildIgnoreRulesCacheKey",
-			BindingFlags.NonPublic | BindingFlags.Static);
-		Assert.NotNull(method);
-
-		var first = (string)method!.Invoke(null, [@"C:\Workspace\ProjectA", Array.Empty<IgnoreOptionId>(), new[] { "src" }])!;
-		var second = (string)method.Invoke(null, [@"C:\Workspace\ProjectA", Array.Empty<IgnoreOptionId>(), new[] { "Src" }])!;
+		var first = IgnoreRulesBuildCacheKeyBuilder.Build(
+			@"C:\Workspace\ProjectA",
+			Array.Empty<IgnoreOptionId>(),
+			new[] { "src" });
+		var second = IgnoreRulesBuildCacheKeyBuilder.Build(
+			@"C:\Workspace\ProjectA",
+			Array.Empty<IgnoreOptionId>(),
+			new[] { "Src" });
 
 		Assert.Equal(OperatingSystem.IsWindows(), string.Equals(first, second, StringComparison.Ordinal));
 	}

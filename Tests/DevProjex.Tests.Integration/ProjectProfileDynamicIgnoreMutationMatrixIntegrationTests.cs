@@ -158,7 +158,8 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 				Assert.False(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 				Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
 				Assert.False(viewModel.AllIgnoreChecked);
-				AssertIgnoreSetEqual(selectedIds, [IgnoreOptionId.UseGitIgnore]);
+				Assert.Empty(selectedIds);
+				AssertPersistentState(coordinator, IgnoreOptionId.UseGitIgnore, expectedChecked: true);
 				break;
 
 			case ProfileMutationMode.ClearedAfterSave:
@@ -196,6 +197,17 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 		Assert.Equal(expectedSet.Count, actualSet.Count);
 		foreach (var optionId in expectedSet)
 			Assert.Contains(optionId, actualSet);
+	}
+
+	private static void AssertPersistentState(
+		SelectionSyncCoordinator coordinator,
+		IgnoreOptionId optionId,
+		bool expectedChecked)
+	{
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.NotNull(states);
+		Assert.True(states!.TryGetValue(optionId, out var actualChecked));
+		Assert.Equal(expectedChecked, actualChecked);
 	}
 
 	private static IgnoreOptionCounts BuildCounts(

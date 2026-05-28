@@ -40,7 +40,7 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 	}
 
 	[Fact]
-	public void FullRefresh_NewEntriesAreCheckedEvenWhenAllTogglesWerePreviouslyCleared()
+	public void FullRefresh_NewRootAndExtensionEntriesAreCheckedButNewIgnoreOptionsRespectAllOff()
 	{
 		using var temp = new TemporaryDirectory();
 		SeedInitialWorkspace(temp);
@@ -65,11 +65,11 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 		AssertSelection(snapshot.ExtensionOptions, ".log", expectedChecked: true);
 
 		AssertIgnoreOption(snapshot, IgnoreOptionId.EmptyFiles, expectedChecked: false);
-		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFiles, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFiles, expectedChecked: false);
 	}
 
 	[Fact]
-	public void FullRefresh_FirstEntriesAreCheckedAfterPreviouslyEmptySections()
+	public void FullRefresh_FirstRootAndExtensionEntriesAreCheckedButIgnoreOptionsRespectAllOff()
 	{
 		using var temp = new TemporaryDirectory();
 
@@ -88,8 +88,8 @@ public sealed class SelectionRefreshNewEntriesCheckedIntegrationTests
 		AssertSelection(snapshot.RootOptions!, "src", expectedChecked: true);
 		AssertSelection(snapshot.ExtensionOptions, ".cs", expectedChecked: true);
 		AssertSelection(snapshot.ExtensionOptions, ".txt", expectedChecked: true);
-		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFiles, expectedChecked: true);
-		AssertIgnoreOption(snapshot, IgnoreOptionId.EmptyFiles, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFiles, expectedChecked: false);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.EmptyFiles, expectedChecked: false);
 	}
 
 	[Fact]

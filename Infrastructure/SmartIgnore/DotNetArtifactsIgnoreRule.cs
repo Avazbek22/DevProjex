@@ -45,9 +45,10 @@ public sealed class DotNetArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRu
 
 	private static bool HasAnyMarkerExtension(string rootPath)
 	{
-		foreach (var extension in MarkerExtensions)
+		foreach (var filePath in Directory.EnumerateFiles(rootPath, "*", SearchOption.TopDirectoryOnly))
 		{
-			if (Directory.EnumerateFiles(rootPath, "*" + extension, SearchOption.TopDirectoryOnly).Any())
+			var extension = Path.GetExtension(filePath);
+			if (!string.IsNullOrWhiteSpace(extension) && MarkerExtensions.Contains(extension))
 				return true;
 		}
 

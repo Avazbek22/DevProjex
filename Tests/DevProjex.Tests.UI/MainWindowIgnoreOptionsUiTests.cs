@@ -279,7 +279,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.DotFolders,
-                visible: false);
+                visible: true,
+                isChecked: true);
 
             var viewModel = UiTestDriver.GetViewModel(window);
             Assert.DoesNotContain(
@@ -857,6 +858,46 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
 
             await WaitForProjectTreePathStateAsync(window, exists: true, ".idea", "workspace.xml");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task NestedPythonProjectWithIdeaFolder_SmartOnlyKeepsDotFolderVisible()
+    {
+        using var project = UiTestProject.CreateWithNestedPythonSmartIgnoreAndIdeaWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: false);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "lab2", ".idea", "workspace.xml");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "lab2", "__pycache__");
         }
         finally
         {

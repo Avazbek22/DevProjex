@@ -77,11 +77,42 @@ public sealed class SmartIgnoreServiceTests
 		Assert.Contains("Thumbs.db", result.FileNames);
 	}
 
+	[Fact]
+	public void HasKnownProjectMarker_DetectsDescriptorMarkerFileAndExtensionCaseInsensitively()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("custom.project", "marker");
+		temp.CreateFile("service.XPROJ", "marker");
+		var service = new SmartIgnoreService([
+			new DescriptorOnlySmartIgnoreRule(
+				markerFiles: ["CUSTOM.PROJECT"],
+				markerExtensions: [".xproj"])
+		]);
+
+		Assert.True(service.HasKnownProjectMarker(temp.Path));
+		Assert.True(service.IsKnownProjectMarker("custom.project", ".project"));
+		Assert.True(service.IsKnownProjectMarker("service.XPROJ", ".XPROJ"));
+	}
+
 	private sealed class ThrowingSmartIgnoreRule : ISmartIgnoreRule
 	{
 		public SmartIgnoreResult Evaluate(string rootPath)
 		{
 			throw new UnauthorizedAccessException("Access denied.");
 		}
+	}
+
+	private sealed class DescriptorOnlySmartIgnoreRule(
+		IEnumerable<string>? markerFiles = null,
+		IEnumerable<string>? markerExtensions = null)
+		: ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
+	{
+		public SmartIgnoreRuleDescriptor Descriptor { get; } = new(
+			(markerFiles ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase),
+			(markerExtensions ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase),
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+		public SmartIgnoreResult Evaluate(string rootPath) => SmartIgnoreResult.Empty;
 	}
 }

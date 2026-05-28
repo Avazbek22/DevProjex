@@ -252,7 +252,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
 
     public static HashSet<IgnoreOptionId> CollectCheckedIgnoreOptionIds(SelectionRefreshSnapshot snapshot) =>
         new(
-            snapshot.IgnoreOptionStateCache.Where(pair => pair.Value).Select(pair => pair.Key));
+            snapshot.IgnoreOptions.Where(option => option.IsChecked).Select(option => option.Id));
 
     private static IReadOnlySet<string> BuildRequestedRootNames(WorkflowRootScenario scenario)
     {
@@ -481,10 +481,15 @@ internal static class ProjectLoadWorkflowRefreshHarness
             return;
         }
 
-        Assert.Equal(expected.Count, actual.Count);
+        Assert.True(
+            expected.Count == actual.Count,
+            $"Selection option count changed. Expected: {DescribeSelectionOptions(expected)}. Actual: {DescribeSelectionOptions(actual)}.");
         for (var index = 0; index < expected.Count; index++)
             Assert.Equal(expected[index], actual[index]);
     }
+
+    private static string DescribeSelectionOptions(IReadOnlyList<SelectionOption> options) =>
+        string.Join(", ", options.Select(option => $"{option.Name}:{option.IsChecked}"));
 
     private static int GetIgnoreCount(IgnoreOptionCounts counts, IgnoreOptionId optionId)
     {

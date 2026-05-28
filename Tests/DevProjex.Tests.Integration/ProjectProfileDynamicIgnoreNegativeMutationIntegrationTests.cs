@@ -46,7 +46,8 @@ public sealed class ProjectProfileDynamicIgnoreNegativeMutationIntegrationTests
 			case NegativeMutationMode.UnavailableOnly:
 				Assert.False(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 				Assert.False(viewModel.AllIgnoreChecked);
-				Assert.Contains(IgnoreOptionId.UseGitIgnore, coordinator.GetSelectedIgnoreOptionIds());
+				Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, coordinator.GetSelectedIgnoreOptionIds());
+				AssertPersistentState(coordinator, IgnoreOptionId.UseGitIgnore, expectedChecked: true);
 				break;
 
 			case NegativeMutationMode.ManualFileRemoval:
@@ -146,6 +147,17 @@ public sealed class ProjectProfileDynamicIgnoreNegativeMutationIntegrationTests
 			SelectedExtensions: [],
 			SelectedIgnoreOptions: selectedIgnoreOptions,
 			IgnoreOptionStates: ignoreOptionStates);
+	}
+
+	private static void AssertPersistentState(
+		SelectionSyncCoordinator coordinator,
+		IgnoreOptionId optionId,
+		bool expectedChecked)
+	{
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.NotNull(states);
+		Assert.True(states!.TryGetValue(optionId, out var actualChecked));
+		Assert.Equal(expectedChecked, actualChecked);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(

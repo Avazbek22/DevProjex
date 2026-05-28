@@ -55,6 +55,45 @@ public sealed class SmartIgnoreService
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 			return false;
 
+		try
+		{
+			foreach (var filePath in Directory.EnumerateFiles(rootPath, "*", SearchOption.TopDirectoryOnly))
+			{
+				var fileName = Path.GetFileName(filePath);
+				if (IsKnownProjectMarker(fileName, Path.GetExtension(fileName)))
+					return true;
+			}
+		}
+		catch
+		{
+			return HasKnownProjectMarkerByTargetedProbe(rootPath);
+		}
+
+		return false;
+	}
+
+	public bool IsKnownProjectMarker(string fileName, string? extension)
+	{
+		if (string.IsNullOrWhiteSpace(fileName))
+			return false;
+
+		foreach (var descriptor in _descriptors)
+		{
+			if (descriptor.MarkerFiles.Contains(fileName))
+				return true;
+
+			if (!string.IsNullOrWhiteSpace(extension) &&
+			    descriptor.MarkerExtensions.Contains(extension))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private bool HasKnownProjectMarkerByTargetedProbe(string rootPath)
+	{
 		foreach (var descriptor in _descriptors)
 		{
 			foreach (var markerFile in descriptor.MarkerFiles)
@@ -68,23 +107,6 @@ public sealed class SmartIgnoreService
 				{
 					// Marker probing is best-effort and must never break loading.
 				}
-			}
-
-			if (descriptor.MarkerExtensions.Count == 0)
-				continue;
-
-			try
-			{
-				foreach (var filePath in Directory.EnumerateFiles(rootPath, "*", SearchOption.TopDirectoryOnly))
-				{
-					var extension = Path.GetExtension(filePath);
-					if (!string.IsNullOrWhiteSpace(extension) && descriptor.MarkerExtensions.Contains(extension))
-						return true;
-				}
-			}
-			catch
-			{
-				// Continue with other descriptors.
 			}
 		}
 

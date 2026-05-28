@@ -240,7 +240,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
 
     private static HashSet<IgnoreOptionId> CollectCheckedIgnoreOptionIds(SelectionRefreshSnapshot snapshot) =>
         new(
-            snapshot.IgnoreOptionStateCache.Where(pair => pair.Value).Select(pair => pair.Key));
+            snapshot.IgnoreOptions.Where(option => option.IsChecked).Select(option => option.Id));
 
     private static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(
         IEnumerable<IgnoreOptionId> selectedIgnoreOptions,

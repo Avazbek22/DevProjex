@@ -139,6 +139,21 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithNestedPythonSmartIgnoreAndIdeaWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("lab2", "requirements.txt"), "pytest\n");
+            WriteFile(rootPath, Path.Combine("lab2", "main.py"), "print('ok')\n");
+            WriteFile(rootPath, Path.Combine("lab2", "report_lab2.txt"), "report\n");
+            WriteFile(rootPath, Path.Combine("lab2", "var06.csv"), "value\n");
+            WriteFile(rootPath, Path.Combine("lab2", "__pycache__", "main.cpython-312.pyc"), "binary");
+            WriteFile(rootPath, Path.Combine("lab2", ".idea", "workspace.xml"), "<project />\n");
+            WriteFile(rootPath, Path.Combine("lab2", ".idea", "lab2.iml"), "<module />\n");
+            WriteFile(rootPath, "lab2 Peredelanniy.rar", "archive\n");
+        });
+    }
+
     public static UiTestProject CreateWithHiddenDotFolderOverlapWorkspace()
     {
         return Create(static rootPath =>

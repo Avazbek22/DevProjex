@@ -797,54 +797,68 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 						effectiveRules.IgnoreDotFolders);
 				var shouldCountDotFolder =
 					isDotFolder &&
-					!isHiddenByCurrentHiddenFolderRule;
+					(effectiveRules.IgnoreDotFolders || !isHiddenByCurrentHiddenFolderRule);
 				var shouldCountHiddenFolder =
 					isHiddenFolder &&
 					!IgnoreRuleSemantics.ShouldIgnoreDotDirectory(effectiveRules.IgnoreDotFolders, isDotFolder);
 
 				if (shouldCountDotFolder)
 				{
-					var visible = HasVisibleContentForDirectoryToggleCandidate(
-						directoryPath,
-						effectiveRules with
-						{
-							IgnoreDotFolders = false,
-							IgnoreHiddenFolders = false,
-							IgnoreEmptyFolders = true
-						},
-						parallelOptions.CancellationToken);
-					if (visible.RootAccessDenied)
+					if (!effectiveRules.IgnoreEmptyFolders)
 					{
-						Interlocked.Exchange(ref rootAccessDenied, 1);
-						Interlocked.Exchange(ref hadAccessDenied, 1);
-						return localCounts;
-					}
-					if (visible.HadAccessDenied)
-						Interlocked.Exchange(ref hadAccessDenied, 1);
-					if (visible.HadAccessDenied || visible.Value)
 						localCounts.DotFolders++;
+					}
+					else
+					{
+						var visible = HasVisibleContentForDirectoryToggleCandidate(
+							directoryPath,
+							effectiveRules with
+							{
+								IgnoreDotFolders = false,
+								IgnoreHiddenFolders = false,
+								IgnoreEmptyFolders = true
+							},
+							parallelOptions.CancellationToken);
+						if (visible.RootAccessDenied)
+						{
+							Interlocked.Exchange(ref rootAccessDenied, 1);
+							Interlocked.Exchange(ref hadAccessDenied, 1);
+							return localCounts;
+						}
+						if (visible.HadAccessDenied)
+							Interlocked.Exchange(ref hadAccessDenied, 1);
+						if (visible.HadAccessDenied || visible.Value)
+							localCounts.DotFolders++;
+					}
 				}
 
 				if (shouldCountHiddenFolder)
 				{
-					var visible = HasVisibleContentForDirectoryToggleCandidate(
-						directoryPath,
-						effectiveRules with
-						{
-							IgnoreHiddenFolders = false,
-							IgnoreEmptyFolders = true
-						},
-						parallelOptions.CancellationToken);
-					if (visible.RootAccessDenied)
+					if (!effectiveRules.IgnoreEmptyFolders)
 					{
-						Interlocked.Exchange(ref rootAccessDenied, 1);
-						Interlocked.Exchange(ref hadAccessDenied, 1);
-						return localCounts;
-					}
-					if (visible.HadAccessDenied)
-						Interlocked.Exchange(ref hadAccessDenied, 1);
-					if (visible.HadAccessDenied || visible.Value)
 						localCounts.HiddenFolders++;
+					}
+					else
+					{
+						var visible = HasVisibleContentForDirectoryToggleCandidate(
+							directoryPath,
+							effectiveRules with
+							{
+								IgnoreHiddenFolders = false,
+								IgnoreEmptyFolders = true
+							},
+							parallelOptions.CancellationToken);
+						if (visible.RootAccessDenied)
+						{
+							Interlocked.Exchange(ref rootAccessDenied, 1);
+							Interlocked.Exchange(ref hadAccessDenied, 1);
+							return localCounts;
+						}
+						if (visible.HadAccessDenied)
+							Interlocked.Exchange(ref hadAccessDenied, 1);
+						if (visible.HadAccessDenied || visible.Value)
+							localCounts.HiddenFolders++;
+					}
 				}
 
 				return localCounts;
