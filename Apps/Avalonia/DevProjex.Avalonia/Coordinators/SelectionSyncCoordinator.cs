@@ -295,6 +295,9 @@ public sealed class SelectionSyncCoordinator(
             cancellationToken.ThrowIfCancellationRequested();
             var visibleExtensions = new List<string>(scan.Value.Extensions.Count);
             var extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+            extensionlessEntriesCount = Math.Max(
+                extensionlessEntriesCount,
+                scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
             var options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev, previousExtensionStates);
             var usedProfileFallback = SelectionRefreshPolicy.ShouldApplyMissingProfileSelectionsFallback(
                 _preparedSelectionMode,
@@ -317,6 +320,9 @@ public sealed class SelectionSyncCoordinator(
 
                 visibleExtensions = new List<string>(scan.Value.Extensions.Count);
                 extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+                extensionlessEntriesCount = Math.Max(
+                    extensionlessEntriesCount,
+                    scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
                 options = filterSelectionService.BuildExtensionOptions(visibleExtensions, prev, previousExtensionStates);
                 options = ApplyMissingProfileSelectionsFallbackToExtensions(options);
             }

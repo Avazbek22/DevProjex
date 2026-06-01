@@ -429,32 +429,6 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 
 	private bool HasProjectMarker(string directoryPath)
 	{
-		try
-		{
-			foreach (var file in EnumerateTopLevelFiles(directoryPath))
-			{
-				if (ProjectMarkerFiles.Contains(file.FileName))
-					return true;
-				if (!string.IsNullOrWhiteSpace(file.Extension) &&
-				    ProjectMarkerExtensions.Contains(file.Extension))
-				{
-					return true;
-				}
-				if (smartIgnore.IsKnownProjectMarker(file.FileName, file.Extension))
-					return true;
-			}
-		}
-		catch
-		{
-			// Fall back to the older targeted probe when full enumeration is unavailable.
-			return HasProjectMarkerByTargetedProbe(directoryPath);
-		}
-
-		return false;
-	}
-
-	private bool HasProjectMarkerByTargetedProbe(string directoryPath)
-	{
 		foreach (var markerFile in ProjectMarkerFiles)
 		{
 			try
@@ -468,9 +442,6 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			}
 		}
 
-		if (smartIgnore.HasKnownProjectMarker(directoryPath))
-			return true;
-
 		try
 		{
 			foreach (var file in EnumerateTopLevelFiles(directoryPath))
@@ -480,11 +451,15 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 				{
 					return true;
 				}
+				if (smartIgnore.IsKnownProjectMarker(file.FileName, file.Extension))
+					return true;
 			}
 		}
 		catch
 		{
-			// Ignore marker scan failures.
+			// Full enumeration is only a fallback path for extension/custom markers.
+			// Keep descriptor-specific marker files discoverable even on partial IO failures.
+			return smartIgnore.HasKnownProjectMarker(directoryPath);
 		}
 
 		return false;

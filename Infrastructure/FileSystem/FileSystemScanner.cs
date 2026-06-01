@@ -1295,7 +1295,12 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 					effectiveGitIgnoreCandidateContext);
 				var passesDiscovery = PassesExtensionDiscoveryRules(facts, extensionDiscoveryRules);
 				if (passesDiscovery)
-					AddExtensionEntry(file.Name, facts.Extension, facts.IsExtensionless, extensions);
+					AddExtensionEntry(
+						file.Name,
+						facts.Extension,
+						facts.IsExtensionless,
+						extensions,
+						skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 
 				var visibility = EvaluateFileVisibilityProfile(
 					facts,
@@ -1454,7 +1459,12 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 						                      PassesExtensionDiscoveryRules(facts, extensionDiscoveryRules);
 						if (passesDiscovery)
 						{
-							AddExtensionEntry(file.Name, facts.Extension, facts.IsExtensionless, localExtensions);
+							AddExtensionEntry(
+								file.Name,
+								facts.Extension,
+								facts.IsExtensionless,
+								localExtensions,
+								skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 							localMetrics.ExtensionDiscoveryVisibleFiles++;
 						}
 
@@ -2082,10 +2092,14 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 		string fileName,
 		string extension,
 		bool isExtensionless,
-		ICollection<string> extensions)
+		ICollection<string> extensions,
+		bool skipExtensionlessEntry = false)
 	{
 		if (isExtensionless)
 		{
+			if (skipExtensionlessEntry)
+				return;
+
 			extensions.Add(fileName);
 			return;
 		}
