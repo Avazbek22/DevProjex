@@ -282,7 +282,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 	}
 
 	[Fact]
-	public void IgnoreSectionSnapshot_EmptyUnselectedDotRoot_DoesNotKeepDotFoldersVisible()
+	public void IgnoreSectionSnapshot_EmptyRootDotFolder_RemainsDirectDotFolderEvidence()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("src/app.py", "print('ok')");
@@ -303,7 +303,7 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 			effectiveAllowedExtensions: null,
 			includeDirectoryToggleProbeRoots: true, cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal(0, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(1, snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders);
 		Assert.Contains(".py", snapshot.Value.Extensions);
 	}
 

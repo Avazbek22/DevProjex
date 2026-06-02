@@ -151,7 +151,8 @@ public sealed class ProjectProfileSmartGitDotRoundTripIntegrationTests
 			IgnoreOptionStateCache = loadedProfile.SelectedIgnoreOptions.ToDictionary(
 				static optionId => optionId,
 				static _ => true),
-			IgnoreAllPreference = null
+			IgnoreAllPreference = null,
+			IgnoreOptionStateCacheIsComplete = false
 		};
 
 		return services.Engine.ComputeFullRefreshSnapshot(context, CancellationToken.None);

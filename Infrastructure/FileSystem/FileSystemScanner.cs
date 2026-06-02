@@ -1996,13 +1996,23 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 			visibilityStates[index] = visibilityState;
 
 			if (node.IsHidden &&
-			    visibilityState.BaseFinalVisible != visibilityState.HiddenFoldersFinalVisible)
+			    HasDirectoryToggleImpact(
+				    node,
+				    visibilityStates,
+				    node.HiddenFoldersRuleState,
+				    visibilityState.BaseFinalVisible,
+				    visibilityState.HiddenFoldersFinalVisible))
 			{
 				effectiveCounts.HiddenFolders++;
 			}
 
 			if (node.IsDot &&
-			    visibilityState.BaseFinalVisible != visibilityState.DotFoldersFinalVisible)
+			    HasDirectoryToggleImpact(
+				    node,
+				    visibilityStates,
+				    node.DotFoldersRuleState,
+				    visibilityState.BaseFinalVisible,
+				    visibilityState.DotFoldersFinalVisible))
 			{
 				effectiveCounts.DotFolders++;
 			}
@@ -2049,6 +2059,28 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 	private readonly record struct EffectiveIgnoreFinalizeResult(
 		IgnoreOptionCounts IgnoreOptionCounts,
 		IgnoreControllerImpactCounts ControllerImpactCounts);
+
+	private static bool HasDirectoryToggleImpact(
+		in EffectiveIgnoreScanNode node,
+		EffectiveIgnoreNodeVisibilityState[] visibilityStates,
+		in DirectoryToggleRuleState toggledRuleState,
+		bool baseFinalVisible,
+		bool toggledFinalVisible)
+	{
+		var parentBaseVisible = node.ParentIndex < 0 ||
+		                        visibilityStates[node.ParentIndex].BaseFinalVisible;
+		if (!parentBaseVisible)
+			return false;
+
+		// A directory-level toggle affects the tree as soon as it changes whether a
+		// reachable directory node can be entered. Do not require visible child files:
+		// those files may use extensions that are discoverable only after the directory
+		// toggle is disabled, and empty-folder filtering must not hide the toggle itself.
+		if (node.BaseRuleState.CanTraverseChildren != toggledRuleState.CanTraverseChildren)
+			return true;
+
+		return baseFinalVisible != toggledFinalVisible;
+	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static void AccumulateDirectFileDelta(
@@ -2313,8 +2345,6 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 		var hiddenFolders = 0;
 		var dotFolders = 0;
-		var rootAccessDenied = 0;
-		var hadAccessDenied = 0;
 		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 
 		Parallel.ForEach(
@@ -2340,63 +2370,18 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 				if (shouldCountDotFolder)
 				{
-					if (!effectiveRules.IgnoreEmptyFolders)
-					{
-						localCounts.DotFolders++;
-					}
-					else
-					{
-						var visible = HasVisibleContentForDirectoryToggleCandidate(
-							directory.FullPath,
-							effectiveRules with
-							{
-								IgnoreDotFolders = false,
-								IgnoreHiddenFolders = false,
-								IgnoreEmptyFolders = true
-							},
-							parallelOptions.CancellationToken);
-						if (visible.RootAccessDenied)
-						{
-							Interlocked.Exchange(ref rootAccessDenied, 1);
-							Interlocked.Exchange(ref hadAccessDenied, 1);
-							return localCounts;
-						}
-
-						if (visible.HadAccessDenied)
-							Interlocked.Exchange(ref hadAccessDenied, 1);
-						if (visible.HadAccessDenied || visible.Value)
-							localCounts.DotFolders++;
-					}
+					// A root-level dot directory is direct evidence for the DotFolders
+					// toggle. Do not let EmptyFolders mask this evidence, otherwise a
+					// .cache/.idea root can disappear for one refresh and reappear on the
+					// next one after the DotFolders option was not persisted as visible.
+					localCounts.DotFolders++;
 				}
 
 				if (isHiddenByCurrentHiddenFolderRule)
 				{
-					if (!effectiveRules.IgnoreEmptyFolders)
-					{
-						localCounts.HiddenFolders++;
-					}
-					else
-					{
-						var visible = HasVisibleContentForDirectoryToggleCandidate(
-							directory.FullPath,
-							effectiveRules with
-							{
-								IgnoreHiddenFolders = false,
-								IgnoreEmptyFolders = true
-							},
-							parallelOptions.CancellationToken);
-						if (visible.RootAccessDenied)
-						{
-							Interlocked.Exchange(ref rootAccessDenied, 1);
-							Interlocked.Exchange(ref hadAccessDenied, 1);
-							return localCounts;
-						}
-
-						if (visible.HadAccessDenied)
-							Interlocked.Exchange(ref hadAccessDenied, 1);
-						if (visible.HadAccessDenied || visible.Value)
-							localCounts.HiddenFolders++;
-					}
+					// Same contract as DotFolders: native hidden root folders are direct
+					// directory-toggle evidence and must not depend on content-level rules.
+					localCounts.HiddenFolders++;
 				}
 
 				return localCounts;
@@ -2412,8 +2397,8 @@ public sealed class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAd
 
 		return new ScanResult<IgnoreOptionCounts>(
 			new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
-			RootAccessDenied: rootAccessDenied == 1,
-			HadAccessDenied: hadAccessDenied == 1);
+			RootAccessDenied: false,
+			HadAccessDenied: false);
 	}
 
 	private static ScanResult<IgnoreControllerImpactCounts> CountRootDirectoryControllerImpactCandidates(

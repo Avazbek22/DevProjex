@@ -5,6 +5,8 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 {
+	private const int MaximumExternalConvergencePasses = 4;
+
 	[Fact]
 	public void FullRefresh_AllIgnoreOptionsOff_RevealsEveryIgnoreCandidateAcrossSections()
 	{
@@ -50,7 +52,7 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 	}
 
 	[Fact]
-	public void FullRefresh_ExtensionFilterOff_DoesNotFakeIgnoreOptionImpact()
+	public void FullRefresh_ExtensionFilterOff_KeepsGitIgnoreVisibleWhenIgnoredFolderStillChangesTree()
 	{
 		using var workspace = CreateComprehensiveWorkspace();
 		var services = CreateServices();
@@ -63,17 +65,55 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 			CreateExtensionStateContext(workspace.Path, allOff, ".log", isChecked: false));
 
 		AssertExtensionOption(logExtensionOff, ".log", expectedChecked: false);
-		AssertIgnoreOption(logExtensionOff, IgnoreOptionId.UseGitIgnore, expectedVisible: false, expectedChecked: null);
+		AssertIgnoreOption(logExtensionOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
 		AssertTreeState(
 			workspace.Path,
 			logExtensionOff,
 			visiblePaths:
 			[
 				"api/src/Program.cs",
+				"api/logs",
 				"web/src/app.ts",
 				"general/visible.txt"
 			],
 			hiddenPaths: ["api/logs/runtime.log"]);
+	}
+
+	[Fact]
+	public void FullRefresh_ExtensionFilterOffAndEmptyFoldersOn_RemovesGitIgnoreWhenItNoLongerChangesTree()
+	{
+		using var workspace = CreateComprehensiveWorkspace();
+		var services = CreateServices();
+
+		var defaults = ComputeConvergedSnapshot(services, workspace.Path, CreateDefaultContext(workspace.Path));
+		var allOff = ComputeConvergedSnapshot(services, workspace.Path, CreateAllIgnoreOptionsOffContext(workspace.Path, defaults));
+		var logExtensionOff = ComputeConvergedSnapshot(
+			services,
+			workspace.Path,
+			CreateExtensionStateContext(workspace.Path, allOff, ".log", isChecked: false));
+		var logExtensionOffAndEmptyFoldersOn = ComputeConvergedSnapshot(
+			services,
+			workspace.Path,
+			CreateSingleIgnoreOptionOnContext(workspace.Path, logExtensionOff, IgnoreOptionId.EmptyFolders));
+
+		AssertExtensionOption(logExtensionOffAndEmptyFoldersOn, ".log", expectedChecked: false);
+		AssertIgnoreOption(logExtensionOffAndEmptyFoldersOn, IgnoreOptionId.EmptyFolders, expectedVisible: true, expectedChecked: true);
+		AssertIgnoreOption(logExtensionOffAndEmptyFoldersOn, IgnoreOptionId.UseGitIgnore, expectedVisible: false, expectedChecked: null);
+		AssertTreeState(
+			workspace.Path,
+			logExtensionOffAndEmptyFoldersOn,
+			visiblePaths:
+			[
+				"api/src/Program.cs",
+				"web/src/app.ts",
+				"general/visible.txt"
+			],
+			hiddenPaths:
+			[
+				"api/logs",
+				"api/logs/runtime.log",
+				"general/empty-root"
+			]);
 	}
 
 	[Fact]
@@ -194,13 +234,38 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 		string rootPath,
 		SelectionRefreshContext context)
 	{
-		var first = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
-		var second = services.Engine.ComputeFullRefreshSnapshot(
-			CreateContextFromSnapshot(rootPath, first),
-			TestContext.Current.CancellationToken);
+		var previous = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
+		for (var pass = 0; pass < MaximumExternalConvergencePasses; pass++)
+		{
+			var next = services.Engine.ComputeFullRefreshSnapshot(
+				CreateContextFromSnapshot(rootPath, previous),
+				TestContext.Current.CancellationToken);
+			if (AreEquivalentSnapshots(previous, next))
+				return next;
 
-		AssertEquivalentSnapshots(first, second);
-		return second;
+			previous = next;
+		}
+
+		var final = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextFromSnapshot(rootPath, previous),
+			TestContext.Current.CancellationToken);
+		AssertEquivalentSnapshots(previous, final);
+		return final;
+	}
+
+	private static bool AreEquivalentSnapshots(
+		SelectionRefreshSnapshot expected,
+		SelectionRefreshSnapshot actual)
+	{
+		try
+		{
+			AssertEquivalentSnapshots(expected, actual);
+			return true;
+		}
+		catch (Xunit.Sdk.XunitException)
+		{
+			return false;
+		}
 	}
 
 	private static SelectionRefreshContext CreateAllIgnoreOptionsOffContext(

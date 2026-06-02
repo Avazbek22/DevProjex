@@ -5,7 +5,7 @@ namespace DevProjex.Tests.Unit;
 public sealed class SelectionRefreshEngineTests
 {
 	[Fact]
-	public void ComputeFullRefreshSnapshot_UsesSecondPassRootRefreshForDynamicDotFolderAvailability()
+	public void ComputeFullRefreshSnapshot_DefaultDirectoryTogglesUseSinglePassRootProjection()
 	{
 		var scanner = new DotFolderNoiseScanner();
 		var useCase = new ScanOptionsUseCase(scanner);
@@ -46,15 +46,15 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
-	public void ComputeFullRefreshSnapshot_DirectoryLevelDynamicChange_ConvergesWithinBoundedRootRefreshes()
+	public void ComputeFullRefreshSnapshot_DefaultDirectoryLevelDynamicChange_UsesSingleRootRefresh()
 	{
 		var scanner = new CountingDirectoryLevelScanner();
 		var engine = CreateEngine(scanner);
 
 		_ = engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None);
 
-		Assert.InRange(scanner.RootFolderScanCount, 2, 4);
-		Assert.True(scanner.IgnoreSnapshotCallCount >= 3);
+		Assert.Equal(1, scanner.RootFolderScanCount);
+		Assert.Equal(2, scanner.IgnoreSnapshotCallCount);
 	}
 
 	[Fact]
@@ -74,8 +74,8 @@ public sealed class SelectionRefreshEngineTests
 
 		var snapshot = engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None);
 
-		Assert.InRange(scanner.RootFolderScanCount, 2, 3);
-		Assert.InRange(scanner.RootSelectionSnapshotCount, 2, 3);
+		Assert.Equal(1, scanner.RootFolderScanCount);
+		Assert.Equal(1, scanner.RootSelectionSnapshotCount);
 		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore && option.IsChecked);
 		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && option.IsChecked);
 		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
@@ -119,7 +119,7 @@ public sealed class SelectionRefreshEngineTests
 		var engine = CreateEngine(scanner);
 
 		var exception = Assert.Throws<OperationCanceledException>(() =>
-			engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None));
+			engine.ComputeFullRefreshSnapshot(CreateInitializedEmptyIgnoreContext(), CancellationToken.None));
 
 		Assert.True(scanner.IgnoreSnapshotCallCount >= 2);
 		Assert.NotNull(exception);
@@ -269,6 +269,14 @@ public sealed class SelectionRefreshEngineTests
 				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 				HasExtensionlessEntries: false,
 				ExtensionlessEntriesCount: 0));
+
+	private static SelectionRefreshContext CreateInitializedEmptyIgnoreContext() =>
+		CreateDefaultsContext() with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(),
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>()
+		};
 
 	private static SelectionRefreshContext CreateNewExtensionPolicyContext() =>
 		CreateDefaultsContext() with
@@ -769,18 +777,21 @@ public sealed class SelectionRefreshEngineTests
 			var extensions = effectiveRules.IgnoreExtensionlessFiles
 				? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" }
 				: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", "README" };
+			// The scanner snapshot reports option impact for the current scope, not just
+			// currently visible leftovers. This keeps active self-hidden toggles stable
+			// without letting the refresh engine reuse stale counts from an old scope.
 			var counts = new IgnoreOptionCounts(
-				DotFolders: effectiveRules.IgnoreDotFolders ? 0 : 1,
-				EmptyFolders: effectiveRules.IgnoreEmptyFolders ? 0 : 1,
-				ExtensionlessFiles: effectiveRules.IgnoreExtensionlessFiles ? 0 : 1,
-				EmptyFiles: effectiveRules.IgnoreEmptyFiles ? 0 : 1);
+				DotFolders: 1,
+				EmptyFolders: 1,
+				ExtensionlessFiles: 1,
+				EmptyFiles: 1);
 			var controllerImpactCounts = new IgnoreControllerImpactCounts(
-				GitIgnore: effectiveRules.UseGitIgnore ? 0 : 1,
-				SmartIgnore: effectiveRules.UseSmartIgnore ? 0 : 1);
+				GitIgnore: 1,
+				SmartIgnore: 1);
 
-			// This deliberately models options that hide their own evidence once active.
-			// The refresh engine must preserve those runtime-active options to avoid an
-			// availability/selection oscillation and repeated expensive snapshot passes.
+			// This deliberately models options that hide their own evidence in the tree.
+			// The fresh snapshot still owns the impact truth; the engine only preserves
+			// the user's checked/unchecked preference separately in the option state cache.
 			return new ScanResult<IgnoreSectionScanData>(
 				new IgnoreSectionScanData(
 					extensions,

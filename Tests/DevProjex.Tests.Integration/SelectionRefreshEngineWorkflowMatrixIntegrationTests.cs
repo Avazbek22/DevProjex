@@ -61,7 +61,7 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
     }
 
     [Fact]
-    public void ComputeFullRefreshSnapshot_ProfileAllRoots_DoesNotActivateUnavailableDotFolderToggleSilently()
+    public void ComputeFullRefreshSnapshot_ProfileAllRoots_ActivatesNowAvailableDotFolderToggleConsistently()
     {
         var rootPath = ProjectLoadWorkflowSharedWorkspace.RootPath;
         var services = CreateServices();
@@ -70,11 +70,11 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             CreateProfileWithAllVisibleRootsAndUnavailableDotFolderContext(rootPath),
             CancellationToken.None);
 
-        Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, ".cache", StringComparison.Ordinal) && !option.IsChecked);
+        Assert.DoesNotContain(snapshot.RootOptions!, option => string.Equals(option.Name, ".cache", StringComparison.Ordinal));
         Assert.All(
             snapshot.RootOptions!.Where(option => !string.Equals(option.Name, ".cache", StringComparison.Ordinal)),
             option => Assert.True(option.IsChecked));
-        Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+        Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
     }
 
     public static IEnumerable<object[]> WorkflowCases()
@@ -173,10 +173,10 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             CreateProfileWithUnavailableIgnoreSelectionContext,
             snapshot =>
             {
-                Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+                Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
                 Assert.All(
-                    snapshot.IgnoreOptions.Where(option => option.Id is not IgnoreOptionId.UseGitIgnore and not IgnoreOptionId.SmartIgnore),
-                    option => Assert.True(option.IsChecked));
+                    snapshot.IgnoreOptions.Where(option => option.Id is not IgnoreOptionId.DotFolders),
+                    option => Assert.False(option.IsChecked));
             })
     ];
 
@@ -389,7 +389,8 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             ExtensionOptionStateCache: snapshot.ExtensionOptions.ToDictionary(
                 option => option.Name,
                 option => option.IsChecked,
-                StringComparer.OrdinalIgnoreCase));
+                StringComparer.OrdinalIgnoreCase),
+            IgnoreOptionStateCacheIsComplete: true);
     }
 
     private static bool? DeriveIgnoreAllPreference(IReadOnlyList<ResolvedIgnoreOptionState> ignoreOptions)

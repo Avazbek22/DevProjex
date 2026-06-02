@@ -5,6 +5,82 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class IgnoreOptionDeepContractMatrixIntegrationTests
 {
+	private const int MaximumExternalConvergencePasses = 4;
+
+	[Fact]
+	public void RootDotFolderWithExtensionlessNoise_DefaultsUseDirectDotFolderEvidenceAcrossConvergence()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateFile("README", "visible extensionless\n");
+		workspace.CreateFile("src/Program.cs", "Console.WriteLine(\"ok\");\n");
+		for (var index = 0; index < 128; index++)
+			workspace.CreateFile(Path.Combine(".cache", "nested", $"artifact-{index:000}"), $"noise {index}\n");
+
+		var services = CreateServices();
+		var defaults = ComputeConvergedSnapshot(services, workspace.Path, CreateDefaultContext(workspace.Path));
+
+		AssertIgnoreOption(defaults, IgnoreOptionId.EmptyFolders, expectedVisible: false, expectedChecked: null);
+		var dotFolders = AssertIgnoreOption(defaults, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+		var extensionlessFiles = AssertIgnoreOption(defaults, IgnoreOptionId.ExtensionlessFiles, expectedVisible: true, expectedChecked: true);
+
+		Assert.Equal(1, defaults.IgnoreOptionCounts.DotFolders);
+		Assert.Equal(0, defaults.IgnoreOptionCounts.EmptyFolders);
+		Assert.Equal(1, defaults.IgnoreOptionCounts.ExtensionlessFiles);
+		Assert.Contains("(1)", dotFolders.Label);
+		Assert.Contains("(1)", extensionlessFiles.Label);
+		Assert.DoesNotContain(defaults.RootOptions!, option => string.Equals(option.Name, ".cache", StringComparison.Ordinal));
+		AssertTreeState(
+			workspace.Path,
+			defaults,
+			visiblePaths: ["src/Program.cs"],
+			hiddenPaths:
+			[
+				"README",
+				".cache/nested/artifact-000"
+			]);
+	}
+
+	[Fact]
+	public void NestedDotFolderWithUndiscoveredExtension_DefaultsKeepStructuralToggleVisible()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateFile("src/Program.cs", "Console.WriteLine(\"ok\");\n");
+		workspace.CreateFile("src/.idea/settings.xml", "<settings />\n");
+
+		var services = CreateServices();
+		var defaults = ComputeConvergedSnapshot(services, workspace.Path, CreateDefaultContext(workspace.Path));
+
+		var dotFolders = AssertIgnoreOption(defaults, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+		Assert.Equal(1, defaults.IgnoreOptionCounts.DotFolders);
+		Assert.Contains("(1)", dotFolders.Label);
+		Assert.DoesNotContain(defaults.ExtensionOptions, option => string.Equals(option.Name, ".xml", StringComparison.OrdinalIgnoreCase));
+		AssertTreeState(
+			workspace.Path,
+			defaults,
+			visiblePaths: ["src/Program.cs"],
+			hiddenPaths: ["src/.idea/settings.xml"]);
+
+		var dotOff = ComputeConvergedSnapshot(
+			services,
+			workspace.Path,
+			CreateForcedIgnoreContext(workspace.Path, defaults, new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.DotFolders] = false
+			}));
+
+		AssertIgnoreOption(dotOff, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: false);
+		Assert.Contains(dotOff.ExtensionOptions, option => string.Equals(option.Name, ".xml", StringComparison.OrdinalIgnoreCase) && option.IsChecked);
+		AssertTreeState(
+			workspace.Path,
+			dotOff,
+			visiblePaths:
+			[
+				"src/Program.cs",
+				"src/.idea/settings.xml"
+			],
+			hiddenPaths: []);
+	}
+
 	[Fact]
 	public void MultiRootWorkspace_SelectedRootScopeCountsOnlyDotFoldersThatCanAffectCheckedRoots()
 	{
@@ -207,13 +283,38 @@ public sealed class IgnoreOptionDeepContractMatrixIntegrationTests
 		string rootPath,
 		SelectionRefreshContext context)
 	{
-		var first = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
-		var second = services.Engine.ComputeFullRefreshSnapshot(
-			CreateContextFromSnapshot(rootPath, first),
-			TestContext.Current.CancellationToken);
+		var previous = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
+		for (var pass = 0; pass < MaximumExternalConvergencePasses; pass++)
+		{
+			var next = services.Engine.ComputeFullRefreshSnapshot(
+				CreateContextFromSnapshot(rootPath, previous),
+				TestContext.Current.CancellationToken);
+			if (AreEquivalentSnapshots(previous, next))
+				return next;
 
-		AssertEquivalentSnapshots(first, second);
-		return second;
+			previous = next;
+		}
+
+		var final = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextFromSnapshot(rootPath, previous),
+			TestContext.Current.CancellationToken);
+		AssertEquivalentSnapshots(previous, final);
+		return final;
+	}
+
+	private static bool AreEquivalentSnapshots(
+		SelectionRefreshSnapshot expected,
+		SelectionRefreshSnapshot actual)
+	{
+		try
+		{
+			AssertEquivalentSnapshots(expected, actual);
+			return true;
+		}
+		catch (Xunit.Sdk.XunitException)
+		{
+			return false;
+		}
 	}
 
 	private static SelectionRefreshContext CreateSingleRootContext(
@@ -313,15 +414,28 @@ public sealed class IgnoreOptionDeepContractMatrixIntegrationTests
 		var options = snapshot.IgnoreOptions.Where(option => option.Id == optionId).ToArray();
 		if (!expectedVisible)
 		{
-			Assert.Empty(options);
+			Assert.True(
+				options.Length == 0,
+				$"Expected ignore option '{optionId}' to be hidden, but it was visible. {DescribeSnapshot(snapshot)}");
 			return default;
 		}
 
-		Assert.Single(options);
+		Assert.True(
+			options.Length == 1,
+			$"Expected ignore option '{optionId}' to be visible once, but found {options.Length}. {DescribeSnapshot(snapshot)}");
 		if (expectedChecked.HasValue)
 			Assert.Equal(expectedChecked.Value, options[0].IsChecked);
 
 		return options[0];
+	}
+
+	private static string DescribeSnapshot(SelectionRefreshSnapshot snapshot)
+	{
+		var roots = snapshot.RootOptions is null
+			? "<null>"
+			: string.Join(", ", snapshot.RootOptions.Select(option => $"{option.Name}:{option.IsChecked}"));
+		var ignore = string.Join(", ", snapshot.IgnoreOptions.Select(option => $"{option.Id}:{option.IsChecked}:{option.Label}"));
+		return $"Roots=[{roots}] Ignore=[{ignore}] Counts=(dotFolders:{snapshot.IgnoreOptionCounts.DotFolders}, extensionless:{snapshot.IgnoreOptionCounts.ExtensionlessFiles}, emptyFolders:{snapshot.IgnoreOptionCounts.EmptyFolders}) Controller=(smart:{snapshot.ControllerImpactCounts.SmartIgnore}, git:{snapshot.ControllerImpactCounts.GitIgnore})";
 	}
 
 	private static (string[] Visible, string[] Hidden) ExpectedPathVisibility(string path, bool hidden) =>
