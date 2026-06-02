@@ -759,10 +759,9 @@ private static SelectionSyncCoordinator CreateCoordinator(
 
 		coordinator.ApplyProjectProfileSelections("C:\\ProjectA", profile);
 
-		var initialized = GetPrivateBoolField(coordinator, "_extensionsSelectionInitialized");
-		var cached = GetPrivateHashSetField(coordinator, "_extensionsSelectionCache");
-		Assert.True(initialized);
-		Assert.Empty(cached);
+		var session = GetPrivateSession(coordinator);
+		Assert.True(session.Extensions.IsInitialized);
+		Assert.Empty(session.Extensions.SelectedNames);
 	}
 
 	[Fact]
@@ -772,8 +771,8 @@ private static SelectionSyncCoordinator CreateCoordinator(
 
 		coordinator.ResetProjectProfileSelections("C:\\ProjectB");
 
-		var prepared = GetPrivateStringField(coordinator, "_preparedSelectionPath");
-		Assert.Equal("C:\\ProjectB", prepared);
+		var session = GetPrivateSession(coordinator);
+		Assert.True(session.HasPreparedSelectionForPath("C:\\ProjectB"));
 	}
 
 	[Fact]
@@ -875,40 +874,13 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		method!.Invoke(coordinator, [options, stateCache]);
 	}
 
-	private static void SetPrivateField(SelectionSyncCoordinator coordinator, string fieldName, string? value)
+	private static ProjectSelectionSessionState GetPrivateSession(SelectionSyncCoordinator coordinator)
 	{
 		var field = typeof(SelectionSyncCoordinator).GetField(
-			fieldName,
+			"_session",
 			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(field);
-		field.SetValue(coordinator, value);
-	}
-
-	private static bool GetPrivateBoolField(SelectionSyncCoordinator coordinator, string fieldName)
-	{
-		var field = typeof(SelectionSyncCoordinator).GetField(
-			fieldName,
-			BindingFlags.NonPublic | BindingFlags.Instance);
-		Assert.NotNull(field);
-		return (bool)field.GetValue(coordinator)!;
-	}
-
-	private static string? GetPrivateStringField(SelectionSyncCoordinator coordinator, string fieldName)
-	{
-		var field = typeof(SelectionSyncCoordinator).GetField(
-			fieldName,
-			BindingFlags.NonPublic | BindingFlags.Instance);
-		Assert.NotNull(field);
-		return (string?)field.GetValue(coordinator);
-	}
-
-	private static HashSet<string> GetPrivateHashSetField(SelectionSyncCoordinator coordinator, string fieldName)
-	{
-		var field = typeof(SelectionSyncCoordinator).GetField(
-			fieldName,
-			BindingFlags.NonPublic | BindingFlags.Instance);
-		Assert.NotNull(field);
-		return (HashSet<string>)field.GetValue(coordinator)!;
+		return (ProjectSelectionSessionState)field.GetValue(coordinator)!;
 	}
 }
 

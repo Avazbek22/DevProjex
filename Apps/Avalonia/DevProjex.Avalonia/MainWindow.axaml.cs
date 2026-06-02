@@ -8,6 +8,7 @@ using Avalonia.Animation.Easings;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using DevProjex.Application;
+using DevProjex.Application.Models;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
@@ -6943,7 +6944,7 @@ public partial class MainWindow : Window
         var profile = CaptureCurrentProjectSelectionProfile();
         var persistedAtUtc = DateTimeOffset.UtcNow;
         _lastPersistedProjectProfilePath = _currentPath;
-        _lastPersistedProjectProfile = CloneProjectSelectionProfile(profile);
+        _lastPersistedProjectProfile = ProjectSelectionProfileBuilder.Clone(profile);
         _lastPersistedProjectProfileUpdatedUtc = persistedAtUtc;
         _projectProfilePersistencePending = !_projectProfileStore.TrySaveProfile(_currentPath, profile, persistedAtUtc);
     }
@@ -6973,45 +6974,16 @@ public partial class MainWindow : Window
 
     private ProjectSelectionProfile CaptureCurrentProjectSelectionProfile()
     {
-        // Options can temporarily disappear when another section hides their evidence.
-        // Persist the coordinator caches and overlay currently visible values so hidden
-        // manual choices are not erased during Apply, refresh, or window close.
-        var rootFolderStates = MergeOptionStates(
-            _selectionCoordinator.SnapshotRootOptionStatesForPersistence(),
-            _viewModel.RootFolders,
-            PathComparer.Default);
-        var extensionStates = MergeOptionStates(
-            _selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
-            _viewModel.Extensions,
-            StringComparer.OrdinalIgnoreCase);
-        var ignoreOptionStates = MergeIgnoreOptionStates(
-            _selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
-            _viewModel.IgnoreOptions);
-
-        return new ProjectSelectionProfile(
-            SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default),
-            SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
-            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray(),
-            RootFolderStates: rootFolderStates,
-            ExtensionStates: extensionStates,
-            IgnoreOptionStates: ignoreOptionStates);
-    }
-
-    private static ProjectSelectionProfile CloneProjectSelectionProfile(ProjectSelectionProfile profile)
-    {
-        return new ProjectSelectionProfile(
-            SelectedRootFolders: profile.SelectedRootFolders.ToArray(),
-            SelectedExtensions: profile.SelectedExtensions.ToArray(),
-            SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray(),
-            RootFolderStates: profile.RootFolderStates is null
-                ? null
-                : new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default),
-            ExtensionStates: profile.ExtensionStates is null
-                ? null
-                : new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
-            IgnoreOptionStates: profile.IgnoreOptionStates is null
-                ? null
-                : new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates));
+        return ProjectSelectionProfileBuilder.Create(
+            visibleRootFolders: _viewModel.RootFolders.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
+            visibleExtensions: _viewModel.Extensions.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
+            visibleIgnoreOptions: _viewModel.IgnoreOptions.Select(static option => new IgnoreSelectionOption(option.Id, option.IsChecked)),
+            cachedRootFolderStates: _selectionCoordinator.SnapshotRootOptionStatesForPersistence(),
+            cachedExtensionStates: _selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
+            cachedIgnoreOptionStates: _selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
+            selectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds(),
+            rootFolderComparer: PathComparer.Default,
+            extensionComparer: StringComparer.OrdinalIgnoreCase);
     }
 
     private void FlushPersistedStateOnWindowClose()
@@ -7031,7 +7003,7 @@ public partial class MainWindow : Window
 
         if (_projectProfileStore.TrySaveProfile(
                 _lastPersistedProjectProfilePath,
-                CloneProjectSelectionProfile(_lastPersistedProjectProfile),
+                ProjectSelectionProfileBuilder.Clone(_lastPersistedProjectProfile),
                 _lastPersistedProjectProfileUpdatedUtc))
         {
             _projectProfilePersistencePending = false;
@@ -8260,35 +8232,6 @@ public partial class MainWindow : Window
         }
 
         return selected;
-    }
-
-    private static Dictionary<string, bool> MergeOptionStates(
-        IReadOnlyDictionary<string, bool>? cachedStates,
-        IEnumerable<SelectionOptionViewModel> options,
-        StringComparer comparer)
-    {
-        var states = cachedStates is null
-            ? new Dictionary<string, bool>(comparer)
-            : new Dictionary<string, bool>(cachedStates, comparer);
-
-        foreach (var option in options)
-            states[option.Name] = option.IsChecked;
-
-        return states;
-    }
-
-    private static Dictionary<IgnoreOptionId, bool> MergeIgnoreOptionStates(
-        IReadOnlyDictionary<IgnoreOptionId, bool>? cachedStates,
-        IEnumerable<IgnoreOptionViewModel> options)
-    {
-        var states = cachedStates is null
-            ? []
-            : new Dictionary<IgnoreOptionId, bool>(cachedStates);
-
-        foreach (var option in options)
-            states[option.Id] = option.IsChecked;
-
-        return states;
     }
 
     private HashSet<string> GetCheckedPaths()
