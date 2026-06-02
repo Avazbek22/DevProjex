@@ -8,7 +8,6 @@ using Avalonia.Animation.Easings;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using DevProjex.Application;
-using DevProjex.Application.Models;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
@@ -63,28 +62,11 @@ public partial class MainWindow : Window
         Filter = 2
     }
 
-    private enum StatusOperationType
-    {
-        None = 0,
-        LoadProject = 1,
-        RefreshProject = 2,
-        MetricsCalculation = 3,
-        GitPullUpdates = 4,
-        GitSwitchBranch = 5,
-        PreviewBuild = 6
-    }
-
-    private sealed record SelectionOptionSnapshot(string Name, bool IsChecked);
-
-    private sealed record IgnoreOptionSnapshot(IgnoreOptionId Id, string Label, bool IsChecked);
-
     private readonly record struct PreviewWarmupSnapshot(string Text, int LineCount);
     private readonly record struct PreviewBuildResult(IPreviewTextDocument Document);
     private readonly record struct PreviewSelectionMetricsSnapshot(
         IPreviewTextDocument Document,
         PreviewSelectionRange SelectionRange);
-    private readonly record struct ProjectProfileLoadSnapshot(bool HasProfile, ProjectSelectionProfile? Profile);
-
     private readonly record struct TreeMetricsCacheKey(
         int TreeIdentity,
         TreeTextFormat Format,
@@ -97,35 +79,6 @@ public partial class MainWindow : Window
         int SelectedCount,
         int SelectedHash,
         int PathMapperIdentity);
-
-    private readonly record struct StatusOperationSnapshot(
-        long OperationId,
-        StatusOperationType OperationType,
-        Action? CancelAction);
-
-    private sealed record ProjectLoadCancellationSnapshot(
-        bool HadLoadedProjectBefore,
-        string? Path,
-        string? ProjectDisplayName,
-        string? RepositoryUrl,
-        BuildTreeResult? Tree,
-        ProjectSourceType ProjectSourceType,
-        string CurrentBranch,
-        IReadOnlyList<GitBranch> GitBranches,
-        bool SettingsVisible,
-        bool SearchVisible,
-        bool FilterVisible,
-        PreviewWorkspaceMode PreviewWorkspaceMode,
-        bool StatusMetricsVisible,
-        string StatusTreeStatsText,
-        string StatusContentStatsText,
-        bool AllRootFoldersChecked,
-        bool AllExtensionsChecked,
-        bool AllIgnoreChecked,
-        bool HasCompleteMetricsBaseline,
-        IReadOnlyList<SelectionOptionSnapshot> RootFolders,
-        IReadOnlyList<SelectionOptionSnapshot> Extensions,
-        IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions);
 
     public MainWindow()
         : this(CommandLineOptions.Empty, AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty))
@@ -154,19 +107,21 @@ public partial class MainWindow : Window
     private readonly IElevationService _elevation;
     private readonly IAppInstanceLauncher _appInstanceLauncher;
     private readonly UserSettingsStore _userSettingsStore;
-    private readonly IProjectProfileStore _projectProfileStore;
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
     private readonly IFileContentAnalyzer _fileContentAnalyzer;
     private readonly RecentProjectsStore _recentProjectsStore;
-    private readonly ITaskbarProgressService _taskbarProgressService;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
     private readonly NameFilterCoordinator _filterCoordinator;
     private readonly ThemeBrushCoordinator _themeBrushCoordinator;
     private readonly SelectionSyncCoordinator _selectionCoordinator;
+    private readonly StatusOperationCoordinator _statusOperations;
+    private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
+    private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
+    private readonly TaskbarProgressCoordinator _taskbarProgress;
 
     private BuildTreeResult? _currentTree;
     private BuildTreeResult? _filterBaseTree;
@@ -232,13 +187,8 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
-    private bool _gitCloneTaskbarProgressActive;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
-    private bool _projectProfilePersistencePending;
-    private string? _lastPersistedProjectProfilePath;
-    private ProjectSelectionProfile? _lastPersistedProjectProfile;
-    private DateTimeOffset _lastPersistedProjectProfileUpdatedUtc;
     private Border? _dropZoneContainer;
 
     // Settings panel animation
@@ -377,14 +327,8 @@ public partial class MainWindow : Window
     private ExportOutputMetrics _contentMetricsCacheValue = ExportOutputMetrics.Empty;
     private int _allOrderedFilePathsTreeIdentity;
     private IReadOnlyList<string>? _allOrderedFilePathsCache;
-    private long _statusOperationSequence;
-    private readonly object _statusOperationLock = new();
-    private long _activeStatusOperationId;
-    private StatusOperationType _activeStatusOperationType;
-    private Action? _activeStatusCancelAction;
     private bool _metricsCancellationRequestedByUser;
     private volatile bool _hasCompleteMetricsBaseline;
-    private ProjectLoadCancellationSnapshot? _activeProjectLoadCancellationSnapshot;
     private static readonly FrozenSet<string> MetricsWarmupBinaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
@@ -422,15 +366,33 @@ public partial class MainWindow : Window
         _elevation = services.Elevation;
         _appInstanceLauncher = services.AppInstanceLauncher;
         _userSettingsStore = services.UserSettingsStore;
-        _projectProfileStore = services.ProjectProfileStore;
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
         _fileContentAnalyzer = services.FileContentAnalyzer;
         _recentProjectsStore = services.RecentProjectsStore;
-        _taskbarProgressService = services.TaskbarProgressService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
+        _statusOperations = new StatusOperationCoordinator(
+            _viewModel,
+            () => _isBackgroundMetricsActive,
+            () => _viewModel.StatusOperationCalculatingData);
+        _selectionCoordinator = new SelectionSyncCoordinator(
+            _viewModel,
+            _scanOptions,
+            _filterSelectionService,
+            _ignoreOptionsService,
+            BuildIgnoreRules,
+            GetIgnoreOptionsAvailability,
+            TryElevateAndRestart,
+            () => _currentPath);
+        _projectProfiles = new ProjectProfilePersistenceCoordinator(
+            _viewModel,
+            _selectionCoordinator,
+            services.ProjectProfileStore);
+        _taskbarProgress = new TaskbarProgressCoordinator(
+            _viewModel,
+            services.TaskbarProgressService);
         _viewModel.SetToastItems(_toastService.Items);
         EnsureAppStateStoresExist();
         LoadRecentProjects();
@@ -586,16 +548,6 @@ public partial class MainWindow : Window
             () => !string.IsNullOrWhiteSpace(_viewModel.NameFilter),
             _viewModel.SetFilterInProgress);
         _themeBrushCoordinator = new ThemeBrushCoordinator(this, _viewModel, () => _topMenuBar?.MainMenuControl);
-        _selectionCoordinator = new SelectionSyncCoordinator(
-            _viewModel,
-            _scanOptions,
-            _filterSelectionService,
-            _ignoreOptionsService,
-            BuildIgnoreRules,
-            GetIgnoreOptionsAvailability,
-            TryElevateAndRestart,
-            () => _currentPath);
-
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
@@ -646,7 +598,7 @@ public partial class MainWindow : Window
             else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
                      or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
                      or nameof(MainWindowViewModel.StatusProgressValue))
-                SyncTaskbarProgressWithStatusBar();
+                _taskbarProgress.SyncWithStatusBar();
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
             {
                 RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
@@ -694,7 +646,7 @@ public partial class MainWindow : Window
             // recover from partial external cleanup without waiting for a later save path.
             _userSettingsStore.EnsureStorageExists();
             _recentProjectsStore.EnsureStorageExists();
-            _projectProfileStore.EnsureStorageExists();
+            _projectProfiles.EnsureStorageExists();
         }
         catch
         {
@@ -796,8 +748,7 @@ public partial class MainWindow : Window
         // Clean up repository cache on exit
         _repoCacheService.ClearAllCache();
 
-        _taskbarProgressService.Clear();
-        _taskbarProgressService.Dispose();
+        _taskbarProgress.Dispose();
 
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
@@ -941,8 +892,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            _taskbarProgressService.Attach(this);
-            SyncTaskbarProgressWithStatusBar();
+            _taskbarProgress.Attach(this);
 
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
             ApplyStartupThemePreset();
@@ -971,61 +921,6 @@ public partial class MainWindow : Window
         {
             await ShowErrorAsync(ex.Message);
         }
-    }
-
-    private void SyncTaskbarProgressWithStatusBar()
-    {
-        if (!_viewModel.StatusBusy)
-        {
-            _taskbarProgressService.Clear();
-            return;
-        }
-
-        if (_viewModel.StatusProgressIsIndeterminate)
-        {
-            _taskbarProgressService.SetIndeterminate();
-            return;
-        }
-
-        _taskbarProgressService.SetProgress(_viewModel.StatusProgressValue);
-    }
-
-    private void BeginGitCloneTaskbarProgress()
-    {
-        _gitCloneTaskbarProgressActive = true;
-        // The clone dialog is owner-only and hidden from the taskbar, so progress belongs
-        // to the main window icon even while the dialog is the active surface.
-        _taskbarProgressService.Attach(this);
-        _taskbarProgressService.SetIndeterminate();
-    }
-
-    private void UpdateGitCloneTaskbarProgress(string status)
-    {
-        if (!_gitCloneTaskbarProgressActive)
-            return;
-
-        if (TryParseTrailingPercent(status, out var percent))
-        {
-            _taskbarProgressService.SetProgress(percent);
-            return;
-        }
-
-        _taskbarProgressService.SetIndeterminate();
-    }
-
-    private void MarkGitCloneTaskbarProgressError()
-    {
-        if (_gitCloneTaskbarProgressActive)
-            _taskbarProgressService.SetError();
-    }
-
-    private void CompleteGitCloneTaskbarProgress()
-    {
-        if (!_gitCloneTaskbarProgressActive)
-            return;
-
-        _gitCloneTaskbarProgressActive = false;
-        SyncTaskbarProgressWithStatusBar();
     }
 
     #region Drop Zone Handlers
@@ -2287,7 +2182,7 @@ public partial class MainWindow : Window
         CancelPreviewRefresh();
         var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = refreshCts.Token;
-        var statusOperationId = BeginStatusOperation(
+        var statusOperationId = _statusOperations.Begin(
             _viewModel.StatusOperationRefreshingProject,
             indeterminate: true,
             operationType: StatusOperationType.RefreshProject,
@@ -2295,18 +2190,18 @@ public partial class MainWindow : Window
         try
         {
             await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.RefreshProject);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
         finally
@@ -2359,7 +2254,7 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
-            statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin("Preparing content...", indeterminate: true);
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2367,18 +2262,18 @@ public partial class MainWindow : Window
                 pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
             await SetClipboardTextAsync(content);
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2397,7 +2292,7 @@ public partial class MainWindow : Window
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
             // Run file reading off UI thread
-            statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2407,12 +2302,12 @@ public partial class MainWindow : Window
                     CancellationToken.None,
                     pathPresentation));
             await SetClipboardTextAsync(content);
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2465,7 +2360,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin("Preparing content...", indeterminate: true);
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2473,7 +2368,7 @@ public partial class MainWindow : Window
                 pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
@@ -2485,13 +2380,13 @@ public partial class MainWindow : Window
                 useJsonDefaultExtension: false,
                 allowBothExtensions: false);
 
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             if (saved)
                 _toastService.Show(_localization["Toast.Export.Content"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2510,7 +2405,7 @@ public partial class MainWindow : Window
             var saveAsJson = false;
             var pathPresentation = CreateExportPathPresentation();
 
-            statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2527,13 +2422,13 @@ public partial class MainWindow : Window
                 useJsonDefaultExtension: false,
                 allowBothExtensions: false);
 
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             if (saved)
                 _toastService.Show(_localization["Toast.Export.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2982,7 +2877,7 @@ public partial class MainWindow : Window
         _viewModel.IsPreviewLoading = true;
 
         // Show progress bar immediately with cancel support
-        var operationId = BeginStatusOperation(
+        var operationId = _statusOperations.Begin(
             _viewModel.StatusOperationPreparingPreview,
             indeterminate: true,
             operationType: StatusOperationType.PreviewBuild,
@@ -3101,7 +2996,7 @@ public partial class MainWindow : Window
                 _viewModel.IsPreviewLoading = false;
 
             // Always hide progress bar
-            CompleteStatusOperation(operationId);
+            _statusOperations.Complete(operationId);
 
             DisposeIfCurrent(ref _previewBuildCts, previewCts);
         }
@@ -5276,7 +5171,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _projectProfileStore.ClearAllProfiles();
+        _projectProfiles.ClearAllProfiles();
         _toastService.Show(_localization["Toast.Data.Reset"]);
         e.Handled = true;
     }
@@ -5452,7 +5347,7 @@ public partial class MainWindow : Window
 
         _viewModel.GitCloneInProgress = true;
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
-        BeginGitCloneTaskbarProgress();
+        _taskbarProgress.BeginGitClone();
 
         string? targetPath = null;
 
@@ -5465,7 +5360,7 @@ public partial class MainWindow : Window
                 _viewModel.GitCloneInProgress = false;
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
-                MarkGitCloneTaskbarProgressError();
+                _taskbarProgress.MarkGitCloneError();
                 await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
                 return;
             }
@@ -5486,7 +5381,7 @@ public partial class MainWindow : Window
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    UpdateGitCloneTaskbarProgress(status);
+                    _taskbarProgress.UpdateGitClone(status);
 
                     // Handle phase transition markers
                     if (status == "::EXTRACTING::")
@@ -5518,7 +5413,7 @@ public partial class MainWindow : Window
             {
                 currentOperation = _viewModel.GitCloneProgressCloning;
                 _viewModel.GitCloneStatus = currentOperation;
-                _taskbarProgressService.SetIndeterminate();
+                _taskbarProgress.SetGitCloneIndeterminate();
                 result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
             }
             else
@@ -5529,7 +5424,7 @@ public partial class MainWindow : Window
 
                 currentOperation = _viewModel.GitCloneProgressDownloading;
                 _viewModel.GitCloneStatus = currentOperation;
-                _taskbarProgressService.SetIndeterminate();
+                _taskbarProgress.SetGitCloneIndeterminate();
                 result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
             }
 
@@ -5541,7 +5436,7 @@ public partial class MainWindow : Window
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
-                MarkGitCloneTaskbarProgressError();
+                _taskbarProgress.MarkGitCloneError();
                 await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
                 _toastService.Show(_localization["Toast.Git.CloneError"]);
                 return;
@@ -5590,14 +5485,14 @@ public partial class MainWindow : Window
 
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
-            MarkGitCloneTaskbarProgressError();
+            _taskbarProgress.MarkGitCloneError();
             await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
             _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
         {
             _viewModel.GitCloneInProgress = false;
-            CompleteGitCloneTaskbarProgress();
+            _taskbarProgress.CompleteGitClone();
             DisposeIfCurrent(ref _gitCloneCts, gitCloneCts);
         }
 
@@ -5622,7 +5517,7 @@ public partial class MainWindow : Window
     {
         _gitCloneCts?.Cancel();
         _viewModel.GitCloneInProgress = false;
-        CompleteGitCloneTaskbarProgress();
+        _taskbarProgress.CompleteGitClone();
     }
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
@@ -5638,7 +5533,7 @@ public partial class MainWindow : Window
             var statusText = string.IsNullOrWhiteSpace(_viewModel.CurrentBranch)
                 ? _viewModel.StatusOperationGettingUpdates
                 : _localization.Format("Status.Operation.GettingUpdatesBranch", _viewModel.CurrentBranch);
-            statusOperationId = BeginStatusOperation(
+            statusOperationId = _statusOperations.Begin(
                 statusText,
                 indeterminate: true,
                 operationType: StatusOperationType.GitPullUpdates,
@@ -5648,10 +5543,10 @@ public partial class MainWindow : Window
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (TryParseTrailingPercent(status, out var percent))
-                        UpdateStatusOperationProgress(percent, statusText, statusOperationId);
+                    if (GitProgressStatusParser.TryParseTrailingPercent(status, out var percent))
+                        _statusOperations.UpdateProgress(percent, statusText, statusOperationId);
                     else
-                        UpdateStatusOperationText(statusText, statusOperationId);
+                        _statusOperations.UpdateText(statusText, statusOperationId);
                 });
             });
             var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
@@ -5659,7 +5554,7 @@ public partial class MainWindow : Window
 
             if (!success)
             {
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
                 return;
             }
@@ -5672,24 +5567,24 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
             {
                 _toastService.Show(_localization["Toast.Git.NoUpdates"]);
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
             }
             else
             {
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 // Clean up memory from old tree after successful update.
                 ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.GitPullUpdate);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Operation.GitCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
         }
         finally
@@ -5711,7 +5606,7 @@ public partial class MainWindow : Window
         try
         {
             var statusText = _localization.Format("Status.Operation.SwitchingBranch", branchName);
-            statusOperationId = BeginStatusOperation(
+            statusOperationId = _statusOperations.Begin(
                 statusText,
                 indeterminate: true,
                 operationType: StatusOperationType.GitSwitchBranch,
@@ -5721,10 +5616,10 @@ public partial class MainWindow : Window
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (TryParseTrailingPercent(status, out var percent))
-                        UpdateStatusOperationProgress(percent, statusText, statusOperationId);
+                    if (GitProgressStatusParser.TryParseTrailingPercent(status, out var percent))
+                        _statusOperations.UpdateProgress(percent, statusText, statusOperationId);
                     else
-                        UpdateStatusOperationText(statusText, statusOperationId);
+                        _statusOperations.UpdateText(statusText, statusOperationId);
                 });
             });
             var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress, cancellationToken);
@@ -5735,7 +5630,7 @@ public partial class MainWindow : Window
 
             if (!success)
             {
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
                 return;
             }
@@ -5744,7 +5639,7 @@ public partial class MainWindow : Window
             // This keeps UI stable if reload fails or gets cancelled mid-flight.
             await ReloadProjectAsync(cancellationToken);
             await RefreshGitBranchesAsync(_currentPath, cancellationToken);
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
 
             _viewModel.CurrentBranch = branchName;
             UpdateTitle();
@@ -5755,12 +5650,12 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Operation.GitCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
         }
         finally
@@ -6921,7 +6816,7 @@ public partial class MainWindow : Window
             // Keep dynamic ignore counts aligned with the tree that was just applied.
             await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionAsync(_currentPath);
             await _selectionCoordinator.WaitForPendingRefreshesAsync();
-            PersistLocalProjectProfileIfNeeded();
+            _projectProfiles.PersistIfNeeded(_currentPath);
         }
         catch (OperationCanceledException)
         {
@@ -6933,59 +6828,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PersistLocalProjectProfileIfNeeded()
-    {
-        if (!IsLocalProjectProfilePersistenceApplicable())
-            return;
-
-        if (string.IsNullOrWhiteSpace(_currentPath))
-            return;
-
-        var profile = CaptureCurrentProjectSelectionProfile();
-        var persistedAtUtc = DateTimeOffset.UtcNow;
-        _lastPersistedProjectProfilePath = _currentPath;
-        _lastPersistedProjectProfile = ProjectSelectionProfileBuilder.Clone(profile);
-        _lastPersistedProjectProfileUpdatedUtc = persistedAtUtc;
-        _projectProfilePersistencePending = !_projectProfileStore.TrySaveProfile(_currentPath, profile, persistedAtUtc);
-    }
-
-    private bool TryGetLocalProjectProfile(out ProjectSelectionProfile profile)
-    {
-        profile = new ProjectSelectionProfile(
-            SelectedRootFolders: [],
-            SelectedExtensions: [],
-            SelectedIgnoreOptions: []);
-
-        if (!IsLocalProjectProfilePersistenceApplicable() || string.IsNullOrWhiteSpace(_currentPath))
-            return false;
-
-        return _projectProfileStore.TryLoadProfile(_currentPath, out profile);
-    }
-
-    private ProjectProfileLoadSnapshot LoadProjectProfileSnapshot()
-    {
-        return TryGetLocalProjectProfile(out var profile)
-            ? new ProjectProfileLoadSnapshot(true, profile)
-            : new ProjectProfileLoadSnapshot(false, null);
-    }
-
-    private bool IsLocalProjectProfilePersistenceApplicable()
-        => _viewModel.ProjectSourceType == ProjectSourceType.LocalFolder;
-
-    private ProjectSelectionProfile CaptureCurrentProjectSelectionProfile()
-    {
-        return ProjectSelectionProfileBuilder.Create(
-            visibleRootFolders: _viewModel.RootFolders.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
-            visibleExtensions: _viewModel.Extensions.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
-            visibleIgnoreOptions: _viewModel.IgnoreOptions.Select(static option => new IgnoreSelectionOption(option.Id, option.IsChecked)),
-            cachedRootFolderStates: _selectionCoordinator.SnapshotRootOptionStatesForPersistence(),
-            cachedExtensionStates: _selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
-            cachedIgnoreOptionStates: _selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
-            selectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds(),
-            rootFolderComparer: PathComparer.Default,
-            extensionComparer: StringComparer.OrdinalIgnoreCase);
-    }
-
     private void FlushPersistedStateOnWindowClose()
     {
         // Give persistence one last synchronous chance before the process exits.
@@ -6994,20 +6836,7 @@ public partial class MainWindow : Window
         if (_recentProjectsDb.RecentFolders.Count > 0 || _recentProjectsDb.RecentRepositories.Count > 0)
             _recentProjectsStore.TryPersist(_recentProjectsDb);
 
-        if (!_projectProfilePersistencePending ||
-            string.IsNullOrWhiteSpace(_lastPersistedProjectProfilePath) ||
-            _lastPersistedProjectProfile is null)
-        {
-            return;
-        }
-
-        if (_projectProfileStore.TrySaveProfile(
-                _lastPersistedProjectProfilePath,
-                ProjectSelectionProfileBuilder.Clone(_lastPersistedProjectProfile),
-                _lastPersistedProjectProfileUpdatedUtc))
-        {
-            _projectProfilePersistencePending = false;
-        }
+        _projectProfiles.FlushPending();
     }
 
     private async Task TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
@@ -7028,7 +6857,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
+        _projectLoadCancellation.Capture(CaptureProjectLoadCancellationSnapshot());
         await PrepareSearchAndFilterForProjectLoadAsync();
         CancelBackgroundMemoryCleanup();
         CancelPreviewRefresh();
@@ -7037,7 +6866,7 @@ public partial class MainWindow : Window
         var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = projectLoadCts.Token;
         _viewModel.StatusMetricsVisible = false;
-        var statusOperationId = BeginStatusOperation(
+        var statusOperationId = _statusOperations.Begin(
             _viewModel.StatusOperationLoadingProject,
             indeterminate: true,
             operationType: StatusOperationType.LoadProject,
@@ -7084,8 +6913,8 @@ public partial class MainWindow : Window
                 _currentCachedRepoPath = null;
             }
 
-            _activeProjectLoadCancellationSnapshot = null;
-            CompleteStatusOperation(statusOperationId);
+            _projectLoadCancellation.Clear();
+            _statusOperations.Complete(statusOperationId);
 
             // First project load has nothing meaningful to reclaim yet. Skip the post-load sweep there
             // so the initial settings reveal and early interaction stay as smooth as possible.
@@ -7105,17 +6934,17 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (IsStatusOperationActive(statusOperationId) && TryApplyActiveProjectLoadCancellationFallback())
+            if (_statusOperations.IsActive(statusOperationId) && TryApplyActiveProjectLoadCancellationFallback())
             {
                 _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
             }
 
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
         }
         catch
         {
-            _activeProjectLoadCancellationSnapshot = null;
-            CompleteStatusOperation(statusOperationId);
+            _projectLoadCancellation.Clear();
+            _statusOperations.Complete(statusOperationId);
             throw;
         }
         finally
@@ -7163,7 +6992,9 @@ public partial class MainWindow : Window
 
         if (applyStoredProfile)
         {
-            var profileSnapshot = await Task.Run(LoadProjectProfileSnapshot, cancellationToken);
+            var profileSnapshot = await Task.Run(
+                () => _projectProfiles.LoadSnapshot(_currentPath),
+                cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
             if (profileSnapshot is { HasProfile: true, Profile: not null })
@@ -7899,99 +7730,6 @@ public partial class MainWindow : Window
         return BuildIgnoreRules(rootPath, selected, selectedRoots);
     }
 
-    private long BeginStatusOperation(
-        string text,
-        bool indeterminate = true,
-        StatusOperationType operationType = StatusOperationType.None,
-        Action? cancelAction = null)
-    {
-        var operationId = Interlocked.Increment(ref _statusOperationSequence);
-
-        lock (_statusOperationLock)
-        {
-            _activeStatusOperationId = operationId;
-            _activeStatusOperationType = operationType;
-            _activeStatusCancelAction = cancelAction;
-        }
-
-        _viewModel.StatusOperationText = text;
-        _viewModel.StatusBusy = true;
-        _viewModel.StatusProgressIsIndeterminate = indeterminate;
-        _viewModel.StatusProgressValue = 0;
-
-        return operationId;
-    }
-
-    private void UpdateStatusOperationText(string text, long? operationId = null)
-    {
-        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
-            return;
-
-        _viewModel.StatusOperationText = text;
-    }
-
-    private void UpdateStatusOperationProgress(double percent, string? text = null, long? operationId = null)
-    {
-        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
-            return;
-
-        if (!string.IsNullOrWhiteSpace(text))
-            _viewModel.StatusOperationText = text;
-
-        _viewModel.StatusBusy = true;
-        _viewModel.StatusProgressIsIndeterminate = false;
-        _viewModel.StatusProgressValue = Math.Clamp(percent, 0, 100);
-    }
-
-    private void CompleteStatusOperation(long? operationId = null)
-    {
-        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
-            return;
-
-        StatusOperationType activeOperationType;
-        lock (_statusOperationLock)
-            activeOperationType = _activeStatusOperationType;
-
-        // Keep progress visible only for the active metrics operation.
-        if (_isBackgroundMetricsActive && activeOperationType == StatusOperationType.MetricsCalculation)
-        {
-            UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
-            return;
-        }
-
-        lock (_statusOperationLock)
-        {
-            if (operationId.HasValue && _activeStatusOperationId != operationId.Value)
-                return;
-
-            _activeStatusOperationId = 0;
-            _activeStatusOperationType = StatusOperationType.None;
-            _activeStatusCancelAction = null;
-        }
-
-        _viewModel.StatusOperationText = string.Empty;
-        _viewModel.StatusBusy = false;
-        _viewModel.StatusProgressIsIndeterminate = true;
-        _viewModel.StatusProgressValue = 0;
-    }
-
-    private bool IsStatusOperationActive(long operationId)
-    {
-        lock (_statusOperationLock)
-            return _activeStatusOperationId == operationId;
-    }
-
-    private StatusOperationSnapshot GetActiveStatusOperationSnapshot()
-    {
-        lock (_statusOperationLock)
-        {
-            return new StatusOperationSnapshot(
-                _activeStatusOperationId,
-                _activeStatusOperationType,
-                _activeStatusCancelAction);
-        }
-    }
-
     /// <summary>
     /// Cancels any active background metrics calculation.
     /// Call this before starting user-initiated operations that need the status bar.
@@ -8043,25 +7781,9 @@ public partial class MainWindow : Window
 
     private bool TryApplyActiveProjectLoadCancellationFallback()
     {
-        var snapshot = _activeProjectLoadCancellationSnapshot;
-        if (snapshot is null)
-            return false;
-
-        _activeProjectLoadCancellationSnapshot = null;
-        ApplyProjectLoadCancellationFallback(snapshot);
-        return true;
-    }
-
-    private void ApplyProjectLoadCancellationFallback(ProjectLoadCancellationSnapshot snapshot)
-    {
-        var fallback = ProjectLoadCancellationFallbackResolver.Resolve(snapshot.HadLoadedProjectBefore);
-        if (fallback == ProjectLoadCancellationFallback.ResetToInitialState)
-        {
-            ResetToInitialProjectStateAfterCancellation();
-            return;
-        }
-
-        RestorePreviousProjectStateAfterCancellation(snapshot);
+        return _projectLoadCancellation.TryApply(
+            ResetToInitialProjectStateAfterCancellation,
+            RestorePreviousProjectStateAfterCancellation);
     }
 
     private void RestorePreviousProjectStateAfterCancellation(ProjectLoadCancellationSnapshot snapshot)
@@ -8147,7 +7869,7 @@ public partial class MainWindow : Window
 
     private void ResetToInitialProjectStateAfterCancellation()
     {
-        _activeProjectLoadCancellationSnapshot = null;
+        _projectLoadCancellation.Clear();
         CancelBackgroundMetricsCalculation();
         CancelPreviewRefresh();
         ClearPreviousProjectState();
@@ -8180,25 +7902,6 @@ public partial class MainWindow : Window
 
         UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
         UpdateTitle();
-    }
-
-
-    private static bool TryParseTrailingPercent(string status, out double percent)
-    {
-        percent = 0;
-        if (string.IsNullOrWhiteSpace(status))
-            return false;
-
-        var trimmed = status.Trim();
-        if (!trimmed.EndsWith('%'))
-            return false;
-
-        var lastSpace = trimmed.LastIndexOf(' ');
-        var token = lastSpace >= 0 ? trimmed[(lastSpace + 1)..] : trimmed;
-        token = token.TrimEnd('%');
-
-        return double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out percent) ||
-               double.TryParse(token, NumberStyles.Float, CultureInfo.CurrentCulture, out percent);
     }
 
     private async Task SetClipboardTextAsync(string content)
@@ -8468,7 +8171,7 @@ public partial class MainWindow : Window
         _metricsCancellationRequestedByUser = false;
         _hasCompleteMetricsBaseline = false;
         _isBackgroundMetricsActive = true;
-        var statusOperationId = BeginStatusOperation(
+        var statusOperationId = _statusOperations.Begin(
             _viewModel.StatusOperationCalculatingData,
             indeterminate: false,
             operationType: StatusOperationType.MetricsCalculation,
@@ -8477,7 +8180,7 @@ public partial class MainWindow : Window
         var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
         try
         {
-            if (IsStatusOperationActive(statusOperationId))
+            if (_statusOperations.IsActive(statusOperationId))
                 _viewModel.StatusProgressValue = 0;
 
             IReadOnlyList<string> filePaths;
@@ -8501,7 +8204,7 @@ public partial class MainWindow : Window
                 _hasCompleteMetricsBaseline = true;
                 RecalculateMetricsAsync();
                 _viewModel.StatusMetricsVisible = true;
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 return;
             }
 
@@ -8510,11 +8213,11 @@ public partial class MainWindow : Window
             {
                 _isBackgroundMetricsActive = false;
                 _hasCompleteMetricsBaseline = true;
-                if (IsStatusOperationActive(statusOperationId))
+                if (_statusOperations.IsActive(statusOperationId))
                     _viewModel.StatusProgressValue = 100;
                 RecalculateMetricsAsync();
                 _viewModel.StatusMetricsVisible = true;
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 return;
             }
 
@@ -8532,11 +8235,11 @@ public partial class MainWindow : Window
             // Calculation completed successfully
             _isBackgroundMetricsActive = false;
             _hasCompleteMetricsBaseline = true;
-            if (IsStatusOperationActive(statusOperationId))
+            if (_statusOperations.IsActive(statusOperationId))
                 _viewModel.StatusProgressValue = 100;
             RecalculateMetricsAsync();
             _viewModel.StatusMetricsVisible = true;
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
         }
         catch (OperationCanceledException)
         {
@@ -8559,7 +8262,7 @@ public partial class MainWindow : Window
                 RecalculateMetricsAsync();
                 _viewModel.StatusMetricsVisible = true;
             }
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
         }
         finally
         {
@@ -8670,7 +8373,7 @@ public partial class MainWindow : Window
                 {
                     await Dispatcher.UIThread.InvokeAsync(() =>
                     {
-                        if (_isBackgroundMetricsActive && IsStatusOperationActive(statusOperationId))
+                        if (_isBackgroundMetricsActive && _statusOperations.IsActive(statusOperationId))
                             _viewModel.StatusProgressValue = progressPercent;
                     });
                 }
@@ -8989,7 +8692,7 @@ public partial class MainWindow : Window
 
         _metricsCancellationRequestedByUser = false;
         _isBackgroundMetricsActive = true;
-        var statusOperationId = BeginStatusOperation(
+        var statusOperationId = _statusOperations.Begin(
             _viewModel.StatusOperationCalculatingData,
             indeterminate: false,
             operationType: StatusOperationType.MetricsCalculation,
@@ -8999,7 +8702,7 @@ public partial class MainWindow : Window
 
         try
         {
-            if (IsStatusOperationActive(statusOperationId))
+            if (_statusOperations.IsActive(statusOperationId))
                 _viewModel.StatusProgressValue = 0;
 
             await ScanFileMetricsAsync(
@@ -9012,7 +8715,7 @@ public partial class MainWindow : Window
             MergeStagedMetricsIntoCache(stagedMetrics);
             MergeInspectedMetricsPaths(stagedInspectedPaths);
 
-            if (IsStatusOperationActive(statusOperationId))
+            if (_statusOperations.IsActive(statusOperationId))
                 _viewModel.StatusProgressValue = 100;
         }
         catch (OperationCanceledException)
@@ -9026,7 +8729,7 @@ public partial class MainWindow : Window
         finally
         {
             _isBackgroundMetricsActive = false;
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             DisposeIfCurrent(ref _metricsCalculationCts, metricsCts);
         }
     }
@@ -9431,7 +9134,7 @@ public partial class MainWindow : Window
 
     private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)
     {
-        var activeOperation = GetActiveStatusOperationSnapshot();
+        var activeOperation = _statusOperations.GetActiveSnapshot();
         var activeOperationId = activeOperation.OperationId;
         var activeOperationType = activeOperation.OperationType;
 
@@ -9492,7 +9195,7 @@ public partial class MainWindow : Window
             _toastService.Show(_viewModel.ToastPreviewCanceled);
         }
 
-        CompleteStatusOperation(activeOperationId);
+        _statusOperations.Complete(activeOperationId);
     }
 
     #endregion
