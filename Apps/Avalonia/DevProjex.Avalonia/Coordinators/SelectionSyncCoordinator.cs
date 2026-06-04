@@ -4,7 +4,7 @@ using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 
-public sealed class SelectionSyncCoordinator(
+public sealed partial class SelectionSyncCoordinator(
     MainWindowViewModel viewModel,
     ScanOptionsUseCase scanOptions,
     FilterOptionSelectionService filterSelectionService,
@@ -1696,9 +1696,4 @@ public sealed class SelectionSyncCoordinator(
             viewModel.RootFolders.Select(static option => new SelectionOption(option.Name, option.IsChecked)));
     }
 
-    private sealed record IgnoreRulesBuildCacheEntry(string Key, IgnoreRules Rules);
-
-    private sealed record LiveRefreshInput(
-        SelectionRefreshContext Context,
-        IReadOnlyCollection<string> SelectedRoots);
 }

@@ -60,8 +60,6 @@ public partial class MainWindow : Window
         Filter = 2
     }
 
-    private readonly record struct PreviewWarmupSnapshot(string Text, int LineCount);
-    private readonly record struct PreviewBuildResult(IPreviewTextDocument Document);
     private readonly record struct PreviewSelectionMetricsSnapshot(
         IPreviewTextDocument Document,
         PreviewSelectionRange SelectionRange);
@@ -105,6 +103,8 @@ public partial class MainWindow : Window
     private readonly StatusOperationCoordinator _statusOperations;
     private readonly MetricsPipeline _metrics;
     private readonly ProjectLoadPipeline _projectLoadPipeline;
+    private readonly PreviewWorkspacePipeline _previewPipeline;
+    private readonly RefreshTreePipeline _refreshPipeline;
     private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
     private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
     private readonly TaskbarProgressCoordinator _taskbarProgress;
@@ -169,7 +169,6 @@ public partial class MainWindow : Window
     private int _filterApplyVersion;
     private SuspendedTreeToolMode _previewOnlySuspendedTreeToolMode;
     private CancellationTokenSource? _projectOperationCts;
-    private CancellationTokenSource? _refreshCts;
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
@@ -259,21 +258,15 @@ public partial class MainWindow : Window
     private PreviewToolbarLayoutMode _previewToolbarLayoutMode = PreviewToolbarLayoutMode.Wide;
 
     // Preview generation
-    private CancellationTokenSource? _previewBuildCts;
-    private DispatcherTimer? _previewDebounceTimer;
-    private int _previewBuildVersion;
-    private volatile bool _previewRefreshRequested;
     private bool _previewScrollSyncActive;
     private CancellationTokenSource? _previewMemoryCleanupCts;
     private int _previewMemoryCleanupVersion;
     private CancellationTokenSource? _searchMemoryCleanupCts;
     private int _searchMemoryCleanupVersion;
     private CancellationTokenSource? _backgroundMemoryCleanupCts;
-    private PreviewCacheKeyData? _cachedPreviewKey;
     private CancellationTokenSource? _previewModeSwitchCts;
     private int _previewModeSwitchVersion;
     private bool _previewModeSwitchInProgress;
-    private bool _clearPreviewBeforeNextRefresh;
     private bool _previewFontInitialized;
     private int _suppressSearchFilterRealtimeDepth;
     private static readonly int TreeViewModelBuildParallelism =
@@ -337,6 +330,11 @@ public partial class MainWindow : Window
             CreateExportPathPresentation,
             () => Bounds.Width);
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
+        _previewPipeline = new PreviewWorkspacePipeline(
+            this,
+            // 350ms delay ensures thumb animation (250ms) completes fully before loading.
+            UiTimingProfile.Scale(TimeSpan.FromMilliseconds(350)));
+        _refreshPipeline = new RefreshTreePipeline(this);
         _selectionCoordinator = new SelectionSyncCoordinator(
             _viewModel,
             _scanOptions,
@@ -2483,45 +2481,12 @@ public partial class MainWindow : Window
 
     private void SchedulePreviewRefresh(bool immediate = false)
     {
-        _previewRefreshRequested = true;
-
-        if (!_viewModel.IsProjectLoaded || !_viewModel.IsAnyPreviewVisible)
-            return;
-
-        if (immediate)
-        {
-            _previewDebounceTimer?.Stop();
-            _ = RefreshPreviewAsync();
-            return;
-        }
-
-        if (_previewDebounceTimer is null)
-        {
-            _previewDebounceTimer = new DispatcherTimer
-            {
-                // 350ms delay ensures thumb animation (250ms) completes fully before loading
-                Interval = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(350))
-            };
-            _previewDebounceTimer.Tick += OnPreviewDebounceTick;
-        }
-
-        _previewDebounceTimer.Stop();
-        _previewDebounceTimer.Start();
+        _previewPipeline.ScheduleRefresh(immediate);
     }
 
     private void CancelPreviewRefresh()
     {
-        _previewRefreshRequested = false;
-        _previewDebounceTimer?.Stop();
-        _previewBuildCts?.Cancel();
-        _clearPreviewBeforeNextRefresh = false;
-        _viewModel.IsPreviewLoading = false;
-    }
-
-    private void OnPreviewDebounceTick(object? sender, EventArgs e)
-    {
-        _previewDebounceTimer?.Stop();
-        _ = RefreshPreviewAsync();
+        _previewPipeline.CancelRefresh();
     }
 
     private void OnPreviewTextScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -2814,152 +2779,6 @@ public partial class MainWindow : Window
     private void OnPreviewSelectionChanged(object? sender, EventArgs e)
     {
         SchedulePreviewSelectionMetricsUpdate();
-    }
-
-    private async Task RefreshPreviewAsync()
-    {
-        if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsAnyPreviewVisible)
-            return;
-        if (_previewModeSwitchInProgress)
-            return;
-
-        if (!EnsureTreeReady())
-        {
-            ApplyPreviewText(_viewModel.PreviewNoDataText);
-            _previewRefreshRequested = false;
-            SchedulePreviewMemoryCleanup(force: false);
-            return;
-        }
-
-        var previewCts = ReplaceCancellationSource(ref _previewBuildCts);
-        var cancellationToken = previewCts.Token;
-        var buildVersion = Interlocked.Increment(ref _previewBuildVersion);
-        _viewModel.IsPreviewLoading = true;
-
-        // Show progress bar immediately with cancel support
-        var operationId = _statusOperations.Begin(
-            _viewModel.StatusOperationPreparingPreview,
-            indeterminate: true,
-            operationType: StatusOperationType.PreviewBuild,
-            cancelAction: () =>
-            {
-                previewCts.Cancel();
-                _toastService.Show(_viewModel.ToastPreviewCanceled);
-            });
-
-        try
-        {
-            if (_clearPreviewBeforeNextRefresh)
-            {
-                // Keep old content visible during thumb animation and clear it only
-                // after preview progress becomes visible for a smoother sequence.
-                ClearPreviewDocument();
-                _clearPreviewBeforeNextRefresh = false;
-            }
-
-            // Capture state on UI thread before background work
-            var selectedPaths = GetCheckedPaths();
-            var selectedMode = _viewModel.SelectedPreviewContentMode;
-            var treeFormat = GetCurrentTreeTextFormat();
-            var hasSelection = selectedPaths.Count > 0;
-            var noCheckedFilesText = _localization["Msg.NoCheckedFilesShort"];
-            var noTextContentText = _localization["Msg.NoTextContent"];
-            var currentPath = _currentPath;
-            var currentTreeRoot = _currentTree?.Root;
-            var noDataText = _viewModel.PreviewNoDataText;
-            var pathPresentation = CreateExportPathPresentation();
-            var previewKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
-                projectPath: currentPath,
-                treeRoot: currentTreeRoot,
-                mode: selectedMode,
-                treeFormat: treeFormat,
-                selectedPaths: selectedPaths);
-
-            if (IsCurrentPreviewCacheHit(previewKey) && _viewModel.PreviewDocument is { } currentPreviewDocument)
-            {
-                if (buildVersion == Volatile.Read(ref _previewBuildVersion))
-                {
-                    ApplyPreviewDocument(currentPreviewDocument);
-                    _previewRefreshRequested = false;
-                    SchedulePreviewMemoryCleanup(
-                        force: PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
-                            currentPreviewDocument.CharacterCount,
-                            currentPreviewDocument.LineCount));
-                }
-
-                return;
-            }
-
-            var warmupSnapshot = await TryBuildPreviewWarmupSnapshotAsync(
-                mode: selectedMode,
-                treeFormat: treeFormat,
-                hasSelection: hasSelection,
-                selectedPaths: selectedPaths,
-                currentPath: currentPath,
-                currentTreeRoot: currentTreeRoot,
-                pathPresentation: pathPresentation,
-                noTextContentText: noTextContentText,
-                noCheckedFilesText: noCheckedFilesText,
-                cancellationToken: cancellationToken);
-
-            if (warmupSnapshot is { } warmup &&
-                buildVersion == Volatile.Read(ref _previewBuildVersion))
-            {
-                ApplyPreviewText(warmup.Text, warmup.LineCount);
-            }
-
-            // Run all heavy work in background thread
-            var previewResult = await Task.Run(() =>
-                BuildPreviewDocument(
-                    selectedMode,
-                    selectedPaths,
-                    hasSelection,
-                    treeFormat,
-                    noCheckedFilesText,
-                    noTextContentText,
-                    noDataText,
-                    currentPath,
-                    currentTreeRoot,
-                    pathPresentation,
-                    cancellationToken),
-                cancellationToken);
-
-            if (buildVersion != Volatile.Read(ref _previewBuildVersion))
-            {
-                previewResult.Document.Dispose();
-                return;
-            }
-
-            CachePreview(previewKey);
-            ApplyPreviewDocument(previewResult.Document);
-            _previewRefreshRequested = false;
-            SchedulePreviewMemoryCleanup(force: PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
-                previewResult.Document.CharacterCount,
-                previewResult.Document.LineCount));
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Ignore stale preview builds.
-        }
-        catch (Exception ex)
-        {
-            if (buildVersion == Volatile.Read(ref _previewBuildVersion))
-            {
-                InvalidatePreviewCache();
-                ApplyPreviewText(ex.Message);
-                SchedulePreviewMemoryCleanup(force: false);
-            }
-        }
-        finally
-        {
-            if (buildVersion == Volatile.Read(ref _previewBuildVersion))
-                _viewModel.IsPreviewLoading = false;
-
-            // Always hide progress bar
-            _statusOperations.Complete(operationId);
-
-            DisposeIfCurrent(ref _previewBuildCts, previewCts);
-        }
     }
 
     private async Task<PreviewWarmupSnapshot?> TryBuildPreviewWarmupSnapshotAsync(
@@ -3281,13 +3100,13 @@ public partial class MainWindow : Window
         PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths);
 
     private bool IsCurrentPreviewCacheHit(PreviewCacheKeyData key)
-        => _cachedPreviewKey == key && _viewModel.PreviewDocument is not null;
+        => _previewPipeline.IsCurrentCacheHit(key, _viewModel.PreviewDocument);
 
-    private void CachePreview(PreviewCacheKeyData key) => _cachedPreviewKey = key;
+    private void CachePreview(PreviewCacheKeyData key) => _previewPipeline.CachePreview(key);
 
     private void InvalidatePreviewCache()
     {
-        _cachedPreviewKey = null;
+        _previewPipeline.InvalidateCache();
     }
 
     private static bool ShouldForcePreviewMemoryCleanup(long textLength, int lineCount) =>
@@ -3525,8 +3344,7 @@ public partial class MainWindow : Window
         try
         {
             // Cancel any in-flight preview work so stale content cannot render.
-            CancelPreviewRefresh();
-            Interlocked.Increment(ref _previewBuildVersion);
+            _previewPipeline.CancelActiveBuildAndInvalidate();
 
             _viewModel.SelectedPreviewContentMode = targetMode;
             UpdatePreviewSegmentThumbPosition(animate: true);
@@ -3541,7 +3359,7 @@ public partial class MainWindow : Window
             // RefreshPreviewAsync exits early while switch is still in-progress.
             _previewModeSwitchInProgress = false;
             // Clear preview only when refresh actually starts (after progress is shown).
-            _clearPreviewBeforeNextRefresh = true;
+            _previewPipeline.MarkClearBeforeNextRefresh();
             SchedulePreviewRefresh(immediate: true);
             // Restore keyboard shortcuts to the preview surface after the mode button steals focus.
             Dispatcher.UIThread.Post(FocusPreviewSurface, DispatcherPriority.Background);
@@ -4520,9 +4338,7 @@ public partial class MainWindow : Window
 
     private bool SuspendPreviewRefreshForTreeHide()
     {
-        var shouldResume = _previewRefreshRequested || _viewModel.IsPreviewLoading;
-        CancelPreviewRefresh();
-        return shouldResume;
+        return _previewPipeline.SuspendForTreeHide();
     }
 
     private void SetPreviewToolbarInteractionSuspended(bool suspended)
@@ -7184,148 +7000,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshTreeAsync(bool interactiveFilter = false, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_currentPath)) return;
-        cancellationToken.ThrowIfCancellationRequested();
-
-        using var _ = PerformanceMetrics.Measure("RefreshTreeAsync");
-
-        // Cancel any previous refresh operation to avoid race conditions
-        var refreshCts = new CancellationTokenSource();
-        var previousRefreshCts = Interlocked.Exchange(ref _refreshCts, refreshCts);
-        previousRefreshCts?.Cancel();
-        previousRefreshCts?.Dispose();
-
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(refreshCts.Token, cancellationToken);
-        var linkedToken = linkedCts.Token;
-
-        var allowedExt = CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
-        var allowedRoot = CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default);
-
-        var selectedIgnoreOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
-        var ignoreRules = BuildIgnoreRules(_currentPath, selectedIgnoreOptions, allowedRoot);
-
-        var nameFilter = string.IsNullOrWhiteSpace(_viewModel.NameFilter) ? null : _viewModel.NameFilter.Trim();
-
-        var options = new TreeFilterOptions(
-            AllowedExtensions: allowedExt,
-            AllowedRootFolders: allowedRoot,
-            IgnoreRules: ignoreRules,
-            NameFilter: nameFilter);
-
-        if (!interactiveFilter)
-        {
-            // Full-tree refresh invalidates the active metrics baseline.
-            // Cancel early so obsolete file reads stop before we start the next build.
-            _metrics.CancelBackgroundCalculation();
-            _viewModel.StatusMetricsVisible = false;
-        }
-
-        try
-        {
-            BuildTreeResult result;
-            var usedInMemoryFilter = false;
-
-            if (interactiveFilter && TryBuildInteractiveFilteredTreeResult(nameFilter, linkedToken, out var filteredResult))
-            {
-                result = filteredResult;
-                usedInMemoryFilter = true;
-            }
-            else
-            {
-                // Build the tree off the UI thread to keep the window responsive on large folders.
-                using (PerformanceMetrics.Measure("BuildTree"))
-                {
-                    result = await Task.Run(
-                        () => _buildTree.Execute(new BuildTreeRequest(_currentPath, options), linkedToken),
-                        linkedToken);
-                }
-            }
-
-            // Check if this operation was superseded by a newer one
-            linkedToken.ThrowIfCancellationRequested();
-
-            if (result.RootAccessDenied && TryElevateAndRestart(_currentPath))
-                return;
-
-            // Build ViewModel tree off the UI thread for better responsiveness.
-            // IconCache is now thread-safe, enabling parallel icon loading.
-            var displayName = !string.IsNullOrEmpty(_currentProjectDisplayName)
-                ? _currentProjectDisplayName
-                : GetDirectoryNameSafe(_currentPath!);
-
-            TreeNodeViewModel root;
-            using (PerformanceMetrics.Measure("BuildTreeViewModel"))
-            {
-                root = await Task.Run(() =>
-                {
-                    var node = BuildTreeViewModel(result.Root, null);
-                    node.DisplayName = displayName;
-                    return node;
-                }, linkedToken);
-            }
-
-            linkedToken.ThrowIfCancellationRequested();
-
-            // Swap trees only after the new root is fully materialized.
-            // This prevents losing the previously visible project on cancellation.
-            _searchCoordinator.ClearSearchState();
-            if (_treeView is not null)
-                _treeView.SelectedItem = null;
-
-            foreach (var node in _viewModel.TreeNodes)
-                node.ClearRecursive();
-            _viewModel.TreeNodes.Clear();
-
-            _currentTree = result;
-            _metrics.InvalidateComputedCaches();
-
-            if (!interactiveFilter)
-            {
-                // Keep a baseline snapshot for low-latency in-memory filter updates.
-                _filterBaseTree = string.IsNullOrWhiteSpace(nameFilter) ? result : null;
-                ResetInteractiveFilterCache();
-            }
-            else if (!usedInMemoryFilter && string.IsNullOrWhiteSpace(nameFilter))
-            {
-                // Recover baseline after fallback interactive rebuilds.
-                _filterBaseTree = result;
-                ResetInteractiveFilterCache();
-            }
-
-            _viewModel.TreeNodes.Add(root);
-            root.IsExpanded = true;
-
-            if (!interactiveFilter && !string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
-                _toastService.Show(_localization["Toast.NoMatches"]);
-
-            // Project-load and refresh paths usually arrive here with an empty search state.
-            // Skip the tree-wide search normalization unless there is an active query or a
-            // non-empty cached result set that still needs to be rebound to the new tree.
-            if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery) || _searchCoordinator.HasMatches)
-                _searchCoordinator.UpdateSearchMatches();
-
-            // Initialize file metrics cache in background for real-time status bar updates
-            // Only do full scan on initial load, not on interactive filter changes
-            if (!interactiveFilter)
-            {
-                StartPostLoadBackgroundWork(result.Root, cancellationToken);
-            }
-            else
-            {
-                // For filter changes, just recalculate from existing cache
-                _metrics.Recalculate();
-            }
-
-            SchedulePreviewRefresh(immediate: true);
-
-            // Do not force GC from the hot end-of-load path.
-            // Large sessions still get a heavy cleanup, but only through the explicit
-            // deferred scheduler once the UI has finished the visible transition.
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _refreshCts, refreshCts);
-        }
+        await _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
     }
 
     private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
@@ -8150,14 +7825,14 @@ public partial class MainWindow : Window
                 break;
             case StatusOperationType.RefreshProject:
                 _projectOperationCts?.Cancel();
-                _refreshCts?.Cancel();
+                _refreshPipeline.CancelActiveRefresh();
                 break;
             case StatusOperationType.GitPullUpdates:
             case StatusOperationType.GitSwitchBranch:
                 _gitOperationCts?.Cancel();
                 break;
             case StatusOperationType.PreviewBuild:
-                _previewBuildCts?.Cancel();
+                _previewPipeline.CancelActiveBuild();
                 break;
             case StatusOperationType.MetricsCalculation:
                 // Metrics cancellation is handled below by dedicated fallback logic.
@@ -8182,7 +7857,7 @@ public partial class MainWindow : Window
         // Cancel preview build if in progress
         if (_viewModel.IsPreviewLoading || activeOperationType == StatusOperationType.PreviewBuild)
         {
-            _previewBuildCts?.Cancel();
+            _previewPipeline.CancelActiveBuild();
             _viewModel.IsPreviewLoading = false;
             _toastService.Show(_viewModel.ToastPreviewCanceled);
         }

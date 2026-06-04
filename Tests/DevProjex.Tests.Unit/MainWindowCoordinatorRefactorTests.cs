@@ -196,6 +196,103 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public async Task PreviewWorkspacePipeline_CacheHitReappliesDocumentWithoutRebuilding()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+        using var document = new InMemoryPreviewTextDocument("cached");
+        viewModel.PreviewDocument = document;
+
+        var host = new RecordingPreviewWorkspaceHost(viewModel);
+        using var pipeline = new PreviewWorkspacePipeline(host, TimeSpan.FromMilliseconds(1));
+        pipeline.CachePreview(host.Input.CacheKey);
+
+        await pipeline.RefreshNowAsync();
+
+        Assert.Equal(1, host.ApplyDocumentCount);
+        Assert.Equal(0, host.BuildDocumentCount);
+        Assert.True(pipeline.IsIdle);
+        Assert.False(viewModel.IsPreviewLoading);
+    }
+
+    [Fact]
+    public async Task PreviewWorkspacePipeline_StaleBuildDoesNotApplyResult()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        PreviewWorkspacePipeline? pipeline = null;
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            BuildDocumentHandler = _ =>
+            {
+                pipeline!.CancelActiveBuildAndInvalidate();
+                return new PreviewBuildResult(new InMemoryPreviewTextDocument("stale"));
+            }
+        };
+        pipeline = new PreviewWorkspacePipeline(host, TimeSpan.FromMilliseconds(1));
+
+        await pipeline.RefreshNowAsync();
+        pipeline.Dispose();
+
+        Assert.Equal(1, host.BuildDocumentCount);
+        Assert.Equal(0, host.ApplyDocumentCount);
+        Assert.False(viewModel.IsPreviewLoading);
+    }
+
+    [Fact]
+    public async Task RefreshTreePipeline_CancelsActiveRefreshBeforeApplyingTree()
+    {
+        var viewModel = CreateViewModel();
+        var releaseBuild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingRefreshTreeHost(viewModel)
+        {
+            BuildTreeHandler = token =>
+            {
+                releaseBuild.Task.Wait(TestContext.Current.CancellationToken);
+                token.ThrowIfCancellationRequested();
+                return RecordingRefreshTreeHost.CreateResult("root");
+            }
+        };
+        using var pipeline = new RefreshTreePipeline(host);
+
+        var refreshTask = pipeline.RefreshTreeAsync(cancellationToken: TestContext.Current.CancellationToken);
+        await Task.Delay(30, TestContext.Current.CancellationToken);
+        pipeline.CancelActiveRefresh();
+        releaseBuild.SetResult();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => refreshTask);
+        Assert.Equal(0, host.ApplyCount);
+    }
+
+    [Fact]
+    public async Task RefreshTreePipeline_LeavesStaleProjectTreeUntouched()
+    {
+        var viewModel = CreateViewModel();
+        RecordingRefreshTreeHost? host = null;
+        host = new RecordingRefreshTreeHost(viewModel)
+        {
+            BuildViewModelHandler = (input, result) =>
+            {
+                host!.CurrentPath = @"C:\ProjectB";
+                return new TreeNodeViewModel(result.Root, parent: null, icon: null)
+                {
+                    DisplayName = input.DisplayName
+                };
+            }
+        };
+        using var pipeline = new RefreshTreePipeline(host);
+
+        await pipeline.RefreshTreeAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, host.BuildTreeCount);
+        Assert.Equal(0, host.ApplyCount);
+        Assert.Empty(viewModel.TreeNodes);
+    }
+
+    [Fact]
     public void ProjectLoadCancellationCoordinator_AppliesExpectedFallback()
     {
         var coordinator = new ProjectLoadCancellationCoordinator();
@@ -583,6 +680,226 @@ public sealed class MainWindowCoordinatorRefactorTests
         ScheduleInitialProjectLoadCleanup,
         ScheduleProjectSwitchCleanup,
         ShowLoadCanceledToast
+    }
+
+    private sealed class RecordingPreviewWorkspaceHost(MainWindowViewModel viewModel) : IPreviewWorkspacePipelineHost
+    {
+        private static readonly TreeNodeDescriptor EmptyRoot = new(
+            "root",
+            @"C:\Project",
+            IsDirectory: true,
+            IsAccessDenied: false,
+            IconKey: "folder",
+            Children: []);
+
+        public MainWindowViewModel ViewModel => viewModel;
+
+        public bool IsPreviewModeSwitchInProgress { get; set; }
+
+        public PreviewRefreshInput Input { get; } = new(
+            SelectedMode: PreviewContentMode.Content,
+            SelectedPaths: new HashSet<string>(PathComparer.Default),
+            HasSelection: false,
+            TreeFormat: TreeTextFormat.Ascii,
+            NoCheckedFilesText: "No checked files",
+            NoTextContentText: "No text content",
+            NoDataText: "No data",
+            CurrentPath: @"C:\Project",
+            CurrentTreeRoot: EmptyRoot,
+            PathPresentation: null,
+            CacheKey: new PreviewCacheKeyData(
+                ProjectPath: @"C:\Project",
+                TreeIdentity: 1,
+                Mode: PreviewContentMode.Content,
+                TreeFormat: TreeTextFormat.Ascii,
+                SelectedCount: 0,
+                SelectedHash: 0));
+
+        public Func<CancellationToken, PreviewBuildResult>? BuildDocumentHandler { get; set; }
+
+        public int ApplyDocumentCount { get; private set; }
+
+        public int BuildDocumentCount { get; private set; }
+
+        public bool EnsurePreviewTreeReady() => true;
+
+        public void ApplyPreviewNoDataText() =>
+            viewModel.PreviewText = "No data";
+
+        public long BeginPreviewBuildOperation(CancellationTokenSource previewCts)
+        {
+            _ = previewCts;
+            return 1;
+        }
+
+        public void CompletePreviewBuildOperation(long operationId) =>
+            Assert.Equal(1, operationId);
+
+        public PreviewRefreshInput CapturePreviewRefreshInput() => Input;
+
+        public bool IsCurrentPreviewCacheHit(PreviewCacheKeyData key) =>
+            key == Input.CacheKey && viewModel.PreviewDocument is not null;
+
+        public IPreviewTextDocument? CurrentPreviewDocument => viewModel.PreviewDocument;
+
+        public void ApplyPreviewDocument(IPreviewTextDocument document)
+        {
+            ApplyDocumentCount++;
+            viewModel.PreviewDocument = document;
+        }
+
+        public void ApplyPreviewText(string text) =>
+            viewModel.PreviewText = text;
+
+        public void ApplyPreviewText(string text, int lineCount)
+        {
+            viewModel.PreviewText = text;
+            viewModel.PreviewLineCount = lineCount;
+        }
+
+        public void ClearPreviewDocument() =>
+            viewModel.PreviewDocument = null;
+
+        public Task<PreviewWarmupSnapshot?> TryBuildPreviewWarmupSnapshotAsync(
+            PreviewRefreshInput input,
+            CancellationToken cancellationToken)
+        {
+            _ = input;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<PreviewWarmupSnapshot?>(null);
+        }
+
+        public PreviewBuildResult BuildPreviewDocument(
+            PreviewRefreshInput input,
+            CancellationToken cancellationToken)
+        {
+            _ = input;
+            cancellationToken.ThrowIfCancellationRequested();
+            BuildDocumentCount++;
+            return BuildDocumentHandler?.Invoke(cancellationToken) ??
+                   new PreviewBuildResult(new InMemoryPreviewTextDocument("built"));
+        }
+
+        public void CachePreview(PreviewCacheKeyData key) =>
+            Assert.Equal(Input.CacheKey, key);
+
+        public void InvalidatePreviewCache()
+        {
+        }
+
+        public void SchedulePreviewMemoryCleanup(bool force)
+        {
+            _ = force;
+        }
+
+        public void SchedulePreviewMemoryCleanupForDocument(IPreviewTextDocument document)
+        {
+            _ = document;
+        }
+    }
+
+    private sealed class RecordingRefreshTreeHost(MainWindowViewModel viewModel) : IRefreshTreePipelineHost
+    {
+        public MainWindowViewModel ViewModel => viewModel;
+
+        public string CurrentPath { get; set; } = @"C:\ProjectA";
+
+        public Func<CancellationToken, BuildTreeResult>? BuildTreeHandler { get; set; }
+
+        public Func<TreeRefreshInput, BuildTreeResult, TreeNodeViewModel>? BuildViewModelHandler { get; set; }
+
+        public int BuildTreeCount { get; private set; }
+
+        public int ApplyCount { get; private set; }
+
+        public TreeRefreshInput? CaptureTreeRefreshInput()
+        {
+            return new TreeRefreshInput(
+                CurrentPath,
+                "ProjectA",
+                new TreeFilterOptions(
+                    AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    AllowedRootFolders: new HashSet<string>(PathComparer.Default),
+                    IgnoreRules: new IgnoreRules(
+                        IgnoreHiddenFolders: false,
+                        IgnoreHiddenFiles: false,
+                        IgnoreDotFolders: false,
+                        IgnoreDotFiles: false,
+                        SmartIgnoredFolders: new HashSet<string>(),
+                        SmartIgnoredFiles: new HashSet<string>())),
+                NameFilter: null);
+        }
+
+        public void BeforeFullTreeRefresh() =>
+            viewModel.StatusMetricsVisible = false;
+
+        public bool TryBuildInteractiveFilteredTreeResult(
+            string? nameFilter,
+            CancellationToken cancellationToken,
+            out BuildTreeResult result)
+        {
+            _ = nameFilter;
+            cancellationToken.ThrowIfCancellationRequested();
+            result = null!;
+            return false;
+        }
+
+        public BuildTreeResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken)
+        {
+            _ = input;
+            BuildTreeCount++;
+            return BuildTreeHandler?.Invoke(cancellationToken) ?? CreateResult("root");
+        }
+
+        public bool TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result)
+        {
+            _ = input;
+            return result.RootAccessDenied;
+        }
+
+        public TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
+        {
+            return BuildViewModelHandler?.Invoke(input, result) ??
+                   new TreeNodeViewModel(result.Root, parent: null, icon: null)
+                   {
+                       DisplayName = input.DisplayName
+                   };
+        }
+
+        public void ApplyTreeRefreshResult(
+            TreeRefreshInput input,
+            BuildTreeResult result,
+            TreeNodeViewModel root,
+            bool interactiveFilter,
+            bool usedInMemoryFilter,
+            CancellationToken cancellationToken)
+        {
+            _ = result;
+            _ = interactiveFilter;
+            _ = usedInMemoryFilter;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Mirrors the production host guard: a project switch can happen after the
+            // background build but before UI application, and that stale tree must not win.
+            if (!PathComparer.Default.Equals(CurrentPath, input.CurrentPath))
+                return;
+
+            ApplyCount++;
+            viewModel.TreeNodes.Add(root);
+        }
+
+        public static BuildTreeResult CreateResult(string name)
+        {
+            var root = new TreeNodeDescriptor(
+                name,
+                Path.Combine(@"C:\ProjectA", name),
+                IsDirectory: true,
+                IsAccessDenied: false,
+                IconKey: "folder",
+                Children: []);
+
+            return new BuildTreeResult(root, RootAccessDenied: false, HadAccessDenied: false);
+        }
     }
 
     private sealed class StubFileContentAnalyzer : IFileContentAnalyzer
