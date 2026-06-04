@@ -4,8 +4,8 @@ public partial class MainWindow
 {
     private void CancelAndDisposeWindowOperations()
     {
-        CancelAndDispose(ref _metricsCalculationCts);
-        CancelAndDispose(ref _recalculateMetricsCts);
+        _metrics.Dispose();
+        _projectLoadPipeline.Dispose();
         StopMetricsDebounceTimers();
         CancelBackgroundMemoryCleanup();
 
@@ -23,12 +23,6 @@ public partial class MainWindow
 
     private void StopMetricsDebounceTimers()
     {
-        if (_metricsDebounceTimer is not null)
-        {
-            _metricsDebounceTimer.Stop();
-            _metricsDebounceTimer.Tick -= OnMetricsDebounceTimerTick;
-        }
-
         if (_previewSelectionMetricsDebounceTimer is not null)
         {
             _previewSelectionMetricsDebounceTimer.Stop();

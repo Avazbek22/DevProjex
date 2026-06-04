@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.Collections.Frozen;
 using System.Runtime;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -67,19 +65,6 @@ public partial class MainWindow : Window
     private readonly record struct PreviewSelectionMetricsSnapshot(
         IPreviewTextDocument Document,
         PreviewSelectionRange SelectionRange);
-    private readonly record struct TreeMetricsCacheKey(
-        int TreeIdentity,
-        TreeTextFormat Format,
-        int SelectedCount,
-        int SelectedHash,
-        int PathPresentationIdentity);
-
-    private readonly record struct ContentMetricsCacheKey(
-        int TreeIdentity,
-        int SelectedCount,
-        int SelectedHash,
-        int PathMapperIdentity);
-
     public MainWindow()
         : this(CommandLineOptions.Empty, AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty))
     {
@@ -110,7 +95,6 @@ public partial class MainWindow : Window
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
-    private readonly IFileContentAnalyzer _fileContentAnalyzer;
     private readonly RecentProjectsStore _recentProjectsStore;
 
     private readonly MainWindowViewModel _viewModel;
@@ -119,6 +103,8 @@ public partial class MainWindow : Window
     private readonly ThemeBrushCoordinator _themeBrushCoordinator;
     private readonly SelectionSyncCoordinator _selectionCoordinator;
     private readonly StatusOperationCoordinator _statusOperations;
+    private readonly MetricsPipeline _metrics;
+    private readonly ProjectLoadPipeline _projectLoadPipeline;
     private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
     private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
     private readonly TaskbarProgressCoordinator _taskbarProgress;
@@ -295,51 +281,13 @@ public partial class MainWindow : Window
     private const int TreeViewModelParallelChildrenThreshold = 24;
 
     // Real-time metrics calculation
-    private readonly object _metricsLock = new();
-    private readonly object _metricsComputationCacheLock = new();
-    private CancellationTokenSource? _metricsCalculationCts;
-    private DispatcherTimer? _metricsDebounceTimer;
     private CancellationTokenSource? _previewSelectionMetricsCts;
     private DispatcherTimer? _previewSelectionMetricsDebounceTimer;
 
-    private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(PathComparer.Default);
-    private readonly HashSet<string> _inspectedFileMetricsPaths = new(PathComparer.Default);
-    private volatile bool _isBackgroundMetricsActive;
-    private int _metricsRecalcVersion;
     private int _previewSelectionMetricsVersion;
-    private const double CompactStatusMetricsThresholdWidth = 1050;
     private static readonly TimeSpan PreviewSelectionMetricsDebounceInterval = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80));
-    private int _lastStatusTreeLines;
-    private int _lastStatusTreeChars;
-    private int _lastStatusTreeTokens;
-    private int _lastStatusContentLines;
-    private int _lastStatusContentChars;
-    private int _lastStatusContentTokens;
-    private bool _hasStatusMetricsSnapshot;
     private ExportOutputMetrics _lastPreviewSelectionMetrics = ExportOutputMetrics.Empty;
     private bool _hasPreviewSelectionMetricsSnapshot;
-    private CancellationTokenSource? _recalculateMetricsCts;
-    private bool _hasTreeMetricsCache;
-    private TreeMetricsCacheKey _treeMetricsCacheKey;
-    private ExportOutputMetrics _treeMetricsCacheValue = ExportOutputMetrics.Empty;
-    private bool _hasContentMetricsCache;
-    private ContentMetricsCacheKey _contentMetricsCacheKey;
-    private ExportOutputMetrics _contentMetricsCacheValue = ExportOutputMetrics.Empty;
-    private int _allOrderedFilePathsTreeIdentity;
-    private IReadOnlyList<string>? _allOrderedFilePathsCache;
-    private bool _metricsCancellationRequestedByUser;
-    private volatile bool _hasCompleteMetricsBaseline;
-    private static readonly FrozenSet<string> MetricsWarmupBinaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
-        ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
-        ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
-        ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
-        ".exe", ".dll", ".so", ".dylib", ".pdb", ".ilk",
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".ttf", ".otf", ".woff", ".woff2", ".eot",
-        ".bin", ".dat", ".db", ".sqlite", ".mdb"
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -369,14 +317,26 @@ public partial class MainWindow : Window
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
-        _fileContentAnalyzer = services.FileContentAnalyzer;
         _recentProjectsStore = services.RecentProjectsStore;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _statusOperations = new StatusOperationCoordinator(
             _viewModel,
-            () => _isBackgroundMetricsActive,
+            IsBackgroundMetricsActive,
             () => _viewModel.StatusOperationCalculatingData);
+        _metrics = new MetricsPipeline(
+            _viewModel,
+            _localization,
+            services.FileContentAnalyzer,
+            _treeExport,
+            _statusOperations,
+            () => _currentTree,
+            () => _currentPath,
+            GetCheckedPaths,
+            GetCurrentTreeTextFormat,
+            CreateExportPathPresentation,
+            () => Bounds.Width);
+        _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _selectionCoordinator = new SelectionSyncCoordinator(
             _viewModel,
             _scanOptions,
@@ -601,7 +561,7 @@ public partial class MainWindow : Window
                 _taskbarProgress.SyncWithStatusBar();
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
             {
-                RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
+                _metrics.Recalculate(); // Update tree metrics when format changes (ASCII vs JSON)
                 InvalidatePreviewCache();
                 SchedulePreviewRefresh();
             }
@@ -740,10 +700,10 @@ public partial class MainWindow : Window
         _previewOnlySuspendedTreeToolMode = SuspendedTreeToolMode.None;
         ResetPreviewTreePaneVisualState();
         ResetInteractiveFilterCache();
-        InvalidateComputedMetricsCaches();
+        _metrics.InvalidateComputedCaches();
 
         // Clear file metrics cache
-        ClearFileMetricsCache(trimCapacity: true);
+        _metrics.ClearFileMetricsCache(trimCapacity: true);
 
         // Clean up repository cache on exit
         _repoCacheService.ClearAllCache();
@@ -803,8 +763,8 @@ public partial class MainWindow : Window
             ClampSettingsPanelWidthToAvailableSpace(applyToVisual: ShouldApplySettingsPanelWidthToVisual());
             UpdatePreviewSettingsSplitterState();
             UpdateAdaptiveWorkspaceChrome();
-            if (_hasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
-                RenderStatusBarMetrics();
+            if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+                _metrics.RenderStatusBarMetrics();
             if (_hasPreviewSelectionMetricsSnapshot)
                 RenderPreviewSelectionMetrics();
             if (_viewModel.IsAnyPreviewVisible && !_previewModeSwitchInProgress)
@@ -2085,7 +2045,7 @@ public partial class MainWindow : Window
         _viewModel.UpdateLocalization();
         _settingsPanel?.RequestMinimumWidthRefresh();
         UpdatePreviewToolbarPresentation(forceRefreshContent: true);
-        RecalculateMetricsAsync(); // Update metrics text with new localization
+        _metrics.Recalculate(); // Update metrics text with new localization
         if (_hasPreviewSelectionMetricsSnapshot)
             RenderPreviewSelectionMetrics();
         if (_viewModel.IsAnyPreviewVisible)
@@ -2239,7 +2199,7 @@ public partial class MainWindow : Window
             if (!EnsureTreeReady()) return;
 
             // Cancel background metrics calculation - user wants immediate action
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
 
             var selected = GetCheckedPaths();
             var files = BuildOrderedUniqueFilePaths(selected);
@@ -2286,7 +2246,7 @@ public partial class MainWindow : Window
             if (!EnsureTreeReady()) return;
 
             // Cancel background metrics calculation - user wants immediate action
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
 
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
@@ -2346,7 +2306,7 @@ public partial class MainWindow : Window
         {
             if (!EnsureTreeReady()) return;
 
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
 
             var selected = GetCheckedPaths();
             var files = BuildOrderedUniqueFilePaths(selected);
@@ -2398,7 +2358,7 @@ public partial class MainWindow : Window
         {
             if (!EnsureTreeReady()) return;
 
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
 
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
@@ -3222,7 +3182,7 @@ public partial class MainWindow : Window
                 ? BuildOrderedSelectedFilePaths(currentTreeRoot, selectedPaths)
                 : []
             : currentTreeRoot is not null
-                ? GetOrBuildAllOrderedFilePaths(currentTreeRoot)
+                ? _metrics.GetOrBuildAllOrderedFilePaths(currentTreeRoot)
                 : [];
 
         if (selectedMode == PreviewContentMode.Content)
@@ -3328,22 +3288,6 @@ public partial class MainWindow : Window
     private void InvalidatePreviewCache()
     {
         _cachedPreviewKey = null;
-    }
-
-    /// <summary>
-    /// Clears computed tree/content metrics caches that depend on current tree snapshot.
-    /// </summary>
-    private void InvalidateComputedMetricsCaches()
-    {
-        lock (_metricsComputationCacheLock)
-        {
-            _hasTreeMetricsCache = false;
-            _treeMetricsCacheValue = ExportOutputMetrics.Empty;
-            _hasContentMetricsCache = false;
-            _contentMetricsCacheValue = ExportOutputMetrics.Empty;
-            _allOrderedFilePathsCache = null;
-            _allOrderedFilePathsTreeIdentity = 0;
-        }
     }
 
     private static bool ShouldForcePreviewMemoryCleanup(long textLength, int lineCount) =>
@@ -6857,100 +6801,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _projectLoadCancellation.Capture(CaptureProjectLoadCancellationSnapshot());
-        await PrepareSearchAndFilterForProjectLoadAsync();
-        CancelBackgroundMemoryCleanup();
-        CancelPreviewRefresh();
-        var hadLoadedProjectBefore = _viewModel.IsProjectLoaded;
-        var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
-        var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
-        var cancellationToken = projectLoadCts.Token;
-        _viewModel.StatusMetricsVisible = false;
-        var statusOperationId = _statusOperations.Begin(
-            _viewModel.StatusOperationLoadingProject,
-            indeterminate: true,
-            operationType: StatusOperationType.LoadProject,
-            cancelAction: () => projectLoadCts.Cancel());
-        try
-        {
-            if (hadLoadedProjectBefore)
-            {
-                // Render the loading shell before the blocking compacting GC runs.
-                // The pause still exists, but it now happens after the user sees an explicit
-                // project-switch transition instead of an unexplained UI hitch.
-                await YieldProjectLoadStartupFrameAsync(cancellationToken);
-                ClearPreviousProjectState(forceCompactingGc: true);
-            }
-
-            _currentPath = path;
-            _viewModel.IsProjectLoaded = true;
-            _viewModel.SettingsVisible = true;
-            _viewModel.SearchVisible = false;
-
-            // Set project source type based on how it was opened
-            // If opened from dialog (File → Open), it's LocalFolder
-            // If opened from Git clone, the source type is already set
-            if (fromDialog)
-            {
-                _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
-                _viewModel.CurrentBranch = string.Empty;
-                _viewModel.GitBranches.Clear();
-                _currentProjectDisplayName = null;
-                _currentRepositoryUrl = null;
-            }
-
-            UpdateTitle();
-            await YieldProjectLoadStartupFrameAsync(cancellationToken);
-
-            await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
-            if (recordRecentFolder)
-                RecordRecentFolder(path);
-
-            // Clear cached repo path only after the new local project load has completed successfully.
-            if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))
-            {
-                _repoCacheService.DeleteRepositoryDirectory(cachedRepoPathToDeleteOnSuccess);
-                _currentCachedRepoPath = null;
-            }
-
-            _projectLoadCancellation.Clear();
-            _statusOperations.Complete(statusOperationId);
-
-            // First project load has nothing meaningful to reclaim yet. Skip the post-load sweep there
-            // so the initial settings reveal and early interaction stay as smooth as possible.
-            if (hadLoadedProjectBefore)
-            {
-                // Clean up memory from previous project (old tree, strings, etc.)
-                // Must be AFTER loading new project so old references are replaced, but also
-                // after the new UI has had a chance to render at least one stable frame.
-                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.ProjectSwitchPostLoad);
-            }
-            else
-            {
-                // First load still creates temporary buffers and transient strings, but reclaim them
-                // only after the initial UI settles so opening the project keeps feeling smooth.
-                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.InitialProjectLoad);
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            if (_statusOperations.IsActive(statusOperationId) && TryApplyActiveProjectLoadCancellationFallback())
-            {
-                _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
-            }
-
-            _statusOperations.Complete(statusOperationId);
-        }
-        catch
-        {
-            _projectLoadCancellation.Clear();
-            _statusOperations.Complete(statusOperationId);
-            throw;
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _projectOperationCts, projectLoadCts);
-        }
+        await _projectLoadPipeline.OpenFolderAsync(path, fromDialog, recordRecentFolder);
     }
 
     private bool TryElevateAndRestart(string path)
@@ -7020,7 +6871,7 @@ public partial class MainWindow : Window
 
         // Background metrics become stale as soon as the visible tree is about to change.
         // Cancel them before tearing down the current project state to avoid wasted I/O.
-        CancelBackgroundMetricsCalculation();
+        _metrics.CancelBackgroundCalculation();
 
         // Clear search state first (holds references to TreeNodeViewModel)
         _searchCoordinator.ClearSearchState();
@@ -7048,7 +6899,7 @@ public partial class MainWindow : Window
         foreach (var node in _viewModel.TreeNodes)
             node.ClearRecursive();
         _viewModel.ResetTreeNodes();
-        ClearFileMetricsCache(trimCapacity: true);
+        _metrics.ClearFileMetricsCache(trimCapacity: true);
 
         // Reconnect ItemsSource
         if (_treeView is not null)
@@ -7057,14 +6908,14 @@ public partial class MainWindow : Window
         // Clear current tree descriptor reference (this is the second copy of the tree)
         _currentTree = null;
         _filterBaseTree = null;
-        _hasCompleteMetricsBaseline = false;
+        _metrics.HasCompleteBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;
         _viewModel.StatusContentStatsText = string.Empty;
         ClearPreviewDocument();
         _viewModel.IsPreviewLoading = false;
         InvalidatePreviewCache();
-        InvalidateComputedMetricsCaches();
+        _metrics.InvalidateComputedCaches();
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
@@ -7365,7 +7216,7 @@ public partial class MainWindow : Window
         {
             // Full-tree refresh invalidates the active metrics baseline.
             // Cancel early so obsolete file reads stop before we start the next build.
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
             _viewModel.StatusMetricsVisible = false;
         }
 
@@ -7426,7 +7277,7 @@ public partial class MainWindow : Window
             _viewModel.TreeNodes.Clear();
 
             _currentTree = result;
-            InvalidateComputedMetricsCaches();
+            _metrics.InvalidateComputedCaches();
 
             if (!interactiveFilter)
             {
@@ -7462,7 +7313,7 @@ public partial class MainWindow : Window
             else
             {
                 // For filter changes, just recalculate from existing cache
-                RecalculateMetricsAsync();
+                _metrics.Recalculate();
             }
 
             SchedulePreviewRefresh(immediate: true);
@@ -7570,7 +7421,7 @@ public partial class MainWindow : Window
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         StartDeferredSettingsPanelAnimation(cancellationToken);
         ObserveDetachedTask(
-            InitializeFileMetricsCacheSoonAfterFirstPaintAsync(treeRoot, cancellationToken),
+            _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(treeRoot, cancellationToken),
             "InitializeFileMetricsCache");
     }
 
@@ -7589,28 +7440,6 @@ public partial class MainWindow : Window
         await WaitForTreeRenderStabilizationAsync(cancellationToken);
         if (_viewModel.SettingsVisible && !_settingsAnimating)
             AnimateSettingsPanel(true);
-    }
-
-    private async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
-        TreeNodeDescriptor treeRoot,
-        CancellationToken cancellationToken)
-    {
-        // Two quick frames are enough for the freshly swapped tree to become visible and for the
-        // loading status strip to enter a stable state. Waiting for the full settings-panel
-        // choreography was adding visible latency before the metrics warmup even started.
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var warmupDelay = UiTimingProfile.Scale(
-            MetricsCalculationPolicy.GetInitialWarmupStartDelay(_viewModel.SettingsVisible));
-        if (warmupDelay > TimeSpan.Zero)
-            await Task.Delay(warmupDelay, cancellationToken);
-
-        cancellationToken.ThrowIfCancellationRequested();
-        await InitializeFileMetricsCacheAsync(treeRoot, cancellationToken);
     }
 
     private static async void ObserveDetachedTask(Task task, string operationName)
@@ -7734,16 +7563,6 @@ public partial class MainWindow : Window
     /// Cancels any active background metrics calculation.
     /// Call this before starting user-initiated operations that need the status bar.
     /// </summary>
-    private void CancelBackgroundMetricsCalculation()
-    {
-        if (_isBackgroundMetricsActive)
-            _hasCompleteMetricsBaseline = false;
-
-        _isBackgroundMetricsActive = false;
-        _metricsCalculationCts?.Cancel();
-        _recalculateMetricsCts?.Cancel();
-    }
-
     private ProjectLoadCancellationSnapshot CaptureProjectLoadCancellationSnapshot()
     {
         var hadLoadedProjectBefore = _viewModel.IsProjectLoaded && !string.IsNullOrWhiteSpace(_currentPath);
@@ -7767,7 +7586,7 @@ public partial class MainWindow : Window
             AllRootFoldersChecked: _viewModel.AllRootFoldersChecked,
             AllExtensionsChecked: _viewModel.AllExtensionsChecked,
             AllIgnoreChecked: _viewModel.AllIgnoreChecked,
-            HasCompleteMetricsBaseline: _hasCompleteMetricsBaseline,
+            HasCompleteMetricsBaseline: _metrics.HasCompleteBaseline,
             RootFolders: _viewModel.RootFolders
                 .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
                 .ToArray(),
@@ -7795,7 +7614,7 @@ public partial class MainWindow : Window
         _filterBaseTree = snapshot.Tree;
         _previewOnlySuspendedTreeToolMode = SuspendedTreeToolMode.None;
         ResetInteractiveFilterCache();
-        InvalidateComputedMetricsCaches();
+        _metrics.InvalidateComputedCaches();
 
         _viewModel.IsProjectLoaded = true;
         _viewModel.SettingsVisible = snapshot.SettingsVisible;
@@ -7828,7 +7647,7 @@ public partial class MainWindow : Window
         _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
         _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
         _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
-        _hasCompleteMetricsBaseline = snapshot.HasCompleteMetricsBaseline;
+        _metrics.HasCompleteBaseline = snapshot.HasCompleteMetricsBaseline;
         UpdateCompactModeVisualState();
         UpdateWorkspaceLayoutForCurrentMode();
         SyncSearchAndFilterVisualStateFromFlags();
@@ -7870,7 +7689,7 @@ public partial class MainWindow : Window
     private void ResetToInitialProjectStateAfterCancellation()
     {
         _projectLoadCancellation.Clear();
-        CancelBackgroundMetricsCalculation();
+        _metrics.CancelBackgroundCalculation();
         CancelPreviewRefresh();
         ClearPreviousProjectState();
 
@@ -7900,7 +7719,7 @@ public partial class MainWindow : Window
         UpdateWorkspaceLayoutForCurrentMode();
         UpdateBranchMenu();
 
-        UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+        _metrics.UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
         UpdateTitle();
     }
 
@@ -7957,8 +7776,14 @@ public partial class MainWindow : Window
 
         return _currentTree is null
             ? []
-            : GetOrBuildAllOrderedFilePaths(_currentTree.Root).ToList();
+            : _metrics.GetOrBuildAllOrderedFilePaths(_currentTree.Root).ToList();
     }
+
+    private static List<string> BuildOrderedSelectedFilePaths(
+        TreeNodeDescriptor treeRoot,
+        IReadOnlySet<string> selectedPaths,
+        bool ensureExists = true) =>
+        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
 
     private HashSet<string> CaptureExpandedNodes()
     {
@@ -8094,841 +7919,22 @@ public partial class MainWindow : Window
 
     #region Real-time Status Metrics
 
-    /// <summary>
-    /// Cached file metrics for efficient real-time updates.
-    /// </summary>
-    private readonly record struct FileMetricsData(
-        long Size,
-        int LineCount,
-        int CharCount,
-        bool IsEmpty,
-        bool IsWhitespaceOnly,
-        bool IsEstimated,
-        int CrLfPairCount,
-        int TrailingNewlineChars,
-        int TrailingNewlineLineBreaks);
+    private bool IsBackgroundMetricsActive() => _metrics.IsBackgroundActive;
 
-    /// <summary>
-    /// Subscribe to checkbox change events for real-time metrics updates.
-    /// </summary>
     private void SubscribeToMetricsUpdates()
     {
         TreeNodeViewModel.GlobalCheckedChanged += OnTreeNodeCheckedChanged;
     }
 
-    /// <summary>
-    /// Unsubscribe from checkbox change events.
-    /// </summary>
     private void UnsubscribeFromMetricsUpdates()
     {
         TreeNodeViewModel.GlobalCheckedChanged -= OnTreeNodeCheckedChanged;
     }
 
-    /// <summary>
-    /// Handle checkbox change with debouncing to avoid excessive recalculations.
-    /// </summary>
     private void OnTreeNodeCheckedChanged(object? sender, EventArgs e)
     {
-        // Debounce rapid checkbox changes (e.g., when selecting parent node)
-        // Reuse existing timer to prevent memory leaks from accumulating timer instances
-        if (_metricsDebounceTimer is null)
-        {
-            _metricsDebounceTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(50)
-            };
-            _metricsDebounceTimer.Tick += OnMetricsDebounceTimerTick;
-        }
-
-        _metricsDebounceTimer.Stop();
-        _metricsDebounceTimer.Start();
-
+        _metrics.ScheduleRecalculate();
         SchedulePreviewRefresh();
-    }
-
-    /// <summary>
-    /// Handler for metrics debounce timer tick. Separated to avoid lambda capture leaks.
-    /// </summary>
-    private void OnMetricsDebounceTimerTick(object? sender, EventArgs e)
-    {
-        _metricsDebounceTimer?.Stop();
-        RecalculateMetricsAsync();
-    }
-
-    /// <summary>
-    /// Initialize file metrics cache after tree is built.
-    /// Scans all files in parallel using IFileContentAnalyzer as single source of truth.
-    /// Binary files are skipped via extension check (fast) or null-byte detection.
-    /// </summary>
-    private async Task InitializeFileMetricsCacheAsync(TreeNodeDescriptor treeRoot, CancellationToken cancellationToken)
-    {
-        using var _ = PerformanceMetrics.Measure("InitializeFileMetricsCacheAsync");
-
-        // Cancel any previous calculation
-        var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, metricsCts.Token);
-
-        _metricsCancellationRequestedByUser = false;
-        _hasCompleteMetricsBaseline = false;
-        _isBackgroundMetricsActive = true;
-        var statusOperationId = _statusOperations.Begin(
-            _viewModel.StatusOperationCalculatingData,
-            indeterminate: false,
-            operationType: StatusOperationType.MetricsCalculation,
-            cancelAction: CancelBackgroundMetricsCalculation);
-        var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
-        var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
-        try
-        {
-            if (_statusOperations.IsActive(statusOperationId))
-                _viewModel.StatusProgressValue = 0;
-
-            IReadOnlyList<string> filePaths;
-            using (PerformanceMetrics.Measure("CollectMetricsWarmupFilePaths"))
-            {
-                // Warmup must read from the descriptor tree instead of TreeNodeViewModel instances.
-                // That keeps the UI tree out of the hot path and reuses the ordered-file cache
-                // shared with preview/export metrics.
-                filePaths = await Task.Run(
-                    () => GetOrBuildAllOrderedFilePaths(treeRoot),
-                    linkedCts.Token);
-            }
-
-            // Clear cache before scanning
-            ClearFileMetricsCache(trimCapacity: true);
-
-            var totalFiles = filePaths.Count;
-            if (totalFiles == 0)
-            {
-                _isBackgroundMetricsActive = false;
-                _hasCompleteMetricsBaseline = true;
-                RecalculateMetricsAsync();
-                _viewModel.StatusMetricsVisible = true;
-                _statusOperations.Complete(statusOperationId);
-                return;
-            }
-
-            // Skip warmup scan for obvious binary-only datasets (e.g. screenshot folders).
-            if (AreAllFilesDefinitelyBinaryForMetricsWarmup(filePaths))
-            {
-                _isBackgroundMetricsActive = false;
-                _hasCompleteMetricsBaseline = true;
-                if (_statusOperations.IsActive(statusOperationId))
-                    _viewModel.StatusProgressValue = 100;
-                RecalculateMetricsAsync();
-                _viewModel.StatusMetricsVisible = true;
-                _statusOperations.Complete(statusOperationId);
-                return;
-            }
-
-            await ScanFileMetricsAsync(
-                filePaths,
-                stagedMetrics,
-                stagedInspectedPaths,
-                linkedCts.Token,
-                statusOperationId,
-                MetricsCalculationPolicy.GetBaselineWarmupParallelism(Environment.ProcessorCount));
-
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
-
-            // Calculation completed successfully
-            _isBackgroundMetricsActive = false;
-            _hasCompleteMetricsBaseline = true;
-            if (_statusOperations.IsActive(statusOperationId))
-                _viewModel.StatusProgressValue = 100;
-            RecalculateMetricsAsync();
-            _viewModel.StatusMetricsVisible = true;
-            _statusOperations.Complete(statusOperationId);
-        }
-        catch (OperationCanceledException)
-        {
-            // Show explicit fallback for user-initiated cancellation.
-            _isBackgroundMetricsActive = false;
-            _hasCompleteMetricsBaseline = false;
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
-            var hasCachedMetrics = false;
-            lock (_metricsLock)
-                hasCachedMetrics = _fileMetricsCache.Count > 0;
-            if (_metricsCancellationRequestedByUser)
-            {
-                _metricsCancellationRequestedByUser = false;
-                UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-                _viewModel.StatusMetricsVisible = true;
-            }
-            else if (hasCachedMetrics)
-            {
-                RecalculateMetricsAsync();
-                _viewModel.StatusMetricsVisible = true;
-            }
-            _statusOperations.Complete(statusOperationId);
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _metricsCalculationCts, metricsCts);
-        }
-    }
-
-    private static bool AreAllFilesDefinitelyBinaryForMetricsWarmup(IReadOnlyList<string> filePaths)
-    {
-        for (var index = 0; index < filePaths.Count; index++)
-        {
-            if (!IsDefinitelyBinaryByExtensionForMetricsWarmup(filePaths[index]))
-                return false;
-        }
-
-        return true;
-    }
-
-    private void MergeStagedMetricsIntoCache(ConcurrentDictionary<string, FileMetricsData> stagedMetrics)
-    {
-        if (stagedMetrics.IsEmpty)
-            return;
-
-        lock (_metricsLock)
-        {
-            foreach (var pair in stagedMetrics)
-                _fileMetricsCache[pair.Key] = pair.Value;
-        }
-
-        stagedMetrics.Clear();
-    }
-
-    private void MergeInspectedMetricsPaths(ConcurrentDictionary<string, byte> inspectedPaths)
-    {
-        if (inspectedPaths.IsEmpty)
-            return;
-
-        lock (_metricsLock)
-        {
-            foreach (var pair in inspectedPaths)
-                _inspectedFileMetricsPaths.Add(pair.Key);
-        }
-
-        inspectedPaths.Clear();
-    }
-
-    private async Task ScanFileMetricsAsync(
-        IReadOnlyList<string> filePaths,
-        ConcurrentDictionary<string, FileMetricsData> stagedMetrics,
-        ConcurrentDictionary<string, byte> stagedInspectedPaths,
-        CancellationToken cancellationToken,
-        long statusOperationId,
-        int maxDegreeOfParallelism)
-    {
-        if (filePaths.Count == 0)
-            return;
-
-        var processedCount = 0;
-        var lastProgressPercent = 0;
-        var parallelOptions = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = maxDegreeOfParallelism,
-            CancellationToken = cancellationToken
-        };
-
-        await Parallel.ForEachAsync(filePaths, parallelOptions, async (filePath, ct) =>
-        {
-            try
-            {
-                var metrics = await _fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
-                    .ConfigureAwait(false);
-
-                if (metrics is not null)
-                {
-                    stagedMetrics[filePath] = new FileMetricsData(
-                        metrics.SizeBytes,
-                        metrics.LineCount,
-                        metrics.CharCount,
-                        metrics.IsEmpty,
-                        metrics.IsWhitespaceOnly,
-                        metrics.IsEstimated,
-                        metrics.CrLfPairCount,
-                        metrics.TrailingNewlineChars,
-                        metrics.TrailingNewlineLineBreaks);
-                }
-
-                // Null means "not exportable as text", not "still missing". Remembering the
-                // completed probe prevents binary files from keeping selected content metrics
-                // stuck behind a permanent "missing metrics" gate.
-                stagedInspectedPaths[filePath] = 0;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                // Skip files that cannot be read. Export/preview logic already treats them as unavailable.
-                stagedInspectedPaths[filePath] = 0;
-            }
-            finally
-            {
-                var current = Interlocked.Increment(ref processedCount);
-                var progressPercent = (int)(current * 100.0 / filePaths.Count);
-                var observed = Volatile.Read(ref lastProgressPercent);
-                if (progressPercent >= observed + 5 &&
-                    Interlocked.CompareExchange(ref lastProgressPercent, progressPercent, observed) == observed)
-                {
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        if (_isBackgroundMetricsActive && _statusOperations.IsActive(statusOperationId))
-                            _viewModel.StatusProgressValue = progressPercent;
-                    });
-                }
-            }
-        });
-    }
-
-    /// <summary>
-    /// Recalculate both tree and content metrics based on current selection.
-    /// Calculations run in parallel on background threads for better performance.
-    /// Cancels any previous calculation to avoid stale updates and wasted CPU.
-    /// </summary>
-    private void RecalculateMetricsAsync()
-    {
-        if (!_viewModel.IsProjectLoaded || _viewModel.TreeNodes.Count == 0)
-        {
-            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-            return;
-        }
-
-        // Cancel previous calculation to avoid wasted CPU and stale updates
-        var recalcCts = ReplaceCancellationSource(ref _recalculateMetricsCts);
-        var token = recalcCts.Token;
-
-        var recalcVersion = Interlocked.Increment(ref _metricsRecalcVersion);
-        var treeRoot = _viewModel.TreeNodes.FirstOrDefault();
-        if (treeRoot == null)
-        {
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-            return;
-        }
-
-        // Capture state for background calculation
-        var selectedPaths = GetCheckedPaths();
-        var hasAnyChecked = selectedPaths.Count > 0;
-        var hasCompleteMetricsBaseline = _hasCompleteMetricsBaseline;
-        var treeFormat = GetCurrentTreeTextFormat();
-        var currentTree = _currentTree;
-        var currentPath = _currentPath;
-
-        if (!hasCompleteMetricsBaseline)
-        {
-            _ = RecalculateIncompleteBaselineMetricsAsync(
-                recalcCts,
-                token,
-                recalcVersion,
-                hasAnyChecked,
-                selectedPaths,
-                treeFormat,
-                currentTree,
-                currentPath);
-            return;
-        }
-
-        if (!MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(hasAnyChecked, hasCompleteMetricsBaseline))
-        {
-            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-            return;
-        }
-
-        _ = RecalculateMetricsCoreAsync(
-            recalcCts,
-            token,
-            recalcVersion,
-            hasAnyChecked,
-            selectedPaths,
-            treeFormat,
-            currentTree,
-            currentPath);
-    }
-
-    /// <summary>
-    /// Recalculates metrics while the global baseline is still incomplete.
-    /// A non-empty selection computes subtree metrics, while an empty selection
-    /// falls back to whole-project metrics instead of incorrectly zeroing the status bar.
-    /// </summary>
-    private async Task RecalculateIncompleteBaselineMetricsAsync(
-        CancellationTokenSource recalcCts,
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult? currentTree,
-        string? currentPath)
-    {
-        try
-        {
-            if (token.IsCancellationRequested)
-                return;
-
-            if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
-            {
-                await Dispatcher.UIThread.InvokeAsync(() => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
-                return;
-            }
-
-            var targetFilePaths = await Task.Run(
-                () => hasAnyChecked
-                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
-                    : GetOrBuildAllOrderedFilePaths(currentTree.Root),
-                token);
-
-            if (targetFilePaths.Count == 0)
-            {
-                await PublishTreeMetricsWhileContentPendingAsync(
-                    token,
-                    recalcVersion,
-                    hasAnyChecked,
-                    selectedPaths,
-                    treeFormat,
-                    currentTree,
-                    currentPath);
-                return;
-            }
-
-            var missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(targetFilePaths), token);
-            if (missingPaths.Count > 0)
-            {
-                if (_isBackgroundMetricsActive)
-                {
-                    _metricsCalculationCts?.Cancel();
-                    await WaitForBackgroundMetricsIdleAsync(token);
-                    if (token.IsCancellationRequested)
-                        return;
-
-                    missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(targetFilePaths), token);
-                }
-
-                if (missingPaths.Count > 0)
-                {
-                    await PublishTreeMetricsWhileContentPendingAsync(
-                        token,
-                        recalcVersion,
-                        hasAnyChecked,
-                        selectedPaths,
-                        treeFormat,
-                        currentTree,
-                        currentPath);
-
-                    await EnsureSelectedFileMetricsAsync(missingPaths, token);
-                }
-            }
-
-            await PublishMetricsAsync(
-                token,
-                recalcVersion,
-                hasAnyChecked,
-                selectedPaths,
-                treeFormat,
-                currentTree,
-                currentPath);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when a newer selection supersedes the current one.
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-        }
-    }
-
-    private async Task WaitForBackgroundMetricsIdleAsync(CancellationToken cancellationToken)
-    {
-        while (_isBackgroundMetricsActive)
-            await Task.Delay(10, cancellationToken);
-    }
-
-    private async Task PublishTreeMetricsWhileContentPendingAsync(
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult currentTree,
-        string currentPath)
-    {
-        if (token.IsCancellationRequested)
-            return;
-
-        // Tree metrics do not depend on file-content warmup, so we can publish them
-        // immediately while the content side is still scanning missing files.
-        var treeMetrics = await Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-
-        if (token.IsCancellationRequested)
-            return;
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
-                return;
-
-            if (!string.Equals(_currentPath, currentPath, StringComparison.Ordinal) || !ReferenceEquals(_currentTree, currentTree))
-                return;
-
-            UpdateStatusBarMetrics(treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens, 0, 0, 0);
-            _viewModel.StatusMetricsVisible = true;
-        });
-    }
-
-    private async Task RecalculateMetricsCoreAsync(
-        CancellationTokenSource recalcCts,
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult? currentTree,
-        string? currentPath)
-    {
-        try
-        {
-            await PublishMetricsAsync(
-                token,
-                recalcVersion,
-                hasAnyChecked,
-                selectedPaths,
-                treeFormat,
-                currentTree,
-                currentPath);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when a newer recalculation supersedes the current one.
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-        }
-    }
-
-    private async Task PublishMetricsAsync(
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult? currentTree,
-        string? currentPath)
-    {
-        if (token.IsCancellationRequested)
-            return;
-
-        if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
-        {
-            await Dispatcher.UIThread.InvokeAsync(
-                () => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
-            return;
-        }
-
-        var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-        var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
-
-        await Task.WhenAll(treeMetricsTask, contentMetricsTask).ConfigureAwait(false);
-
-        if (token.IsCancellationRequested)
-            return;
-
-        var treeMetrics = treeMetricsTask.Result;
-        var contentMetrics = contentMetricsTask.Result;
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
-                return;
-
-            UpdateStatusBarMetrics(
-                treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
-                contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
-        });
-    }
-
-    private void ClearFileMetricsCache(bool trimCapacity)
-    {
-        lock (_metricsLock)
-        {
-            _fileMetricsCache.Clear();
-            _inspectedFileMetricsPaths.Clear();
-            if (trimCapacity)
-            {
-                _fileMetricsCache.TrimExcess();
-                _inspectedFileMetricsPaths.TrimExcess();
-            }
-        }
-
-        InvalidateComputedMetricsCaches();
-    }
-
-    private List<string> CollectMissingMetricsFilePaths(IReadOnlyList<string> orderedPaths)
-    {
-        var missingPaths = new List<string>();
-        lock (_metricsLock)
-        {
-            for (var index = 0; index < orderedPaths.Count; index++)
-            {
-                var path = orderedPaths[index];
-                if (!_inspectedFileMetricsPaths.Contains(path))
-                    missingPaths.Add(path);
-            }
-        }
-
-        return missingPaths;
-    }
-
-    private async Task EnsureSelectedFileMetricsAsync(
-        IReadOnlyList<string> missingPaths,
-        CancellationToken cancellationToken)
-    {
-        if (missingPaths.Count == 0)
-            return;
-
-        var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, metricsCts.Token);
-
-        _metricsCancellationRequestedByUser = false;
-        _isBackgroundMetricsActive = true;
-        var statusOperationId = _statusOperations.Begin(
-            _viewModel.StatusOperationCalculatingData,
-            indeterminate: false,
-            operationType: StatusOperationType.MetricsCalculation,
-            cancelAction: CancelBackgroundMetricsCalculation);
-        var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
-        var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
-
-        try
-        {
-            if (_statusOperations.IsActive(statusOperationId))
-                _viewModel.StatusProgressValue = 0;
-
-            await ScanFileMetricsAsync(
-                missingPaths,
-                stagedMetrics,
-                stagedInspectedPaths,
-                linkedCts.Token,
-                statusOperationId,
-                MetricsCalculationPolicy.GetSelectionRecoveryParallelism(Environment.ProcessorCount));
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
-
-            if (_statusOperations.IsActive(statusOperationId))
-                _viewModel.StatusProgressValue = 100;
-        }
-        catch (OperationCanceledException)
-        {
-            // Preserve already completed probes so rapid selection changes do not keep
-            // re-scanning the same text/binary files from scratch.
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
-            throw;
-        }
-        finally
-        {
-            _isBackgroundMetricsActive = false;
-            _statusOperations.Complete(statusOperationId);
-            DisposeIfCurrent(ref _metricsCalculationCts, metricsCts);
-        }
-    }
-
-    /// <summary>
-    /// Full metrics require a completed baseline calculation.
-    /// Selected metrics can be calculated independently.
-    /// </summary>
-    private static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
-        MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(hasAnyCheckedNodes, hasCompleteMetricsBaseline);
-
-    private static bool IsFullTreeSelection(TreeNodeDescriptor treeRoot, IReadOnlySet<string> selectedPaths) =>
-        selectedPaths.Contains(treeRoot.FullPath);
-
-    /// <summary>
-    /// Calculates tree metrics from actual tree export output in the currently selected format.
-    /// This keeps status metrics aligned with copy/export output.
-    /// </summary>
-    private ExportOutputMetrics CalculateTreeMetrics(
-        bool hasSelection,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat format)
-    {
-        if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
-            return ExportOutputMetrics.Empty;
-
-        var isFullTreeSelection = hasSelection && IsFullTreeSelection(_currentTree.Root, selectedPaths);
-        var effectiveHasSelection = hasSelection && !isFullTreeSelection;
-        var pathPresentation = CreateExportPathPresentation();
-        var pathPresentationIdentity = pathPresentation is null
-            ? 0
-            : HashCode.Combine(pathPresentation.DisplayRootPath, pathPresentation.DisplayRootName);
-        var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
-        var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
-        var cacheKey = new TreeMetricsCacheKey(
-            TreeIdentity: RuntimeHelpers.GetHashCode(_currentTree.Root),
-            Format: format,
-            SelectedCount: selectedCount,
-            SelectedHash: selectedHash,
-            PathPresentationIdentity: pathPresentationIdentity);
-
-        lock (_metricsComputationCacheLock)
-        {
-            if (_hasTreeMetricsCache && _treeMetricsCacheKey == cacheKey)
-                return _treeMetricsCacheValue;
-        }
-
-        // Tree status metrics are requested frequently while the user tweaks selection.
-        // Rebuilding a 100k+ line ASCII tree string only to count chars/lines is wasteful,
-        // so the export service provides a direct metrics path that preserves the same contract.
-        var metrics = effectiveHasSelection
-            ? _treeExport.CalculateSelectedTreeMetrics(
-                _currentPath,
-                _currentTree.Root,
-                selectedPaths,
-                format,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName)
-            : _treeExport.CalculateFullTreeMetrics(
-                _currentPath,
-                _currentTree.Root,
-                format,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName);
-
-        lock (_metricsComputationCacheLock)
-        {
-            _hasTreeMetricsCache = true;
-            _treeMetricsCacheKey = cacheKey;
-            _treeMetricsCacheValue = metrics;
-        }
-
-        return metrics;
-    }
-
-    /// <summary>
-    /// Calculates content metrics using the same text shaping rules as content export.
-    /// File I/O is avoided by using cached metrics prepared in background.
-    /// </summary>
-    private ExportOutputMetrics CalculateContentMetrics(bool hasSelection, IReadOnlySet<string> selectedPaths)
-    {
-        if (_currentTree is null)
-            return ExportOutputMetrics.Empty;
-
-        var pathMapper = CreateExportPathPresentation()?.MapFilePath;
-        var isFullTreeSelection = hasSelection && IsFullTreeSelection(_currentTree.Root, selectedPaths);
-        var effectiveHasSelection = hasSelection && !isFullTreeSelection;
-        var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
-        var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
-        var cacheKey = new ContentMetricsCacheKey(
-            TreeIdentity: RuntimeHelpers.GetHashCode(_currentTree.Root),
-            SelectedCount: selectedCount,
-            SelectedHash: selectedHash,
-            PathMapperIdentity: pathMapper is null ? 0 : RuntimeHelpers.GetHashCode(pathMapper));
-
-        lock (_metricsComputationCacheLock)
-        {
-            if (_hasContentMetricsCache && _contentMetricsCacheKey == cacheKey)
-                return _contentMetricsCacheValue;
-        }
-
-        var orderedPaths = effectiveHasSelection
-            ? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths, ensureExists: false)
-            : GetOrBuildAllOrderedFilePaths(_currentTree.Root);
-
-        if (orderedPaths.Count == 0)
-            return ExportOutputMetrics.Empty;
-
-        var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-        lock (_metricsLock)
-        {
-            foreach (var path in orderedPaths)
-            {
-                if (!_fileMetricsCache.TryGetValue(path, out var metrics))
-                    continue;
-
-                var displayPath = MapExportDisplayPath(path, pathMapper);
-                accumulator.AppendFile(new ContentFileMetrics(
-                    Path: displayPath,
-                    SizeBytes: metrics.Size,
-                    LineCount: metrics.LineCount,
-                    CharCount: metrics.CharCount,
-                    IsEmpty: metrics.IsEmpty,
-                    IsWhitespaceOnly: metrics.IsWhitespaceOnly,
-                    IsEstimated: metrics.IsEstimated,
-                    CrLfPairCount: metrics.CrLfPairCount,
-                    TrailingNewlineChars: metrics.TrailingNewlineChars,
-                    TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
-            }
-        }
-
-        var computed = accumulator.ToMetrics();
-        lock (_metricsComputationCacheLock)
-        {
-            _hasContentMetricsCache = true;
-            _contentMetricsCacheKey = cacheKey;
-            _contentMetricsCacheValue = computed;
-        }
-
-        return computed;
-    }
-
-    private IReadOnlyList<string> GetOrBuildAllOrderedFilePaths(TreeNodeDescriptor treeRoot)
-    {
-        var treeIdentity = RuntimeHelpers.GetHashCode(treeRoot);
-        lock (_metricsComputationCacheLock)
-        {
-            if (_allOrderedFilePathsCache is not null &&
-                _allOrderedFilePathsTreeIdentity == treeIdentity)
-            {
-                return _allOrderedFilePathsCache;
-            }
-        }
-
-        var orderedPaths = PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(treeRoot);
-
-        lock (_metricsComputationCacheLock)
-        {
-            _allOrderedFilePathsTreeIdentity = treeIdentity;
-            _allOrderedFilePathsCache = orderedPaths;
-            return _allOrderedFilePathsCache;
-        }
-    }
-
-    private static List<string> BuildOrderedSelectedFilePaths(
-        TreeNodeDescriptor treeRoot,
-        IReadOnlySet<string> selectedPaths,
-        bool ensureExists = true) =>
-        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
-
-    /// <summary>
-    /// Update status bar with calculated metrics.
-    /// </summary>
-    private void UpdateStatusBarMetrics(
-        int treeLines, int treeChars, int treeTokens,
-        int contentLines, int contentChars, int contentTokens)
-    {
-        _lastStatusTreeLines = treeLines;
-        _lastStatusTreeChars = treeChars;
-        _lastStatusTreeTokens = treeTokens;
-        _lastStatusContentLines = contentLines;
-        _lastStatusContentChars = contentChars;
-        _lastStatusContentTokens = contentTokens;
-        _hasStatusMetricsSnapshot = true;
-        RenderStatusBarMetrics();
-    }
-
-    private void RenderStatusBarMetrics()
-    {
-        var labels = BuildStatusMetricLabels();
-        var useCompactMode = ShouldUseCompactStatusMetrics();
-        _viewModel.StatusTreeStatsText = PreviewSelectionMetricsPolicy.FormatStatusMetricsText(
-            new ExportOutputMetrics(_lastStatusTreeLines, _lastStatusTreeChars, _lastStatusTreeTokens),
-            labels,
-            useCompactMode);
-        _viewModel.StatusContentStatsText = PreviewSelectionMetricsPolicy.FormatStatusMetricsText(
-            new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens),
-            labels,
-            useCompactMode);
     }
 
     private void RenderPreviewSelectionMetrics()
@@ -8958,9 +7964,6 @@ public partial class MainWindow : Window
             charsLabel.Replace("{0}", string.Empty).Trim(),
             tokensLabel.Replace("{0}", string.Empty).Trim());
     }
-
-    private bool ShouldUseCompactStatusMetrics() =>
-        Bounds.Width > 0 && Bounds.Width <= CompactStatusMetricsThresholdWidth;
 
     private void SchedulePreviewSelectionMetricsUpdate(bool immediate = false)
     {
@@ -9102,13 +8105,10 @@ public partial class MainWindow : Window
         PreviewSelectionMetricsSnapshot snapshot,
         out ExportOutputMetrics metrics)
     {
-        return PreviewSelectionMetricsPolicy.TryGetCachedMetrics(
-            _hasStatusMetricsSnapshot,
+        return _metrics.TryGetCachedPreviewSelectionMetrics(
             _viewModel.SelectedPreviewContentMode,
             snapshot.Document,
             snapshot.SelectionRange,
-            new ExportOutputMetrics(_lastStatusTreeLines, _lastStatusTreeChars, _lastStatusTreeTokens),
-            new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens),
             out metrics);
     }
 
@@ -9124,12 +8124,6 @@ public partial class MainWindow : Window
         _hasPreviewSelectionMetricsSnapshot = false;
         _viewModel.StatusPreviewSelectionVisible = false;
         _viewModel.StatusPreviewSelectionStatsText = string.Empty;
-    }
-
-    private static bool IsDefinitelyBinaryByExtensionForMetricsWarmup(string path)
-    {
-        var extension = Path.GetExtension(path);
-        return !string.IsNullOrWhiteSpace(extension) && MetricsWarmupBinaryExtensions.Contains(extension);
     }
 
     private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)
@@ -9152,6 +8146,8 @@ public partial class MainWindow : Window
         switch (activeOperationType)
         {
             case StatusOperationType.LoadProject:
+                _projectLoadPipeline.CancelActiveLoad();
+                break;
             case StatusOperationType.RefreshProject:
                 _projectOperationCts?.Cancel();
                 _refreshCts?.Cancel();
@@ -9173,11 +8169,7 @@ public partial class MainWindow : Window
 
         if (activeOperationType == StatusOperationType.MetricsCalculation)
         {
-            _metricsCancellationRequestedByUser = true;
-            _hasCompleteMetricsBaseline = false;
-            CancelBackgroundMetricsCalculation();
-            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-            _viewModel.StatusMetricsVisible = _viewModel.IsProjectLoaded;
+            _metrics.CancelByUser();
             _toastService.Show(_localization["Toast.Operation.MetricsCanceled"]);
         }
 

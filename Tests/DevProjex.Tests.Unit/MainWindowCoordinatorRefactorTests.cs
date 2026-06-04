@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using DevProjex.Application.Preview;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit;
@@ -102,6 +103,96 @@ public sealed class MainWindowCoordinatorRefactorTests
         coordinator.Complete(operationId);
 
         Assert.False(viewModel.StatusBusy);
+    }
+
+    [Fact]
+    public async Task ProjectLoadPipeline_OpenFolderAsync_RunsStableSuccessSequence()
+    {
+        var viewModel = CreateViewModel();
+        var host = new RecordingProjectLoadHost(viewModel)
+        {
+            CurrentCachedRepoPathValue = @"C:\Cache\Repo"
+        };
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+        using var pipeline = new ProjectLoadPipeline(host, status);
+
+        await pipeline.OpenFolderAsync(@"C:\Project", fromDialog: true, recordRecentFolder: true);
+
+        Assert.Equal(ProjectSourceType.LocalFolder, viewModel.ProjectSourceType);
+        Assert.True(viewModel.IsProjectLoaded);
+        Assert.Equal(
+        [
+            ProjectLoadHostCall.CaptureCancellationSnapshot,
+            ProjectLoadHostCall.PrepareSearchAndFilter,
+            ProjectLoadHostCall.CancelBackgroundMemoryCleanup,
+            ProjectLoadHostCall.CancelPreviewRefresh,
+            ProjectLoadHostCall.SetProjectLoadIdentity,
+            ProjectLoadHostCall.UpdateTitle,
+            ProjectLoadHostCall.YieldProjectLoadStartupFrame,
+            ProjectLoadHostCall.ReloadProject,
+            ProjectLoadHostCall.RecordRecentFolder,
+            ProjectLoadHostCall.DeleteRepositoryDirectory,
+            ProjectLoadHostCall.ClearCurrentCachedRepoPath,
+            ProjectLoadHostCall.ClearProjectLoadCancellation,
+            ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup
+        ], host.Calls);
+    }
+
+    [Fact]
+    public async Task ProjectLoadPipeline_OpenFolderAsync_CancellationAppliesFallbackWithoutSuccessSideEffects()
+    {
+        var viewModel = CreateViewModel();
+        var host = new RecordingProjectLoadHost(viewModel);
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+        ProjectLoadPipeline? pipeline = null;
+        host.ReloadHandler = token =>
+        {
+            pipeline!.CancelActiveLoad();
+            token.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        };
+        pipeline = new ProjectLoadPipeline(host, status);
+
+        await pipeline.OpenFolderAsync(@"C:\Canceled", fromDialog: false, recordRecentFolder: true);
+        pipeline.Dispose();
+
+        Assert.Contains(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
+        Assert.Contains(ProjectLoadHostCall.ShowLoadCanceledToast, host.Calls);
+        Assert.DoesNotContain(ProjectLoadHostCall.RecordRecentFolder, host.Calls);
+        Assert.DoesNotContain(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
+        Assert.False(viewModel.StatusBusy);
+    }
+
+    [Fact]
+    public void MetricsPipeline_StatusSnapshotFeedsPreviewSelectionCache()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+        using var pipeline = CreateMetricsPipeline(viewModel, boundsWidth: 900);
+        using var document = new InMemoryPreviewTextDocument("tree\ncontent");
+
+        pipeline.UpdateStatusBarMetrics(
+            treeLines: 1,
+            treeChars: 2,
+            treeTokens: 3,
+            contentLines: 4,
+            contentChars: 5,
+            contentTokens: 6);
+
+        Assert.Equal("[lines 1]", viewModel.StatusTreeStatsText);
+        Assert.True(pipeline.HasStatusMetricsSnapshot);
+        Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
+            viewModel.SelectedPreviewContentMode,
+            document,
+            new PreviewSelectionRange(1, 0, 2, 7),
+            out var metrics));
+        Assert.Equal(new ExportOutputMetrics(5, 7, 9), metrics);
     }
 
     [Fact]
@@ -222,6 +313,28 @@ public sealed class MainWindowCoordinatorRefactorTests
         return new MainWindowViewModel(localization, new HelpContentProvider());
     }
 
+    private static MetricsPipeline CreateMetricsPipeline(MainWindowViewModel viewModel, double boundsWidth)
+    {
+        var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+
+        return new MetricsPipeline(
+            viewModel,
+            localization,
+            new StubFileContentAnalyzer(),
+            new TreeExportService(),
+            status,
+            currentTreeProvider: () => null,
+            currentPathProvider: () => null,
+            selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+            treeFormatProvider: () => TreeTextFormat.Ascii,
+            exportPathPresentationProvider: () => null,
+            boundsWidthProvider: () => boundsWidth);
+    }
+
     private static StubLocalizationCatalog CreateCatalog()
     {
         var data = new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
@@ -235,6 +348,10 @@ public sealed class MainWindowCoordinatorRefactorTests
                 ["Settings.Ignore.DotFolders"] = "dot folders",
                 ["Settings.Ignore.DotFiles"] = "dot files",
                 ["Settings.Ignore.ExtensionlessFiles"] = "Files without extension",
+                ["Status.Operation.LoadingProject"] = "Loading project",
+                ["Status.Metric.Lines"] = "{0} lines",
+                ["Status.Metric.Chars"] = "{0} chars",
+                ["Status.Metric.Tokens"] = "{0} tokens",
                 ["Status.Operation.CalculatingData"] = "Calculating data"
             }
         };
@@ -347,5 +464,145 @@ public sealed class MainWindowCoordinatorRefactorTests
         Error,
         Clear,
         Disposed
+    }
+
+    private sealed class RecordingProjectLoadHost(MainWindowViewModel viewModel) : IProjectLoadPipelineHost
+    {
+        public MainWindowViewModel ViewModel => viewModel;
+
+        public string? CurrentCachedRepoPathValue { get; set; }
+
+        public string? CurrentCachedRepoPath => CurrentCachedRepoPathValue;
+
+        public List<ProjectLoadHostCall> Calls { get; } = [];
+
+        public Func<CancellationToken, Task>? ReloadHandler { get; set; }
+
+        public void CaptureProjectLoadCancellationSnapshot() =>
+            Calls.Add(ProjectLoadHostCall.CaptureCancellationSnapshot);
+
+        public Task PrepareSearchAndFilterForProjectLoadAsync()
+        {
+            Calls.Add(ProjectLoadHostCall.PrepareSearchAndFilter);
+            return Task.CompletedTask;
+        }
+
+        public void CancelBackgroundMemoryCleanup() =>
+            Calls.Add(ProjectLoadHostCall.CancelBackgroundMemoryCleanup);
+
+        public void CancelPreviewRefresh() =>
+            Calls.Add(ProjectLoadHostCall.CancelPreviewRefresh);
+
+        public Task YieldProjectLoadStartupFrameAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add(ProjectLoadHostCall.YieldProjectLoadStartupFrame);
+            return Task.CompletedTask;
+        }
+
+        public void ClearPreviousProjectState(bool forceCompactingGc) =>
+            Calls.Add(forceCompactingGc
+                ? ProjectLoadHostCall.ClearPreviousProjectStateWithCompactingGc
+                : ProjectLoadHostCall.ClearPreviousProjectState);
+
+        public void SetProjectLoadIdentity(string path, bool fromDialog)
+        {
+            _ = path;
+            Calls.Add(ProjectLoadHostCall.SetProjectLoadIdentity);
+            viewModel.IsProjectLoaded = true;
+            viewModel.SettingsVisible = true;
+            viewModel.SearchVisible = false;
+            if (fromDialog)
+                viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
+        }
+
+        public void UpdateTitle() =>
+            Calls.Add(ProjectLoadHostCall.UpdateTitle);
+
+        public async Task ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile)
+        {
+            _ = applyStoredProfile;
+            Calls.Add(ProjectLoadHostCall.ReloadProject);
+            if (ReloadHandler is not null)
+                await ReloadHandler(cancellationToken);
+        }
+
+        public void RecordRecentFolder(string path)
+        {
+            _ = path;
+            Calls.Add(ProjectLoadHostCall.RecordRecentFolder);
+        }
+
+        public void DeleteRepositoryDirectory(string path)
+        {
+            _ = path;
+            Calls.Add(ProjectLoadHostCall.DeleteRepositoryDirectory);
+        }
+
+        public void ClearCurrentCachedRepoPath()
+        {
+            CurrentCachedRepoPathValue = null;
+            Calls.Add(ProjectLoadHostCall.ClearCurrentCachedRepoPath);
+        }
+
+        public void ClearProjectLoadCancellation() =>
+            Calls.Add(ProjectLoadHostCall.ClearProjectLoadCancellation);
+
+        public bool TryApplyActiveProjectLoadCancellationFallback()
+        {
+            Calls.Add(ProjectLoadHostCall.ApplyCancellationFallback);
+            return true;
+        }
+
+        public void ScheduleProjectLoadMemoryCleanup(bool hadLoadedProjectBefore) =>
+            Calls.Add(hadLoadedProjectBefore
+                ? ProjectLoadHostCall.ScheduleProjectSwitchCleanup
+                : ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup);
+
+        public void ShowLoadCanceledToast() =>
+            Calls.Add(ProjectLoadHostCall.ShowLoadCanceledToast);
+    }
+
+    private enum ProjectLoadHostCall
+    {
+        CaptureCancellationSnapshot,
+        PrepareSearchAndFilter,
+        CancelBackgroundMemoryCleanup,
+        CancelPreviewRefresh,
+        YieldProjectLoadStartupFrame,
+        ClearPreviousProjectState,
+        ClearPreviousProjectStateWithCompactingGc,
+        SetProjectLoadIdentity,
+        UpdateTitle,
+        ReloadProject,
+        RecordRecentFolder,
+        DeleteRepositoryDirectory,
+        ClearCurrentCachedRepoPath,
+        ClearProjectLoadCancellation,
+        ApplyCancellationFallback,
+        ScheduleInitialProjectLoadCleanup,
+        ScheduleProjectSwitchCleanup,
+        ShowLoadCanceledToast
+    }
+
+    private sealed class StubFileContentAnalyzer : IFileContentAnalyzer
+    {
+        public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
+        public Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
+            => Task.FromResult<TextFileMetrics?>(null);
+
+        public Task<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default)
+            => Task.FromResult<TextFileContent?>(null);
+
+        public Task<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            long maxSizeForFullRead,
+            CancellationToken cancellationToken = default)
+        {
+            _ = maxSizeForFullRead;
+            return TryReadAsTextAsync(path, cancellationToken);
+        }
     }
 }
