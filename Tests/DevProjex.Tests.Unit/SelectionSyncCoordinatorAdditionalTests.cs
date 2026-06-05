@@ -777,6 +777,47 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	}
 
 	[Fact]
+	public void ApplyRootAndDependentsSnapshot_WhenPathIsStale_DoesNotMutateOptions()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.RootFolders.Add(new SelectionOptionViewModel("keep", true));
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".keep", true));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.DotFolders, "dot folders", false));
+		var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => "C:\\ProjectB");
+
+		var applied = coordinator.ApplyRootAndDependentsSnapshot(
+			"C:\\ProjectA",
+			CreateSelectionRefreshSnapshot());
+
+		Assert.False(applied);
+		Assert.Single(viewModel.RootFolders);
+		Assert.Equal("keep", viewModel.RootFolders[0].Name);
+		Assert.Single(viewModel.Extensions);
+		Assert.Equal(".keep", viewModel.Extensions[0].Name);
+		Assert.Single(viewModel.IgnoreOptions);
+		Assert.False(viewModel.IgnoreOptions[0].IsChecked);
+	}
+
+	[Fact]
+	public void ApplyRootAndDependentsSnapshot_WhenPreparedForTargetPath_AppliesAndConsumesPreparedState()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => "C:\\ProjectB");
+		coordinator.ResetProjectProfileSelections("C:\\ProjectA");
+
+		var applied = coordinator.ApplyRootAndDependentsSnapshot(
+			"C:\\ProjectA",
+			CreateSelectionRefreshSnapshot());
+
+		var session = GetPrivateSession(coordinator);
+		Assert.True(applied);
+		Assert.Contains(viewModel.RootFolders, option => option.Name == "src" && option.IsChecked);
+		Assert.Contains(viewModel.Extensions, option => option.Name == ".cs" && option.IsChecked);
+		Assert.Contains(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
+		Assert.False(session.HasPreparedSelectionForPath("C:\\ProjectA"));
+	}
+
+	[Fact]
 	public void ApplyProjectProfileSelections_EmptyExtensions_StillInitializesExtensionCache()
 	{
 		var coordinator = CreateCoordinator(CreateViewModel());
@@ -957,6 +998,37 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
 		method!.Invoke(coordinator, [snapshot]);
+	}
+
+	private static SelectionRefreshSnapshot CreateSelectionRefreshSnapshot()
+	{
+		return new SelectionRefreshSnapshot(
+			RootOptions:
+			[
+				new SelectionOption("src", true),
+				new SelectionOption("docs", false)
+			],
+			ExtensionOptions:
+			[
+				new SelectionOption(".cs", true),
+				new SelectionOption(".md", false)
+			],
+			IgnoreOptions:
+			[
+				new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders", true, true),
+				new ResolvedIgnoreOptionState(IgnoreOptionId.EmptyFiles, "empty files", true, false)
+			],
+			ExtensionlessEntriesCount: 0,
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: new IgnoreOptionCounts(DotFolders: 1),
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.DotFolders] = true,
+				[IgnoreOptionId.EmptyFiles] = false
+			},
+			RootAccessDenied: false,
+			HadAccessDenied: false);
 	}
 
 	private static void MarkSelectionRefreshDirty(SelectionSyncCoordinator coordinator)

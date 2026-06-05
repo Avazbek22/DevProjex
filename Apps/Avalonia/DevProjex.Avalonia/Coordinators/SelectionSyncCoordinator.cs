@@ -555,6 +555,31 @@ public sealed partial class SelectionSyncCoordinator(
             cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<SelectionRefreshSnapshot?> BuildRootAndDependentsSnapshotAsync(
+        string currentPath,
+        CancellationToken cancellationToken = default)
+    {
+        return await BuildRootAndDependentsSnapshotCoreAsync(
+            currentPath,
+            expectedRequestVersion: null,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public bool ApplyRootAndDependentsSnapshot(string currentPath, SelectionRefreshSnapshot snapshot)
+    {
+        if (IsStalePathRequest(currentPath) && !HasPreparedSelectionForPath(currentPath))
+            return false;
+        if (ShouldSkipRefreshForPreparedPath(currentPath))
+            return false;
+
+        ApplySelectionRefreshSnapshot(snapshot);
+
+        // Project-load snapshots apply selection and tree together. Prepared profile/default
+        // state must still be consumed only after the matching selection snapshot wins.
+        _session.ConsumePreparedSelectionForPath(currentPath);
+        return true;
+    }
+
     private async Task RefreshRootAndDependentsCoreAsync(
         string currentPath,
         int? expectedRequestVersion,
@@ -631,6 +656,60 @@ public sealed partial class SelectionSyncCoordinator(
                 // clearing the prepared state between capture and apply.
                 _session.ConsumePreparedSelectionForPath(currentPath);
             });
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    private async Task<SelectionRefreshSnapshot?> BuildRootAndDependentsSnapshotCoreAsync(
+        string currentPath,
+        int? expectedRequestVersion,
+        CancellationToken cancellationToken)
+    {
+        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (IsSupersededFullRefreshRequest(expectedRequestVersion))
+                return null;
+
+            if (IsStalePathRequest(currentPath) && !HasPreparedSelectionForPath(currentPath))
+                return null;
+
+            if (ShouldSkipRefreshForPreparedPath(currentPath))
+                return null;
+
+            var context = await RunOnUiThreadAsync(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (IsSupersededFullRefreshRequest(expectedRequestVersion))
+                    return null;
+                if (IsStalePathRequest(currentPath) && !HasPreparedSelectionForPath(currentPath))
+                    return null;
+                if (ShouldSkipRefreshForPreparedPath(currentPath))
+                    return null;
+
+                if (ShouldClearCachesForCurrentPath(currentPath))
+                    ClearCachesForNewProject();
+
+                _session.LastLoadedPath = currentPath;
+                MarkSelectionRefreshDirty();
+                return CreateSelectionRefreshContext(currentPath);
+            });
+            if (context is null)
+                return null;
+
+            var snapshot = await Task.Run(
+                    () => _selectionRefreshEngine.ComputeFullRefreshSnapshot(context, cancellationToken),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (IsSupersededFullRefreshRequest(expectedRequestVersion))
+                return null;
+
+            return snapshot;
         }
         finally
         {

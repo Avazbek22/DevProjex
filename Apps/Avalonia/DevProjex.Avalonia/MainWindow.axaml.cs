@@ -103,6 +103,7 @@ public partial class MainWindow : Window
     private readonly StatusOperationCoordinator _statusOperations;
     private readonly MetricsPipeline _metrics;
     private readonly ProjectLoadPipeline _projectLoadPipeline;
+    private readonly ProjectLoadSnapshotPipeline _projectLoadSnapshotPipeline;
     private readonly PreviewWorkspacePipeline _previewPipeline;
     private readonly RefreshTreePipeline _refreshPipeline;
     private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
@@ -329,7 +330,6 @@ public partial class MainWindow : Window
             GetCurrentTreeTextFormat,
             CreateExportPathPresentation,
             () => Bounds.Width);
-        _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _previewPipeline = new PreviewWorkspacePipeline(
             this,
             // 350ms delay ensures thumb animation (250ms) completes fully before loading.
@@ -344,6 +344,8 @@ public partial class MainWindow : Window
             GetIgnoreOptionsAvailability,
             TryElevateAndRestart,
             () => _currentPath);
+        _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
+        _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
             _viewModel,
             _selectionCoordinator,
@@ -6673,10 +6675,7 @@ public partial class MainWindow : Window
                 _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
         }
 
-        // Keep root/extension scans sequenced to avoid inconsistent UI states.
-        await _selectionCoordinator.RefreshRootAndDependentsAsync(_currentPath, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        await RefreshTreeAsync(cancellationToken: cancellationToken);
+        await _projectLoadSnapshotPipeline.ReloadAsync(_currentPath, cancellationToken);
     }
 
     /// <summary>

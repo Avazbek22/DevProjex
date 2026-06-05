@@ -134,6 +134,9 @@ public class ZipDownloadServiceTests : IAsyncLifetime
                message.Contains("timeout") ||
                message.Contains("proxy") ||
                message.Contains("connection") ||
+               message.Contains("соедин") ||
+               message.Contains("отклик") ||
+               message.Contains("разорвано") ||
                message.Contains("name or service not known") ||
                message.Contains("could not resolve");
     }

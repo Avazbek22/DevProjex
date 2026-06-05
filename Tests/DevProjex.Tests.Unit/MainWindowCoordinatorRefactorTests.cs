@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using DevProjex.Application.Models;
 using DevProjex.Application.Preview;
 using DevProjex.Avalonia.Services;
 
@@ -293,6 +294,52 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public async Task ProjectLoadSnapshotPipeline_ReloadAsync_BuildsTreeFromSelectionSnapshot()
+    {
+        var selectionSnapshot = CreateSelectionRefreshSnapshot();
+        var host = new RecordingProjectLoadSnapshotHost(selectionSnapshot);
+        var pipeline = new ProjectLoadSnapshotPipeline(host);
+
+        await pipeline.ReloadAsync(@"C:\Project", TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [
+                ProjectLoadSnapshotHostCall.BuildSelectionSnapshot,
+                ProjectLoadSnapshotHostCall.CreateTreeInput,
+                ProjectLoadSnapshotHostCall.BeforeTreeRefresh,
+                ProjectLoadSnapshotHostCall.BuildTree,
+                ProjectLoadSnapshotHostCall.BuildTreeViewModel,
+                ProjectLoadSnapshotHostCall.ApplySnapshot
+            ],
+            host.Calls);
+        Assert.NotNull(host.CapturedTreeInput);
+        Assert.Contains("src", host.CapturedTreeInput!.Options.AllowedRootFolders);
+        Assert.DoesNotContain("docs", host.CapturedTreeInput.Options.AllowedRootFolders);
+        Assert.Contains(".cs", host.CapturedTreeInput.Options.AllowedExtensions);
+        Assert.DoesNotContain(".md", host.CapturedTreeInput.Options.AllowedExtensions);
+        Assert.True(host.CapturedTreeInput.Options.IgnoreRules.IgnoreDotFolders);
+    }
+
+    [Fact]
+    public async Task ProjectLoadSnapshotPipeline_ReloadAsync_SelectionAccessDeniedStopsBeforeTreeBuild()
+    {
+        var host = new RecordingProjectLoadSnapshotHost(
+            CreateSelectionRefreshSnapshot(rootAccessDenied: true))
+        {
+            HandleSelectionAccessDenied = true
+        };
+        var pipeline = new ProjectLoadSnapshotPipeline(host);
+
+        await pipeline.ReloadAsync(@"C:\Project", TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [ProjectLoadSnapshotHostCall.BuildSelectionSnapshot],
+            host.Calls);
+        Assert.Equal(0, host.BuildTreeCount);
+        Assert.Equal(0, host.ApplyCount);
+    }
+
+    [Fact]
     public void ProjectLoadCancellationCoordinator_AppliesExpectedFallback()
     {
         var coordinator = new ProjectLoadCancellationCoordinator();
@@ -377,6 +424,37 @@ public sealed class MainWindowCoordinatorRefactorTests
             RootFolders: [],
             Extensions: [],
             IgnoreOptions: []);
+    }
+
+    private static SelectionRefreshSnapshot CreateSelectionRefreshSnapshot(bool rootAccessDenied = false)
+    {
+        return new SelectionRefreshSnapshot(
+            RootOptions:
+            [
+                new SelectionOption("src", true),
+                new SelectionOption("docs", false)
+            ],
+            ExtensionOptions:
+            [
+                new SelectionOption(".cs", true),
+                new SelectionOption(".md", false)
+            ],
+            IgnoreOptions:
+            [
+                new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders", true, true),
+                new ResolvedIgnoreOptionState(IgnoreOptionId.EmptyFiles, "empty files", true, false)
+            ],
+            ExtensionlessEntriesCount: 0,
+            HasIgnoreOptionCounts: true,
+            IgnoreOptionCounts: new IgnoreOptionCounts(DotFolders: 1),
+            ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+            IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>
+            {
+                [IgnoreOptionId.DotFolders] = true,
+                [IgnoreOptionId.EmptyFiles] = false
+            },
+            RootAccessDenied: rootAccessDenied,
+            HadAccessDenied: rootAccessDenied);
     }
 
     private static SelectionSyncCoordinator CreateSelectionCoordinator(MainWindowViewModel viewModel)
@@ -680,6 +758,127 @@ public sealed class MainWindowCoordinatorRefactorTests
         ScheduleInitialProjectLoadCleanup,
         ScheduleProjectSwitchCleanup,
         ShowLoadCanceledToast
+    }
+
+    private sealed class RecordingProjectLoadSnapshotHost(SelectionRefreshSnapshot selectionSnapshot)
+        : IProjectLoadSnapshotPipelineHost
+    {
+        public List<ProjectLoadSnapshotHostCall> Calls { get; } = [];
+
+        public TreeRefreshInput? CapturedTreeInput { get; private set; }
+
+        public int BuildTreeCount { get; private set; }
+
+        public int ApplyCount { get; private set; }
+
+        public bool HandleSelectionAccessDenied { get; init; }
+
+        public Task<SelectionRefreshSnapshot?> BuildSelectionSnapshotAsync(
+            string currentPath,
+            CancellationToken cancellationToken)
+        {
+            Assert.Equal(@"C:\Project", currentPath);
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add(ProjectLoadSnapshotHostCall.BuildSelectionSnapshot);
+            return Task.FromResult<SelectionRefreshSnapshot?>(selectionSnapshot);
+        }
+
+        public bool TryHandleSelectionRootAccessDenied(
+            string currentPath,
+            SelectionRefreshSnapshot snapshot)
+        {
+            Assert.Equal(@"C:\Project", currentPath);
+            Assert.Same(selectionSnapshot, snapshot);
+            return HandleSelectionAccessDenied;
+        }
+
+        public TreeRefreshInput CreateTreeRefreshInput(
+            string currentPath,
+            SelectionRefreshSnapshot snapshot)
+        {
+            Assert.Same(selectionSnapshot, snapshot);
+            Calls.Add(ProjectLoadSnapshotHostCall.CreateTreeInput);
+
+            var allowedRoots = snapshot.RootOptions!
+                .Where(static option => option.IsChecked)
+                .Select(static option => option.Name)
+                .ToHashSet(PathComparer.Default);
+            var allowedExtensions = snapshot.ExtensionOptions
+                .Where(static option => option.IsChecked)
+                .Select(static option => option.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var selectedIgnoreOptions = snapshot.IgnoreOptions
+                .Where(static option => option.IsChecked)
+                .Select(static option => option.Id)
+                .ToHashSet();
+            var rules = new IgnoreRules(
+                IgnoreHiddenFolders: false,
+                IgnoreHiddenFiles: false,
+                IgnoreDotFolders: selectedIgnoreOptions.Contains(IgnoreOptionId.DotFolders),
+                IgnoreDotFiles: false,
+                SmartIgnoredFolders: new HashSet<string>(),
+                SmartIgnoredFiles: new HashSet<string>());
+
+            CapturedTreeInput = new TreeRefreshInput(
+                currentPath,
+                "Project",
+                new TreeFilterOptions(
+                    allowedExtensions,
+                    allowedRoots,
+                    rules),
+                NameFilter: null);
+            return CapturedTreeInput;
+        }
+
+        public void BeforeProjectLoadTreeRefresh() =>
+            Calls.Add(ProjectLoadSnapshotHostCall.BeforeTreeRefresh);
+
+        public BuildTreeResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken)
+        {
+            Assert.Same(CapturedTreeInput, input);
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add(ProjectLoadSnapshotHostCall.BuildTree);
+            BuildTreeCount++;
+            return RecordingRefreshTreeHost.CreateResult("root");
+        }
+
+        public bool TryHandleTreeRootAccessDenied(TreeRefreshInput input, BuildTreeResult result)
+        {
+            Assert.Same(CapturedTreeInput, input);
+            _ = result;
+            return false;
+        }
+
+        public TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
+        {
+            Assert.Same(CapturedTreeInput, input);
+            Calls.Add(ProjectLoadSnapshotHostCall.BuildTreeViewModel);
+            return new TreeNodeViewModel(result.Root, parent: null, icon: null)
+            {
+                DisplayName = input.DisplayName
+            };
+        }
+
+        public void ApplyProjectLoadSnapshot(
+            ProjectLoadSnapshot snapshot,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert.Same(selectionSnapshot, snapshot.SelectionSnapshot);
+            Assert.Same(CapturedTreeInput, snapshot.TreeInput);
+            Calls.Add(ProjectLoadSnapshotHostCall.ApplySnapshot);
+            ApplyCount++;
+        }
+    }
+
+    private enum ProjectLoadSnapshotHostCall
+    {
+        BuildSelectionSnapshot,
+        CreateTreeInput,
+        BeforeTreeRefresh,
+        BuildTree,
+        BuildTreeViewModel,
+        ApplySnapshot
     }
 
     private sealed class RecordingPreviewWorkspaceHost(MainWindowViewModel viewModel) : IPreviewWorkspacePipelineHost
