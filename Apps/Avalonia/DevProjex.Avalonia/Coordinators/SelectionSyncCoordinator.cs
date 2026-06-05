@@ -696,7 +696,7 @@ public sealed partial class SelectionSyncCoordinator(
 
                 _session.LastLoadedPath = currentPath;
                 MarkSelectionRefreshDirty();
-                return CreateSelectionRefreshContext(currentPath);
+                return CreateSelectionRefreshContext(currentPath, captureTreeInventory: true);
             });
             if (context is null)
                 return null;
@@ -1402,7 +1402,7 @@ public sealed partial class SelectionSyncCoordinator(
         return extensionlessEntriesCount;
     }
 
-    private SelectionRefreshContext CreateSelectionRefreshContext(string path) =>
+    private SelectionRefreshContext CreateSelectionRefreshContext(string path, bool captureTreeInventory = false) =>
         new(
             Path: path,
             PreparedSelectionMode: _session.PreparedMode,
@@ -1419,7 +1419,8 @@ public sealed partial class SelectionSyncCoordinator(
             CurrentSnapshotState: CaptureIgnoreSectionSnapshotState(),
             RootOptionStateCache: SnapshotRootOptionStateCacheOrNull(isInitialized: true),
             ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
-            IgnoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete);
+            IgnoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
+            CaptureTreeInventory: captureTreeInventory);
 
     private HashSet<IgnoreOptionId> SnapshotRuntimeSelectedIgnoreOptions()
     {

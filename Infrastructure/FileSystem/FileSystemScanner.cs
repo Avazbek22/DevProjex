@@ -2,7 +2,7 @@ using System.Buffers;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
-public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
+public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider, IFileSystemScannerProjectWorkspaceSnapshotProvider
 {
 	public bool CanReadRoot(string rootPath)
 	{
@@ -272,6 +272,150 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		return new ScanResult<IgnoreSectionScanData>(
 			new IgnoreSectionScanData(aggregatedExtensions, rawCounts, effectiveCounts, controllerImpactCounts),
+			rootAccessDenied == 1,
+			hadAccessDenied == 1);
+	}
+
+	public ScanResult<ProjectWorkspaceScanSnapshot> GetProjectWorkspaceSnapshotForRootSelection(
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders,
+		IgnoreRules extensionDiscoveryRules,
+		IgnoreRules effectiveRules,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		bool includeDirectoryToggleProbeRoots = false,
+		CancellationToken cancellationToken = default,
+		bool includeControllerImpactProbeRoots = false)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+
+		var scanPlan = BuildRootSelectionScanPlan(
+			rootPath,
+			selectedRootFolders,
+			effectiveRules,
+			includeDirectoryToggleProbeRoots,
+			includeControllerImpactProbeRoots,
+			cancellationToken);
+
+		var aggregatedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var rawCounts = IgnoreOptionCounts.Empty;
+		var effectiveCounts = IgnoreOptionCounts.Empty;
+		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
+		var rootAccessDenied = scanPlan.RootAccessDenied ? 1 : 0;
+		var hadAccessDenied = scanPlan.HadAccessDenied ? 1 : 0;
+		var mergeLock = new object();
+		var rootFileInventoryEntries = new List<ProjectTreeInventoryEntry>();
+
+		var rootFileSnapshot = ScanRootFileIgnoreSectionSnapshotCore(
+			rootPath,
+			extensionDiscoveryRules,
+			effectiveRules,
+			effectiveExtensionPolicy,
+			cancellationToken,
+			rootFileInventoryEntries);
+		aggregatedExtensions.UnionWith(rootFileSnapshot.Value.Extensions);
+		rawCounts = rawCounts.Add(rootFileSnapshot.Value.RawIgnoreOptionCounts);
+		effectiveCounts = effectiveCounts.Add(rootFileSnapshot.Value.EffectiveIgnoreOptionCounts);
+		controllerImpactCounts = controllerImpactCounts.Add(rootFileSnapshot.Value.ControllerImpactCounts);
+		if (rootFileSnapshot.RootAccessDenied)
+			Interlocked.Exchange(ref rootAccessDenied, 1);
+		if (rootFileSnapshot.HadAccessDenied)
+			Interlocked.Exchange(ref hadAccessDenied, 1);
+
+		var subtreeInventories = new List<ProjectTreeInventorySnapshot>();
+		if (scanPlan.SelectedRootPaths.Count > 0)
+		{
+			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+			Parallel.ForEach(
+				scanPlan.SelectedRootPaths,
+				parallelOptions,
+				() => new WorkspaceSnapshotLocalState(),
+				(folderPath, _, localState) =>
+				{
+					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
+					var inventoryCapture = new ProjectTreeInventoryCapture();
+					var snapshot = ScanIgnoreSectionSnapshotCore(
+						folderPath,
+						extensionDiscoveryRules,
+						effectiveRules,
+						effectiveExtensionPolicy,
+						includeRootDirectoryInRawCounts: true,
+						parallelOptions.CancellationToken,
+						inventoryCapture);
+
+					localState.Extensions.UnionWith(snapshot.Value.Extensions);
+					localState.RawCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
+					localState.EffectiveCounts = localState.EffectiveCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
+					localState.ControllerImpactCounts =
+						localState.ControllerImpactCounts.Add(snapshot.Value.ControllerImpactCounts);
+					if (inventoryCapture.Inventory is not null)
+						localState.TreeInventories.Add(inventoryCapture.Inventory);
+
+					if (snapshot.RootAccessDenied)
+						Interlocked.Exchange(ref rootAccessDenied, 1);
+					if (snapshot.HadAccessDenied)
+						Interlocked.Exchange(ref hadAccessDenied, 1);
+
+					return localState;
+				},
+				localState =>
+				{
+					if (localState.IsEmpty)
+						return;
+
+					lock (mergeLock)
+					{
+						if (localState.Extensions.Count > 0)
+							aggregatedExtensions.UnionWith(localState.Extensions);
+						rawCounts = rawCounts.Add(localState.RawCounts.ToImmutable());
+						effectiveCounts = effectiveCounts.Add(localState.EffectiveCounts);
+						controllerImpactCounts = controllerImpactCounts.Add(localState.ControllerImpactCounts);
+						if (localState.TreeInventories.Count > 0)
+							subtreeInventories.AddRange(localState.TreeInventories);
+					}
+				});
+		}
+
+		if (includeDirectoryToggleProbeRoots && scanPlan.DirectoryToggleCandidates.Count > 0)
+		{
+			var rootCandidateCounts = CountRootDirectoryToggleCandidates(
+				scanPlan.DirectoryToggleCandidates,
+				effectiveRules,
+				cancellationToken);
+			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
+			if (rootCandidateCounts.RootAccessDenied)
+				Interlocked.Exchange(ref rootAccessDenied, 1);
+			if (rootCandidateCounts.HadAccessDenied)
+				Interlocked.Exchange(ref hadAccessDenied, 1);
+		}
+
+		if (scanPlan.ControllerImpactCandidates.Count > 0)
+		{
+			var rootControllerImpactCounts = CountRootDirectoryControllerImpactCandidates(
+				scanPlan.ControllerImpactCandidates,
+				effectiveRules,
+				effectiveExtensionPolicy,
+				cancellationToken);
+			controllerImpactCounts = controllerImpactCounts.Add(rootControllerImpactCounts.Value);
+			if (rootControllerImpactCounts.RootAccessDenied)
+				Interlocked.Exchange(ref rootAccessDenied, 1);
+			if (rootControllerImpactCounts.HadAccessDenied)
+				Interlocked.Exchange(ref hadAccessDenied, 1);
+		}
+
+		var ignoreSection = new IgnoreSectionScanData(
+			aggregatedExtensions,
+			rawCounts,
+			effectiveCounts,
+			controllerImpactCounts);
+		var treeInventory = BuildRootSelectionInventory(
+			rootPath,
+			rootFileInventoryEntries,
+			subtreeInventories,
+			rootAccessDenied == 1,
+			hadAccessDenied == 1);
+		return new ScanResult<ProjectWorkspaceScanSnapshot>(
+			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1);
 	}
@@ -1244,7 +1388,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules extensionDiscoveryRules,
 		IgnoreRules effectiveRules,
 		IExtensionInclusionPolicy? effectiveExtensionPolicy,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		List<ProjectTreeInventoryEntry>? treeInventoryFiles = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -1279,6 +1424,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(rootPath))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				treeInventoryFiles?.Add(new ProjectTreeInventoryEntry(
+					file.Name,
+					file.FullPath,
+					file.RelativePath,
+					parentIndex: 0,
+					isDirectory: false,
+					file.IsHidden,
+					file.Length));
 
 				AccumulateFileIgnoreOptionCounts(file, ref rawCounts);
 
@@ -1362,7 +1515,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules effectiveRules,
 		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		bool includeRootDirectoryInRawCounts,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		ProjectTreeInventoryCapture? treeInventoryCapture = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -1375,6 +1529,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var directories = discovery.Value;
 		if (directories.Count == 0)
 		{
+			if (treeInventoryCapture is not null)
+				treeInventoryCapture.Inventory = null;
+
 			return new ScanResult<IgnoreSectionScanData>(
 				new IgnoreSectionScanData(
 					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
@@ -1389,8 +1546,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var rawCounts = default(MutableIgnoreOptionCounts);
 		var fileMetrics = ArrayPool<EffectiveIgnoreNodeFileMetrics>.Shared.Rent(directories.Count);
 		var visibilityStates = ArrayPool<EffectiveIgnoreNodeVisibilityState>.Shared.Rent(directories.Count);
+		var treeInventoryFiles = treeInventoryCapture is null
+			? null
+			: new List<ProjectTreeInventoryEntry>?[directories.Count];
+		var treeInventoryDirectoryIncluded = treeInventoryCapture is null
+			? null
+			: ArrayPool<bool>.Shared.Rent(directories.Count);
 		Array.Clear(fileMetrics, 0, directories.Count);
 		Array.Clear(visibilityStates, 0, directories.Count);
+		if (treeInventoryDirectoryIncluded is not null)
+			Array.Clear(treeInventoryDirectoryIncluded, 0, directories.Count);
 		var hadAccessDenied = discovery.HadAccessDenied ? 1 : 0;
 		var mergeLock = new object();
 		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
@@ -1400,6 +1565,17 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		{
 			for (var index = 0; index < directories.Count; index++)
 				visibilityStates[index].IsAccessDenied = directories[index].IsAccessDenied;
+
+			if (treeInventoryDirectoryIncluded is not null)
+			{
+				for (var index = 0; index < directories.Count; index++)
+				{
+					var node = directories[index];
+					treeInventoryDirectoryIncluded[index] =
+						node.BaseRuleState.CanTraverseChildren &&
+						(node.ParentIndex < 0 || treeInventoryDirectoryIncluded[node.ParentIndex]);
+				}
+			}
 
 			for (var index = 0; index < directories.Count; index++)
 			{
@@ -1437,6 +1613,18 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(node.Path, node.RelativePath))
 					{
 						token.ThrowIfCancellationRequested();
+						if (treeInventoryDirectoryIncluded is not null &&
+						    treeInventoryDirectoryIncluded[index])
+						{
+							(treeInventoryFiles![index] ??= []).Add(new ProjectTreeInventoryEntry(
+								file.Name,
+								file.FullPath,
+								file.RelativePath,
+								parentIndex: -1,
+								isDirectory: false,
+								file.IsHidden,
+								file.Length));
+						}
 
 						var facts = AnalyzeFile(
 							file.FullPath,
@@ -1614,6 +1802,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			}
 
 			var finalizedCounts = FinalizeEffectiveIgnoreCounts(directories, fileMetrics, visibilityStates, effectiveRules);
+			if (treeInventoryCapture is not null)
+			{
+				treeInventoryCapture.Inventory = BuildSubtreeInventory(
+					directories,
+					treeInventoryFiles!,
+					treeInventoryDirectoryIncluded!,
+					discovery.RootAccessDenied,
+					hadAccessDenied == 1);
+			}
+
 			return new ScanResult<IgnoreSectionScanData>(
 				new IgnoreSectionScanData(
 					extensions,
@@ -1627,7 +1825,295 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		{
 			ArrayPool<EffectiveIgnoreNodeFileMetrics>.Shared.Return(fileMetrics);
 			ArrayPool<EffectiveIgnoreNodeVisibilityState>.Shared.Return(visibilityStates);
+			if (treeInventoryDirectoryIncluded is not null)
+				ArrayPool<bool>.Shared.Return(treeInventoryDirectoryIncluded);
 		}
+	}
+
+	private static ProjectTreeInventorySnapshot? BuildSubtreeInventory(
+		IReadOnlyList<EffectiveIgnoreScanNode> directories,
+		List<ProjectTreeInventoryEntry>?[] treeInventoryFiles,
+		bool[] treeInventoryDirectoryIncluded,
+		bool rootAccessDenied,
+		bool hadAccessDenied)
+	{
+		if (directories.Count == 0 || !treeInventoryDirectoryIncluded[0])
+			return null;
+
+		var childDirectories = BuildIncludedChildDirectoryIndex(directories, treeInventoryDirectoryIncluded);
+		var entries = new List<ProjectTreeInventoryEntry>(Math.Max(1, directories.Count));
+
+		AddDirectoryShell(sourceIndex: 0, parentIndex: -1);
+		PopulateDirectory(sourceIndex: 0, targetIndex: 0);
+		return new ProjectTreeInventorySnapshot(entries, rootAccessDenied, hadAccessDenied);
+
+		int AddDirectoryShell(int sourceIndex, int parentIndex)
+		{
+			var node = directories[sourceIndex];
+			var entry = new ProjectTreeInventoryEntry(
+				node.Name,
+				node.Path,
+				node.RelativePath,
+				parentIndex,
+				isDirectory: true,
+				node.IsHidden,
+				length: 0)
+			{
+				IsAccessDenied = node.IsAccessDenied
+			};
+			var targetIndex = entries.Count;
+			entries.Add(entry);
+			return targetIndex;
+		}
+
+		void PopulateDirectory(int sourceIndex, int targetIndex)
+		{
+			var directoryChildren = childDirectories[sourceIndex];
+			var fileChildren = treeInventoryFiles[sourceIndex];
+			if ((directoryChildren is null || directoryChildren.Count == 0) &&
+			    (fileChildren is null || fileChildren.Count == 0))
+			{
+				return;
+			}
+
+			SortDirectoryIndexes(directoryChildren, directories);
+			SortInventoryEntries(fileChildren);
+
+			// ProjectTreeInventorySnapshot requires every node's direct children to occupy
+			// one contiguous range. Add directory shells and files first, then append each
+			// directory subtree after that range exactly like ProjectTreeInventoryScanner.
+			var firstChildIndex = entries.Count;
+			var childDirectoryPairs = new List<(int SourceIndex, int TargetIndex)>(directoryChildren?.Count ?? 0);
+			if (directoryChildren is not null)
+			{
+				foreach (var childSourceIndex in directoryChildren)
+				{
+					var childTargetIndex = AddDirectoryShell(childSourceIndex, targetIndex);
+					childDirectoryPairs.Add((childSourceIndex, childTargetIndex));
+				}
+			}
+
+			if (fileChildren is not null)
+			{
+				foreach (var file in fileChildren)
+				{
+					entries.Add(new ProjectTreeInventoryEntry(
+						file.Name,
+						file.FullPath,
+						file.RelativePath,
+						targetIndex,
+						isDirectory: false,
+						file.IsHidden,
+						file.Length));
+				}
+			}
+
+			var childCount = entries.Count - firstChildIndex;
+			if (childCount > 0)
+			{
+				var parent = entries[targetIndex];
+				parent.FirstChildIndex = firstChildIndex;
+				parent.ChildCount = childCount;
+				entries[targetIndex] = parent;
+			}
+
+			foreach (var (childSourceIndex, childTargetIndex) in childDirectoryPairs)
+				PopulateDirectory(childSourceIndex, childTargetIndex);
+		}
+	}
+
+	private static List<int>?[] BuildIncludedChildDirectoryIndex(
+		IReadOnlyList<EffectiveIgnoreScanNode> directories,
+		bool[] includedDirectories)
+	{
+		var childDirectories = new List<int>?[directories.Count];
+		for (var index = 1; index < directories.Count; index++)
+		{
+			if (!includedDirectories[index])
+				continue;
+
+			var parentIndex = directories[index].ParentIndex;
+			if (parentIndex < 0 || !includedDirectories[parentIndex])
+				continue;
+
+			(childDirectories[parentIndex] ??= []).Add(index);
+		}
+
+		return childDirectories;
+	}
+
+	private static ProjectTreeInventorySnapshot BuildRootSelectionInventory(
+		string rootPath,
+		List<ProjectTreeInventoryEntry> rootFileEntries,
+		List<ProjectTreeInventorySnapshot> subtreeInventories,
+		bool rootAccessDenied,
+		bool hadAccessDenied)
+	{
+		var rootName = Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+		if (string.IsNullOrEmpty(rootName))
+			rootName = rootPath;
+
+		var entries = new List<ProjectTreeInventoryEntry>(
+			1 + rootFileEntries.Count + subtreeInventories.Sum(static inventory => inventory.Entries.Count))
+		{
+			new(
+				rootName,
+				rootPath,
+				relativePath: string.Empty,
+				parentIndex: -1,
+				isDirectory: true,
+				HasHiddenAttribute(rootPath),
+				length: 0)
+		};
+
+		subtreeInventories.Sort(CompareInventoryRootNames);
+		SortInventoryEntries(rootFileEntries);
+
+		var firstChildIndex = entries.Count;
+		var rootChildIndexes = new List<int>(subtreeInventories.Count);
+		var rootChildRelativePaths = new List<string>(subtreeInventories.Count);
+		foreach (var subtree in subtreeInventories)
+		{
+			ref readonly var subtreeRoot = ref subtree.GetEntryRef(0);
+			var rootChildRelativePath = string.IsNullOrEmpty(subtreeRoot.RelativePath)
+				? subtreeRoot.Name
+				: subtreeRoot.RelativePath;
+			var rootChildIndex = entries.Count;
+			rootChildIndexes.Add(rootChildIndex);
+			rootChildRelativePaths.Add(rootChildRelativePath);
+			entries.Add(new ProjectTreeInventoryEntry(
+				subtreeRoot.Name,
+				subtreeRoot.FullPath,
+				rootChildRelativePath,
+				parentIndex: 0,
+				isDirectory: true,
+				subtreeRoot.IsHidden,
+				length: 0)
+			{
+				IsAccessDenied = subtreeRoot.IsAccessDenied
+			});
+		}
+
+		foreach (var file in rootFileEntries)
+		{
+			entries.Add(new ProjectTreeInventoryEntry(
+				file.Name,
+				file.FullPath,
+				file.RelativePath,
+				parentIndex: 0,
+				isDirectory: false,
+				file.IsHidden,
+				file.Length));
+		}
+
+		var rootChildCount = entries.Count - firstChildIndex;
+		if (rootChildCount > 0)
+		{
+			var root = entries[0];
+			root.FirstChildIndex = firstChildIndex;
+			root.ChildCount = rootChildCount;
+			entries[0] = root;
+		}
+
+		for (var subtreeIndex = 0; subtreeIndex < subtreeInventories.Count; subtreeIndex++)
+		{
+			AppendSubtreeInventory(
+				entries,
+				rootChildIndexes[subtreeIndex],
+				rootChildRelativePaths[subtreeIndex],
+				subtreeInventories[subtreeIndex]);
+		}
+
+		return new ProjectTreeInventorySnapshot(entries, rootAccessDenied, hadAccessDenied);
+	}
+
+	private static void AppendSubtreeInventory(
+		List<ProjectTreeInventoryEntry> targetEntries,
+		int rootTargetIndex,
+		string rootRelativePath,
+		ProjectTreeInventorySnapshot subtree)
+	{
+		ref readonly var sourceRoot = ref subtree.GetEntryRef(0);
+		if (subtree.Entries.Count == 1)
+		{
+			var rootOnly = targetEntries[rootTargetIndex];
+			rootOnly.IsAccessDenied = sourceRoot.IsAccessDenied;
+			targetEntries[rootTargetIndex] = rootOnly;
+			return;
+		}
+
+		var targetBaseIndex = targetEntries.Count;
+		var root = targetEntries[rootTargetIndex];
+		root.IsAccessDenied = sourceRoot.IsAccessDenied;
+		root.ChildCount = sourceRoot.ChildCount;
+		root.FirstChildIndex = sourceRoot.FirstChildIndex < 0
+			? -1
+			: targetBaseIndex + sourceRoot.FirstChildIndex - 1;
+		targetEntries[rootTargetIndex] = root;
+
+		for (var sourceIndex = 1; sourceIndex < subtree.Entries.Count; sourceIndex++)
+		{
+			ref readonly var source = ref subtree.GetEntryRef(sourceIndex);
+			var parentIndex = source.ParentIndex == 0
+				? rootTargetIndex
+				: targetBaseIndex + source.ParentIndex - 1;
+			var firstChildIndex = source.FirstChildIndex < 0
+				? -1
+				: targetBaseIndex + source.FirstChildIndex - 1;
+
+			targetEntries.Add(new ProjectTreeInventoryEntry(
+				source.Name,
+				source.FullPath,
+				RebaseSubtreeRelativePath(rootRelativePath, source.RelativePath),
+				parentIndex,
+				source.IsDirectory,
+				source.IsHidden,
+				source.Length)
+			{
+				IsAccessDenied = source.IsAccessDenied,
+				FirstChildIndex = firstChildIndex,
+				ChildCount = source.ChildCount
+			});
+		}
+	}
+
+	private static string RebaseSubtreeRelativePath(string rootRelativePath, string subtreeRelativePath)
+	{
+		// Selected-root scans use paths relative to that selected root. The merged
+		// workspace inventory must expose paths relative to the opened project root.
+		return string.IsNullOrEmpty(subtreeRelativePath)
+			? rootRelativePath
+			: $"{rootRelativePath}/{subtreeRelativePath}";
+	}
+
+	private static void SortDirectoryIndexes(
+		List<int>? directoryIndexes,
+		IReadOnlyList<EffectiveIgnoreScanNode> directories)
+	{
+		directoryIndexes?.Sort((left, right) => string.Compare(
+			directories[left].Name,
+			directories[right].Name,
+			StringComparison.OrdinalIgnoreCase));
+	}
+
+	private static void SortInventoryEntries(List<ProjectTreeInventoryEntry>? entries)
+	{
+		entries?.Sort(CompareInventoryEntries);
+	}
+
+	private static int CompareInventoryEntries(ProjectTreeInventoryEntry left, ProjectTreeInventoryEntry right)
+	{
+		if (left.IsDirectory != right.IsDirectory)
+			return left.IsDirectory ? -1 : 1;
+
+		return string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static int CompareInventoryRootNames(ProjectTreeInventorySnapshot left, ProjectTreeInventorySnapshot right)
+	{
+		ref readonly var leftRoot = ref left.GetEntryRef(0);
+		ref readonly var rightRoot = ref right.GetEntryRef(0);
+		return string.Compare(leftRoot.Name, rightRoot.Name, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private ScanResult<List<EffectiveIgnoreScanNode>> DiscoverEffectiveIgnoreScanNodes(

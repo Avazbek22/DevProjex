@@ -18,6 +18,27 @@ public sealed partial class FileSystemScanner
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
     }
 
+    private sealed class WorkspaceSnapshotLocalState
+    {
+        public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public MutableIgnoreOptionCounts RawCounts;
+        public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
+        public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
+        public List<ProjectTreeInventorySnapshot> TreeInventories { get; } = [];
+
+        public bool IsEmpty =>
+            Extensions.Count == 0 &&
+            RawCounts.IsEmpty &&
+            EffectiveCounts == IgnoreOptionCounts.Empty &&
+            ControllerImpactCounts == IgnoreControllerImpactCounts.Empty &&
+            TreeInventories.Count == 0;
+    }
+
+    private sealed class ProjectTreeInventoryCapture
+    {
+        public ProjectTreeInventorySnapshot? Inventory { get; set; }
+    }
+
     private sealed record RootSelectionScanPlan(
         List<string> SelectedRootPaths,
         List<FileSystemDirectoryEntry> DirectoryToggleCandidates,

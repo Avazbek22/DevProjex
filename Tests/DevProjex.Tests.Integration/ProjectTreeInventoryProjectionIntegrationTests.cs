@@ -117,6 +117,58 @@ public sealed class ProjectTreeInventoryProjectionIntegrationTests
 	}
 
 	[Fact]
+	public void TreeBuilder_MixedDirectoryAndFileProjection_KeepsStableInventoryOrder()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("z-file.txt", "root file");
+		temp.CreateFile("a-file.txt", "root file");
+		temp.CreateFile("b-dir/readme.txt", "nested file");
+		temp.CreateFile("a-dir/z.txt", "nested file");
+		temp.CreateFile("a-dir/a.txt", "nested file");
+		temp.CreateFile("a-dir/inner/value.txt", "nested file");
+
+		var tree = BuildTree(
+			temp.Path,
+			CreateRules(),
+			allowedExtensions: [".txt"],
+			allowedRoots: ["a-dir", "b-dir"]);
+
+		Assert.Equal(
+			["a-dir", "b-dir", "a-file.txt", "z-file.txt"],
+			tree.Root.Children.Select(child => child.Name).ToArray());
+		var firstDirectory = tree.Root.Children.Single(child => child.Name == "a-dir");
+		Assert.Equal(
+			["inner", "a.txt", "z.txt"],
+			firstDirectory.Children.Select(child => child.Name).ToArray());
+	}
+
+	[Fact]
+	public void TreeBuilder_SmartIgnoredFiles_StayScopedAcrossSiblingRoots()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("project-a/Thumbs.db", "cache");
+		temp.CreateFile("project-a/app.cs", "class App {}");
+		temp.CreateFile("outside/Thumbs.db", "cache");
+		temp.CreateFile("outside/app.cs", "class App {}");
+		var projectScope = Path.Combine(temp.Path, "project-a");
+		var rules = CreateRules(smartFiles: ["Thumbs.db"], useSmartIgnore: true) with
+		{
+			SmartIgnoreScopeRoots = [projectScope]
+		};
+
+		var tree = BuildTree(
+			temp.Path,
+			rules,
+			allowedExtensions: [".cs", ".db"],
+			allowedRoots: ["project-a", "outside"]);
+
+		var project = tree.Root.Children.Single(child => child.Name == "project-a");
+		Assert.DoesNotContain(project.Children, child => child.Name == "Thumbs.db");
+		var outside = tree.Root.Children.Single(child => child.Name == "outside");
+		Assert.Contains(outside.Children, child => child.Name == "Thumbs.db");
+	}
+
+	[Fact]
 	public void TreeInventoryScanner_PrunesDirectoriesBeforeReadingTheirChildren()
 	{
 		using var temp = new TemporaryDirectory();
@@ -168,6 +220,7 @@ public sealed class ProjectTreeInventoryProjectionIntegrationTests
 
 	private static IgnoreRules CreateRules(
 		IReadOnlyCollection<string>? smartFolders = null,
+		IReadOnlyCollection<string>? smartFiles = null,
 		bool useSmartIgnore = false,
 		bool useGitIgnore = false)
 	{
@@ -177,7 +230,7 @@ public sealed class ProjectTreeInventoryProjectionIntegrationTests
 			IgnoreDotFolders: false,
 			IgnoreDotFiles: false,
 			SmartIgnoredFolders: new HashSet<string>(smartFolders ?? [], StringComparer.OrdinalIgnoreCase),
-			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+			SmartIgnoredFiles: new HashSet<string>(smartFiles ?? [], StringComparer.OrdinalIgnoreCase))
 		{
 			UseSmartIgnore = useSmartIgnore,
 			UseGitIgnore = useGitIgnore

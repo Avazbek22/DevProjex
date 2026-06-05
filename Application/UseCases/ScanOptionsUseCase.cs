@@ -387,6 +387,48 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			policyProvider.GetIgnoreSectionSnapshot);
 	}
 
+	public ScanResult<ProjectWorkspaceScanSnapshot> GetProjectWorkspaceSnapshotForRootFolders(
+		string rootPath,
+		IReadOnlyCollection<string> rootFolders,
+		IgnoreRules extensionDiscoveryRules,
+		IgnoreRules effectiveRules,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		bool includeDirectoryToggleProbeRoots = false,
+		CancellationToken cancellationToken = default,
+		bool includeControllerImpactProbeRoots = false)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+
+		if (scanner is IFileSystemScannerProjectWorkspaceSnapshotProvider provider)
+		{
+			return provider.GetProjectWorkspaceSnapshotForRootSelection(
+				rootPath,
+				rootFolders,
+				extensionDiscoveryRules,
+				effectiveRules,
+				effectiveExtensionPolicy,
+				includeDirectoryToggleProbeRoots,
+				cancellationToken,
+				includeControllerImpactProbeRoots);
+		}
+
+		// Older scanner implementations can still participate through the stable
+		// ignore-section contract. They simply do not provide a reusable tree inventory.
+		var ignoreSection = GetIgnoreSectionSnapshotForRootFolders(
+			rootPath,
+			rootFolders,
+			extensionDiscoveryRules,
+			effectiveRules,
+			effectiveExtensionPolicy,
+			includeDirectoryToggleProbeRoots,
+			cancellationToken,
+			includeControllerImpactProbeRoots);
+		return new ScanResult<ProjectWorkspaceScanSnapshot>(
+			new ProjectWorkspaceScanSnapshot(ignoreSection.Value, TreeInventory: null),
+			ignoreSection.RootAccessDenied,
+			ignoreSection.HadAccessDenied);
+	}
+
 	private ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootFoldersCore<TPolicy>(
 		string rootPath,
 		IReadOnlyCollection<string> rootFolders,

@@ -33,4 +33,24 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 			new BuildTreeResult(root, result.RootAccessDenied, result.HadAccessDenied),
 			inventory);
 	}
+
+	public BuildTreeSnapshotResult ExecuteWithInventory(
+		BuildTreeRequest request,
+		ProjectTreeInventorySnapshot inventory,
+		CancellationToken cancellationToken = default)
+	{
+		if (treeBuilder is not IProjectTreeInventoryBuilder inventoryBuilder)
+			return new BuildTreeSnapshotResult(Execute(request, cancellationToken), Inventory: null);
+
+		// The caller owns the inventory provenance. This overload only projects it
+		// through the same tree builder, so behavior stays identical to ReadInventory + Build.
+		var result = inventoryBuilder.Build(
+			inventory,
+			request.Filter,
+			cancellationToken);
+		var root = presenter.Build(result.Root);
+		return new BuildTreeSnapshotResult(
+			new BuildTreeResult(root, result.RootAccessDenied, result.HadAccessDenied),
+			inventory);
+	}
 }

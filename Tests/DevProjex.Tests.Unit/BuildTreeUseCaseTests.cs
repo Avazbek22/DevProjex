@@ -94,6 +94,30 @@ public sealed class BuildTreeUseCaseTests
 		Assert.Equal("root", result.Tree.Root.DisplayName);
 	}
 
+	[Fact]
+	public void ExecuteWithProvidedInventory_DoesNotReadFilesystemInventoryAgain()
+	{
+		var treeBuilder = new InventoryTreeBuilderStub();
+		var providedInventory = CreateSingleRootInventory("/provided");
+		treeBuilder.ExpectedBuildInventory = providedInventory;
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>()
+		});
+		var localization = new LocalizationService(catalog, AppLanguage.En);
+		var presenter = new TreeNodePresentationService(localization, new StubIconMapper { IconKey = "folder" });
+		var useCase = new BuildTreeUseCase(treeBuilder, presenter);
+
+		var result = useCase.ExecuteWithInventory(
+			new BuildTreeRequest("/root", CreateOptions()),
+			providedInventory,
+			TestContext.Current.CancellationToken);
+
+		Assert.Same(providedInventory, result.Inventory);
+		Assert.Equal(0, treeBuilder.ReadInventoryCount);
+		Assert.Equal(1, treeBuilder.BuildFromInventoryCount);
+	}
+
 	private static TreeFilterOptions CreateOptions()
 	{
 		return new TreeFilterOptions(
@@ -106,6 +130,23 @@ public sealed class BuildTreeUseCaseTests
 				IgnoreDotFiles: false,
 				SmartIgnoredFolders: new HashSet<string>(),
 				SmartIgnoredFiles: new HashSet<string>()));
+	}
+
+	private static ProjectTreeInventorySnapshot CreateSingleRootInventory(string rootPath)
+	{
+		return new ProjectTreeInventorySnapshot(
+			[
+				new ProjectTreeInventoryEntry(
+					"root",
+					rootPath,
+					relativePath: string.Empty,
+					parentIndex: -1,
+					isDirectory: true,
+					isHidden: false,
+					length: 0)
+			],
+			rootAccessDenied: false,
+			hadAccessDenied: false);
 	}
 
 	private sealed class InventoryTreeBuilderStub : ITreeBuilder, IProjectTreeInventoryBuilder
@@ -127,6 +168,8 @@ public sealed class BuildTreeUseCaseTests
 		public int ReadInventoryCount { get; private set; }
 
 		public int BuildFromInventoryCount { get; private set; }
+
+		public ProjectTreeInventorySnapshot? ExpectedBuildInventory { get; set; }
 
 		public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 		{
@@ -153,7 +196,7 @@ public sealed class BuildTreeUseCaseTests
 			TreeFilterOptions options,
 			CancellationToken cancellationToken = default)
 		{
-			Assert.Same(_inventory, inventory);
+			Assert.Same(ExpectedBuildInventory ?? _inventory, inventory);
 			_ = options;
 			cancellationToken.ThrowIfCancellationRequested();
 			BuildFromInventoryCount++;

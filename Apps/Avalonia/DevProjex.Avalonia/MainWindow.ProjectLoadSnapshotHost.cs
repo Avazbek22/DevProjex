@@ -42,7 +42,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             ? _currentProjectDisplayName
             : GetDirectoryNameSafe(currentPath);
 
-        return new TreeRefreshInput(currentPath, displayName, options, nameFilter);
+        return new TreeRefreshInput(currentPath, displayName, options, nameFilter, selectionSnapshot.TreeInventory);
     }
 
     void IProjectLoadSnapshotPipelineHost.BeforeProjectLoadTreeRefresh()
@@ -56,7 +56,9 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
     BuildTreeSnapshotResult IProjectLoadSnapshotPipelineHost.BuildTree(
         TreeRefreshInput input,
         CancellationToken cancellationToken) =>
-        _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), cancellationToken);
+        input.TreeInventory is null
+            ? _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), cancellationToken)
+            : _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), input.TreeInventory, cancellationToken);
 
     bool IProjectLoadSnapshotPipelineHost.TryHandleTreeRootAccessDenied(
         TreeRefreshInput input,
