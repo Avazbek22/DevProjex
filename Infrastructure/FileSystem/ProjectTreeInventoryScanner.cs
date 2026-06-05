@@ -4,6 +4,8 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 internal static class ProjectTreeInventoryScanner
 {
+	private const int RootSubtreeParallelThreshold = 4;
+
 	public static ProjectTreeInventorySnapshot Read(
 		string rootPath,
 		Func<FileSystemTreeEntry, bool, bool> shouldTraverseDirectory,
@@ -61,16 +63,32 @@ internal static class ProjectTreeInventoryScanner
 			return new ProjectTreeInventorySnapshot(entries, rootAccessDenied, hadAccessDenied);
 
 		var subtreeResults = new SubtreeScanResult[rootDirectoryChildren.Count];
-		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
-		Parallel.For(0, rootDirectoryChildren.Count, parallelOptions, index =>
+		if (rootDirectoryChildren.Count < RootSubtreeParallelThreshold)
 		{
-			var rootChildIndex = rootDirectoryChildren[index];
-			subtreeResults[index] = ReadSubtree(
-				rootChildIndex,
-				entries[rootChildIndex],
-				shouldTraverseDirectory,
-				parallelOptions.CancellationToken);
-		});
+			for (var index = 0; index < rootDirectoryChildren.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var rootChildIndex = rootDirectoryChildren[index];
+				subtreeResults[index] = ReadSubtree(
+					rootChildIndex,
+					entries[rootChildIndex],
+					shouldTraverseDirectory,
+					cancellationToken);
+			}
+		}
+		else
+		{
+			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+			Parallel.For(0, rootDirectoryChildren.Count, parallelOptions, index =>
+			{
+				var rootChildIndex = rootDirectoryChildren[index];
+				subtreeResults[index] = ReadSubtree(
+					rootChildIndex,
+					entries[rootChildIndex],
+					shouldTraverseDirectory,
+					parallelOptions.CancellationToken);
+			});
+		}
 
 		foreach (var result in subtreeResults)
 		{

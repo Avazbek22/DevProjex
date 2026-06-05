@@ -94,6 +94,29 @@ public sealed class ProjectTreeInventoryProjectionIntegrationTests
 	}
 
 	[Fact]
+	public void TreeBuilder_ReadInventoryThenBuild_MatchesDirectBuild_ForBroadRoot()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootNames = Enumerable.Range(0, 32)
+			.Select(index => $"root-{index:D2}")
+			.ToArray();
+		foreach (var rootName in rootNames)
+			temp.CreateFile($"{rootName}/src/App.cs", "class App {}");
+		var options = new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>([".cs"], StringComparer.OrdinalIgnoreCase),
+			AllowedRootFolders: new HashSet<string>(rootNames, PathComparer.Default),
+			IgnoreRules: CreateRules());
+		var builder = new TreeBuilder();
+
+		var direct = builder.Build(temp.Path, options, TestContext.Current.CancellationToken);
+		var inventory = builder.ReadInventory(temp.Path, options, TestContext.Current.CancellationToken);
+		var projected = builder.Build(inventory, options, TestContext.Current.CancellationToken);
+
+		Assert.Equal(FlattenTree(direct.Root), FlattenTree(projected.Root));
+		Assert.Equal(rootNames, projected.Root.Children.Select(child => child.Name).ToArray());
+	}
+
+	[Fact]
 	public void TreeInventoryScanner_PrunesDirectoriesBeforeReadingTheirChildren()
 	{
 		using var temp = new TemporaryDirectory();

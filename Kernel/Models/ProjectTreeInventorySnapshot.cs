@@ -17,9 +17,16 @@ public sealed class ProjectTreeInventorySnapshot(
 
 	public ProjectTreeInventoryEntry GetEntry(int index) => entries[index];
 
+	public ref readonly ProjectTreeInventoryEntry GetEntryRef(int index)
+	{
+		// Entries are immutable after snapshot creation; returning by readonly ref avoids
+		// copying the hot-path struct while keeping callers from mutating inventory state.
+		return ref CollectionsMarshal.AsSpan(entries)[index];
+	}
+
 	public ReadOnlySpan<ProjectTreeInventoryEntry> GetChildren(int parentIndex)
 	{
-		var parent = entries[parentIndex];
+		ref readonly var parent = ref GetEntryRef(parentIndex);
 		if (parent.ChildCount == 0)
 			return [];
 

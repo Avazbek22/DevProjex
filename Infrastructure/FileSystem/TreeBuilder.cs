@@ -2,6 +2,8 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 {
+	private const int RootProjectionParallelThreshold = 24;
+
 	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
 		var inventory = ReadInventory(rootPath, options, cancellationToken);
@@ -30,7 +32,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		CancellationToken cancellationToken = default)
 	{
 		var allowedExtensions = new AllowedExtensionLookup(options.AllowedExtensions);
-		var rootEntry = inventory.GetEntry(0);
+		ref readonly var rootEntry = ref inventory.GetEntryRef(0);
 		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootEntry.FullPath);
 		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
 		var root = new FileSystemNode(
@@ -38,7 +40,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 			fullPath: rootEntry.FullPath,
 			isDirectory: true,
 			isAccessDenied: rootEntry.IsAccessDenied,
-			children: new List<FileSystemNode>());
+			children: new List<FileSystemNode>(rootEntry.ChildCount));
 
 		ProjectChildren(
 			inventory,
@@ -83,7 +85,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var children = (List<FileSystemNode>)parentNode.Children;
-		var parentEntry = inventory.GetEntry(parentIndex);
+		ref readonly var parentEntry = ref inventory.GetEntryRef(parentIndex);
 		if (parentEntry.IsAccessDenied)
 			return;
 
@@ -132,8 +134,28 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		bool hasNameFilter,
 		CancellationToken cancellationToken)
 	{
-		var nodes = new FileSystemNode?[childEntries.Length];
 		var firstChildIndex = inventory.GetEntry(0).FirstChildIndex;
+		if (childEntries.Length < RootProjectionParallelThreshold)
+		{
+			for (var offset = 0; offset < childEntries.Length; offset++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var node = ProjectNode(
+					inventory,
+					firstChildIndex + offset,
+					options,
+					allowedExtensions,
+					gitIgnoreContext,
+					hasNameFilter,
+					cancellationToken);
+				if (node is not null)
+					children.Add(node);
+			}
+
+			return;
+		}
+
+		var nodes = new FileSystemNode?[childEntries.Length];
 		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 
 		Parallel.For(0, childEntries.Length, parallelOptions, offset =>
@@ -167,12 +189,12 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		var entry = inventory.GetEntry(entryIndex);
+		ref readonly var entry = ref inventory.GetEntryRef(entryIndex);
 		if (entry.IsDirectory)
 			return ProjectDirectory(
 				inventory,
 				entryIndex,
-				entry,
+				in entry,
 				options,
 				allowedExtensions,
 				gitIgnoreContext,
@@ -181,7 +203,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 
 		return ProjectFile(
 			inventory,
-			entry,
+			in entry,
 			options,
 			allowedExtensions,
 			gitIgnoreContext,
@@ -191,7 +213,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 	private static FileSystemNode? ProjectDirectory(
 		ProjectTreeInventorySnapshot inventory,
 		int entryIndex,
-		ProjectTreeInventoryEntry entry,
+		in ProjectTreeInventoryEntry entry,
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
@@ -203,7 +225,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 			fullPath: entry.FullPath,
 			isDirectory: true,
 			isAccessDenied: entry.IsAccessDenied,
-			children: new List<FileSystemNode>());
+			children: new List<FileSystemNode>(entry.ChildCount));
 
 		ProjectChildren(
 			inventory,
@@ -245,7 +267,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 
 	private static FileSystemNode? ProjectFile(
 		ProjectTreeInventorySnapshot inventory,
-		ProjectTreeInventoryEntry entry,
+		in ProjectTreeInventoryEntry entry,
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
@@ -255,7 +277,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		var fileGitIgnore = ignore.UseGitIgnore
 			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: false, entry.Name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
-		var parentEntry = inventory.GetEntry(entry.ParentIndex);
+		ref readonly var parentEntry = ref inventory.GetEntryRef(entry.ParentIndex);
 		var shouldApplySmartIgnoreForFiles = ignore.ShouldApplySmartIgnore(parentEntry.FullPath, isDirectory: true);
 
 		if (ShouldSkipFile(entry, ignore, shouldApplySmartIgnoreForFiles, fileGitIgnore))
@@ -316,7 +338,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 	}
 
 	private static bool ShouldSkipFile(
-		ProjectTreeInventoryEntry entry,
+		in ProjectTreeInventoryEntry entry,
 		IgnoreRules rules,
 		bool shouldApplySmartIgnore,
 		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
