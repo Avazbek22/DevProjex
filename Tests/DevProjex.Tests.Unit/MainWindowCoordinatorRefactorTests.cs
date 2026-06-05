@@ -833,13 +833,15 @@ public sealed class MainWindowCoordinatorRefactorTests
         public void BeforeProjectLoadTreeRefresh() =>
             Calls.Add(ProjectLoadSnapshotHostCall.BeforeTreeRefresh);
 
-        public BuildTreeResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken)
+        public BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken)
         {
             Assert.Same(CapturedTreeInput, input);
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add(ProjectLoadSnapshotHostCall.BuildTree);
             BuildTreeCount++;
-            return RecordingRefreshTreeHost.CreateResult("root");
+            return new BuildTreeSnapshotResult(
+                RecordingRefreshTreeHost.CreateResult("root"),
+                CreateInventorySnapshot());
         }
 
         public bool TryHandleTreeRootAccessDenied(TreeRefreshInput input, BuildTreeResult result)
@@ -866,8 +868,26 @@ public sealed class MainWindowCoordinatorRefactorTests
             cancellationToken.ThrowIfCancellationRequested();
             Assert.Same(selectionSnapshot, snapshot.SelectionSnapshot);
             Assert.Same(CapturedTreeInput, snapshot.TreeInput);
+            Assert.NotNull(snapshot.TreeInventory);
             Calls.Add(ProjectLoadSnapshotHostCall.ApplySnapshot);
             ApplyCount++;
+        }
+
+        private static ProjectTreeInventorySnapshot CreateInventorySnapshot()
+        {
+            return new ProjectTreeInventorySnapshot(
+                [
+                    new ProjectTreeInventoryEntry(
+                        "Project",
+                        @"C:\Project",
+                        relativePath: string.Empty,
+                        parentIndex: -1,
+                        isDirectory: true,
+                        isHidden: false,
+                        length: 0)
+                ],
+                rootAccessDenied: false,
+                hadAccessDenied: false);
         }
     }
 

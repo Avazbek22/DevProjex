@@ -24,32 +24,32 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
         var treeInput = host.CreateTreeRefreshInput(currentPath, selectionSnapshot);
         host.BeforeProjectLoadTreeRefresh();
 
-        BuildTreeResult treeResult;
+        BuildTreeSnapshotResult treeBuild;
         using (PerformanceMetrics.Measure("ProjectLoadSnapshotPipeline.BuildTree"))
         {
             // Match RefreshTreePipeline semantics: heavy work runs in the background,
             // while the continuation returns to the caller context so UI state is applied
             // only from the UI thread.
-            treeResult = await Task.Run(
+            treeBuild = await Task.Run(
                 () => host.BuildTree(treeInput, cancellationToken),
                 cancellationToken);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        if (host.TryHandleTreeRootAccessDenied(treeInput, treeResult))
+        if (host.TryHandleTreeRootAccessDenied(treeInput, treeBuild.Tree))
             return;
 
         TreeNodeViewModel treeRoot;
         using (PerformanceMetrics.Measure("ProjectLoadSnapshotPipeline.BuildTreeViewModel"))
         {
             treeRoot = await Task.Run(
-                () => host.BuildTreeViewModel(treeInput, treeResult),
+                () => host.BuildTreeViewModel(treeInput, treeBuild.Tree),
                 cancellationToken);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         host.ApplyProjectLoadSnapshot(
-            new ProjectLoadSnapshot(selectionSnapshot, treeInput, treeResult, treeRoot),
+            new ProjectLoadSnapshot(selectionSnapshot, treeInput, treeBuild.Tree, treeBuild.Inventory, treeRoot),
             cancellationToken);
     }
 }

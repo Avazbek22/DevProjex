@@ -66,6 +66,34 @@ public sealed class ProjectTreeInventoryProjectionIntegrationTests
 	}
 
 	[Fact]
+	public void TreeBuilder_ReadInventoryThenBuild_MatchesDirectBuild()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/app.cs", "class App {}");
+		temp.CreateFile("src/.cache/generated.cs", "class Generated {}");
+		temp.CreateFile("docs/readme.md", "# docs");
+		temp.CreateFile("build/noise.tmp", "noise");
+		var options = new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>([".cs", ".md"], StringComparer.OrdinalIgnoreCase),
+			AllowedRootFolders: new HashSet<string>(["src", "docs", "build"], PathComparer.Default),
+			IgnoreRules: CreateRules(smartFolders: ["build"], useSmartIgnore: true) with
+			{
+				IgnoreDotFolders = true
+			});
+		var builder = new TreeBuilder();
+
+		var direct = builder.Build(temp.Path, options, TestContext.Current.CancellationToken);
+		var inventory = builder.ReadInventory(temp.Path, options, TestContext.Current.CancellationToken);
+		var projected = builder.Build(inventory, options, TestContext.Current.CancellationToken);
+
+		Assert.Equal(FlattenTree(direct.Root), FlattenTree(projected.Root));
+		Assert.Equal(direct.RootAccessDenied, projected.RootAccessDenied);
+		Assert.Equal(direct.HadAccessDenied, projected.HadAccessDenied);
+		Assert.Contains(inventory.Entries, entry => entry.Name == "src");
+		Assert.DoesNotContain(inventory.Entries, entry => entry.Name == "build");
+	}
+
+	[Fact]
 	public void TreeInventoryScanner_PrunesDirectoriesBeforeReadingTheirChildren()
 	{
 		using var temp = new TemporaryDirectory();
@@ -80,6 +108,22 @@ public sealed class ProjectTreeInventoryProjectionIntegrationTests
 		Assert.Contains(snapshot.Entries, entry => entry.Name == "src");
 		Assert.DoesNotContain(snapshot.Entries, entry => entry.Name == "build");
 		Assert.DoesNotContain(snapshot.Entries, entry => entry.Name == "noise.cs");
+	}
+
+	private static List<string> FlattenTree(FileSystemNode root)
+	{
+		var paths = new List<string>();
+		var pending = new Stack<FileSystemNode>();
+		pending.Push(root);
+		while (pending.Count > 0)
+		{
+			var node = pending.Pop();
+			paths.Add($"{node.FullPath}|{node.IsDirectory}|{node.IsAccessDenied}");
+			for (var i = node.Children.Count - 1; i >= 0; i--)
+				pending.Push(node.Children[i]);
+		}
+
+		return paths;
 	}
 
 	private static TreeBuildResult BuildTree(

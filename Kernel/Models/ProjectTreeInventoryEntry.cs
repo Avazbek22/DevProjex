@@ -1,11 +1,10 @@
-namespace DevProjex.Infrastructure.FileSystem;
+namespace DevProjex.Kernel.Models;
 
 /// <summary>
-/// Compact tree-inventory entry. The scanner owns filesystem IO; the tree builder
-/// only projects these entries into visible nodes, so filtering can be tested without
-/// mixing it with directory enumeration details.
+/// Compact filesystem inventory entry. The filesystem scanner owns IO; higher-level
+/// project-load code can reuse the captured metadata without re-enumerating folders.
 /// </summary>
-internal struct ProjectTreeInventoryEntry(
+public struct ProjectTreeInventoryEntry(
 	string name,
 	string fullPath,
 	string relativePath,

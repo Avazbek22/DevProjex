@@ -53,10 +53,10 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         _viewModel.StatusMetricsVisible = false;
     }
 
-    BuildTreeResult IProjectLoadSnapshotPipelineHost.BuildTree(
+    BuildTreeSnapshotResult IProjectLoadSnapshotPipelineHost.BuildTree(
         TreeRefreshInput input,
         CancellationToken cancellationToken) =>
-        _buildTree.Execute(new BuildTreeRequest(input.CurrentPath, input.Options), cancellationToken);
+        _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), cancellationToken);
 
     bool IProjectLoadSnapshotPipelineHost.TryHandleTreeRootAccessDenied(
         TreeRefreshInput input,

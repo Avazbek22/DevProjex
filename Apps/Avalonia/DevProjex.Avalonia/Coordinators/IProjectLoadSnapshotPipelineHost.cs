@@ -16,7 +16,7 @@ internal interface IProjectLoadSnapshotPipelineHost
 
     void BeforeProjectLoadTreeRefresh();
 
-    BuildTreeResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken);
+    BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken);
 
     bool TryHandleTreeRootAccessDenied(TreeRefreshInput input, BuildTreeResult result);
 

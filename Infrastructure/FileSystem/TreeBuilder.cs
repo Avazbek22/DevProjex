@@ -1,14 +1,20 @@
 namespace DevProjex.Infrastructure.FileSystem;
 
-public sealed class TreeBuilder : ITreeBuilder
+public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 {
 	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
-		var allowedExtensions = new AllowedExtensionLookup(options.AllowedExtensions);
-		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootPath);
-		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
+		var inventory = ReadInventory(rootPath, options, cancellationToken);
+		return Build(inventory, options, cancellationToken);
+	}
 
-		var inventory = ProjectTreeInventoryScanner.Read(
+	public ProjectTreeInventorySnapshot ReadInventory(
+		string rootPath,
+		TreeFilterOptions options,
+		CancellationToken cancellationToken = default)
+	{
+		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootPath);
+		return ProjectTreeInventoryScanner.Read(
 			rootPath,
 			(entry, isProjectRootChild) => ShouldTraverseDirectoryInInventory(
 				entry,
@@ -16,8 +22,17 @@ public sealed class TreeBuilder : ITreeBuilder
 				options,
 				gitIgnoreContext),
 			cancellationToken);
+	}
 
+	public TreeBuildResult Build(
+		ProjectTreeInventorySnapshot inventory,
+		TreeFilterOptions options,
+		CancellationToken cancellationToken = default)
+	{
+		var allowedExtensions = new AllowedExtensionLookup(options.AllowedExtensions);
 		var rootEntry = inventory.GetEntry(0);
+		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootEntry.FullPath);
+		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
 		var root = new FileSystemNode(
 			name: rootEntry.Name,
 			fullPath: rootEntry.FullPath,

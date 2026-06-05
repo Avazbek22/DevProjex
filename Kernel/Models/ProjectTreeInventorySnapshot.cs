@@ -1,13 +1,12 @@
 using System.Runtime.InteropServices;
 
-namespace DevProjex.Infrastructure.FileSystem;
+namespace DevProjex.Kernel.Models;
 
 /// <summary>
-/// Immutable snapshot of a tree scan. Entries are stored as an indexed graph
-/// instead of nested objects so large projects do not allocate a temporary node
-/// hierarchy before the final FileSystemNode tree is projected.
+/// Immutable indexed snapshot of a project tree scan. Entries are stored as a flat
+/// graph so projection layers can build different views without repeating filesystem IO.
 /// </summary>
-internal sealed class ProjectTreeInventorySnapshot(
+public sealed class ProjectTreeInventorySnapshot(
 	List<ProjectTreeInventoryEntry> entries,
 	bool rootAccessDenied,
 	bool hadAccessDenied)
