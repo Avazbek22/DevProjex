@@ -6573,8 +6573,11 @@ public partial class MainWindow : Window
             // would capture stale root-folder availability and keep newly revealed folders hidden.
             await _selectionCoordinator.WaitForPendingRefreshesAsync();
             await RefreshTreeAsync();
-            // Keep dynamic ignore counts aligned with the tree that was just applied.
-            await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionAsync(_currentPath);
+            // Most checkbox changes already queue and apply a converged selection snapshot
+            // before Apply rebuilds the tree. Running another live refresh unconditionally
+            // doubles the expensive scan path on large projects, so only do it if a new
+            // selection change landed while the tree was rebuilding.
+            await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath);
             await _selectionCoordinator.WaitForPendingRefreshesAsync();
             _projectProfiles.PersistIfNeeded(_currentPath);
         }

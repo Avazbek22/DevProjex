@@ -53,6 +53,9 @@ public sealed partial class SelectionSyncCoordinator(
     private Task _latestFullRefreshTask = Task.CompletedTask;
     private int _liveOptionsRequestVersion;
     private int _fullRefreshRequestVersion;
+    // Tracks whether UI selections changed after the last applied selection snapshot.
+    // Apply uses it to avoid an unconditional second filesystem pass on large projects.
+    private int _selectionRefreshDirty;
     private readonly object _ignoreRulesBuildCacheSync = new();
     private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
     private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
@@ -464,6 +467,17 @@ public sealed partial class SelectionSyncCoordinator(
             cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
+        string? currentPath,
+        CancellationToken cancellationToken = default)
+    {
+        if (!HasDirtySelectionRefresh())
+            return;
+
+        await UpdateLiveOptionsFromRootSelectionAsync(currentPath, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private async Task UpdateLiveOptionsFromRootSelectionCoreAsync(
         string? currentPath,
         int? expectedRequestVersion,
@@ -579,6 +593,7 @@ public sealed partial class SelectionSyncCoordinator(
                     ClearCachesForNewProject();
 
                 _session.LastLoadedPath = currentPath;
+                MarkSelectionRefreshDirty();
                 return CreateSelectionRefreshContext(currentPath);
             });
             if (context is null)
@@ -974,6 +989,7 @@ public sealed partial class SelectionSyncCoordinator(
             if (_disposed)
                 return;
 
+            MarkSelectionRefreshDirty();
             previousCts = _liveOptionsRefreshCts;
             previousTask = _latestLiveOptionsRefreshTask;
             previousCts?.Cancel();
@@ -1009,6 +1025,7 @@ public sealed partial class SelectionSyncCoordinator(
             if (_disposed)
                 return;
 
+            MarkSelectionRefreshDirty();
             invalidatedLiveCts = _liveOptionsRefreshCts;
             invalidatedLiveTask = _latestLiveOptionsRefreshTask;
             if (invalidatedLiveCts is not null)
@@ -1207,7 +1224,17 @@ public sealed partial class SelectionSyncCoordinator(
             snapshot.HasIgnoreOptionCounts);
 
         ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+        MarkSelectionRefreshClean();
     }
+
+    private bool HasDirtySelectionRefresh() =>
+        Volatile.Read(ref _selectionRefreshDirty) != 0;
+
+    private void MarkSelectionRefreshDirty() =>
+        Volatile.Write(ref _selectionRefreshDirty, 1);
+
+    private void MarkSelectionRefreshClean() =>
+        Volatile.Write(ref _selectionRefreshDirty, 0);
 
     private static void ReplaceCollectionItems<T>(
         ObservableCollection<T> collection,

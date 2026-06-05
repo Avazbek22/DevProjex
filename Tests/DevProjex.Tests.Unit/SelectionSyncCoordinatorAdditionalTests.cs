@@ -93,6 +93,34 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public async Task UpdateLiveOptionsFromRootSelectionIfDirtyAsync_AfterSnapshotApply_DoesNotRunRedundantSnapshot()
+	{
+		var viewModel = CreateViewModel();
+		var path = @"C:\Project";
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		MarkSelectionRefreshDirty(coordinator);
+
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			new SelectionRefreshSnapshot(
+				RootOptions: [new SelectionOption("src", true)],
+				ExtensionOptions: [new SelectionOption(".cs", true)],
+				IgnoreOptions: [],
+				ExtensionlessEntriesCount: 0,
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+				IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>(),
+				RootAccessDenied: false,
+				HadAccessDenied: false));
+
+		await coordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(path, cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, scanner.RootSelectionSnapshotCount);
+	}
+
+	[Fact]
 	public void PopulateExtensionsForRootSelectionAsync_DoesNotDropCachedSelections()
 	{
 		var viewModel = CreateViewModel();
@@ -584,7 +612,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 private static SelectionSyncCoordinator CreateCoordinator(
 	MainWindowViewModel viewModel,
-	StubFileSystemScanner? scanner = null,
+	IFileSystemScanner? scanner = null,
 	Func<string?>? currentPathProvider = null)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
@@ -811,6 +839,52 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		Assert.Contains(viewModel.IgnoreOptions, option => option.Id != IgnoreOptionId.DotFiles && !option.IsChecked);
 	}
 
+	private sealed class CountingRootSelectionSnapshotScanner
+		: IFileSystemScanner, IFileSystemScannerRootSelectionSnapshotProvider
+	{
+		public int RootSelectionSnapshotCount { get; private set; }
+
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(["src"], false, false);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
+			string rootPath,
+			IReadOnlyCollection<string> selectedRootFolders,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			bool includeDirectoryToggleProbeRoots = false,
+			CancellationToken cancellationToken = default,
+			bool includeControllerImpactProbeRoots = false)
+		{
+			RootSelectionSnapshotCount++;
+			return new ScanResult<IgnoreSectionScanData>(
+				new IgnoreSectionScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+					IgnoreOptionCounts.Empty,
+					IgnoreOptionCounts.Empty),
+				false,
+				false);
+		}
+	}
+
 	private static StubLocalizationCatalog CreateCatalog()
 	{
 		var data = new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
@@ -872,6 +946,26 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
 		method!.Invoke(coordinator, [options, stateCache]);
+	}
+
+	private static void ApplySelectionRefreshSnapshot(
+		SelectionSyncCoordinator coordinator,
+		SelectionRefreshSnapshot snapshot)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"ApplySelectionRefreshSnapshot",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [snapshot]);
+	}
+
+	private static void MarkSelectionRefreshDirty(SelectionSyncCoordinator coordinator)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"MarkSelectionRefreshDirty",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, []);
 	}
 
 	private static ProjectSelectionSessionState GetPrivateSession(SelectionSyncCoordinator coordinator)
