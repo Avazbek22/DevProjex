@@ -42,7 +42,20 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             ? _currentProjectDisplayName
             : GetDirectoryNameSafe(currentPath);
 
-        return new TreeRefreshInput(currentPath, displayName, options, nameFilter, selectionSnapshot.TreeInventory);
+        var inventoryScope = selectionSnapshot.TreeInventory is null
+            ? null
+            : ProjectTreeInventoryReuseScope.Create(
+                currentPath,
+                options,
+                supportsHiddenDotFolderVariants: true);
+
+        return new TreeRefreshInput(
+            currentPath,
+            displayName,
+            options,
+            nameFilter,
+            selectionSnapshot.TreeInventory,
+            inventoryScope);
     }
 
     void IProjectLoadSnapshotPipelineHost.BeforeProjectLoadTreeRefresh()
@@ -91,7 +104,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
 
         ((IRefreshTreePipelineHost)this).ApplyTreeRefreshResult(
             snapshot.TreeInput,
-            snapshot.TreeResult,
+            new BuildTreeSnapshotResult(snapshot.TreeResult, snapshot.TreeInventory),
             snapshot.TreeRoot,
             interactiveFilter: false,
             usedInMemoryFilter: false,

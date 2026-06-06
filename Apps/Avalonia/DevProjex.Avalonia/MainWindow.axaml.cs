@@ -112,6 +112,7 @@ public partial class MainWindow : Window
 
     private BuildTreeResult? _currentTree;
     private BuildTreeResult? _filterBaseTree;
+    private ProjectTreeInventoryState? _currentTreeInventory;
     private TreeNodeDescriptor? _lastInteractiveFilteredRoot;
     private TreeNodeDescriptor? _lastInteractiveFilterBaseRoot;
     private string? _lastInteractiveFilterQuery;
@@ -696,6 +697,7 @@ public partial class MainWindow : Window
         _viewModel.TreeNodes.Clear();
         _currentTree = null;
         _filterBaseTree = null;
+        _currentTreeInventory = null;
         _filterExpansionSnapshot = null;
         _previewOnlySuspendedTreeToolMode = SuspendedTreeToolMode.None;
         ResetPreviewTreePaneVisualState();
@@ -2986,6 +2988,7 @@ public partial class MainWindow : Window
         string noDataText,
         string? currentPath,
         TreeNodeDescriptor? currentTreeRoot,
+        IReadOnlyList<string>? currentTreeOrderedFilePaths,
         ExportPathPresentation? pathPresentation,
         CancellationToken cancellationToken)
     {
@@ -3003,7 +3006,7 @@ public partial class MainWindow : Window
                 ? BuildOrderedSelectedFilePaths(currentTreeRoot, selectedPaths)
                 : []
             : currentTreeRoot is not null
-                ? _metrics.GetOrBuildAllOrderedFilePaths(currentTreeRoot)
+                ? currentTreeOrderedFilePaths ?? _metrics.GetOrBuildAllOrderedFilePaths(currentTreeRoot)
                 : [];
 
         if (selectedMode == PreviewContentMode.Content)
@@ -6726,6 +6729,7 @@ public partial class MainWindow : Window
         // Clear current tree descriptor reference (this is the second copy of the tree)
         _currentTree = null;
         _filterBaseTree = null;
+        _currentTreeInventory = null;
         _metrics.HasCompleteBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;
@@ -7092,13 +7096,13 @@ public partial class MainWindow : Window
         return realizedChildren;
     }
 
-    private void StartPostLoadBackgroundWork(TreeNodeDescriptor treeRoot, CancellationToken cancellationToken)
+    private void StartPostLoadBackgroundWork(BuildTreeResult currentTree, CancellationToken cancellationToken)
     {
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         StartDeferredSettingsPanelAnimation(cancellationToken);
         ObserveDetachedTask(
-            _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(treeRoot, cancellationToken),
+            _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(currentTree, cancellationToken),
             "InitializeFileMetricsCache");
     }
 
@@ -7289,6 +7293,7 @@ public partial class MainWindow : Window
         _currentRepositoryUrl = snapshot.RepositoryUrl;
         _currentTree = snapshot.Tree;
         _filterBaseTree = snapshot.Tree;
+        _currentTreeInventory = null;
         _previewOnlySuspendedTreeToolMode = SuspendedTreeToolMode.None;
         ResetInteractiveFilterCache();
         _metrics.InvalidateComputedCaches();
@@ -7373,6 +7378,7 @@ public partial class MainWindow : Window
         _currentPath = null;
         _currentTree = null;
         _filterBaseTree = null;
+        _currentTreeInventory = null;
         _currentProjectDisplayName = null;
         _currentRepositoryUrl = null;
         _filterExpansionSnapshot = null;
@@ -7441,7 +7447,7 @@ public partial class MainWindow : Window
         return selected;
     }
 
-    private List<string> BuildOrderedUniqueFilePaths(IReadOnlySet<string> selectedPaths)
+    private IReadOnlyList<string> BuildOrderedUniqueFilePaths(IReadOnlySet<string> selectedPaths)
     {
         if (selectedPaths.Count > 0)
         {
@@ -7453,7 +7459,7 @@ public partial class MainWindow : Window
 
         return _currentTree is null
             ? []
-            : _metrics.GetOrBuildAllOrderedFilePaths(_currentTree.Root).ToList();
+            : _currentTree.OrderedFilePaths ?? _metrics.GetOrBuildAllOrderedFilePaths(_currentTree.Root);
     }
 
     private static List<string> BuildOrderedSelectedFilePaths(

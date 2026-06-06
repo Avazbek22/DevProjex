@@ -28,7 +28,19 @@ public partial class MainWindow : IRefreshTreePipelineHost
             ? _currentProjectDisplayName
             : GetDirectoryNameSafe(_currentPath);
 
-        return new TreeRefreshInput(_currentPath, displayName, options, nameFilter);
+        var inventoryState = _currentTreeInventory;
+        var reusableInventory = inventoryState is not null &&
+                                inventoryState.Scope.CanProject(_currentPath, options)
+            ? inventoryState
+            : null;
+
+        return new TreeRefreshInput(
+            _currentPath,
+            displayName,
+            options,
+            nameFilter,
+            reusableInventory?.Snapshot,
+            reusableInventory?.Scope);
     }
 
     void IRefreshTreePipelineHost.BeforeFullTreeRefresh()
@@ -47,8 +59,10 @@ public partial class MainWindow : IRefreshTreePipelineHost
         return TryBuildInteractiveFilteredTreeResult(nameFilter, cancellationToken, out result);
     }
 
-    BuildTreeResult IRefreshTreePipelineHost.BuildTree(TreeRefreshInput input, CancellationToken cancellationToken) =>
-        _buildTree.Execute(new BuildTreeRequest(input.CurrentPath, input.Options), cancellationToken);
+    BuildTreeSnapshotResult IRefreshTreePipelineHost.BuildTree(TreeRefreshInput input, CancellationToken cancellationToken) =>
+        input.TreeInventory is null
+            ? _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), cancellationToken)
+            : _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), input.TreeInventory, cancellationToken);
 
     bool IRefreshTreePipelineHost.TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result) =>
         result.RootAccessDenied &&
@@ -64,7 +78,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
     void IRefreshTreePipelineHost.ApplyTreeRefreshResult(
         TreeRefreshInput input,
-        BuildTreeResult result,
+        BuildTreeSnapshotResult result,
         TreeNodeViewModel root,
         bool interactiveFilter,
         bool usedInMemoryFilter,
@@ -85,19 +99,20 @@ public partial class MainWindow : IRefreshTreePipelineHost
             node.ClearRecursive();
         _viewModel.TreeNodes.Clear();
 
-        _currentTree = result;
+        _currentTree = result.Tree;
+        UpdateCurrentTreeInventory(input, result, interactiveFilter, usedInMemoryFilter);
         _metrics.InvalidateComputedCaches();
 
         if (!interactiveFilter)
         {
             // Keep a baseline snapshot for low-latency in-memory filter updates.
-            _filterBaseTree = string.IsNullOrWhiteSpace(input.NameFilter) ? result : null;
+            _filterBaseTree = string.IsNullOrWhiteSpace(input.NameFilter) ? result.Tree : null;
             ResetInteractiveFilterCache();
         }
         else if (!usedInMemoryFilter && string.IsNullOrWhiteSpace(input.NameFilter))
         {
             // Recover baseline after fallback interactive rebuilds.
-            _filterBaseTree = result;
+            _filterBaseTree = result.Tree;
             ResetInteractiveFilterCache();
         }
 
@@ -115,7 +130,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         if (!interactiveFilter)
         {
-            StartPostLoadBackgroundWork(result.Root, cancellationToken);
+            StartPostLoadBackgroundWork(result.Tree, cancellationToken);
         }
         else
         {
@@ -123,5 +138,30 @@ public partial class MainWindow : IRefreshTreePipelineHost
         }
 
         SchedulePreviewRefresh(immediate: true);
+    }
+
+    private void UpdateCurrentTreeInventory(
+        TreeRefreshInput input,
+        BuildTreeSnapshotResult result,
+        bool interactiveFilter,
+        bool usedInMemoryFilter)
+    {
+        if (interactiveFilter && usedInMemoryFilter)
+            return;
+
+        if (result.Inventory is null)
+        {
+            if (!interactiveFilter)
+                _currentTreeInventory = null;
+            return;
+        }
+
+        var scope = ReferenceEquals(result.Inventory, input.TreeInventory) && input.TreeInventoryScope is not null
+            ? input.TreeInventoryScope
+            : ProjectTreeInventoryReuseScope.Create(
+                input.CurrentPath,
+                input.Options,
+                supportsHiddenDotFolderVariants: false);
+        _currentTreeInventory = new ProjectTreeInventoryState(result.Inventory, scope);
     }
 }

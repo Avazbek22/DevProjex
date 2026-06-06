@@ -171,7 +171,7 @@ internal sealed class MetricsPipeline(
     }
 
     public async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
-        TreeNodeDescriptor treeRoot,
+        BuildTreeResult currentTree,
         CancellationToken cancellationToken)
     {
         await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
@@ -186,7 +186,7 @@ internal sealed class MetricsPipeline(
             await Task.Delay(warmupDelay, cancellationToken);
 
         cancellationToken.ThrowIfCancellationRequested();
-        await InitializeFileMetricsCacheAsync(treeRoot, cancellationToken);
+        await InitializeFileMetricsCacheAsync(currentTree, cancellationToken);
     }
 
     public void CancelBackgroundCalculation()
@@ -300,7 +300,7 @@ internal sealed class MetricsPipeline(
         Recalculate();
     }
 
-    private async Task InitializeFileMetricsCacheAsync(TreeNodeDescriptor treeRoot, CancellationToken cancellationToken)
+    private async Task InitializeFileMetricsCacheAsync(BuildTreeResult currentTree, CancellationToken cancellationToken)
     {
         using var _ = PerformanceMetrics.Measure("InitializeFileMetricsCacheAsync");
 
@@ -326,7 +326,7 @@ internal sealed class MetricsPipeline(
             using (PerformanceMetrics.Measure("CollectMetricsWarmupFilePaths"))
             {
                 filePaths = await Task.Run(
-                    () => GetOrBuildAllOrderedFilePaths(treeRoot),
+                    () => GetOrBuildAllOrderedFilePaths(currentTree),
                     linkedCts.Token);
             }
 
@@ -536,7 +536,7 @@ internal sealed class MetricsPipeline(
             var targetFilePaths = await Task.Run(
                 () => hasAnyChecked
                     ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
-                    : GetOrBuildAllOrderedFilePaths(currentTree.Root),
+                    : GetOrBuildAllOrderedFilePaths(currentTree),
                 token);
 
             if (targetFilePaths.Count == 0)
@@ -859,7 +859,7 @@ internal sealed class MetricsPipeline(
 
         var orderedPaths = effectiveHasSelection
             ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
-            : GetOrBuildAllOrderedFilePaths(currentTree.Root);
+            : GetOrBuildAllOrderedFilePaths(currentTree);
 
         if (orderedPaths.Count == 0)
             return ExportOutputMetrics.Empty;
@@ -916,6 +916,20 @@ internal sealed class MetricsPipeline(
         {
             _allOrderedFilePathsTreeIdentity = treeIdentity;
             _allOrderedFilePathsCache = orderedPaths;
+            return _allOrderedFilePathsCache;
+        }
+    }
+
+    public IReadOnlyList<string> GetOrBuildAllOrderedFilePaths(BuildTreeResult currentTree)
+    {
+        if (currentTree.OrderedFilePaths is not { } orderedFilePaths)
+            return GetOrBuildAllOrderedFilePaths(currentTree.Root);
+
+        var treeIdentity = RuntimeHelpers.GetHashCode(currentTree.Root);
+        lock (_computationCacheLock)
+        {
+            _allOrderedFilePathsTreeIdentity = treeIdentity;
+            _allOrderedFilePathsCache = orderedFilePaths;
             return _allOrderedFilePathsCache;
         }
     }

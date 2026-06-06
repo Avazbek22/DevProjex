@@ -1572,7 +1572,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				{
 					var node = directories[index];
 					treeInventoryDirectoryIncluded[index] =
-						node.BaseRuleState.CanTraverseChildren &&
+						node.CanAnyVariantTraverseChildren &&
 						(node.ParentIndex < 0 || treeInventoryDirectoryIncluded[node.ParentIndex]);
 				}
 			}

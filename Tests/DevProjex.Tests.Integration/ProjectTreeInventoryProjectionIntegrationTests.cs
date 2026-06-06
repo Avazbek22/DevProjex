@@ -117,6 +117,35 @@ public sealed class ProjectTreeInventoryProjectionIntegrationTests
 	}
 
 	[Fact]
+	public void TreeBuilder_BroadInventoryProjection_AppliesAllowedRootFolders()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("docs/readme.md", "# docs");
+		temp.CreateFile("root.txt", "root");
+		temp.CreateFile("samples/sample.json", "{}");
+		temp.CreateFile("src/App.cs", "class App {}");
+		var builder = new TreeBuilder();
+		var broadOptions = new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>([".cs", ".json", ".md", ".txt"], StringComparer.OrdinalIgnoreCase),
+			AllowedRootFolders: new HashSet<string>(["docs", "samples", "src"], PathComparer.Default),
+			IgnoreRules: CreateRules());
+		var inventory = builder.ReadInventory(temp.Path, broadOptions, TestContext.Current.CancellationToken);
+		var projectedOptions = broadOptions with
+		{
+			AllowedRootFolders = new HashSet<string>(["src"], PathComparer.Default)
+		};
+
+		var projected = builder.Build(inventory, projectedOptions, TestContext.Current.CancellationToken);
+
+		Assert.Contains(projected.Root.Children, child => child.Name == "src");
+		Assert.Contains(projected.Root.Children, child => child.Name == "root.txt" && !child.IsDirectory);
+		Assert.DoesNotContain(projected.Root.Children, child => child.Name == "docs");
+		Assert.DoesNotContain(projected.Root.Children, child => child.Name == "samples");
+		var src = projected.Root.Children.Single(child => child.Name == "src");
+		Assert.Equal(["App.cs"], src.Children.Select(child => child.Name).ToArray());
+	}
+
+	[Fact]
 	public void TreeBuilder_MixedDirectoryAndFileProjection_KeepsStableInventoryOrder()
 	{
 		using var temp = new TemporaryDirectory();

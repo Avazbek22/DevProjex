@@ -18,6 +18,91 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public void ProjectTreeInventoryReuseScope_AllowsHiddenDotProjection_WhenSnapshotIsBroad()
+    {
+        var scope = ProjectTreeInventoryReuseScope.Create(
+            @"C:\Project",
+            CreateInventoryScopeOptions(
+                roots: ["src", ".idea"],
+                useGitIgnore: true,
+                useSmartIgnore: true,
+                ignoreHiddenFolders: true,
+                ignoreDotFolders: true),
+            supportsHiddenDotFolderVariants: true);
+
+        var nextOptions = CreateInventoryScopeOptions(
+            roots: ["src"],
+            useGitIgnore: true,
+            useSmartIgnore: true,
+            ignoreHiddenFolders: false,
+            ignoreDotFolders: false);
+
+        Assert.True(scope.CanProject(@"C:\Project", nextOptions));
+    }
+
+    [Fact]
+    public void ProjectTreeInventoryReuseScope_RejectsHiddenDotProjection_WhenSnapshotIsNarrow()
+    {
+        var scope = ProjectTreeInventoryReuseScope.Create(
+            @"C:\Project",
+            CreateInventoryScopeOptions(
+                roots: ["src"],
+                useGitIgnore: true,
+                useSmartIgnore: true,
+                ignoreHiddenFolders: true,
+                ignoreDotFolders: true),
+            supportsHiddenDotFolderVariants: false);
+
+        var nextOptions = CreateInventoryScopeOptions(
+            roots: ["src"],
+            useGitIgnore: true,
+            useSmartIgnore: true,
+            ignoreHiddenFolders: false,
+            ignoreDotFolders: false);
+
+        Assert.False(scope.CanProject(@"C:\Project", nextOptions));
+    }
+
+    [Fact]
+    public void ProjectTreeInventoryReuseScope_RejectsUnsafeRootAndControllerExpansion()
+    {
+        var scope = ProjectTreeInventoryReuseScope.Create(
+            @"C:\Project",
+            CreateInventoryScopeOptions(
+                roots: ["src"],
+                useGitIgnore: true,
+                useSmartIgnore: true,
+                ignoreHiddenFolders: false,
+                ignoreDotFolders: false),
+            supportsHiddenDotFolderVariants: true);
+
+        Assert.False(scope.CanProject(
+            @"C:\Project",
+            CreateInventoryScopeOptions(
+                roots: ["src", "docs"],
+                useGitIgnore: true,
+                useSmartIgnore: true,
+                ignoreHiddenFolders: false,
+                ignoreDotFolders: false)));
+        Assert.False(scope.CanProject(
+            @"C:\Project",
+            CreateInventoryScopeOptions(
+                roots: ["src"],
+                useGitIgnore: false,
+                useSmartIgnore: true,
+                ignoreHiddenFolders: false,
+                ignoreDotFolders: false)));
+        Assert.False(scope.CanProject(
+            @"C:\Project",
+            CreateInventoryScopeOptions(
+                roots: ["src"],
+                useGitIgnore: true,
+                useSmartIgnore: false,
+                ignoreHiddenFolders: false,
+                ignoreDotFolders: false)));
+    }
+
+    [Fact]
     public void TaskbarProgressCoordinator_SyncsStatusAndGitCloneProgress()
     {
         var viewModel = CreateViewModel();
@@ -254,7 +339,9 @@ public sealed class MainWindowCoordinatorRefactorTests
             {
                 releaseBuild.Task.Wait(TestContext.Current.CancellationToken);
                 token.ThrowIfCancellationRequested();
-                return RecordingRefreshTreeHost.CreateResult("root");
+                return new BuildTreeSnapshotResult(
+                    RecordingRefreshTreeHost.CreateResult("root"),
+                    RecordingRefreshTreeHost.CreateInventorySnapshot());
             }
         };
         using var pipeline = new RefreshTreePipeline(host);
@@ -424,6 +511,29 @@ public sealed class MainWindowCoordinatorRefactorTests
             RootFolders: [],
             Extensions: [],
             IgnoreOptions: []);
+    }
+
+    private static TreeFilterOptions CreateInventoryScopeOptions(
+        IReadOnlyCollection<string> roots,
+        bool useGitIgnore,
+        bool useSmartIgnore,
+        bool ignoreHiddenFolders,
+        bool ignoreDotFolders)
+    {
+        return new TreeFilterOptions(
+            AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            AllowedRootFolders: new HashSet<string>(roots, PathComparer.Default),
+            IgnoreRules: new IgnoreRules(
+                IgnoreHiddenFolders: ignoreHiddenFolders,
+                IgnoreHiddenFiles: false,
+                IgnoreDotFolders: ignoreDotFolders,
+                IgnoreDotFiles: false,
+                SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+            {
+                UseGitIgnore = useGitIgnore,
+                UseSmartIgnore = useSmartIgnore
+            });
     }
 
     private static SelectionRefreshSnapshot CreateSelectionRefreshSnapshot(bool rootAccessDenied = false)
@@ -925,6 +1035,7 @@ public sealed class MainWindowCoordinatorRefactorTests
             NoDataText: "No data",
             CurrentPath: @"C:\Project",
             CurrentTreeRoot: EmptyRoot,
+            CurrentTreeOrderedFilePaths: null,
             PathPresentation: null,
             CacheKey: new PreviewCacheKeyData(
                 ProjectPath: @"C:\Project",
@@ -1023,7 +1134,7 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public string CurrentPath { get; set; } = @"C:\ProjectA";
 
-        public Func<CancellationToken, BuildTreeResult>? BuildTreeHandler { get; set; }
+        public Func<CancellationToken, BuildTreeSnapshotResult>? BuildTreeHandler { get; set; }
 
         public Func<TreeRefreshInput, BuildTreeResult, TreeNodeViewModel>? BuildViewModelHandler { get; set; }
 
@@ -1063,11 +1174,12 @@ public sealed class MainWindowCoordinatorRefactorTests
             return false;
         }
 
-        public BuildTreeResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken)
+        public BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken)
         {
             _ = input;
             BuildTreeCount++;
-            return BuildTreeHandler?.Invoke(cancellationToken) ?? CreateResult("root");
+            return BuildTreeHandler?.Invoke(cancellationToken) ??
+                   new BuildTreeSnapshotResult(CreateResult("root"), CreateInventorySnapshot());
         }
 
         public bool TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result)
@@ -1087,7 +1199,7 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public void ApplyTreeRefreshResult(
             TreeRefreshInput input,
-            BuildTreeResult result,
+            BuildTreeSnapshotResult result,
             TreeNodeViewModel root,
             bool interactiveFilter,
             bool usedInMemoryFilter,
@@ -1118,6 +1230,23 @@ public sealed class MainWindowCoordinatorRefactorTests
                 Children: []);
 
             return new BuildTreeResult(root, RootAccessDenied: false, HadAccessDenied: false);
+        }
+
+        public static ProjectTreeInventorySnapshot CreateInventorySnapshot()
+        {
+            return new ProjectTreeInventorySnapshot(
+                [
+                    new ProjectTreeInventoryEntry(
+                        "ProjectA",
+                        @"C:\ProjectA",
+                        relativePath: string.Empty,
+                        parentIndex: -1,
+                        isDirectory: true,
+                        isHidden: false,
+                        length: 0)
+                ],
+                rootAccessDenied: false,
+                hadAccessDenied: false);
         }
     }
 

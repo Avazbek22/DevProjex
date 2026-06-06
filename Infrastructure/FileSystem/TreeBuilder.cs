@@ -140,9 +140,13 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 			for (var offset = 0; offset < childEntries.Length; offset++)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				var childIndex = firstChildIndex + offset;
+				if (!IsAllowedRootChild(inventory, childIndex, options))
+					continue;
+
 				var node = ProjectNode(
 					inventory,
-					firstChildIndex + offset,
+					childIndex,
 					options,
 					allowedExtensions,
 					gitIgnoreContext,
@@ -160,9 +164,13 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 
 		Parallel.For(0, childEntries.Length, parallelOptions, offset =>
 		{
+			var childIndex = firstChildIndex + offset;
+			if (!IsAllowedRootChild(inventory, childIndex, options))
+				return;
+
 			nodes[offset] = ProjectNode(
 				inventory,
-				firstChildIndex + offset,
+				childIndex,
 				options,
 				allowedExtensions,
 				gitIgnoreContext,
@@ -176,6 +184,15 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 			if (node is not null)
 				children.Add(node);
 		}
+	}
+
+	private static bool IsAllowedRootChild(
+		ProjectTreeInventorySnapshot inventory,
+		int entryIndex,
+		TreeFilterOptions options)
+	{
+		ref readonly var entry = ref inventory.GetEntryRef(entryIndex);
+		return !entry.IsDirectory || options.AllowedRootFolders.Contains(entry.Name);
 	}
 
 	private static FileSystemNode? ProjectNode(
@@ -220,22 +237,34 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		bool hasNameFilter,
 		CancellationToken cancellationToken)
 	{
+		var directoryGitIgnore = options.IgnoreRules.UseGitIgnore
+			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, entry.Name)
+			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+		if (ShouldSkipDirectory(in entry, options.IgnoreRules, directoryGitIgnore))
+			return null;
+
+		var children = entry.ChildCount == 0
+			? FileSystemNode.EmptyChildren
+			: new List<FileSystemNode>(entry.ChildCount);
 		var dirNode = new FileSystemNode(
 			name: entry.Name,
 			fullPath: entry.FullPath,
 			isDirectory: true,
 			isAccessDenied: entry.IsAccessDenied,
-			children: new List<FileSystemNode>(entry.ChildCount));
+			children: children);
 
-		ProjectChildren(
-			inventory,
-			dirNode,
-			entryIndex,
-			options,
-			allowedExtensions,
-			gitIgnoreContext,
-			hasNameFilter,
-			cancellationToken);
+		if (entry.ChildCount > 0)
+		{
+			ProjectChildren(
+				inventory,
+				dirNode,
+				entryIndex,
+				options,
+				allowedExtensions,
+				gitIgnoreContext,
+				hasNameFilter,
+				cancellationToken);
+		}
 
 		if (options.IgnoreRules.IgnoreEmptyFolders &&
 		    dirNode.Children.Count == 0 &&
@@ -251,9 +280,6 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 			return hasMatchingChildren || matchesName ? dirNode : null;
 		}
 
-		var directoryGitIgnore = options.IgnoreRules.UseGitIgnore
-			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, entry.Name)
-			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 		if (directoryGitIgnore.IsIgnored &&
 		    directoryGitIgnore.ShouldTraverseIgnoredDirectory &&
 		    dirNode.Children.Count == 0 &&
@@ -312,22 +338,40 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		IgnoreRules rules,
 		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
 	{
+		return ShouldSkipDirectoryCore(entry.FullPath, entry.Name, entry.IsHidden, rules, gitIgnoreEvaluation);
+	}
+
+	private static bool ShouldSkipDirectory(
+		in ProjectTreeInventoryEntry entry,
+		IgnoreRules rules,
+		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
+	{
+		return ShouldSkipDirectoryCore(entry.FullPath, entry.Name, entry.IsHidden, rules, gitIgnoreEvaluation);
+	}
+
+	private static bool ShouldSkipDirectoryCore(
+		string fullPath,
+		string name,
+		bool isHidden,
+		IgnoreRules rules,
+		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
+	{
 		if (gitIgnoreEvaluation.IsIgnored)
 		{
 			if (!gitIgnoreEvaluation.ShouldTraverseIgnoredDirectory)
 				return true;
 		}
 
-		if (rules.IsSmartIgnoredDirectory(entry.FullPath, entry.Name))
+		if (rules.IsSmartIgnoredDirectory(fullPath, name))
 			return true;
 
-		var isDot = IgnoreRuleSemantics.IsDotName(entry.Name);
+		var isDot = IgnoreRuleSemantics.IsDotName(name);
 		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(rules.IgnoreDotFolders, isDot))
 			return true;
 
 		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
 			    rules.IgnoreHiddenFolders,
-			    entry.IsHidden,
+			    isHidden,
 			    isDot,
 			    rules.IgnoreDotFolders))
 		{

@@ -25,13 +25,13 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
 
         try
         {
-            BuildTreeResult result;
+            BuildTreeSnapshotResult result;
             var usedInMemoryFilter = false;
 
             if (interactiveFilter &&
                 host.TryBuildInteractiveFilteredTreeResult(input.NameFilter, linkedToken, out var filteredResult))
             {
-                result = filteredResult;
+                result = new BuildTreeSnapshotResult(filteredResult, Inventory: null);
                 usedInMemoryFilter = true;
             }
             else
@@ -47,14 +47,14 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
 
             linkedToken.ThrowIfCancellationRequested();
 
-            if (host.TryHandleRootAccessDenied(input, result))
+            if (host.TryHandleRootAccessDenied(input, result.Tree))
                 return;
 
             TreeNodeViewModel root;
             using (PerformanceMetrics.Measure("BuildTreeViewModel"))
             {
                 root = await Task.Run(
-                    () => host.BuildTreeViewModel(input, result),
+                    () => host.BuildTreeViewModel(input, result.Tree),
                     linkedToken);
             }
 

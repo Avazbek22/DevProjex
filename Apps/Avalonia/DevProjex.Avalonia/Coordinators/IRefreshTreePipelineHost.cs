@@ -13,7 +13,7 @@ internal interface IRefreshTreePipelineHost
         CancellationToken cancellationToken,
         out BuildTreeResult result);
 
-    BuildTreeResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken);
+    BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken);
 
     bool TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result);
 
@@ -21,7 +21,7 @@ internal interface IRefreshTreePipelineHost
 
     void ApplyTreeRefreshResult(
         TreeRefreshInput input,
-        BuildTreeResult result,
+        BuildTreeSnapshotResult result,
         TreeNodeViewModel root,
         bool interactiveFilter,
         bool usedInMemoryFilter,

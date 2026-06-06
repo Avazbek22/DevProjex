@@ -115,6 +115,42 @@ public sealed class TreeNodePresentationServiceTests
 		Assert.Equal("/root/child.txt", result.Children[0].FullPath);
 	}
 
+	[Fact]
+	public void BuildWithFilePaths_ReturnsVisibleFilesInTreeOrder()
+	{
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>()
+		});
+		var localization = new LocalizationService(catalog, AppLanguage.En);
+		var iconMapper = new StubIconMapper { IconKey = "icon" };
+		var service = new TreeNodePresentationService(localization, iconMapper);
+		var root = new FileSystemNode(
+			name: "root",
+			fullPath: "/root",
+			isDirectory: true,
+			isAccessDenied: false,
+			children: new List<FileSystemNode>
+			{
+				new("a.txt", "/root/a.txt", false, false, FileSystemNode.EmptyChildren),
+				new(
+					"src",
+					"/root/src",
+					true,
+					false,
+					new List<FileSystemNode>
+					{
+						new("b.cs", "/root/src/b.cs", false, false, FileSystemNode.EmptyChildren),
+						new("c.cs", "/root/src/c.cs", false, false, FileSystemNode.EmptyChildren)
+					})
+			});
+
+		var result = service.BuildWithFilePaths(root);
+
+		Assert.Equal("root", result.Root.DisplayName);
+		Assert.Equal(["/root/a.txt", "/root/src/b.cs", "/root/src/c.cs"], result.OrderedFilePaths);
+	}
+
 	// Verifies access-denied child uses child-specific localization.
 	[Fact]
 	public void Build_UsesChildAccessDeniedLabelWhenRootAccessible()

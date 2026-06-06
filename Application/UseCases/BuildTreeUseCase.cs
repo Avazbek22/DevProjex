@@ -5,9 +5,13 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 	public BuildTreeResult Execute(BuildTreeRequest request, CancellationToken cancellationToken = default)
 	{
 		var result = treeBuilder.Build(request.RootPath, request.Filter, cancellationToken);
-		var root = presenter.Build(result.Root);
+		var presentation = presenter.BuildWithFilePaths(result.Root);
 
-		return new BuildTreeResult(root, result.RootAccessDenied, result.HadAccessDenied);
+		return new BuildTreeResult(
+			presentation.Root,
+			result.RootAccessDenied,
+			result.HadAccessDenied,
+			presentation.OrderedFilePaths);
 	}
 
 	public BuildTreeSnapshotResult ExecuteWithInventory(
@@ -28,9 +32,13 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 			inventory,
 			request.Filter,
 			cancellationToken);
-		var root = presenter.Build(result.Root);
+		var presentation = presenter.BuildWithFilePaths(result.Root);
 		return new BuildTreeSnapshotResult(
-			new BuildTreeResult(root, result.RootAccessDenied, result.HadAccessDenied),
+			new BuildTreeResult(
+				presentation.Root,
+				result.RootAccessDenied,
+				result.HadAccessDenied,
+				presentation.OrderedFilePaths),
 			inventory);
 	}
 
@@ -48,9 +56,13 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 			inventory,
 			request.Filter,
 			cancellationToken);
-		var root = presenter.Build(result.Root);
+		var presentation = presenter.BuildWithFilePaths(result.Root);
 		return new BuildTreeSnapshotResult(
-			new BuildTreeResult(root, result.RootAccessDenied, result.HadAccessDenied),
+			new BuildTreeResult(
+				presentation.Root,
+				result.RootAccessDenied,
+				result.HadAccessDenied,
+				presentation.OrderedFilePaths),
 			inventory);
 	}
 }

@@ -42,7 +42,8 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
         var treeFormat = GetCurrentTreeTextFormat();
         var hasSelection = selectedPaths.Count > 0;
         var currentPath = _currentPath;
-        var currentTreeRoot = _currentTree?.Root;
+        var currentTree = _currentTree;
+        var currentTreeRoot = currentTree?.Root;
         var pathPresentation = CreateExportPathPresentation();
         var cacheKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
             projectPath: currentPath,
@@ -61,6 +62,7 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
             NoDataText: _viewModel.PreviewNoDataText,
             CurrentPath: currentPath,
             CurrentTreeRoot: currentTreeRoot,
+            CurrentTreeOrderedFilePaths: currentTree?.OrderedFilePaths,
             PathPresentation: pathPresentation,
             CacheKey: cacheKey);
     }
@@ -111,6 +113,7 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
             input.NoDataText,
             input.CurrentPath,
             input.CurrentTreeRoot,
+            input.CurrentTreeOrderedFilePaths,
             input.PathPresentation,
             cancellationToken);
     }

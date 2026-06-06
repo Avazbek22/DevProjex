@@ -33,14 +33,11 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 			effectiveRules: rules,
 			effectiveExtensionPolicy: null,
 			cancellationToken: TestContext.Current.CancellationToken);
-		var separateInventory = builder.ReadInventory(temp.Path, options, TestContext.Current.CancellationToken);
-
 		Assert.NotNull(workspace.Value.TreeInventory);
-		Assert.Equal(
-			FlattenInventory(separateInventory),
-			FlattenInventory(workspace.Value.TreeInventory));
+		var workspaceInventory = FlattenInventory(workspace.Value.TreeInventory);
+		Assert.Contains(workspaceInventory, entry => entry.Contains("|.idea|.idea|", StringComparison.Ordinal));
 
-		var directTree = builder.Build(separateInventory, options, TestContext.Current.CancellationToken);
+		var directTree = builder.Build(temp.Path, options, TestContext.Current.CancellationToken);
 		var workspaceTree = builder.Build(workspace.Value.TreeInventory, options, TestContext.Current.CancellationToken);
 		Assert.Equal(FlattenTree(directTree.Root), FlattenTree(workspaceTree.Root));
 		Assert.Contains(workspaceTree.Root.Children, child => child.Name == "src");
@@ -48,6 +45,13 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		Assert.DoesNotContain(workspaceTree.Root.Children, child => child.Name == "bin");
 		Assert.DoesNotContain(workspaceTree.Root.Children, child => child.Name == ".idea");
 		Assert.DoesNotContain(workspaceTree.Root.Children, child => child.Name == "logs");
+
+		var includeDotRules = rules with { IgnoreDotFolders = false };
+		var includeDotOptions = options with { IgnoreRules = includeDotRules };
+		var directIncludeDotTree = builder.Build(temp.Path, includeDotOptions, TestContext.Current.CancellationToken);
+		var workspaceIncludeDotTree = builder.Build(workspace.Value.TreeInventory, includeDotOptions, TestContext.Current.CancellationToken);
+		Assert.Equal(FlattenTree(directIncludeDotTree.Root), FlattenTree(workspaceIncludeDotTree.Root));
+		Assert.Contains(workspaceIncludeDotTree.Root.Children, child => child.Name == ".idea");
 	}
 
 	[Fact]

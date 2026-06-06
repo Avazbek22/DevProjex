@@ -13,5 +13,6 @@ internal sealed record PreviewRefreshInput(
     string NoDataText,
     string? CurrentPath,
     TreeNodeDescriptor? CurrentTreeRoot,
+    IReadOnlyList<string>? CurrentTreeOrderedFilePaths,
     ExportPathPresentation? PathPresentation,
     PreviewCacheKeyData CacheKey);
