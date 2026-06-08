@@ -63,6 +63,16 @@ public partial class MainWindow : Window
     private readonly record struct PreviewSelectionMetricsSnapshot(
         IPreviewTextDocument Document,
         PreviewSelectionRange SelectionRange);
+
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    private sealed class ProjectLoadTiming
+    {
+        public Stopwatch LoadingStopwatch { get; } = Stopwatch.StartNew();
+        public TimeSpan LoadingElapsed { get; set; }
+        public bool HasLoadingElapsed { get; set; }
+    }
+#endif
+
     public MainWindow()
         : this(CommandLineOptions.Empty, AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty))
     {
@@ -177,6 +187,9 @@ public partial class MainWindow : Window
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
     private Border? _dropZoneContainer;
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    private ProjectLoadTiming? _projectLoadTiming;
+#endif
 
     // Settings panel animation
     private Border? _settingsContainer;
@@ -6665,6 +6678,11 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(_currentPath)) return;
         cancellationToken.ThrowIfCancellationRequested();
 
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+        var timing = new ProjectLoadTiming();
+        _projectLoadTiming = timing;
+#endif
+
         if (applyStoredProfile)
         {
             var profileSnapshot = await Task.Run(
@@ -7101,10 +7119,56 @@ public partial class MainWindow : Window
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         StartDeferredSettingsPanelAnimation(cancellationToken);
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+        var timing = _projectLoadTiming;
+        if (timing is not null && !timing.HasLoadingElapsed)
+        {
+            timing.LoadingElapsed = timing.LoadingStopwatch.Elapsed;
+            timing.HasLoadingElapsed = true;
+        }
+
+        ObserveDetachedTask(
+            TrackProjectAnalysisTimingAsync(
+                _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(currentTree, cancellationToken),
+                timing),
+            "InitializeFileMetricsCache");
+#else
         ObserveDetachedTask(
             _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(currentTree, cancellationToken),
             "InitializeFileMetricsCache");
+#endif
     }
+
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    private async Task TrackProjectAnalysisTimingAsync(
+        Task metricsWarmupTask,
+        ProjectLoadTiming? timing)
+    {
+        var analysisStopwatch = Stopwatch.StartNew();
+        await metricsWarmupTask;
+        analysisStopwatch.Stop();
+
+        if (timing is null ||
+            !timing.HasLoadingElapsed ||
+            !ReferenceEquals(_projectLoadTiming, timing))
+        {
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(
+            () =>
+            {
+                if (!ReferenceEquals(_projectLoadTiming, timing))
+                    return;
+
+                ApplyProjectLoadTimingTitleSuffix(
+                    timing.LoadingElapsed,
+                    analysisStopwatch.Elapsed);
+                _projectLoadTiming = null;
+            },
+            DispatcherPriority.Background);
+    }
+#endif
 
     private void StartDeferredSettingsPanelAnimation(CancellationToken cancellationToken)
     {
@@ -7213,6 +7277,26 @@ public partial class MainWindow : Window
             _viewModel.CurrentBranch,
             _currentProjectDisplayName);
     }
+
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    private void ApplyProjectLoadTimingTitleSuffix(TimeSpan loadingElapsed, TimeSpan analysisElapsed)
+    {
+        var baseTitle = BuildWindowTitle(
+            _currentPath,
+            _viewModel.IsGitMode,
+            _currentRepositoryUrl,
+            _viewModel.CurrentBranch,
+            _currentProjectDisplayName);
+        var totalElapsed = loadingElapsed + analysisElapsed;
+        var timingSuffix =
+            $"[{FormatSeconds(loadingElapsed)} + {FormatSeconds(analysisElapsed)} = {FormatSeconds(totalElapsed)}]";
+
+        _viewModel.Title = $"{baseTitle} {timingSuffix}";
+
+        static string FormatSeconds(TimeSpan elapsed) =>
+            elapsed.TotalSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+    }
+#endif
 
     private IgnoreRules BuildIgnoreRules(
         string rootPath,

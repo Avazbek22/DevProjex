@@ -11,6 +11,10 @@
     <AssemblyTitle>DevProjex</AssemblyTitle>
     <Product>DevProjex</Product>
     <RootNamespace>DevProjex.Avalonia</RootNamespace>
+    <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'=='' and '$(Configuration)'=='ReleaseStore'">false</EnableProjectLoadTiming>
+    <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'=='' and '$(PublishSingleFile)'=='true'">false</EnableProjectLoadTiming>
+    <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'==''">true</EnableProjectLoadTiming>
+    <DefineConstants Condition="'$(EnableProjectLoadTiming)'=='true'">$(DefineConstants);DEVPROJEX_PROJECT_LOAD_TIMING</DefineConstants>
     <!-- Windows .exe icon (shown in Explorer, taskbar, Alt+Tab) -->
     <ApplicationIcon Condition="Exists('..\..\..\Assets\AppIcon\Windows\app.ico')">..\..\..\Assets\AppIcon\Windows\app.ico</ApplicationIcon>
   </PropertyGroup>
