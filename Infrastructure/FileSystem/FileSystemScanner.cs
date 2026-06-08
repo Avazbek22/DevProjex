@@ -2334,6 +2334,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		DirectoryScanFacts facts,
 		IgnoreRules effectiveRules)
 	{
+		// DotFolders owns dot+hidden overlap while the dot toggle is active. The
+		// DotFolders-off variant must therefore expose dot directories instead of
+		// letting HiddenFolders keep them hidden and undercounting DotFolders impact.
 		if (facts.IsDot)
 			return false;
 

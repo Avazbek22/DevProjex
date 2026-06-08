@@ -75,10 +75,11 @@ public sealed class SelectionRefreshEngine(
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var selectedIgnoreOptions = BuildInitialLiveRefreshIgnoreSelection(context);
         var dynamicSection = BuildDynamicSection(
             context,
             selectedRoots,
-            context.IgnoreSelectionCache,
+            selectedIgnoreOptions,
             context.IgnoreOptionStateCache,
             context.CurrentSnapshotState,
             cancellationToken);
@@ -445,6 +446,21 @@ public sealed class SelectionRefreshEngine(
         }
 
         AddDefaultDynamicIgnoreOptions(selected);
+        return selected;
+    }
+
+    private static IReadOnlySet<IgnoreOptionId> BuildInitialLiveRefreshIgnoreSelection(SelectionRefreshContext context)
+    {
+        // Live refresh must use the same active-rule source as full refresh. Visible
+        // options alone are not enough because self-hidden toggles stay active through
+        // the complete state cache after they remove their own visible evidence.
+        var selected = context.IgnoreSelectionInitialized
+            ? new HashSet<IgnoreOptionId>(context.IgnoreSelectionCache)
+            : new HashSet<IgnoreOptionId>();
+
+        if (context.IgnoreOptionStateCacheIsComplete)
+            AddCheckedIgnoreStateCacheSelections(selected, context.IgnoreOptionStateCache);
+
         return selected;
     }
 
