@@ -15,6 +15,7 @@ public sealed record AvaloniaAppServices(
     BuildTreeUseCase BuildTreeUseCase,
     IgnoreOptionsService IgnoreOptionsService,
     IgnoreRulesService IgnoreRulesService,
+    IgnoreOwnershipAuditService IgnoreOwnershipAuditService,
     FilterOptionSelectionService FilterOptionSelectionService,
     TreeExportService TreeExportService,
     SelectedContentExportService ContentExportService,

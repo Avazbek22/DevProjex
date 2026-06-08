@@ -1292,6 +1292,10 @@ public sealed partial class SelectionSyncCoordinator(
 
     private void ApplySelectionRefreshSnapshot(SelectionRefreshSnapshot snapshot)
     {
+        // A full/live selection snapshot is the authoritative count-driven ignore state.
+        // Invalidate older standalone availability refreshes so they cannot overwrite it.
+        Interlocked.Increment(ref _ignoreOptionsVersion);
+
         if (snapshot.RootOptions is not null)
             ApplyRootOptions(snapshot.RootOptions);
 

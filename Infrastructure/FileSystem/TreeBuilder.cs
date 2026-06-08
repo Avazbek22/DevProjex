@@ -356,29 +356,9 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		IgnoreRules rules,
 		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
 	{
-		if (gitIgnoreEvaluation.IsIgnored)
-		{
-			if (!gitIgnoreEvaluation.ShouldTraverseIgnoredDirectory)
-				return true;
-		}
-
-		if (rules.IsSmartIgnoredDirectory(fullPath, name))
-			return true;
-
-		var isDot = IgnoreRuleSemantics.IsDotName(name);
-		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(rules.IgnoreDotFolders, isDot))
-			return true;
-
-		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
-			    rules.IgnoreHiddenFolders,
-			    isHidden,
-			    isDot,
-			    rules.IgnoreDotFolders))
-		{
-			return true;
-		}
-
-		return false;
+		return IgnoreDecisionEngine
+			.EvaluateDirectory(fullPath, name, isHidden, rules, gitIgnoreEvaluation)
+			.IsIgnored;
 	}
 
 	private static bool ShouldSkipFile(
@@ -387,45 +367,20 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		bool shouldApplySmartIgnore,
 		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
 	{
-		if (gitIgnoreEvaluation.IsIgnored)
-			return true;
-
-		if (rules.IsSmartIgnoredFile(entry.FullPath, entry.Name, shouldApplySmartIgnore))
-			return true;
-
-		var isDot = IgnoreRuleSemantics.IsDotName(entry.Name);
-		if (IgnoreRuleSemantics.ShouldIgnoreDotFile(rules.IgnoreDotFiles, isDot))
-			return true;
-
-		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(entry.Name))
-			return true;
-
-		if (rules.IgnoreEmptyFiles && entry.Length == 0)
-			return true;
-
-		if (IgnoreRuleSemantics.ShouldIgnoreHiddenFile(
-			    rules.IgnoreHiddenFiles,
-			    entry.IsHidden,
-			    isDot,
-			    rules.IgnoreDotFiles))
-		{
-			return true;
-		}
-
-		return false;
+		return IgnoreDecisionEngine
+			.EvaluateFile(
+				entry.FullPath,
+				entry.Name,
+				entry.IsHidden,
+				entry.Length,
+				rules,
+				shouldApplySmartIgnore,
+				gitIgnoreEvaluation)
+			.IsIgnored;
 	}
 
-	private static bool IsExtensionlessFileName(string fileName)
-	{
-		if (string.IsNullOrWhiteSpace(fileName))
-			return false;
-
-		var dotIndex = fileName.AsSpan().LastIndexOf('.');
-		if (dotIndex <= 0)
-			return dotIndex != 0;
-
-		return dotIndex == fileName.Length - 1;
-	}
+	private static bool IsExtensionlessFileName(string fileName) =>
+		IgnoreRuleSemantics.IsExtensionlessFileName(fileName);
 
 	private readonly struct AllowedExtensionLookup(IReadOnlySet<string> allowedExtensions)
 	{

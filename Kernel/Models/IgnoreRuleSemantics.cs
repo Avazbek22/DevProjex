@@ -33,6 +33,19 @@ public static class IgnoreRuleSemantics
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static bool IsExtensionlessFileName(string fileName)
+	{
+		if (string.IsNullOrWhiteSpace(fileName))
+			return false;
+
+		var dotIndex = fileName.AsSpan().LastIndexOf('.');
+		if (dotIndex <= 0)
+			return dotIndex != 0;
+
+		return dotIndex == fileName.Length - 1;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static bool ShouldIgnoreHiddenFile(
 		bool ignoreHiddenFiles,
 		bool isHidden,

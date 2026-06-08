@@ -122,6 +122,35 @@ public sealed class SelectionRefreshEngineHiddenDotOverlapIntegrationTests
 		Assert.Contains(dotFoldersOffAgain.RootOptions!, option => option.Name == ".git" && option.IsChecked);
 	}
 
+	[Fact]
+	public void ComputeFullRefreshSnapshot_WindowsNestedHiddenDotFolder_CountsAsDotFoldersBeforeHiddenFolders()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateFile("src/.visible-dot/payload.txt", "visible dot payload");
+		temp.CreateFile("src/.hidden-dot/payload.txt", "hidden dot payload");
+		MarkHidden(Path.Combine(temp.Path, "src", ".hidden-dot"));
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path),
+			CancellationToken.None);
+		AssertVisibleOption(baseline, IgnoreOptionId.DotFolders, isChecked: true);
+		AssertHiddenOption(baseline, IgnoreOptionId.HiddenFolders);
+		Assert.Equal(2, baseline.IgnoreOptionCounts.DotFolders);
+		Assert.Equal(0, baseline.IgnoreOptionCounts.HiddenFolders);
+
+		var secondPass = services.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(temp.Path, baseline),
+			CancellationToken.None);
+		AssertVisibleOption(secondPass, IgnoreOptionId.DotFolders, isChecked: true);
+		AssertHiddenOption(secondPass, IgnoreOptionId.HiddenFolders);
+		Assert.Equal(baseline.IgnoreOptionCounts.DotFolders, secondPass.IgnoreOptionCounts.DotFolders);
+	}
+
 	private static TemporaryDirectory CreateHiddenDotWorkspaceWithVisibleGitContent()
 	{
 		var temp = new TemporaryDirectory();

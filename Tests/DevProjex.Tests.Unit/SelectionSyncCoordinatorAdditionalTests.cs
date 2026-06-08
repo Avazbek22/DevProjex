@@ -121,6 +121,47 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void ApplySelectionRefreshSnapshot_InvalidatesOlderStandaloneIgnoreAvailabilityRefreshes()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(viewModel);
+		var beforeVersion = GetPrivateIgnoreOptionsVersion(coordinator);
+
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			new SelectionRefreshSnapshot(
+				RootOptions: [new SelectionOption("src", true)],
+				ExtensionOptions: [new SelectionOption(".cs", true)],
+				IgnoreOptions:
+				[
+					new ResolvedIgnoreOptionState(IgnoreOptionId.UseGitIgnore, "Use .gitignore", true, true),
+					new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders (100)", true, true)
+				],
+				ExtensionlessEntriesCount: 0,
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: new IgnoreOptionCounts(DotFolders: 100),
+				ControllerImpactCounts: new IgnoreControllerImpactCounts(GitIgnore: 150),
+				IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.UseGitIgnore] = true,
+					[IgnoreOptionId.DotFolders] = true
+				},
+				RootAccessDenied: false,
+				HadAccessDenied: false));
+
+		var afterVersion = GetPrivateIgnoreOptionsVersion(coordinator);
+
+		// Standalone async availability refreshes compare this version before mutating
+		// the UI. Count-driven snapshots must advance it to preserve one authoritative
+		// ignore state after live/full refreshes.
+		Assert.True(afterVersion > beforeVersion);
+		Assert.Contains(viewModel.IgnoreOptions, option =>
+			option.Id == IgnoreOptionId.DotFolders &&
+			option.Label == "dot folders (100)" &&
+			option.IsChecked);
+	}
+
+	[Fact]
 	public void PopulateExtensionsForRootSelectionAsync_DoesNotDropCachedSelections()
 	{
 		var viewModel = CreateViewModel();
@@ -1047,6 +1088,15 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(field);
 		return (ProjectSelectionSessionState)field.GetValue(coordinator)!;
+	}
+
+	private static int GetPrivateIgnoreOptionsVersion(SelectionSyncCoordinator coordinator)
+	{
+		var field = typeof(SelectionSyncCoordinator).GetField(
+			"_ignoreOptionsVersion",
+			BindingFlags.NonPublic | BindingFlags.Instance);
+		Assert.NotNull(field);
+		return (int)field.GetValue(coordinator)!;
 	}
 }
 
