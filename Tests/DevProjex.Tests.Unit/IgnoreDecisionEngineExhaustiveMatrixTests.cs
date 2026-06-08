@@ -149,7 +149,7 @@ public sealed class IgnoreDecisionEngineExhaustiveMatrixTests
 	{
 		// This is the public ownership contract: controller rules own first, Git traversal
 		// keeps directories visible for negated descendants, and DotFolders owns dot+hidden
-		// overlap before HiddenFolders can claim it.
+		// overlap while the dot rule is enabled.
 		if (testCase.GitIgnore.IsIgnored && !testCase.GitIgnore.ShouldTraverseIgnoredDirectory)
 			return IgnoreDecisionOwner.GitIgnore;
 		if (testCase.SmartMatches)
@@ -158,7 +158,7 @@ public sealed class IgnoreDecisionEngineExhaustiveMatrixTests
 		var isDot = IsDotNameByContract(testCase.Name);
 		if (testCase.IgnoreDotFolders && isDot)
 			return IgnoreDecisionOwner.DotFolders;
-		if (testCase.IgnoreHiddenFolders && testCase.IsHidden && !(testCase.IgnoreDotFolders && isDot))
+		if (ShouldHiddenOwnEntryByContract(testCase.IgnoreHiddenFolders, testCase.IsHidden, isDot, testCase.IgnoreDotFolders))
 			return IgnoreDecisionOwner.HiddenFolders;
 
 		return IgnoreDecisionOwner.None;
@@ -181,10 +181,30 @@ public sealed class IgnoreDecisionEngineExhaustiveMatrixTests
 			return IgnoreDecisionOwner.ExtensionlessFiles;
 		if (testCase.IgnoreEmptyFiles && testCase.Length == 0)
 			return IgnoreDecisionOwner.EmptyFiles;
-		if (testCase.IgnoreHiddenFiles && testCase.IsHidden && !(testCase.IgnoreDotFiles && isDot))
+		if (ShouldHiddenOwnEntryByContract(testCase.IgnoreHiddenFiles, testCase.IsHidden, isDot, testCase.IgnoreDotFiles))
 			return IgnoreDecisionOwner.HiddenFiles;
 
 		return IgnoreDecisionOwner.None;
+	}
+
+	private static bool ShouldHiddenOwnEntryByContract(
+		bool ignoreHidden,
+		bool isHidden,
+		bool isDot,
+		bool ignoreDotEntry)
+	{
+		if (!ignoreHidden || !isHidden)
+			return false;
+
+		if (!isDot)
+			return true;
+
+		if (ignoreDotEntry)
+			return false;
+
+		// Dot names are hidden by convention on Unix-like platforms. Hidden ownership
+		// for dot entries is only a real filesystem Hidden attribute contract on Windows.
+		return OperatingSystem.IsWindows();
 	}
 
 	private static bool IsDotNameByContract(string name) =>
