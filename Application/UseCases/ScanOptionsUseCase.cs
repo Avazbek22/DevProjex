@@ -265,6 +265,28 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
+		if (scanner is IFileSystemScannerProjectWorkspaceScanner projectScanner)
+		{
+			var effectiveExtensionPolicy = effectiveAllowedExtensions is null
+				? null
+				: new ExtensionSetInclusionPolicy(effectiveAllowedExtensions);
+			var workspaceScan = projectScanner.ScanProjectWorkspace(
+				new ProjectWorkspaceScanRequest(
+					rootPath,
+					rootFolders,
+					extensionDiscoveryRules,
+					effectiveRules,
+					effectiveExtensionPolicy,
+					CaptureTreeInventory: false,
+					IncludeDirectoryToggleProbeRoots: includeDirectoryToggleProbeRoots,
+					IncludeControllerImpactProbeRoots: includeControllerImpactProbeRoots),
+				cancellationToken);
+			return new ScanResult<IgnoreSectionScanData>(
+				workspaceScan.Value.IgnoreSection,
+				workspaceScan.RootAccessDenied,
+				workspaceScan.HadAccessDenied);
+		}
+
 		if (scanner is IFileSystemScannerRootSelectionSnapshotProvider rootSelectionProvider)
 		{
 			var effectiveExtensionPolicy = effectiveAllowedExtensions is null
@@ -332,6 +354,25 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
+		if (scanner is IFileSystemScannerProjectWorkspaceScanner projectScanner)
+		{
+			var workspaceScan = projectScanner.ScanProjectWorkspace(
+				new ProjectWorkspaceScanRequest(
+					rootPath,
+					rootFolders,
+					extensionDiscoveryRules,
+					effectiveRules,
+					effectiveExtensionPolicy,
+					CaptureTreeInventory: false,
+					IncludeDirectoryToggleProbeRoots: includeDirectoryToggleProbeRoots,
+					IncludeControllerImpactProbeRoots: includeControllerImpactProbeRoots),
+				cancellationToken);
+			return new ScanResult<IgnoreSectionScanData>(
+				workspaceScan.Value.IgnoreSection,
+				workspaceScan.RootAccessDenied,
+				workspaceScan.HadAccessDenied);
+		}
+
 		if (scanner is IFileSystemScannerRootSelectionSnapshotProvider rootSelectionProvider)
 		{
 			return rootSelectionProvider.GetIgnoreSectionSnapshotForRootSelection(
@@ -398,6 +439,21 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		bool includeControllerImpactProbeRoots = false)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+
+		if (scanner is IFileSystemScannerProjectWorkspaceScanner projectScanner)
+		{
+			return projectScanner.ScanProjectWorkspace(
+				new ProjectWorkspaceScanRequest(
+					rootPath,
+					rootFolders,
+					extensionDiscoveryRules,
+					effectiveRules,
+					effectiveExtensionPolicy,
+					CaptureTreeInventory: true,
+					IncludeDirectoryToggleProbeRoots: includeDirectoryToggleProbeRoots,
+					IncludeControllerImpactProbeRoots: includeControllerImpactProbeRoots),
+				cancellationToken);
+		}
 
 		if (scanner is IFileSystemScannerProjectWorkspaceSnapshotProvider provider)
 		{

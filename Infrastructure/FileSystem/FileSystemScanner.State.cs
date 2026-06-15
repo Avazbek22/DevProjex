@@ -18,20 +18,20 @@ public sealed partial class FileSystemScanner
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
     }
 
-    private sealed class WorkspaceSnapshotLocalState
+    private sealed class ProjectWorkspaceScanLocalState(bool captureTreeInventory)
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts RawCounts;
         public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
-        public List<ProjectTreeInventorySnapshot> TreeInventories { get; } = [];
+        public List<ProjectTreeInventorySnapshot>? TreeInventories { get; } = captureTreeInventory ? [] : null;
 
         public bool IsEmpty =>
             Extensions.Count == 0 &&
             RawCounts.IsEmpty &&
             EffectiveCounts == IgnoreOptionCounts.Empty &&
             ControllerImpactCounts == IgnoreControllerImpactCounts.Empty &&
-            TreeInventories.Count == 0;
+            (TreeInventories is null || TreeInventories.Count == 0);
     }
 
     private sealed class ProjectTreeInventoryCapture

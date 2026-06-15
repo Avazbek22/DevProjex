@@ -174,6 +174,26 @@ internal sealed class MetricsPipeline(
         BuildTreeResult currentTree,
         CancellationToken cancellationToken)
     {
+        await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
+        await InitializeFileMetricsCacheAsync(currentTree, cancellationToken);
+    }
+
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    public async Task<TimeSpan> InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
+        BuildTreeResult currentTree,
+        CancellationToken cancellationToken)
+    {
+        await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
+
+        var stopwatch = Stopwatch.StartNew();
+        await InitializeFileMetricsCacheAsync(currentTree, cancellationToken);
+        stopwatch.Stop();
+        return stopwatch.Elapsed;
+    }
+#endif
+
+    private async Task WaitForInitialMetricsWarmupSlotAsync(CancellationToken cancellationToken)
+    {
         await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -186,7 +206,6 @@ internal sealed class MetricsPipeline(
             await Task.Delay(warmupDelay, cancellationToken);
 
         cancellationToken.ThrowIfCancellationRequested();
-        await InitializeFileMetricsCacheAsync(currentTree, cancellationToken);
     }
 
     public void CancelBackgroundCalculation()

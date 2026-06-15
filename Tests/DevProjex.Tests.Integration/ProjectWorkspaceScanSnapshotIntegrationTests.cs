@@ -197,6 +197,53 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		Assert.Equal(hiddenOwnsDotRoot ? 0 : 1, result.Value.DotFolders);
 	}
 
+	[Fact]
+	public void ProjectWorkspaceScanRequest_CaptureTreeInventoryOnlyChangesInventoryPayload()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "ignored-by-git/\n");
+		temp.CreateFile("root.txt", "root");
+		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateFile("src/.env", "secret");
+		temp.CreateFile("docs/readme.md", "# docs");
+		temp.CreateFile("node_modules/pkg/index.js", "module.exports = {};");
+		temp.CreateFile("ignored-by-git/payload.txt", "ignored");
+
+		var rules = CreateRules(temp.Path);
+		var selectedRoots = new HashSet<string>(["src", "docs", "node_modules"], PathComparer.Default);
+		var selectedExtensions = new HashSet<string>([".cs", ".md", ".txt"], StringComparer.OrdinalIgnoreCase);
+		var extensionPolicy = new ExtensionSetInclusionPolicy(selectedExtensions);
+		var scanner = new FileSystemScanner();
+		var lightRequest = new ProjectWorkspaceScanRequest(
+			temp.Path,
+			selectedRoots,
+			rules,
+			rules,
+			extensionPolicy,
+			CaptureTreeInventory: false,
+			IncludeDirectoryToggleProbeRoots: true,
+			IncludeControllerImpactProbeRoots: true);
+		var fullRequest = lightRequest with { CaptureTreeInventory = true };
+
+		var light = scanner.ScanProjectWorkspace(lightRequest, TestContext.Current.CancellationToken);
+		var full = scanner.ScanProjectWorkspace(fullRequest, TestContext.Current.CancellationToken);
+		var useCaseIgnoreOnly = new ScanOptionsUseCase(scanner).GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			selectedRoots,
+			extensionDiscoveryRules: rules,
+			effectiveRules: rules,
+			effectiveExtensionPolicy: extensionPolicy,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken,
+			includeControllerImpactProbeRoots: true);
+
+		Assert.Null(light.Value.TreeInventory);
+		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(full.Value.TreeInventory);
+		AssertIgnoreSectionEquivalent(light.Value.IgnoreSection, full.Value.IgnoreSection);
+		AssertIgnoreSectionEquivalent(useCaseIgnoreOnly.Value, full.Value.IgnoreSection);
+		AssertTreeProjectionEqualsDirectBuild(temp.Path, selectedRoots, selectedExtensions, rules, inventory);
+	}
+
 	private static IgnoreRules CreateRules(string rootPath)
 	{
 		return new IgnoreRules(
@@ -243,13 +290,20 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		ProjectWorkspaceScanSnapshot expected,
 		ProjectWorkspaceScanSnapshot actual)
 	{
-		Assert.Equal(expected.IgnoreSection.Extensions.Order(StringComparer.OrdinalIgnoreCase), actual.IgnoreSection.Extensions.Order(StringComparer.OrdinalIgnoreCase));
-		Assert.Equal(expected.IgnoreSection.RawIgnoreOptionCounts, actual.IgnoreSection.RawIgnoreOptionCounts);
-		Assert.Equal(expected.IgnoreSection.EffectiveIgnoreOptionCounts, actual.IgnoreSection.EffectiveIgnoreOptionCounts);
-		Assert.Equal(expected.IgnoreSection.ControllerImpactCounts, actual.IgnoreSection.ControllerImpactCounts);
+		AssertIgnoreSectionEquivalent(expected.IgnoreSection, actual.IgnoreSection);
 		Assert.NotNull(expected.TreeInventory);
 		Assert.NotNull(actual.TreeInventory);
 		Assert.Equal(FlattenInventory(expected.TreeInventory), FlattenInventory(actual.TreeInventory));
+	}
+
+	private static void AssertIgnoreSectionEquivalent(
+		IgnoreSectionScanData expected,
+		IgnoreSectionScanData actual)
+	{
+		Assert.Equal(expected.Extensions.Order(StringComparer.OrdinalIgnoreCase), actual.Extensions.Order(StringComparer.OrdinalIgnoreCase));
+		Assert.Equal(expected.RawIgnoreOptionCounts, actual.RawIgnoreOptionCounts);
+		Assert.Equal(expected.EffectiveIgnoreOptionCounts, actual.EffectiveIgnoreOptionCounts);
+		Assert.Equal(expected.ControllerImpactCounts, actual.ControllerImpactCounts);
 	}
 
 	private static void AssertTreeProjectionEqualsDirectBuild(

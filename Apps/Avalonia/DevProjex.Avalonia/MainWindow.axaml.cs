@@ -7129,7 +7129,7 @@ public partial class MainWindow : Window
 
         ObserveDetachedTask(
             TrackProjectAnalysisTimingAsync(
-                _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(currentTree, cancellationToken),
+                _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(currentTree, cancellationToken),
                 timing),
             "InitializeFileMetricsCache");
 #else
@@ -7141,12 +7141,10 @@ public partial class MainWindow : Window
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     private async Task TrackProjectAnalysisTimingAsync(
-        Task metricsWarmupTask,
+        Task<TimeSpan> metricsWarmupTask,
         ProjectLoadTiming? timing)
     {
-        var analysisStopwatch = Stopwatch.StartNew();
-        await metricsWarmupTask;
-        analysisStopwatch.Stop();
+        var analysisElapsed = await metricsWarmupTask;
 
         if (timing is null ||
             !timing.HasLoadingElapsed ||
@@ -7163,7 +7161,7 @@ public partial class MainWindow : Window
 
                 ApplyProjectLoadTimingTitleSuffix(
                     timing.LoadingElapsed,
-                    analysisStopwatch.Elapsed);
+                    analysisElapsed);
                 _projectLoadTiming = null;
             },
             DispatcherPriority.Background);

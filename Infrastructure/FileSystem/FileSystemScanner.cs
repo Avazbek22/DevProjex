@@ -2,7 +2,7 @@ using System.Buffers;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
-public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider, IFileSystemScannerProjectWorkspaceSnapshotProvider
+public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider, IFileSystemScannerProjectWorkspaceSnapshotProvider, IFileSystemScannerProjectWorkspaceScanner
 {
 	public bool CanReadRoot(string rootPath)
 	{
@@ -157,123 +157,21 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		CancellationToken cancellationToken = default,
 		bool includeControllerImpactProbeRoots = false)
 	{
-		cancellationToken.ThrowIfCancellationRequested();
-
-		var scanPlan = BuildRootSelectionScanPlan(
-			rootPath,
-			selectedRootFolders,
-			effectiveRules,
-			includeDirectoryToggleProbeRoots,
-			includeControllerImpactProbeRoots,
-			cancellationToken);
-
-		var aggregatedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var rawCounts = IgnoreOptionCounts.Empty;
-		var effectiveCounts = IgnoreOptionCounts.Empty;
-		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
-		var rootAccessDenied = scanPlan.RootAccessDenied ? 1 : 0;
-		var hadAccessDenied = scanPlan.HadAccessDenied ? 1 : 0;
-		var mergeLock = new object();
-
-		var rootFileSnapshot = ScanRootFileIgnoreSectionSnapshotCore(
-			rootPath,
-			extensionDiscoveryRules,
-			effectiveRules,
-			effectiveExtensionPolicy,
-			cancellationToken);
-		aggregatedExtensions.UnionWith(rootFileSnapshot.Value.Extensions);
-		rawCounts = rawCounts.Add(rootFileSnapshot.Value.RawIgnoreOptionCounts);
-		effectiveCounts = effectiveCounts.Add(rootFileSnapshot.Value.EffectiveIgnoreOptionCounts);
-		controllerImpactCounts = controllerImpactCounts.Add(rootFileSnapshot.Value.ControllerImpactCounts);
-		if (rootFileSnapshot.RootAccessDenied)
-			Interlocked.Exchange(ref rootAccessDenied, 1);
-		if (rootFileSnapshot.HadAccessDenied)
-			Interlocked.Exchange(ref hadAccessDenied, 1);
-
-		if (scanPlan.SelectedRootPaths.Count > 0)
-		{
-			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
-			Parallel.ForEach(
-				scanPlan.SelectedRootPaths,
-				parallelOptions,
-				() => new IgnoreSectionSnapshotLocalState(),
-				(folderPath, _, localState) =>
-				{
-					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
-
-					var snapshot = ScanIgnoreSectionSnapshotCore(
-						folderPath,
-						extensionDiscoveryRules,
-						effectiveRules,
-						effectiveExtensionPolicy,
-						includeRootDirectoryInRawCounts: true,
-						parallelOptions.CancellationToken);
-
-					localState.Extensions.UnionWith(snapshot.Value.Extensions);
-					localState.RawCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
-					localState.EffectiveCounts = localState.EffectiveCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
-					localState.ControllerImpactCounts =
-						localState.ControllerImpactCounts.Add(snapshot.Value.ControllerImpactCounts);
-
-					if (snapshot.RootAccessDenied)
-						Interlocked.Exchange(ref rootAccessDenied, 1);
-					if (snapshot.HadAccessDenied)
-						Interlocked.Exchange(ref hadAccessDenied, 1);
-
-					return localState;
-				},
-				localState =>
-				{
-					if (localState.Extensions.Count == 0 &&
-					    localState.RawCounts.IsEmpty &&
-					    localState.EffectiveCounts == IgnoreOptionCounts.Empty &&
-					    localState.ControllerImpactCounts == IgnoreControllerImpactCounts.Empty)
-					{
-						return;
-					}
-
-					lock (mergeLock)
-					{
-						if (localState.Extensions.Count > 0)
-							aggregatedExtensions.UnionWith(localState.Extensions);
-						rawCounts = rawCounts.Add(localState.RawCounts.ToImmutable());
-						effectiveCounts = effectiveCounts.Add(localState.EffectiveCounts);
-						controllerImpactCounts = controllerImpactCounts.Add(localState.ControllerImpactCounts);
-					}
-				});
-		}
-
-		if (includeDirectoryToggleProbeRoots && scanPlan.DirectoryToggleCandidates.Count > 0)
-		{
-			var rootCandidateCounts = CountRootDirectoryToggleCandidates(
-				scanPlan.DirectoryToggleCandidates,
-				effectiveRules,
-				cancellationToken);
-			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
-			if (rootCandidateCounts.RootAccessDenied)
-				Interlocked.Exchange(ref rootAccessDenied, 1);
-			if (rootCandidateCounts.HadAccessDenied)
-				Interlocked.Exchange(ref hadAccessDenied, 1);
-		}
-
-		if (scanPlan.ControllerImpactCandidates.Count > 0)
-		{
-			var rootControllerImpactCounts = CountRootDirectoryControllerImpactCandidates(
-				scanPlan.ControllerImpactCandidates,
+		var scan = ScanProjectWorkspace(
+			new ProjectWorkspaceScanRequest(
+				rootPath,
+				selectedRootFolders,
+				extensionDiscoveryRules,
 				effectiveRules,
 				effectiveExtensionPolicy,
-				cancellationToken);
-			controllerImpactCounts = controllerImpactCounts.Add(rootControllerImpactCounts.Value);
-			if (rootControllerImpactCounts.RootAccessDenied)
-				Interlocked.Exchange(ref rootAccessDenied, 1);
-			if (rootControllerImpactCounts.HadAccessDenied)
-				Interlocked.Exchange(ref hadAccessDenied, 1);
-		}
-
+				CaptureTreeInventory: false,
+				IncludeDirectoryToggleProbeRoots: includeDirectoryToggleProbeRoots,
+				IncludeControllerImpactProbeRoots: includeControllerImpactProbeRoots),
+			cancellationToken);
 		return new ScanResult<IgnoreSectionScanData>(
-			new IgnoreSectionScanData(aggregatedExtensions, rawCounts, effectiveCounts, controllerImpactCounts),
-			rootAccessDenied == 1,
-			hadAccessDenied == 1);
+			scan.Value.IgnoreSection,
+			scan.RootAccessDenied,
+			scan.HadAccessDenied);
 	}
 
 	public ScanResult<ProjectWorkspaceScanSnapshot> GetProjectWorkspaceSnapshotForRootSelection(
@@ -286,7 +184,32 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		CancellationToken cancellationToken = default,
 		bool includeControllerImpactProbeRoots = false)
 	{
+		return ScanProjectWorkspace(
+			new ProjectWorkspaceScanRequest(
+				rootPath,
+				selectedRootFolders,
+				extensionDiscoveryRules,
+				effectiveRules,
+				effectiveExtensionPolicy,
+				CaptureTreeInventory: true,
+				IncludeDirectoryToggleProbeRoots: includeDirectoryToggleProbeRoots,
+				IncludeControllerImpactProbeRoots: includeControllerImpactProbeRoots),
+			cancellationToken);
+	}
+
+	public ScanResult<ProjectWorkspaceScanSnapshot> ScanProjectWorkspace(
+		ProjectWorkspaceScanRequest request,
+		CancellationToken cancellationToken = default)
+	{
 		cancellationToken.ThrowIfCancellationRequested();
+		var rootPath = request.RootPath;
+		var selectedRootFolders = request.SelectedRootFolders;
+		var extensionDiscoveryRules = request.ExtensionDiscoveryRules;
+		var effectiveRules = request.EffectiveRules;
+		var effectiveExtensionPolicy = request.EffectiveExtensionPolicy;
+		var includeDirectoryToggleProbeRoots = request.IncludeDirectoryToggleProbeRoots;
+		var includeControllerImpactProbeRoots = request.IncludeControllerImpactProbeRoots;
+		var captureTreeInventory = request.CaptureTreeInventory;
 
 		var scanPlan = BuildRootSelectionScanPlan(
 			rootPath,
@@ -303,7 +226,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var rootAccessDenied = scanPlan.RootAccessDenied ? 1 : 0;
 		var hadAccessDenied = scanPlan.HadAccessDenied ? 1 : 0;
 		var mergeLock = new object();
-		var rootFileInventoryEntries = new List<ProjectTreeInventoryEntry>();
+		var rootFileInventoryEntries = captureTreeInventory
+			? new List<ProjectTreeInventoryEntry>()
+			: null;
 
 		var rootFileSnapshot = ScanRootFileIgnoreSectionSnapshotCore(
 			rootPath,
@@ -321,19 +246,23 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (rootFileSnapshot.HadAccessDenied)
 			Interlocked.Exchange(ref hadAccessDenied, 1);
 
-		var subtreeInventories = new List<ProjectTreeInventorySnapshot>();
+		var subtreeInventories = captureTreeInventory
+			? new List<ProjectTreeInventorySnapshot>()
+			: null;
 		if (scanPlan.SelectedRootPaths.Count > 0)
 		{
 			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 			Parallel.ForEach(
 				scanPlan.SelectedRootPaths,
 				parallelOptions,
-				() => new WorkspaceSnapshotLocalState(),
+				() => new ProjectWorkspaceScanLocalState(captureTreeInventory),
 				(folderPath, _, localState) =>
 				{
 					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
-					var inventoryCapture = new ProjectTreeInventoryCapture();
+					var inventoryCapture = captureTreeInventory
+						? new ProjectTreeInventoryCapture()
+						: null;
 					var snapshot = ScanIgnoreSectionSnapshotCore(
 						folderPath,
 						extensionDiscoveryRules,
@@ -348,8 +277,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					localState.EffectiveCounts = localState.EffectiveCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
 					localState.ControllerImpactCounts =
 						localState.ControllerImpactCounts.Add(snapshot.Value.ControllerImpactCounts);
-					if (inventoryCapture.Inventory is not null)
+					if (localState.TreeInventories is not null &&
+					    inventoryCapture?.Inventory is not null)
+					{
 						localState.TreeInventories.Add(inventoryCapture.Inventory);
+					}
 
 					if (snapshot.RootAccessDenied)
 						Interlocked.Exchange(ref rootAccessDenied, 1);
@@ -370,8 +302,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						rawCounts = rawCounts.Add(localState.RawCounts.ToImmutable());
 						effectiveCounts = effectiveCounts.Add(localState.EffectiveCounts);
 						controllerImpactCounts = controllerImpactCounts.Add(localState.ControllerImpactCounts);
-						if (localState.TreeInventories.Count > 0)
+						if (subtreeInventories is not null &&
+						    localState.TreeInventories is not null &&
+						    localState.TreeInventories.Count > 0)
+						{
 							subtreeInventories.AddRange(localState.TreeInventories);
+						}
 					}
 				});
 		}
@@ -411,12 +347,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			rawCounts,
 			effectiveCounts,
 			controllerImpactCounts);
-		var treeInventory = BuildRootSelectionInventory(
-			rootPath,
-			rootFileInventoryEntries,
-			subtreeInventories,
-			rootAccessDenied == 1,
-			hadAccessDenied == 1);
+		var treeInventory = captureTreeInventory
+			? BuildRootSelectionInventory(
+				rootPath,
+				rootFileInventoryEntries!,
+				subtreeInventories!,
+				rootAccessDenied == 1,
+				hadAccessDenied == 1)
+			: null;
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
 			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory),
 			rootAccessDenied == 1,
