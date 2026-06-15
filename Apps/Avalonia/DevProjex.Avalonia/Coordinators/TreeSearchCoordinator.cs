@@ -1101,10 +1101,12 @@ public sealed class TreeSearchCoordinator(
     private (IBrush highlightBackground, IBrush highlightForeground, IBrush normalForeground, IBrush currentBackground)
         GetSearchHighlightBrushes()
     {
-        var app = global::Avalonia.Application.Current;
-        var theme = app?.ActualThemeVariant ?? ThemeVariant.Light;
+        var canReadAvaloniaResources = Dispatcher.UIThread.CheckAccess();
+        var app = canReadAvaloniaResources
+            ? global::Avalonia.Application.Current
+            : null;
+        var theme = ResolveSearchHighlightTheme(app, canReadAvaloniaResources);
 
-        // Return cached brushes if theme hasn't changed
         if (_cachedTheme == theme &&
             _cachedHighlightBackground is not null &&
             _cachedHighlightForeground is not null &&
@@ -1114,7 +1116,6 @@ public sealed class TreeSearchCoordinator(
             return (_cachedHighlightBackground, _cachedHighlightForeground, _cachedNormalForeground, _cachedCurrentBackground);
         }
 
-        // Create new brushes only when theme changes
         _cachedTheme = theme;
 
         _cachedHighlightBackground = new SolidColorBrush(Color.Parse("#FFEB3B"));
@@ -1124,21 +1125,39 @@ public sealed class TreeSearchCoordinator(
             : new SolidColorBrush(Color.Parse("#1A1A1A"));
         _cachedCurrentBackground = new SolidColorBrush(Color.Parse("#F9A825"));
 
-        if (app?.Resources.TryGetResource("TreeSearchHighlightBrush", theme, out var bg) == true &&
+        if (app is not null)
+            ApplySearchHighlightResourceOverrides(app, theme);
+
+        return (_cachedHighlightBackground, _cachedHighlightForeground, _cachedNormalForeground, _cachedCurrentBackground);
+    }
+
+    private ThemeVariant ResolveSearchHighlightTheme(
+        global::Avalonia.Application? app,
+        bool canReadAvaloniaResources)
+    {
+        // Avalonia Application and resource dictionaries are dispatcher-owned. Worker-thread
+        // searches must not touch them, otherwise test order and debounce timing make this flaky.
+        if (!canReadAvaloniaResources)
+            return _cachedTheme ?? ThemeVariant.Light;
+
+        return app?.ActualThemeVariant ?? ThemeVariant.Light;
+    }
+
+    private void ApplySearchHighlightResourceOverrides(global::Avalonia.Application app, ThemeVariant theme)
+    {
+        if (app.Resources.TryGetResource("TreeSearchHighlightBrush", theme, out var bg) &&
             bg is IBrush bgBrush)
             _cachedHighlightBackground = bgBrush;
 
-        if (app?.Resources.TryGetResource("TreeSearchHighlightTextBrush", theme, out var fg) == true &&
+        if (app.Resources.TryGetResource("TreeSearchHighlightTextBrush", theme, out var fg) &&
             fg is IBrush fgBrush)
             _cachedHighlightForeground = fgBrush;
 
-        if (app?.Resources.TryGetResource("TreeSearchCurrentBrush", theme, out var current) == true &&
+        if (app.Resources.TryGetResource("TreeSearchCurrentBrush", theme, out var current) &&
             current is IBrush currentBrush)
             _cachedCurrentBackground = currentBrush;
 
-        if (app?.Resources.TryGetResource("AppTextBrush", theme, out var textFg) == true && textFg is IBrush textBrush)
+        if (app.Resources.TryGetResource("AppTextBrush", theme, out var textFg) && textFg is IBrush textBrush)
             _cachedNormalForeground = textBrush;
-
-        return (_cachedHighlightBackground, _cachedHighlightForeground, _cachedNormalForeground, _cachedCurrentBackground);
     }
 }
