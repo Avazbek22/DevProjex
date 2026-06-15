@@ -1,10 +1,13 @@
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.Unit;
 
 public sealed class InfrastructureJsonPersistenceTests
 {
+	private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
 	[Fact]
 	public void ProjectProfileStore_WritesCamelCaseEnumPayloadAndLoadsFullState()
 	{
@@ -157,6 +160,106 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal("https://github.com/example/repo.git", loaded.RecentRepositories[0].Url);
 	}
 
+	[Fact]
+	public void JsonStorePersistence_TryReadNormalized_InvalidJsonDoesNotRewriteOrMutatePrimary()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, "{ invalid json");
+
+		var result = JsonStorePersistence.TryReadNormalized(
+			fileSet.PrimaryPath,
+			JsonOptions,
+			static () => new TestDocument("default", 0),
+			static document => document with { Name = document.Name.Trim() },
+			out var document,
+			out var requiresRewrite);
+
+		Assert.False(result);
+		Assert.False(requiresRewrite);
+		Assert.Equal(new TestDocument("default", 0), document);
+		Assert.Equal("{ invalid json", File.ReadAllText(fileSet.PrimaryPath));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_TryReadNormalized_ReportsRewriteOnlyAfterSuccessfulNormalization()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, """{"name":" Project ","count":3}""");
+
+		var result = JsonStorePersistence.TryReadNormalized(
+			fileSet.PrimaryPath,
+			JsonOptions,
+			static () => new TestDocument("default", 0),
+			static document => document with { Name = document.Name.Trim() },
+			out var document,
+			out var requiresRewrite);
+
+		Assert.True(result);
+		Assert.True(requiresRewrite);
+		Assert.Equal(new TestDocument("Project", 3), document);
+	}
+
+	[Fact]
+	public void JsonStorePersistence_TryWriteAtomic_CommitsPrimaryMirrorsBackupAndLeavesNoTempFiles()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+
+		var result = JsonStorePersistence.TryWriteAtomic(
+			fileSet,
+			new TestDocument("committed", 7),
+			JsonOptions);
+
+		Assert.True(result);
+		Assert.True(File.Exists(fileSet.PrimaryPath));
+		Assert.True(File.Exists(fileSet.BackupPath));
+		Assert.Equal(File.ReadAllText(fileSet.PrimaryPath), File.ReadAllText(fileSet.BackupPath));
+		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
+		Assert.Contains("\"name\":\"committed\"", File.ReadAllText(fileSet.PrimaryPath));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_TryWriteAtomic_ReturnsFalseForUnresolvablePrimaryDirectory()
+	{
+		var fileSet = new JsonStoreFileSet("settings.json", "settings.json.bak", "settings.json.lock");
+
+		var result = JsonStorePersistence.TryWriteAtomic(
+			fileSet,
+			new TestDocument("ignored", 1),
+			JsonOptions);
+
+		Assert.False(result);
+	}
+
+	[Fact]
+	public void CrossProcessFileLock_AcquireFailsFastWhenSidecarLockIsAlreadyHeld()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		using var heldLock = CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero);
+
+		Assert.ThrowsAny<IOException>(() => CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero));
+	}
+
+	[Fact]
+	public void CrossProcessFileLock_DisposeReleasesSidecarLockForNextWriter()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+
+		using (CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero))
+		{
+			Assert.True(File.Exists(fileSet.LockPath));
+		}
+
+		using var reacquired = CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero);
+		Assert.NotNull(reacquired);
+	}
+
 	private static string CreateLegacyProfileJson(string projectPath)
 	{
 		var normalizedPath = JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
@@ -174,4 +277,12 @@ public sealed class InfrastructureJsonPersistenceTests
 			}
 			""";
 	}
+
+	private static JsonStoreFileSet CreateFileSet(TemporaryDirectory temp, string fileName)
+	{
+		var primaryPath = Path.Combine(temp.Path, "appdata", fileName);
+		return new JsonStoreFileSet(primaryPath, $"{primaryPath}.bak", $"{primaryPath}.lock");
+	}
+
+	private sealed record TestDocument(string Name, int Count);
 }
