@@ -103,6 +103,40 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		AssertGoldenTree(workspace.Path, services, snapshot, testCase);
 	}
 
+	// Export is the last user-visible surface after ignore decisions. This pins the
+	// clipboard payload to the same tree that SelectionRefreshEngine exposes.
+	[Theory]
+	[MemberData(nameof(ExportGoldenCases))]
+	public async Task TreeAndContentExport_UsesOnlyGoldenVisibleFiles(ExportGoldenCase testCase)
+	{
+		using var workspace = CreateScopedControllerWorkspace();
+		var services = CreateServices();
+		var baseline = ComputeConvergedSnapshot(
+			services,
+			workspace.Path,
+			CreateDefaultContext(workspace.Path));
+		var snapshot = ComputeConvergedSnapshot(
+			services,
+			workspace.Path,
+			BuildScenarioContext(workspace.Path, baseline, testCase.Scenario));
+		var tree = BuildTreeFromSnapshot(workspace.Path, services, snapshot);
+		var descriptor = ToDescriptor(tree.Root);
+		var export = await new TreeAndContentExportService(
+				new TreeExportService(),
+				new SelectedContentExportService(new FileContentAnalyzer()))
+			.BuildAsync(
+				workspace.Path,
+				descriptor,
+				new HashSet<string>(PathComparer.Default),
+				TreeTextFormat.Ascii,
+				TestContext.Current.CancellationToken);
+
+		foreach (var fragment in testCase.ExpectedFragments)
+			Assert.Contains(NormalizeExportFragment(fragment), export, StringComparison.Ordinal);
+		foreach (var fragment in testCase.ForbiddenFragments)
+			Assert.DoesNotContain(NormalizeExportFragment(fragment), export, StringComparison.Ordinal);
+	}
+
 	public static IEnumerable<object[]> ScopedGoldenCases()
 	{
 		yield return [CreateCase(
@@ -665,6 +699,90 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		}
 	}
 
+	public static IEnumerable<object[]> ExportGoldenCases()
+	{
+		foreach (var data in ScopedGoldenCases())
+		{
+			var testCase = Assert.IsType<ScopedGoldenCase>(data[0]);
+			if (testCase.Name == "all roots defaults")
+			{
+				yield return [new ExportGoldenCase(
+					testCase,
+					ExpectedFragments:
+					[
+						"api/logs/keep.log",
+						"keep log",
+						"web/src/app.ts",
+						"export const ok = true;",
+						"docs/readme.md",
+						"# docs"
+					],
+					ForbiddenFragments:
+					[
+						"api/logs/drop.tmp",
+						"drop temp",
+						"web/node_modules/pkg/index.js",
+						"module.exports",
+						"docs/.drafts/draft.md",
+						"# draft"
+					])];
+			}
+			else if (testCase.Name == "api root cs extension preserves git negation branch")
+			{
+				yield return [new ExportGoldenCase(
+					testCase,
+					ExpectedFragments:
+					[
+						"api/src/Program.cs",
+						"Console.WriteLine",
+						"api/generated/keep/keep.cs",
+						"class Keep"
+					],
+					ForbiddenFragments:
+					[
+						"api/generated/drop/old.cs",
+						"class Dropped",
+						"api/logs/keep.log",
+						"keep log",
+						"api/bin/Debug/api.dll"
+					])];
+			}
+			else if (testCase.Name == "web root js extension appears when smart is off")
+			{
+				yield return [new ExportGoldenCase(
+					testCase,
+					ExpectedFragments:
+					[
+						"web/node_modules/pkg/index.js",
+						"module.exports"
+					],
+					ForbiddenFragments:
+					[
+						"web/package.json",
+						"web/src/app.ts",
+						"export const ok"
+					])];
+			}
+			else if (testCase.Name == "all roots all ignore off exposes every extension")
+			{
+				yield return [new ExportGoldenCase(
+					testCase,
+					ExpectedFragments:
+					[
+						"api/logs/drop.tmp",
+						"drop temp",
+						"api/generated/drop/old.cs",
+						"class Dropped",
+						"web/node_modules/pkg/index.js",
+						"module.exports",
+						"docs/.drafts/draft.md",
+						"# draft"
+					],
+					ForbiddenFragments: [])];
+			}
+		}
+	}
+
 	private static TemporaryDirectory CreateScopedControllerWorkspace()
 	{
 		var workspace = new TemporaryDirectory();
@@ -993,6 +1111,20 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		return true;
 	}
 
+	private static TreeNodeDescriptor ToDescriptor(FileSystemNode node) =>
+		new(
+			DisplayName: node.Name,
+			FullPath: node.FullPath,
+			IsDirectory: node.IsDirectory,
+			IsAccessDenied: node.IsAccessDenied,
+			IconKey: node.IsDirectory ? "folder" : "file",
+			Children: node.Children.Select(ToDescriptor).ToArray());
+
+	private static string NormalizeExportFragment(string fragment) =>
+		fragment.Contains('/', StringComparison.Ordinal)
+			? string.Join(Path.DirectorySeparatorChar, fragment.Split('/'))
+			: fragment;
+
 	private static void AssertSetEquals(
 		IReadOnlySet<string> expected,
 		IEnumerable<string> actualValues,
@@ -1084,4 +1216,12 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		int? DotFiles,
 		int? MinGitIgnoreImpact,
 		int? MinSmartIgnoreImpact);
+
+	public sealed record ExportGoldenCase(
+		ScopedGoldenCase Scenario,
+		IReadOnlyCollection<string> ExpectedFragments,
+		IReadOnlyCollection<string> ForbiddenFragments)
+	{
+		public override string ToString() => Scenario.Name;
+	}
 }

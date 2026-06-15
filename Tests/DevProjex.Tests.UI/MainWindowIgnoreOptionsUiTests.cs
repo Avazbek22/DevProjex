@@ -921,6 +921,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
             Assert.DoesNotContain(UiTestDriver.GetViewModel(window).IgnoreOptions, option => option.IsChecked);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".dll", ".log", ".js", ".pyc", ".xml", ".env"],
+                hidden: []);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -941,6 +945,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".log", ".xml", ".env"],
+                hidden: [".dll", ".js", ".pyc"]);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -964,6 +972,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.UseGitIgnore, isChecked: true);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".dll", ".js", ".pyc", ".xml", ".env"],
+                hidden: [".log"]);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -986,6 +998,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".dll", ".log", ".js", ".pyc", ".env"],
+                hidden: [".xml"]);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -1625,6 +1641,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await WaitForProjectTreePathStateAsync(window, exists: true, visiblePath);
         foreach (var hiddenPath in hiddenPaths)
             await WaitForProjectTreePathStateAsync(window, exists: false, hiddenPath);
+    }
+
+    private static async Task AssertExtensionStatesAsync(
+        MainWindow window,
+        IReadOnlyCollection<string> visibleChecked,
+        IReadOnlyCollection<string> hidden)
+    {
+        // These assertions bind the user-visible extension list to the currently applied
+        // ignore controllers. A path can be correct while the extension checklist is stale.
+        foreach (var extension in visibleChecked)
+            await WaitForExtensionStateAsync(window, extension, visible: true, isChecked: true);
+        foreach (var extension in hidden)
+            await WaitForExtensionStateAsync(window, extension, visible: false);
     }
 
     private static async Task WaitForProjectTreePathStateAsync(
