@@ -202,6 +202,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		ValidateProjectWorkspaceScanRuleContract(request.ExtensionDiscoveryRules, request.EffectiveRules);
 		var rootPath = request.RootPath;
 		var selectedRootFolders = request.SelectedRootFolders;
 		var extensionDiscoveryRules = request.ExtensionDiscoveryRules;
@@ -359,6 +360,24 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1);
+	}
+
+	private static void ValidateProjectWorkspaceScanRuleContract(
+		IgnoreRules extensionDiscoveryRules,
+		IgnoreRules effectiveRules)
+	{
+		// Extension discovery may differ for file-level rules and EmptyFolders only. The
+		// latter is a final tree-pruning rule, not a traversal rule for finding extensions.
+		// Directory/controller rules define reachability and must stay shared.
+		if (extensionDiscoveryRules.UseGitIgnore != effectiveRules.UseGitIgnore ||
+		    extensionDiscoveryRules.UseSmartIgnore != effectiveRules.UseSmartIgnore ||
+		    extensionDiscoveryRules.IgnoreHiddenFolders != effectiveRules.IgnoreHiddenFolders ||
+		    extensionDiscoveryRules.IgnoreDotFolders != effectiveRules.IgnoreDotFolders)
+		{
+			throw new ArgumentException(
+				"Extension discovery rules may differ from effective rules only by file-level ignore options and EmptyFolders.",
+				nameof(ProjectWorkspaceScanRequest.ExtensionDiscoveryRules));
+		}
 	}
 
 	public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
