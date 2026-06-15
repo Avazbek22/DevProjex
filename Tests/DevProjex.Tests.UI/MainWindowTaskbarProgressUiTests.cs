@@ -1,4 +1,5 @@
 using System.Reflection;
+using DevProjex.Avalonia.Coordinators;
 
 namespace DevProjex.Tests.UI;
 
@@ -58,7 +59,7 @@ public sealed class MainWindowTaskbarProgressUiTests
             InvokeGitCloneTaskbarMethod(window, "MarkGitCloneTaskbarProgressError");
             InvokeGitCloneTaskbarMethod(window, "CompleteGitCloneTaskbarProgress");
 
-            Assert.Equal(initialAttachCount + 1, taskbarProgress.AttachCount);
+            Assert.Equal(initialAttachCount, taskbarProgress.AttachCount);
             Assert.Equal(
             [
                 TaskbarProgressCall.Indeterminate(),
@@ -182,12 +183,33 @@ public sealed class MainWindowTaskbarProgressUiTests
 
     private static void InvokeGitCloneTaskbarMethod(MainWindow window, string methodName, params object[] args)
     {
-        var method = typeof(MainWindow).GetMethod(
-            methodName,
+        var coordinator = GetTaskbarProgressCoordinator(window);
+        var mappedName = methodName switch
+        {
+            "BeginGitCloneTaskbarProgress" => nameof(TaskbarProgressCoordinator.BeginGitClone),
+            "UpdateGitCloneTaskbarProgress" => nameof(TaskbarProgressCoordinator.UpdateGitClone),
+            "MarkGitCloneTaskbarProgressError" => nameof(TaskbarProgressCoordinator.MarkGitCloneError),
+            "CompleteGitCloneTaskbarProgress" => nameof(TaskbarProgressCoordinator.CompleteGitClone),
+            _ => methodName
+        };
+        var method = typeof(TaskbarProgressCoordinator).GetMethod(
+            mappedName,
             BindingFlags.Instance | BindingFlags.NonPublic);
+        method ??= typeof(TaskbarProgressCoordinator).GetMethod(
+            mappedName,
+            BindingFlags.Instance | BindingFlags.Public);
 
         Assert.NotNull(method);
-        method.Invoke(window, args);
+        method.Invoke(coordinator, args);
+    }
+
+    private static TaskbarProgressCoordinator GetTaskbarProgressCoordinator(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_taskbarProgress",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (TaskbarProgressCoordinator)field.GetValue(window)!;
     }
 
     private sealed class RecordingTaskbarProgressService : ITaskbarProgressService
@@ -215,16 +237,25 @@ public sealed class MainWindowTaskbarProgressUiTests
         }
     }
 
-    private sealed record TaskbarProgressCall(string Kind, double? Percent = null)
+    private sealed record TaskbarProgressCall(TaskbarProgressCallKind Kind, double? Percent = null)
     {
-        public static TaskbarProgressCall Indeterminate() => new("Indeterminate");
+        public static TaskbarProgressCall Indeterminate() => new(TaskbarProgressCallKind.Indeterminate);
 
-        public static TaskbarProgressCall Progress(double percent) => new("Progress", percent);
+        public static TaskbarProgressCall Progress(double percent) => new(TaskbarProgressCallKind.Progress, percent);
 
-        public static TaskbarProgressCall Paused() => new("Paused");
+        public static TaskbarProgressCall Paused() => new(TaskbarProgressCallKind.Paused);
 
-        public static TaskbarProgressCall Error() => new("Error");
+        public static TaskbarProgressCall Error() => new(TaskbarProgressCallKind.Error);
 
-        public static TaskbarProgressCall Clear() => new("Clear");
+        public static TaskbarProgressCall Clear() => new(TaskbarProgressCallKind.Clear);
+    }
+
+    private enum TaskbarProgressCallKind
+    {
+        Indeterminate,
+        Progress,
+        Paused,
+        Error,
+        Clear
     }
 }

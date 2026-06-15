@@ -4,42 +4,31 @@ public partial class MainWindow
 {
     private void CancelAndDisposeWindowOperations()
     {
-        CancelAndDispose(ref _metricsCalculationCts);
-        CancelAndDispose(ref _recalculateMetricsCts);
+        _metrics.Dispose();
+        _projectLoadPipeline.Dispose();
+        _previewPipeline.Dispose();
+        _refreshPipeline.Dispose();
         StopMetricsDebounceTimers();
         CancelBackgroundMemoryCleanup();
 
-        CancelAndDispose(ref _previewBuildCts);
         CancelAndDispose(ref _previewSelectionMetricsCts);
         CancelAndDispose(ref _previewMemoryCleanupCts);
         CancelAndDispose(ref _searchMemoryCleanupCts);
         CancelAndDispose(ref _previewModeSwitchCts);
 
         CancelAndDispose(ref _projectOperationCts);
-        CancelAndDispose(ref _refreshCts);
         CancelAndDispose(ref _gitCloneCts);
         CancelAndDispose(ref _gitOperationCts);
     }
 
     private void StopMetricsDebounceTimers()
     {
-        if (_metricsDebounceTimer is not null)
-        {
-            _metricsDebounceTimer.Stop();
-            _metricsDebounceTimer.Tick -= OnMetricsDebounceTimerTick;
-        }
-
         if (_previewSelectionMetricsDebounceTimer is not null)
         {
             _previewSelectionMetricsDebounceTimer.Stop();
             _previewSelectionMetricsDebounceTimer.Tick -= OnPreviewSelectionMetricsDebounceTick;
         }
 
-        if (_previewDebounceTimer is not null)
-        {
-            _previewDebounceTimer.Stop();
-            _previewDebounceTimer.Tick -= OnPreviewDebounceTick;
-        }
     }
 
     private static void CancelAndDispose(ref CancellationTokenSource? source)

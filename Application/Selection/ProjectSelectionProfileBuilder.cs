@@ -1,0 +1,110 @@
+using DevProjex.Application.Models;
+
+namespace DevProjex.Application.Selection;
+
+public static class ProjectSelectionProfileBuilder
+{
+    public static ProjectSelectionProfile Create(
+        IEnumerable<SelectionOption> visibleRootFolders,
+        IEnumerable<SelectionOption> visibleExtensions,
+        IEnumerable<IgnoreSelectionOption> visibleIgnoreOptions,
+        IReadOnlyDictionary<string, bool>? cachedRootFolderStates,
+        IReadOnlyDictionary<string, bool>? cachedExtensionStates,
+        IReadOnlyDictionary<IgnoreOptionId, bool>? cachedIgnoreOptionStates,
+        IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
+        StringComparer rootFolderComparer,
+        StringComparer extensionComparer)
+    {
+        var rootOptions = MaterializeSelectionOptions(visibleRootFolders);
+        var extensionOptions = MaterializeSelectionOptions(visibleExtensions);
+        var ignoreOptions = MaterializeIgnoreOptions(visibleIgnoreOptions);
+
+        return new ProjectSelectionProfile(
+            SelectedRootFolders: CollectCheckedNames(rootOptions, rootFolderComparer),
+            SelectedExtensions: CollectCheckedNames(extensionOptions, extensionComparer),
+            SelectedIgnoreOptions: selectedIgnoreOptions.ToArray(),
+            RootFolderStates: MergeSelectionStates(cachedRootFolderStates, rootOptions, rootFolderComparer),
+            ExtensionStates: MergeSelectionStates(cachedExtensionStates, extensionOptions, extensionComparer),
+            IgnoreOptionStates: MergeIgnoreStates(cachedIgnoreOptionStates, ignoreOptions));
+    }
+
+    public static ProjectSelectionProfile Clone(ProjectSelectionProfile profile)
+    {
+        return new ProjectSelectionProfile(
+            SelectedRootFolders: profile.SelectedRootFolders.ToArray(),
+            SelectedExtensions: profile.SelectedExtensions.ToArray(),
+            SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray(),
+            RootFolderStates: profile.RootFolderStates is null
+                ? null
+                : new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default),
+            ExtensionStates: profile.ExtensionStates is null
+                ? null
+                : new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
+            IgnoreOptionStates: profile.IgnoreOptionStates is null
+                ? null
+                : new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates));
+    }
+
+    private static List<SelectionOption> MaterializeSelectionOptions(IEnumerable<SelectionOption> options)
+    {
+        return options switch
+        {
+            List<SelectionOption> list => list,
+            SelectionOption[] array => [..array],
+            _ => options.ToList()
+        };
+    }
+
+    private static List<IgnoreSelectionOption> MaterializeIgnoreOptions(IEnumerable<IgnoreSelectionOption> options)
+    {
+        return options switch
+        {
+            List<IgnoreSelectionOption> list => list,
+            IgnoreSelectionOption[] array => [..array],
+            _ => options.ToList()
+        };
+    }
+
+    private static HashSet<string> CollectCheckedNames(
+        IEnumerable<SelectionOption> options,
+        StringComparer comparer)
+    {
+        var selected = new HashSet<string>(comparer);
+        foreach (var option in options)
+        {
+            if (option.IsChecked)
+                selected.Add(option.Name);
+        }
+
+        return selected;
+    }
+
+    private static Dictionary<string, bool> MergeSelectionStates(
+        IReadOnlyDictionary<string, bool>? cachedStates,
+        IEnumerable<SelectionOption> visibleOptions,
+        StringComparer comparer)
+    {
+        var states = cachedStates is null
+            ? new Dictionary<string, bool>(comparer)
+            : new Dictionary<string, bool>(cachedStates, comparer);
+
+        foreach (var option in visibleOptions)
+            states[option.Name] = option.IsChecked;
+
+        return states;
+    }
+
+    private static Dictionary<IgnoreOptionId, bool> MergeIgnoreStates(
+        IReadOnlyDictionary<IgnoreOptionId, bool>? cachedStates,
+        IEnumerable<IgnoreSelectionOption> visibleOptions)
+    {
+        var states = cachedStates is null
+            ? []
+            : new Dictionary<IgnoreOptionId, bool>(cachedStates);
+
+        foreach (var option in visibleOptions)
+            states[option.Id] = option.IsChecked;
+
+        return states;
+    }
+}

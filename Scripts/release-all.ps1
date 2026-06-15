@@ -579,6 +579,7 @@ function Build-GitHubArtifactsInWorkspace([string]$version, [string]$configurati
             # ReadyToRun reduces JIT work for packaged RID-specific desktop binaries.
             "/p:PublishReadyToRun=true",
             "/p:PublishTrimmed=false",
+            "/p:EnableProjectLoadTiming=false",
             "/p:DebugType=None",
             "/p:DebugSymbols=false",
             "-o", $ridOutDir
@@ -771,6 +772,7 @@ function Build-StoreArtifactsInWorkspace(
         "/p:AppxBundlePlatforms=$bundlePlatforms",
         "/p:UapAppxPackageBuildMode=StoreUpload",
         "/p:AppxPackageDir=publish\store\",
+        "/p:EnableProjectLoadTiming=false",
         "/flp:logfile=$buildLogRelative;verbosity=normal"
     ) + $versionProperties
     Invoke-ExternalCommand -filePath $msbuildExe -arguments $msbuildArgs -failureMessage "MSIX build failed" -workingDirectory $script:IsolatedRepoRoot

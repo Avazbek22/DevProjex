@@ -43,6 +43,7 @@ public static class AvaloniaCompositionRoot
         var smartIgnoreService = new SmartIgnoreService(smartIgnoreRules);
         var ignoreOptionsService = new IgnoreOptionsService(localization);
         var ignoreRulesService = new IgnoreRulesService(smartIgnoreService);
+        var ignoreOwnershipAuditService = new IgnoreOwnershipAuditService();
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();
         var fileContentAnalyzer = new FileContentAnalyzer();
@@ -79,6 +80,7 @@ public static class AvaloniaCompositionRoot
             BuildTreeUseCase: buildTreeUseCase,
             IgnoreOptionsService: ignoreOptionsService,
             IgnoreRulesService: ignoreRulesService,
+            IgnoreOwnershipAuditService: ignoreOwnershipAuditService,
             FilterOptionSelectionService: filterSelectionService,
             TreeExportService: treeExportService,
             ContentExportService: contentExportService,

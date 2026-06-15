@@ -177,6 +177,30 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithRootExtensionIgnoreStressWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("api", ".gitignore"), "*.log\n!important.log\n.git-owned/\n");
+            WriteFile(rootPath, Path.Combine("api", "App.csproj"), "<Project />\n");
+            WriteFile(rootPath, Path.Combine("api", "src", "Program.cs"), "Console.WriteLine(\"api\");\n");
+            WriteFile(rootPath, Path.Combine("api", "src", "runtime.log"), "ignored by gitignore\n");
+            WriteFile(rootPath, Path.Combine("api", "src", "important.log"), "explicitly unignored\n");
+            WriteFile(rootPath, Path.Combine("api", ".git-owned", "payload.txt"), "git-owned dot root\n");
+            WriteFile(rootPath, Path.Combine("api", ".idea", "workspace.xml"), "<project />\n");
+            WriteFile(rootPath, Path.Combine("api", ".visible-dot", "inside.cs"), "class InsideDot {}\n");
+
+            WriteFile(rootPath, Path.Combine("web", "package.json"), "{}\n");
+            WriteFile(rootPath, Path.Combine("web", "src", "app.ts"), "export const ok = true;\n");
+            WriteFile(rootPath, Path.Combine("web", "node_modules", "pkg", "index.js"), "module.exports = {};\n");
+            WriteFile(rootPath, Path.Combine("web", "node_modules", "pkg", "app.ts"), "export const hidden = true;\n");
+            WriteFile(rootPath, Path.Combine("web", ".cache", "cache.json"), "{}\n");
+
+            WriteFile(rootPath, Path.Combine("docs", "readme.md"), "# docs\n");
+            WriteFile(rootPath, Path.Combine("docs", ".draft", "notes.md"), "# draft\n");
+        });
+    }
+
     public static UiTestProject CreateWithHiddenDotFolderOverlapWorkspace()
     {
         return Create(static rootPath =>

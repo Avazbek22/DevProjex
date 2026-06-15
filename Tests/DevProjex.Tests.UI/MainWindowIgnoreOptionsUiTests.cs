@@ -921,6 +921,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
             Assert.DoesNotContain(UiTestDriver.GetViewModel(window).IgnoreOptions, option => option.IsChecked);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".dll", ".log", ".js", ".pyc", ".xml", ".env"],
+                hidden: []);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -941,6 +945,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".log", ".xml", ".env"],
+                hidden: [".dll", ".js", ".pyc"]);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -964,6 +972,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.UseGitIgnore, isChecked: true);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".dll", ".js", ".pyc", ".xml", ".env"],
+                hidden: [".log"]);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -986,6 +998,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".dll", ".log", ".js", ".pyc", ".env"],
+                hidden: [".xml"]);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -1376,6 +1392,64 @@ public sealed class MainWindowIgnoreOptionsUiTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task MixedRootExtensionAndIgnoreChanges_ConvergeToLastAppliedState()
+    {
+        using var project = UiTestProject.CreateWithRootExtensionIgnoreStressWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await WaitForRootFolderStateAsync(window, "api", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "web", visible: true, isChecked: true);
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".log", visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
+
+            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.UseGitIgnore, isChecked: false);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
+            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".log");
+
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: false);
+            await WaitForExtensionStateAsync(window, ".log", visible: true, isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "api", "src", "Program.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "api", ".visible-dot", "inside.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "api", "src", "runtime.log");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "docs", "readme.md");
+
+            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".log");
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.UseGitIgnore, isChecked: true);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
+            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
+
+            await WaitForRootFolderStateAsync(window, "docs", visible: true, isChecked: true);
+            await WaitForExtensionStateAsync(window, ".log", visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFolders, visible: true, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "api", "src", "Program.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "api", "src", "important.log");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "docs", "readme.md");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "api", "src", "runtime.log");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "api", ".visible-dot", "inside.cs");
+            await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     private static async Task AssertDynamicIgnoreOptionStateIsPreservedWhenRootSelectionRestoresIt(
         IgnoreOptionId optionId)
     {
@@ -1625,6 +1699,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await WaitForProjectTreePathStateAsync(window, exists: true, visiblePath);
         foreach (var hiddenPath in hiddenPaths)
             await WaitForProjectTreePathStateAsync(window, exists: false, hiddenPath);
+    }
+
+    private static async Task AssertExtensionStatesAsync(
+        MainWindow window,
+        IReadOnlyCollection<string> visibleChecked,
+        IReadOnlyCollection<string> hidden)
+    {
+        // These assertions bind the user-visible extension list to the currently applied
+        // ignore controllers. A path can be correct while the extension checklist is stale.
+        foreach (var extension in visibleChecked)
+            await WaitForExtensionStateAsync(window, extension, visible: true, isChecked: true);
+        foreach (var extension in hidden)
+            await WaitForExtensionStateAsync(window, extension, visible: false);
     }
 
     private static async Task WaitForProjectTreePathStateAsync(
