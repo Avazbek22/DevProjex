@@ -51,6 +51,22 @@ public sealed class TreeSearchCoordinatorTests
 		Assert.False(root.Children[1].Children[0].IsExpanded);
 	}
 
+	[AvaloniaFact]
+	public async Task UpdateSearchMatches_FromWorkerThreadWithAvaloniaApplication_DoesNotReadThemeResourcesOffDispatcher()
+	{
+		var (viewModel, treeView) = CreateContext();
+		var root = CreateTree();
+		viewModel.TreeNodes.Add(root);
+
+		using var coordinator = new TreeSearchCoordinator(viewModel, treeView);
+		viewModel.SearchQuery = "___no_match___";
+
+		await Task.Run(() => coordinator.UpdateSearchMatches());
+
+		Assert.False(coordinator.HasMatches);
+		Assert.Equal("(0 / 0)", viewModel.SearchMatchSummaryText);
+	}
+
 	[Fact]
 	public void UpdateSearchMatches_WithSingleDeepMatch_SelectsNodeAndExpandsAncestors()
 	{
