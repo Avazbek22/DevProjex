@@ -12,4 +12,5 @@ public sealed record SelectionRefreshSnapshot(
     IgnoreControllerImpactCounts ControllerImpactCounts,
     IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreOptionStateCache,
     bool RootAccessDenied,
-    bool HadAccessDenied);
+    bool HadAccessDenied,
+    ProjectTreeInventorySnapshot? TreeInventory = null);

@@ -104,6 +104,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 		Assert.False(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 		Assert.False(viewModel.AllIgnoreChecked);
 		Assert.Contains(IgnoreOptionId.UseGitIgnore, coordinator.GetSelectedIgnoreOptionIds());
+		AssertPersistentState(coordinator, IgnoreOptionId.UseGitIgnore, expectedChecked: true);
 	}
 
 	[Theory]
@@ -138,6 +139,17 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)
 	{
 		return Assert.Single(viewModel.IgnoreOptions, option => option.Id == id);
+	}
+
+	private static void AssertPersistentState(
+		SelectionSyncCoordinator coordinator,
+		IgnoreOptionId optionId,
+		bool expectedChecked)
+	{
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.NotNull(states);
+		Assert.True(states!.TryGetValue(optionId, out var actualChecked));
+		Assert.Equal(expectedChecked, actualChecked);
 	}
 
 	private static IgnoreOptionCounts BuildCounts(IgnoreOptionId dynamicOptionId, bool dynamicVisible)

@@ -36,7 +36,10 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 			effectiveRules,
 			legacyRawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 
-		AssertSetEquals(legacyRawScan.Value.Extensions, snapshot.Value.Extensions);
+		AssertSnapshotExtensionsMatchLegacy(
+			legacyRawScan.Value.Extensions,
+			snapshot.Value.Extensions,
+			effectiveRules);
 		Assert.Equal(legacyRawScan.Value.IgnoreOptionCounts, snapshot.Value.RawIgnoreOptionCounts);
 		Assert.Equal(legacyEffectiveScan.Value, snapshot.Value.EffectiveIgnoreOptionCounts);
 		Assert.Equal(
@@ -86,7 +89,10 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 			effectiveRules,
 			legacyRawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 
-		AssertSetEquals(legacyRawScan.Value.Extensions, snapshot.Value.Extensions);
+		AssertSnapshotExtensionsMatchLegacy(
+			legacyRawScan.Value.Extensions,
+			snapshot.Value.Extensions,
+			effectiveRules);
 		Assert.Equal(legacyRawScan.Value.IgnoreOptionCounts, snapshot.Value.RawIgnoreOptionCounts);
 		Assert.Equal(legacyEffectiveScan.Value, snapshot.Value.EffectiveIgnoreOptionCounts);
 		Assert.Contains(".md", snapshot.Value.Extensions);
@@ -149,7 +155,10 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 			smallRules,
 			legacyRawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 
-		AssertSetEquals(legacyRawScan.Value.Extensions, snapshot.Value.Extensions);
+		AssertSnapshotExtensionsMatchLegacy(
+			legacyRawScan.Value.Extensions,
+			snapshot.Value.Extensions,
+			smallRules);
 		Assert.Equal(legacyRawScan.Value.IgnoreOptionCounts, snapshot.Value.RawIgnoreOptionCounts);
 		Assert.Equal(legacyEffectiveScan.Value, snapshot.Value.EffectiveIgnoreOptionCounts);
 		Assert.Equal([".cs"], snapshot.Value.Extensions.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
@@ -266,6 +275,45 @@ public sealed class FileSystemScannerIgnoreSectionSnapshotMatrixIntegrationTests
 		Assert.True(
 			expected.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
 				.SequenceEqual(actual.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)));
+	}
+
+	private static void AssertSnapshotExtensionsMatchLegacy(
+		IReadOnlySet<string> legacyExtensions,
+		IReadOnlySet<string> snapshotExtensions,
+		IgnoreRules effectiveRules)
+	{
+		if (!effectiveRules.IgnoreExtensionlessFiles)
+		{
+			AssertSetEquals(legacyExtensions, snapshotExtensions);
+			return;
+		}
+
+		// The optimized snapshot path keeps extensionless availability in
+		// IgnoreOptionCounts and avoids carrying every extensionless file name in the
+		// extension set. Real extension options must still match the legacy pipeline.
+		AssertSetEquals(FilterExtensionEntries(legacyExtensions), snapshotExtensions);
+		Assert.DoesNotContain(snapshotExtensions, IsExtensionlessEntry);
+	}
+
+	private static HashSet<string> FilterExtensionEntries(IEnumerable<string> entries)
+	{
+		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var entry in entries)
+		{
+			if (!IsExtensionlessEntry(entry))
+				extensions.Add(entry);
+		}
+
+		return extensions;
+	}
+
+	private static bool IsExtensionlessEntry(string value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+			return false;
+
+		var extension = Path.GetExtension(value);
+		return string.IsNullOrEmpty(extension) || extension == ".";
 	}
 
 	private static IgnoreRules CreateBaseRules() => new(

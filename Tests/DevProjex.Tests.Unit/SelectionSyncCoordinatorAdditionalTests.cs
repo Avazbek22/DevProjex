@@ -93,6 +93,75 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public async Task UpdateLiveOptionsFromRootSelectionIfDirtyAsync_AfterSnapshotApply_DoesNotRunRedundantSnapshot()
+	{
+		var viewModel = CreateViewModel();
+		var path = @"C:\Project";
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		MarkSelectionRefreshDirty(coordinator);
+
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			new SelectionRefreshSnapshot(
+				RootOptions: [new SelectionOption("src", true)],
+				ExtensionOptions: [new SelectionOption(".cs", true)],
+				IgnoreOptions: [],
+				ExtensionlessEntriesCount: 0,
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+				IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>(),
+				RootAccessDenied: false,
+				HadAccessDenied: false));
+
+		await coordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(path, cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, scanner.RootSelectionSnapshotCount);
+	}
+
+	[Fact]
+	public void ApplySelectionRefreshSnapshot_InvalidatesOlderStandaloneIgnoreAvailabilityRefreshes()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(viewModel);
+		var beforeVersion = GetPrivateIgnoreOptionsVersion(coordinator);
+
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			new SelectionRefreshSnapshot(
+				RootOptions: [new SelectionOption("src", true)],
+				ExtensionOptions: [new SelectionOption(".cs", true)],
+				IgnoreOptions:
+				[
+					new ResolvedIgnoreOptionState(IgnoreOptionId.UseGitIgnore, "Use .gitignore", true, true),
+					new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders (100)", true, true)
+				],
+				ExtensionlessEntriesCount: 0,
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: new IgnoreOptionCounts(DotFolders: 100),
+				ControllerImpactCounts: new IgnoreControllerImpactCounts(GitIgnore: 150),
+				IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.UseGitIgnore] = true,
+					[IgnoreOptionId.DotFolders] = true
+				},
+				RootAccessDenied: false,
+				HadAccessDenied: false));
+
+		var afterVersion = GetPrivateIgnoreOptionsVersion(coordinator);
+
+		// Standalone async availability refreshes compare this version before mutating
+		// the UI. Count-driven snapshots must advance it to preserve one authoritative
+		// ignore state after live/full refreshes.
+		Assert.True(afterVersion > beforeVersion);
+		Assert.Contains(viewModel.IgnoreOptions, option =>
+			option.Id == IgnoreOptionId.DotFolders &&
+			option.Label == "dot folders (100)" &&
+			option.IsChecked);
+	}
+
+	[Fact]
 	public void PopulateExtensionsForRootSelectionAsync_DoesNotDropCachedSelections()
 	{
 		var viewModel = CreateViewModel();
@@ -330,7 +399,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
-	public void ApplyProjectProfileSelections_SetsIgnoreSelectionCache()
+	public void ApplyProjectProfileSelections_StoresUnavailableIgnoreSelectionsWithoutActivatingHiddenRules()
 	{
 		var viewModel = CreateViewModel();
 		var coordinator = CreateCoordinator(viewModel);
@@ -341,10 +410,12 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		coordinator.ApplyProjectProfileSelections("C:\\ProjectA", profile);
 		var selected = coordinator.GetSelectedIgnoreOptionIds();
+		var persistedStates = coordinator.SnapshotIgnoreOptionStatesForPersistence();
 
-		Assert.Equal(2, selected.Count);
-		Assert.Contains(IgnoreOptionId.DotFiles, selected);
-		Assert.Contains(IgnoreOptionId.HiddenFiles, selected);
+		Assert.Empty(selected);
+		Assert.NotNull(persistedStates);
+		Assert.True(persistedStates![IgnoreOptionId.DotFiles]);
+		Assert.True(persistedStates[IgnoreOptionId.HiddenFiles]);
 	}
 
 	[Fact]
@@ -501,6 +572,79 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.True(viewModel.Extensions.Single(option => option.Name == ".md").IsChecked);
 	}
 
+	[Fact]
+	public void ApplyRootOptions_WhenOptionsAreUnchanged_KeepsExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.AllRootFoldersChecked = false;
+		var coordinator = CreateCoordinator(viewModel);
+		var options = new[]
+		{
+			new SelectionOption("src", true),
+			new SelectionOption("tests", false)
+		};
+
+		ApplyRootOptions(coordinator, options);
+		var firstRoot = viewModel.RootFolders[0];
+		var collectionEvents = 0;
+		viewModel.RootFolders.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyRootOptions(coordinator, options);
+
+		Assert.Same(firstRoot, viewModel.RootFolders[0]);
+		Assert.Equal(0, collectionEvents);
+	}
+
+	[Fact]
+	public void ApplyExtensionOptions_WhenOptionsAreUnchanged_KeepsExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.AllExtensionsChecked = false;
+		var coordinator = CreateCoordinator(viewModel);
+		var options = new[]
+		{
+			new SelectionOption(".cs", true),
+			new SelectionOption(".md", false)
+		};
+
+		ApplyExtensionOptions(coordinator, options);
+		var firstExtension = viewModel.Extensions[0];
+		var collectionEvents = 0;
+		viewModel.Extensions.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyExtensionOptions(coordinator, options);
+
+		Assert.Same(firstExtension, viewModel.Extensions[0]);
+		Assert.Equal(0, collectionEvents);
+	}
+
+	[Fact]
+	public void ApplyResolvedIgnoreOptions_WhenOptionsAreUnchanged_KeepsExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(viewModel);
+		var options = new[]
+		{
+			new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders", true, true),
+			new ResolvedIgnoreOptionState(IgnoreOptionId.EmptyFiles, "empty files", true, false)
+		};
+		var stateCache = new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.DotFolders] = true,
+			[IgnoreOptionId.EmptyFiles] = false
+		};
+
+		ApplyResolvedIgnoreOptions(coordinator, options, stateCache);
+		var firstIgnoreOption = viewModel.IgnoreOptions[0];
+		var collectionEvents = 0;
+		viewModel.IgnoreOptions.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyResolvedIgnoreOptions(coordinator, options, stateCache);
+
+		Assert.Same(firstIgnoreOption, viewModel.IgnoreOptions[0]);
+		Assert.Equal(0, collectionEvents);
+	}
+
 	private static MainWindowViewModel CreateViewModel()
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
@@ -509,7 +653,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 private static SelectionSyncCoordinator CreateCoordinator(
 	MainWindowViewModel viewModel,
-	StubFileSystemScanner? scanner = null,
+	IFileSystemScanner? scanner = null,
 	Func<string?>? currentPathProvider = null)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
@@ -674,6 +818,47 @@ private static SelectionSyncCoordinator CreateCoordinator(
 	}
 
 	[Fact]
+	public void ApplyRootAndDependentsSnapshot_WhenPathIsStale_DoesNotMutateOptions()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.RootFolders.Add(new SelectionOptionViewModel("keep", true));
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".keep", true));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.DotFolders, "dot folders", false));
+		var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => "C:\\ProjectB");
+
+		var applied = coordinator.ApplyRootAndDependentsSnapshot(
+			"C:\\ProjectA",
+			CreateSelectionRefreshSnapshot());
+
+		Assert.False(applied);
+		Assert.Single(viewModel.RootFolders);
+		Assert.Equal("keep", viewModel.RootFolders[0].Name);
+		Assert.Single(viewModel.Extensions);
+		Assert.Equal(".keep", viewModel.Extensions[0].Name);
+		Assert.Single(viewModel.IgnoreOptions);
+		Assert.False(viewModel.IgnoreOptions[0].IsChecked);
+	}
+
+	[Fact]
+	public void ApplyRootAndDependentsSnapshot_WhenPreparedForTargetPath_AppliesAndConsumesPreparedState()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => "C:\\ProjectB");
+		coordinator.ResetProjectProfileSelections("C:\\ProjectA");
+
+		var applied = coordinator.ApplyRootAndDependentsSnapshot(
+			"C:\\ProjectA",
+			CreateSelectionRefreshSnapshot());
+
+		var session = GetPrivateSession(coordinator);
+		Assert.True(applied);
+		Assert.Contains(viewModel.RootFolders, option => option.Name == "src" && option.IsChecked);
+		Assert.Contains(viewModel.Extensions, option => option.Name == ".cs" && option.IsChecked);
+		Assert.Contains(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
+		Assert.False(session.HasPreparedSelectionForPath("C:\\ProjectA"));
+	}
+
+	[Fact]
 	public void ApplyProjectProfileSelections_EmptyExtensions_StillInitializesExtensionCache()
 	{
 		var coordinator = CreateCoordinator(CreateViewModel());
@@ -684,10 +869,9 @@ private static SelectionSyncCoordinator CreateCoordinator(
 
 		coordinator.ApplyProjectProfileSelections("C:\\ProjectA", profile);
 
-		var initialized = GetPrivateBoolField(coordinator, "_extensionsSelectionInitialized");
-		var cached = GetPrivateHashSetField(coordinator, "_extensionsSelectionCache");
-		Assert.True(initialized);
-		Assert.Empty(cached);
+		var session = GetPrivateSession(coordinator);
+		Assert.True(session.Extensions.IsInitialized);
+		Assert.Empty(session.Extensions.SelectedNames);
 	}
 
 	[Fact]
@@ -697,8 +881,8 @@ private static SelectionSyncCoordinator CreateCoordinator(
 
 		coordinator.ResetProjectProfileSelections("C:\\ProjectB");
 
-		var prepared = GetPrivateStringField(coordinator, "_preparedSelectionPath");
-		Assert.Equal("C:\\ProjectB", prepared);
+		var session = GetPrivateSession(coordinator);
+		Assert.True(session.HasPreparedSelectionForPath("C:\\ProjectB"));
 	}
 
 	[Fact]
@@ -737,6 +921,52 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		Assert.Contains(viewModel.IgnoreOptions, option => option.Id != IgnoreOptionId.DotFiles && !option.IsChecked);
 	}
 
+	private sealed class CountingRootSelectionSnapshotScanner
+		: IFileSystemScanner, IFileSystemScannerRootSelectionSnapshotProvider
+	{
+		public int RootSelectionSnapshotCount { get; private set; }
+
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(["src"], false, false);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
+			string rootPath,
+			IReadOnlyCollection<string> selectedRootFolders,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			bool includeDirectoryToggleProbeRoots = false,
+			CancellationToken cancellationToken = default,
+			bool includeControllerImpactProbeRoots = false)
+		{
+			RootSelectionSnapshotCount++;
+			return new ScanResult<IgnoreSectionScanData>(
+				new IgnoreSectionScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+					IgnoreOptionCounts.Empty,
+					IgnoreOptionCounts.Empty),
+				false,
+				false);
+		}
+	}
+
 	private static StubLocalizationCatalog CreateCatalog()
 	{
 		var data = new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
@@ -764,40 +994,109 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, true]);
 	}
 
-	private static void SetPrivateField(SelectionSyncCoordinator coordinator, string fieldName, string? value)
+	private static void ApplyRootOptions(
+		SelectionSyncCoordinator coordinator,
+		IReadOnlyList<SelectionOption> options)
 	{
-		var field = typeof(SelectionSyncCoordinator).GetField(
-			fieldName,
-			BindingFlags.NonPublic | BindingFlags.Instance);
-		Assert.NotNull(field);
-		field.SetValue(coordinator, value);
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"ApplyRootOptions",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [options]);
 	}
 
-	private static bool GetPrivateBoolField(SelectionSyncCoordinator coordinator, string fieldName)
+	private static void ApplyExtensionOptions(
+		SelectionSyncCoordinator coordinator,
+		IReadOnlyList<SelectionOption> options)
 	{
-		var field = typeof(SelectionSyncCoordinator).GetField(
-			fieldName,
-			BindingFlags.NonPublic | BindingFlags.Instance);
-		Assert.NotNull(field);
-		return (bool)field.GetValue(coordinator)!;
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"ApplyExtensionOptions",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(
+			coordinator,
+			[options, 0, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty, true]);
 	}
 
-	private static string? GetPrivateStringField(SelectionSyncCoordinator coordinator, string fieldName)
+	private static void ApplyResolvedIgnoreOptions(
+		SelectionSyncCoordinator coordinator,
+		IReadOnlyList<ResolvedIgnoreOptionState> options,
+		IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
 	{
-		var field = typeof(SelectionSyncCoordinator).GetField(
-			fieldName,
-			BindingFlags.NonPublic | BindingFlags.Instance);
-		Assert.NotNull(field);
-		return (string?)field.GetValue(coordinator);
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"ApplyResolvedIgnoreOptions",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [options, stateCache]);
 	}
 
-	private static HashSet<string> GetPrivateHashSetField(SelectionSyncCoordinator coordinator, string fieldName)
+	private static void ApplySelectionRefreshSnapshot(
+		SelectionSyncCoordinator coordinator,
+		SelectionRefreshSnapshot snapshot)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"ApplySelectionRefreshSnapshot",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [snapshot]);
+	}
+
+	private static SelectionRefreshSnapshot CreateSelectionRefreshSnapshot()
+	{
+		return new SelectionRefreshSnapshot(
+			RootOptions:
+			[
+				new SelectionOption("src", true),
+				new SelectionOption("docs", false)
+			],
+			ExtensionOptions:
+			[
+				new SelectionOption(".cs", true),
+				new SelectionOption(".md", false)
+			],
+			IgnoreOptions:
+			[
+				new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders", true, true),
+				new ResolvedIgnoreOptionState(IgnoreOptionId.EmptyFiles, "empty files", true, false)
+			],
+			ExtensionlessEntriesCount: 0,
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: new IgnoreOptionCounts(DotFolders: 1),
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.DotFolders] = true,
+				[IgnoreOptionId.EmptyFiles] = false
+			},
+			RootAccessDenied: false,
+			HadAccessDenied: false);
+	}
+
+	private static void MarkSelectionRefreshDirty(SelectionSyncCoordinator coordinator)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"MarkSelectionRefreshDirty",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, []);
+	}
+
+	private static ProjectSelectionSessionState GetPrivateSession(SelectionSyncCoordinator coordinator)
 	{
 		var field = typeof(SelectionSyncCoordinator).GetField(
-			fieldName,
+			"_session",
 			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(field);
-		return (HashSet<string>)field.GetValue(coordinator)!;
+		return (ProjectSelectionSessionState)field.GetValue(coordinator)!;
+	}
+
+	private static int GetPrivateIgnoreOptionsVersion(SelectionSyncCoordinator coordinator)
+	{
+		var field = typeof(SelectionSyncCoordinator).GetField(
+			"_ignoreOptionsVersion",
+			BindingFlags.NonPublic | BindingFlags.Instance);
+		Assert.NotNull(field);
+		return (int)field.GetValue(coordinator)!;
 	}
 }
 

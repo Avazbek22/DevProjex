@@ -1,9 +1,11 @@
+using DevProjex.Application.Models;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class SelectionRefreshEngineTests
 {
 	[Fact]
-	public void ComputeFullRefreshSnapshot_UsesSecondPassRootRefreshForDynamicDotFolderAvailability()
+	public void ComputeFullRefreshSnapshot_DefaultDirectoryTogglesUseSinglePassRootProjection()
 	{
 		var scanner = new DotFolderNoiseScanner();
 		var useCase = new ScanOptionsUseCase(scanner);
@@ -39,20 +41,47 @@ public sealed class SelectionRefreshEngineTests
 
 		Assert.DoesNotContain(snapshot.RootOptions!, option => string.Equals(option.Name, ".cache", StringComparison.Ordinal));
 		Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "src", StringComparison.Ordinal));
-		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
 		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.ExtensionlessFiles && option.IsChecked);
 	}
 
 	[Fact]
-	public void ComputeFullRefreshSnapshot_DirectoryLevelDynamicChange_RebuildsRootFoldersExactlyOnce()
+	public void ComputeFullRefreshSnapshot_DefaultDirectoryLevelDynamicChange_UsesSingleRootRefresh()
 	{
 		var scanner = new CountingDirectoryLevelScanner();
 		var engine = CreateEngine(scanner);
 
 		_ = engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None);
 
-		Assert.Equal(2, scanner.RootFolderScanCount);
-		Assert.True(scanner.IgnoreSnapshotCallCount >= 3);
+		Assert.Equal(1, scanner.RootFolderScanCount);
+		Assert.Equal(2, scanner.IgnoreSnapshotCallCount);
+	}
+
+	[Fact]
+	public void ComputeFullRefreshSnapshot_SelfHiddenRuntimeOptions_DoNotOscillateAcrossMaximumPasses()
+	{
+		var scanner = new SelfHiddenRuntimeOptionsScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(scanner),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			(_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				ShowAdvancedCounts: true));
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None);
+
+		Assert.Equal(1, scanner.RootFolderScanCount);
+		Assert.Equal(1, scanner.RootSelectionSnapshotCount);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore && option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.EmptyFolders && option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.EmptyFiles && option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.ExtensionlessFiles && option.IsChecked);
 	}
 
 	[Fact]
@@ -90,14 +119,14 @@ public sealed class SelectionRefreshEngineTests
 		var engine = CreateEngine(scanner);
 
 		var exception = Assert.Throws<OperationCanceledException>(() =>
-			engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None));
+			engine.ComputeFullRefreshSnapshot(CreateInitializedEmptyIgnoreContext(), CancellationToken.None));
 
 		Assert.True(scanner.IgnoreSnapshotCallCount >= 2);
 		Assert.NotNull(exception);
 	}
 
 	[Fact]
-	public void ComputeFullRefreshSnapshot_ProfileFallback_PreservesUnavailableIgnoreSelectionWithoutLeakingVisibleOption()
+	public void ComputeFullRefreshSnapshot_ProfileFallback_PreservesDirectoryToggleWhenItAffectsRootList()
 	{
 		var scanner = new ProfileFallbackVisibilityScanner();
 		var engine = CreateEngine(scanner);
@@ -106,7 +135,7 @@ public sealed class SelectionRefreshEngineTests
 			CreateProfileContext([IgnoreOptionId.DotFolders]),
 			CancellationToken.None);
 
-		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
 		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.DotFolders, out var isChecked) && isChecked);
 	}
 
@@ -131,7 +160,7 @@ public sealed class SelectionRefreshEngineTests
 			CreateProfileContext([IgnoreOptionId.DotFolders]),
 			CancellationToken.None);
 
-		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
 		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && !option.IsChecked);
 		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore && !option.IsChecked);
 		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.DotFolders, out var isChecked) && isChecked);
@@ -158,6 +187,54 @@ public sealed class SelectionRefreshEngineTests
 
 		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
 		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore);
+	}
+
+	[Fact]
+	public void ComputeLiveRefreshSnapshot_ReusesIgnoreRulesForIdenticalInputs()
+	{
+		var scanner = new StableSnapshotScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var buildCount = 0;
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(scanner),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			(path, selectedIgnoreOptions, selectedRootFolders) =>
+			{
+				buildCount++;
+				return BuildIgnoreRules(path, selectedIgnoreOptions, selectedRootFolders);
+			},
+			GetIgnoreAvailability);
+		var context = CreateDefaultsContext();
+
+		_ = engine.ComputeLiveRefreshSnapshot(context, ["src"], CancellationToken.None);
+		_ = engine.ComputeLiveRefreshSnapshot(context, ["src"], CancellationToken.None);
+
+		Assert.Equal(1, buildCount);
+	}
+
+	[Fact]
+	public void ExtensionSnapshotReusePolicy_NullPolicyMatchesAllCheckedFallbackOptions()
+	{
+		var options = new[]
+		{
+			new SelectionOption(".cs", true),
+			new SelectionOption(".md", true)
+		};
+
+		Assert.True(ExtensionSnapshotReusePolicy.CanReuseSnapshot(null, options));
+	}
+
+	[Fact]
+	public void ExtensionSnapshotReusePolicy_NullPolicyDoesNotMatchUncheckedOptions()
+	{
+		var options = new[]
+		{
+			new SelectionOption(".cs", true),
+			new SelectionOption(".md", false)
+		};
+
+		Assert.False(ExtensionSnapshotReusePolicy.CanReuseSnapshot(null, options));
 	}
 
 	private static SelectionRefreshEngine CreateEngine(
@@ -192,6 +269,14 @@ public sealed class SelectionRefreshEngineTests
 				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 				HasExtensionlessEntries: false,
 				ExtensionlessEntriesCount: 0));
+
+	private static SelectionRefreshContext CreateInitializedEmptyIgnoreContext() =>
+		CreateDefaultsContext() with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(),
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>()
+		};
 
 	private static SelectionRefreshContext CreateNewExtensionPolicyContext() =>
 		CreateDefaultsContext() with
@@ -290,8 +375,52 @@ public sealed class SelectionRefreshEngineTests
 		return new StubLocalizationCatalog(data);
 	}
 
+	private static ScanResult<IgnoreSectionScanData> AggregateRootSelectionSnapshot(
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders,
+		ScanResult<IgnoreSectionScanData> rootFileSnapshot,
+		Func<string, ScanResult<IgnoreSectionScanData>> getFolderSnapshot,
+		IgnoreOptionCounts extraEffectiveCounts = default)
+	{
+		var extensions = new HashSet<string>(rootFileSnapshot.Value.Extensions, StringComparer.OrdinalIgnoreCase);
+		var rawCounts = rootFileSnapshot.Value.RawIgnoreOptionCounts;
+		var effectiveCounts = rootFileSnapshot.Value.EffectiveIgnoreOptionCounts.Add(extraEffectiveCounts);
+		var controllerImpactCounts = rootFileSnapshot.Value.ControllerImpactCounts;
+		var rootAccessDenied = rootFileSnapshot.RootAccessDenied;
+		var hadAccessDenied = rootFileSnapshot.HadAccessDenied;
+
+		foreach (var selectedRootFolder in selectedRootFolders)
+		{
+			var snapshot = getFolderSnapshot(Path.Combine(rootPath, selectedRootFolder));
+			extensions.UnionWith(snapshot.Value.Extensions);
+			rawCounts = rawCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
+			effectiveCounts = effectiveCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
+			controllerImpactCounts = controllerImpactCounts.Add(snapshot.Value.ControllerImpactCounts);
+			rootAccessDenied |= snapshot.RootAccessDenied;
+			hadAccessDenied |= snapshot.HadAccessDenied;
+		}
+
+		return new ScanResult<IgnoreSectionScanData>(
+			new IgnoreSectionScanData(extensions, rawCounts, effectiveCounts, controllerImpactCounts),
+			rootAccessDenied,
+			hadAccessDenied);
+	}
+
+	private static bool ContainsRootFolderName(
+		IEnumerable<string> rootFolders,
+		string name)
+	{
+		foreach (var rootFolder in rootFolders)
+		{
+			if (PathComparer.Default.Equals(rootFolder, name))
+				return true;
+		}
+
+		return false;
+	}
+
 	private sealed class DotFolderNoiseScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
 	{
 		public bool CanReadRoot(string rootPath) => true;
 
@@ -374,10 +503,35 @@ public sealed class SelectionRefreshEngineTests
 			IExtensionInclusionPolicy? effectiveExtensionPolicy,
 			CancellationToken cancellationToken = default) =>
 			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
+			string rootPath,
+			IReadOnlyCollection<string> selectedRootFolders,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			bool includeDirectoryToggleProbeRoots = false,
+			CancellationToken cancellationToken = default,
+			bool includeControllerImpactProbeRoots = false)
+		{
+			var extraEffectiveCounts =
+				includeDirectoryToggleProbeRoots &&
+				effectiveRules.IgnoreDotFolders &&
+				!ContainsRootFolderName(selectedRootFolders, ".cache")
+					? new IgnoreOptionCounts(DotFolders: 1)
+					: IgnoreOptionCounts.Empty;
+
+			return AggregateRootSelectionSnapshot(
+				rootPath,
+				selectedRootFolders,
+				GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, effectiveExtensionPolicy, cancellationToken),
+				folderPath => GetIgnoreSectionSnapshot(folderPath, extensionDiscoveryRules, effectiveRules, effectiveExtensionPolicy, cancellationToken),
+				extraEffectiveCounts);
+		}
 	}
 
 	private sealed class CountingDirectoryLevelScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
 	{
 		public int RootFolderScanCount { get; private set; }
 		public int IgnoreSnapshotCallCount { get; private set; }
@@ -459,6 +613,31 @@ public sealed class SelectionRefreshEngineTests
 			IExtensionInclusionPolicy? effectiveExtensionPolicy,
 			CancellationToken cancellationToken = default) =>
 			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
+			string rootPath,
+			IReadOnlyCollection<string> selectedRootFolders,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			bool includeDirectoryToggleProbeRoots = false,
+			CancellationToken cancellationToken = default,
+			bool includeControllerImpactProbeRoots = false)
+		{
+			var extraEffectiveCounts =
+				includeDirectoryToggleProbeRoots &&
+				effectiveRules.IgnoreDotFolders &&
+				!ContainsRootFolderName(selectedRootFolders, ".cache")
+					? new IgnoreOptionCounts(DotFolders: 1)
+					: IgnoreOptionCounts.Empty;
+
+			return AggregateRootSelectionSnapshot(
+				rootPath,
+				selectedRootFolders,
+				GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, effectiveExtensionPolicy, cancellationToken),
+				folderPath => GetIgnoreSectionSnapshot(folderPath, extensionDiscoveryRules, effectiveRules, effectiveExtensionPolicy, cancellationToken),
+				extraEffectiveCounts);
+		}
 	}
 
 	private sealed class CountingFileLevelScanner
@@ -533,6 +712,95 @@ public sealed class SelectionRefreshEngineTests
 			IExtensionInclusionPolicy? effectiveExtensionPolicy,
 			CancellationToken cancellationToken = default) =>
 			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+	}
+
+	private sealed class SelfHiddenRuntimeOptionsScanner
+		: IFileSystemScanner, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
+	{
+		public int RootFolderScanCount { get; private set; }
+		public int RootSelectionSnapshotCount { get; private set; }
+
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+			=> new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+			=> new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+		{
+			RootFolderScanCount++;
+			var hasRootSuppressingRule =
+				rules.UseGitIgnore ||
+				rules.UseSmartIgnore ||
+				rules.IgnoreDotFolders ||
+				rules.IgnoreEmptyFolders;
+			var names = hasRootSuppressingRule
+				? new List<string> { "src" }
+				: new List<string> { ".idea", "bin", "empty", "src" };
+			return new ScanResult<List<string>>(names, false, false);
+		}
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			CreateSnapshot(effectiveRules);
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			CreateSnapshot(effectiveRules);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
+			string rootPath,
+			IReadOnlyCollection<string> selectedRootFolders,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			bool includeDirectoryToggleProbeRoots = false,
+			CancellationToken cancellationToken = default,
+			bool includeControllerImpactProbeRoots = false)
+		{
+			RootSelectionSnapshotCount++;
+			return CreateSnapshot(effectiveRules);
+		}
+
+		private static ScanResult<IgnoreSectionScanData> CreateSnapshot(IgnoreRules effectiveRules)
+		{
+			var extensions = effectiveRules.IgnoreExtensionlessFiles
+				? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" }
+				: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", "README" };
+			// The scanner snapshot reports option impact for the current scope, not just
+			// currently visible leftovers. This keeps active self-hidden toggles stable
+			// without letting the refresh engine reuse stale counts from an old scope.
+			var counts = new IgnoreOptionCounts(
+				DotFolders: 1,
+				EmptyFolders: 1,
+				ExtensionlessFiles: 1,
+				EmptyFiles: 1);
+			var controllerImpactCounts = new IgnoreControllerImpactCounts(
+				GitIgnore: 1,
+				SmartIgnore: 1);
+
+			// This deliberately models options that hide their own evidence in the tree.
+			// The fresh snapshot still owns the impact truth; the engine only preserves
+			// the user's checked/unchecked preference separately in the option state cache.
+			return new ScanResult<IgnoreSectionScanData>(
+				new IgnoreSectionScanData(
+					extensions,
+					IgnoreOptionCounts.Empty,
+					counts,
+					controllerImpactCounts),
+				false,
+				false);
+		}
 	}
 
 	private sealed class NewExtensionPolicyScanner
@@ -661,7 +929,7 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	private sealed class ProfileFallbackVisibilityScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
 	{
 		private readonly IgnoreControllerImpactCounts _controllerImpactCounts;
 
@@ -753,5 +1021,71 @@ public sealed class SelectionRefreshEngineTests
 			IExtensionInclusionPolicy? effectiveExtensionPolicy,
 			CancellationToken cancellationToken = default) =>
 			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
+			string rootPath,
+			IReadOnlyCollection<string> selectedRootFolders,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			bool includeDirectoryToggleProbeRoots = false,
+			CancellationToken cancellationToken = default,
+			bool includeControllerImpactProbeRoots = false)
+		{
+			var extraEffectiveCounts =
+				includeDirectoryToggleProbeRoots &&
+				effectiveRules.IgnoreDotFolders &&
+				!ContainsRootFolderName(selectedRootFolders, ".cache")
+					? new IgnoreOptionCounts(DotFolders: 1)
+					: IgnoreOptionCounts.Empty;
+
+			return AggregateRootSelectionSnapshot(
+				rootPath,
+				selectedRootFolders,
+				GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, effectiveExtensionPolicy, cancellationToken),
+				folderPath => GetIgnoreSectionSnapshot(folderPath, extensionDiscoveryRules, effectiveRules, effectiveExtensionPolicy, cancellationToken),
+				extraEffectiveCounts);
+		}
 	}
+
+	private sealed class StableSnapshotScanner
+		: IFileSystemScanner, IFileSystemScannerExtensionPolicySnapshotProvider
+	{
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+			=> new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+			=> new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
+			=> new(new List<string> { "src" }, false, false);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			CreateEmptySnapshot();
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			CreateEmptySnapshot();
+
+		private static ScanResult<IgnoreSectionScanData> CreateEmptySnapshot() =>
+			new(
+				new IgnoreSectionScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+					IgnoreOptionCounts.Empty,
+					IgnoreOptionCounts.Empty),
+				false,
+				false);
+	}
+
 }

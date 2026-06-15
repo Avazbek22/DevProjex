@@ -28,7 +28,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderMatrixTests
             beforeSelection,
             afterSelection);
 
-        if (!availabilityChanged)
+        if (!availabilityChanged && expectedImpactValue == (int)IgnoreOptionRefreshImpact.None)
         {
             Assert.Equal(IgnoreSectionRefreshPlan.None, plan);
             return;

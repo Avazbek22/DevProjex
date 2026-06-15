@@ -14,7 +14,7 @@ public sealed class SelectionSyncCoordinatorPathSemanticsTests
 
 		coordinator.ApplyProjectProfileSelections(projectPath, profile);
 
-		var cache = GetPrivateRootSelectionCache(coordinator);
+		var cache = GetPrivateSession(coordinator).RootFolders.SelectedNames;
 		var expectedCount = OperatingSystem.IsWindows() ? 1 : 2;
 		Assert.Equal(expectedCount, cache.Count);
 		Assert.Contains("src", cache);
@@ -25,13 +25,14 @@ public sealed class SelectionSyncCoordinatorPathSemanticsTests
 	[Fact]
 	public void BuildIgnoreRulesCacheKey_RootSelectionCaseVariants_FollowPathComparer()
 	{
-		var method = typeof(SelectionSyncCoordinator).GetMethod(
-			"BuildIgnoreRulesCacheKey",
-			BindingFlags.NonPublic | BindingFlags.Static);
-		Assert.NotNull(method);
-
-		var first = (string)method!.Invoke(null, [@"C:\Workspace\ProjectA", Array.Empty<IgnoreOptionId>(), new[] { "src" }])!;
-		var second = (string)method.Invoke(null, [@"C:\Workspace\ProjectA", Array.Empty<IgnoreOptionId>(), new[] { "Src" }])!;
+		var first = IgnoreRulesBuildCacheKeyBuilder.Build(
+			@"C:\Workspace\ProjectA",
+			Array.Empty<IgnoreOptionId>(),
+			new[] { "src" });
+		var second = IgnoreRulesBuildCacheKeyBuilder.Build(
+			@"C:\Workspace\ProjectA",
+			Array.Empty<IgnoreOptionId>(),
+			new[] { "Src" });
 
 		Assert.Equal(OperatingSystem.IsWindows(), string.Equals(first, second, StringComparison.Ordinal));
 	}
@@ -62,13 +63,13 @@ public sealed class SelectionSyncCoordinatorPathSemanticsTests
 			() => @"C:\Workspace\ProjectA");
 	}
 
-	private static HashSet<string> GetPrivateRootSelectionCache(SelectionSyncCoordinator coordinator)
+	private static ProjectSelectionSessionState GetPrivateSession(SelectionSyncCoordinator coordinator)
 	{
 		var field = typeof(SelectionSyncCoordinator).GetField(
-			"_rootSelectionCache",
+			"_session",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(field);
-		return (HashSet<string>)field!.GetValue(coordinator)!;
+		return (ProjectSelectionSessionState)field!.GetValue(coordinator)!;
 	}
 
 	private static StubLocalizationCatalog CreateCatalog()

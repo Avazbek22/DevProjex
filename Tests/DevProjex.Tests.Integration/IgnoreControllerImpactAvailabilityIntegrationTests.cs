@@ -96,12 +96,72 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 		Assert.DoesNotContain(snapshot.ExtensionOptions, option => option.Name == ".pyc");
 	}
 
+	[Fact]
+	public void RiderProjectsStyleWorkspace_ShowsDotFolders_WhenNestedProjectDotFoldersAffectOutput()
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateRiderProjectsStyleWorkspace(workspace);
+
+		var services = CreateServices();
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(workspace.Path),
+			TestContext.Current.CancellationToken);
+
+		var dotFolders = AssertIgnoreOption(snapshot, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+
+		Assert.Equal(5, snapshot.IgnoreOptionCounts.DotFolders);
+		Assert.Contains("(5)", dotFolders.Label);
+		Assert.DoesNotContain(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".xml", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void ActiveControllerWorkspace_DotFoldersRemainIndependent_WhenGitAndSmartAreDisabled()
+	{
+		using var project = new TemporaryDirectory();
+		CreateActiveControllerWorkspace(project);
+
+		var services = CreateServices();
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+		var controllersOffContext = CreateContextWithDisabledIgnoreOptions(
+			project.Path,
+			baseline,
+			IgnoreOptionId.UseGitIgnore,
+			IgnoreOptionId.SmartIgnore);
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			controllersOffContext,
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+		var dotFolders = AssertIgnoreOption(snapshot, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+
+		Assert.Equal(2, snapshot.IgnoreOptionCounts.DotFolders);
+		Assert.Contains("(2)", dotFolders.Label);
+		Assert.DoesNotContain(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".xml", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void RiderProjectsStyleWorkspace_HidesDotFolders_WhenGitIgnoreAlreadyMasksAllDotFolders()
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateRiderProjectsStyleWorkspace(workspace, gitIgnoreOwnsDotFolders: true);
+
+		var snapshot = ComputeDefaultSnapshot(workspace.Path);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: true);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFolders, expectedVisible: false, expectedChecked: null);
+		Assert.Equal(0, snapshot.IgnoreOptionCounts.DotFolders);
+		Assert.DoesNotContain(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".xml", StringComparison.OrdinalIgnoreCase));
+	}
+
 	private static SelectionRefreshSnapshot ComputeDefaultSnapshot(string projectPath)
 	{
 		var services = CreateServices();
 		return services.Engine.ComputeFullRefreshSnapshot(
 			CreateDefaultContext(projectPath),
-			CancellationToken.None);
+			TestContext.Current.CancellationToken);
 	}
 
 	private static void CreateSunnyEastLikeWorkspace(TemporaryDirectory project)
@@ -121,7 +181,107 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 		project.CreateFile("src/Client/Client/Program.cs", "Console.WriteLine(\"ok\");\n");
 	}
 
-	private static void AssertIgnoreOption(
+	private static void CreateActiveControllerWorkspace(TemporaryDirectory project)
+	{
+		project.CreateFile(".gitignore", "logs/\n");
+		project.CreateFile("App.csproj", "<Project />\n");
+		project.CreateFile("Program.cs", "Console.WriteLine(\"ok\");\n");
+		project.CreateFile("bin/Debug/net10.0/App.dll", "generated\n");
+		project.CreateFile("logs/runtime.log", "ignored\n");
+		project.CreateFile(".idea/settings.xml", "<settings />\n");
+		project.CreateFile(".run/App.run.xml", "<component />\n");
+	}
+
+	private static void CreateRiderProjectsStyleWorkspace(
+		TemporaryDirectory workspace,
+		bool gitIgnoreOwnsDotFolders = false)
+	{
+		CreateNestedProject(
+			workspace,
+			"DevProjex",
+			"DevProjex.csproj",
+			"src/MainWindow.cs",
+			"class MainWindow {}",
+			[".idea", ".github", ".run"],
+			"bin/Debug/net10.0/DevProjex.dll",
+			"logs/runtime.log",
+			gitIgnoreOwnsDotFolders);
+		CreateNestedProject(
+			workspace,
+			"SunnyEast",
+			"package.json",
+			"src/app.ts",
+			"export const app = true;\n",
+			[".idea", ".claude"],
+			"node_modules/pkg/index.js",
+			"dist/bundle.js",
+			gitIgnoreOwnsDotFolders);
+	}
+
+	private static void CreateNestedProject(
+		TemporaryDirectory workspace,
+		string rootName,
+		string markerPath,
+		string sourcePath,
+		string sourceContent,
+		string[] dotFolders,
+		string smartArtifactPath,
+		string gitIgnoredPath,
+		bool gitIgnoreOwnsDotFolders)
+	{
+		workspace.CreateFile($"{rootName}/{markerPath}", BuildMarkerContent(markerPath));
+		workspace.CreateFile($"{rootName}/{sourcePath}", sourceContent);
+		workspace.CreateFile($"{rootName}/{smartArtifactPath}", "generated\n");
+		workspace.CreateFile($"{rootName}/{gitIgnoredPath}", "ignored\n");
+		workspace.CreateFile($"{rootName}/.gitignore", BuildGitIgnoreContent(gitIgnoredPath, dotFolders, gitIgnoreOwnsDotFolders));
+
+		foreach (var dotFolder in dotFolders)
+		{
+			// The XML-only payload makes DotFolders impact observable through extension discovery.
+			workspace.CreateFile($"{rootName}/{dotFolder}/settings.xml", "<settings />\n");
+		}
+	}
+
+	private static string BuildMarkerContent(string markerPath) =>
+		Path.GetExtension(markerPath).Equals(".json", StringComparison.OrdinalIgnoreCase)
+			? "{}\n"
+			: "<Project />\n";
+
+	private static string BuildGitIgnoreContent(
+		string gitIgnoredPath,
+		IEnumerable<string> dotFolders,
+		bool gitIgnoreOwnsDotFolders)
+	{
+		var ignoredRoot = gitIgnoredPath.Split(['/', '\\'], 2)[0];
+		var lines = new List<string> { $"{ignoredRoot}/" };
+		if (gitIgnoreOwnsDotFolders)
+			lines.AddRange(dotFolders.Select(folder => $"{folder}/"));
+
+		return string.Join('\n', lines) + "\n";
+	}
+
+	private static SelectionRefreshContext CreateContextWithDisabledIgnoreOptions(
+		string projectPath,
+		SelectionRefreshSnapshot snapshot,
+		params IgnoreOptionId[] disabledOptions)
+	{
+		var disabled = disabledOptions.ToHashSet();
+		var stateCache = snapshot.IgnoreOptionStateCache.ToDictionary(pair => pair.Key, pair => pair.Value);
+		foreach (var optionId in disabled)
+			stateCache[optionId] = false;
+
+		return CreateContextFromSnapshot(projectPath, snapshot) with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = snapshot.IgnoreOptions
+				.Select(option => option.Id)
+				.Where(optionId => !disabled.Contains(optionId))
+				.ToHashSet(),
+			IgnoreOptionStateCache = stateCache
+		};
+	}
+
+	private static ResolvedIgnoreOptionState AssertIgnoreOption(
 		SelectionRefreshSnapshot snapshot,
 		IgnoreOptionId optionId,
 		bool expectedVisible,
@@ -133,11 +293,13 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 		if (!expectedVisible)
 		{
 			Assert.Empty(options);
-			return;
+			return default;
 		}
 
 		Assert.Single(options);
 		if (expectedChecked.HasValue)
 			Assert.Equal(expectedChecked.Value, options[0].IsChecked);
+
+		return options[0];
 	}
 }

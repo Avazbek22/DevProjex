@@ -139,6 +139,68 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithNestedPythonSmartIgnoreAndIdeaWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("lab2", "requirements.txt"), "pytest\n");
+            WriteFile(rootPath, Path.Combine("lab2", "main.py"), "print('ok')\n");
+            WriteFile(rootPath, Path.Combine("lab2", "report_lab2.txt"), "report\n");
+            WriteFile(rootPath, Path.Combine("lab2", "var06.csv"), "value\n");
+            WriteFile(rootPath, Path.Combine("lab2", "__pycache__", "main.cpython-312.pyc"), "binary");
+            WriteFile(rootPath, Path.Combine("lab2", ".idea", "workspace.xml"), "<project />\n");
+            WriteFile(rootPath, Path.Combine("lab2", ".idea", "lab2.iml"), "<module />\n");
+            WriteFile(rootPath, "lab2 Peredelanniy.rar", "archive\n");
+        });
+    }
+
+    public static UiTestProject CreateWithNestedPolyglotIgnoreMatrixWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("api", ".gitignore"), "logs/\n");
+            WriteFile(rootPath, Path.Combine("api", "App.csproj"), "<Project />\n");
+            WriteFile(rootPath, Path.Combine("api", "src", "Program.cs"), "Console.WriteLine(\"ok\");\n");
+            WriteFile(rootPath, Path.Combine("api", "bin", "Debug", "app.dll"), "binary");
+            WriteFile(rootPath, Path.Combine("api", "logs", "runtime.log"), "git ignored\n");
+            WriteFile(rootPath, Path.Combine("web", "package.json"), "{}\n");
+            WriteFile(rootPath, Path.Combine("web", "src", "app.ts"), "export const ok = true;\n");
+            WriteFile(rootPath, Path.Combine("web", "node_modules", "pkg", "index.js"), "module.exports = {};\n");
+            WriteFile(rootPath, Path.Combine("python", "requirements.txt"), "pytest\n");
+            WriteFile(rootPath, Path.Combine("python", "app.py"), "print('ok')\n");
+            WriteFile(rootPath, Path.Combine("python", "__pycache__", "app.pyc"), "binary");
+            WriteFile(rootPath, Path.Combine(".idea", "workspace.xml"), "<project />\n");
+            WriteFile(rootPath, ".env", "APP_ENV=test\n");
+            WriteFile(rootPath, "README", "extensionless docs\n");
+            WriteFile(rootPath, "empty.txt", string.Empty);
+            Directory.CreateDirectory(Path.Combine(rootPath, "empty-root"));
+        });
+    }
+
+    public static UiTestProject CreateWithRootExtensionIgnoreStressWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("api", ".gitignore"), "*.log\n!important.log\n.git-owned/\n");
+            WriteFile(rootPath, Path.Combine("api", "App.csproj"), "<Project />\n");
+            WriteFile(rootPath, Path.Combine("api", "src", "Program.cs"), "Console.WriteLine(\"api\");\n");
+            WriteFile(rootPath, Path.Combine("api", "src", "runtime.log"), "ignored by gitignore\n");
+            WriteFile(rootPath, Path.Combine("api", "src", "important.log"), "explicitly unignored\n");
+            WriteFile(rootPath, Path.Combine("api", ".git-owned", "payload.txt"), "git-owned dot root\n");
+            WriteFile(rootPath, Path.Combine("api", ".idea", "workspace.xml"), "<project />\n");
+            WriteFile(rootPath, Path.Combine("api", ".visible-dot", "inside.cs"), "class InsideDot {}\n");
+
+            WriteFile(rootPath, Path.Combine("web", "package.json"), "{}\n");
+            WriteFile(rootPath, Path.Combine("web", "src", "app.ts"), "export const ok = true;\n");
+            WriteFile(rootPath, Path.Combine("web", "node_modules", "pkg", "index.js"), "module.exports = {};\n");
+            WriteFile(rootPath, Path.Combine("web", "node_modules", "pkg", "app.ts"), "export const hidden = true;\n");
+            WriteFile(rootPath, Path.Combine("web", ".cache", "cache.json"), "{}\n");
+
+            WriteFile(rootPath, Path.Combine("docs", "readme.md"), "# docs\n");
+            WriteFile(rootPath, Path.Combine("docs", ".draft", "notes.md"), "# draft\n");
+        });
+    }
+
     public static UiTestProject CreateWithHiddenDotFolderOverlapWorkspace()
     {
         return Create(static rootPath =>

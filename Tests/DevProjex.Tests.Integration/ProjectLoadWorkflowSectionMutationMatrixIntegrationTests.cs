@@ -107,12 +107,15 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
             {
                 var selectedRoots = CollectCheckedRootNames(baselineSnapshot);
                 selectedRoots.Remove(rootName);
+                var rootStates = BuildRootOptionStateCache(baselineSnapshot);
+                rootStates[rootName] = false;
 
                 return CreateEditableContext(rootPath, baselineSnapshot) with
                 {
                     AllRootFoldersChecked = false,
                     RootSelectionInitialized = true,
-                    RootSelectionCache = selectedRoots
+                    RootSelectionCache = selectedRoots,
+                    RootOptionStateCache = rootStates
                 };
             },
             snapshot =>
@@ -127,12 +130,15 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
             {
                 var selectedExtensions = CollectCheckedExtensionNames(baselineSnapshot);
                 selectedExtensions.Remove(extension);
+                var extensionStates = BuildExtensionOptionStateCache(baselineSnapshot);
+                extensionStates[extension] = false;
 
                 return CreateEditableContext(rootPath, baselineSnapshot) with
                 {
                     AllExtensionsChecked = false,
                     ExtensionsSelectionInitialized = true,
-                    ExtensionsSelectionCache = selectedExtensions
+                    ExtensionsSelectionCache = selectedExtensions,
+                    ExtensionOptionStateCache = extensionStates
                 };
             },
             snapshot =>
@@ -218,7 +224,16 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
                 snapshot.IgnoreOptionCounts,
                 snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
-                snapshot.ExtensionlessEntriesCount));
+                snapshot.ExtensionlessEntriesCount),
+            RootOptionStateCache: snapshot.RootOptions?.ToDictionary(
+                option => option.Name,
+                option => option.IsChecked,
+                PathComparer.Default),
+            ExtensionOptionStateCache: snapshot.ExtensionOptions.ToDictionary(
+                option => option.Name,
+                option => option.IsChecked,
+                StringComparer.OrdinalIgnoreCase),
+            IgnoreOptionStateCacheIsComplete: true);
     }
 
     private static SelectionRefreshContext BuildConvergedContext(
@@ -240,7 +255,28 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
 
     private static HashSet<IgnoreOptionId> CollectCheckedIgnoreOptionIds(SelectionRefreshSnapshot snapshot) =>
         new(
-            snapshot.IgnoreOptionStateCache.Where(pair => pair.Value).Select(pair => pair.Key));
+            snapshot.IgnoreOptions.Where(option => option.IsChecked).Select(option => option.Id));
+
+    private static Dictionary<string, bool> BuildRootOptionStateCache(SelectionRefreshSnapshot snapshot)
+    {
+        var cache = new Dictionary<string, bool>(PathComparer.Default);
+        if (snapshot.RootOptions is null)
+            return cache;
+
+        foreach (var option in snapshot.RootOptions)
+            cache[option.Name] = option.IsChecked;
+
+        return cache;
+    }
+
+    private static Dictionary<string, bool> BuildExtensionOptionStateCache(SelectionRefreshSnapshot snapshot)
+    {
+        var cache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in snapshot.ExtensionOptions)
+            cache[option.Name] = option.IsChecked;
+
+        return cache;
+    }
 
     private static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(
         IEnumerable<IgnoreOptionId> selectedIgnoreOptions,

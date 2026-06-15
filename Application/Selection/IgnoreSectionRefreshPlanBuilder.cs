@@ -13,10 +13,22 @@ public static class IgnoreSectionRefreshPlanBuilder
         IReadOnlySet<IgnoreOptionId> beforeSelection,
         IReadOnlySet<IgnoreOptionId> afterSelection)
     {
-        if (!beforeSnapshot.HasAvailabilityDifference(afterSnapshot))
-            return IgnoreSectionRefreshPlan.None;
-
         var impact = IgnoreOptionRefreshPlanner.ClassifyChangedSelection(beforeSelection, afterSelection);
+        if (!beforeSnapshot.HasAvailabilityDifference(afterSnapshot))
+        {
+            if (impact == IgnoreOptionRefreshImpact.None)
+                return IgnoreSectionRefreshPlan.None;
+
+            // A checked-state change can alter root/extension output even when the visible
+            // availability counters stay numerically equal. The follow-up keeps root options,
+            // extension options, and the final tree rules aligned inside the same refresh.
+            return new IgnoreSectionRefreshPlan(
+                RequiresIgnoreOptionsRefresh: true,
+                RequiresSecondSnapshotPass: true,
+                RequiresRootFolderRefresh: (impact & IgnoreOptionRefreshImpact.RootStructure) != 0,
+                Impact: impact);
+        }
+
         if (impact == IgnoreOptionRefreshImpact.None)
         {
             return new IgnoreSectionRefreshPlan(

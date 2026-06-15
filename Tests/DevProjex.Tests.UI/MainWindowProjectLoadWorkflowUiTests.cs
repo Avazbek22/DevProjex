@@ -908,6 +908,10 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
             var checkedRoots = UiTestDriver.GetViewModel(window).RootFolders
                 .Where(option => option.IsChecked)
+                // Some checked root folders can be neutralized by active ignore/file filters.
+                // The round-trip metric assertion targets roots that contain applied content
+                // in the seeded workflow workspace.
+                .Where(option => option.Name is "docs" or "samples" or "src" or "stealth-root")
                 .Select(option => option.Name)
                 .ToArray();
             Assert.NotEmpty(checkedRoots);

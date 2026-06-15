@@ -1293,9 +1293,13 @@ internal static class UiTestDriver
         // Preview mode switching is a two-step pipeline: the selected mode changes first,
         // then the actual preview refresh is scheduled and can temporarily clear the document.
         // UI tests must wait for both steps to settle before reading the live preview payload.
-        return !GetRequiredPrivateField<bool>(window, "_previewModeSwitchInProgress") &&
-               !GetRequiredPrivateField<bool>(window, "_previewRefreshRequested") &&
-               !GetRequiredPrivateField<bool>(window, "_clearPreviewBeforeNextRefresh");
+        return GetPreviewPipeline(window).IsIdle;
+    }
+
+    private static DevProjex.Avalonia.Coordinators.PreviewWorkspacePipeline GetPreviewPipeline(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField("_previewPipeline", BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<DevProjex.Avalonia.Coordinators.PreviewWorkspacePipeline>(field?.GetValue(window));
     }
 
     private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)

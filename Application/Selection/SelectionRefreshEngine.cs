@@ -1,4 +1,5 @@
 using DevProjex.Application.Models;
+using System.Runtime.InteropServices;
 
 namespace DevProjex.Application.Selection;
 
@@ -9,10 +10,20 @@ public sealed class SelectionRefreshEngine(
     Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, IgnoreRules> buildIgnoreRules,
     Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> getIgnoreOptionsAvailability)
 {
-    private const int MaximumDynamicSnapshotPasses = 3;
+    // Some dynamic chains need more than one follow-up pass:
+    // controller -> directory toggle -> empty/extensionless toggle -> final root shape.
+    private const int MaximumDynamicSnapshotPasses = 6;
     private static readonly HashSet<string> EmptyRootSelection = new(PathComparer.Default);
     private static readonly HashSet<string> EmptyExtensionSelection = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<IgnoreOptionId> EmptyIgnoreSelection = [];
+    private static readonly IgnoreSectionSnapshotState EmptySnapshotState = new(
+        HasIgnoreOptionCounts: false,
+        IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+        ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+        HasExtensionlessEntries: false,
+        ExtensionlessEntriesCount: 0);
+    private readonly object _ignoreRulesBuildCacheSync = new();
+    private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
 
     public SelectionRefreshSnapshot ComputeFullRefreshSnapshot(
         SelectionRefreshContext context,
@@ -25,16 +36,20 @@ public sealed class SelectionRefreshEngine(
             EmptyRootSelection,
             context,
             context.CurrentSnapshotState);
+        var initialSelectedIgnoreOptions = BuildInitialFullRefreshIgnoreSelection(
+            context,
+            warmIgnore.SelectedIgnoreOptions);
 
         var rootSection = BuildRootSection(
             context,
-            warmIgnore.SelectedIgnoreOptions,
+            initialSelectedIgnoreOptions,
             cancellationToken);
+        var dynamicContext = EnsureRuntimeRootStateCache(context, rootSection.Options);
 
         var dynamicSection = BuildDynamicSection(
-            context,
+            dynamicContext,
             rootSection.SelectedRoots,
-            warmIgnore.SelectedIgnoreOptions,
+            initialSelectedIgnoreOptions,
             warmIgnore.IgnoreOptionStateCache,
             context.CurrentSnapshotState,
             cancellationToken);
@@ -49,7 +64,8 @@ public sealed class SelectionRefreshEngine(
             ControllerImpactCounts: dynamicSection.ControllerImpactCounts,
             IgnoreOptionStateCache: dynamicSection.IgnoreOptionStateCache,
             RootAccessDenied: rootSection.RootAccessDenied || dynamicSection.RootAccessDenied,
-            HadAccessDenied: rootSection.HadAccessDenied || dynamicSection.HadAccessDenied);
+            HadAccessDenied: rootSection.HadAccessDenied || dynamicSection.HadAccessDenied,
+            TreeInventory: dynamicSection.TreeInventory);
     }
 
     public SelectionRefreshSnapshot ComputeLiveRefreshSnapshot(
@@ -59,10 +75,11 @@ public sealed class SelectionRefreshEngine(
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var selectedIgnoreOptions = BuildInitialLiveRefreshIgnoreSelection(context);
         var dynamicSection = BuildDynamicSection(
             context,
             selectedRoots,
-            context.IgnoreSelectionCache,
+            selectedIgnoreOptions,
             context.IgnoreOptionStateCache,
             context.CurrentSnapshotState,
             cancellationToken);
@@ -77,7 +94,8 @@ public sealed class SelectionRefreshEngine(
             ControllerImpactCounts: dynamicSection.ControllerImpactCounts,
             IgnoreOptionStateCache: dynamicSection.IgnoreOptionStateCache,
             RootAccessDenied: dynamicSection.RootAccessDenied,
-            HadAccessDenied: dynamicSection.HadAccessDenied);
+            HadAccessDenied: dynamicSection.HadAccessDenied,
+            TreeInventory: dynamicSection.TreeInventory);
     }
 
     private RootSectionSnapshot BuildRootSection(
@@ -85,7 +103,7 @@ public sealed class SelectionRefreshEngine(
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
         CancellationToken cancellationToken)
     {
-        var ignoreRules = buildIgnoreRules(context.Path, selectedIgnoreOptions, null);
+        var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, null);
         var scan = scanOptions.GetRootFolders(context.Path, ignoreRules, cancellationToken);
 
         var previousSelections = context.RootSelectionInitialized
@@ -126,6 +144,7 @@ public sealed class SelectionRefreshEngine(
         var currentSelectedIgnoreOptions = selectedIgnoreOptions;
         var currentIgnoreStateCache = ignoreStateCache;
         var previousSnapshot = beforeSnapshot;
+        var previousRuntimeSnapshot = EmptySnapshotState;
         IReadOnlyList<SelectionOption>? refreshedRootOptions = null;
         var rootAccessDenied = false;
         var hadAccessDenied = false;
@@ -141,6 +160,7 @@ public sealed class SelectionRefreshEngine(
                 currentRoots,
                 currentSelectedIgnoreOptions,
                 currentIgnoreStateCache,
+                previousRuntimeSnapshot,
                 cancellationToken);
 
             rootAccessDenied |= snapshot.RootAccessDenied;
@@ -149,7 +169,7 @@ public sealed class SelectionRefreshEngine(
             var refreshPlan = IgnoreSectionRefreshPlanBuilder.Build(
                 previousSnapshot,
                 snapshot.SnapshotState,
-                currentSelectedIgnoreOptions,
+                BuildMeasuredSelectionForRefreshPlanning(currentSelectedIgnoreOptions, snapshot.SnapshotState),
                 snapshot.SelectedIgnoreOptions);
             if (!refreshPlan.RequiresSecondSnapshotPass)
             {
@@ -176,6 +196,7 @@ public sealed class SelectionRefreshEngine(
             currentSelectedIgnoreOptions = snapshot.SelectedIgnoreOptions;
             currentIgnoreStateCache = snapshot.IgnoreOptionStateCache;
             previousSnapshot = snapshot.SnapshotState;
+            previousRuntimeSnapshot = snapshot.SnapshotState;
 
             if (passIndex == MaximumDynamicSnapshotPasses - 1)
             {
@@ -196,26 +217,39 @@ public sealed class SelectionRefreshEngine(
         IReadOnlyCollection<string> selectedRoots,
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyDictionary<IgnoreOptionId, bool> ignoreStateCache,
+        IgnoreSectionSnapshotState previousRuntimeSnapshotState,
         CancellationToken cancellationToken)
     {
-        var ignoreRules = buildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
+        var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
         var extensionScanRules = BuildExtensionAvailabilityScanRules(ignoreRules);
         var effectiveExtensionPolicy = BuildEffectiveExtensionPolicy(context);
 
-        // Extension availability and effective ignore counts must come from the same snapshot.
-        // Otherwise the UI can briefly show mismatched counts/options after dynamic toggles appear.
-        var scan = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
-            context.Path,
+        // Extension availability, effective ignore counts, and optional tree inventory must
+        // come from the same filesystem observation. This prevents mismatched UI sections and
+        // lets project load reuse the scan instead of enumerating the tree again.
+        var scan = GetDynamicSectionScan(
+            context,
             selectedRoots,
+            selectedIgnoreOptions,
             extensionScanRules,
             ignoreRules,
             effectiveExtensionPolicy,
-            includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
-            cancellationToken,
-            includeControllerImpactProbeRoots: ShouldIncludeControllerImpactProbeRoots(context));
+            cancellationToken);
+        var scanData = scan.Value.IgnoreSection;
 
-        var visibleExtensions = new List<string>(scan.Value.Extensions.Count);
-        var extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+        var snapshotState = CreateSnapshotState(
+            scanData.EffectiveIgnoreOptionCounts,
+            scanData.ControllerImpactCounts);
+        snapshotState = PreserveActiveRuntimeSnapshotState(
+            snapshotState,
+            previousRuntimeSnapshotState,
+            selectedIgnoreOptions);
+
+        var visibleExtensions = new List<string>(scanData.Extensions.Count);
+        var extensionlessEntriesCount = SplitExtensions(scanData.Extensions, visibleExtensions);
+        extensionlessEntriesCount = Math.Max(
+            extensionlessEntriesCount,
+            snapshotState.IgnoreOptionCounts.ExtensionlessFiles);
 
         var extensionOptions = filterSelectionService.BuildExtensionOptions(
             visibleExtensions,
@@ -235,20 +269,32 @@ public sealed class SelectionRefreshEngine(
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
             extensionOptions = ForceAllChecked(extensionOptions);
 
-        if (usedProfileFallback)
+        if (usedProfileFallback &&
+            !ExtensionSnapshotReusePolicy.CanReuseSnapshot(effectiveExtensionPolicy, extensionOptions))
         {
-            scan = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
-                context.Path,
+            scan = GetDynamicSectionScan(
+                context,
                 selectedRoots,
+                selectedIgnoreOptions,
                 extensionScanRules,
                 ignoreRules,
                 BuildResolvedExtensionPolicy(extensionOptions),
-                includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
-                cancellationToken,
-                includeControllerImpactProbeRoots: ShouldIncludeControllerImpactProbeRoots(context));
+                cancellationToken);
+            scanData = scan.Value.IgnoreSection;
 
-            visibleExtensions = new List<string>(scan.Value.Extensions.Count);
-            extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+            snapshotState = CreateSnapshotState(
+                scanData.EffectiveIgnoreOptionCounts,
+                scanData.ControllerImpactCounts);
+            snapshotState = PreserveActiveRuntimeSnapshotState(
+                snapshotState,
+                previousRuntimeSnapshotState,
+                selectedIgnoreOptions);
+
+            visibleExtensions = new List<string>(scanData.Extensions.Count);
+            extensionlessEntriesCount = SplitExtensions(scanData.Extensions, visibleExtensions);
+            extensionlessEntriesCount = Math.Max(
+                extensionlessEntriesCount,
+                snapshotState.IgnoreOptionCounts.ExtensionlessFiles);
 
             extensionOptions = filterSelectionService.BuildExtensionOptions(
                 visibleExtensions,
@@ -265,18 +311,13 @@ public sealed class SelectionRefreshEngine(
                 extensionOptions = ForceAllChecked(extensionOptions);
         }
 
-        var snapshotState = CreateSnapshotState(
-            scan.Value.EffectiveIgnoreOptionCounts,
-            scan.Value.ControllerImpactCounts);
         var ignoreState = BuildIgnoreOptionState(
             context.Path,
             selectedRoots,
             context,
             snapshotState,
             ignoreStateCache,
-            context.IgnoreSelectionInitialized
-                ? new HashSet<IgnoreOptionId>(context.IgnoreSelectionCache)
-                : EmptyIgnoreSelection);
+            selectedIgnoreOptions);
 
         return new DynamicSectionSnapshot(
             RootOptions: null,
@@ -284,13 +325,52 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptions: ignoreState.VisibleOptions,
             ExtensionlessEntriesCount: extensionlessEntriesCount,
             HasIgnoreOptionCounts: true,
-            IgnoreOptionCounts: scan.Value.EffectiveIgnoreOptionCounts,
-            ControllerImpactCounts: scan.Value.ControllerImpactCounts,
+            IgnoreOptionCounts: snapshotState.IgnoreOptionCounts,
+            ControllerImpactCounts: snapshotState.ControllerImpactCounts,
             IgnoreOptionStateCache: ignoreState.IgnoreOptionStateCache,
             SelectedIgnoreOptions: ignoreState.SelectedIgnoreOptions,
             SnapshotState: snapshotState,
             RootAccessDenied: scan.RootAccessDenied,
-            HadAccessDenied: scan.HadAccessDenied);
+            HadAccessDenied: scan.HadAccessDenied,
+            TreeInventory: scan.Value.TreeInventory);
+    }
+
+    private ScanResult<ProjectWorkspaceScanSnapshot> GetDynamicSectionScan(
+        SelectionRefreshContext context,
+        IReadOnlyCollection<string> selectedRoots,
+        IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
+        IgnoreRules extensionScanRules,
+        IgnoreRules ignoreRules,
+        IExtensionInclusionPolicy? effectiveExtensionPolicy,
+        CancellationToken cancellationToken)
+    {
+        return context.CaptureTreeInventory
+            ? scanOptions.GetProjectWorkspaceSnapshotForRootFolders(
+                context.Path,
+                selectedRoots,
+                extensionScanRules,
+                ignoreRules,
+                effectiveExtensionPolicy,
+                includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
+                cancellationToken,
+                includeControllerImpactProbeRoots: ShouldIncludeControllerImpactProbeRoots(context, selectedIgnoreOptions))
+            : WrapIgnoreSectionScan(scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+                context.Path,
+                selectedRoots,
+                extensionScanRules,
+                ignoreRules,
+                effectiveExtensionPolicy,
+                includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
+                cancellationToken,
+                includeControllerImpactProbeRoots: ShouldIncludeControllerImpactProbeRoots(context, selectedIgnoreOptions)));
+    }
+
+    private static ScanResult<ProjectWorkspaceScanSnapshot> WrapIgnoreSectionScan(ScanResult<IgnoreSectionScanData> scan)
+    {
+        return new ScanResult<ProjectWorkspaceScanSnapshot>(
+            new ProjectWorkspaceScanSnapshot(scan.Value, TreeInventory: null),
+            scan.RootAccessDenied,
+            scan.HadAccessDenied);
     }
 
     private IgnoreOptionResolutionResult BuildIgnoreOptionState(
@@ -308,11 +388,15 @@ public sealed class SelectionRefreshEngine(
         var stateCache = new Dictionary<IgnoreOptionId, bool>(
             stateCacheOverride ?? context.IgnoreOptionStateCache);
         var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots, snapshotState);
+
         var descriptors = ignoreOptionsService.GetOptions(availability);
+        var defaultFallbackReferenceSelections = GetIgnoreDefaultFallbackReferenceSelections(
+            context,
+            previousSelections);
         var useDefaultCheckedFallback = SelectionRefreshPolicy.ShouldUseIgnoreDefaultFallback(
             context.PreparedSelectionMode,
             descriptors,
-            previousSelections);
+            defaultFallbackReferenceSelections);
 
         var visibleIds = new HashSet<IgnoreOptionId>();
         var resolved = new List<ResolvedIgnoreOptionState>(descriptors.Count);
@@ -331,11 +415,255 @@ public sealed class SelectionRefreshEngine(
             resolved.Add(new ResolvedIgnoreOptionState(option.Id, option.Label, option.DefaultChecked, isChecked));
         }
 
-        PreserveMissingIgnoreSelections(previousSelections, visibleIds, stateCache);
-        return new IgnoreOptionResolutionResult(
-            resolved,
-            stateCache,
-            BuildSelectedIgnoreOptionSet(stateCache));
+		PreserveMissingIgnoreSelections(previousSelections, visibleIds, stateCache);
+		return new IgnoreOptionResolutionResult(
+			resolved,
+			stateCache,
+			BuildSelectedIgnoreOptionSet(stateCache, visibleIds));
+    }
+
+    private static IReadOnlySet<IgnoreOptionId> BuildInitialFullRefreshIgnoreSelection(
+        SelectionRefreshContext context,
+        IReadOnlySet<IgnoreOptionId> warmSelection)
+    {
+        var selected = new HashSet<IgnoreOptionId>(warmSelection);
+        if (context.IgnoreOptionStateCacheIsComplete)
+            AddCheckedIgnoreStateCacheSelections(selected, context.IgnoreOptionStateCache);
+        else if (context.PreparedSelectionMode == PreparedSelectionMode.Profile &&
+                 context.IgnoreSelectionInitialized)
+        {
+            // Legacy selected-only profiles do not have a complete state cache. Their
+            // selected ids still need one optimistic rule-build pass so self-hidden
+            // options such as DotFolders can prove whether they affect the current tree.
+            selected.UnionWith(context.IgnoreSelectionCache);
+        }
+
+        if (context.PreparedSelectionMode == PreparedSelectionMode.Profile ||
+            context.IgnoreSelectionInitialized ||
+            context.IgnoreAllPreference == false)
+        {
+            return selected;
+        }
+
+        AddDefaultDynamicIgnoreOptions(selected);
+        return selected;
+    }
+
+    private static IReadOnlySet<IgnoreOptionId> BuildInitialLiveRefreshIgnoreSelection(SelectionRefreshContext context)
+    {
+        // Live refresh must use the same active-rule source as full refresh. Visible
+        // options alone are not enough because self-hidden toggles stay active through
+        // the complete state cache after they remove their own visible evidence.
+        var selected = context.IgnoreSelectionInitialized
+            ? new HashSet<IgnoreOptionId>(context.IgnoreSelectionCache)
+            : new HashSet<IgnoreOptionId>();
+
+        if (context.IgnoreOptionStateCacheIsComplete)
+            AddCheckedIgnoreStateCacheSelections(selected, context.IgnoreOptionStateCache);
+
+        return selected;
+    }
+
+    private static void AddCheckedIgnoreStateCacheSelections(
+        HashSet<IgnoreOptionId> selected,
+        IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
+    {
+        foreach (var (optionId, isChecked) in stateCache)
+        {
+            if (isChecked)
+                selected.Add(optionId);
+        }
+    }
+
+    private static void AddDefaultDynamicIgnoreOptions(HashSet<IgnoreOptionId> selected)
+    {
+        // Defaults are applied optimistically before the first expensive snapshot pass.
+        // The scanner reports direct impact for self-hidden root-level directories, so
+        // directory toggles no longer need a second convergence pass just to prove that
+        // .idea/.git/hidden roots existed before they were filtered out.
+        selected.Add(IgnoreOptionId.HiddenFolders);
+        selected.Add(IgnoreOptionId.HiddenFiles);
+        selected.Add(IgnoreOptionId.DotFolders);
+        selected.Add(IgnoreOptionId.DotFiles);
+        selected.Add(IgnoreOptionId.EmptyFolders);
+        selected.Add(IgnoreOptionId.EmptyFiles);
+        selected.Add(IgnoreOptionId.ExtensionlessFiles);
+    }
+
+    private static SelectionRefreshContext EnsureRuntimeRootStateCache(
+        SelectionRefreshContext context,
+        IReadOnlyList<SelectionOption> rootOptions)
+    {
+        if (context.RootOptionStateCache is not null || rootOptions.Count == 0)
+            return context;
+
+        var stateCache = new Dictionary<string, bool>(rootOptions.Count, PathComparer.Default);
+        foreach (var option in rootOptions)
+            stateCache[option.Name] = option.IsChecked;
+
+        // The UI marks root state as complete immediately after applying root options.
+        // Full refresh must use the same runtime contract inside one call, otherwise the
+        // second F5 can discover different root-level ignore toggles than the first one.
+        return context with { RootOptionStateCache = stateCache };
+    }
+
+    private static IReadOnlySet<IgnoreOptionId> GetIgnoreDefaultFallbackReferenceSelections(
+        SelectionRefreshContext context,
+        IReadOnlySet<IgnoreOptionId> runtimeSelections)
+    {
+        if (context.PreparedSelectionMode == PreparedSelectionMode.Profile &&
+            context.IgnoreSelectionInitialized &&
+            !context.IgnoreOptionStateCacheIsComplete)
+        {
+            return context.IgnoreSelectionCache;
+        }
+
+        return runtimeSelections;
+    }
+
+    private static IgnoreSectionSnapshotState PreserveActiveRuntimeSnapshotState(
+        IgnoreSectionSnapshotState current,
+        IgnoreSectionSnapshotState previous,
+        IReadOnlySet<IgnoreOptionId> activeOptions)
+    {
+        if (activeOptions.Count == 0 || !previous.HasIgnoreOptionCounts)
+            return current;
+
+        var counts = current.IgnoreOptionCounts;
+        var controllerImpactCounts = current.ControllerImpactCounts;
+        var dotFoldersOwnHiddenDotFolders = activeOptions.Contains(IgnoreOptionId.DotFolders);
+        var dotFilesOwnHiddenDotFiles = activeOptions.Contains(IgnoreOptionId.DotFiles);
+        foreach (var id in activeOptions)
+        {
+            // Counts are preserved only inside the current convergence loop. This keeps
+            // self-hidden active toggles stable without leaking stale evidence from an old
+            // root/extension scope into a new refresh.
+            counts = id switch
+            {
+                IgnoreOptionId.HiddenFolders when !dotFoldersOwnHiddenDotFolders => counts with
+                {
+                    HiddenFolders = PreserveActiveCount(
+                        counts.HiddenFolders,
+                        previous.IgnoreOptionCounts.HiddenFolders)
+                },
+                IgnoreOptionId.HiddenFiles when !dotFilesOwnHiddenDotFiles => counts with
+                {
+                    HiddenFiles = PreserveActiveCount(
+                        counts.HiddenFiles,
+                        previous.IgnoreOptionCounts.HiddenFiles)
+                },
+                IgnoreOptionId.DotFolders => counts with
+                {
+                    DotFolders = PreserveActiveCount(
+                        counts.DotFolders,
+                        previous.IgnoreOptionCounts.DotFolders)
+                },
+                IgnoreOptionId.DotFiles => counts with
+                {
+                    DotFiles = PreserveActiveCount(
+                        counts.DotFiles,
+                        previous.IgnoreOptionCounts.DotFiles)
+                },
+                IgnoreOptionId.EmptyFolders => counts with
+                {
+                    EmptyFolders = PreserveActiveCount(
+                        counts.EmptyFolders,
+                        previous.IgnoreOptionCounts.EmptyFolders)
+                },
+                IgnoreOptionId.EmptyFiles => counts with
+                {
+                    EmptyFiles = PreserveActiveCount(
+                        counts.EmptyFiles,
+                        previous.IgnoreOptionCounts.EmptyFiles)
+                },
+                IgnoreOptionId.ExtensionlessFiles => counts with
+                {
+                    ExtensionlessFiles = PreserveActiveCount(
+                        counts.ExtensionlessFiles,
+                        previous.IgnoreOptionCounts.ExtensionlessFiles)
+                },
+                _ => counts
+            };
+
+            controllerImpactCounts = id switch
+            {
+                IgnoreOptionId.SmartIgnore => controllerImpactCounts with
+                {
+                    SmartIgnore = PreserveActiveCount(
+                        controllerImpactCounts.SmartIgnore,
+                        previous.ControllerImpactCounts.SmartIgnore)
+                },
+                IgnoreOptionId.UseGitIgnore => controllerImpactCounts with
+                {
+                    GitIgnore = PreserveActiveCount(
+                        controllerImpactCounts.GitIgnore,
+                        previous.ControllerImpactCounts.GitIgnore)
+                },
+                _ => controllerImpactCounts
+            };
+        }
+
+        if (counts == current.IgnoreOptionCounts &&
+            controllerImpactCounts == current.ControllerImpactCounts)
+        {
+            return current;
+        }
+
+        return current with
+        {
+            IgnoreOptionCounts = counts,
+            ControllerImpactCounts = controllerImpactCounts,
+            HasExtensionlessEntries = counts.ExtensionlessFiles > 0,
+            ExtensionlessEntriesCount = counts.ExtensionlessFiles
+        };
+    }
+
+    private static int PreserveActiveCount(int currentCount, int previousCount) =>
+        currentCount > 0 ? currentCount : previousCount;
+
+    private static IReadOnlySet<IgnoreOptionId> BuildMeasuredSelectionForRefreshPlanning(
+        IReadOnlySet<IgnoreOptionId> selectedOptions,
+        IgnoreSectionSnapshotState snapshotState)
+    {
+        if (selectedOptions.Count == 0 || !snapshotState.HasIgnoreOptionCounts)
+            return selectedOptions;
+
+        // Optimistic defaults can be active during the first scan even when the project
+        // has no matching entries. Treat only measured-impact options as planning inputs;
+        // otherwise a zero-impact default disappearing from the visible section would
+        // look like a user-visible mutation and force a redundant convergence pass.
+        HashSet<IgnoreOptionId>? measured = null;
+        foreach (var optionId in selectedOptions)
+        {
+            if (!HasMeasuredIgnoreImpact(optionId, snapshotState))
+                continue;
+
+            measured ??= new HashSet<IgnoreOptionId>();
+            measured.Add(optionId);
+        }
+
+        return measured ?? EmptyIgnoreSelection;
+    }
+
+    private static bool HasMeasuredIgnoreImpact(
+        IgnoreOptionId optionId,
+        IgnoreSectionSnapshotState snapshotState)
+    {
+        var counts = snapshotState.IgnoreOptionCounts;
+        var controllerImpactCounts = snapshotState.ControllerImpactCounts;
+        return optionId switch
+        {
+            IgnoreOptionId.UseGitIgnore => controllerImpactCounts.GitIgnore > 0,
+            IgnoreOptionId.SmartIgnore => controllerImpactCounts.SmartIgnore > 0,
+            IgnoreOptionId.HiddenFolders => counts.HiddenFolders > 0,
+            IgnoreOptionId.HiddenFiles => counts.HiddenFiles > 0,
+            IgnoreOptionId.DotFolders => counts.DotFolders > 0,
+            IgnoreOptionId.DotFiles => counts.DotFiles > 0,
+            IgnoreOptionId.EmptyFolders => counts.EmptyFolders > 0,
+            IgnoreOptionId.EmptyFiles => counts.EmptyFiles > 0,
+            IgnoreOptionId.ExtensionlessFiles => counts.ExtensionlessFiles > 0,
+            _ => true
+        };
     }
 
     private IgnoreOptionsAvailability ResolveIgnoreOptionsAvailability(
@@ -472,7 +800,24 @@ public sealed class SelectionRefreshEngine(
         bool useDefaultCheckedFallback)
     {
         if (stateCache.TryGetValue(option.Id, out var cachedState))
+        {
+            if (!cachedState &&
+                useDefaultCheckedFallback &&
+                !stateCacheIsComplete &&
+                !context.IgnoreOptionStateCache.ContainsKey(option.Id) &&
+                SelectionRefreshPolicy.CanUseIgnoreDefaultFallback(option.Id))
+            {
+                // Legacy selected-only profiles can expose new options after a convergence
+                // pass. A transient false from an earlier pass must not block the fallback
+                // that makes newly available non-controller options checked by default.
+                return option.DefaultChecked;
+            }
+
             return cachedState;
+        }
+
+        if (context.IgnoreAllPreference.HasValue)
+            return context.IgnoreAllPreference.Value;
 
         if (stateCacheIsComplete)
             return option.DefaultChecked;
@@ -492,27 +837,61 @@ public sealed class SelectionRefreshEngine(
     private static void PreserveMissingIgnoreSelections(
         IReadOnlySet<IgnoreOptionId> previousSelections,
         IReadOnlySet<IgnoreOptionId> visibleIds,
-        IDictionary<IgnoreOptionId, bool> stateCache)
+        Dictionary<IgnoreOptionId, bool> stateCache)
     {
         foreach (var id in previousSelections)
         {
-            if (!visibleIds.Contains(id) && !stateCache.ContainsKey(id))
-                stateCache[id] = true;
+            if (visibleIds.Contains(id))
+                continue;
+
+            ref var cachedState = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                stateCache,
+                id,
+                out var exists);
+            if (!exists)
+                cachedState = true;
         }
     }
 
-    private static HashSet<IgnoreOptionId> BuildSelectedIgnoreOptionSet(
-        IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
+    private IgnoreRules BuildIgnoreRules(
+        string path,
+        IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
+        IReadOnlyCollection<string>? selectedRootFolders)
     {
-        var selected = new HashSet<IgnoreOptionId>();
-        foreach (var (id, isChecked) in stateCache)
+        var cacheKey = IgnoreRulesBuildCacheKeyBuilder.Build(path, selectedIgnoreOptions, selectedRootFolders);
+
+        lock (_ignoreRulesBuildCacheSync)
         {
-            if (isChecked)
-                selected.Add(id);
+            if (_ignoreRulesBuildCache is not null &&
+                string.Equals(_ignoreRulesBuildCache.Key, cacheKey, StringComparison.Ordinal))
+            {
+                return _ignoreRulesBuildCache.Rules;
+            }
         }
 
-        return selected;
+        var rules = buildIgnoreRules(path, selectedIgnoreOptions, selectedRootFolders);
+
+        lock (_ignoreRulesBuildCacheSync)
+            _ignoreRulesBuildCache = new IgnoreRulesBuildCacheEntry(cacheKey, rules);
+
+        return rules;
     }
+
+	private static HashSet<IgnoreOptionId> BuildSelectedIgnoreOptionSet(
+		IReadOnlyDictionary<IgnoreOptionId, bool> stateCache,
+		IReadOnlySet<IgnoreOptionId> visibleIds)
+	{
+		var selected = new HashSet<IgnoreOptionId>();
+		foreach (var (id, isChecked) in stateCache)
+		{
+			// Hidden states are kept for profile roundtrip and transient availability churn,
+			// but invisible options must never silently affect the active tree/export rules.
+			if (isChecked && visibleIds.Contains(id))
+				selected.Add(id);
+		}
+
+		return selected;
+	}
 
     private static HashSet<string> CollectCheckedSelectionNames(
         IEnumerable<SelectionOption> options,
@@ -557,13 +936,25 @@ public sealed class SelectionRefreshEngine(
     private static bool ShouldSuppressAllTogglesOverride(SelectionRefreshContext context)
         => context.PreparedSelectionMode == PreparedSelectionMode.Profile;
 
-    private static bool ShouldIncludeControllerImpactProbeRoots(SelectionRefreshContext context)
+    private static bool ShouldIncludeControllerImpactProbeRoots(
+        SelectionRefreshContext context,
+        IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions)
     {
-        // Controller probes are broader than directory-toggle probes: they can reveal
-        // .gitignore/Smart Ignore entries hidden before the root list is built. Keep them
-        // scoped to the "all roots" workflow so an explicit root subset does not surface
-        // controllers that only affect folders outside the user's current scope.
-        return context.AllRootFoldersChecked && !ShouldSuppressAllTogglesOverride(context);
+        var hasActiveController =
+            selectedIgnoreOptions.Contains(IgnoreOptionId.UseGitIgnore) ||
+            selectedIgnoreOptions.Contains(IgnoreOptionId.SmartIgnore);
+
+        if (hasActiveController)
+        {
+            // Controller options also shape the root-folder list. If a selected controller
+            // hides root-level generated/log/artifact folders, its impact must stay visible
+            // even when the current content scope is a manually selected root subset.
+            return true;
+        }
+
+        return context.AllRootFoldersChecked ||
+               !ShouldSuppressAllTogglesOverride(context) ||
+               HasCompleteSelectionStateForNewRootLevelToggles(context);
     }
 
     private static bool ShouldIncludeDirectoryToggleProbeRoots(
@@ -574,9 +965,7 @@ public sealed class SelectionRefreshEngine(
         var hasDirectoryToggle =
             selectedIgnoreOptions.Contains(IgnoreOptionId.DotFolders) ||
             selectedIgnoreOptions.Contains(IgnoreOptionId.HiddenFolders);
-        var canDiscoverNewRootLevelToggle =
-            context.AllRootFoldersChecked ||
-            HasCompleteSelectionStateForNewRootLevelToggles(context);
+        var canDiscoverNewRootLevelToggle = CanDiscoverNewRootLevelDirectoryToggle(context);
 
         if (!hasDirectoryToggle)
         {
@@ -607,6 +996,21 @@ public sealed class SelectionRefreshEngine(
         context.PreparedSelectionMode != PreparedSelectionMode.Profile ||
         context.RootOptionStateCache is not null ||
         context.IgnoreOptionStateCacheIsComplete;
+
+    private static bool CanDiscoverNewRootLevelDirectoryToggle(SelectionRefreshContext context)
+    {
+        if (context.AllRootFoldersChecked)
+            return HasCompleteSelectionStateForNewRootLevelToggles(context);
+
+        if (!context.RootSelectionInitialized)
+            return false;
+
+        // With a manual root subset, probing every root-level directory leaks counts from
+        // unchecked roots into the Ignore section. Only complete root state can distinguish
+        // between "unchecked before" and "new since last refresh, checked by default".
+        return context.RootOptionStateCache is not null &&
+               HasCompleteSelectionStateForNewRootLevelToggles(context);
+    }
 
     private static bool ContainsDotDirectoryName(IEnumerable<string> names)
     {
@@ -667,10 +1071,13 @@ public sealed class SelectionRefreshEngine(
         IReadOnlySet<IgnoreOptionId> SelectedIgnoreOptions,
         IgnoreSectionSnapshotState SnapshotState,
         bool RootAccessDenied,
-        bool HadAccessDenied);
+        bool HadAccessDenied,
+        ProjectTreeInventorySnapshot? TreeInventory);
 
     private sealed record IgnoreOptionResolutionResult(
         IReadOnlyList<ResolvedIgnoreOptionState> VisibleOptions,
         IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreOptionStateCache,
         IReadOnlySet<IgnoreOptionId> SelectedIgnoreOptions);
+
+    private sealed record IgnoreRulesBuildCacheEntry(string Key, IgnoreRules Rules);
 }
