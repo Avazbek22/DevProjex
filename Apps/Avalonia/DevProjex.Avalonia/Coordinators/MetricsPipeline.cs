@@ -464,6 +464,12 @@ internal sealed class MetricsPipeline(
         {
             try
             {
+                if (IsDefinitelyBinaryByExtensionForMetricsWarmup(filePath))
+                {
+                    stagedInspectedPaths[filePath] = 0;
+                    return;
+                }
+
                 var metrics = await fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
                     .ConfigureAwait(false);
 

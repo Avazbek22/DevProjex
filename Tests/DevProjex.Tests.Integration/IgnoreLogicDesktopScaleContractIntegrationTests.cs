@@ -33,7 +33,7 @@ public sealed class IgnoreLogicDesktopScaleContractIntegrationTests
 		AssertEquivalentVisibleSnapshots(regularSnapshot, inventorySnapshot);
 
 		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(inventorySnapshot.TreeInventory);
-		Assert.Equal(DesktopScaleDotFolderCount, CountRootDotDirectories(inventory));
+		Assert.Equal(0, CountRootDotDirectories(inventory));
 
 		AssertScanPipelinesAgree(
 			services,
@@ -87,7 +87,7 @@ public sealed class IgnoreLogicDesktopScaleContractIntegrationTests
 	}
 
 	[Fact]
-	public void DesktopScaleDotFolderCounts_DotFoldersOffProjectsCapturedBroadInventory()
+	public void DesktopScaleDotFolderCounts_DotFoldersOffProjectsExpandedInventoryAfterRescan()
 	{
 		using var workspace = CreateDesktopScaleWorkspace();
 		var services = CreateServices();
@@ -103,17 +103,20 @@ public sealed class IgnoreLogicDesktopScaleContractIntegrationTests
 			CreateForcedIgnoreContext(workspace.Path, baseline, new Dictionary<IgnoreOptionId, bool>
 			{
 				[IgnoreOptionId.DotFolders] = false
-			}));
+			}) with { CaptureTreeInventory = true });
+		var dotFoldersOffInventory = Assert.IsType<ProjectTreeInventorySnapshot>(dotFoldersOff.TreeInventory);
 
 		// The option remains visible and counted when unchecked: it still has an observable
-		// inverse effect, and broad inventory must be able to project that expanded state.
+		// inverse effect. The initial load inventory stays narrow for first-paint speed;
+		// the expanded state gets its own inventory once root selection includes dot roots.
 		AssertDesktopScaleDotFolderCount(dotFoldersOff, DesktopScaleDotFolderCount, expectedChecked: false);
 		Assert.Equal(DesktopScaleDotFolderCount, CountRootDotOptions(dotFoldersOff));
+		Assert.Equal(0, CountRootDotDirectories(baselineInventory));
 		AssertTreeProjectionMatchesDirectBuild(
 			services,
 			workspace.Path,
 			dotFoldersOff,
-			baselineInventory,
+			dotFoldersOffInventory,
 			expectedRootDotFolders: DesktopScaleDotFolderCount);
 	}
 

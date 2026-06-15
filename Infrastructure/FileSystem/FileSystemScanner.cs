@@ -378,19 +378,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		if (includeDirectoryToggleProbeRoots && scanPlan.DirectoryToggleCandidates.Count > 0)
 		{
-			var candidateInventoryResult = CaptureRootDirectoryToggleCandidateInventories(
-				scanPlan.DirectoryToggleCandidates,
-				extensionDiscoveryRules,
-				effectiveRules,
-				effectiveExtensionPolicy,
-				cancellationToken);
-			if (candidateInventoryResult.Value.Count > 0)
-				subtreeInventories.AddRange(candidateInventoryResult.Value);
-			if (candidateInventoryResult.RootAccessDenied)
-				Interlocked.Exchange(ref rootAccessDenied, 1);
-			if (candidateInventoryResult.HadAccessDenied)
-				Interlocked.Exchange(ref hadAccessDenied, 1);
-
+			// Keep initial project-load inventory focused on the currently selected roots.
+			// Root-level toggle candidates still affect counts, but reading their full
+			// subtrees here would delay first paint for folders that are invisible now.
 			var rootCandidateCounts = CountRootDirectoryToggleCandidates(
 				scanPlan.DirectoryToggleCandidates,
 				effectiveRules,
@@ -429,75 +419,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			hadAccessDenied == 1);
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
 			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory),
-			rootAccessDenied == 1,
-			hadAccessDenied == 1);
-	}
-
-	private ScanResult<List<ProjectTreeInventorySnapshot>> CaptureRootDirectoryToggleCandidateInventories(
-		IReadOnlyList<FileSystemDirectoryEntry> candidateDirectories,
-		IgnoreRules extensionDiscoveryRules,
-		IgnoreRules effectiveRules,
-		IExtensionInclusionPolicy? effectiveExtensionPolicy,
-		CancellationToken cancellationToken)
-	{
-		var inventories = new List<ProjectTreeInventorySnapshot>();
-		if (candidateDirectories.Count == 0)
-		{
-			return new ScanResult<List<ProjectTreeInventorySnapshot>>(
-				inventories,
-				RootAccessDenied: false,
-				HadAccessDenied: false);
-		}
-
-		var rootAccessDenied = 0;
-		var hadAccessDenied = 0;
-		var mergeLock = new object();
-		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
-
-		Parallel.ForEach(
-			candidateDirectories,
-			parallelOptions,
-			() => new List<ProjectTreeInventorySnapshot>(),
-			(directory, _, localInventories) =>
-			{
-				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
-
-				var inventoryCapture = new ProjectTreeInventoryCapture();
-				var snapshot = ScanIgnoreSectionSnapshotCore(
-					directory.FullPath,
-					extensionDiscoveryRules,
-					effectiveRules,
-					effectiveExtensionPolicy,
-					includeRootDirectoryInRawCounts: true,
-					parallelOptions.CancellationToken,
-					inventoryCapture);
-
-				// Root-level directory-toggle candidates are invisible in the current tree,
-				// but the captured project inventory must be broad enough to project the
-				// immediately expanded state after DotFolders/HiddenFolders changes. Keep
-				// this path inventory-only: aggregating its extensions or counts would leak
-				// hidden roots into live options while the controlling toggle is still on.
-				if (inventoryCapture.Inventory is not null)
-					localInventories.Add(inventoryCapture.Inventory);
-
-				if (snapshot.RootAccessDenied)
-					Interlocked.Exchange(ref rootAccessDenied, 1);
-				if (snapshot.HadAccessDenied)
-					Interlocked.Exchange(ref hadAccessDenied, 1);
-
-				return localInventories;
-			},
-			localInventories =>
-			{
-				if (localInventories.Count == 0)
-					return;
-
-				lock (mergeLock)
-					inventories.AddRange(localInventories);
-			});
-
-		return new ScanResult<List<ProjectTreeInventorySnapshot>>(
-			inventories,
 			rootAccessDenied == 1,
 			hadAccessDenied == 1);
 	}

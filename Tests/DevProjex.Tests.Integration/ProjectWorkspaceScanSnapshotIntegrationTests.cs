@@ -90,6 +90,113 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		Assert.DoesNotContain(FlattenTree(workspaceTree.Root), path => path.Contains("UserHandler.cs", StringComparison.OrdinalIgnoreCase));
 	}
 
+	[Fact]
+	public void WorkspaceSnapshot_RepeatedScanMatchesIgnoreOnlyCountsAndTreeProjection()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "git-owned/\n.git-owned-*/\n");
+		temp.CreateFile("root.txt", "root");
+		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateFile("docs/readme.md", "# docs");
+		temp.CreateFile("node_modules/pkg/index.js", "module.exports = {};");
+		temp.CreateFile("git-owned/log.txt", "git owned");
+		for (var index = 0; index < 8; index++)
+		{
+			temp.CreateFile(
+				Path.Combine($".dot-root-{index:D2}", "payload.txt"),
+				$"dot payload {index}");
+		}
+
+		var rules = CreateRules(temp.Path);
+		var selectedRoots = new HashSet<string>(["src", "docs", "node_modules"], PathComparer.Default);
+		var selectedExtensions = new HashSet<string>([".cs", ".js", ".md", ".txt"], StringComparer.OrdinalIgnoreCase);
+		var extensionPolicy = new ExtensionSetInclusionPolicy(selectedExtensions);
+		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+
+		var first = scanOptions.GetProjectWorkspaceSnapshotForRootFolders(
+			temp.Path,
+			selectedRoots,
+			extensionDiscoveryRules: rules,
+			effectiveRules: rules,
+			effectiveExtensionPolicy: extensionPolicy,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken,
+			includeControllerImpactProbeRoots: true);
+		var second = scanOptions.GetProjectWorkspaceSnapshotForRootFolders(
+			temp.Path,
+			selectedRoots,
+			extensionDiscoveryRules: rules,
+			effectiveRules: rules,
+			effectiveExtensionPolicy: extensionPolicy,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken,
+			includeControllerImpactProbeRoots: true);
+		var ignoreOnly = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
+			temp.Path,
+			selectedRoots,
+			extensionDiscoveryRules: rules,
+			effectiveRules: rules,
+			effectiveExtensionPolicy: extensionPolicy,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken,
+			includeControllerImpactProbeRoots: true);
+		var explicitCounts = scanOptions.GetEffectiveIgnoreOptionCountsForRootFolders(
+			temp.Path,
+			selectedRoots,
+			selectedExtensions,
+			rules,
+			ignoreOnly.Value.RawIgnoreOptionCounts,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertWorkspaceSnapshotEquivalent(first.Value, second.Value);
+		Assert.Equal(ignoreOnly.Value.Extensions.Order(StringComparer.OrdinalIgnoreCase), first.Value.IgnoreSection.Extensions.Order(StringComparer.OrdinalIgnoreCase));
+		Assert.Equal(ignoreOnly.Value.RawIgnoreOptionCounts, first.Value.IgnoreSection.RawIgnoreOptionCounts);
+		Assert.Equal(ignoreOnly.Value.EffectiveIgnoreOptionCounts, first.Value.IgnoreSection.EffectiveIgnoreOptionCounts);
+		Assert.Equal(ignoreOnly.Value.ControllerImpactCounts, first.Value.IgnoreSection.ControllerImpactCounts);
+		Assert.Equal(ignoreOnly.Value.EffectiveIgnoreOptionCounts, explicitCounts.Value);
+		Assert.Equal(8, first.Value.IgnoreSection.EffectiveIgnoreOptionCounts.DotFolders);
+
+		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(first.Value.TreeInventory);
+		Assert.Equal(0, CountRootDotDirectories(inventory));
+		AssertTreeProjectionEqualsDirectBuild(temp.Path, selectedRoots, selectedExtensions, rules, inventory);
+
+		var dotFoldersOffRules = rules with { IgnoreDotFolders = false };
+		AssertTreeProjectionEqualsDirectBuild(temp.Path, selectedRoots, selectedExtensions, dotFoldersOffRules, inventory);
+	}
+
+	[Fact]
+	public void WorkspaceSnapshot_FallbackRootToggleProbeUsesHiddenDotContract()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine(".dot-root", "payload.txt"), "payload");
+		var dotRootPath = Path.Combine(temp.Path, ".dot-root");
+		var isHidden = File.GetAttributes(dotRootPath).HasFlag(FileAttributes.Hidden);
+		var rules = CreateRules(temp.Path) with
+		{
+			IgnoreDotFolders = false,
+			IgnoreHiddenFolders = true
+		};
+		var scanOptions = new ScanOptionsUseCase(new LegacyEmptyScanner());
+
+		var result = scanOptions.GetEffectiveIgnoreOptionCountsForRootFolders(
+			temp.Path,
+			rootFolders: [],
+			allowedExtensions: new HashSet<string>([".txt"], StringComparer.OrdinalIgnoreCase),
+			ignoreRules: rules,
+			rawCounts: IgnoreOptionCounts.Empty,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var hiddenOwnsDotRoot = IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			ignoreHiddenFolders: true,
+			isHidden,
+			isDot: true,
+			ignoreDotFolders: false);
+		Assert.Equal(hiddenOwnsDotRoot ? 1 : 0, result.Value.HiddenFolders);
+		Assert.Equal(hiddenOwnsDotRoot ? 0 : 1, result.Value.DotFolders);
+	}
+
 	private static IgnoreRules CreateRules(string rootPath)
 	{
 		return new IgnoreRules(
@@ -132,6 +239,48 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		return result;
 	}
 
+	private static void AssertWorkspaceSnapshotEquivalent(
+		ProjectWorkspaceScanSnapshot expected,
+		ProjectWorkspaceScanSnapshot actual)
+	{
+		Assert.Equal(expected.IgnoreSection.Extensions.Order(StringComparer.OrdinalIgnoreCase), actual.IgnoreSection.Extensions.Order(StringComparer.OrdinalIgnoreCase));
+		Assert.Equal(expected.IgnoreSection.RawIgnoreOptionCounts, actual.IgnoreSection.RawIgnoreOptionCounts);
+		Assert.Equal(expected.IgnoreSection.EffectiveIgnoreOptionCounts, actual.IgnoreSection.EffectiveIgnoreOptionCounts);
+		Assert.Equal(expected.IgnoreSection.ControllerImpactCounts, actual.IgnoreSection.ControllerImpactCounts);
+		Assert.NotNull(expected.TreeInventory);
+		Assert.NotNull(actual.TreeInventory);
+		Assert.Equal(FlattenInventory(expected.TreeInventory), FlattenInventory(actual.TreeInventory));
+	}
+
+	private static void AssertTreeProjectionEqualsDirectBuild(
+		string rootPath,
+		IReadOnlySet<string> selectedRoots,
+		IReadOnlySet<string> selectedExtensions,
+		IgnoreRules rules,
+		ProjectTreeInventorySnapshot inventory)
+	{
+		var options = new TreeFilterOptions(selectedExtensions, selectedRoots, rules);
+		var builder = new TreeBuilder();
+		var directTree = builder.Build(rootPath, options, TestContext.Current.CancellationToken);
+		var inventoryTree = builder.Build(inventory, options, TestContext.Current.CancellationToken);
+
+		Assert.Equal(FlattenTree(directTree.Root), FlattenTree(inventoryTree.Root));
+	}
+
+	private static int CountRootDotDirectories(ProjectTreeInventorySnapshot snapshot)
+	{
+		var count = 0;
+		var children = snapshot.GetChildren(0);
+		for (var index = 0; index < children.Length; index++)
+		{
+			var child = children[index];
+			if (child.IsDirectory && IgnoreRuleSemantics.IsDotName(child.Name))
+				count++;
+		}
+
+		return count;
+	}
+
 	private static List<string> FlattenTree(FileSystemNode root)
 	{
 		var paths = new List<string>();
@@ -146,5 +295,43 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		}
 
 		return paths;
+	}
+
+	private sealed class LegacyEmptyScanner : IFileSystemScanner
+	{
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			return new ScanResult<HashSet<string>>(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			return new ScanResult<HashSet<string>>(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default)
+		{
+			return new ScanResult<List<string>>(
+				[],
+				RootAccessDenied: false,
+				HadAccessDenied: false);
+		}
 	}
 }

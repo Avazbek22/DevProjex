@@ -525,6 +525,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		{
 			var rootCandidateCounts = GetRootDirectoryToggleCandidateCounts(
 				rootPath,
+				rootFolders,
 				effectiveRules,
 				cancellationToken);
 			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
@@ -564,10 +565,27 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				ignoreRules,
 				cancellationToken);
 
+			var fallbackCounts = rawCounts with { EmptyFolders = Math.Max(0, effectiveEmptyFolderCount.Value) };
+			var fallbackRootAccessDenied = effectiveEmptyFolderCount.RootAccessDenied;
+			var fallbackHadAccessDenied = effectiveEmptyFolderCount.HadAccessDenied;
+			if (includeDirectoryToggleProbeRoots)
+			{
+				// Legacy scanners do not expose effective root-directory probes, but the
+				// UI contract still needs root-level DotFolders/HiddenFolders evidence.
+				var rootCandidateCounts = GetRootDirectoryToggleCandidateCounts(
+					rootPath,
+					rootFolders,
+					ignoreRules,
+					cancellationToken);
+				fallbackCounts = fallbackCounts.Add(rootCandidateCounts.Value);
+				fallbackRootAccessDenied = fallbackRootAccessDenied || rootCandidateCounts.RootAccessDenied;
+				fallbackHadAccessDenied = fallbackHadAccessDenied || rootCandidateCounts.HadAccessDenied;
+			}
+
 			return new ScanResult<IgnoreOptionCounts>(
-				rawCounts with { EmptyFolders = Math.Max(0, effectiveEmptyFolderCount.Value) },
-				effectiveEmptyFolderCount.RootAccessDenied,
-				effectiveEmptyFolderCount.HadAccessDenied);
+				fallbackCounts,
+				fallbackRootAccessDenied,
+				fallbackHadAccessDenied);
 		}
 
 		var effectiveCounts = IgnoreOptionCounts.Empty;
@@ -627,6 +645,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		{
 			var rootCandidateCounts = GetRootDirectoryToggleCandidateCounts(
 				rootPath,
+				rootFolders,
 				ignoreRules,
 				cancellationToken);
 			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
@@ -727,6 +746,14 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		return paths;
 	}
 
+	private static bool IsSafeRelativeRootFolderName(string? selectedRootFolder)
+	{
+		return !string.IsNullOrWhiteSpace(selectedRootFolder) &&
+		       !Path.IsPathRooted(selectedRootFolder) &&
+		       selectedRootFolder.IndexOf(Path.DirectorySeparatorChar) < 0 &&
+		       selectedRootFolder.IndexOf(Path.AltDirectorySeparatorChar) < 0;
+	}
+
 	private sealed class LocalRootSelectionScanAccumulator
 	{
 		public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -773,6 +800,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 	private static ScanResult<IgnoreOptionCounts> GetRootDirectoryToggleCandidateCounts(
 		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders,
 		IgnoreRules effectiveRules,
 		CancellationToken cancellationToken)
 	{
@@ -784,6 +812,16 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
 		var directoryPaths = new List<string>();
+		HashSet<string>? selectedNames = null;
+		if (selectedRootFolders.Count > 0)
+		{
+			selectedNames = new HashSet<string>(PathComparer.Default);
+			foreach (var selectedRootFolder in selectedRootFolders)
+			{
+				if (IsSafeRelativeRootFolderName(selectedRootFolder))
+					selectedNames.Add(selectedRootFolder);
+			}
+		}
 
 		try
 		{
@@ -823,6 +861,10 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				var name = Path.GetFileName(directoryPath);
 				if (string.IsNullOrWhiteSpace(name))
 					return localCounts;
+				// Selected roots are already represented by the main selected-root scan.
+				// Counting them here would double-count dot/hidden roots in fallback mode.
+				if (selectedNames?.Contains(name) == true)
+					return localCounts;
 				if (IsReparsePointDirectory(directoryPath))
 					return localCounts;
 
@@ -841,8 +883,11 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 					isDotFolder &&
 					(effectiveRules.IgnoreDotFolders || !isHiddenByCurrentHiddenFolderRule);
 				var shouldCountHiddenFolder =
-					isHiddenFolder &&
-					!IgnoreRuleSemantics.ShouldIgnoreDotDirectory(effectiveRules.IgnoreDotFolders, isDotFolder);
+					IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+						effectiveRules.IgnoreHiddenFolders,
+						isHiddenFolder,
+						isDotFolder,
+						effectiveRules.IgnoreDotFolders);
 
 				if (shouldCountDotFolder)
 				{
