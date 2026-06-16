@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.Reports;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -29,4 +30,7 @@ public sealed record AvaloniaAppServices(
     IRepoCacheService RepoCacheService,
     IZipDownloadService ZipDownloadService,
     IFileContentAnalyzer FileContentAnalyzer,
+    ProjectAnalysisService ProjectAnalysisService,
+    ReportPathResolver ReportPathResolver,
+    ProjectAnalysisReportWriter ProjectAnalysisReportWriter,
     ITaskbarProgressService TaskbarProgressService);

@@ -6,6 +6,7 @@ using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.AppInstances;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Infrastructure.Reports;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -49,6 +50,15 @@ public static class AvaloniaCompositionRoot
         var fileContentAnalyzer = new FileContentAnalyzer();
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
+        var projectAnalysisService = new ProjectAnalysisService(
+            scanOptionsUseCase,
+            buildTreeUseCase,
+            ignoreOptionsService,
+            ignoreRulesService,
+            treeExportService,
+            fileContentAnalyzer);
+        var reportPathResolver = new ReportPathResolver();
+        var projectAnalysisReportWriter = new ProjectAnalysisReportWriter();
         var previewDocumentBuilder = new PreviewDocumentBuilder(fileContentAnalyzer);
         var repositoryWebPathPresentationService = new RepositoryWebPathPresentationService();
         var textFileExportService = new TextFileExportService();
@@ -94,6 +104,9 @@ public static class AvaloniaCompositionRoot
             RepoCacheService: repoCacheService,
             ZipDownloadService: zipDownloadService,
             FileContentAnalyzer: fileContentAnalyzer,
+            ProjectAnalysisService: projectAnalysisService,
+            ReportPathResolver: reportPathResolver,
+            ProjectAnalysisReportWriter: projectAnalysisReportWriter,
             TaskbarProgressService: taskbarProgressService);
     }
 }

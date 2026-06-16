@@ -11,9 +11,9 @@ public sealed class App : global::Avalonia.Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var options = CommandLineOptions.Parse(desktop.Args ?? []);
-            var services = AvaloniaCompositionRoot.CreateDefault(options);
-            desktop.MainWindow = new MainWindow(options, services);
+            var parseResult = CommandLineOptions.Parse(desktop.Args ?? []);
+            var services = AvaloniaCompositionRoot.CreateDefault(parseResult.Options);
+            desktop.MainWindow = new MainWindow(parseResult.Options, services, parseResult.Errors);
         }
 
         base.OnFrameworkInitializationCompleted();
