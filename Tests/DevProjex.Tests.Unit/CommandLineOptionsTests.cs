@@ -89,6 +89,16 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_ReadsJsonReportFormat()
+	{
+		var result = CommandLineOptions.Parse(["--path", "/tmp/root", "--report-format", "json"]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Report.Enabled);
+		Assert.Equal(StartupReportFormat.Json, result.Options.Report.Format);
+	}
+
+	[Fact]
 	public void Parse_ReadsReportPathFromReportOption()
 	{
 		var result = CommandLineOptions.Parse(["--path", "/tmp/root", "--report", "/tmp/report.json"]);
@@ -141,6 +151,28 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_ReadsNoUiLongForm()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.NoUi]);
+
+		AssertValid(result);
+		Assert.True(result.Options.NoUi);
+	}
+
+	[Fact]
+	public void Parse_DeduplicatesExtensionsCaseInsensitivelyAfterNormalization()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.IncludeExtension, ".CS",
+			CommandLineOptionTokens.IncludeExtension, "json"
+		]);
+
+		AssertValid(result);
+		Assert.Equal([".cs", ".json"], result.Options.IncludeExtensions);
+	}
+
+	[Fact]
 	public void Parse_IgnoreNoneRepresentsExplicitEmptyIgnoreOverride()
 	{
 		var result = CommandLineOptions.Parse(["--path", "/tmp/root", "--ignore", "none"]);
@@ -152,15 +184,96 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
-	public void Parse_ReadsHelpAndVersion()
+	public void Parse_IgnoreNoneClearsPreviouslySelectedIgnoreOptions()
 	{
-		var help = CommandLineOptions.Parse(["-h"]);
-		var version = CommandLineOptions.Parse(["--version"]);
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreGitIgnore,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone
+		]);
 
-		AssertValid(help);
-		Assert.True(help.Options.ShowHelp);
-		AssertValid(version);
-		Assert.True(version.Options.ShowVersion);
+		AssertValid(result);
+		Assert.True(result.Options.IgnoreOptionsSpecified);
+		Assert.Empty(result.Options.IgnoreOptions);
+	}
+
+	[Fact]
+	public void Parse_IgnoreOptionAfterNoneStartsNewExplicitSet()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.IgnoreOptionsSpecified);
+		Assert.Equal([IgnoreOptionId.DotFolders], result.Options.IgnoreOptions);
+	}
+
+	[Theory]
+	[InlineData(CommandLineOptionTokens.Help)]
+	[InlineData(CommandLineOptionTokens.ShortHelp)]
+	[InlineData(CommandLineOptionTokens.WindowsHelp)]
+	public void Parse_ReadsHelpAliases(string token)
+	{
+		var result = CommandLineOptions.Parse([token]);
+
+		AssertValid(result);
+		Assert.True(result.Options.ShowHelp);
+	}
+
+	[Fact]
+	public void Parse_ReadsVersion()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Version]);
+
+		AssertValid(result);
+		Assert.True(result.Options.ShowVersion);
+	}
+
+	[Theory]
+	[MemberData(nameof(PublicIgnoreOptionNames))]
+	public void Parse_MapsEveryDocumentedIgnoreOptionNameToExpectedOption(string optionName, IgnoreOptionId? expectedOption)
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Ignore, optionName]);
+
+		AssertValid(result);
+		Assert.True(result.Options.IgnoreOptionsSpecified);
+		if (expectedOption is null)
+		{
+			Assert.Empty(result.Options.IgnoreOptions);
+			return;
+		}
+
+		var actualOption = Assert.Single(result.Options.IgnoreOptions);
+		Assert.Equal(expectedOption, actualOption);
+	}
+
+	[Fact]
+	public void ToArguments_UsesDocumentedCanonicalIgnoreOptionNames()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			IgnoreOptionsSpecified = true,
+			IgnoreOptions =
+			[
+				IgnoreOptionId.SmartIgnore,
+				IgnoreOptionId.UseGitIgnore,
+				IgnoreOptionId.HiddenFolders,
+				IgnoreOptionId.HiddenFiles,
+				IgnoreOptionId.DotFolders,
+				IgnoreOptionId.DotFiles,
+				IgnoreOptionId.EmptyFolders,
+				IgnoreOptionId.EmptyFiles,
+				IgnoreOptionId.ExtensionlessFiles
+			]
+		};
+
+		var args = options.ToArguments();
+
+		foreach (var optionName in CommandLineOptionTokens.PublicIgnoreOptionNames.Where(static name => name != CommandLineOptionTokens.IgnoreNone))
+			Assert.Contains(optionName, args, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -285,6 +398,24 @@ public sealed class CommandLineOptionsTests
 		Assert.Contains("\\\"", args);
 	}
 
+	[Theory]
+	[MemberData(nameof(ValueOptions))]
+	public void Parse_RejectsMissingRequiredValues(string optionName)
+	{
+		var result = CommandLineOptions.Parse([optionName]);
+
+		AssertInvalid(result, "missing-value");
+	}
+
+	[Theory]
+	[MemberData(nameof(ValueOptions))]
+	public void Parse_RejectsOptionTokenAsRequiredValue(string optionName)
+	{
+		var result = CommandLineOptions.Parse([optionName, CommandLineOptionTokens.Version]);
+
+		AssertInvalid(result, "missing-value");
+	}
+
 	private static void AssertValid(CommandLineParseResult result)
 	{
 		Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors.Select(static error => error.Message)));
@@ -296,4 +427,29 @@ public sealed class CommandLineOptionsTests
 		Assert.False(result.Success);
 		Assert.Contains(result.Errors, error => error.Code == expectedCode);
 	}
+
+	public static TheoryData<string, IgnoreOptionId?> PublicIgnoreOptionNames() => new()
+	{
+		{ CommandLineOptionTokens.IgnoreSmartIgnore, IgnoreOptionId.SmartIgnore },
+		{ CommandLineOptionTokens.IgnoreGitIgnore, IgnoreOptionId.UseGitIgnore },
+		{ CommandLineOptionTokens.IgnoreHiddenFolders, IgnoreOptionId.HiddenFolders },
+		{ CommandLineOptionTokens.IgnoreHiddenFiles, IgnoreOptionId.HiddenFiles },
+		{ CommandLineOptionTokens.IgnoreDotFolders, IgnoreOptionId.DotFolders },
+		{ CommandLineOptionTokens.IgnoreDotFiles, IgnoreOptionId.DotFiles },
+		{ CommandLineOptionTokens.IgnoreEmptyFolders, IgnoreOptionId.EmptyFolders },
+		{ CommandLineOptionTokens.IgnoreEmptyFiles, IgnoreOptionId.EmptyFiles },
+		{ CommandLineOptionTokens.IgnoreExtensionlessFiles, IgnoreOptionId.ExtensionlessFiles },
+		{ CommandLineOptionTokens.IgnoreNone, null }
+	};
+
+	public static TheoryData<string> ValueOptions() => new()
+	{
+		CommandLineOptionTokens.Path,
+		CommandLineOptionTokens.Language,
+		CommandLineOptionTokens.ReportPath,
+		CommandLineOptionTokens.ReportFormat,
+		CommandLineOptionTokens.IncludeRoot,
+		CommandLineOptionTokens.IncludeExtension,
+		CommandLineOptionTokens.Ignore
+	};
 }

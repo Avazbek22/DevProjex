@@ -1,0 +1,147 @@
+# DevProjex Command Line
+
+DevProjex can be launched from a terminal to open a project folder, preselect filters, and generate automation reports.
+
+The command line surface is intentionally small. The desktop UI remains the primary experience; CLI options are for startup automation, repeatable checks, and scripts that need a machine-readable project analysis report.
+
+## Usage
+
+```text
+DevProjex --path <folder> [options]
+DevProjex <folder> [options]
+```
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `--path <folder>` | Opens a project folder. |
+| `<folder>` | Opens a project folder as a positional argument. |
+| `--lang <code>` | Sets UI language: `en`, `ru`, `uz`, `tg`, `kk`, `fr`, `de`, `it`. |
+| `--report [file]` | Writes a JSON analysis report. If `file` is omitted, DevProjex writes to the default report folder. |
+| `--report-path <file>` | Writes a JSON analysis report to a specific file. |
+| `--report-format json` | Selects the report format. JSON is the v1 format. |
+| `--include-root <name>` | Includes one root folder. Can be repeated. |
+| `--include-extension <ext>` | Includes one extension. Can be repeated. `cs` and `.cs` are equivalent. |
+| `--ignore <name\|none>` | Uses exact ignore options for automation. Can be repeated. |
+| `--no-ui`, `--silent` | Runs analysis without showing the window. Requires `--report` or `--report-path`. |
+| `--version` | Prints application version and exits. |
+| `--help`, `-h`, `/?` | Prints help and exits. |
+
+## Ignore Option Names
+
+```text
+smart-ignore
+git-ignore
+hidden-folders
+hidden-files
+dot-folders
+dot-files
+empty-folders
+empty-files
+extensionless-files
+none
+```
+
+`--ignore none` means "use an explicit empty ignore set". It is different from omitting `--ignore`, where DevProjex uses the current default ignore behavior.
+
+## Reports
+
+Reports are JSON documents with:
+
+- selected root folders, extensions, and ignore options;
+- available root folders and extensions discovered in the project;
+- resulting tree summary;
+- output metrics for tree/content;
+- loading, analysis, and total timing in milliseconds;
+- diagnostics and warnings.
+
+If no explicit report path is provided, reports are written to:
+
+```text
+<Documents>/DevProjex/reports/devprojex-report-YYYY-MM-DD_HH-mm-ss.json
+```
+
+If the documents folder cannot be resolved, DevProjex falls back to the user profile folder, then the system temp folder.
+
+## Output Contract
+
+Automation-friendly output is kept strict:
+
+- `stdout`: help text, version text, or the generated report path.
+- `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
+- no UI is created for `--help`, `--version`, or `--no-ui`.
+
+## Windows Portable EXE Note
+
+The Windows desktop executable is built as a GUI-subsystem app so double-clicking DevProjex does not open an extra console window.
+
+Because of that Windows shell behavior, a plain PowerShell call to the portable GUI executable may return control to the shell before a longer `--no-ui` analysis finishes. For reliable Windows automation, use `Start-Process -Wait` and redirect output explicitly:
+
+```powershell
+$process = Start-Process `
+  -FilePath ".\DevProjex.exe" `
+  -ArgumentList @("--no-ui", "--path", "C:\Projects\App", "--report-path", "C:\Reports\app.json") `
+  -Wait `
+  -PassThru `
+  -NoNewWindow `
+  -RedirectStandardOutput ".\devprojex.stdout.txt" `
+  -RedirectStandardError ".\devprojex.stderr.txt"
+
+exit $process.ExitCode
+```
+
+Framework-dependent builds can also be invoked through the .NET host, which behaves like a normal console command:
+
+```powershell
+dotnet .\DevProjex.dll --no-ui --path "C:\Projects\App" --report-path "C:\Reports\app.json"
+```
+
+Linux and macOS terminal launches use the published executable directly.
+
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, help, or version output. |
+| `1` | Runtime failure, such as an unavailable project path or failed report write. |
+| `2` | Invalid arguments or invalid command combination. |
+| `130` | Operation canceled. |
+
+## Examples
+
+Open a folder in the UI:
+
+```powershell
+DevProjex --path "C:\Projects\App"
+```
+
+Open a folder using a positional path:
+
+```bash
+DevProjex "/home/me/projects/app"
+```
+
+Open the UI and write a startup report after the project loads:
+
+```powershell
+DevProjex --path "C:\Projects\App" --report
+```
+
+Run without UI and write a report:
+
+```bash
+DevProjex --path "/home/me/projects/app" --no-ui --report
+```
+
+Run without UI with exact selection overrides:
+
+```powershell
+DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json" --include-root src --include-extension cs --ignore none
+```
+
+Run with selected ignore options:
+
+```bash
+DevProjex "/home/me/projects/app" --no-ui --report ./devprojex-report.json --ignore smart-ignore --ignore git-ignore --ignore dot-folders
+```

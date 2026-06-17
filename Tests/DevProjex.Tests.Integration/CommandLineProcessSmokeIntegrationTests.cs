@@ -1,0 +1,120 @@
+using DevProjex.Avalonia;
+
+namespace DevProjex.Tests.Integration;
+
+public sealed class CommandLineProcessSmokeIntegrationTests
+{
+	[Fact]
+	public async Task Process_HelpPrintsHelpAndExitsZero()
+	{
+		var result = await RunAppAsync(CommandLineOptionTokens.Help);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Contains("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.Equal(string.Empty, result.Stderr);
+	}
+
+	[Fact]
+	public async Task Process_VersionPrintsVersionAndExitsZero()
+	{
+		var result = await RunAppAsync(CommandLineOptionTokens.Version);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.False(string.IsNullOrWhiteSpace(result.Stdout));
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Single(result.Stdout.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+	}
+
+	[Fact]
+	public async Task Process_NoUiWritesReportAndPrintsReportPath()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var reportPath = Path.Combine(temp.Path, "reports", "process-report.json");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", result.Stdout);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.True(File.Exists(reportPath));
+	}
+
+	[Fact]
+	public async Task Process_NoUiInvalidCombinationWritesStderrAndUsageExitCode()
+	{
+		var result = await RunAppAsync(CommandLineOptionTokens.NoUi, CommandLineOptionTokens.Report);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("--no-ui requires --path", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ParseErrorWritesStderrAndDoesNotStartUi()
+	{
+		var result = await RunAppAsync("--unknown");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("Unknown option '--unknown'.", result.Stderr, StringComparison.Ordinal);
+	}
+
+	private static async Task<CommandLineProcessResult> RunAppAsync(params string[] args)
+	{
+		var appPath = typeof(App).Assembly.Location;
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = "dotnet",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		startInfo.ArgumentList.Add(appPath);
+		foreach (var arg in args)
+			startInfo.ArgumentList.Add(arg);
+
+		using var process = Process.Start(startInfo)
+			?? throw new InvalidOperationException("Failed to start DevProjex command-line smoke process.");
+		var stdoutTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var stderrTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var waitForExitTask = process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		var completedTask = await Task.WhenAny(
+			waitForExitTask,
+			Task.Delay(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
+
+		if (completedTask != waitForExitTask)
+		{
+			TryKill(process);
+			throw new TimeoutException("DevProjex command-line smoke process did not exit within 20 seconds.");
+		}
+
+		return new CommandLineProcessResult(
+			process.ExitCode,
+			await stdoutTask,
+			await stderrTask);
+	}
+
+	private static void TryKill(Process process)
+	{
+		try
+		{
+			if (!process.HasExited)
+				process.Kill(entireProcessTree: true);
+		}
+		catch
+		{
+			// The test is already failing on timeout; process cleanup is best effort.
+		}
+	}
+
+	private sealed record CommandLineProcessResult(int ExitCode, string Stdout, string Stderr);
+}

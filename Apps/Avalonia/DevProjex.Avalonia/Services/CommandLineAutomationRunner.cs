@@ -7,53 +7,62 @@ internal static class CommandLineAutomationRunner
 	public static async Task<int> RunUtilityOrHeadlessAsync(
 		CommandLineParseResult parseResult,
 		CancellationToken cancellationToken = default)
+		=> await RunUtilityOrHeadlessAsync(parseResult, CreateDefaultContext(), cancellationToken)
+			.ConfigureAwait(false);
+
+	internal static async Task<int> RunUtilityOrHeadlessAsync(
+		CommandLineParseResult parseResult,
+		CommandLineAutomationContext context,
+		CancellationToken cancellationToken = default)
 	{
 		if (parseResult.Options.ShowHelp)
 		{
-			Console.WriteLine(BuildHelpText());
-			return 0;
+			context.Output.WriteLine(context.HelpContentProvider.GetHelpText());
+			return CommandLineExitCodes.Success;
 		}
 
 		if (parseResult.Options.ShowVersion)
 		{
-			Console.WriteLine(GetVersion());
-			return 0;
+			context.Output.WriteLine(context.VersionProvider());
+			return CommandLineExitCodes.Success;
 		}
 
 		if (parseResult.Errors.Count > 0)
-			return WriteErrors(parseResult.Errors);
+			return WriteErrors(parseResult.Errors, context.Error);
 
 		if (!parseResult.Options.NoUi)
-			return 0;
+			return CommandLineExitCodes.Success;
 
-		return await RunHeadlessAnalysisAsync(parseResult.Options, cancellationToken)
+		return await RunHeadlessAnalysisAsync(parseResult.Options, context, cancellationToken)
 			.ConfigureAwait(false);
 	}
 
 	public static bool ShouldRunBeforeAvalonia(CommandLineParseResult parseResult) =>
+		parseResult.Errors.Count > 0 ||
 		parseResult.Options.ShowHelp ||
 		parseResult.Options.ShowVersion ||
 		parseResult.Options.NoUi;
 
 	private static async Task<int> RunHeadlessAnalysisAsync(
 		CommandLineOptions options,
+		CommandLineAutomationContext context,
 		CancellationToken cancellationToken)
 	{
 		if (string.IsNullOrWhiteSpace(options.Path))
 		{
-			WriteError("--no-ui requires --path or a positional project path.");
-			return 2;
+			WriteError(context.Error, "--no-ui requires --path or a positional project path.");
+			return CommandLineExitCodes.UsageError;
 		}
 
 		if (!options.Report.Enabled)
 		{
-			WriteError("--no-ui requires --report or --report-path because no window is shown.");
-			return 2;
+			WriteError(context.Error, "--no-ui requires --report or --report-path because no window is shown.");
+			return CommandLineExitCodes.UsageError;
 		}
 
 		try
 		{
-			var services = AvaloniaCompositionRoot.CreateDefault(options);
+			var services = context.ServicesFactory(options);
 			var report = await services.ProjectAnalysisService.AnalyzeAsync(
 					new ProjectAnalysisRequest(
 						RootPath: options.Path!,
@@ -67,30 +76,38 @@ internal static class CommandLineAutomationRunner
 			await services.ProjectAnalysisReportWriter.WriteAsync(report, reportPath, cancellationToken)
 				.ConfigureAwait(false);
 
-			Console.WriteLine(reportPath);
-			return 0;
+			context.Output.WriteLine(reportPath);
+			return CommandLineExitCodes.Success;
 		}
 		catch (OperationCanceledException)
 		{
-			WriteError("Operation was canceled.");
-			return 130;
+			WriteError(context.Error, "Operation was canceled.");
+			return CommandLineExitCodes.Canceled;
 		}
 		catch (Exception ex)
 		{
-			WriteError(ex.Message);
-			return 1;
+			WriteError(context.Error, ex.Message);
+			return CommandLineExitCodes.RuntimeError;
 		}
 	}
 
-	private static int WriteErrors(IReadOnlyList<CommandLineParseError> errors)
+	private static int WriteErrors(IReadOnlyList<CommandLineParseError> errors, TextWriter errorWriter)
 	{
-		foreach (var error in errors)
-			WriteError(error.Message);
+		foreach (var parseError in errors)
+			WriteError(errorWriter, parseError.Message);
 
-		return 2;
+		return CommandLineExitCodes.UsageError;
 	}
 
-	private static void WriteError(string message) => Console.Error.WriteLine($"DevProjex: {message}");
+	private static void WriteError(TextWriter error, string message) => error.WriteLine($"DevProjex: {message}");
+
+	private static CommandLineAutomationContext CreateDefaultContext() =>
+		new(
+			Output: Console.Out,
+			Error: Console.Error,
+			ServicesFactory: AvaloniaCompositionRoot.CreateDefault,
+			HelpContentProvider: new CommandLineHelpContentProvider(),
+			VersionProvider: GetVersion);
 
 	private static string GetVersion()
 	{
@@ -101,30 +118,11 @@ internal static class CommandLineAutomationRunner
 		       ?? assembly.GetName().Version?.ToString()
 		       ?? "unknown";
 	}
-
-	private static string BuildHelpText() =>
-		"""
-		DevProjex
-
-		Usage:
-		  DevProjex --path <folder> [options]
-		  DevProjex <folder> [options]
-
-		Options:
-		  --path <folder>                 Open a project folder.
-		  --lang <code>                   UI language: en, ru, uz, tg, kk, fr, de, it.
-		  --report [file]                 Write a JSON analysis report.
-		  --report-path <file>            Write a JSON analysis report to a specific file.
-		  --report-format json            Report format. JSON is the v1 format.
-		  --include-root <name>           Include one root folder. Can be repeated.
-		  --include-extension <ext>       Include one extension. Can be repeated.
-		  --ignore <name|none>            Use exact ignore options for automation. Can be repeated.
-		  --no-ui, --silent               Run analysis without showing the window. Requires --report.
-		  --version                       Print application version.
-		  --help, -h, /?                  Show help.
-
-		Ignore option names:
-		  smart-ignore, git-ignore, hidden-folders, hidden-files,
-		  dot-folders, dot-files, empty-folders, empty-files, extensionless-files, none
-		""";
 }
+
+internal sealed record CommandLineAutomationContext(
+	TextWriter Output,
+	TextWriter Error,
+	Func<CommandLineOptions, AvaloniaAppServices> ServicesFactory,
+	CommandLineHelpContentProvider HelpContentProvider,
+	Func<string> VersionProvider);

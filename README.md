@@ -67,6 +67,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **Animated toasts** for user feedback
 * **Localization** (8 languages)
 * **Responsive async scanning** (UI stays smooth on big folders)
+* **Command-line startup automation** with optional JSON analysis reports
 
 ---
 
@@ -81,6 +82,18 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 
 
 DevProjex works with any language, repository, or project structure.
+
+---
+
+## Command Line ⚙️
+
+DevProjex can also be launched from a terminal to open a folder, preselect filters, or generate a JSON analysis report for automation.
+
+```bash
+DevProjex --path "/path/to/project" --no-ui --report
+```
+
+See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, exit codes, and report behavior.
 
 ---
 

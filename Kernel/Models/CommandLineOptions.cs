@@ -52,13 +52,13 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals("--version", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.Version, StringComparison.OrdinalIgnoreCase))
 			{
 				showVersion = true;
 				continue;
 			}
 
-			if (arg.Equals("--path", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.Path, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
 					continue;
@@ -67,7 +67,7 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals("--lang", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.Language, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
 					continue;
@@ -78,21 +78,21 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals("--elevation-attempted", StringComparison.OrdinalIgnoreCase) ||
-			    arg.Equals("--elevationAttempted", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.ElevationAttempted, StringComparison.OrdinalIgnoreCase) ||
+			    arg.Equals(CommandLineOptionTokens.LegacyElevationAttempted, StringComparison.OrdinalIgnoreCase))
 			{
 				elevationAttempted = true;
 				continue;
 			}
 
-			if (arg.Equals("--no-ui", StringComparison.OrdinalIgnoreCase) ||
-			    arg.Equals("--silent", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.NoUi, StringComparison.OrdinalIgnoreCase) ||
+			    arg.Equals(CommandLineOptionTokens.Silent, StringComparison.OrdinalIgnoreCase))
 			{
 				noUi = true;
 				continue;
 			}
 
-			if (arg.Equals("--report", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.Report, StringComparison.OrdinalIgnoreCase))
 			{
 				report = report with { Enabled = true };
 				if (TryReadOptionalValue(args, ref i, out var value))
@@ -101,7 +101,7 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals("--report-path", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.ReportPath, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
 					continue;
@@ -110,7 +110,7 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals("--report-format", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.ReportFormat, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
 					continue;
@@ -126,7 +126,7 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals("--include-root", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.IncludeRoot, StringComparison.OrdinalIgnoreCase))
 			{
 				if (TryReadRequiredValue(args, ref i, arg, errors, out var value))
 					includeRootFolders.Add(value);
@@ -134,7 +134,7 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals("--include-extension", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.IncludeExtension, StringComparison.OrdinalIgnoreCase))
 			{
 				if (TryReadRequiredValue(args, ref i, arg, errors, out var value))
 					includeExtensions.Add(NormalizeExtension(value));
@@ -142,13 +142,13 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals("--ignore", StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.Ignore, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
 					continue;
 
 				ignoreOptionsSpecified = true;
-				if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+				if (value.Equals(CommandLineOptionTokens.IgnoreNone, StringComparison.OrdinalIgnoreCase))
 				{
 					ignoreOptions.Clear();
 					continue;
@@ -206,56 +206,56 @@ public sealed record CommandLineOptions(
 
 		if (!string.IsNullOrWhiteSpace(Path))
 		{
-			parts.Add("--path");
+			parts.Add(CommandLineOptionTokens.Path);
 			parts.Add(Quote(Path!));
 		}
 
 		if (Language is not null)
 		{
-			parts.Add("--lang");
+			parts.Add(CommandLineOptionTokens.Language);
 			parts.Add(LanguageToCode(Language.Value));
 		}
 
 		if (ElevationAttempted)
-			parts.Add("--elevation-attempted");
+			parts.Add(CommandLineOptionTokens.ElevationAttempted);
 
 		if (NoUi)
-			parts.Add("--no-ui");
+			parts.Add(CommandLineOptionTokens.NoUi);
 
 		if (Report.Enabled)
 		{
-			parts.Add("--report");
+			parts.Add(CommandLineOptionTokens.Report);
 			if (!string.IsNullOrWhiteSpace(Report.Path))
 				parts.Add(Quote(Report.Path!));
 
 			if (Report.Format != StartupReportFormat.Json)
 			{
-				parts.Add("--report-format");
+				parts.Add(CommandLineOptionTokens.ReportFormat);
 				parts.Add(Report.Format.ToString().ToLowerInvariant());
 			}
 		}
 
 		foreach (var root in IncludeRootFolders)
 		{
-			parts.Add("--include-root");
+			parts.Add(CommandLineOptionTokens.IncludeRoot);
 			parts.Add(Quote(root));
 		}
 
 		foreach (var extension in IncludeExtensions)
 		{
-			parts.Add("--include-extension");
+			parts.Add(CommandLineOptionTokens.IncludeExtension);
 			parts.Add(Quote(extension));
 		}
 
 		if (IgnoreOptionsSpecified && IgnoreOptions.Count == 0)
 		{
-			parts.Add("--ignore");
-			parts.Add("none");
+			parts.Add(CommandLineOptionTokens.Ignore);
+			parts.Add(CommandLineOptionTokens.IgnoreNone);
 		}
 
 		foreach (var ignoreOption in IgnoreOptions)
 		{
-			parts.Add("--ignore");
+			parts.Add(CommandLineOptionTokens.Ignore);
 			parts.Add(FormatIgnoreOption(ignoreOption));
 		}
 
@@ -348,9 +348,9 @@ public sealed record CommandLineOptions(
 	}
 
 	private static bool IsHelpToken(string value) =>
-		value.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
-		value.Equals("-h", StringComparison.OrdinalIgnoreCase) ||
-		value.Equals("/?", StringComparison.OrdinalIgnoreCase);
+		value.Equals(CommandLineOptionTokens.Help, StringComparison.OrdinalIgnoreCase) ||
+		value.Equals(CommandLineOptionTokens.ShortHelp, StringComparison.OrdinalIgnoreCase) ||
+		value.Equals(CommandLineOptionTokens.WindowsHelp, StringComparison.OrdinalIgnoreCase);
 
 	private static bool IsOptionToken(string value)
 	{
@@ -359,7 +359,7 @@ public sealed record CommandLineOptions(
 
 		return value.StartsWith("--", StringComparison.Ordinal) ||
 		       (value.Length == 2 && value[0] == '-' && char.IsLetter(value[1])) ||
-		       value.Equals("/?", StringComparison.Ordinal);
+		       value.Equals(CommandLineOptionTokens.WindowsHelp, StringComparison.Ordinal);
 	}
 
 	private static bool TryParseReportFormat(string value, out StartupReportFormat format)
@@ -388,34 +388,34 @@ public sealed record CommandLineOptions(
 		switch (NormalizeOptionName(value))
 		{
 			case "smart":
-			case "smart-ignore":
+			case CommandLineOptionTokens.IgnoreSmartIgnore:
 				optionId = IgnoreOptionId.SmartIgnore;
 				return true;
 			case "gitignore":
-			case "git-ignore":
+			case CommandLineOptionTokens.IgnoreGitIgnore:
 			case "use-gitignore":
 			case "use-git-ignore":
 				optionId = IgnoreOptionId.UseGitIgnore;
 				return true;
-			case "hidden-folders":
+			case CommandLineOptionTokens.IgnoreHiddenFolders:
 				optionId = IgnoreOptionId.HiddenFolders;
 				return true;
-			case "hidden-files":
+			case CommandLineOptionTokens.IgnoreHiddenFiles:
 				optionId = IgnoreOptionId.HiddenFiles;
 				return true;
-			case "dot-folders":
+			case CommandLineOptionTokens.IgnoreDotFolders:
 				optionId = IgnoreOptionId.DotFolders;
 				return true;
-			case "dot-files":
+			case CommandLineOptionTokens.IgnoreDotFiles:
 				optionId = IgnoreOptionId.DotFiles;
 				return true;
-			case "empty-folders":
+			case CommandLineOptionTokens.IgnoreEmptyFolders:
 				optionId = IgnoreOptionId.EmptyFolders;
 				return true;
-			case "empty-files":
+			case CommandLineOptionTokens.IgnoreEmptyFiles:
 				optionId = IgnoreOptionId.EmptyFiles;
 				return true;
-			case "extensionless-files":
+			case CommandLineOptionTokens.IgnoreExtensionlessFiles:
 			case "files-without-extension":
 				optionId = IgnoreOptionId.ExtensionlessFiles;
 				return true;
@@ -427,15 +427,15 @@ public sealed record CommandLineOptions(
 
 	private static string FormatIgnoreOption(IgnoreOptionId optionId) => optionId switch
 	{
-		IgnoreOptionId.SmartIgnore => "smart-ignore",
-		IgnoreOptionId.UseGitIgnore => "git-ignore",
-		IgnoreOptionId.HiddenFolders => "hidden-folders",
-		IgnoreOptionId.HiddenFiles => "hidden-files",
-		IgnoreOptionId.DotFolders => "dot-folders",
-		IgnoreOptionId.DotFiles => "dot-files",
-		IgnoreOptionId.EmptyFolders => "empty-folders",
-		IgnoreOptionId.EmptyFiles => "empty-files",
-		IgnoreOptionId.ExtensionlessFiles => "extensionless-files",
+		IgnoreOptionId.SmartIgnore => CommandLineOptionTokens.IgnoreSmartIgnore,
+		IgnoreOptionId.UseGitIgnore => CommandLineOptionTokens.IgnoreGitIgnore,
+		IgnoreOptionId.HiddenFolders => CommandLineOptionTokens.IgnoreHiddenFolders,
+		IgnoreOptionId.HiddenFiles => CommandLineOptionTokens.IgnoreHiddenFiles,
+		IgnoreOptionId.DotFolders => CommandLineOptionTokens.IgnoreDotFolders,
+		IgnoreOptionId.DotFiles => CommandLineOptionTokens.IgnoreDotFiles,
+		IgnoreOptionId.EmptyFolders => CommandLineOptionTokens.IgnoreEmptyFolders,
+		IgnoreOptionId.EmptyFiles => CommandLineOptionTokens.IgnoreEmptyFiles,
+		IgnoreOptionId.ExtensionlessFiles => CommandLineOptionTokens.IgnoreExtensionlessFiles,
 		_ => optionId.ToString().ToLowerInvariant()
 	};
 
