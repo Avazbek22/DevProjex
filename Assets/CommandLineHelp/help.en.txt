@@ -1,0 +1,31 @@
+DevProjex
+
+Usage:
+  DevProjex --path <folder> [options]
+  DevProjex <folder> [options]
+
+Options:
+  --path <folder>                 Open a project folder.
+  --lang <code>                   UI language: en, ru, uz, tg, kk, fr, de, it.
+  --report [file]                 Write a JSON analysis report.
+  --report-path <file>            Write a JSON analysis report to a specific file.
+  --report-format json            Report format. JSON is the v1 format.
+  --include-root <name>           Include one root folder. Can be repeated.
+  --include-extension <ext>       Include one extension. Can be repeated.
+  --ignore <name|none>            Use exact ignore options for automation. Can be repeated.
+  --no-ui, --silent               Run analysis without showing the window. Requires --report.
+  --version                       Print application version.
+  --help, -h, /?                  Show help.
+
+Ignore option names:
+  smart-ignore, git-ignore, hidden-folders, hidden-files,
+  dot-folders, dot-files, empty-folders, empty-files,
+  extensionless-files, none
+
+Examples:
+  DevProjex "C:\Projects\App"
+  DevProjex "/home/me/projects/app"
+  DevProjex --path "C:\Projects\App" --report
+  DevProjex --path "/home/me/projects/app" --no-ui --report
+  DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json"
+  DevProjex --path "C:\Projects\App" --include-root src --include-extension cs --ignore none --report
