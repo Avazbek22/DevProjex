@@ -112,6 +112,17 @@ cat > "DevProjex.app/Contents/Info.plist" << 'EOF'
 EOF
 ```
 
+## Optional Terminal Alias
+
+For terminal automation, install a user-level wrapper or symlink named `devprojex` after publishing/bundling:
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "/Applications/DevProjex.app/Contents/MacOS/DevProjex" ~/.local/bin/devprojex
+```
+
+Make sure `~/.local/bin` is in `PATH`. The app bundle itself does not modify shell profiles or global environment variables.
+
 ## Code Signing and Notarization
 
 For distribution outside the Mac App Store, the app must be signed and notarized:

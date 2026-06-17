@@ -2,7 +2,13 @@ DevProjex
 
 Usage:
   DevProjex --path <folder> [options]
+  DevProjex.exe --path <folder> [options]
+  devprojex --path <folder> [options]
+  devprojex.exe --path <folder> [options]
   DevProjex <folder> [options]
+
+Value syntax:
+  --path <folder> and --path=<folder> are both supported.
 
 Options:
   --path <folder>                 Open a project folder.
@@ -24,6 +30,9 @@ Ignore option names:
 
 Examples:
   DevProjex "C:\Projects\App"
+  DevProjex.exe --path "C:\Projects\App"
+  devprojex.exe --path "C:\Projects\App" --report
+  devprojex "/home/me/projects/app"
   DevProjex "/home/me/projects/app"
   DevProjex --path "C:\Projects\App" --report
   DevProjex --path "/home/me/projects/app" --no-ui --report

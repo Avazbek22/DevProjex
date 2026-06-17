@@ -44,7 +44,15 @@ public sealed record CommandLineOptions(
 
 		for (int i = 0; i < args.Length; i++)
 		{
-			var arg = args[i];
+			var rawArg = args[i];
+			var arg = rawArg;
+			string? inlineValue = null;
+			var hasInlineValue = TrySplitOptionAssignment(rawArg, out var optionName, out var assignedValue);
+			if (hasInlineValue)
+			{
+				arg = optionName;
+				inlineValue = assignedValue;
+			}
 
 			if (IsHelpToken(arg))
 			{
@@ -60,7 +68,7 @@ public sealed record CommandLineOptions(
 
 			if (arg.Equals(CommandLineOptionTokens.Path, StringComparison.OrdinalIgnoreCase))
 			{
-				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					continue;
 
 				path = value;
@@ -69,7 +77,7 @@ public sealed record CommandLineOptions(
 
 			if (arg.Equals(CommandLineOptionTokens.Language, StringComparison.OrdinalIgnoreCase))
 			{
-				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					continue;
 
 				lang = ParseLanguage(value);
@@ -95,7 +103,7 @@ public sealed record CommandLineOptions(
 			if (arg.Equals(CommandLineOptionTokens.Report, StringComparison.OrdinalIgnoreCase))
 			{
 				report = report with { Enabled = true };
-				if (TryReadOptionalValue(args, ref i, out var value))
+				if (TryReadOptionalValue(args, ref i, inlineValue, out var value))
 					report = report with { Path = value };
 
 				continue;
@@ -103,7 +111,7 @@ public sealed record CommandLineOptions(
 
 			if (arg.Equals(CommandLineOptionTokens.ReportPath, StringComparison.OrdinalIgnoreCase))
 			{
-				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					continue;
 
 				report = report with { Enabled = true, Path = value };
@@ -112,7 +120,7 @@ public sealed record CommandLineOptions(
 
 			if (arg.Equals(CommandLineOptionTokens.ReportFormat, StringComparison.OrdinalIgnoreCase))
 			{
-				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					continue;
 
 				report = report with { Enabled = true };
@@ -128,7 +136,7 @@ public sealed record CommandLineOptions(
 
 			if (arg.Equals(CommandLineOptionTokens.IncludeRoot, StringComparison.OrdinalIgnoreCase))
 			{
-				if (TryReadRequiredValue(args, ref i, arg, errors, out var value))
+				if (TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					includeRootFolders.Add(value);
 
 				continue;
@@ -136,7 +144,7 @@ public sealed record CommandLineOptions(
 
 			if (arg.Equals(CommandLineOptionTokens.IncludeExtension, StringComparison.OrdinalIgnoreCase))
 			{
-				if (TryReadRequiredValue(args, ref i, arg, errors, out var value))
+				if (TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					includeExtensions.Add(NormalizeExtension(value));
 
 				continue;
@@ -144,7 +152,7 @@ public sealed record CommandLineOptions(
 
 			if (arg.Equals(CommandLineOptionTokens.Ignore, StringComparison.OrdinalIgnoreCase))
 			{
-				if (!TryReadRequiredValue(args, ref i, arg, errors, out var value))
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					continue;
 
 				ignoreOptionsSpecified = true;
@@ -168,7 +176,7 @@ public sealed record CommandLineOptions(
 			if (IsOptionToken(arg))
 			{
 				errors.Add(new CommandLineParseError("unknown-option", $"Unknown option '{arg}'.", arg));
-				if (i + 1 < args.Length && !IsOptionToken(args[i + 1]))
+				if (!hasInlineValue && i + 1 < args.Length && !IsOptionToken(args[i + 1]))
 					i++;
 				continue;
 			}
@@ -323,10 +331,23 @@ public sealed record CommandLineOptions(
 		string[] args,
 		ref int index,
 		string optionName,
+		string? inlineValue,
 		List<CommandLineParseError> errors,
 		out string value)
 	{
 		value = string.Empty;
+		if (inlineValue is not null)
+		{
+			if (inlineValue.Length == 0)
+			{
+				errors.Add(new CommandLineParseError("missing-value", $"Option '{optionName}' requires a value.", optionName));
+				return false;
+			}
+
+			value = inlineValue;
+			return true;
+		}
+
 		if (index + 1 >= args.Length || IsOptionToken(args[index + 1]))
 		{
 			errors.Add(new CommandLineParseError("missing-value", $"Option '{optionName}' requires a value.", optionName));
@@ -337,13 +358,39 @@ public sealed record CommandLineOptions(
 		return true;
 	}
 
-	private static bool TryReadOptionalValue(string[] args, ref int index, out string value)
+	private static bool TryReadOptionalValue(string[] args, ref int index, string? inlineValue, out string value)
 	{
 		value = string.Empty;
+		if (inlineValue is not null)
+		{
+			if (inlineValue.Length == 0)
+				return false;
+
+			value = inlineValue;
+			return true;
+		}
+
 		if (index + 1 >= args.Length || IsOptionToken(args[index + 1]))
 			return false;
 
 		value = args[++index];
+		return true;
+	}
+
+	private static bool TrySplitOptionAssignment(string arg, out string optionName, out string value)
+	{
+		optionName = arg;
+		value = string.Empty;
+
+		if (!arg.StartsWith("--", StringComparison.Ordinal))
+			return false;
+
+		var separatorIndex = arg.IndexOf('=');
+		if (separatorIndex <= 2)
+			return false;
+
+		optionName = arg[..separatorIndex];
+		value = arg[(separatorIndex + 1)..];
 		return true;
 	}
 

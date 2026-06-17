@@ -25,11 +25,53 @@ public sealed class CommandLineHelpContentProviderTests
 	}
 
 	[Fact]
+	public void GetHelpText_DocumentsEveryPublicExecutableAlias()
+	{
+		var help = new CommandLineHelpContentProvider().GetHelpText();
+
+		foreach (var alias in CommandLineExecutableAliases.DocumentedCommandNames)
+			Assert.Contains(alias, help, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void GetHelpText_DocumentsInlineValueSyntax()
+	{
+		var help = new CommandLineHelpContentProvider().GetHelpText();
+
+		Assert.Contains("--path=<folder>", help, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void PublicHelpTokens_AreUnique()
 	{
 		Assert.Equal(
 			CommandLineOptionTokens.PublicHelpTokens.Count,
 			CommandLineOptionTokens.PublicHelpTokens.Distinct(StringComparer.Ordinal).Count());
+	}
+
+	[Fact]
+	public void DocumentedCommandNames_AreUniqueStableTerminalNames()
+	{
+		Assert.Equal(
+			CommandLineExecutableAliases.DocumentedCommandNames.Count,
+			CommandLineExecutableAliases.DocumentedCommandNames.Distinct(StringComparer.Ordinal).Count());
+
+		foreach (var commandName in CommandLineExecutableAliases.DocumentedCommandNames)
+		{
+			Assert.Equal(commandName.Trim(), commandName);
+			Assert.DoesNotContain(Path.DirectorySeparatorChar, commandName);
+			Assert.DoesNotContain(Path.AltDirectorySeparatorChar, commandName);
+			Assert.DoesNotContain(' ', commandName);
+		}
+	}
+
+	[Fact]
+	public void PublicAliases_ExposePlatformAutomationNamesOnly()
+	{
+		Assert.Contains(CommandLineExecutableAliases.DisplayName, CommandLineExecutableAliases.PublicAliases);
+		Assert.Contains(CommandLineExecutableAliases.UnixCommand, CommandLineExecutableAliases.PublicAliases);
+		Assert.Contains(CommandLineExecutableAliases.WindowsStoreAlias, CommandLineExecutableAliases.PublicAliases);
+		Assert.DoesNotContain(CommandLineExecutableAliases.WindowsPortableExecutable, CommandLineExecutableAliases.PublicAliases);
 	}
 
 	[Fact]

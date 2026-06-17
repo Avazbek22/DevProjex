@@ -8,8 +8,29 @@ The command line surface is intentionally small. The desktop UI remains the prim
 
 ```text
 DevProjex --path <folder> [options]
+DevProjex.exe --path <folder> [options]
+devprojex --path <folder> [options]
+devprojex.exe --path <folder> [options]
 DevProjex <folder> [options]
 ```
+
+Options with values support both separated and inline assignment forms:
+
+```text
+--path <folder>
+--path=<folder>
+```
+
+## Executable Names And Aliases
+
+| Platform/package | Command |
+| --- | --- |
+| Windows portable folder | `.\DevProjex.exe` or the full path to `DevProjex.exe`. |
+| Windows Microsoft Store/MSIX | `devprojex.exe` through Windows App Execution Alias. |
+| Linux installed manually/package | `devprojex` when the executable is installed or symlinked into `PATH`. |
+| macOS terminal automation | `devprojex` when a symlink/wrapper is installed into `PATH`, or the direct executable path inside the `.app` bundle. |
+
+Portable builds do not edit `PATH` automatically. Store/MSIX uses the OS-supported App Execution Alias mechanism instead of self-modifying environment variables.
 
 ## Options
 
@@ -119,7 +140,7 @@ DevProjex --path "C:\Projects\App"
 Open a folder using a positional path:
 
 ```bash
-DevProjex "/home/me/projects/app"
+devprojex "/home/me/projects/app"
 ```
 
 Open the UI and write a startup report after the project loads:
@@ -131,7 +152,7 @@ DevProjex --path "C:\Projects\App" --report
 Run without UI and write a report:
 
 ```bash
-DevProjex --path "/home/me/projects/app" --no-ui --report
+devprojex --path "/home/me/projects/app" --no-ui --report
 ```
 
 Run without UI with exact selection overrides:
@@ -143,5 +164,5 @@ DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json" -
 Run with selected ignore options:
 
 ```bash
-DevProjex "/home/me/projects/app" --no-ui --report ./devprojex-report.json --ignore smart-ignore --ignore git-ignore --ignore dot-folders
+devprojex "/home/me/projects/app" --no-ui --report ./devprojex-report.json --ignore smart-ignore --ignore git-ignore --ignore dot-folders
 ```

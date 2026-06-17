@@ -90,7 +90,7 @@ DevProjex works with any language, repository, or project structure.
 DevProjex can also be launched from a terminal to open a folder, preselect filters, or generate a JSON analysis report for automation.
 
 ```bash
-DevProjex --path "/path/to/project" --no-ui --report
+devprojex --path "/path/to/project" --no-ui --report
 ```
 
 See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, exit codes, and report behavior.

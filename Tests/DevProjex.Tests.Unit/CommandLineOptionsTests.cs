@@ -23,6 +23,108 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_ReadsInlineOptionValues()
+	{
+		var result = CommandLineOptions.Parse([
+			"--path=/tmp/root",
+			"--lang=ru",
+			"--report-path=/tmp/report.json",
+			"--report-format=json",
+			"--include-root=src",
+			"--include-extension=cs",
+			"--ignore=dot-folders"
+		]);
+
+		AssertValid(result);
+		Assert.Equal("/tmp/root", result.Options.Path);
+		Assert.Equal(AppLanguage.Ru, result.Options.Language);
+		Assert.True(result.Options.Report.Enabled);
+		Assert.Equal("/tmp/report.json", result.Options.Report.Path);
+		Assert.Equal(StartupReportFormat.Json, result.Options.Report.Format);
+		Assert.Equal(["src"], result.Options.IncludeRootFolders);
+		Assert.Equal([".cs"], result.Options.IncludeExtensions);
+		Assert.Equal([IgnoreOptionId.DotFolders], result.Options.IgnoreOptions);
+	}
+
+	[Theory]
+	[MemberData(nameof(InlineEquivalentValueOptions))]
+	public void Parse_InlineValueSyntaxMatchesSeparatedValueSyntax(string optionName, string value)
+	{
+		var separated = CommandLineOptions.Parse([optionName, value]);
+		var inline = CommandLineOptions.Parse([$"{optionName}={value}"]);
+
+		AssertValid(separated);
+		AssertValid(inline);
+		AssertEquivalentOptions(separated.Options, inline.Options);
+	}
+
+	[Fact]
+	public void Parse_ReadsInlineReportPathFromReportOption()
+	{
+		var result = CommandLineOptions.Parse(["--report=/tmp/report.json"]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Report.Enabled);
+		Assert.Equal("/tmp/report.json", result.Options.Report.Path);
+	}
+
+	[Fact]
+	public void Parse_EmptyInlineReportValueUsesDefaultReportPath()
+	{
+		var result = CommandLineOptions.Parse(["--report="]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Report.Enabled);
+		Assert.Null(result.Options.Report.Path);
+	}
+
+	[Fact]
+	public void Parse_InlineReportPathMayStartWithDash()
+	{
+		var result = CommandLineOptions.Parse(["--report=--report.json"]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Report.Enabled);
+		Assert.Equal("--report.json", result.Options.Report.Path);
+	}
+
+	[Fact]
+	public void Parse_InlineValuePreservesEqualsInsidePath()
+	{
+		var result = CommandLineOptions.Parse(["--path=/tmp/root=name"]);
+
+		AssertValid(result);
+		Assert.Equal("/tmp/root=name", result.Options.Path);
+	}
+
+	[Fact]
+	public void Parse_InlineRequiredValueMayStartWithDash()
+	{
+		var result = CommandLineOptions.Parse(["--path=--folder"]);
+
+		AssertValid(result);
+		Assert.Equal("--folder", result.Options.Path);
+	}
+
+	[Fact]
+	public void Parse_RejectsEmptyInlineRequiredValue()
+	{
+		var result = CommandLineOptions.Parse(["--path="]);
+
+		AssertInvalid(result, "missing-value");
+		Assert.Null(result.Options.Path);
+	}
+
+	[Fact]
+	public void Parse_UnknownInlineOptionDoesNotConsumeFollowingPositionalPath()
+	{
+		var result = CommandLineOptions.Parse(["--unknown=value", "/tmp/root"]);
+
+		AssertInvalid(result, "unknown-option");
+		Assert.Equal("/tmp/root", result.Options.Path);
+	}
+
+	[Fact]
 	public void Parse_ReadsLegacyElevationAttemptedFlagForExistingRelaunches()
 	{
 		var result = CommandLineOptions.Parse(["--path", "/tmp/root", "--elevationAttempted"]);
@@ -428,6 +530,21 @@ public sealed class CommandLineOptionsTests
 		Assert.Contains(result.Errors, error => error.Code == expectedCode);
 	}
 
+	private static void AssertEquivalentOptions(CommandLineOptions expected, CommandLineOptions actual)
+	{
+		Assert.Equal(expected.Path, actual.Path);
+		Assert.Equal(expected.Language, actual.Language);
+		Assert.Equal(expected.ElevationAttempted, actual.ElevationAttempted);
+		Assert.Equal(expected.NoUi, actual.NoUi);
+		Assert.Equal(expected.ShowHelp, actual.ShowHelp);
+		Assert.Equal(expected.ShowVersion, actual.ShowVersion);
+		Assert.Equal(expected.Report, actual.Report);
+		Assert.Equal(expected.IncludeRootFolders, actual.IncludeRootFolders);
+		Assert.Equal(expected.IncludeExtensions, actual.IncludeExtensions);
+		Assert.Equal(expected.IgnoreOptions, actual.IgnoreOptions);
+		Assert.Equal(expected.IgnoreOptionsSpecified, actual.IgnoreOptionsSpecified);
+	}
+
 	public static TheoryData<string, IgnoreOptionId?> PublicIgnoreOptionNames() => new()
 	{
 		{ CommandLineOptionTokens.IgnoreSmartIgnore, IgnoreOptionId.SmartIgnore },
@@ -440,6 +557,17 @@ public sealed class CommandLineOptionsTests
 		{ CommandLineOptionTokens.IgnoreEmptyFiles, IgnoreOptionId.EmptyFiles },
 		{ CommandLineOptionTokens.IgnoreExtensionlessFiles, IgnoreOptionId.ExtensionlessFiles },
 		{ CommandLineOptionTokens.IgnoreNone, null }
+	};
+
+	public static TheoryData<string, string> InlineEquivalentValueOptions() => new()
+	{
+		{ CommandLineOptionTokens.Path, "/tmp/root" },
+		{ CommandLineOptionTokens.Language, "ru" },
+		{ CommandLineOptionTokens.ReportPath, "/tmp/report.json" },
+		{ CommandLineOptionTokens.ReportFormat, "json" },
+		{ CommandLineOptionTokens.IncludeRoot, "src" },
+		{ CommandLineOptionTokens.IncludeExtension, "cs" },
+		{ CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders }
 	};
 
 	public static TheoryData<string> ValueOptions() => new()

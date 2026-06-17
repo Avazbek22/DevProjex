@@ -15,6 +15,16 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_HelpDocumentsAllSupportedCommandNames()
+	{
+		var result = await RunAppAsync(CommandLineOptionTokens.Help);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		foreach (var commandName in CommandLineExecutableAliases.DocumentedCommandNames)
+			Assert.Contains(commandName, result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task Process_VersionPrintsVersionAndExitsZero()
 	{
 		var result = await RunAppAsync(CommandLineOptionTokens.Version);
@@ -39,6 +49,27 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			CommandLineOptionTokens.IncludeRoot, "src",
 			CommandLineOptionTokens.IncludeExtension, "cs",
 			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", result.Stdout);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.True(File.Exists(reportPath));
+	}
+
+	[Fact]
+	public async Task Process_NoUiSupportsInlineValueSyntax()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var reportPath = Path.Combine(temp.Path, "reports", "inline-report.json");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			$"{CommandLineOptionTokens.Path}={temp.Path}",
+			$"{CommandLineOptionTokens.ReportPath}={reportPath}",
+			$"{CommandLineOptionTokens.IncludeRoot}=src",
+			$"{CommandLineOptionTokens.IncludeExtension}=cs",
+			$"{CommandLineOptionTokens.Ignore}={CommandLineOptionTokens.IgnoreNone}");
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", result.Stdout);

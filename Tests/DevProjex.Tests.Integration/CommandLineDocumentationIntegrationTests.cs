@@ -18,6 +18,15 @@ public sealed class CommandLineDocumentationIntegrationTests
 		foreach (var ignoreOptionName in CommandLineOptionTokens.PublicIgnoreOptionNames)
 			Assert.Contains(ignoreOptionName, docs, StringComparison.Ordinal);
 
+		foreach (var commandName in CommandLineExecutableAliases.DocumentedCommandNames)
+			Assert.Contains(commandName, docs, StringComparison.Ordinal);
+
+		Assert.Contains("--path=<folder>", docs, StringComparison.Ordinal);
+		Assert.Contains("Portable builds do not edit `PATH` automatically", docs, StringComparison.Ordinal);
+		Assert.Contains("Windows Microsoft Store/MSIX", docs, StringComparison.Ordinal);
+		Assert.Contains("Windows portable folder", docs, StringComparison.Ordinal);
+		Assert.Contains("Linux installed manually/package", docs, StringComparison.Ordinal);
+		Assert.Contains("macOS terminal automation", docs, StringComparison.Ordinal);
 		Assert.Contains("stdout", docs, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("stderr", docs, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("Exit Codes", docs, StringComparison.Ordinal);
