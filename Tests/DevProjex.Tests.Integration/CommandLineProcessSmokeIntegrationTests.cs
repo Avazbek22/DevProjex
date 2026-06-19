@@ -15,6 +15,16 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_HelpWinsOverInvalidArgumentsAndStillExitsZero()
+	{
+		var result = await RunAppAsync(CommandLineOptionTokens.Help, "--unknown", CommandLineOptionTokens.NoUi);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Contains("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.Equal(string.Empty, result.Stderr);
+	}
+
+	[Fact]
 	public async Task Process_HelpDocumentsAllSupportedCommandNames()
 	{
 		var result = await RunAppAsync(CommandLineOptionTokens.Help);
@@ -57,6 +67,30 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_NoUiSupportsPositionalPathAndRelativeReportFromWorkingDirectory()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		temp.CreateFile(Path.Combine("project with spaces", "src", "App.cs"), "class App {}\n");
+		var relativeReportPath = Path.Combine("reports", "relative-process-report.json");
+		var expectedReportPath = Path.GetFullPath(Path.Combine(temp.Path, relativeReportPath));
+
+		var result = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			CommandLineOptionTokens.NoUi,
+			projectPath,
+			CommandLineOptionTokens.Report, relativeReportPath,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal($"{expectedReportPath}{Environment.NewLine}", result.Stdout);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.True(File.Exists(expectedReportPath));
+	}
+
+	[Fact]
 	public async Task Process_NoUiSupportsInlineValueSyntax()
 	{
 		using var temp = new TemporaryDirectory();
@@ -88,6 +122,25 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_InvalidReportFormatReturnsUsageErrorBeforeCreatingReport()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var reportPath = Path.Combine(temp.Path, "reports", "invalid-format.json");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.ReportFormat, "xml");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("Unsupported report format 'xml'.", result.Stderr, StringComparison.Ordinal);
+		Assert.False(File.Exists(reportPath));
+	}
+
+	[Fact]
 	public async Task Process_ParseErrorWritesStderrAndDoesNotStartUi()
 	{
 		var result = await RunAppAsync("--unknown");
@@ -97,7 +150,13 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Contains("Unknown option '--unknown'.", result.Stderr, StringComparison.Ordinal);
 	}
 
-	private static async Task<CommandLineProcessResult> RunAppAsync(params string[] args)
+	private static Task<CommandLineProcessResult> RunAppAsync(params string[] args) =>
+		RunAppCoreAsync(workingDirectory: null, args);
+
+	private static Task<CommandLineProcessResult> RunAppWithWorkingDirectoryAsync(string workingDirectory, params string[] args) =>
+		RunAppCoreAsync(workingDirectory, args);
+
+	private static async Task<CommandLineProcessResult> RunAppCoreAsync(string? workingDirectory, params string[] args)
 	{
 		var appPath = typeof(App).Assembly.Location;
 		var startInfo = new ProcessStartInfo
@@ -108,6 +167,9 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			UseShellExecute = false,
 			CreateNoWindow = true
 		};
+
+		if (!string.IsNullOrWhiteSpace(workingDirectory))
+			startInfo.WorkingDirectory = workingDirectory;
 
 		startInfo.ArgumentList.Add(appPath);
 		foreach (var arg in args)
