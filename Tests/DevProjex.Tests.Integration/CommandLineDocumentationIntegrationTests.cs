@@ -22,6 +22,8 @@ public sealed class CommandLineDocumentationIntegrationTests
 			Assert.Contains(commandName, docs, StringComparison.Ordinal);
 
 		Assert.Contains("--path=<folder>", docs, StringComparison.Ordinal);
+		Assert.Contains("--report -", docs, StringComparison.Ordinal);
+		Assert.Contains("--strict", docs, StringComparison.Ordinal);
 		Assert.Contains("Portable builds do not edit `PATH` automatically", docs, StringComparison.Ordinal);
 		Assert.Contains("Windows Microsoft Store/MSIX", docs, StringComparison.Ordinal);
 		Assert.Contains("Windows portable folder", docs, StringComparison.Ordinal);

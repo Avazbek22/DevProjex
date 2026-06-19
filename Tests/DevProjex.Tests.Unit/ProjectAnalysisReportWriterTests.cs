@@ -37,6 +37,30 @@ public sealed class ProjectAnalysisReportWriterTests
 		Assert.Equal("second", document.RootElement.GetProperty("rootPath").GetString());
 	}
 
+	[Fact]
+	public async Task WriteAsync_TextWriterWritesJsonWithoutTouchingFileSystem()
+	{
+		var writer = new ProjectAnalysisReportWriter();
+		using var output = new StringWriter();
+
+		await writer.WriteAsync(CreateReport("stdout-root"), output, TestContext.Current.CancellationToken);
+
+		using var document = JsonDocument.Parse(output.ToString());
+		var root = document.RootElement;
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("stdout-root", root.GetProperty("rootPath").GetString());
+		Assert.Equal("dotFolders", root.GetProperty("selection").GetProperty("selectedIgnoreOptions")[0].GetString());
+	}
+
+	[Fact]
+	public void StartupReportOptions_WriteToStandardOutputRecognizesTrimmedDashOnly()
+	{
+		Assert.True(new StartupReportOptions(true, "-", StartupReportFormat.Json).WriteToStandardOutput);
+		Assert.True(new StartupReportOptions(true, " - ", StartupReportFormat.Json).WriteToStandardOutput);
+		Assert.False(new StartupReportOptions(true, "./-", StartupReportFormat.Json).WriteToStandardOutput);
+		Assert.False(StartupReportOptions.Disabled.WriteToStandardOutput);
+	}
+
 	private static ProjectAnalysisReport CreateReport(string rootPath) =>
 		new(
 			SchemaVersion: ProjectAnalysisReport.CurrentSchemaVersion,

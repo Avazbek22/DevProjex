@@ -72,12 +72,10 @@ internal static class CommandLineAutomationRunner
 					cancellationToken)
 				.ConfigureAwait(false);
 
-			var reportPath = services.ReportPathResolver.Resolve(options.Report);
-			await services.ProjectAnalysisReportWriter.WriteAsync(report, reportPath, cancellationToken)
+			await WriteReportAsync(options, context, services, report, cancellationToken)
 				.ConfigureAwait(false);
 
-			context.Output.WriteLine(reportPath);
-			return CommandLineExitCodes.Success;
+			return ResolveStrictExitCode(options, report, context.Error);
 		}
 		catch (OperationCanceledException)
 		{
@@ -98,6 +96,51 @@ internal static class CommandLineAutomationRunner
 
 		return CommandLineExitCodes.UsageError;
 	}
+
+	private static async Task WriteReportAsync(
+		CommandLineOptions options,
+		CommandLineAutomationContext context,
+		AvaloniaAppServices services,
+		ProjectAnalysisReport report,
+		CancellationToken cancellationToken)
+	{
+		if (options.Report.WriteToStandardOutput)
+		{
+			await services.ProjectAnalysisReportWriter.WriteAsync(report, context.Output, cancellationToken)
+				.ConfigureAwait(false);
+			return;
+		}
+
+		var reportPath = services.ReportPathResolver.Resolve(options.Report);
+		await services.ProjectAnalysisReportWriter.WriteAsync(report, reportPath, cancellationToken)
+			.ConfigureAwait(false);
+		context.Output.WriteLine(reportPath);
+	}
+
+	private static int ResolveStrictExitCode(
+		CommandLineOptions options,
+		ProjectAnalysisReport report,
+		TextWriter errorWriter)
+	{
+		if (!options.Strict || IsClean(report.Diagnostics))
+			return CommandLineExitCodes.Success;
+
+		WriteError(errorWriter, "Strict mode failed because the analysis report contains diagnostics.");
+		foreach (var warning in report.Diagnostics.Warnings)
+			WriteError(errorWriter, warning);
+
+		if (report.Diagnostics.RootAccessDenied)
+			WriteError(errorWriter, "Root path access was denied.");
+		if (report.Diagnostics.HadAccessDenied)
+			WriteError(errorWriter, "One or more directories could not be read.");
+
+		return CommandLineExitCodes.RuntimeError;
+	}
+
+	private static bool IsClean(ProjectAnalysisDiagnosticsReport diagnostics) =>
+		!diagnostics.RootAccessDenied &&
+		!diagnostics.HadAccessDenied &&
+		diagnostics.Warnings.Count == 0;
 
 	private static void WriteError(TextWriter error, string message) => error.WriteLine($"DevProjex: {message}");
 

@@ -11,6 +11,7 @@ public static class CommandLineOptionTokens
 	public const string IncludeRoot = "--include-root";
 	public const string IncludeExtension = "--include-extension";
 	public const string Ignore = "--ignore";
+	public const string Strict = "--strict";
 	public const string NoUi = "--no-ui";
 	public const string Silent = "--silent";
 	public const string Version = "--version";
@@ -19,6 +20,7 @@ public static class CommandLineOptionTokens
 	public const string WindowsHelp = "/?";
 	public const string ElevationAttempted = "--elevation-attempted";
 	public const string LegacyElevationAttempted = "--elevationAttempted";
+	public const string StandardOutputReportPath = "-";
 
 	public const string IgnoreNone = "none";
 	public const string IgnoreSmartIgnore = "smart-ignore";
@@ -41,6 +43,7 @@ public static class CommandLineOptionTokens
 		IncludeRoot,
 		IncludeExtension,
 		Ignore,
+		Strict,
 		NoUi,
 		Silent,
 		Version,

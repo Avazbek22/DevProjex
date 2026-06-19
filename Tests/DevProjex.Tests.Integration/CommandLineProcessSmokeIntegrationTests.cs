@@ -46,6 +46,16 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_VersionWinsOverInvalidArgumentsAndNoUi()
+	{
+		var result = await RunAppAsync(CommandLineOptionTokens.Version, "--unknown", CommandLineOptionTokens.NoUi);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.False(string.IsNullOrWhiteSpace(result.Stdout));
+		Assert.Equal(string.Empty, result.Stderr);
+	}
+
+	[Fact]
 	public async Task Process_NoUiWritesReportAndPrintsReportPath()
 	{
 		using var temp = new TemporaryDirectory();
@@ -63,6 +73,71 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", result.Stdout);
 		Assert.Equal(string.Empty, result.Stderr);
+		Assert.True(File.Exists(reportPath));
+	}
+
+	[Fact]
+	public async Task Process_SilentAliasRunsHeadlessReport()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var reportPath = Path.Combine(temp.Path, "reports", "silent-report.json");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Silent,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", result.Stdout);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.True(File.Exists(reportPath));
+	}
+
+	[Fact]
+	public async Task Process_ReportDashWritesJsonToStdout()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+
+		using var document = JsonDocument.Parse(result.Stdout);
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(temp.Path, document.RootElement.GetProperty("rootPath").GetString());
+	}
+
+	[Fact]
+	public async Task Process_StrictReturnsRuntimeErrorWhenReportContainsWarnings()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var reportPath = Path.Combine(temp.Path, "reports", "strict-warning.json");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Strict,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.IncludeRoot, "missing-root",
+			CommandLineOptionTokens.IncludeExtension, "missingext",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, result.ExitCode);
+		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", result.Stdout);
+		Assert.Contains("Strict mode failed", result.Stderr, StringComparison.Ordinal);
 		Assert.True(File.Exists(reportPath));
 	}
 
@@ -138,6 +213,27 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(string.Empty, result.Stdout);
 		Assert.Contains("Unsupported report format 'xml'.", result.Stderr, StringComparison.Ordinal);
 		Assert.False(File.Exists(reportPath));
+	}
+
+	[Fact]
+	public async Task Process_ReportPathPointingToExistingDirectoryReturnsRuntimeError()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var reportDirectoryPath = temp.CreateDirectory("existing-report-directory");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.ReportPath, reportDirectoryPath,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.StartsWith("DevProjex: ", result.Stderr, StringComparison.Ordinal);
+		Assert.True(Directory.Exists(reportDirectoryPath));
 	}
 
 	[Fact]

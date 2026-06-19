@@ -1,4 +1,5 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.Reports;
 
 namespace DevProjex.Tests.Integration;
 
@@ -47,6 +48,171 @@ public sealed class CommandLineReportContractIntegrationTests
 		Assert.Contains(".md", ReadStringArray(root.GetProperty("inventory").GetProperty("availableExtensions")));
 		Assert.Equal(1, root.GetProperty("inventory").GetProperty("tree").GetProperty("fileCount").GetInt32());
 		Assert.False(root.GetProperty("diagnostics").GetProperty("hadAccessDenied").GetBoolean());
+	}
+
+	[Fact]
+	public async Task NoUi_ReportFormatJsonWithoutExplicitReportPath_WritesToDefaultReportFolder()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootPath = CreateCrossPlatformWorkspace(temp);
+		var documentsPath = Path.Combine(temp.Path, "Documents");
+		var expectedReportPath = Path.Combine(
+			documentsPath,
+			"DevProjex",
+			"reports",
+			"devprojex-report-2026-06-19_10-15-16.json");
+		var reportPathResolver = new ReportPathResolver(
+			specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? documentsPath : string.Empty,
+			utcNowProvider: () => new DateTimeOffset(2026, 6, 19, 10, 15, 16, TimeSpan.Zero));
+
+		await RunNoUiReportAsync(
+			expectedReportPath,
+			services => services with { ReportPathResolver = reportPathResolver },
+			CommandLineOptionTokens.Silent,
+			CommandLineOptionTokens.Path, rootPath,
+			CommandLineOptionTokens.ReportFormat, "json",
+			CommandLineOptionTokens.IncludeRoot, "src app",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(expectedReportPath, TestContext.Current.CancellationToken));
+		var root = document.RootElement;
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(["src app"], ReadStringArray(root.GetProperty("selection").GetProperty("selectedRootFolders")));
+		Assert.Equal([".cs"], ReadStringArray(root.GetProperty("selection").GetProperty("selectedExtensions")));
+	}
+
+	[Fact]
+	public async Task NoUi_ReportDashWritesJsonToStdoutWithoutCreatingDashFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootPath = CreateCrossPlatformWorkspace(temp);
+		var dashPath = Path.Combine(Environment.CurrentDirectory, CommandLineOptionTokens.StandardOutputReportPath);
+		var dashFileExistedBefore = File.Exists(dashPath);
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, rootPath,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.IncludeRoot, "src app",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(string.Empty, error.ToString());
+		Assert.Equal(dashFileExistedBefore, File.Exists(dashPath));
+
+		using var document = JsonDocument.Parse(output.ToString());
+		var root = document.RootElement;
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(rootPath, root.GetProperty("rootPath").GetString());
+		Assert.Equal(["src app"], ReadStringArray(root.GetProperty("selection").GetProperty("selectedRootFolders")));
+		Assert.Equal([".cs"], ReadStringArray(root.GetProperty("selection").GetProperty("selectedExtensions")));
+	}
+
+	[Fact]
+	public async Task NoUi_StrictReturnsRuntimeErrorAfterWritingReportWhenDiagnosticsExist()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootPath = CreateCrossPlatformWorkspace(temp);
+		var reportPath = Path.Combine(temp.Path, "reports", "strict-diagnostics.json");
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Strict,
+			CommandLineOptionTokens.Path, rootPath,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.IncludeRoot, "missing-root",
+			CommandLineOptionTokens.IncludeExtension, "missingext",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", output.ToString());
+		Assert.True(File.Exists(reportPath));
+		Assert.Contains("Strict mode failed", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("Selected root folder was not found", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("Selected extension was not found", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task NoUi_StrictKeepsSuccessWhenReportDiagnosticsAreClean()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootPath = CreateCrossPlatformWorkspace(temp);
+		var reportPath = Path.Combine(temp.Path, "reports", "strict-clean.json");
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Strict,
+			CommandLineOptionTokens.Path, rootPath,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.IncludeRoot, "src app",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", output.ToString());
+		Assert.Equal(string.Empty, error.ToString());
+		Assert.True(File.Exists(reportPath));
+	}
+
+	[Fact]
+	public async Task NoUi_DotFolderIgnoreOptionChangesEffectiveReportTree()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootPath = CreateCrossPlatformWorkspace(temp);
+		var noIgnoreReportPath = Path.Combine(temp.Path, "reports", "ignore-none.json");
+		var dotFoldersReportPath = Path.Combine(temp.Path, "reports", "ignore-dot-folders.json");
+
+		await RunNoUiReportAsync(
+			noIgnoreReportPath,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, rootPath,
+			CommandLineOptionTokens.ReportPath, noIgnoreReportPath,
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+		await RunNoUiReportAsync(
+			dotFoldersReportPath,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, rootPath,
+			CommandLineOptionTokens.ReportPath, dotFoldersReportPath,
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders);
+
+		using var noIgnoreDocument = JsonDocument.Parse(await File.ReadAllTextAsync(noIgnoreReportPath, TestContext.Current.CancellationToken));
+		using var dotFoldersDocument = JsonDocument.Parse(await File.ReadAllTextAsync(dotFoldersReportPath, TestContext.Current.CancellationToken));
+		var noIgnoreRoot = noIgnoreDocument.RootElement;
+		var dotFoldersRoot = dotFoldersDocument.RootElement;
+
+		Assert.Empty(noIgnoreRoot.GetProperty("selection").GetProperty("selectedIgnoreOptions").EnumerateArray());
+		Assert.Equal(["dotFolders"], ReadStringArray(dotFoldersRoot.GetProperty("selection").GetProperty("selectedIgnoreOptions")));
+		Assert.True(
+			ReadTreeFileCount(noIgnoreRoot) > ReadTreeFileCount(dotFoldersRoot),
+			"Turning on dot-folder ignore must remove the .cache/cached.cs file from the effective report tree.");
 	}
 
 	[Fact]
@@ -141,6 +307,12 @@ public sealed class CommandLineReportContractIntegrationTests
 	}
 
 	private static async Task RunNoUiReportAsync(string expectedReportPath, params string[] args)
+		=> await RunNoUiReportAsync(expectedReportPath, configureServices: null, args);
+
+	private static async Task RunNoUiReportAsync(
+		string expectedReportPath,
+		Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices,
+		params string[] args)
 	{
 		using var output = new StringWriter();
 		using var error = new StringWriter();
@@ -148,7 +320,7 @@ public sealed class CommandLineReportContractIntegrationTests
 
 		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
 			parseResult,
-			CreateContext(output, error),
+			CreateContext(output, error, configureServices),
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
@@ -157,11 +329,18 @@ public sealed class CommandLineReportContractIntegrationTests
 		Assert.True(File.Exists(expectedReportPath));
 	}
 
-	private static CommandLineAutomationContext CreateContext(TextWriter output, TextWriter error) =>
+	private static CommandLineAutomationContext CreateContext(
+		TextWriter output,
+		TextWriter error,
+		Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null) =>
 		new(
 			Output: output,
 			Error: error,
-			ServicesFactory: AvaloniaCompositionRoot.CreateDefault,
+			ServicesFactory: options =>
+			{
+				var services = AvaloniaCompositionRoot.CreateDefault(options);
+				return configureServices?.Invoke(services) ?? services;
+			},
 			HelpContentProvider: new CommandLineHelpContentProvider(),
 			VersionProvider: () => "test-version");
 
@@ -180,4 +359,7 @@ public sealed class CommandLineReportContractIntegrationTests
 		element.EnumerateArray()
 			.Select(static item => item.GetString() ?? string.Empty)
 			.ToArray();
+
+	private static int ReadTreeFileCount(JsonElement root) =>
+		root.GetProperty("inventory").GetProperty("tree").GetProperty("fileCount").GetInt32();
 }

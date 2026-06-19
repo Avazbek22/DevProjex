@@ -17,6 +17,7 @@ public sealed record CommandLineOptions(
 	public IReadOnlyList<string> IncludeExtensions { get; init; } = [];
 	public IReadOnlyList<IgnoreOptionId> IgnoreOptions { get; init; } = [];
 	public bool IgnoreOptionsSpecified { get; init; }
+	public bool Strict { get; init; }
 
 	public bool HasRootFolderOverrides => IncludeRootFolders.Count > 0;
 	public bool HasExtensionOverrides => IncludeExtensions.Count > 0;
@@ -39,6 +40,7 @@ public sealed record CommandLineOptions(
 		var includeExtensions = new List<string>();
 		var ignoreOptions = new List<IgnoreOptionId>();
 		var ignoreOptionsSpecified = false;
+		var strict = false;
 		var errors = new List<CommandLineParseError>();
 		var hasPositionalPath = false;
 
@@ -97,6 +99,12 @@ public sealed record CommandLineOptions(
 			    arg.Equals(CommandLineOptionTokens.Silent, StringComparison.OrdinalIgnoreCase))
 			{
 				noUi = true;
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.Strict, StringComparison.OrdinalIgnoreCase))
+			{
+				strict = true;
 				continue;
 			}
 
@@ -200,7 +208,8 @@ public sealed record CommandLineOptions(
 			IncludeRootFolders = includeRootFolders.ToArray(),
 			IncludeExtensions = includeExtensions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
 			IgnoreOptions = ignoreOptions.ToArray(),
-			IgnoreOptionsSpecified = ignoreOptionsSpecified
+			IgnoreOptionsSpecified = ignoreOptionsSpecified,
+			Strict = strict
 		};
 
 		return new CommandLineParseResult(options, errors.ToArray());
@@ -229,6 +238,9 @@ public sealed record CommandLineOptions(
 
 		if (NoUi)
 			parts.Add(CommandLineOptionTokens.NoUi);
+
+		if (Strict)
+			parts.Add(CommandLineOptionTokens.Strict);
 
 		if (Report.Enabled)
 		{
@@ -496,6 +508,9 @@ public sealed record StartupReportOptions(
 	StartupReportFormat Format)
 {
 	public static StartupReportOptions Disabled { get; } = new(false, null, StartupReportFormat.Json);
+
+	public bool WriteToStandardOutput =>
+		string.Equals(Path?.Trim(), CommandLineOptionTokens.StandardOutputReportPath, StringComparison.Ordinal);
 }
 
 public enum StartupReportFormat

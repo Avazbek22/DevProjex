@@ -14,11 +14,13 @@ Options:
   --path <folder>                 Open a project folder.
   --lang <code>                   UI language: en, ru, uz, tg, kk, fr, de, it.
   --report [file]                 Write a JSON analysis report.
+                                  Use --report - to write JSON to stdout.
   --report-path <file>            Write a JSON analysis report to a specific file.
   --report-format json            Report format. JSON is the v1 format.
   --include-root <name>           Include one root folder. Can be repeated.
   --include-extension <ext>       Include one extension. Can be repeated.
   --ignore <name|none>            Use exact ignore options for automation. Can be repeated.
+  --strict                        Return a failure exit code when the report has diagnostics.
   --no-ui, --silent               Run analysis without showing the window. Requires --report.
   --version                       Print application version.
   --help, -h, /?                  Show help.
@@ -36,5 +38,7 @@ Examples:
   DevProjex "/home/me/projects/app"
   DevProjex --path "C:\Projects\App" --report
   DevProjex --path "/home/me/projects/app" --no-ui --report
+  devprojex --no-ui --path "/home/me/projects/app" --report -
+  devprojex --no-ui --path "/home/me/projects/app" --report --strict
   DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json"
   DevProjex --path "C:\Projects\App" --include-root src --include-extension cs --ignore none --report

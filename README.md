@@ -91,6 +91,8 @@ DevProjex can also be launched from a terminal to open a folder, preselect filte
 
 ```bash
 devprojex --path "/path/to/project" --no-ui --report
+devprojex --path "/path/to/project" --no-ui --report -
+devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
 ```
 
 See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, exit codes, and report behavior.

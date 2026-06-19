@@ -211,6 +211,16 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_ReadsStandardOutputReportTarget()
+	{
+		var result = CommandLineOptions.Parse(["--path", "/tmp/root", "--report", CommandLineOptionTokens.StandardOutputReportPath]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Report.Enabled);
+		Assert.True(result.Options.Report.WriteToStandardOutput);
+	}
+
+	[Fact]
 	public void Parse_ReadsReportPathFromDedicatedOption()
 	{
 		var result = CommandLineOptions.Parse(["--path", "/tmp/root", "--report-path", "/tmp/report.json"]);
@@ -259,6 +269,15 @@ public sealed class CommandLineOptionsTests
 
 		AssertValid(result);
 		Assert.True(result.Options.NoUi);
+	}
+
+	[Fact]
+	public void Parse_ReadsStrictMode()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Strict]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Strict);
 	}
 
 	[Fact]
@@ -406,6 +425,7 @@ public sealed class CommandLineOptionsTests
 		var options = new CommandLineOptions("/tmp/root folder", AppLanguage.En, true)
 		{
 			NoUi = true,
+			Strict = true,
 			Report = new StartupReportOptions(true, "/tmp/report folder/report.json", StartupReportFormat.Json),
 			IncludeRootFolders = ["src"],
 			IncludeExtensions = [".cs"],
@@ -416,6 +436,7 @@ public sealed class CommandLineOptionsTests
 		var args = options.ToArguments();
 
 		Assert.Contains("--no-ui", args);
+		Assert.Contains("--strict", args);
 		Assert.Contains("--report", args);
 		Assert.Contains("\"/tmp/report folder/report.json\"", args);
 		Assert.Contains("--include-root", args);
@@ -543,6 +564,7 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(expected.IncludeExtensions, actual.IncludeExtensions);
 		Assert.Equal(expected.IgnoreOptions, actual.IgnoreOptions);
 		Assert.Equal(expected.IgnoreOptionsSpecified, actual.IgnoreOptionsSpecified);
+		Assert.Equal(expected.Strict, actual.Strict);
 	}
 
 	public static TheoryData<string, IgnoreOptionId?> PublicIgnoreOptionNames() => new()

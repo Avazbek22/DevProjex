@@ -47,6 +47,17 @@ public sealed class ProjectAnalysisReportWriter
 		}
 	}
 
+	public async Task WriteAsync(
+		ProjectAnalysisReport report,
+		TextWriter writer,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(writer);
+
+		var json = JsonSerializer.Serialize(report, JsonOptions);
+		await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
+	}
+
 	private static string BuildTemporaryPath(string fullPath)
 	{
 		var directory = Path.GetDirectoryName(fullPath);
