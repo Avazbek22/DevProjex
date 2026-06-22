@@ -26,6 +26,8 @@ public sealed class CommandLineDocumentationIntegrationTests
 		Assert.Contains("--strict", docs, StringComparison.Ordinal);
 		Assert.Contains("Portable builds do not edit `PATH` automatically", docs, StringComparison.Ordinal);
 		Assert.Contains("Windows Microsoft Store/MSIX", docs, StringComparison.Ordinal);
+		Assert.Contains("The alias starts the packaged DevProjex UI executable", docs, StringComparison.Ordinal);
+		Assert.Contains("not a separate CLI binary", docs, StringComparison.Ordinal);
 		Assert.Contains("Windows portable folder", docs, StringComparison.Ordinal);
 		Assert.Contains("Linux installed manually/package", docs, StringComparison.Ordinal);
 		Assert.Contains("macOS terminal automation", docs, StringComparison.Ordinal);

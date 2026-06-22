@@ -6,6 +6,8 @@ public static class CommandLineExecutableAliases
 	public const string WindowsPortableExecutable = "DevProjex.exe";
 	public const string UnixCommand = "devprojex";
 	public const string WindowsStoreAlias = "devprojex.exe";
+	public const string WindowsStoreApplicationId = "App";
+	public const string WindowsStoreUiPackageExecutable = "DevProjex.Avalonia\\DevProjex.exe";
 
 	public static IReadOnlyList<string> DocumentedCommandNames { get; } =
 	[

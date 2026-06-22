@@ -17,32 +17,36 @@ public sealed class AppInstancePackagingContractTests
             .Descendants(packageNamespace + "Application")
             .Single();
 
-        Assert.Equal("App", applicationElement.Attribute("Id")?.Value);
+        Assert.Equal(CommandLineExecutableAliases.WindowsStoreApplicationId, applicationElement.Attribute("Id")?.Value);
     }
 
     [Fact]
-    public void WindowsStoreManifest_DeclaresCommandLineExecutionAlias()
+    public void WindowsStoreManifest_DeclaresCommandLineExecutionAliasOnUiApplication()
     {
         var manifestPath = ResolveStoreManifestPath();
         var document = XDocument.Load(manifestPath);
         var packageNamespace = XNamespace.Get("http://schemas.microsoft.com/appx/manifest/foundation/windows10");
-        var uap5Namespace = XNamespace.Get("http://schemas.microsoft.com/appx/manifest/uap/windows10/5");
+        var uap3Namespace = XNamespace.Get("http://schemas.microsoft.com/appx/manifest/uap/windows10/3");
+        var desktopNamespace = XNamespace.Get("http://schemas.microsoft.com/appx/manifest/desktop/windows10");
         var applicationElement = document
             .Descendants(packageNamespace + "Application")
             .Single();
 
+        Assert.Equal(CommandLineExecutableAliases.WindowsStoreApplicationId, applicationElement.Attribute("Id")?.Value);
+        Assert.DoesNotContain("Cli", applicationElement.Attribute("Executable")?.Value ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
         var extension = applicationElement
             .Element(packageNamespace + "Extensions")
-            ?.Elements(uap5Namespace + "Extension")
+            ?.Elements(uap3Namespace + "Extension")
             .SingleOrDefault(element => element.Attribute("Category")?.Value == "windows.appExecutionAlias");
 
         Assert.NotNull(extension);
-        Assert.Equal("DevProjex.Avalonia.exe", extension.Attribute("Executable")?.Value);
+        Assert.Equal(CommandLineExecutableAliases.WindowsStoreUiPackageExecutable, extension.Attribute("Executable")?.Value);
         Assert.Equal("Windows.FullTrustApplication", extension.Attribute("EntryPoint")?.Value);
 
         var executionAlias = extension
-            .Element(uap5Namespace + "AppExecutionAlias")
-            ?.Element(uap5Namespace + "ExecutionAlias");
+            .Element(uap3Namespace + "AppExecutionAlias")
+            ?.Element(desktopNamespace + "ExecutionAlias");
 
         Assert.NotNull(executionAlias);
         Assert.Equal(CommandLineExecutableAliases.WindowsStoreAlias, executionAlias.Attribute("Alias")?.Value);
@@ -53,19 +57,56 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
-    public void WindowsStoreManifest_KeepsUap5NamespaceIgnorableForDownlevelTooling()
+    public void WindowsStoreManifest_KeepsDesktopAliasNamespacesIgnorableForDownlevelTooling()
     {
         var manifestPath = ResolveStoreManifestPath();
         var document = XDocument.Load(manifestPath);
         var root = document.Root ?? throw new InvalidOperationException("Package manifest has no root element.");
 
         Assert.Equal(
-            "http://schemas.microsoft.com/appx/manifest/uap/windows10/5",
-            root.GetNamespaceOfPrefix("uap5")?.NamespaceName);
+            "http://schemas.microsoft.com/appx/manifest/uap/windows10/3",
+            root.GetNamespaceOfPrefix("uap3")?.NamespaceName);
+        Assert.Equal(
+            "http://schemas.microsoft.com/appx/manifest/desktop/windows10",
+            root.GetNamespaceOfPrefix("desktop")?.NamespaceName);
 
         var ignorableNamespaces = root.Attribute("IgnorableNamespaces")?.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
 
-        Assert.Contains("uap5", ignorableNamespaces);
+        Assert.Contains("uap3", ignorableNamespaces);
+        Assert.Contains("desktop", ignorableNamespaces);
+    }
+
+    [Fact]
+    public void WindowsStoreManifest_DoesNotDeclareSeparateCliApplication()
+    {
+        var manifestPath = ResolveStoreManifestPath();
+        var document = XDocument.Load(manifestPath);
+        var packageNamespace = XNamespace.Get("http://schemas.microsoft.com/appx/manifest/foundation/windows10");
+        var applications = document
+            .Descendants(packageNamespace + "Application")
+            .ToArray();
+
+        Assert.Single(applications);
+        Assert.DoesNotContain(
+            applications,
+            application =>
+                (application.Attribute("Id")?.Value.Contains("Cli", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (application.Attribute("Executable")?.Value.Contains("Cli", StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    [Fact]
+    public void Repository_DoesNotContainSeparateCliProjectForCommandLineStartup()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var cliProjectCandidates = Directory
+            .EnumerateFiles(repositoryRoot, "*.csproj", SearchOption.AllDirectories)
+            .Where(path =>
+                !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) &&
+                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) &&
+                Path.GetFileNameWithoutExtension(path).Contains("DevProjex.Cli", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        Assert.Empty(cliProjectCandidates);
     }
 
     [Fact]

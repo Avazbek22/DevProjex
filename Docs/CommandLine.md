@@ -26,11 +26,11 @@ Options with values support both separated and inline assignment forms:
 | Platform/package | Command |
 | --- | --- |
 | Windows portable folder | `.\DevProjex.exe` or the full path to `DevProjex.exe`. |
-| Windows Microsoft Store/MSIX | `devprojex.exe` through Windows App Execution Alias. |
+| Windows Microsoft Store/MSIX | `devprojex.exe` through Windows App Execution Alias. The alias starts the packaged DevProjex UI executable; `--no-ui` is a mode of the same app, not a separate CLI binary. |
 | Linux installed manually/package | `devprojex` when the executable is installed or symlinked into `PATH`. |
 | macOS terminal automation | `devprojex` when a symlink/wrapper is installed into `PATH`, or the direct executable path inside the `.app` bundle. |
 
-Portable builds do not edit `PATH` automatically. Store/MSIX uses the OS-supported App Execution Alias mechanism instead of self-modifying environment variables.
+Portable builds do not edit `PATH` automatically. Store/MSIX uses the OS-supported App Execution Alias mechanism instead of self-modifying environment variables. DevProjex intentionally ships one desktop executable; automation arguments and silent mode are handled by that executable's startup pipeline.
 
 ## Options
 

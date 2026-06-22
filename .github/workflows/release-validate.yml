@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate release metadata
+      - name: Validate release metadata and Store alias contract
         shell: pwsh
         run: ./Scripts/release-all.ps1 -ValidateConfigOnly
 

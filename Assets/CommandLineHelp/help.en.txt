@@ -42,3 +42,7 @@ Examples:
   devprojex --no-ui --path "/home/me/projects/app" --report --strict
   DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json"
   DevProjex --path "C:\Projects\App" --include-root src --include-extension cs --ignore none --report
+
+Notes:
+  Windows Store command devprojex.exe starts the packaged DevProjex UI app.
+  --no-ui is a mode of the same app, not a separate CLI binary.

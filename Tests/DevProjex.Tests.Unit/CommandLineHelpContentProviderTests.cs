@@ -34,6 +34,16 @@ public sealed class CommandLineHelpContentProviderTests
 	}
 
 	[Fact]
+	public void GetHelpText_DocumentsStoreAliasAsUiAppStartupMode()
+	{
+		var help = new CommandLineHelpContentProvider().GetHelpText();
+
+		Assert.Contains("devprojex.exe starts the packaged DevProjex UI app", help, StringComparison.Ordinal);
+		Assert.Contains("--no-ui is a mode of the same app", help, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex.Cli", help, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
 	public void GetHelpText_DocumentsInlineValueSyntax()
 	{
 		var help = new CommandLineHelpContentProvider().GetHelpText();
