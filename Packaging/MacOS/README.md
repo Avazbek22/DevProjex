@@ -114,11 +114,17 @@ EOF
 
 ## Optional Terminal Alias
 
-For terminal automation, install a user-level wrapper or symlink named `devprojex` after publishing/bundling:
+For terminal automation, use **Help -> Terminal command** in the app. DevProjex creates a user-level wrapper named `devprojex` in `~/.local/bin` and can repair it if the app bundle moves.
+
+Manual equivalent:
 
 ```bash
 mkdir -p ~/.local/bin
-ln -sf "/Applications/DevProjex.app/Contents/MacOS/DevProjex" ~/.local/bin/devprojex
+cat > ~/.local/bin/devprojex <<'EOF'
+#!/bin/sh
+exec '/Applications/DevProjex.app/Contents/MacOS/DevProjex' "$@"
+EOF
+chmod +x ~/.local/bin/devprojex
 ```
 
 Make sure `~/.local/bin` is in `PATH`. The app bundle itself does not modify shell profiles or global environment variables.

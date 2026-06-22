@@ -13,6 +13,7 @@ using DevProjex.Avalonia.Views;
 using DevProjex.Kernel;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Reports;
+using DevProjex.Infrastructure.TerminalCommands;
 using UserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
 using UserSettingsDb = DevProjex.Infrastructure.ThemePresets.UserSettingsDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
@@ -307,6 +308,7 @@ public partial class MainWindow : Window
     private readonly ProjectAnalysisService _projectAnalysisService;
     private readonly ReportPathResolver _reportPathResolver;
     private readonly ProjectAnalysisReportWriter _projectAnalysisReportWriter;
+    private readonly ITerminalCommandSetupService _terminalCommandSetupService;
 
     public MainWindow(
         CommandLineOptions startupOptions,
@@ -338,6 +340,7 @@ public partial class MainWindow : Window
         _projectAnalysisService = services.ProjectAnalysisService;
         _reportPathResolver = services.ReportPathResolver;
         _projectAnalysisReportWriter = services.ProjectAnalysisReportWriter;
+        _terminalCommandSetupService = services.TerminalCommandSetupService;
         _recentProjectsStore = services.RecentProjectsStore;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
@@ -901,6 +904,10 @@ public partial class MainWindow : Window
                     await TryApplyStartupSelectionOverridesAsync();
                     await TryWriteStartupReportAsync(startupLoadStopwatch.Elapsed);
                 }
+            }
+            else
+            {
+                await TryShowAutomaticTerminalCommandPromptAsync();
             }
 
             // Clean up stale cache from previous sessions (non-blocking background task)
@@ -2000,6 +2007,7 @@ public partial class MainWindow : Window
             IsCompactMode = _viewModel.IsCompactMode,
             IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled,
             IsAdvancedIgnoreCountsEnabled = _isAdvancedIgnoreCountsEnabled,
+            IsTerminalCommandPromptDismissed = _userSettingsDb.ViewSettings?.IsTerminalCommandPromptDismissed ?? false,
             PreferredLanguage = _userSettingsDb.ViewSettings?.PreferredLanguage
         };
 
@@ -4936,10 +4944,67 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private async void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await ShowTerminalCommandSetupAsync(_terminalCommandSetupService.Probe(), isAutomaticPrompt: false);
+            e.Handled = true;
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+            e.Handled = true;
+        }
+    }
+
     private void OnHelpClose(object? sender, RoutedEventArgs e)
     {
         _viewModel.HelpDocsPopoverOpen = false;
         e.Handled = true;
+    }
+
+    private async Task ShowTerminalCommandSetupAsync(
+        TerminalCommandSetupSnapshot snapshot,
+        bool isAutomaticPrompt)
+    {
+        var dialogResult = await TerminalCommandSetupDialog.ShowAsync(this, _localization, snapshot, isAutomaticPrompt);
+        if (ShouldPersistTerminalCommandPromptDismissal(dialogResult))
+            SaveTerminalCommandPromptDismissed();
+
+        if (dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair)
+            return;
+
+        var installResult = _terminalCommandSetupService.InstallOrRepair();
+        if (!installResult.Success)
+        {
+            await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+            return;
+        }
+
+        await TerminalCommandSetupDialog.ShowAsync(
+            this,
+            _localization,
+            installResult.Snapshot,
+            isAutomaticPrompt: false);
+    }
+
+    private void SaveTerminalCommandPromptDismissed()
+    {
+        var current = _userSettingsDb.ViewSettings ?? new AppViewSettings();
+        _userSettingsDb.ViewSettings = current with
+        {
+            IsTerminalCommandPromptDismissed = true
+        };
+        _userSettingsStore.Save(_userSettingsDb);
+    }
+
+    internal static bool ShouldPersistTerminalCommandPromptDismissal(TerminalCommandDialogResult dialogResult)
+    {
+        // Choosing install/repair is not a dismissal. If the install attempt fails,
+        // the next startup should still be allowed to offer setup again.
+        return dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair &&
+               (dialogResult.DontShowAgain || dialogResult.Action == TerminalCommandDialogAction.DismissPrompt);
     }
 
     private async void OnResetSettings(object? sender, RoutedEventArgs e)
@@ -6741,6 +6806,38 @@ public partial class MainWindow : Window
         {
             await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private async Task TryShowAutomaticTerminalCommandPromptAsync()
+    {
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            var snapshot = _terminalCommandSetupService.Probe();
+            if (!LooksLikePublishedDevProjexExecutable(snapshot.TargetExecutablePath))
+                return;
+
+            if (!TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(
+                    _userSettingsDb.ViewSettings,
+                    snapshot,
+                    startedWithProjectPath: !string.IsNullOrWhiteSpace(_startupOptions.Path)))
+                return;
+
+            await ShowTerminalCommandSetupAsync(snapshot, isAutomaticPrompt: true);
+        }
+        catch
+        {
+            // Terminal setup is optional; startup must stay resilient even if probing fails.
+        }
+    }
+
+    private static bool LooksLikePublishedDevProjexExecutable(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+            return false;
+
+        var name = Path.GetFileNameWithoutExtension(executablePath);
+        return name.Equals("DevProjex", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool TryElevateAndRestart(string path)

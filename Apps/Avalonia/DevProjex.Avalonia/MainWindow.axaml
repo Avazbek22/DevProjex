@@ -227,6 +227,7 @@
                           ToggleFilterRequested="OnToggleFilter"
                           ThemeMenuClickRequested="OnThemeMenuClick"
                           HelpRequested="OnHelp"
+                          TerminalCommandSetupRequested="OnTerminalCommandSetup"
                           HelpCloseRequested="OnHelpClose"
                           LanguageRuRequested="OnLangRu"
                           LanguageEnRequested="OnLangEn"

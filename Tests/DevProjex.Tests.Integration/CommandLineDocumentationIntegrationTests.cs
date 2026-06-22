@@ -31,6 +31,9 @@ public sealed class CommandLineDocumentationIntegrationTests
 		Assert.Contains("Windows portable folder", docs, StringComparison.Ordinal);
 		Assert.Contains("Linux installed manually/package", docs, StringComparison.Ordinal);
 		Assert.Contains("macOS terminal automation", docs, StringComparison.Ordinal);
+		Assert.Contains("Help → Terminal command", docs, StringComparison.Ordinal);
+		Assert.Contains("~/.local/bin/devprojex", docs, StringComparison.Ordinal);
+		Assert.Contains("detects that state and repairs the wrapper", docs, StringComparison.Ordinal);
 		Assert.Contains("stdout", docs, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("stderr", docs, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("Exit Codes", docs, StringComparison.Ordinal);

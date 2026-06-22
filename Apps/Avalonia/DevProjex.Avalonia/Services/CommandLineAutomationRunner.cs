@@ -1,5 +1,3 @@
-using System.Reflection;
-
 namespace DevProjex.Avalonia.Services;
 
 internal static class CommandLineAutomationRunner

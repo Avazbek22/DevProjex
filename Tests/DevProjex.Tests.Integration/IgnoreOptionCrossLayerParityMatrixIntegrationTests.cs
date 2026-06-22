@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 

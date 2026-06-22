@@ -46,3 +46,4 @@ Examples:
 Notes:
   Windows Store command devprojex.exe starts the packaged DevProjex UI app.
   --no-ui is a mode of the same app, not a separate CLI binary.
+  Use Help -> Terminal command in the UI to inspect platform-specific command setup.

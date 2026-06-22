@@ -32,6 +32,15 @@ Options with values support both separated and inline assignment forms:
 
 Portable builds do not edit `PATH` automatically. Store/MSIX uses the OS-supported App Execution Alias mechanism instead of self-modifying environment variables. DevProjex intentionally ships one desktop executable; automation arguments and silent mode are handled by that executable's startup pipeline.
 
+## Terminal Command Setup
+
+Use **Help → Terminal command** in the desktop app to inspect or enable the terminal command for the current package.
+
+- Windows Store/MSIX: DevProjex relies on the Windows App Execution Alias `devprojex.exe`. The alias is controlled by Windows and can be disabled by the user in Windows Settings.
+- Windows portable: DevProjex does not mutate user or machine `PATH`. Start the app with `.\DevProjex.exe` from the publish folder or the full executable path.
+- Linux/macOS: DevProjex can create a small user-level wrapper at `~/.local/bin/devprojex`. If `~/.local/bin` is not in `PATH`, the dialog shows the shell profile hint instead of editing profile files automatically.
+- If the app is moved, the wrapper can become stale. The same dialog detects that state and repairs the wrapper to the current executable.
+
 ## Options
 
 | Option | Description |

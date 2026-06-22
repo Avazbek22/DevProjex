@@ -7,6 +7,7 @@ using DevProjex.Infrastructure.AppInstances;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.Reports;
+using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -59,6 +60,7 @@ public static class AvaloniaCompositionRoot
             fileContentAnalyzer);
         var reportPathResolver = new ReportPathResolver();
         var projectAnalysisReportWriter = new ProjectAnalysisReportWriter();
+        var terminalCommandSetupService = new TerminalCommandSetupService();
         var previewDocumentBuilder = new PreviewDocumentBuilder(fileContentAnalyzer);
         var repositoryWebPathPresentationService = new RepositoryWebPathPresentationService();
         var textFileExportService = new TextFileExportService();
@@ -107,6 +109,7 @@ public static class AvaloniaCompositionRoot
             ProjectAnalysisService: projectAnalysisService,
             ReportPathResolver: reportPathResolver,
             ProjectAnalysisReportWriter: projectAnalysisReportWriter,
+            TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService);
     }
 }
