@@ -1,3 +1,4 @@
+using Avalonia.Controls.Documents;
 using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Avalonia.Services;
@@ -25,24 +26,24 @@ internal static class TerminalCommandSetupDialog
 		                   ?? global::Avalonia.Application.Current?.ActualThemeVariant
 		                   ?? ThemeVariant.Default;
 		var brushes = ResolveDialogBrushes(owner, themeVariant);
-		var content = TerminalCommandSetupDialogText.Create(localization, snapshot);
+		var content = TerminalCommandSetupDialogText.Create(localization, snapshot, isAutomaticPrompt);
 		var completion = new TaskCompletionSource<TerminalCommandDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var dimensions = TerminalCommandDialogDimensions.ForPromptMode(isAutomaticPrompt);
 
 		var dontShowAgain = new CheckBox
 		{
 			Content = localization["Dialog.TerminalCommand.DontShowAgain"],
-			IsVisible = isAutomaticPrompt && TerminalCommandPromptPolicy.IsDismissibleAutomaticPrompt(snapshot),
-			Margin = new Thickness(12, 0, 12, 12)
+			IsVisible = isAutomaticPrompt && TerminalCommandPromptPolicy.IsDismissibleAutomaticPrompt(snapshot)
 		};
 
 		var body = BuildContent(owner, localization, content, snapshot, isAutomaticPrompt, dontShowAgain, completion);
 		var dialog = new Window
 		{
 			Title = content.Title,
-			Width = 560,
-			Height = 320,
-			MinWidth = 480,
-			MinHeight = 280,
+			Width = dimensions.Width,
+			Height = dimensions.Height,
+			MinWidth = dimensions.MinWidth,
+			MinHeight = dimensions.MinHeight,
 			WindowStartupLocation = WindowStartupLocation.CenterOwner,
 			CanResize = false,
 			RequestedThemeVariant = themeVariant,
@@ -83,12 +84,20 @@ internal static class TerminalCommandSetupDialog
 			Margin = new Thickness(12, 12, 12, 4)
 		};
 
+		dontShowAgain.Margin = new Thickness(0, 0, 12, 0);
+		dontShowAgain.VerticalAlignment = VerticalAlignment.Center;
+
 		var message = new TextBlock
 		{
-			Text = content.Body,
 			TextWrapping = TextWrapping.Wrap,
-			Margin = new Thickness(12, 4, 12, 8)
+			Margin = isAutomaticPrompt
+				? new Thickness(12, 18, 12, 8)
+				: new Thickness(12, 4, 12, 8)
 		};
+		if (isAutomaticPrompt)
+			message.Inlines = BuildAutomaticPromptBodyInlines(content.Body);
+		else
+			message.Text = content.Body;
 
 		var details = new TextBlock
 		{
@@ -112,7 +121,7 @@ internal static class TerminalCommandSetupDialog
 		{
 			Orientation = Orientation.Horizontal,
 			HorizontalAlignment = HorizontalAlignment.Right,
-			Margin = new Thickness(12)
+			Margin = new Thickness(0)
 		};
 
 		if (content.ShowCopyButton)
@@ -122,7 +131,9 @@ internal static class TerminalCommandSetupDialog
 				Content = localization["Dialog.TerminalCommand.CopyCommand"],
 				MinWidth = 118,
 				Margin = new Thickness(0, 0, 8, 0),
-				IsEnabled = !string.IsNullOrWhiteSpace(content.CommandToCopy)
+				IsEnabled = !string.IsNullOrWhiteSpace(content.CommandToCopy),
+				HorizontalContentAlignment = HorizontalAlignment.Center,
+				VerticalContentAlignment = VerticalAlignment.Center
 			};
 			copyButton.Click += async (_, _) =>
 			{
@@ -144,7 +155,9 @@ internal static class TerminalCommandSetupDialog
 			{
 				Content = content.InstallButtonText,
 				MinWidth = 130,
-				Margin = new Thickness(0, 0, 8, 0)
+				Margin = new Thickness(0, 0, 8, 0),
+				HorizontalContentAlignment = HorizontalAlignment.Center,
+				VerticalContentAlignment = VerticalAlignment.Center
 			};
 			installButton.Classes.Add("primary-action");
 			installButton.Click += (_, _) =>
@@ -162,7 +175,9 @@ internal static class TerminalCommandSetupDialog
 			Content = isAutomaticPrompt
 				? localization["Dialog.TerminalCommand.NotNow"]
 				: localization["Dialog.OK"],
-			MinWidth = 104
+			MinWidth = 104,
+			HorizontalContentAlignment = HorizontalAlignment.Center,
+			VerticalContentAlignment = VerticalAlignment.Center
 		};
 		closeButton.Click += (_, _) =>
 		{
@@ -174,29 +189,67 @@ internal static class TerminalCommandSetupDialog
 		};
 		buttonPanel.Children.Add(closeButton);
 
-		var panel = new DockPanel();
-		DockPanel.SetDock(buttonPanel, Dock.Bottom);
-		DockPanel.SetDock(dontShowAgain, Dock.Bottom);
+		var footer = new Grid
+		{
+			ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+			Margin = new Thickness(12)
+		};
+		Grid.SetColumn(dontShowAgain, 0);
+		Grid.SetColumn(buttonPanel, 1);
+		footer.Children.Add(dontShowAgain);
+		footer.Children.Add(buttonPanel);
 
-		panel.Children.Add(buttonPanel);
-		panel.Children.Add(dontShowAgain);
+		var panel = new DockPanel();
+		DockPanel.SetDock(footer, Dock.Bottom);
+
+		panel.Children.Add(footer);
+		var contentStack = new StackPanel();
+		if (!isAutomaticPrompt)
+			contentStack.Children.Add(title);
+		contentStack.Children.Add(message);
+
+		if (!string.IsNullOrWhiteSpace(content.Details))
+			contentStack.Children.Add(details);
+		if (!string.IsNullOrWhiteSpace(content.CommandLine))
+			contentStack.Children.Add(commandText);
+
 		panel.Children.Add(new ScrollViewer
 		{
 			VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
 			HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-			Content = new StackPanel
-			{
-				Children =
-				{
-					title,
-					message,
-					details,
-					commandText
-				}
-			}
+			Content = contentStack
 		});
 
 		return panel;
+	}
+
+	private static InlineCollection BuildAutomaticPromptBodyInlines(string body)
+	{
+		const string commandName = "devprojex";
+		var inlines = new InlineCollection();
+		var startIndex = 0;
+
+		while (startIndex < body.Length)
+		{
+			var commandIndex = body.IndexOf(commandName, startIndex, StringComparison.OrdinalIgnoreCase);
+			if (commandIndex < 0)
+			{
+				inlines.Add(new Run(body[startIndex..]));
+				break;
+			}
+
+			if (commandIndex > startIndex)
+				inlines.Add(new Run(body[startIndex..commandIndex]));
+
+			inlines.Add(new Run(body.Substring(commandIndex, commandName.Length))
+			{
+				FontWeight = FontWeight.Bold
+			});
+
+			startIndex = commandIndex + commandName.Length;
+		}
+
+		return inlines;
 	}
 
 	internal static TerminalCommandDialogBrushes ResolveDialogBrushes(Window? owner, ThemeVariant themeVariant)
@@ -242,6 +295,18 @@ internal sealed record TerminalCommandDialogBrushes(
 	IBrush? Panel,
 	IBrush? Border);
 
+internal sealed record TerminalCommandDialogDimensions(
+	double Width,
+	double Height,
+	double MinWidth,
+	double MinHeight)
+{
+	public static TerminalCommandDialogDimensions ForPromptMode(bool isAutomaticPrompt) =>
+		isAutomaticPrompt
+			? new TerminalCommandDialogDimensions(480, 180, 420, 170)
+			: new TerminalCommandDialogDimensions(560, 320, 480, 280);
+}
+
 internal sealed record TerminalCommandDialogText(
 	string Title,
 	string Body,
@@ -256,14 +321,17 @@ internal static class TerminalCommandSetupDialogText
 {
 	public static TerminalCommandDialogText Create(
 		LocalizationService localization,
-		TerminalCommandSetupSnapshot snapshot)
+		TerminalCommandSetupSnapshot snapshot,
+		bool isAutomaticPrompt = false)
 	{
 		var title = localization["Dialog.TerminalCommand.Title"];
-		var body = GetBody(localization, snapshot);
-		var details = GetDetails(localization, snapshot);
+		var body = GetBody(localization, snapshot, isAutomaticPrompt);
+		var details = isAutomaticPrompt ? string.Empty : GetDetails(localization, snapshot);
 		var commandToCopy = GetCommandToCopy(snapshot);
-		var commandLine = localization.Format("Dialog.TerminalCommand.CommandLine", commandToCopy);
-		var showCopyButton = ShouldShowCopyButton(snapshot, commandToCopy);
+		var commandLine = isAutomaticPrompt
+			? string.Empty
+			: localization.Format("Dialog.TerminalCommand.CommandLine", commandToCopy);
+		var showCopyButton = !isAutomaticPrompt && ShouldShowCopyButton(snapshot, commandToCopy);
 		var installText = snapshot.CanRepair
 			? localization["Dialog.TerminalCommand.Repair"]
 			: localization["Dialog.TerminalCommand.Enable"];
@@ -307,8 +375,15 @@ internal static class TerminalCommandSetupDialogText
 		return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 	}
 
-	private static string GetBody(LocalizationService localization, TerminalCommandSetupSnapshot snapshot) =>
-		snapshot.State switch
+	private static string GetBody(
+		LocalizationService localization,
+		TerminalCommandSetupSnapshot snapshot,
+		bool isAutomaticPrompt)
+	{
+		if (isAutomaticPrompt && snapshot.IsActionable)
+			return localization["Dialog.TerminalCommand.AutomaticPrompt.Body"];
+
+		return snapshot.State switch
 		{
 			TerminalCommandSetupState.ManagedByOperatingSystem =>
 				localization["Dialog.TerminalCommand.Body.ManagedByOS"],
@@ -330,6 +405,7 @@ internal static class TerminalCommandSetupDialogText
 				localization["Dialog.TerminalCommand.Body.PermissionDenied"],
 			_ => localization["Dialog.TerminalCommand.Body.Failed"]
 		};
+	}
 
 	private static string GetDetails(LocalizationService localization, TerminalCommandSetupSnapshot snapshot)
 	{
@@ -349,4 +425,5 @@ internal static class TerminalCommandSetupDialogText
 
 		return string.Join(Environment.NewLine, lines);
 	}
+
 }

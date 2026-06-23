@@ -103,6 +103,7 @@
   "Dialog.ResetData.Message": "Тек жергілікті жобалар үшін DevProjex ішінде сақталған параметр профильдері жойылады:\nтаңдалған жоғарғы деңгей қалталары, файл кеңейтімдері және елемеу ережелері (параметрлер панеліндегі белгілер).\nЖобаларыңыздың файлдары мен қалталары өзгертілмейді және жойылмайды — қолданба read-only режимінде жұмыс істейді.\nСыртқы көрініс параметрлері өзгермейді.\n\nСақталған профильдерді жою керек пе?",
   "Dialog.ResetData.Confirm": "Жою",
   "Dialog.TerminalCommand.Title": "Run from terminal",
+  "Dialog.TerminalCommand.AutomaticPrompt.Body": "Make the devprojex command available in terminal?\n\nThe app will add the devprojex command to PATH for your user account.",
   "Dialog.TerminalCommand.Body.ManagedByOS": "The command is already handled by the system. You can open a terminal and run DevProjex with arguments from any folder.",
   "Dialog.TerminalCommand.Body.UnsupportedPackage": "This package cannot enable a short terminal command automatically. You can still launch DevProjex with the full app path shown below.",
   "Dialog.TerminalCommand.Body.UnsupportedPlatform": "DevProjex cannot set up a short terminal command automatically on this platform yet.",

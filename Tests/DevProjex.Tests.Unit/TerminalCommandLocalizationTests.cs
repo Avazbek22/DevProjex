@@ -6,6 +6,7 @@ public sealed class TerminalCommandLocalizationTests
 	[
 		"Menu.Help.TerminalCommand",
 		"Dialog.TerminalCommand.Title",
+		"Dialog.TerminalCommand.AutomaticPrompt.Body",
 		"Dialog.TerminalCommand.Body.ManagedByOS",
 		"Dialog.TerminalCommand.Body.UnsupportedPackage",
 		"Dialog.TerminalCommand.Body.UnsupportedPlatform",

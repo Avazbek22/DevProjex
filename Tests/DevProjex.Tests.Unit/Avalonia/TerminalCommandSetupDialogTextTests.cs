@@ -136,6 +136,39 @@ public sealed class TerminalCommandSetupDialogTextTests
 	}
 
 	[Fact]
+	public void Create_AutomaticPrompt_UsesShortUserFacingQuestionWithoutTechnicalDetails()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.NotInstalled,
+			CommandPath: @"C:\Users\me\AppData\Local\DevProjex\bin\devprojex.cmd",
+			TargetExecutablePath: @"C:\Users\me\DevProjex\DevProjex.exe",
+			InstalledTargetExecutablePath: null,
+			UserBinDirectory: @"C:\Users\me\AppData\Local\DevProjex\bin",
+			UserBinDirectoryIsInPath: false,
+			CanInstall: true,
+			CanRepair: false,
+			ShellProfileHint: "Restart already-open terminal windows after enabling it.");
+
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot, isAutomaticPrompt: true);
+		var combined = string.Join(Environment.NewLine, text.Title, text.Body, text.Details, text.CommandLine);
+
+		Assert.Equal(
+			"Сделать команду devprojex доступной в терминале?\n\nПриложение добавит команду devprojex в PATH для вашего пользователя.",
+			text.Body);
+		Assert.Contains("\n\n", text.Body, StringComparison.Ordinal);
+		Assert.Empty(text.Details);
+		Assert.Empty(text.CommandLine);
+		Assert.True(text.ShowInstallButton);
+		Assert.False(text.ShowCopyButton);
+		Assert.DoesNotContain("Команда для проверки", combined, StringComparison.Ordinal);
+		Assert.DoesNotContain("Файл приложения", combined, StringComparison.Ordinal);
+		Assert.DoesNotContain("C:\\Users\\me", combined, StringComparison.Ordinal);
+		Assert.DoesNotContain("Состояние:", combined, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void Create_RussianWindowsPortableInstallText_IsUserFacingAndDoesNotExposeInternalState()
 	{
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);

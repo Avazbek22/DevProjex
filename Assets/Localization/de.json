@@ -103,6 +103,7 @@
   "Dialog.ResetData.Message": "Es werden nur in DevProjex gespeicherte Parameterprofile für lokale Projekte gelöscht:\nausgewählte Ordner der obersten Ebene, Dateierweiterungen und Ignorierregeln (Checkboxen im Parameterbereich).\nDateien und Ordner Ihrer Projekte werden nicht geändert oder gelöscht — die Anwendung arbeitet im read-only-Modus.\nDarstellungseinstellungen bleiben unverändert.\n\nGespeicherte Profile löschen?",
   "Dialog.ResetData.Confirm": "Löschen",
   "Dialog.TerminalCommand.Title": "Run from terminal",
+  "Dialog.TerminalCommand.AutomaticPrompt.Body": "Make the devprojex command available in terminal?\n\nThe app will add the devprojex command to PATH for your user account.",
   "Dialog.TerminalCommand.Body.ManagedByOS": "The command is already handled by the system. You can open a terminal and run DevProjex with arguments from any folder.",
   "Dialog.TerminalCommand.Body.UnsupportedPackage": "This package cannot enable a short terminal command automatically. You can still launch DevProjex with the full app path shown below.",
   "Dialog.TerminalCommand.Body.UnsupportedPlatform": "DevProjex cannot set up a short terminal command automatically on this platform yet.",

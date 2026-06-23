@@ -103,6 +103,7 @@
   "Dialog.ResetData.Message": "Танҳо профилҳои параметрҳои дар DevProjex сабтшуда барои лоиҳаҳои маҳаллӣ ҳазф мешаванд:\nҷузвдонҳои сатҳи болоии интихобшуда, васеъшавиҳои файл ва қоидаҳои нодидагирӣ (қуттиҳои нишона дар панели параметрҳо).\nФайлҳо ва ҷузвдонҳои лоиҳаҳои шумо тағйир дода намешаванд ва ҳазф намешаванд — барнома дар реҷаи read-only кор мекунад.\nТанзимоти намуди зоҳирӣ тағйир намеёбанд.\n\nПрофилҳои сабтшударо ҳазф кунем?",
   "Dialog.ResetData.Confirm": "Ҳазф кардан",
   "Dialog.TerminalCommand.Title": "Run from terminal",
+  "Dialog.TerminalCommand.AutomaticPrompt.Body": "Make the devprojex command available in terminal?\n\nThe app will add the devprojex command to PATH for your user account.",
   "Dialog.TerminalCommand.Body.ManagedByOS": "The command is already handled by the system. You can open a terminal and run DevProjex with arguments from any folder.",
   "Dialog.TerminalCommand.Body.UnsupportedPackage": "This package cannot enable a short terminal command automatically. You can still launch DevProjex with the full app path shown below.",
   "Dialog.TerminalCommand.Body.UnsupportedPlatform": "DevProjex cannot set up a short terminal command automatically on this platform yet.",
