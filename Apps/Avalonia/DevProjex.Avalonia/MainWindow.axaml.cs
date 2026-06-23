@@ -6840,8 +6840,20 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(executablePath))
             return false;
 
-        var name = Path.GetFileNameWithoutExtension(executablePath);
+        var name = GetFileNameWithoutExtensionCrossPlatform(executablePath);
         return name.Equals("DevProjex", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetFileNameWithoutExtensionCrossPlatform(string path)
+    {
+        // Unit tests intentionally pass Windows-style paths on Linux runners.
+        // Path.GetFileName* only recognizes the current OS separator, so keep
+        // this prompt gate deterministic across CI platforms.
+        var fileNameStart = Math.Max(
+            path.LastIndexOf('/'),
+            path.LastIndexOf('\\')) + 1;
+        var fileName = path[fileNameStart..];
+        return Path.GetFileNameWithoutExtension(fileName);
     }
 
     private bool TryElevateAndRestart(string path)

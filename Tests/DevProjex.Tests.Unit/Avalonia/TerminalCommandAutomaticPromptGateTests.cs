@@ -26,6 +26,27 @@ public sealed class TerminalCommandAutomaticPromptGateTests
 	}
 
 	[Fact]
+	public void ShouldShowAutomaticTerminalCommandPrompt_ShowsForUnixPublishedExecutable()
+	{
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.NotInstalled,
+			CommandPath: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: null,
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: true,
+			CanInstall: true,
+			CanRepair: false,
+			ShellProfileHint: null);
+
+		Assert.True(MainWindow.ShouldShowAutomaticTerminalCommandPrompt(
+			new AppViewSettings(),
+			snapshot,
+			startedWithProjectPath: false));
+	}
+
+	[Fact]
 	public void ShouldShowAutomaticTerminalCommandPrompt_SuppressesWindowsPortableAfterDismissal()
 	{
 		var snapshot = new TerminalCommandSetupSnapshot(
