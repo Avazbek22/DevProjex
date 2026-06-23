@@ -34,6 +34,12 @@ public partial class MainWindow : Window
         PreviewOnly = 2
     }
 
+    internal enum TerminalCommandPostInstallUiAction
+    {
+        None,
+        ShowError
+    }
+
     private enum ZoomSurfaceTarget
     {
         None = 0,
@@ -4976,18 +4982,17 @@ public partial class MainWindow : Window
             return;
 
         var installResult = _terminalCommandSetupService.InstallOrRepair();
-        if (!installResult.Success)
+        if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
         {
             await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
-            return;
         }
-
-        await TerminalCommandSetupDialog.ShowAsync(
-            this,
-            _localization,
-            installResult.Snapshot,
-            isAutomaticPrompt: false);
     }
+
+    internal static TerminalCommandPostInstallUiAction ResolveTerminalCommandPostInstallUiAction(
+        TerminalCommandInstallResult installResult) =>
+        installResult.Success
+            ? TerminalCommandPostInstallUiAction.None
+            : TerminalCommandPostInstallUiAction.ShowError;
 
     private void SaveTerminalCommandPromptDismissed()
     {

@@ -21,4 +21,50 @@ public sealed class TerminalCommandPromptDismissalTests
 
 		Assert.Equal(expected, MainWindow.ShouldPersistTerminalCommandPromptDismissal(result));
 	}
+
+	[Theory]
+	[InlineData((int)TerminalCommandInstallOutcome.AlreadyInstalled)]
+	[InlineData((int)TerminalCommandInstallOutcome.Created)]
+	[InlineData((int)TerminalCommandInstallOutcome.Repaired)]
+	public void ResolveTerminalCommandPostInstallUiAction_SuccessDoesNotShowFollowUpDialog(int outcomeValue)
+	{
+		var result = new TerminalCommandInstallResult(
+			Success: true,
+			Outcome: (TerminalCommandInstallOutcome)outcomeValue,
+			Snapshot: CreateInstalledSnapshot());
+
+		var action = MainWindow.ResolveTerminalCommandPostInstallUiAction(result);
+
+		Assert.Equal(MainWindow.TerminalCommandPostInstallUiAction.None, action);
+	}
+
+	[Theory]
+	[InlineData((int)TerminalCommandInstallOutcome.NotSupported)]
+	[InlineData((int)TerminalCommandInstallOutcome.ConflictingCommand)]
+	[InlineData((int)TerminalCommandInstallOutcome.Failed)]
+	public void ResolveTerminalCommandPostInstallUiAction_FailureShowsErrorOnly(int outcomeValue)
+	{
+		var result = new TerminalCommandInstallResult(
+			Success: false,
+			Outcome: (TerminalCommandInstallOutcome)outcomeValue,
+			Snapshot: CreateInstalledSnapshot(),
+			ErrorMessage: "Synthetic failure.");
+
+		var action = MainWindow.ResolveTerminalCommandPostInstallUiAction(result);
+
+		Assert.Equal(MainWindow.TerminalCommandPostInstallUiAction.ShowError, action);
+	}
+
+	private static TerminalCommandSetupSnapshot CreateInstalledSnapshot() =>
+		new(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.Installed,
+			CommandPath: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: "/opt/DevProjex/DevProjex",
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: true,
+			CanInstall: false,
+			CanRepair: false,
+			ShellProfileHint: null);
 }
