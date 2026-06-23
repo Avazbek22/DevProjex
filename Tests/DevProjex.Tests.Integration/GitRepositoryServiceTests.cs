@@ -13,6 +13,7 @@ namespace DevProjex.Tests.Integration;
 /// IMPORTANT: These tests use real git operations and network access.
 /// Some tests will be skipped if git is not available.
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitRepositoryServiceTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _service = new();
@@ -93,7 +94,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     private void SkipIfNoGit()
     {
         if (!_gitAvailable)
-            Assert.Fail("SKIP: Git is not available on this system");
+            Assert.Skip("Git is not available on this system.");
     }
 
     /// <summary>
@@ -102,7 +103,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     private static void SkipIf(bool condition, string reason)
     {
         if (condition)
-            Assert.Fail($"SKIP: {reason}");
+            Assert.Skip(reason);
     }
 
     #region Git Availability Tests

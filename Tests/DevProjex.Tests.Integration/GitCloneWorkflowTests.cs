@@ -4,7 +4,7 @@ namespace DevProjex.Tests.Integration;
 /// Integration tests simulating real-world Git clone workflows.
 /// These tests simulate the complete flow that happens in MainWindow.
 /// </summary>
-[Collection("GitNetworkTests")]
+[Collection(GitNetworkTestCollection.Name)]
 public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
 {
     private readonly GitRepositoryService _gitService;
