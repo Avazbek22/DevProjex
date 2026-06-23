@@ -677,21 +677,56 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		return string.Equals(NormalizePath(left), NormalizePath(right), comparison);
 	}
 
-	private static string NormalizePath(string value)
+	private string NormalizePath(string value)
 	{
-		var trimmed = value.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		var trimmed = TrimTrailingDirectorySeparators(value.Trim());
 		if (trimmed.Length == 0)
 			return trimmed;
 
 		try
 		{
-			return Path.GetFullPath(trimmed).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+			return TrimTrailingDirectorySeparators(Path.GetFullPath(trimmed));
 		}
 		catch
 		{
 			return trimmed;
 		}
 	}
+
+	private string TrimTrailingDirectorySeparators(string value)
+	{
+		var end = value.Length;
+		while (end > 0 && IsTrimmableTrailingDirectorySeparator(value, end))
+			end--;
+
+		return end == value.Length ? value : value[..end];
+	}
+
+	private bool IsTrimmableTrailingDirectorySeparator(string value, int end)
+	{
+		var index = end - 1;
+		if (!IsDirectorySeparator(value[index]))
+			return false;
+
+		if (end == 1)
+			return false;
+
+		if (_options.Platform == TerminalCommandHostPlatform.Windows &&
+		    end == 3 &&
+		    char.IsLetter(value[0]) &&
+		    value[1] == ':' &&
+		    IsDirectorySeparator(value[2]))
+		{
+			return false;
+		}
+
+		return true;
+	}
+
+	private bool IsDirectorySeparator(char value) =>
+		_options.Platform == TerminalCommandHostPlatform.Windows
+			? value is '\\' or '/'
+			: value == '/';
 
 	private static void TrySetUnixExecutableMode(string path)
 	{

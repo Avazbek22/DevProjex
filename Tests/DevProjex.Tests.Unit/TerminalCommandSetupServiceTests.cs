@@ -25,6 +25,39 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void InstallOrRepair_WindowsPackagedApp_NeverCreatesPortableLauncherOrWritesUserPath()
+	{
+		using var temp = new TemporaryDirectory();
+		var userPath = "existing-user-path";
+		var writeCount = 0;
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.Windows,
+			IsWindowsPackagedApp = () => true,
+			LocalAppDataPathProvider = () => temp.Path,
+			PathVariableProvider = () => userPath,
+			UserPathVariableProvider = () => userPath,
+			MachinePathVariableProvider = () => string.Empty,
+			UserPathVariableWriter = value =>
+			{
+				writeCount++;
+				userPath = value;
+			},
+			ExecutablePathProvider = () => @"C:\Program Files\WindowsApps\DevProjex\DevProjex.exe",
+			PathListSeparator = ';'
+		});
+
+		var result = service.InstallOrRepair();
+
+		Assert.True(result.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.AlreadyInstalled, result.Outcome);
+		Assert.Equal(TerminalCommandSetupState.ManagedByOperatingSystem, result.Snapshot.State);
+		Assert.Equal(0, writeCount);
+		Assert.False(Directory.Exists(Path.Combine(temp.Path, "DevProjex", "bin")));
+		Assert.Null(result.Snapshot.CommandPath);
+	}
+
+	[Fact]
 	public void Probe_WindowsPortableBuild_OffersUserLevelCommandSetup()
 	{
 		using var temp = new TemporaryDirectory();
@@ -148,6 +181,31 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void Probe_WindowsPortableBuild_UserPathEntryWithWindowsTrailingSlash_ReturnsInstalledOnAnyRunner()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		File.WriteAllText(commandPath, TerminalCommandSetupService.BuildWindowsLauncherContent(target));
+		var userPath = userBin + "\\";
+		var service = CreateWindowsPortableService(
+			temp.Path,
+			processPath: string.Empty,
+			() => userPath,
+			_ => throw new InvalidOperationException("Existing Windows-style PATH entry must be recognized."),
+			target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+
+		Assert.Equal(TerminalCommandSetupState.Installed, snapshot.State);
+		Assert.True(snapshot.UserBinDirectoryIsInPath);
+		Assert.True(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.AlreadyInstalled, install.Outcome);
+	}
+
+	[Fact]
 	public void Probe_WindowsPortableBuild_WithCurrentLauncherAndOnlyProcessPath_ReturnsRepairableStale()
 	{
 		using var temp = new TemporaryDirectory();
@@ -193,6 +251,29 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void InstallOrRepair_WindowsPortableBuild_DoesNotDuplicateExistingWindowsSlashUserPathEntry()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = Path.Combine(temp.Path, "DevProjex", "bin");
+		var userPath = userBin + "\\";
+		var writeCount = 0;
+		var service = CreateWindowsPortableService(temp.Path, processPath: string.Empty, () => userPath, value =>
+		{
+			writeCount++;
+			userPath = value;
+		}, target);
+
+		var result = service.InstallOrRepair();
+
+		Assert.True(result.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Created, result.Outcome);
+		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
+		Assert.Equal(0, writeCount);
+		Assert.Equal(userBin + "\\", userPath);
+	}
+
+	[Fact]
 	public void InstallOrRepair_WindowsPortableBuild_DoesNotWriteUserPathWhenMachinePathAlreadyContainsBin()
 	{
 		using var temp = new TemporaryDirectory();
@@ -211,6 +292,36 @@ public sealed class TerminalCommandSetupServiceTests
 			},
 			target,
 			machinePathProvider: () => userBin);
+
+		var result = service.InstallOrRepair();
+
+		Assert.True(result.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Created, result.Outcome);
+		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
+		Assert.True(result.Snapshot.UserBinDirectoryIsInPath);
+		Assert.Equal(0, writeCount);
+		Assert.Equal(string.Empty, userPath);
+	}
+
+	[Fact]
+	public void InstallOrRepair_WindowsPortableBuild_RecognizesMachinePathWithDifferentCaseAndWindowsTrailingSlash()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = Path.Combine(temp.Path, "DevProjex", "bin");
+		var userPath = string.Empty;
+		var writeCount = 0;
+		var service = CreateWindowsPortableService(
+			temp.Path,
+			processPath: string.Empty,
+			() => userPath,
+			value =>
+			{
+				writeCount++;
+				userPath = value;
+			},
+			target,
+			machinePathProvider: () => userBin.ToUpperInvariant() + "\\");
 
 		var result = service.InstallOrRepair();
 
@@ -267,6 +378,46 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Equal(TerminalCommandInstallOutcome.Repaired, result.Outcome);
 		Assert.Contains("rem target: " + currentTarget, launcher, StringComparison.Ordinal);
 		Assert.DoesNotContain("rem target: " + oldTarget, launcher, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void InstallOrRepair_WindowsPortableBuild_RepairsMovedExecutableWithoutChangingReachableUserPath()
+	{
+		using var temp = new TemporaryDirectory();
+		var oldTarget = temp.CreateFile("old version/DevProjex.exe", "old executable");
+		var currentTarget = temp.CreateFile("current version/DevProjex.exe", "current executable");
+		var existingTools = temp.CreateFolder("existing-tools");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		File.WriteAllText(commandPath, TerminalCommandSetupService.BuildWindowsLauncherContent(oldTarget));
+		var userPath = string.Join(';', existingTools, userBin + "\\");
+		var originalUserPath = userPath;
+		var writeCount = 0;
+		var service = CreateWindowsPortableService(
+			temp.Path,
+			processPath: string.Empty,
+			() => userPath,
+			value =>
+			{
+				writeCount++;
+				userPath = value;
+			},
+			currentTarget);
+
+		var snapshot = service.Probe();
+		var result = service.InstallOrRepair();
+		var repairedLauncher = File.ReadAllText(commandPath);
+
+		Assert.Equal(TerminalCommandSetupState.Stale, snapshot.State);
+		Assert.True(snapshot.CanRepair);
+		Assert.True(snapshot.UserBinDirectoryIsInPath);
+		Assert.True(result.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Repaired, result.Outcome);
+		Assert.Equal(0, writeCount);
+		Assert.Equal(originalUserPath, userPath);
+		Assert.Equal(2, userPath.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length);
+		Assert.Contains("rem target: " + currentTarget, repairedLauncher, StringComparison.Ordinal);
+		Assert.DoesNotContain("rem target: " + oldTarget, repairedLauncher, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -355,10 +506,32 @@ public sealed class TerminalCommandSetupServiceTests
 		var target = temp.CreateFile("app/DevProjex", "fake executable");
 		var home = Path.Combine("unix-home", Guid.NewGuid().ToString("N"));
 		var userBin = Path.Combine(home, ".local", "bin");
-		var pathValue = string.Join(':', "/usr/bin", userBin + Path.DirectorySeparatorChar, "/bin");
+		var pathValue = string.Join(':', "/usr/bin", userBin + "/", "/bin");
 		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
 		{
 			Platform = TerminalCommandHostPlatform.Linux,
+			HomeDirectoryProvider = () => home,
+			PathVariableProvider = () => pathValue,
+			ExecutablePathProvider = () => target
+		});
+
+		var snapshot = service.Probe();
+
+		Assert.True(snapshot.UserBinDirectoryIsInPath);
+		Assert.Null(snapshot.ShellProfileHint);
+	}
+
+	[Fact]
+	public void Probe_MacOsPathLookup_UsesColonSeparatorByDefault()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var home = Path.Combine("mac-home", Guid.NewGuid().ToString("N"));
+		var userBin = Path.Combine(home, ".local", "bin");
+		var pathValue = string.Join(':', "/usr/local/bin", userBin, "/bin");
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.MacOS,
 			HomeDirectoryProvider = () => home,
 			PathVariableProvider = () => pathValue,
 			ExecutablePathProvider = () => target
@@ -425,6 +598,31 @@ public sealed class TerminalCommandSetupServiceTests
 
 		Assert.Equal(TerminalCommandSetupState.Installed, snapshot.State);
 		Assert.True(snapshot.IsReady);
+		Assert.True(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.AlreadyInstalled, install.Outcome);
+	}
+
+	[Fact]
+	public void Probe_UnixInstalledWrapperMissingFromPath_ReturnsInstalledWithShellProfileHint()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(wrapperPath, TerminalCommandSetupService.BuildWrapperContent(target));
+		var service = CreateService(
+			TerminalCommandHostPlatform.Linux,
+			temp.Path,
+			Path.Combine(temp.Path, "other-bin"),
+			target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+
+		Assert.Equal(TerminalCommandSetupState.Installed, snapshot.State);
+		Assert.True(snapshot.IsReady);
+		Assert.False(snapshot.UserBinDirectoryIsInPath);
+		Assert.Contains(".local/bin", snapshot.ShellProfileHint, StringComparison.Ordinal);
 		Assert.True(install.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.AlreadyInstalled, install.Outcome);
 	}
@@ -505,6 +703,36 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void InstallOrRepair_UnixStaleWrapper_RepairsEvenWhenUserBinIsMissingFromPath()
+	{
+		using var temp = new TemporaryDirectory();
+		var currentTarget = temp.CreateFile("current app/DevProjex", "fake executable");
+		var oldTarget = temp.CreateFile("old app/DevProjex", "old executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(commandPath, TerminalCommandSetupService.BuildWrapperContent(oldTarget));
+		var service = CreateService(
+			TerminalCommandHostPlatform.Linux,
+			temp.Path,
+			Path.Combine(temp.Path, "other-bin"),
+			currentTarget);
+
+		var stale = service.Probe();
+		var result = service.InstallOrRepair();
+		var wrapper = File.ReadAllText(commandPath);
+
+		Assert.Equal(TerminalCommandSetupState.Stale, stale.State);
+		Assert.False(stale.UserBinDirectoryIsInPath);
+		Assert.True(result.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Repaired, result.Outcome);
+		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
+		Assert.False(result.Snapshot.UserBinDirectoryIsInPath);
+		Assert.Contains(".local/bin", result.Snapshot.ShellProfileHint, StringComparison.Ordinal);
+		Assert.Contains("# target: " + currentTarget, wrapper, StringComparison.Ordinal);
+		Assert.DoesNotContain("# target: " + oldTarget, wrapper, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void Probe_UnixForeignCommand_ReturnsConflictAndInstallDoesNotOverwriteIt()
 	{
 		using var temp = new TemporaryDirectory();
@@ -523,6 +751,23 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.False(install.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.ConflictingCommand, install.Outcome);
 		Assert.Contains("echo foreign", unchanged, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Probe_UnsupportedPlatform_ReturnsNonActionableSnapshotAndInstallIsNotSupported()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var service = CreateService(TerminalCommandHostPlatform.Other, temp.Path, temp.Path, target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+
+		Assert.Equal(TerminalCommandSetupState.UnsupportedOnCurrentPlatform, snapshot.State);
+		Assert.False(snapshot.IsActionable);
+		Assert.False(snapshot.IsReady);
+		Assert.False(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.NotSupported, install.Outcome);
 	}
 
 	[Fact]
@@ -681,6 +926,55 @@ public sealed class TerminalCommandSetupServiceTests
 			ShellProfileHint: null);
 
 		Assert.False(TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, snapshot, startedWithProjectPath: true));
+	}
+
+	[Theory]
+	[InlineData((int)TerminalCommandSetupState.ManagedByOperatingSystem, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.UnsupportedOnCurrentPackage, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.UnsupportedOnCurrentPlatform, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.HomeDirectoryUnavailable, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.NotInstalled, true, false, false, false, true, true)]
+	[InlineData((int)TerminalCommandSetupState.NotInstalled, true, false, true, false, false, true)]
+	[InlineData((int)TerminalCommandSetupState.NotInstalled, false, false, false, false, false, true)]
+	[InlineData((int)TerminalCommandSetupState.Installed, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.Stale, false, true, false, false, true, false)]
+	[InlineData((int)TerminalCommandSetupState.Stale, false, true, true, false, true, false)]
+	[InlineData((int)TerminalCommandSetupState.Stale, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.ConflictingCommand, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.PermissionDenied, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.Failed, false, false, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.NotInstalled, true, false, false, true, false, true)]
+	[InlineData((int)TerminalCommandSetupState.Stale, false, true, false, true, false, false)]
+	public void PromptPolicy_StateMatrix_AllowsOnlyActionableNotInstalledOrStaleRepair(
+		int stateValue,
+		bool canInstall,
+		bool canRepair,
+		bool dismissed,
+		bool startedWithProjectPath,
+		bool expectedOffer,
+		bool expectedDismissible)
+	{
+		var state = (TerminalCommandSetupState)stateValue;
+		var settings = new AppViewSettings { IsTerminalCommandPromptDismissed = dismissed };
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			state,
+			CommandPath: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: state == TerminalCommandSetupState.Stale ? "/old/DevProjex" : null,
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: true,
+			CanInstall: canInstall,
+			CanRepair: canRepair,
+			ShellProfileHint: null);
+
+		var actualOffer = TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(
+			settings,
+			snapshot,
+			startedWithProjectPath);
+
+		Assert.Equal(expectedOffer, actualOffer);
+		Assert.Equal(expectedDismissible, TerminalCommandPromptPolicy.IsDismissibleAutomaticPrompt(snapshot));
 	}
 
 	private static TerminalCommandSetupService CreateService(

@@ -120,6 +120,44 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_SilentReportDashWithJsonFormatWritesOnlyJsonToStdout()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		temp.CreateFile(Path.Combine("project with spaces", "src app", "Program.cs"), "class Program {}\n");
+		temp.CreateFile(Path.Combine("project with spaces", ".cache", "Cached.cs"), "class Cached {}\n");
+		var dashPath = Path.Combine(Environment.CurrentDirectory, CommandLineOptionTokens.StandardOutputReportPath);
+		var dashFileExistedBefore = File.Exists(dashPath);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Silent,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.ReportFormat, "json",
+			CommandLineOptionTokens.IncludeRoot, "src app",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Equal(dashFileExistedBefore, File.Exists(dashPath));
+		Assert.StartsWith("{", result.Stdout.TrimStart(), StringComparison.Ordinal);
+		Assert.EndsWith("}", result.Stdout.TrimEnd(), StringComparison.Ordinal);
+
+		using var document = JsonDocument.Parse(result.Stdout);
+		var root = document.RootElement;
+		var selection = root.GetProperty("selection");
+		var inventory = root.GetProperty("inventory");
+
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(projectPath, root.GetProperty("rootPath").GetString());
+		Assert.Equal(["src app"], ReadStringArray(selection.GetProperty("selectedRootFolders")));
+		Assert.Equal([".cs"], ReadStringArray(selection.GetProperty("selectedExtensions")));
+		Assert.Equal(["dotFolders"], ReadStringArray(selection.GetProperty("selectedIgnoreOptions")));
+		Assert.Equal(1, inventory.GetProperty("tree").GetProperty("fileCount").GetInt32());
+	}
+
+	[Fact]
 	public async Task Process_StrictReturnsRuntimeErrorWhenReportContainsWarnings()
 	{
 		using var temp = new TemporaryDirectory();
@@ -184,6 +222,50 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", result.Stdout);
 		Assert.Equal(string.Empty, result.Stderr);
 		Assert.True(File.Exists(reportPath));
+	}
+
+	[Fact]
+	public async Task Process_SilentFullAutomationCommandWritesStableJsonReport()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		temp.CreateFile(Path.Combine("project with spaces", "src app", "Program.cs"), "class Program {}\n");
+		temp.CreateFile(Path.Combine("project with spaces", "src app", "appsettings.json"), "{}\n");
+		temp.CreateFile(Path.Combine("project with spaces", ".cache", "Cached.cs"), "class Cached {}\n");
+		var reportPath = Path.Combine(temp.Path, "reports with spaces", "full-command-report.json");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Silent,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.ReportFormat, "json",
+			CommandLineOptionTokens.IncludeRoot, "src app",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.IncludeExtension, ".CS",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", result.Stdout);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.True(File.Exists(reportPath));
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
+		var root = document.RootElement;
+		var selection = root.GetProperty("selection");
+		var inventory = root.GetProperty("inventory");
+		var diagnostics = root.GetProperty("diagnostics");
+
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(projectPath, root.GetProperty("rootPath").GetString());
+		Assert.Equal(["src app"], ReadStringArray(selection.GetProperty("selectedRootFolders")));
+		Assert.Equal([".cs"], ReadStringArray(selection.GetProperty("selectedExtensions")));
+		Assert.Equal(["dotFolders"], ReadStringArray(selection.GetProperty("selectedIgnoreOptions")));
+		Assert.Contains("src app", ReadStringArray(inventory.GetProperty("availableRootFolders")));
+		Assert.Contains(".cs", ReadStringArray(inventory.GetProperty("availableExtensions")));
+		Assert.Equal(1, inventory.GetProperty("tree").GetProperty("fileCount").GetInt32());
+		Assert.False(diagnostics.GetProperty("rootAccessDenied").GetBoolean());
+		Assert.False(diagnostics.GetProperty("hadAccessDenied").GetBoolean());
+		Assert.Empty(diagnostics.GetProperty("warnings").EnumerateArray());
 	}
 
 	[Fact]
@@ -304,6 +386,11 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			// The test is already failing on timeout; process cleanup is best effort.
 		}
 	}
+
+	private static string[] ReadStringArray(JsonElement element) =>
+		element.EnumerateArray()
+			.Select(static item => item.GetString() ?? string.Empty)
+			.ToArray();
 
 	private sealed record CommandLineProcessResult(int ExitCode, string Stdout, string Stderr);
 }

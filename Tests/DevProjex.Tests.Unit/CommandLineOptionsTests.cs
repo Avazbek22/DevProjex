@@ -263,6 +263,36 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_FullAutomationCommand_NormalizesSelectionsAndReportOptions()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Silent,
+			CommandLineOptionTokens.Strict,
+			CommandLineOptionTokens.Path, @"C:\Projects\Dev Projex",
+			CommandLineOptionTokens.ReportPath, @"C:\Reports\devprojex-report.json",
+			CommandLineOptionTokens.ReportFormat, "json",
+			CommandLineOptionTokens.IncludeRoot, "src app",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.IncludeExtension, ".CS",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.NoUi);
+		Assert.True(result.Options.Strict);
+		Assert.Equal(@"C:\Projects\Dev Projex", result.Options.Path);
+		Assert.True(result.Options.Report.Enabled);
+		Assert.Equal(@"C:\Reports\devprojex-report.json", result.Options.Report.Path);
+		Assert.Equal(StartupReportFormat.Json, result.Options.Report.Format);
+		Assert.Equal(["src app"], result.Options.IncludeRootFolders);
+		Assert.Equal([".cs"], result.Options.IncludeExtensions);
+		Assert.True(result.Options.IgnoreOptionsSpecified);
+		Assert.Equal([IgnoreOptionId.DotFolders], result.Options.IgnoreOptions);
+	}
+
+	[Fact]
 	public void Parse_ReadsNoUiLongForm()
 	{
 		var result = CommandLineOptions.Parse([CommandLineOptionTokens.NoUi]);
