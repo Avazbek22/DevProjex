@@ -353,12 +353,13 @@ public sealed class TerminalCommandSetupServiceTests
 	{
 		using var temp = new TemporaryDirectory();
 		var target = temp.CreateFile("app/DevProjex", "fake executable");
-		var userBin = Path.Combine(temp.Path, ".local", "bin");
+		var home = Path.Combine("unix-home", Guid.NewGuid().ToString("N"));
+		var userBin = Path.Combine(home, ".local", "bin");
 		var pathValue = string.Join(':', "/usr/bin", userBin + Path.DirectorySeparatorChar, "/bin");
 		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
 		{
 			Platform = TerminalCommandHostPlatform.Linux,
-			HomeDirectoryProvider = () => temp.Path,
+			HomeDirectoryProvider = () => home,
 			PathVariableProvider = () => pathValue,
 			ExecutablePathProvider = () => target
 		});
