@@ -85,6 +85,27 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void Probe_UnixPathLookup_UsesColonSeparatorAndNormalizesTrailingSlashes()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = Path.Combine(temp.Path, ".local", "bin");
+		var pathValue = string.Join(':', "/usr/bin", userBin + Path.DirectorySeparatorChar, "/bin");
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.Linux,
+			HomeDirectoryProvider = () => temp.Path,
+			PathVariableProvider = () => pathValue,
+			ExecutablePathProvider = () => target
+		});
+
+		var snapshot = service.Probe();
+
+		Assert.True(snapshot.UserBinDirectoryIsInPath);
+		Assert.Null(snapshot.ShellProfileHint);
+	}
+
+	[Fact]
 	public void InstallOrRepair_UnixMissingCommand_CreatesManagedWrapperAndProbeBecomesInstalled()
 	{
 		using var temp = new TemporaryDirectory();
@@ -100,9 +121,28 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.True(result.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.Created, result.Outcome);
 		Assert.Equal(TerminalCommandSetupState.Installed, snapshot.State);
+		Assert.StartsWith("#!/bin/sh", wrapper, StringComparison.Ordinal);
 		Assert.Contains("# DevProjex terminal command wrapper", wrapper, StringComparison.Ordinal);
 		Assert.Contains("# target: " + target, wrapper, StringComparison.Ordinal);
 		Assert.Contains("exec '" + target + "' \"$@\"", wrapper, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Probe_UnixCommandPathOccupiedByDirectory_ReturnsConflict()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		temp.CreateFolder(Path.Combine(".local", "bin", CommandLineExecutableAliases.UnixCommand));
+		var userBin = Path.Combine(temp.Path, ".local", "bin");
+		var service = CreateService(TerminalCommandHostPlatform.Linux, temp.Path, userBin, target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+
+		Assert.Equal(TerminalCommandSetupState.ConflictingCommand, snapshot.State);
+		Assert.False(snapshot.IsActionable);
+		Assert.False(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.ConflictingCommand, install.Outcome);
 	}
 
 	[Fact]
@@ -122,6 +162,41 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.True(snapshot.IsReady);
 		Assert.True(install.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.AlreadyInstalled, install.Outcome);
+	}
+
+	[Fact]
+	public void Probe_UnixLegacyManagedWrapperWithoutShebang_IsStillRecognized()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(
+			wrapperPath,
+			"# DevProjex terminal command wrapper\n# target: " + target + "\nexec '" + target + "' \"$@\"\n");
+		var service = CreateService(TerminalCommandHostPlatform.Linux, temp.Path, userBin, target);
+
+		var snapshot = service.Probe();
+
+		Assert.Equal(TerminalCommandSetupState.Installed, snapshot.State);
+		Assert.True(snapshot.IsReady);
+	}
+
+	[Fact]
+	public void Probe_UnixMissingCurrentExecutable_DisablesInstallInsteadOfCreatingBrokenWrapper()
+	{
+		using var temp = new TemporaryDirectory();
+		var missingTarget = Path.Combine(temp.Path, "missing", "DevProjex");
+		var userBin = Path.Combine(temp.Path, ".local", "bin");
+		var service = CreateService(TerminalCommandHostPlatform.Linux, temp.Path, userBin, missingTarget);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+
+		Assert.Equal(TerminalCommandSetupState.Failed, snapshot.State);
+		Assert.False(snapshot.IsActionable);
+		Assert.False(install.Success);
+		Assert.False(File.Exists(Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand)));
 	}
 
 	[Fact]
@@ -192,6 +267,7 @@ public sealed class TerminalCommandSetupServiceTests
 
 		var wrapper = TerminalCommandSetupService.BuildWrapperContent(target);
 
+		Assert.StartsWith("#!/bin/sh", wrapper, StringComparison.Ordinal);
 		Assert.Contains("# target: " + target, wrapper, StringComparison.Ordinal);
 		Assert.Contains("exec '/Users/me/DevProjex'\"'\"'s builds/DevProjex' \"$@\"", wrapper, StringComparison.Ordinal);
 	}

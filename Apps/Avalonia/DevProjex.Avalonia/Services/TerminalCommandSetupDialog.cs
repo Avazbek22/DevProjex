@@ -173,14 +173,19 @@ internal static class TerminalCommandSetupDialog
 
 		panel.Children.Add(buttonPanel);
 		panel.Children.Add(dontShowAgain);
-		panel.Children.Add(new StackPanel
+		panel.Children.Add(new ScrollViewer
 		{
-			Children =
+			VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+			HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+			Content = new StackPanel
 			{
-				title,
-				message,
-				details,
-				commandText
+				Children =
+				{
+					title,
+					message,
+					details,
+					commandText
+				}
 			}
 		});
 

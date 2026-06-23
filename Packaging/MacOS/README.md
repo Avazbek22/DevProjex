@@ -122,6 +122,8 @@ Manual equivalent:
 mkdir -p ~/.local/bin
 cat > ~/.local/bin/devprojex <<'EOF'
 #!/bin/sh
+# DevProjex terminal command wrapper
+# target: /Applications/DevProjex.app/Contents/MacOS/DevProjex
 exec '/Applications/DevProjex.app/Contents/MacOS/DevProjex' "$@"
 EOF
 chmod +x ~/.local/bin/devprojex

@@ -158,6 +158,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		// repaired without parsing shell syntax or executing anything.
 		return string.Join(
 			"\n",
+			"#!/bin/sh",
 			WrapperMarker,
 			TargetPrefix + targetPath,
 			"exec " + ShellQuote(targetPath) + " \"$@\"",
@@ -214,6 +215,34 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		{
 			return UnixSnapshot(
 				TerminalCommandSetupState.Failed,
+				commandPath,
+				targetPath,
+				installedTargetPath: null,
+				userBinDirectory,
+				isUserBinInPath,
+				canInstall: false,
+				canRepair: false,
+				shellProfileHint);
+		}
+
+		if (!File.Exists(targetPath))
+		{
+			return UnixSnapshot(
+				TerminalCommandSetupState.Failed,
+				commandPath,
+				targetPath,
+				installedTargetPath: null,
+				userBinDirectory,
+				isUserBinInPath,
+				canInstall: false,
+				canRepair: false,
+				shellProfileHint);
+		}
+
+		if (Directory.Exists(commandPath))
+		{
+			return UnixSnapshot(
+				TerminalCommandSetupState.ConflictingCommand,
 				commandPath,
 				targetPath,
 				installedTargetPath: null,
@@ -340,8 +369,15 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		try
 		{
 			using var reader = new StreamReader(commandPath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-			var marker = reader.ReadLine();
+			var firstLine = reader.ReadLine();
+			var marker = firstLine;
 			var target = reader.ReadLine();
+			if (string.Equals(firstLine, "#!/bin/sh", StringComparison.Ordinal))
+			{
+				marker = target;
+				target = reader.ReadLine();
+			}
+
 			if (!string.Equals(marker, WrapperMarker, StringComparison.Ordinal) ||
 			    target is null ||
 			    !target.StartsWith(TargetPrefix, StringComparison.Ordinal))
