@@ -45,4 +45,55 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 #pragma warning restore CA1416
 		Assert.True((mode & UnixFileMode.UserExecute) == UnixFileMode.UserExecute);
 	}
+
+	[Fact]
+	public void InstallOrRepair_WindowsPortableSimulation_CreatesLauncherAndRepairsThroughPublicApi()
+	{
+		using var temp = new TemporaryDirectory();
+		var firstTarget = temp.CreateFile("v1/DevProjex.exe", "first executable");
+		var secondTarget = temp.CreateFile("v2/DevProjex.exe", "second executable");
+		var userPath = string.Empty;
+
+		var firstService = CreateWindowsPortableService(temp.Path, () => userPath, value => userPath = value, firstTarget);
+		var firstResult = firstService.InstallOrRepair();
+		var commandPath = Path.Combine(temp.Path, "DevProjex", "bin", CommandLineExecutableAliases.WindowsPortableCommandFileName);
+
+		Assert.True(firstResult.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Created, firstResult.Outcome);
+		Assert.Equal(TerminalCommandSetupState.Installed, firstResult.Snapshot.State);
+		Assert.True(File.Exists(commandPath));
+		Assert.Contains(Path.GetDirectoryName(commandPath)!, userPath, StringComparison.OrdinalIgnoreCase);
+
+		var secondService = CreateWindowsPortableService(temp.Path, () => userPath, value => userPath = value, secondTarget);
+		var stale = secondService.Probe();
+		var repair = secondService.InstallOrRepair();
+		var launcher = File.ReadAllText(commandPath);
+
+		Assert.Equal(TerminalCommandSetupState.Stale, stale.State);
+		Assert.True(repair.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Repaired, repair.Outcome);
+		Assert.Contains("rem target: " + secondTarget, launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("rem target: " + firstTarget, launcher, StringComparison.Ordinal);
+	}
+
+	private static TerminalCommandSetupService CreateWindowsPortableService(
+		string localAppData,
+		Func<string?> userPathProvider,
+		Action<string> userPathWriter,
+		string executablePath)
+	{
+		return new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.Windows,
+			IsWindowsPackagedApp = () => false,
+			HomeDirectoryProvider = () => localAppData,
+			LocalAppDataPathProvider = () => localAppData,
+			PathVariableProvider = () => string.Empty,
+			UserPathVariableProvider = userPathProvider,
+			MachinePathVariableProvider = () => string.Empty,
+			UserPathVariableWriter = userPathWriter,
+			ExecutablePathProvider = () => executablePath,
+			PathListSeparator = ';'
+		});
+	}
 }

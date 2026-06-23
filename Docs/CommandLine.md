@@ -25,21 +25,21 @@ Options with values support both separated and inline assignment forms:
 
 | Platform/package | Command |
 | --- | --- |
-| Windows portable folder | `.\DevProjex.exe` or the full path to `DevProjex.exe`. |
+| Windows portable folder | `devprojex` after enabling **Help → Terminal command**, or `.\DevProjex.exe` / the full path to `DevProjex.exe` before setup. |
 | Windows Microsoft Store/MSIX | `devprojex.exe` through Windows App Execution Alias. The alias starts the packaged DevProjex UI executable; `--no-ui` is a mode of the same app, not a separate CLI binary. |
 | Linux installed manually/package | `devprojex` when the executable is installed or symlinked into `PATH`. |
 | macOS terminal automation | `devprojex` when a symlink/wrapper is installed into `PATH`, or the direct executable path inside the `.app` bundle. |
 
-Portable builds do not edit `PATH` automatically. Store/MSIX uses the OS-supported App Execution Alias mechanism instead of self-modifying environment variables. DevProjex intentionally ships one desktop executable; automation arguments and silent mode are handled by that executable's startup pipeline.
+Portable builds ask before changing terminal setup. Store/MSIX uses the OS-supported App Execution Alias mechanism instead of self-modifying environment variables. DevProjex intentionally ships one desktop executable; automation arguments and silent mode are handled by that executable's startup pipeline.
 
 ## Terminal Command Setup
 
 Use **Help → Terminal command** in the desktop app to inspect or enable the terminal command for the current package.
 
 - Windows Store/MSIX: DevProjex relies on the Windows App Execution Alias `devprojex.exe`. The alias is controlled by Windows and can be disabled by the user in Windows Settings.
-- Windows portable: DevProjex does not mutate user or machine `PATH`. Start the app with `.\DevProjex.exe` from the publish folder or the full executable path.
+- Windows portable: DevProjex can create a user-level launcher at `%LOCALAPPDATA%\DevProjex\bin\devprojex.cmd` and add that folder to the current user's `PATH`. It never edits the machine-wide `PATH` and does not require administrator rights.
 - Linux/macOS: DevProjex can create a small user-level wrapper at `~/.local/bin/devprojex`. If `~/.local/bin` is not in `PATH`, the dialog shows the shell profile hint instead of editing profile files automatically.
-- If the app is moved, the wrapper can become stale. The same dialog detects that state and repairs the wrapper to the current executable.
+- If the app is moved, the launcher/wrapper can become stale. The same dialog detects that state and repairs it to the current executable.
 
 ## Options
 

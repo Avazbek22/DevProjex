@@ -6814,13 +6814,10 @@ public partial class MainWindow : Window
         {
             await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
             var snapshot = _terminalCommandSetupService.Probe();
-            if (!LooksLikePublishedDevProjexExecutable(snapshot.TargetExecutablePath))
-                return;
-
-            if (!TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(
+            if (!ShouldShowAutomaticTerminalCommandPrompt(
                     _userSettingsDb.ViewSettings,
                     snapshot,
-                    startedWithProjectPath: !string.IsNullOrWhiteSpace(_startupOptions.Path)))
+                    !string.IsNullOrWhiteSpace(_startupOptions.Path)))
                 return;
 
             await ShowTerminalCommandSetupAsync(snapshot, isAutomaticPrompt: true);
@@ -6830,6 +6827,13 @@ public partial class MainWindow : Window
             // Terminal setup is optional; startup must stay resilient even if probing fails.
         }
     }
+
+    internal static bool ShouldShowAutomaticTerminalCommandPrompt(
+        AppViewSettings settings,
+        TerminalCommandSetupSnapshot snapshot,
+        bool startedWithProjectPath) =>
+        LooksLikePublishedDevProjexExecutable(snapshot.TargetExecutablePath) &&
+        TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, snapshot, startedWithProjectPath);
 
     private static bool LooksLikePublishedDevProjexExecutable(string? executablePath)
     {

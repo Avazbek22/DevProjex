@@ -138,7 +138,9 @@ public class ZipDownloadServiceTests : IAsyncLifetime
                message.Contains("отклик") ||
                message.Contains("разорвано") ||
                message.Contains("name or service not known") ||
-               message.Contains("could not resolve");
+               message.Contains("could not resolve") ||
+               message.Contains("host is unknown") ||
+               message.Contains("хост неизвестен");
     }
 
     [Fact]

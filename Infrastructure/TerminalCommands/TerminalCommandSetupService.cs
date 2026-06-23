@@ -16,8 +16,16 @@ public sealed record TerminalCommandSetupServiceOptions
 	public Func<bool> IsWindowsPackagedApp { get; init; } = WindowsPackageIdentityProbe.IsPackagedApp;
 	public Func<string?> HomeDirectoryProvider { get; init; } =
 		() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+	public Func<string?> LocalAppDataPathProvider { get; init; } =
+		() => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 	public Func<string?> PathVariableProvider { get; init; } =
 		() => Environment.GetEnvironmentVariable("PATH");
+	public Func<string?> UserPathVariableProvider { get; init; } =
+		() => Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User);
+	public Func<string?> MachinePathVariableProvider { get; init; } =
+		() => Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine);
+	public Action<string> UserPathVariableWriter { get; init; } =
+		value => Environment.SetEnvironmentVariable("PATH", value, EnvironmentVariableTarget.User);
 	public Func<string?> ExecutablePathProvider { get; init; } = TerminalCommandSetupService.GetCurrentExecutablePath;
 	public char? PathListSeparator { get; init; }
 }
@@ -25,10 +33,14 @@ public sealed record TerminalCommandSetupServiceOptions
 public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptions? options = null)
 	: ITerminalCommandSetupService
 {
-	private const string WrapperMarker = "# DevProjex terminal command wrapper";
-	private const string TargetPrefix = "# target: ";
+	private const string UnixWrapperMarker = "# DevProjex terminal command wrapper";
+	private const string WindowsLauncherMarker = "rem DevProjex terminal command wrapper";
+	private const string UnixTargetPrefix = "# target: ";
+	private const string WindowsTargetPrefix = "rem target: ";
 	private const string ShellProfileHint =
 		"Add export PATH=\"$HOME/.local/bin:$PATH\" to your shell profile if ~/.local/bin is not already in PATH.";
+	private const string WindowsPathHint =
+		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
 
 	private readonly TerminalCommandSetupServiceOptions _options = options ?? new TerminalCommandSetupServiceOptions();
 
@@ -97,10 +109,14 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 					ErrorMessage: "The command path is occupied by a file not managed by DevProjex.");
 			}
 
-			File.WriteAllText(tempPath, BuildWrapperContent(targetPath), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-			TrySetUnixExecutableMode(tempPath);
+			File.WriteAllText(tempPath, BuildCommandFileContent(targetPath), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+			if (_options.Platform is not TerminalCommandHostPlatform.Windows)
+				TrySetUnixExecutableMode(tempPath);
 			File.Move(tempPath, commandPath, overwrite: true);
-			TrySetUnixExecutableMode(commandPath);
+			if (_options.Platform is TerminalCommandHostPlatform.Windows)
+				EnsureWindowsUserBinDirectoryIsInPath(initial.UserBinDirectory);
+			else
+				TrySetUnixExecutableMode(commandPath);
 
 			var refreshed = Probe();
 			var outcome = initial.State == TerminalCommandSetupState.Stale
@@ -113,7 +129,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				Snapshot: refreshed,
 				ErrorMessage: refreshed.State == TerminalCommandSetupState.Installed
 					? null
-					: "The wrapper was written but the command is still not reported as installed.");
+					: "The command file was written but the command is still not reported as installed.");
 		}
 		catch (UnauthorizedAccessException ex)
 		{
@@ -159,13 +175,28 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		return string.Join(
 			"\n",
 			"#!/bin/sh",
-			WrapperMarker,
-			TargetPrefix + targetPath,
+			UnixWrapperMarker,
+			UnixTargetPrefix + targetPath,
 			"exec " + ShellQuote(targetPath) + " \"$@\"",
 			string.Empty);
 	}
 
+	internal static string BuildWindowsLauncherContent(string targetPath)
+	{
+		var escapedTargetPath = EscapeWindowsBatchValue(targetPath);
+		return string.Join(
+			"\r\n",
+			"@echo off",
+			WindowsLauncherMarker,
+			WindowsTargetPrefix + targetPath,
+			"\"" + escapedTargetPath + "\" %*",
+			string.Empty);
+	}
+
 	internal static string ShellQuote(string value) => "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+
+	internal static string EscapeWindowsBatchValue(string value) =>
+		value.Replace("%", "%%", StringComparison.Ordinal);
 
 	private TerminalCommandSetupSnapshot ProbeWindows()
 	{
@@ -184,7 +215,100 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				ShellProfileHint: null);
 		}
 
-		return Unsupported(TerminalCommandSetupState.UnsupportedOnCurrentPackage);
+		var localAppData = SafeGetLocalAppDataDirectory();
+		var targetPath = SafeGetExecutablePath();
+		if (string.IsNullOrWhiteSpace(localAppData))
+		{
+			return WindowsPortableSnapshot(
+				TerminalCommandSetupState.HomeDirectoryUnavailable,
+				commandPath: null,
+				targetPath,
+				installedTargetPath: null,
+				userBinDirectory: null,
+				isUserBinInPath: false,
+				canInstall: false,
+				canRepair: false);
+		}
+
+		var userBinDirectory = Path.Combine(localAppData, "DevProjex", "bin");
+		var commandPath = Path.Combine(userBinDirectory, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		var isUserBinInPath = IsWindowsUserBinDirectoryReachable(userBinDirectory);
+
+		if (string.IsNullOrWhiteSpace(targetPath) || !File.Exists(targetPath))
+		{
+			return WindowsPortableSnapshot(
+				TerminalCommandSetupState.Failed,
+				commandPath,
+				targetPath,
+				installedTargetPath: null,
+				userBinDirectory,
+				isUserBinInPath,
+				canInstall: false,
+				canRepair: false);
+		}
+
+		if (Directory.Exists(commandPath))
+		{
+			return WindowsPortableSnapshot(
+				TerminalCommandSetupState.ConflictingCommand,
+				commandPath,
+				targetPath,
+				installedTargetPath: null,
+				userBinDirectory,
+				isUserBinInPath,
+				canInstall: false,
+				canRepair: false);
+		}
+
+		if (!File.Exists(commandPath))
+		{
+			return WindowsPortableSnapshot(
+				TerminalCommandSetupState.NotInstalled,
+				commandPath,
+				targetPath,
+				installedTargetPath: null,
+				userBinDirectory,
+				isUserBinInPath,
+				canInstall: true,
+				canRepair: false);
+		}
+
+		var installedTargetPath = ReadManagedWrapperTarget(commandPath);
+		if (installedTargetPath is null)
+		{
+			return WindowsPortableSnapshot(
+				TerminalCommandSetupState.ConflictingCommand,
+				commandPath,
+				targetPath,
+				installedTargetPath: null,
+				userBinDirectory,
+				isUserBinInPath,
+				canInstall: false,
+				canRepair: false);
+		}
+
+		if (AreSamePath(installedTargetPath, targetPath) && File.Exists(installedTargetPath) && isUserBinInPath)
+		{
+			return WindowsPortableSnapshot(
+				TerminalCommandSetupState.Installed,
+				commandPath,
+				targetPath,
+				installedTargetPath,
+				userBinDirectory,
+				isUserBinInPath,
+				canInstall: false,
+				canRepair: false);
+		}
+
+		return WindowsPortableSnapshot(
+			TerminalCommandSetupState.Stale,
+			commandPath,
+			targetPath,
+			installedTargetPath,
+			userBinDirectory,
+			isUserBinInPath,
+			canInstall: false,
+			canRepair: true);
 	}
 
 	private TerminalCommandSetupSnapshot ProbeUnixLike()
@@ -345,6 +469,27 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			CanRepair: canRepair,
 			ShellProfileHint: shellProfileHint);
 
+	private static TerminalCommandSetupSnapshot WindowsPortableSnapshot(
+		TerminalCommandSetupState state,
+		string? commandPath,
+		string? targetPath,
+		string? installedTargetPath,
+		string? userBinDirectory,
+		bool isUserBinInPath,
+		bool canInstall,
+		bool canRepair) =>
+		new(
+			CommandName: CommandLineExecutableAliases.UnixCommand,
+			State: state,
+			CommandPath: commandPath,
+			TargetExecutablePath: targetPath,
+			InstalledTargetExecutablePath: installedTargetPath,
+			UserBinDirectory: userBinDirectory,
+			UserBinDirectoryIsInPath: isUserBinInPath,
+			CanInstall: canInstall,
+			CanRepair: canRepair,
+			ShellProfileHint: isUserBinInPath ? null : WindowsPathHint);
+
 	private static TerminalCommandInstallResult FailedAfterInstallAttempt(
 		TerminalCommandSetupSnapshot initial,
 		TerminalCommandSetupState state,
@@ -372,18 +517,28 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			var firstLine = reader.ReadLine();
 			var marker = firstLine;
 			var target = reader.ReadLine();
+			var targetPrefix = UnixTargetPrefix;
 			if (string.Equals(firstLine, "#!/bin/sh", StringComparison.Ordinal))
 			{
 				marker = target;
 				target = reader.ReadLine();
 			}
+			else if (string.Equals(firstLine, "@echo off", StringComparison.OrdinalIgnoreCase))
+			{
+				marker = target;
+				target = reader.ReadLine();
+				targetPrefix = WindowsTargetPrefix;
+			}
 
-			if (!string.Equals(marker, WrapperMarker, StringComparison.Ordinal) ||
+			if (string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase))
+				targetPrefix = WindowsTargetPrefix;
+
+			if (!IsManagedWrapperMarker(marker) ||
 			    target is null ||
-			    !target.StartsWith(TargetPrefix, StringComparison.Ordinal))
+			    !target.StartsWith(targetPrefix, StringComparison.OrdinalIgnoreCase))
 				return null;
 
-			return target[TargetPrefix.Length..];
+			return target[targetPrefix.Length..];
 		}
 		catch (IOException)
 		{
@@ -395,12 +550,20 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 	}
 
+	private static bool IsManagedWrapperMarker(string? value) =>
+		string.Equals(value, UnixWrapperMarker, StringComparison.Ordinal) ||
+		string.Equals(value, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase);
+
 	private bool IsDirectoryInPath(string directory)
 	{
 		var path = SafeGetPathVariable();
+		return IsDirectoryInPathValue(directory, path);
+	}
+
+	private bool IsDirectoryInPathValue(string directory, string? path)
+	{
 		if (string.IsNullOrWhiteSpace(path))
 			return false;
-
 		var separator = _options.PathListSeparator ?? (_options.Platform == TerminalCommandHostPlatform.Windows ? ';' : ':');
 		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
 		{
@@ -409,6 +572,28 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 
 		return false;
+	}
+
+	private bool IsWindowsUserBinDirectoryReachable(string directory) =>
+		IsDirectoryInPathValue(directory, SafeGetUserPathVariable()) ||
+		IsDirectoryInPathValue(directory, SafeGetMachinePathVariable());
+
+	private void EnsureWindowsUserBinDirectoryIsInPath(string? directory)
+	{
+		if (string.IsNullOrWhiteSpace(directory) || IsWindowsUserBinDirectoryReachable(directory))
+			return;
+
+		var userPath = SafeGetUserPathVariable();
+		var separator = _options.PathListSeparator ?? ';';
+		var entries = string.IsNullOrWhiteSpace(userPath)
+			? new List<string>()
+			: userPath.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+		if (!entries.Any(entry => AreSamePath(entry, directory)))
+			entries.Add(directory);
+
+		_options.UserPathVariableWriter(string.Join(separator, entries));
+		WindowsEnvironmentChangeBroadcaster.NotifyEnvironmentChanged();
 	}
 
 	private string? SafeGetHomeDirectory()
@@ -428,6 +613,42 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		try
 		{
 			return _options.PathVariableProvider();
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private string? SafeGetUserPathVariable()
+	{
+		try
+		{
+			return _options.UserPathVariableProvider();
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private string? SafeGetMachinePathVariable()
+	{
+		try
+		{
+			return _options.MachinePathVariableProvider();
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private string? SafeGetLocalAppDataDirectory()
+	{
+		try
+		{
+			return _options.LocalAppDataPathProvider();
 		}
 		catch
 		{
@@ -509,6 +730,51 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 	}
 
+	private string BuildCommandFileContent(string targetPath) =>
+		_options.Platform == TerminalCommandHostPlatform.Windows
+			? BuildWindowsLauncherContent(targetPath)
+			: BuildWrapperContent(targetPath);
+
+}
+
+internal static class WindowsEnvironmentChangeBroadcaster
+{
+	private const int HwndBroadcast = 0xffff;
+	private const int WmSettingChange = 0x001a;
+	private const int SmtoAbortIfHung = 0x0002;
+
+	public static void NotifyEnvironmentChanged()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		try
+		{
+			_ = SendMessageTimeout(
+				new IntPtr(HwndBroadcast),
+				WmSettingChange,
+				UIntPtr.Zero,
+				"Environment",
+				SmtoAbortIfHung,
+				100,
+				out _);
+		}
+		catch
+		{
+			// Updating the registry-backed user PATH is the durable operation.
+			// Broadcasting only helps already-running shells notice the change sooner.
+		}
+	}
+
+	[DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = false)]
+	private static extern IntPtr SendMessageTimeout(
+		IntPtr hWnd,
+		int msg,
+		UIntPtr wParam,
+		string lParam,
+		int flags,
+		int timeout,
+		out UIntPtr result);
 }
 
 internal static class WindowsPackageIdentityProbe

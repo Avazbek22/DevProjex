@@ -4,6 +4,9 @@ namespace DevProjex.Infrastructure.TerminalCommands;
 
 public static class TerminalCommandPromptPolicy
 {
+	public static bool IsDismissibleAutomaticPrompt(TerminalCommandSetupSnapshot snapshot) =>
+		snapshot.State is TerminalCommandSetupState.NotInstalled;
+
 	public static bool ShouldOfferAutomaticPrompt(
 		AppViewSettings settings,
 		TerminalCommandSetupSnapshot snapshot,

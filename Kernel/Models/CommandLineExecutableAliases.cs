@@ -4,6 +4,7 @@ public static class CommandLineExecutableAliases
 {
 	public const string DisplayName = "DevProjex";
 	public const string WindowsPortableExecutable = "DevProjex.exe";
+	public const string WindowsPortableCommandFileName = "devprojex.cmd";
 	public const string UnixCommand = "devprojex";
 	public const string WindowsStoreAlias = "devprojex.exe";
 	public const string WindowsStoreApplicationId = "App";

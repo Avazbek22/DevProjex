@@ -1,3 +1,5 @@
+using DevProjex.Infrastructure.TerminalCommands;
+
 namespace DevProjex.Avalonia.Services;
 
 internal enum TerminalCommandDialogAction
@@ -22,13 +24,14 @@ internal static class TerminalCommandSetupDialog
 		var themeVariant = owner.ActualThemeVariant
 		                   ?? global::Avalonia.Application.Current?.ActualThemeVariant
 		                   ?? ThemeVariant.Default;
+		var brushes = ResolveDialogBrushes(owner, themeVariant);
 		var content = TerminalCommandSetupDialogText.Create(localization, snapshot);
 		var completion = new TaskCompletionSource<TerminalCommandDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
 		var dontShowAgain = new CheckBox
 		{
 			Content = localization["Dialog.TerminalCommand.DontShowAgain"],
-			IsVisible = isAutomaticPrompt && snapshot.State == TerminalCommandSetupState.NotInstalled,
+			IsVisible = isAutomaticPrompt && TerminalCommandPromptPolicy.IsDismissibleAutomaticPrompt(snapshot),
 			Margin = new Thickness(12, 0, 12, 12)
 		};
 
@@ -44,9 +47,11 @@ internal static class TerminalCommandSetupDialog
 			CanResize = false,
 			RequestedThemeVariant = themeVariant,
 			TransparencyLevelHint = [WindowTransparencyLevel.None],
-			Background = ResolveBrush(owner, themeVariant, "AppBackgroundBrush"),
+			Background = brushes.Background,
 			Content = body
 		};
+
+		ApplyDialogResources(dialog, brushes);
 
 		dialog.Closed += (_, _) =>
 		{
@@ -85,12 +90,11 @@ internal static class TerminalCommandSetupDialog
 			Margin = new Thickness(12, 4, 12, 8)
 		};
 
-		var details = new SelectableTextBlock
+		var details = new TextBlock
 		{
 			Text = content.Details,
 			TextWrapping = TextWrapping.Wrap,
 			Margin = new Thickness(12, 0, 12, 8),
-			FontFamily = FontFamily.Parse("Consolas,Menlo,Monospace"),
 			FontSize = 12,
 			Opacity = 0.82
 		};
@@ -111,25 +115,28 @@ internal static class TerminalCommandSetupDialog
 			Margin = new Thickness(12)
 		};
 
-		var copyButton = new Button
+		if (content.ShowCopyButton)
 		{
-			Content = localization["Dialog.TerminalCommand.CopyCommand"],
-			MinWidth = 118,
-			Margin = new Thickness(0, 0, 8, 0),
-			IsEnabled = !string.IsNullOrWhiteSpace(snapshot.CommandName)
-		};
-		copyButton.Click += async (_, _) =>
-		{
-			try
+			var copyButton = new Button
 			{
-				await owner.Clipboard!.SetTextAsync(snapshot.CommandName);
-			}
-			catch
+				Content = localization["Dialog.TerminalCommand.CopyCommand"],
+				MinWidth = 118,
+				Margin = new Thickness(0, 0, 8, 0),
+				IsEnabled = !string.IsNullOrWhiteSpace(content.CommandToCopy)
+			};
+			copyButton.Click += async (_, _) =>
 			{
-				// Clipboard can be unavailable in headless or restricted sessions.
-			}
-		};
-		buttonPanel.Children.Add(copyButton);
+				try
+				{
+					await owner.Clipboard!.SetTextAsync(content.CommandToCopy);
+				}
+				catch
+				{
+					// Clipboard can be unavailable in headless or restricted sessions.
+				}
+			};
+			buttonPanel.Children.Add(copyButton);
+		}
 
 		if (content.ShowInstallButton)
 		{
@@ -192,20 +199,56 @@ internal static class TerminalCommandSetupDialog
 		return panel;
 	}
 
-	private static IBrush? ResolveBrush(Window? owner, ThemeVariant themeVariant, string key)
+	internal static TerminalCommandDialogBrushes ResolveDialogBrushes(Window? owner, ThemeVariant themeVariant)
 	{
 		var app = global::Avalonia.Application.Current;
+		var appBackground = TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush");
+		var appPanel = TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
+		var appBorder = TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
+
+		return new TerminalCommandDialogBrushes(
+			TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor") ?? appBackground ?? owner?.Background,
+			TryGetThemeColorBrush(app, themeVariant, "AppPanelColor") ?? appPanel,
+			TryGetThemeColorBrush(app, themeVariant, "AppBorderColor") ?? appBorder);
+	}
+
+	private static void ApplyDialogResources(Window dialog, TerminalCommandDialogBrushes brushes)
+	{
+		if (brushes.Background is not null)
+			dialog.Resources["AppBackgroundBrush"] = brushes.Background;
+		if (brushes.Panel is not null)
+			dialog.Resources["AppPanelBrush"] = brushes.Panel;
+		if (brushes.Border is not null)
+			dialog.Resources["AppBorderBrush"] = brushes.Border;
+	}
+
+	private static IBrush? TryGetThemeBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)
+	{
 		return app?.TryFindResource(key, themeVariant, out var resource) == true
 			? resource as IBrush
-			: owner?.Background;
+			: null;
+	}
+
+	private static IBrush? TryGetThemeColorBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)
+	{
+		if (app?.TryFindResource(key, themeVariant, out var resource) == true && resource is Color color)
+			return new SolidColorBrush(color);
+		return null;
 	}
 }
+
+internal sealed record TerminalCommandDialogBrushes(
+	IBrush? Background,
+	IBrush? Panel,
+	IBrush? Border);
 
 internal sealed record TerminalCommandDialogText(
 	string Title,
 	string Body,
 	string Details,
 	string CommandLine,
+	string CommandToCopy,
+	bool ShowCopyButton,
 	string InstallButtonText,
 	bool ShowInstallButton);
 
@@ -218,7 +261,9 @@ internal static class TerminalCommandSetupDialogText
 		var title = localization["Dialog.TerminalCommand.Title"];
 		var body = GetBody(localization, snapshot);
 		var details = GetDetails(localization, snapshot);
-		var commandLine = localization.Format("Dialog.TerminalCommand.CommandLine", snapshot.CommandName);
+		var commandToCopy = GetCommandToCopy(snapshot);
+		var commandLine = localization.Format("Dialog.TerminalCommand.CommandLine", commandToCopy);
+		var showCopyButton = ShouldShowCopyButton(snapshot, commandToCopy);
 		var installText = snapshot.CanRepair
 			? localization["Dialog.TerminalCommand.Repair"]
 			: localization["Dialog.TerminalCommand.Enable"];
@@ -228,8 +273,38 @@ internal static class TerminalCommandSetupDialogText
 			body,
 			details,
 			commandLine,
+			commandToCopy,
+			showCopyButton,
 			installText,
 			snapshot.IsActionable);
+	}
+
+	private static bool ShouldShowCopyButton(TerminalCommandSetupSnapshot snapshot, string commandToCopy)
+	{
+		if (string.IsNullOrWhiteSpace(commandToCopy))
+			return false;
+
+		return snapshot.State is
+			TerminalCommandSetupState.ManagedByOperatingSystem or
+			TerminalCommandSetupState.UnsupportedOnCurrentPackage or
+			TerminalCommandSetupState.Installed;
+	}
+
+	private static string GetCommandToCopy(TerminalCommandSetupSnapshot snapshot)
+	{
+		if (snapshot.State == TerminalCommandSetupState.UnsupportedOnCurrentPackage &&
+		    !string.IsNullOrWhiteSpace(snapshot.TargetExecutablePath))
+			return QuoteForDisplay(snapshot.TargetExecutablePath);
+
+		return snapshot.CommandName;
+	}
+
+	private static string QuoteForDisplay(string value)
+	{
+		if (!value.Any(static ch => char.IsWhiteSpace(ch) || ch == '"'))
+			return value;
+
+		return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 	}
 
 	private static string GetBody(LocalizationService localization, TerminalCommandSetupSnapshot snapshot) =>
@@ -258,11 +333,10 @@ internal static class TerminalCommandSetupDialogText
 
 	private static string GetDetails(LocalizationService localization, TerminalCommandSetupSnapshot snapshot)
 	{
-		var lines = new List<string>
-		{
-			localization.Format("Dialog.TerminalCommand.Detail.State", snapshot.State),
-			localization.Format("Dialog.TerminalCommand.Detail.Command", snapshot.CommandName)
-		};
+		var lines = new List<string>();
+
+		if (snapshot.State != TerminalCommandSetupState.UnsupportedOnCurrentPackage)
+			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.Command", snapshot.CommandName));
 
 		if (!string.IsNullOrWhiteSpace(snapshot.CommandPath))
 			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.CommandPath", snapshot.CommandPath));
