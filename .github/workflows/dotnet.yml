@@ -206,7 +206,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineOptions"
+          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineOptions|FullyQualifiedName~ReportPathResolver"
           --logger "trx;LogFileName=terminal-command-unit.trx"
           --results-directory "TestResults/terminal-command-unit"
 
@@ -218,7 +218,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineOptions"
+          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineOptions|FullyQualifiedName~ReportPathResolver"
           --logger "trx;LogFileName=terminal-command-unit.trx"
           --results-directory "TestResults/terminal-command-unit"
 

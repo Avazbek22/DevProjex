@@ -17,6 +17,32 @@ public sealed class ReportPathResolverTests
 	}
 
 	[Fact]
+	public void Resolve_RelativeExplicitPath_UsesCurrentProcessDirectory()
+	{
+		using var temp = new TemporaryDirectory();
+		var workingDirectory = temp.CreateFolder("working directory");
+		var relativePath = Path.Combine("reports", "relative.json");
+		var resolver = new ReportPathResolver(currentDirectoryProvider: () => workingDirectory);
+
+		var resolved = resolver.Resolve(new StartupReportOptions(true, relativePath, StartupReportFormat.Json));
+
+		Assert.Equal(Path.GetFullPath(Path.Combine(workingDirectory, relativePath)), resolved);
+	}
+
+	[Fact]
+	public void Resolve_AbsoluteExplicitPath_DoesNotReadCurrentProcessDirectory()
+	{
+		using var temp = new TemporaryDirectory();
+		var explicitPath = Path.Combine(temp.Path, "reports", "absolute.json");
+		var resolver = new ReportPathResolver(
+			currentDirectoryProvider: () => throw new InvalidOperationException("Absolute report paths must not read current directory."));
+
+		var resolved = resolver.Resolve(new StartupReportOptions(true, explicitPath, StartupReportFormat.Json));
+
+		Assert.Equal(Path.GetFullPath(explicitPath), resolved);
+	}
+
+	[Fact]
 	public void Resolve_DefaultPath_UsesDocumentsDevProjexReportsFolder()
 	{
 		var resolver = new ReportPathResolver(

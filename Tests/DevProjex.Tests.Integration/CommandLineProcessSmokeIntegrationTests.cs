@@ -239,8 +239,13 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
-		Assert.Equal($"{expectedReportPath}{Environment.NewLine}", result.Stdout);
 		Assert.Equal(string.Empty, result.Stderr);
+		var reportedReportPath = AssertSingleOutputLine(result.Stdout);
+		AssertRelativeReportPathResolvedFromWorkingDirectory(
+			reportedReportPath,
+			expectedReportPath,
+			projectPath,
+			relativeReportPath);
 		Assert.True(File.Exists(expectedReportPath));
 	}
 
@@ -474,6 +479,50 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		element.EnumerateArray()
 			.Select(static item => item.GetString() ?? string.Empty)
 			.ToArray();
+
+	private static string AssertSingleOutputLine(string stdout)
+	{
+		var outputLines = stdout
+			.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		return Assert.Single(outputLines);
+	}
+
+	private static void AssertRelativeReportPathResolvedFromWorkingDirectory(
+		string reportedReportPath,
+		string expectedReportPath,
+		string projectPath,
+		string relativeReportPath)
+	{
+		Assert.True(
+			Path.IsPathFullyQualified(reportedReportPath),
+			$"Expected the report path printed to stdout to be absolute, but got '{reportedReportPath}'.");
+		Assert.EndsWith(relativeReportPath, reportedReportPath, StringComparison.Ordinal);
+		Assert.False(
+			IsPathUnderDirectory(reportedReportPath, projectPath),
+			$"Relative report paths must resolve from the process working directory, not from the project path '{projectPath}'.");
+		Assert.True(
+			File.Exists(expectedReportPath),
+			$"Expected the report file to be reachable through the requested working-directory path '{expectedReportPath}'.");
+		Assert.True(
+			File.Exists(reportedReportPath),
+			$"Expected the report file to exist at the path printed by the app: '{reportedReportPath}'.");
+	}
+
+	private static bool IsPathUnderDirectory(string path, string directory)
+	{
+		var comparison = OperatingSystem.IsWindows()
+			? StringComparison.OrdinalIgnoreCase
+			: StringComparison.Ordinal;
+		var fullPath = AddTrailingDirectorySeparator(Path.GetFullPath(path));
+		var fullDirectory = AddTrailingDirectorySeparator(Path.GetFullPath(directory));
+		return fullPath.StartsWith(fullDirectory, comparison);
+	}
+
+	private static string AddTrailingDirectorySeparator(string path)
+	{
+		var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		return trimmed + Path.DirectorySeparatorChar;
+	}
 
 	private sealed record CommandLineProcessResult(int ExitCode, string Stdout, string Stderr);
 }
