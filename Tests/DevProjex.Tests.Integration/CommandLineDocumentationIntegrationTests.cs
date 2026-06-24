@@ -33,9 +33,9 @@ public sealed class CommandLineDocumentationIntegrationTests
 		Assert.Contains("never edits the machine-wide `PATH`", docs, StringComparison.Ordinal);
 		Assert.Contains("Linux installed manually/package", docs, StringComparison.Ordinal);
 		Assert.Contains("macOS terminal automation", docs, StringComparison.Ordinal);
-		Assert.Contains("Help → Terminal command", docs, StringComparison.Ordinal);
+		Assert.Contains("Help → Launch from terminal", docs, StringComparison.Ordinal);
 		Assert.Contains("~/.local/bin/devprojex", docs, StringComparison.Ordinal);
-		Assert.Contains("detects that state and repairs it", docs, StringComparison.Ordinal);
+		Assert.Contains("repairs it silently on startup", docs, StringComparison.Ordinal);
 		Assert.Contains("stdout", docs, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("stderr", docs, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("Exit Codes", docs, StringComparison.Ordinal);

@@ -44,29 +44,15 @@ jobs:
         id: set-matrix
         shell: pwsh
         run: |
-          # PRs keep a representative smoke matrix to control latency while still
-          # covering all three OS families. Full RID coverage remains on master pushes
-          # and manual runs, where release confidence matters more than turnaround time.
-          if ('${{ github.event_name }}' -eq 'pull_request') {
-            $matrix = @{
-              include = @(
-                @{ runner = 'windows-latest'; rid = 'win-x64' },
-                @{ runner = 'ubuntu-latest'; rid = 'linux-x64' },
-                @{ runner = 'macos-latest'; rid = 'osx-arm64' }
-              )
-            }
-          }
-          else {
-            $matrix = @{
-              include = @(
-                @{ runner = 'windows-latest'; rid = 'win-x64' },
-                @{ runner = 'windows-latest'; rid = 'win-arm64' },
-                @{ runner = 'ubuntu-latest'; rid = 'linux-x64' },
-                @{ runner = 'ubuntu-latest'; rid = 'linux-arm64' },
-                @{ runner = 'macos-latest'; rid = 'osx-x64' },
-                @{ runner = 'macos-latest'; rid = 'osx-arm64' }
-              )
-            }
+          $matrix = @{
+            include = @(
+              @{ runner = 'windows-latest'; rid = 'win-x64'; binary = 'DevProjex.exe' },
+              @{ runner = 'windows-11-arm'; rid = 'win-arm64'; binary = 'DevProjex.exe' },
+              @{ runner = 'ubuntu-latest'; rid = 'linux-x64'; binary = 'DevProjex' },
+              @{ runner = 'ubuntu-24.04-arm'; rid = 'linux-arm64'; binary = 'DevProjex' },
+              @{ runner = 'macos-15-intel'; rid = 'osx-x64'; binary = 'DevProjex' },
+              @{ runner = 'macos-latest'; rid = 'osx-arm64'; binary = 'DevProjex' }
+            )
           }
 
           "matrix=$($matrix | ConvertTo-Json -Compress -Depth 4)" >> $env:GITHUB_OUTPUT
@@ -116,11 +102,11 @@ jobs:
           /p:DebugSymbols=false
           -o artifacts/publish/${{ matrix.rid }}
 
-      - name: Startup Smoke (Windows x64)
-        if: ${{ matrix.rid == 'win-x64' }}
+      - name: Startup Smoke (Windows)
+        if: ${{ startsWith(matrix.rid, 'win-') }}
         shell: pwsh
         run: |
-          $exePath = Resolve-Path "artifacts/publish/${{ matrix.rid }}/DevProjex.exe"
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
           $workingDirectory = Split-Path -Path $exePath -Parent
 
           $process = Start-Process -FilePath $exePath -WorkingDirectory $workingDirectory -PassThru
@@ -141,17 +127,78 @@ jobs:
             }
           }
 
-      - name: Command-line Smoke (Windows x64)
-        if: ${{ matrix.rid == 'win-x64' }}
+      - name: Command-line Smoke (Native Published Artifact)
         shell: pwsh
         run: |
-          $exePath = Resolve-Path "artifacts/publish/${{ matrix.rid }}/DevProjex.exe"
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
           $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-help-stdout.txt"
           $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-help-stderr.txt"
 
+          Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+
+          if ($env:RUNNER_OS -eq "Windows") {
+            $process = Start-Process `
+              -FilePath $exePath `
+              -ArgumentList "--help" `
+              -RedirectStandardOutput $stdoutPath `
+              -RedirectStandardError $stderrPath `
+              -NoNewWindow `
+              -Wait `
+              -PassThru
+            $exitCode = $process.ExitCode
+          }
+          else {
+            chmod +x $exePath
+            & $exePath --help > $stdoutPath 2> $stderrPath
+            $exitCode = $LASTEXITCODE
+          }
+
+          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+          if ($exitCode -ne 0) {
+            throw "Published --help smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$stderr"
+          }
+
+          if ($stdout -notmatch "Usage:") {
+            throw "Published --help smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
+          }
+
+          Write-Host "Command-line smoke passed for ${{ matrix.rid }}."
+
+      - name: Portable Launcher Smoke (Windows)
+        if: ${{ startsWith(matrix.rid, 'win-') }}
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $launcherPath = Join-Path $env:RUNNER_TEMP "devprojex.cmd"
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-help-stdout.txt"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-help-stderr.txt"
+          $dllPath = [System.IO.Path]::ChangeExtension([string]$exePath, ".dll")
+
+          @(
+            "@echo off",
+            "rem DevProjex terminal command wrapper",
+            "rem target: $exePath",
+            "set `"DEVPROJEX_EXE=$exePath`"",
+            "set `"DEVPROJEX_DLL=$dllPath`"",
+            "if `"%~1`"==`"`" (",
+            "  start `"`" `"%DEVPROJEX_EXE%`"",
+            "  exit /b 0",
+            ")",
+            "if exist `"%DEVPROJEX_DLL%`" (",
+            "  dotnet `"%DEVPROJEX_DLL%`" %*",
+            "  exit /b",
+            ")",
+            "start /wait `"`" `"%DEVPROJEX_EXE%`" %*",
+            "exit /b"
+          ) | Set-Content -LiteralPath $launcherPath -Encoding ASCII
+
+          Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+          $cmdArguments = @("/d", "/c", "`"$launcherPath`"", "--help")
           $process = Start-Process `
-            -FilePath $exePath `
-            -ArgumentList "--help" `
+            -FilePath "cmd.exe" `
+            -ArgumentList $cmdArguments `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath `
             -NoNewWindow `
@@ -162,11 +209,11 @@ jobs:
           $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
 
           if ($process.ExitCode -ne 0) {
-            throw "Published --help smoke failed. ExitCode=$($process.ExitCode). StdErr=$stderr"
+            throw "Portable launcher smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
           }
 
           if ($stdout -notmatch "Usage:") {
-            throw "Published --help smoke did not print usage text. StdOut=$stdout StdErr=$stderr"
+            throw "Portable launcher smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
           }
 
-          Write-Host "Command-line smoke passed."
+          Write-Host "Portable launcher smoke passed for ${{ matrix.rid }}."

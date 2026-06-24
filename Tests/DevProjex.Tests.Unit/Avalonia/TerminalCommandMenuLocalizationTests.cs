@@ -11,7 +11,7 @@ public sealed class TerminalCommandMenuLocalizationTests
 			{
 				["Menu.Help"] = "Help",
 				["Menu.Help.Help"] = "Help",
-				["Menu.Help.TerminalCommand"] = "Terminal command",
+				["Menu.Help.TerminalCommand"] = "Launch from terminal",
 				["Menu.Help.About"] = "About",
 				["Menu.Help.ResetSettings"] = "Reset settings",
 				["Menu.Help.ResetData"] = "Reset data"
@@ -22,6 +22,6 @@ public sealed class TerminalCommandMenuLocalizationTests
 
 		viewModel.UpdateLocalization();
 
-		Assert.Equal("Terminal command", viewModel.MenuHelpTerminalCommand);
+		Assert.Equal("Launch from terminal", viewModel.MenuHelpTerminalCommand);
 	}
 }

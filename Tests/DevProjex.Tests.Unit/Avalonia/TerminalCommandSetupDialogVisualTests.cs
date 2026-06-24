@@ -63,8 +63,9 @@ public sealed class TerminalCommandSetupDialogVisualTests
 		Assert.Equal(180, automatic.Height);
 		Assert.True(automatic.Width < manual.Width);
 		Assert.True(automatic.Height < manual.Height);
-		Assert.Equal(automatic.Width, compactManual.Width);
-		Assert.Equal(automatic.Height, compactManual.Height);
+		Assert.True(compactManual.Width < manual.Width);
+		Assert.True(compactManual.Height < manual.Height);
+		Assert.True(compactManual.Height > automatic.Height);
 	}
 
 	[AvaloniaFact]

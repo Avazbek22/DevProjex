@@ -303,10 +303,15 @@ internal sealed record TerminalCommandDialogDimensions(
 {
 	public static TerminalCommandDialogDimensions ForContent(
 		bool isAutomaticPrompt,
-		TerminalCommandDialogText content) =>
-		isAutomaticPrompt || IsCompactManualContent(content)
-			? new TerminalCommandDialogDimensions(480, 180, 420, 170)
+		TerminalCommandDialogText content)
+	{
+		if (isAutomaticPrompt)
+			return new TerminalCommandDialogDimensions(480, 180, 420, 170);
+
+		return IsCompactManualContent(content)
+			? new TerminalCommandDialogDimensions(500, 220, 420, 190)
 			: new TerminalCommandDialogDimensions(560, 320, 480, 280);
+	}
 
 	private static bool IsCompactManualContent(TerminalCommandDialogText content) =>
 		!content.ShowInstallButton &&
@@ -361,8 +366,7 @@ internal static class TerminalCommandSetupDialogText
 
 		return snapshot.State is
 			TerminalCommandSetupState.ManagedByOperatingSystem or
-			TerminalCommandSetupState.UnsupportedOnCurrentPackage or
-			TerminalCommandSetupState.Installed;
+			TerminalCommandSetupState.UnsupportedOnCurrentPackage;
 	}
 
 	private static string GetCommandToCopy(TerminalCommandSetupSnapshot snapshot)

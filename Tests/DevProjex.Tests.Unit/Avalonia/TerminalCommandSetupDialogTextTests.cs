@@ -45,8 +45,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 		Assert.Equal(canInstall || canRepair, text.ShowInstallButton);
 		var expectedCopyButton = state is
 			TerminalCommandSetupState.ManagedByOperatingSystem or
-			TerminalCommandSetupState.UnsupportedOnCurrentPackage or
-			TerminalCommandSetupState.Installed;
+			TerminalCommandSetupState.UnsupportedOnCurrentPackage;
 		Assert.Equal(expectedCopyButton, text.ShowCopyButton);
 		if (state == TerminalCommandSetupState.UnsupportedOnCurrentPackage)
 		{
@@ -165,8 +164,10 @@ public sealed class TerminalCommandSetupDialogTextTests
 
 		Assert.Empty(text.Details);
 		Assert.Empty(text.CommandLine);
-		Assert.True(text.ShowCopyButton);
+		Assert.False(text.ShowCopyButton);
 		Assert.Equal("devprojex", text.CommandToCopy);
+		Assert.Contains("devprojex", combined, StringComparison.Ordinal);
+		Assert.Contains("devprojex --help", combined, StringComparison.Ordinal);
 		Assert.DoesNotContain("C:\\Users\\me", combined, StringComparison.Ordinal);
 		Assert.DoesNotContain("Команда для проверки", combined, StringComparison.Ordinal);
 		Assert.DoesNotContain("Файл приложения", combined, StringComparison.Ordinal);
