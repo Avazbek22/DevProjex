@@ -5,18 +5,25 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class CommandLineProcessSmokeIntegrationTests
 {
-	[Fact]
-	public async Task Process_HelpPrintsHelpAndExitsZero()
+	[Theory]
+	[InlineData(CommandLineOptionTokens.Help)]
+	[InlineData(CommandLineOptionTokens.ShortHelp)]
+	[InlineData(CommandLineOptionTokens.WindowsHelp)]
+	public async Task Process_HelpAliasesPrintHelpAndExitZero(string helpToken)
 	{
-		var result = await RunAppAsync(CommandLineOptionTokens.Help);
+		var result = await RunAppAsync(helpToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Contains("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(helpToken, result.Stdout, StringComparison.Ordinal);
 		Assert.Equal(string.Empty, result.Stderr);
 	}
 
-	[Fact]
-	public async Task WindowsPortableLauncher_HelpPrintsHelpToCurrentConsole()
+	[Theory]
+	[InlineData(CommandLineOptionTokens.Help)]
+	[InlineData(CommandLineOptionTokens.ShortHelp)]
+	[InlineData(CommandLineOptionTokens.WindowsHelp)]
+	public async Task WindowsPortableLauncher_HelpAliasesPrintHelpToCurrentConsole(string helpToken)
 	{
 		if (!OperatingSystem.IsWindows())
 			return;
@@ -30,11 +37,11 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			TerminalCommandSetupService.BuildWindowsLauncherContent(appExecutablePath),
 			TestContext.Current.CancellationToken);
 
-		var result = await RunWindowsCommandAsync(launcherPath, CommandLineOptionTokens.Help);
+		var result = await RunWindowsCommandAsync(launcherPath, helpToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Contains("Usage:", result.Stdout, StringComparison.Ordinal);
-		Assert.Contains(CommandLineOptionTokens.Help, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(helpToken, result.Stdout, StringComparison.Ordinal);
 		Assert.Equal(string.Empty, result.Stderr);
 	}
 

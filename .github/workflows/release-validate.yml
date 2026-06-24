@@ -131,40 +131,153 @@ jobs:
         shell: pwsh
         run: |
           $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
-          $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-help-stdout.txt"
-          $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-help-stderr.txt"
+          $helpArguments = @("--help", "-h", "/?")
 
-          Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
-
-          if ($env:RUNNER_OS -eq "Windows") {
-            $process = Start-Process `
-              -FilePath $exePath `
-              -ArgumentList "--help" `
-              -RedirectStandardOutput $stdoutPath `
-              -RedirectStandardError $stderrPath `
-              -NoNewWindow `
-              -Wait `
-              -PassThru
-            $exitCode = $process.ExitCode
-          }
-          else {
+          if ($env:RUNNER_OS -ne "Windows") {
             chmod +x $exePath
-            & $exePath --help > $stdoutPath 2> $stderrPath
-            $exitCode = $LASTEXITCODE
           }
 
-          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
-          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+          foreach ($helpArgument in $helpArguments) {
+            $safeName = $helpArgument -replace "[^A-Za-z0-9]+", "_"
+            $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-help-$safeName-stdout.txt"
+            $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-help-$safeName-stderr.txt"
 
-          if ($exitCode -ne 0) {
-            throw "Published --help smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$stderr"
-          }
+            Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
 
-          if ($stdout -notmatch "Usage:") {
-            throw "Published --help smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
+            if ($env:RUNNER_OS -eq "Windows") {
+              $process = Start-Process `
+                -FilePath $exePath `
+                -ArgumentList @($helpArgument) `
+                -RedirectStandardOutput $stdoutPath `
+                -RedirectStandardError $stderrPath `
+                -NoNewWindow `
+                -Wait `
+                -PassThru
+              $exitCode = $process.ExitCode
+            }
+            else {
+              & $exePath $helpArgument > $stdoutPath 2> $stderrPath
+              $exitCode = $LASTEXITCODE
+            }
+
+            $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+            $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+            if ($exitCode -ne 0) {
+              throw "Published $helpArgument smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$stderr"
+            }
+
+            if ($stdout -notmatch "Usage:") {
+              throw "Published $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
+            }
           }
 
           Write-Host "Command-line smoke passed for ${{ matrix.rid }}."
+
+      - name: PATH Wrapper Smoke (Unix)
+        if: ${{ startsWith(matrix.rid, 'win-') == false }}
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          chmod +x $exePath
+
+          $binDirectory = Join-Path $env:RUNNER_TEMP "devprojex-path-bin-${{ matrix.rid }}"
+          $workDirectory = Join-Path $env:RUNNER_TEMP "devprojex-path-work-${{ matrix.rid }}"
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-path-project-${{ matrix.rid }}"
+          $sourceDirectory = Join-Path $projectDirectory "src"
+          New-Item -ItemType Directory -Force -Path $binDirectory, $workDirectory, $sourceDirectory | Out-Null
+
+          $wrapperPath = Join-Path $binDirectory "devprojex"
+
+          function ConvertTo-PosixSingleQuoted {
+            param([Parameter(Mandatory = $true)][string] $Value)
+            # POSIX sh escapes a single quote by closing the quoted string, emitting "'", and reopening it.
+            $escapedSingleQuote = '''"''"'''
+            return "'" + $Value.Replace("'", $escapedSingleQuote) + "'"
+          }
+
+          @(
+            "#!/bin/sh",
+            "# DevProjex terminal command wrapper",
+            "# target: $exePath",
+            ("exec " + (ConvertTo-PosixSingleQuoted $exePath) + " " + '"$@"')
+          ) | Set-Content -LiteralPath $wrapperPath -Encoding utf8NoBOM
+          chmod +x $wrapperPath
+
+          "class App {}" | Set-Content -LiteralPath (Join-Path $sourceDirectory "App.cs") -Encoding utf8NoBOM
+
+          function Invoke-DevProjexPathCommand {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string] $Name,
+              [Parameter(Mandatory = $true)]
+              [string[]] $Arguments
+            )
+
+            $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-path-$Name-stdout.txt"
+            $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-path-$Name-stderr.txt"
+            Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+
+            Push-Location $workDirectory
+            try {
+              & devprojex @Arguments > $stdoutPath 2> $stderrPath
+              $exitCode = $LASTEXITCODE
+            }
+            finally {
+              Pop-Location
+            }
+
+            $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+            $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+            if ($exitCode -ne 0) {
+              throw "PATH wrapper command '$Name' failed for ${{ matrix.rid }}. ExitCode=$exitCode. Args=$($Arguments -join ' '). StdErr=$stderr"
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+              throw "PATH wrapper command '$Name' wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
+            }
+
+            return $stdout
+          }
+
+          $previousPath = $env:PATH
+          $env:PATH = "$binDirectory$([IO.Path]::PathSeparator)$previousPath"
+          try {
+            $resolvedCommand = (Get-Command "devprojex" -CommandType Application).Source
+            if ((Resolve-Path $resolvedCommand).Path -ne (Resolve-Path $wrapperPath).Path) {
+              throw "PATH did not resolve devprojex to the generated wrapper. Resolved=$resolvedCommand Expected=$wrapperPath"
+            }
+
+            foreach ($helpArgument in @("--help", "-h", "/?")) {
+              $stdout = Invoke-DevProjexPathCommand -Name "help-$($helpArgument -replace '[^A-Za-z0-9]+', '_')" -Arguments @($helpArgument)
+              if ($stdout -notmatch "Usage:") {
+                throw "PATH wrapper $helpArgument did not print usage text for ${{ matrix.rid }}. StdOut=$stdout"
+              }
+            }
+
+            $versionOutput = Invoke-DevProjexPathCommand -Name "version" -Arguments @("--version")
+            if ([string]::IsNullOrWhiteSpace($versionOutput)) {
+              throw "PATH wrapper --version printed no version for ${{ matrix.rid }}."
+            }
+
+            $reportOutput = Invoke-DevProjexPathCommand -Name "silent-report-stdout" -Arguments @(
+              "--silent",
+              "--path", $projectDirectory,
+              "--report", "-",
+              "--include-root", "src",
+              "--include-extension", "cs",
+              "--ignore", "none")
+
+            if ($reportOutput -notmatch '"schemaVersion"' -or $reportOutput -notmatch '"rootPath"') {
+              throw "PATH wrapper headless report did not print the expected JSON contract for ${{ matrix.rid }}. StdOut=$reportOutput"
+            }
+          }
+          finally {
+            $env:PATH = $previousPath
+          }
+
+          Write-Host "PATH wrapper smoke passed for ${{ matrix.rid }}."
 
       - name: Portable Launcher Smoke (Windows)
         if: ${{ startsWith(matrix.rid, 'win-') }}
@@ -194,26 +307,28 @@ jobs:
             "exit /b"
           ) | Set-Content -LiteralPath $launcherPath -Encoding ASCII
 
-          Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
-          $cmdArguments = @("/d", "/c", "`"$launcherPath`"", "--help")
-          $process = Start-Process `
-            -FilePath "cmd.exe" `
-            -ArgumentList $cmdArguments `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath `
-            -NoNewWindow `
-            -Wait `
-            -PassThru
+          foreach ($helpArgument in @("--help", "-h", "/?")) {
+            Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+            $cmdArguments = @("/d", "/c", "`"$launcherPath`"", $helpArgument)
+            $process = Start-Process `
+              -FilePath "cmd.exe" `
+              -ArgumentList $cmdArguments `
+              -RedirectStandardOutput $stdoutPath `
+              -RedirectStandardError $stderrPath `
+              -NoNewWindow `
+              -Wait `
+              -PassThru
 
-          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
-          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+            $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+            $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
 
-          if ($process.ExitCode -ne 0) {
-            throw "Portable launcher smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
-          }
+            if ($process.ExitCode -ne 0) {
+              throw "Portable launcher $helpArgument smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
+            }
 
-          if ($stdout -notmatch "Usage:") {
-            throw "Portable launcher smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
+            if ($stdout -notmatch "Usage:") {
+              throw "Portable launcher $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
+            }
           }
 
           Write-Host "Portable launcher smoke passed for ${{ matrix.rid }}."
