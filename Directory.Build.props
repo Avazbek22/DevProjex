@@ -10,6 +10,8 @@
     <AssemblyVersion>$(DevProjexAssemblyVersion)</AssemblyVersion>
     <FileVersion>$(DevProjexFileVersion)</FileVersion>
     <InformationalVersion>$(DevProjexInformationalVersion)</InformationalVersion>
+    <!-- Keep user-facing version output stable; CI/build commit hashes belong in artifacts, not terminal output. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <TestTfmsInParallel>false</TestTfmsInParallel>
   </PropertyGroup>

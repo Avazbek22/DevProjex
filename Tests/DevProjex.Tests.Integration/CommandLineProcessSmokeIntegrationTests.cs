@@ -90,7 +90,8 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.False(string.IsNullOrWhiteSpace(result.Stdout));
 		Assert.Equal(string.Empty, result.Stderr);
-		Assert.Single(result.Stdout.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+		var version = Assert.Single(result.Stdout.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+		Assert.DoesNotContain("+", version, StringComparison.Ordinal);
 	}
 
 	[Fact]
