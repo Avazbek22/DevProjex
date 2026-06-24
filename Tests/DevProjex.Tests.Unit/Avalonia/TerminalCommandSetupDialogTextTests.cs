@@ -37,7 +37,10 @@ public sealed class TerminalCommandSetupDialogTextTests
 
 		Assert.False(string.IsNullOrWhiteSpace(text.Title));
 		Assert.False(string.IsNullOrWhiteSpace(text.Body));
-		Assert.False(string.IsNullOrWhiteSpace(text.Details));
+		if (state == TerminalCommandSetupState.Installed)
+			Assert.Empty(text.Details);
+		else
+			Assert.False(string.IsNullOrWhiteSpace(text.Details));
 		Assert.False(text.Body.StartsWith("Dialog.", StringComparison.Ordinal));
 		Assert.Equal(canInstall || canRepair, text.ShowInstallButton);
 		var expectedCopyButton = state is
@@ -49,6 +52,11 @@ public sealed class TerminalCommandSetupDialogTextTests
 		{
 			Assert.Equal("/opt/DevProjex", text.CommandToCopy);
 			Assert.Contains("/opt/DevProjex --help", text.CommandLine, StringComparison.Ordinal);
+		}
+		else if (state == TerminalCommandSetupState.Installed)
+		{
+			Assert.Equal("devprojex", text.CommandToCopy);
+			Assert.Empty(text.CommandLine);
 		}
 		else
 		{
@@ -136,6 +144,36 @@ public sealed class TerminalCommandSetupDialogTextTests
 	}
 
 	[Fact]
+	public void Create_InstalledState_HidesTechnicalLauncherPaths()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var executablePath = @"C:\Users\me\DevProjex\DevProjex.exe";
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.Installed,
+			CommandPath: @"C:\Users\me\AppData\Local\DevProjex\bin\devprojex.cmd",
+			TargetExecutablePath: executablePath,
+			InstalledTargetExecutablePath: executablePath,
+			UserBinDirectory: @"C:\Users\me\AppData\Local\DevProjex\bin",
+			UserBinDirectoryIsInPath: true,
+			CanInstall: false,
+			CanRepair: false,
+			ShellProfileHint: null);
+
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot);
+		var combined = string.Join(Environment.NewLine, text.Body, text.Details, text.CommandLine);
+
+		Assert.Empty(text.Details);
+		Assert.Empty(text.CommandLine);
+		Assert.True(text.ShowCopyButton);
+		Assert.Equal("devprojex", text.CommandToCopy);
+		Assert.DoesNotContain("C:\\Users\\me", combined, StringComparison.Ordinal);
+		Assert.DoesNotContain("Команда для проверки", combined, StringComparison.Ordinal);
+		Assert.DoesNotContain("Файл приложения", combined, StringComparison.Ordinal);
+		Assert.DoesNotContain("Сейчас указывает", combined, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void Create_AutomaticPrompt_UsesShortUserFacingQuestionWithoutTechnicalDetails()
 	{
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
@@ -166,6 +204,31 @@ public sealed class TerminalCommandSetupDialogTextTests
 		Assert.DoesNotContain("Файл приложения", combined, StringComparison.Ordinal);
 		Assert.DoesNotContain("C:\\Users\\me", combined, StringComparison.Ordinal);
 		Assert.DoesNotContain("Состояние:", combined, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Create_AutomaticRepairPrompt_UsesStaleRepairBodyInsteadOfInstallQuestion()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.Stale,
+			CommandPath: @"C:\Users\me\AppData\Local\DevProjex\bin\devprojex.cmd",
+			TargetExecutablePath: @"C:\Users\me\DevProjex\DevProjex.exe",
+			InstalledTargetExecutablePath: @"C:\Old\DevProjex.exe",
+			UserBinDirectory: @"C:\Users\me\AppData\Local\DevProjex\bin",
+			UserBinDirectoryIsInPath: true,
+			CanInstall: false,
+			CanRepair: true,
+			ShellProfileHint: null);
+
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot, isAutomaticPrompt: true);
+
+		Assert.Contains("нужно обновить", text.Body, StringComparison.Ordinal);
+		Assert.DoesNotContain("Сделать команду", text.Body, StringComparison.Ordinal);
+		Assert.Equal("Исправить", text.InstallButtonText);
+		Assert.False(text.ShowCopyButton);
+		Assert.Empty(text.CommandLine);
 	}
 
 	[Fact]

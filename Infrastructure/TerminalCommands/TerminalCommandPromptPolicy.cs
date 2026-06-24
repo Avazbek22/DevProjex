@@ -7,6 +7,9 @@ public static class TerminalCommandPromptPolicy
 	public static bool IsDismissibleAutomaticPrompt(TerminalCommandSetupSnapshot snapshot) =>
 		snapshot.State is TerminalCommandSetupState.NotInstalled;
 
+	public static bool ShouldRepairAutomatically(TerminalCommandSetupSnapshot snapshot) =>
+		snapshot.State == TerminalCommandSetupState.Stale && snapshot.CanRepair;
+
 	public static bool ShouldOfferAutomaticPrompt(
 		AppViewSettings settings,
 		TerminalCommandSetupSnapshot snapshot,
@@ -17,7 +20,6 @@ public static class TerminalCommandPromptPolicy
 
 		return snapshot.State switch
 		{
-			TerminalCommandSetupState.Stale => snapshot.CanRepair,
 			TerminalCommandSetupState.NotInstalled => snapshot.CanInstall && !settings.IsTerminalCommandPromptDismissed,
 			_ => false
 		};

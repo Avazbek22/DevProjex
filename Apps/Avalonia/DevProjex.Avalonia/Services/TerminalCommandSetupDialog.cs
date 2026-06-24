@@ -28,7 +28,7 @@ internal static class TerminalCommandSetupDialog
 		var brushes = ResolveDialogBrushes(owner, themeVariant);
 		var content = TerminalCommandSetupDialogText.Create(localization, snapshot, isAutomaticPrompt);
 		var completion = new TaskCompletionSource<TerminalCommandDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-		var dimensions = TerminalCommandDialogDimensions.ForPromptMode(isAutomaticPrompt);
+		var dimensions = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt, content);
 
 		var dontShowAgain = new CheckBox
 		{
@@ -301,10 +301,17 @@ internal sealed record TerminalCommandDialogDimensions(
 	double MinWidth,
 	double MinHeight)
 {
-	public static TerminalCommandDialogDimensions ForPromptMode(bool isAutomaticPrompt) =>
-		isAutomaticPrompt
+	public static TerminalCommandDialogDimensions ForContent(
+		bool isAutomaticPrompt,
+		TerminalCommandDialogText content) =>
+		isAutomaticPrompt || IsCompactManualContent(content)
 			? new TerminalCommandDialogDimensions(480, 180, 420, 170)
 			: new TerminalCommandDialogDimensions(560, 320, 480, 280);
+
+	private static bool IsCompactManualContent(TerminalCommandDialogText content) =>
+		!content.ShowInstallButton &&
+		string.IsNullOrWhiteSpace(content.Details) &&
+		string.IsNullOrWhiteSpace(content.CommandLine);
 }
 
 internal sealed record TerminalCommandDialogText(
@@ -328,7 +335,7 @@ internal static class TerminalCommandSetupDialogText
 		var body = GetBody(localization, snapshot, isAutomaticPrompt);
 		var details = isAutomaticPrompt ? string.Empty : GetDetails(localization, snapshot);
 		var commandToCopy = GetCommandToCopy(snapshot);
-		var commandLine = isAutomaticPrompt
+		var commandLine = isAutomaticPrompt || ShouldHideCommandLine(snapshot)
 			? string.Empty
 			: localization.Format("Dialog.TerminalCommand.CommandLine", commandToCopy);
 		var showCopyButton = !isAutomaticPrompt && ShouldShowCopyButton(snapshot, commandToCopy);
@@ -380,7 +387,9 @@ internal static class TerminalCommandSetupDialogText
 		TerminalCommandSetupSnapshot snapshot,
 		bool isAutomaticPrompt)
 	{
-		if (isAutomaticPrompt && snapshot.IsActionable)
+		if (isAutomaticPrompt &&
+		    snapshot.State == TerminalCommandSetupState.NotInstalled &&
+		    snapshot.IsActionable)
 			return localization["Dialog.TerminalCommand.AutomaticPrompt.Body"];
 
 		return snapshot.State switch
@@ -409,6 +418,9 @@ internal static class TerminalCommandSetupDialogText
 
 	private static string GetDetails(LocalizationService localization, TerminalCommandSetupSnapshot snapshot)
 	{
+		if (snapshot.State == TerminalCommandSetupState.Installed)
+			return string.Empty;
+
 		var lines = new List<string>();
 
 		if (snapshot.State != TerminalCommandSetupState.UnsupportedOnCurrentPackage)
@@ -425,5 +437,8 @@ internal static class TerminalCommandSetupDialogText
 
 		return string.Join(Environment.NewLine, lines);
 	}
+
+	private static bool ShouldHideCommandLine(TerminalCommandSetupSnapshot snapshot) =>
+		snapshot.State == TerminalCommandSetupState.Installed;
 
 }

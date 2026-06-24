@@ -40,6 +40,13 @@ public partial class MainWindow : Window
         ShowError
     }
 
+    internal enum AutomaticTerminalCommandStartupAction
+    {
+        None,
+        ShowPrompt,
+        RepairSilently
+    }
+
     private enum ZoomSurfaceTarget
     {
         None = 0,
@@ -6819,13 +6826,19 @@ public partial class MainWindow : Window
         {
             await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
             var snapshot = _terminalCommandSetupService.Probe();
-            if (!ShouldShowAutomaticTerminalCommandPrompt(
-                    _userSettingsDb.ViewSettings,
-                    snapshot,
-                    !string.IsNullOrWhiteSpace(_startupOptions.Path)))
-                return;
+            var action = ResolveAutomaticTerminalCommandStartupAction(
+                _userSettingsDb.ViewSettings,
+                snapshot,
+                !string.IsNullOrWhiteSpace(_startupOptions.Path));
 
-            await ShowTerminalCommandSetupAsync(snapshot, isAutomaticPrompt: true);
+            if (action == AutomaticTerminalCommandStartupAction.RepairSilently)
+            {
+                _ = _terminalCommandSetupService.InstallOrRepair();
+                return;
+            }
+
+            if (action == AutomaticTerminalCommandStartupAction.ShowPrompt)
+                await ShowTerminalCommandSetupAsync(snapshot, isAutomaticPrompt: true);
         }
         catch
         {
@@ -6837,8 +6850,24 @@ public partial class MainWindow : Window
         AppViewSettings settings,
         TerminalCommandSetupSnapshot snapshot,
         bool startedWithProjectPath) =>
-        LooksLikePublishedDevProjexExecutable(snapshot.TargetExecutablePath) &&
-        TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, snapshot, startedWithProjectPath);
+        ResolveAutomaticTerminalCommandStartupAction(settings, snapshot, startedWithProjectPath) ==
+        AutomaticTerminalCommandStartupAction.ShowPrompt;
+
+    internal static AutomaticTerminalCommandStartupAction ResolveAutomaticTerminalCommandStartupAction(
+        AppViewSettings settings,
+        TerminalCommandSetupSnapshot snapshot,
+        bool startedWithProjectPath)
+    {
+        if (!LooksLikePublishedDevProjexExecutable(snapshot.TargetExecutablePath))
+            return AutomaticTerminalCommandStartupAction.None;
+
+        if (TerminalCommandPromptPolicy.ShouldRepairAutomatically(snapshot))
+            return AutomaticTerminalCommandStartupAction.RepairSilently;
+
+        return TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, snapshot, startedWithProjectPath)
+            ? AutomaticTerminalCommandStartupAction.ShowPrompt
+            : AutomaticTerminalCommandStartupAction.None;
+    }
 
     private static bool LooksLikePublishedDevProjexExecutable(string? executablePath)
     {

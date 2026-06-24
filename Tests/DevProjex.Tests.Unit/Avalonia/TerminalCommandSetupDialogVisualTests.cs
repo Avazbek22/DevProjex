@@ -38,15 +38,33 @@ public sealed class TerminalCommandSetupDialogVisualTests
 	}
 
 	[Fact]
-	public void DialogDimensions_UsesCompactSizeForAutomaticPromptOnly()
+	public void DialogDimensions_UsesCompactSizeForAutomaticPromptAndInstalledManualContent()
 	{
-		var automatic = TerminalCommandDialogDimensions.ForPromptMode(isAutomaticPrompt: true);
-		var manual = TerminalCommandDialogDimensions.ForPromptMode(isAutomaticPrompt: false);
+		var detailedManualContent = new TerminalCommandDialogText(
+			"Title",
+			"Body",
+			"Details",
+			"devprojex --help",
+			"devprojex",
+			ShowCopyButton: false,
+			InstallButtonText: "Enable",
+			ShowInstallButton: true);
+		var compactManualContent = detailedManualContent with
+		{
+			Details = string.Empty,
+			CommandLine = string.Empty,
+			ShowInstallButton = false
+		};
+		var automatic = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: true, detailedManualContent);
+		var manual = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, detailedManualContent);
+		var compactManual = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, compactManualContent);
 
 		Assert.Equal(480, automatic.Width);
 		Assert.Equal(180, automatic.Height);
 		Assert.True(automatic.Width < manual.Width);
 		Assert.True(automatic.Height < manual.Height);
+		Assert.Equal(automatic.Width, compactManual.Width);
+		Assert.Equal(automatic.Height, compactManual.Height);
 	}
 
 	[AvaloniaFact]

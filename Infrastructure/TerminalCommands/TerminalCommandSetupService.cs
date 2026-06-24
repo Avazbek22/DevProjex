@@ -184,13 +184,42 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	internal static string BuildWindowsLauncherContent(string targetPath)
 	{
 		var escapedTargetPath = EscapeWindowsBatchValue(targetPath);
+		var escapedManagedAssemblyPath = EscapeWindowsBatchValue(BuildWindowsManagedAssemblyPath(targetPath));
 		return string.Join(
 			"\r\n",
 			"@echo off",
 			WindowsLauncherMarker,
 			WindowsTargetPrefix + targetPath,
-			"\"" + escapedTargetPath + "\" %*",
+			"set \"DEVPROJEX_EXE=" + escapedTargetPath + "\"",
+			"set \"DEVPROJEX_DLL=" + escapedManagedAssemblyPath + "\"",
+			"if \"%~1\"==\"\" (",
+			"  start \"\" \"%DEVPROJEX_EXE%\"",
+			"  exit /b 0",
+			")",
+			"if exist \"%DEVPROJEX_DLL%\" (",
+			"  dotnet \"%DEVPROJEX_DLL%\" %*",
+			"  exit /b",
+			")",
+			"start /wait \"\" \"%DEVPROJEX_EXE%\" %*",
+			"exit /b",
 			string.Empty);
+	}
+
+	internal static string BuildWindowsManagedAssemblyPath(string executablePath)
+	{
+		var separatorIndex = Math.Max(
+			executablePath.LastIndexOf('\\'),
+			executablePath.LastIndexOf('/'));
+		var directory = separatorIndex >= 0 ? executablePath[..separatorIndex] : string.Empty;
+		var separator = separatorIndex >= 0 ? executablePath[separatorIndex] : Path.DirectorySeparatorChar;
+		var fileName = separatorIndex >= 0 ? executablePath[(separatorIndex + 1)..] : executablePath;
+		var extensionIndex = fileName.LastIndexOf('.');
+		var fileStem = extensionIndex > 0 ? fileName[..extensionIndex] : fileName;
+		var managedAssemblyName = fileStem + ".dll";
+
+		return string.IsNullOrEmpty(directory)
+			? managedAssemblyName
+			: directory + separator + managedAssemblyName;
 	}
 
 	internal static string ShellQuote(string value) => "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
@@ -287,7 +316,11 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				canRepair: false);
 		}
 
-		if (AreSamePath(installedTargetPath, targetPath) && File.Exists(installedTargetPath) && isUserBinInPath)
+		var isCurrentLauncher = IsCurrentWindowsLauncher(commandPath);
+		if (AreSamePath(installedTargetPath, targetPath) &&
+		    File.Exists(installedTargetPath) &&
+		    isUserBinInPath &&
+		    isCurrentLauncher)
 		{
 			return WindowsPortableSnapshot(
 				TerminalCommandSetupState.Installed,
@@ -309,6 +342,24 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			isUserBinInPath,
 			canInstall: false,
 			canRepair: true);
+	}
+
+	private static bool IsCurrentWindowsLauncher(string commandPath)
+	{
+		try
+		{
+			var content = File.ReadAllText(commandPath);
+			return content.Contains("set \"DEVPROJEX_DLL=", StringComparison.OrdinalIgnoreCase) &&
+			       content.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", StringComparison.OrdinalIgnoreCase);
+		}
+		catch (IOException)
+		{
+			return false;
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return false;
+		}
 	}
 
 	private TerminalCommandSetupSnapshot ProbeUnixLike()

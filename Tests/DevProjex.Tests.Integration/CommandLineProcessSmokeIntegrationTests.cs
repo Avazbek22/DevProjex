@@ -1,4 +1,5 @@
 using DevProjex.Avalonia;
+using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Tests.Integration;
 
@@ -11,6 +12,46 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Contains("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.Equal(string.Empty, result.Stderr);
+	}
+
+	[Fact]
+	public async Task WindowsPortableLauncher_HelpPrintsHelpToCurrentConsole()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var appAssemblyPath = typeof(App).Assembly.Location;
+		var launcherPath = Path.Combine(temp.Path, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		var appExecutablePath = Path.ChangeExtension(appAssemblyPath, ".exe");
+		await File.WriteAllTextAsync(
+			launcherPath,
+			TerminalCommandSetupService.BuildWindowsLauncherContent(appExecutablePath),
+			TestContext.Current.CancellationToken);
+
+		var result = await RunWindowsCommandAsync(launcherPath, CommandLineOptionTokens.Help);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Contains("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.Help, result.Stdout, StringComparison.Ordinal);
+		Assert.Equal(string.Empty, result.Stderr);
+	}
+
+	[Fact]
+	public async Task WindowsExecutable_HelpPrintsHelpToRedirectedStdout()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		var appExecutablePath = Path.ChangeExtension(typeof(App).Assembly.Location, ".exe");
+		Assert.True(File.Exists(appExecutablePath), $"Expected Windows apphost executable at {appExecutablePath}.");
+
+		var result = await RunExecutableAsync(appExecutablePath, CommandLineOptionTokens.Help);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Contains("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.Help, result.Stdout, StringComparison.Ordinal);
 		Assert.Equal(string.Empty, result.Stderr);
 	}
 
@@ -353,6 +394,48 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		foreach (var arg in args)
 			startInfo.ArgumentList.Add(arg);
 
+		return await RunProcessAsync(startInfo);
+	}
+
+	private static async Task<CommandLineProcessResult> RunWindowsCommandAsync(string commandPath, params string[] args)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = "cmd.exe",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		startInfo.ArgumentList.Add("/d");
+		startInfo.ArgumentList.Add("/c");
+		startInfo.ArgumentList.Add(commandPath);
+		foreach (var arg in args)
+			startInfo.ArgumentList.Add(arg);
+
+		return await RunProcessAsync(startInfo);
+	}
+
+	private static async Task<CommandLineProcessResult> RunExecutableAsync(string executablePath, params string[] args)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = executablePath,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		foreach (var arg in args)
+			startInfo.ArgumentList.Add(arg);
+
+		return await RunProcessAsync(startInfo);
+	}
+
+	private static async Task<CommandLineProcessResult> RunProcessAsync(ProcessStartInfo startInfo)
+	{
 		using var process = Process.Start(startInfo)
 			?? throw new InvalidOperationException("Failed to start DevProjex command-line smoke process.");
 		var stdoutTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);

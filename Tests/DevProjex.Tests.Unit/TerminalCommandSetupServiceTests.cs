@@ -97,7 +97,10 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
 		Assert.Contains("rem DevProjex terminal command wrapper", launcher, StringComparison.Ordinal);
 		Assert.Contains("rem target: " + target, launcher, StringComparison.Ordinal);
-		Assert.Contains("\"" + target + "\" %*", launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_EXE=" + target + "\"", launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_DLL=" + Path.ChangeExtension(target, ".dll") + "\"", launcher, StringComparison.Ordinal);
+		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", launcher, StringComparison.Ordinal);
+		Assert.Contains("start /wait \"\" \"%DEVPROJEX_EXE%\" %*", launcher, StringComparison.Ordinal);
 		Assert.Contains(Path.GetDirectoryName(commandPath)!, userPath, StringComparison.OrdinalIgnoreCase);
 	}
 
@@ -109,7 +112,21 @@ public sealed class TerminalCommandSetupServiceTests
 		var launcher = TerminalCommandSetupService.BuildWindowsLauncherContent(target);
 
 		Assert.Contains("rem target: " + target, launcher, StringComparison.Ordinal);
-		Assert.Contains("\"C:\\Users\\me\\100%% portable\\DevProjex.exe\" %*", launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_EXE=C:\\Users\\me\\100%% portable\\DevProjex.exe\"", launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_DLL=C:\\Users\\me\\100%% portable\\DevProjex.dll\"", launcher, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(@"C:\Tools\DevProjex\DevProjex.exe", @"C:\Tools\DevProjex\DevProjex.dll")]
+	[InlineData(@"C:/Tools/DevProjex/DevProjex.exe", @"C:/Tools/DevProjex/DevProjex.dll")]
+	[InlineData("DevProjex.exe", "DevProjex.dll")]
+	public void BuildWindowsManagedAssemblyPath_HandlesWindowsPathsOnAnyRunner(
+		string executablePath,
+		string expectedAssemblyPath)
+	{
+		var assemblyPath = TerminalCommandSetupService.BuildWindowsManagedAssemblyPath(executablePath);
+
+		Assert.Equal(expectedAssemblyPath, assemblyPath);
 	}
 
 	[Fact]
@@ -178,6 +195,37 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.True(snapshot.UserBinDirectoryIsInPath);
 		Assert.True(install.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.AlreadyInstalled, install.Outcome);
+	}
+
+	[Fact]
+	public void Probe_WindowsPortableBuild_LegacyLauncherWithoutConsoleRoute_ReturnsRepairableStale()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		File.WriteAllText(
+			commandPath,
+			string.Join(
+				"\r\n",
+				"@echo off",
+				"rem DevProjex terminal command wrapper",
+				"rem target: " + target,
+				"\"" + target + "\" %*",
+				string.Empty));
+		var userPath = userBin;
+		var service = CreateWindowsPortableService(temp.Path, processPath: string.Empty, () => userPath, _ => throw new InvalidOperationException(), target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+		var repairedLauncher = File.ReadAllText(commandPath);
+
+		Assert.Equal(TerminalCommandSetupState.Stale, snapshot.State);
+		Assert.True(snapshot.CanRepair);
+		Assert.False(snapshot.IsReady);
+		Assert.True(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Repaired, install.Outcome);
+		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", repairedLauncher, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -804,7 +852,7 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
-	public void PromptPolicy_DismissedNotInstalledPromptIsSuppressedButStaleRepairStillShows()
+	public void PromptPolicy_DismissedNotInstalledPromptIsSuppressedAndStaleRepairIsAutomatic()
 	{
 		var settings = new AppViewSettings { IsTerminalCommandPromptDismissed = true };
 		var notInstalled = new TerminalCommandSetupSnapshot(
@@ -827,7 +875,8 @@ public sealed class TerminalCommandSetupServiceTests
 		};
 
 		Assert.False(TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, notInstalled, startedWithProjectPath: false));
-		Assert.True(TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, stale, startedWithProjectPath: false));
+		Assert.False(TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, stale, startedWithProjectPath: false));
+		Assert.True(TerminalCommandPromptPolicy.ShouldRepairAutomatically(stale));
 	}
 
 	[Fact]
@@ -937,8 +986,8 @@ public sealed class TerminalCommandSetupServiceTests
 	[InlineData((int)TerminalCommandSetupState.NotInstalled, true, false, true, false, false, true)]
 	[InlineData((int)TerminalCommandSetupState.NotInstalled, false, false, false, false, false, true)]
 	[InlineData((int)TerminalCommandSetupState.Installed, false, false, false, false, false, false)]
-	[InlineData((int)TerminalCommandSetupState.Stale, false, true, false, false, true, false)]
-	[InlineData((int)TerminalCommandSetupState.Stale, false, true, true, false, true, false)]
+	[InlineData((int)TerminalCommandSetupState.Stale, false, true, false, false, false, false)]
+	[InlineData((int)TerminalCommandSetupState.Stale, false, true, true, false, false, false)]
 	[InlineData((int)TerminalCommandSetupState.Stale, false, false, false, false, false, false)]
 	[InlineData((int)TerminalCommandSetupState.ConflictingCommand, false, false, false, false, false, false)]
 	[InlineData((int)TerminalCommandSetupState.PermissionDenied, false, false, false, false, false, false)]

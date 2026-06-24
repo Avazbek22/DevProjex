@@ -109,7 +109,7 @@
   "Dialog.TerminalCommand.Body.UnsupportedPlatform": "На этой платформе DevProjex пока не может настроить короткую команду автоматически.",
   "Dialog.TerminalCommand.Body.HomeMissing": "DevProjex не нашел домашнюю папку пользователя, поэтому не может создать короткую команду.",
   "Dialog.TerminalCommand.Body.NotInstalled": "DevProjex может добавить запуск из терминала для вашего пользователя. После включения команда devprojex будет работать в новых окнах PowerShell, Terminal или shell.",
-  "Dialog.TerminalCommand.Body.Installed": "Короткая команда уже готова и указывает на текущий файл DevProjex.",
+  "Dialog.TerminalCommand.Body.Installed": "Команда devprojex уже включена.",
   "Dialog.TerminalCommand.Body.Stale": "Запуск из терминала уже был настроен, но его нужно обновить: DevProjex мог быть перенесен или папка команды отсутствует в PATH.",
   "Dialog.TerminalCommand.Body.Conflict": "Команда с таким именем уже существует и создана не DevProjex. Мы не будем ее перезаписывать.",
   "Dialog.TerminalCommand.Body.PermissionDenied": "У DevProjex нет прав для обновления команды терминала.",

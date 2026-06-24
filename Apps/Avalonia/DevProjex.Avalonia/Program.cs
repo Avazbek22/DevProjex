@@ -12,9 +12,12 @@ internal static class Program
     {
         var parseResult = CommandLineOptions.Parse(args);
         if (CommandLineAutomationRunner.ShouldRunBeforeAvalonia(parseResult))
+        {
+            WindowsParentConsole.AttachForCommandLine();
             return CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(parseResult)
                 .GetAwaiter()
                 .GetResult();
+        }
 
         return BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);

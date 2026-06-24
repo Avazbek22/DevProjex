@@ -140,3 +140,33 @@ jobs:
               $process.WaitForExit(5000) | Out-Null
             }
           }
+
+      - name: Command-line Smoke (Windows x64)
+        if: ${{ matrix.rid == 'win-x64' }}
+        shell: pwsh
+        run: |
+          $exePath = Resolve-Path "artifacts/publish/${{ matrix.rid }}/DevProjex.exe"
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-help-stdout.txt"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-help-stderr.txt"
+
+          $process = Start-Process `
+            -FilePath $exePath `
+            -ArgumentList "--help" `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
+          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+          if ($process.ExitCode -ne 0) {
+            throw "Published --help smoke failed. ExitCode=$($process.ExitCode). StdErr=$stderr"
+          }
+
+          if ($stdout -notmatch "Usage:") {
+            throw "Published --help smoke did not print usage text. StdOut=$stdout StdErr=$stderr"
+          }
+
+          Write-Host "Command-line smoke passed."
