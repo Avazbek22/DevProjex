@@ -34,7 +34,11 @@ public sealed class ProjectAnalysisService(
 
 		var loadingStopwatch = Stopwatch.StartNew();
 		var selectedRootFolders = NormalizeRootFolders(request.SelectedRootFolders);
-		var selectedIgnoreOptions = ResolveSelectedIgnoreOptions(rootPath, selectedRootFolders, request.SelectedIgnoreOptions);
+		var selectedIgnoreOptions = ResolveSelectedIgnoreOptions(
+			rootPath,
+			selectedRootFolders,
+			request.SelectedIgnoreOptions,
+			cancellationToken);
 		var rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
 		var scan = scanOptions.Execute(new ScanOptionsRequest(rootPath, rules), cancellationToken);
 
@@ -116,15 +120,42 @@ public sealed class ProjectAnalysisService(
 	private IReadOnlyCollection<IgnoreOptionId> ResolveSelectedIgnoreOptions(
 		string rootPath,
 		IReadOnlyCollection<string> selectedRootFolders,
-		IReadOnlyCollection<IgnoreOptionId>? overrideOptions)
+		IReadOnlyCollection<IgnoreOptionId>? overrideOptions,
+		CancellationToken cancellationToken)
 	{
 		if (overrideOptions is not null)
 			return overrideOptions.Distinct().ToArray();
 
 		var availability = ignoreRules.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
-		return ignoreOptions.GetOptions(availability)
+		var discoveryOptions = ignoreOptions.GetOptions(availability)
 			.Where(static option => option.DefaultChecked)
 			.Select(static option => option.Id)
+			.ToArray();
+		var discoveryRules = ignoreRules.Build(rootPath, discoveryOptions, selectedRootFolders);
+		var scan = scanOptions.GetExtensionsAndIgnoreCountsForRootFolders(
+			rootPath,
+			selectedRootFolders,
+			discoveryRules,
+			cancellationToken);
+		var counts = scan.Value.IgnoreOptionCounts;
+
+		// Headless automation has to start from the same dynamic defaults as the UI.
+		// Git/smart/dot/hidden availability is structural, while empty and extensionless
+		// options only exist when the current root selection exposes matching entries.
+		var dynamicAvailability = availability with
+		{
+			IncludeEmptyFolders = counts.EmptyFolders > 0,
+			EmptyFoldersCount = counts.EmptyFolders,
+			IncludeEmptyFiles = counts.EmptyFiles > 0,
+			EmptyFilesCount = counts.EmptyFiles,
+			IncludeExtensionlessFiles = counts.ExtensionlessFiles > 0,
+			ExtensionlessFilesCount = counts.ExtensionlessFiles
+		};
+
+		return ignoreOptions.GetOptions(dynamicAvailability)
+			.Where(static option => option.DefaultChecked)
+			.Select(static option => option.Id)
+			.Distinct()
 			.ToArray();
 	}
 

@@ -1,4 +1,5 @@
 using DevProjex.Avalonia;
+using DevProjex.Avalonia.ViewModels;
 using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Tests.Integration;
@@ -29,9 +30,8 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			return;
 
 		using var temp = new TemporaryDirectory();
-		var appAssemblyPath = typeof(App).Assembly.Location;
 		var launcherPath = Path.Combine(temp.Path, CommandLineExecutableAliases.WindowsPortableCommandFileName);
-		var appExecutablePath = Path.ChangeExtension(appAssemblyPath, ".exe");
+		var appExecutablePath = GetNativeAppHostExecutablePath();
 		await File.WriteAllTextAsync(
 			launcherPath,
 			TerminalCommandSetupService.BuildWindowsLauncherContent(appExecutablePath),
@@ -46,13 +46,102 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task WindowsPortableLauncher_UserLevelVersionAndFilteredContentExport()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var launcherPath = Path.Combine(temp.Path, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		var appExecutablePath = GetNativeAppHostExecutablePath();
+		await File.WriteAllTextAsync(
+			launcherPath,
+			TerminalCommandSetupService.BuildWindowsLauncherContent(appExecutablePath),
+			TestContext.Current.CancellationToken);
+		SeedUserLevelProject(temp);
+
+		var versionResult = await RunWindowsCommandAsync(launcherPath, CommandLineOptionTokens.Version);
+		Assert.Equal(CommandLineExitCodes.Success, versionResult.ExitCode);
+		Assert.Equal($"{MainWindowViewModel.TitleVersion}{Environment.NewLine}", versionResult.Stdout);
+		Assert.Equal(string.Empty, versionResult.Stderr);
+
+		var exportResult = await RunWindowsCommandAsync(
+			launcherPath,
+			temp.Path,
+			CommandLineOptionTokens.Export, "content",
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.ShortOutput, CommandLineOptionTokens.StandardOutputReportPath);
+
+		Assert.Equal(CommandLineExitCodes.Success, exportResult.ExitCode);
+		Assert.Equal(string.Empty, exportResult.Stderr);
+		Assert.Contains("public static class App", exportResult.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("readme text", exportResult.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", exportResult.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("bin placeholder", exportResult.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("generated", exportResult.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task UnixPortableWrapper_UserLevelTreeContentExportUsesCurrentExecutableAndShellSemantics()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		SeedUserLevelProject(temp);
+		var appExecutablePath = GetNativeAppHostExecutablePath();
+		var wrapperPath = Path.Combine(temp.Path, CommandLineExecutableAliases.UnixCommand);
+		await File.WriteAllTextAsync(
+			wrapperPath,
+			TerminalCommandSetupService.BuildWrapperContent(appExecutablePath),
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+			TestContext.Current.CancellationToken);
+		File.SetUnixFileMode(
+			wrapperPath,
+			UnixFileMode.UserRead |
+			UnixFileMode.UserWrite |
+			UnixFileMode.UserExecute |
+			UnixFileMode.GroupRead |
+			UnixFileMode.GroupExecute |
+			UnixFileMode.OtherRead |
+			UnixFileMode.OtherExecute);
+		var relativeOutputPath = Path.Combine("exports", "context.txt");
+		var expectedOutputPath = Path.GetFullPath(Path.Combine(temp.Path, relativeOutputPath));
+
+		var result = await RunExecutableWithWorkingDirectoryAsync(
+			wrapperPath,
+			temp.Path,
+			temp.Path,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.ShortOutput, relativeOutputPath);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var printedOutputPath = AssertSingleOutputLine(result.Stdout);
+		AssertRelativeOutputPathResolvedFromWorkingDirectory(
+			printedOutputPath,
+			expectedOutputPath,
+			temp.Path,
+			relativeOutputPath);
+		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
+		Assert.Contains("App.cs", payload, StringComparison.Ordinal);
+		Assert.Contains("public static class App", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("Readme.txt", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("bin placeholder", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("generated", payload, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task WindowsExecutable_HelpPrintsHelpToRedirectedStdout()
 	{
 		if (!OperatingSystem.IsWindows())
 			return;
 
-		var appExecutablePath = Path.ChangeExtension(typeof(App).Assembly.Location, ".exe");
-		Assert.True(File.Exists(appExecutablePath), $"Expected Windows apphost executable at {appExecutablePath}.");
+		var appExecutablePath = GetNativeAppHostExecutablePath();
 
 		var result = await RunExecutableAsync(appExecutablePath, CommandLineOptionTokens.Help);
 
@@ -92,6 +181,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(string.Empty, result.Stderr);
 		var version = Assert.Single(result.Stdout.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
 		Assert.DoesNotContain("+", version, StringComparison.Ordinal);
+		Assert.Equal(MainWindowViewModel.TitleVersion, version);
 	}
 
 	[Fact]
@@ -164,6 +254,74 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(string.Empty, result.Stderr);
 		Assert.Contains("App.cs", result.Stdout, StringComparison.Ordinal);
 		Assert.DoesNotContain("Guide.md", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportTreeWithRootAndExtensionFilters_UsesDefaultDynamicIgnores()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("src", "Readme.txt"), "readme\n");
+		temp.CreateFile("LICENSE", "license\n");
+		temp.CreateFile(Path.Combine(".dotfolder", "Secret.cs"), "class Secret {}\n");
+
+		var result = await RunAppAsync(
+			temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("App.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Readme.txt", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain(".dotfolder", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Secret.cs", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportContentWithRootAndExtensionFilters_UsesDefaultDynamicIgnores()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("src", "Readme.txt"), "readme\n");
+		temp.CreateFile("LICENSE", "license\n");
+
+		var result = await RunAppAsync(
+			temp.Path,
+			CommandLineOptionTokens.Export, "content",
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("class App", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Readme.txt", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("readme", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("license", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportContentWithIgnoreNone_AllowsExtensionlessRootFilesByContract()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		temp.CreateFile("LICENSE", "license\n");
+
+		var result = await RunAppAsync(
+			temp.Path,
+			CommandLineOptionTokens.Export, "content",
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("class App", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("LICENSE", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("license", result.Stdout, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -619,6 +777,18 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	private static Task<CommandLineProcessResult> RunAppWithWorkingDirectoryAsync(string workingDirectory, params string[] args) =>
 		RunAppCoreAsync(workingDirectory, args);
 
+	private static void SeedUserLevelProject(TemporaryDirectory temp)
+	{
+		temp.CreateFile(".gitignore", "[Bb]in/\n[Oo]bj/\n*.g.cs\n");
+		temp.CreateFile(Path.Combine("src", "App.cs"), "namespace Smoke;\npublic static class App { }\n");
+		temp.CreateFile(Path.Combine("src", "Readme.txt"), "readme text\n");
+		temp.CreateFile(Path.Combine("docs", "Guide.md"), "# Guide\n");
+		temp.CreateFile(Path.Combine("bin", "Debug", "DevProjex.dll"), "bin placeholder\n");
+		temp.CreateFile(Path.Combine("obj", "cache.tmp"), "obj placeholder\n");
+		temp.CreateFile(Path.Combine("generated", "Generated.g.cs"), "// generated\n");
+		temp.CreateFile("LICENSE", "license text\n");
+	}
+
 	private static async Task<CommandLineProcessResult> RunAppCoreAsync(string? workingDirectory, params string[] args)
 	{
 		var appPath = typeof(App).Assembly.Location;
@@ -639,6 +809,17 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			startInfo.ArgumentList.Add(arg);
 
 		return await RunProcessAsync(startInfo);
+	}
+
+	private static string GetNativeAppHostExecutablePath()
+	{
+		var assemblyPath = typeof(App).Assembly.Location;
+		var appHostPath = OperatingSystem.IsWindows()
+			? Path.ChangeExtension(assemblyPath, ".exe")
+			: Path.Combine(Path.GetDirectoryName(assemblyPath)!, Path.GetFileNameWithoutExtension(assemblyPath));
+
+		Assert.True(File.Exists(appHostPath), $"Expected apphost executable at {appHostPath}.");
+		return appHostPath;
 	}
 
 	private static async Task<CommandLineProcessResult> RunWindowsCommandAsync(string commandPath, params string[] args)
@@ -662,6 +843,12 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	private static async Task<CommandLineProcessResult> RunExecutableAsync(string executablePath, params string[] args)
+		=> await RunExecutableWithWorkingDirectoryAsync(executablePath, workingDirectory: null, args);
+
+	private static async Task<CommandLineProcessResult> RunExecutableWithWorkingDirectoryAsync(
+		string executablePath,
+		string? workingDirectory,
+		params string[] args)
 	{
 		var startInfo = new ProcessStartInfo
 		{
@@ -671,6 +858,9 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			UseShellExecute = false,
 			CreateNoWindow = true
 		};
+
+		if (!string.IsNullOrWhiteSpace(workingDirectory))
+			startInfo.WorkingDirectory = workingDirectory;
 
 		foreach (var arg in args)
 			startInfo.ArgumentList.Add(arg);

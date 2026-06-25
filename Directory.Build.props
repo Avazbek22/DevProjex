@@ -1,11 +1,11 @@
 <Project>
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
-    <DevProjexVersion Condition="'$(DevProjexVersion)'==''">4.8</DevProjexVersion>
-    <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">4.8.0.0</DevProjexAssemblyVersion>
+    <DevProjexVersion Condition="'$(DevProjexVersion)'==''">4.9</DevProjexVersion>
+    <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">4.9.0.0</DevProjexAssemblyVersion>
     <DevProjexFileVersion Condition="'$(DevProjexFileVersion)'==''">$(DevProjexAssemblyVersion)</DevProjexFileVersion>
     <DevProjexInformationalVersion Condition="'$(DevProjexInformationalVersion)'==''">$(DevProjexVersion)</DevProjexInformationalVersion>
-    <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">4.8.0.0</DevProjexStorePackageVersion>
+    <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">4.9.0.0</DevProjexStorePackageVersion>
     <Version>$(DevProjexVersion)</Version>
     <AssemblyVersion>$(DevProjexAssemblyVersion)</AssemblyVersion>
     <FileVersion>$(DevProjexFileVersion)</FileVersion>

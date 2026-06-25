@@ -132,6 +132,13 @@ jobs:
         run: |
           $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
           $helpArguments = @("--help", "-h", "/?")
+          $buildProps = [xml](Get-Content -Raw -Path "Directory.Build.props")
+          $expectedVersionNode = $buildProps.SelectSingleNode("/Project/PropertyGroup/DevProjexVersion")
+          if ($null -eq $expectedVersionNode -or [string]::IsNullOrWhiteSpace($expectedVersionNode.InnerText)) {
+            throw "DevProjexVersion was not found in Directory.Build.props."
+          }
+
+          $expectedVersion = $expectedVersionNode.InnerText.Trim()
 
           if ($env:RUNNER_OS -ne "Windows") {
             chmod +x $exePath
@@ -170,6 +177,42 @@ jobs:
             if ($stdout -notmatch "Usage:") {
               throw "Published $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
             }
+          }
+
+          $versionStdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-version-stdout.txt"
+          $versionStderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-version-stderr.txt"
+          Remove-Item -LiteralPath $versionStdoutPath, $versionStderrPath -ErrorAction SilentlyContinue
+
+          if ($env:RUNNER_OS -eq "Windows") {
+            $process = Start-Process `
+              -FilePath $exePath `
+              -ArgumentList @("--version") `
+              -RedirectStandardOutput $versionStdoutPath `
+              -RedirectStandardError $versionStderrPath `
+              -NoNewWindow `
+              -Wait `
+              -PassThru
+            $exitCode = $process.ExitCode
+          }
+          else {
+            & $exePath "--version" > $versionStdoutPath 2> $versionStderrPath
+            $exitCode = $LASTEXITCODE
+          }
+
+          $versionStdout = Get-Content -Raw -Path $versionStdoutPath -ErrorAction SilentlyContinue
+          $versionStderr = Get-Content -Raw -Path $versionStderrPath -ErrorAction SilentlyContinue
+          $actualVersion = $versionStdout.Trim()
+
+          if ($exitCode -ne 0) {
+            throw "Published --version smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$versionStderr"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($versionStderr)) {
+            throw "Published --version smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$versionStderr"
+          }
+
+          if ($actualVersion -ne $expectedVersion) {
+            throw "Published --version printed '$actualVersion' for ${{ matrix.rid }}, expected '$expectedVersion'."
           }
 
           $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-export-project-${{ matrix.rid }}"
@@ -225,6 +268,13 @@ jobs:
         shell: pwsh
         run: |
           $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $buildProps = [xml](Get-Content -Raw -Path "Directory.Build.props")
+          $expectedVersionNode = $buildProps.SelectSingleNode("/Project/PropertyGroup/DevProjexVersion")
+          if ($null -eq $expectedVersionNode -or [string]::IsNullOrWhiteSpace($expectedVersionNode.InnerText)) {
+            throw "DevProjexVersion was not found in Directory.Build.props."
+          }
+
+          $expectedVersion = $expectedVersionNode.InnerText.Trim()
           chmod +x $exePath
 
           $binDirectory = Join-Path $env:RUNNER_TEMP "devprojex-path-bin-${{ matrix.rid }}"
@@ -303,8 +353,8 @@ jobs:
             }
 
             $versionOutput = Invoke-DevProjexPathCommand -Name "version" -Arguments @("--version")
-            if ([string]::IsNullOrWhiteSpace($versionOutput)) {
-              throw "PATH wrapper --version printed no version for ${{ matrix.rid }}."
+            if ($versionOutput.Trim() -ne $expectedVersion) {
+              throw "PATH wrapper --version printed '$($versionOutput.Trim())' for ${{ matrix.rid }}, expected '$expectedVersion'."
             }
 
             $reportOutput = Invoke-DevProjexPathCommand -Name "silent-report-stdout" -Arguments @(
@@ -360,6 +410,13 @@ jobs:
         shell: pwsh
         run: |
           $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $buildProps = [xml](Get-Content -Raw -Path "Directory.Build.props")
+          $expectedVersionNode = $buildProps.SelectSingleNode("/Project/PropertyGroup/DevProjexVersion")
+          if ($null -eq $expectedVersionNode -or [string]::IsNullOrWhiteSpace($expectedVersionNode.InnerText)) {
+            throw "DevProjexVersion was not found in Directory.Build.props."
+          }
+
+          $expectedVersion = $expectedVersionNode.InnerText.Trim()
           $launcherPath = Join-Path $env:RUNNER_TEMP "devprojex.cmd"
           $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-help-stdout.txt"
           $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-help-stderr.txt"
@@ -405,6 +462,32 @@ jobs:
             if ($stdout -notmatch "Usage:") {
               throw "Portable launcher $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
             }
+          }
+
+          Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+          $versionArguments = @("/d", "/c", "`"$launcherPath`"", "--version")
+          $process = Start-Process `
+            -FilePath "cmd.exe" `
+            -ArgumentList $versionArguments `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
+          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+          if ($process.ExitCode -ne 0) {
+            throw "Portable launcher --version smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            throw "Portable launcher --version smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
+          }
+
+          if ($stdout.Trim() -ne $expectedVersion) {
+            throw "Portable launcher --version printed '$($stdout.Trim())' for ${{ matrix.rid }}, expected '$expectedVersion'."
           }
 
           $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-launcher-export-project-${{ matrix.rid }}"
