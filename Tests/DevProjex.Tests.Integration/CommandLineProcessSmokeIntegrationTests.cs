@@ -187,9 +187,12 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
 		var printedOutputPath = AssertSingleOutputLine(result.Stdout);
-		Assert.Equal(expectedOutputPath, printedOutputPath);
-		Assert.True(File.Exists(expectedOutputPath));
-		var payload = await File.ReadAllTextAsync(expectedOutputPath, TestContext.Current.CancellationToken);
+		AssertRelativeOutputPathResolvedFromWorkingDirectory(
+			printedOutputPath,
+			expectedOutputPath,
+			projectPath,
+			relativeOutputPath);
+		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
 		Assert.Contains("App.cs", payload, StringComparison.Ordinal);
 		Assert.Contains("class App", payload, StringComparison.Ordinal);
 	}
@@ -216,8 +219,13 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
-		Assert.Equal(expectedOutputPath, AssertSingleOutputLine(result.Stdout));
-		var payload = await File.ReadAllTextAsync(expectedOutputPath, TestContext.Current.CancellationToken);
+		var printedOutputPath = AssertSingleOutputLine(result.Stdout);
+		AssertRelativeOutputPathResolvedFromWorkingDirectory(
+			printedOutputPath,
+			expectedOutputPath,
+			projectPath,
+			relativeOutputPath);
+		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
 		Assert.Contains("App.cs", payload, StringComparison.Ordinal);
 		Assert.Contains("class App", payload, StringComparison.Ordinal);
 		Assert.DoesNotContain("appsettings.json", payload, StringComparison.Ordinal);
@@ -704,14 +712,55 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			$"Expected the report file to exist at the path printed by the app: '{reportedReportPath}'.");
 	}
 
+	private static void AssertRelativeOutputPathResolvedFromWorkingDirectory(
+		string printedOutputPath,
+		string expectedOutputPath,
+		string projectPath,
+		string relativeOutputPath)
+	{
+		Assert.True(
+			Path.IsPathFullyQualified(printedOutputPath),
+			$"Expected the export path printed to stdout to be absolute, but got '{printedOutputPath}'.");
+		Assert.EndsWith(relativeOutputPath, printedOutputPath, StringComparison.Ordinal);
+		Assert.False(
+			IsPathUnderDirectory(printedOutputPath, projectPath),
+			$"Relative export paths must resolve from the process working directory, not from the project path '{projectPath}'.");
+		Assert.True(
+			File.Exists(expectedOutputPath),
+			$"Expected the export file to be reachable through the requested working-directory path '{expectedOutputPath}'.");
+		Assert.True(
+			File.Exists(printedOutputPath),
+			$"Expected the export file to exist at the path printed by the app: '{printedOutputPath}'.");
+	}
+
 	private static bool IsPathUnderDirectory(string path, string directory)
 	{
 		var comparison = OperatingSystem.IsWindows()
 			? StringComparison.OrdinalIgnoreCase
 			: StringComparison.Ordinal;
-		var fullPath = AddTrailingDirectorySeparator(Path.GetFullPath(path));
-		var fullDirectory = AddTrailingDirectorySeparator(Path.GetFullPath(directory));
+		var fullPath = AddTrailingDirectorySeparator(GetComparablePath(path));
+		var fullDirectory = AddTrailingDirectorySeparator(GetComparablePath(directory));
 		return fullPath.StartsWith(fullDirectory, comparison);
+	}
+
+	private static string GetComparablePath(string path)
+	{
+		var fullPath = Path.GetFullPath(path);
+		return OperatingSystem.IsMacOS()
+			? NormalizeMacOsPrivateVarAlias(fullPath)
+			: fullPath;
+	}
+
+	private static string NormalizeMacOsPrivateVarAlias(string path)
+	{
+		const string privateVarPrefix = "/private/var/";
+		const string varPrefix = "/var/";
+
+		// macOS temp paths can surface as either /var/... or /private/var/... depending on the process boundary.
+		if (path.StartsWith(privateVarPrefix, StringComparison.Ordinal))
+			return varPrefix + path[privateVarPrefix.Length..];
+
+		return path;
 	}
 
 	private static string AddTrailingDirectorySeparator(string path)
