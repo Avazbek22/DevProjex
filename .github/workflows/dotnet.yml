@@ -134,12 +134,26 @@ jobs:
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
 
+      - name: Print Test Runner Logs
+        if: ${{ failure() }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "." -Recurse -Directory -Filter "TestResults" |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter "*.log" } |
+            ForEach-Object {
+              Write-Host "::group::$($_.FullName)"
+              Get-Content -Path $_.FullName -Raw
+              Write-Host "::endgroup::"
+            }
+
       - name: Upload Test Results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.os_id }}-${{ matrix.suite_id }}
-          path: TestResults/**/*.trx
+          path: |
+            TestResults/**
+            **/TestResults/**
           if-no-files-found: ignore
 
   terminal-command-cross-platform:
@@ -251,7 +265,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terminal-command-results-${{ matrix.os_id }}
-          path: TestResults/**/*.trx
+          path: |
+            TestResults/**
+            **/TestResults/**
           if-no-files-found: ignore
 
   ignore-scanner-cross-platform:
@@ -313,5 +329,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ignore-scanner-results-${{ matrix.os_id }}
-          path: TestResults/**/*.trx
+          path: |
+            TestResults/**
+            **/TestResults/**
           if-no-files-found: ignore

@@ -184,7 +184,15 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
-		Assert.StartsWith(Path.GetFullPath(temp.Path), result.Stdout, StringComparison.Ordinal);
+
+		// macOS can expose the same temp directory as either /var/... or /private/var/... across process boundaries.
+		var expectedRoot = GetComparablePath(temp.Path);
+		var printedRootLine = result.Stdout
+			.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+			.FirstOrDefault() ?? string.Empty;
+		var printedRoot = GetComparablePath(printedRootLine.TrimEnd(':'));
+
+		Assert.Equal(expectedRoot, printedRoot);
 		Assert.False(result.Stdout.StartsWith($".:{Environment.NewLine}", StringComparison.Ordinal));
 		Assert.Contains("App.cs", result.Stdout, StringComparison.Ordinal);
 		Assert.DoesNotContain("├── .", result.Stdout, StringComparison.Ordinal);
