@@ -136,6 +136,85 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task UnixPathCommand_UserLevelResolvesWrapperFromPathAndRunsAutomation()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var binDirectory = temp.CreateDirectory("bin");
+		var projectPath = temp.CreateDirectory("project with spaces");
+		SeedComplexUserProject(projectPath);
+		var wrapperPath = Path.Combine(binDirectory, CommandLineExecutableAliases.UnixCommand);
+		await CreateUnixWrapperAsync(wrapperPath);
+		var relativeOutputPath = Path.Combine("exports", "path-command-context.txt");
+		var expectedOutputPath = Path.GetFullPath(Path.Combine(temp.Path, relativeOutputPath));
+
+		var helpResult = await RunPathCommandAsync(
+			CommandLineExecutableAliases.UnixCommand,
+			binDirectory,
+			temp.Path,
+			CommandLineOptionTokens.Help);
+		Assert.Equal(CommandLineExitCodes.Success, helpResult.ExitCode);
+		Assert.Contains("Usage:", helpResult.Stdout, StringComparison.Ordinal);
+		Assert.Equal(string.Empty, helpResult.Stderr);
+
+		var versionResult = await RunPathCommandAsync(
+			CommandLineExecutableAliases.UnixCommand,
+			binDirectory,
+			temp.Path,
+			CommandLineOptionTokens.Version);
+		Assert.Equal(CommandLineExitCodes.Success, versionResult.ExitCode);
+		Assert.Equal($"{MainWindowViewModel.TitleVersion}{Environment.NewLine}", versionResult.Stdout);
+		Assert.Equal(string.Empty, versionResult.Stderr);
+
+		var exportResult = await RunPathCommandAsync(
+			CommandLineExecutableAliases.UnixCommand,
+			binDirectory,
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ShortOutput, relativeOutputPath,
+			CommandLineOptionTokens.Roots, "src app",
+			CommandLineOptionTokens.Extensions, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, exportResult.ExitCode);
+		Assert.Equal(string.Empty, exportResult.Stderr);
+		var printedOutputPath = AssertSingleOutputLine(exportResult.Stdout);
+		AssertRelativeOutputPathResolvedFromWorkingDirectory(
+			printedOutputPath,
+			expectedOutputPath,
+			projectPath,
+			relativeOutputPath);
+		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
+		Assert.Contains("Program.cs", payload, StringComparison.Ordinal);
+		Assert.Contains("public sealed class Program", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("Generated.g.cs", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", payload, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task UnixPortableWrapper_TargetPathWithApostropheRunsRealAppHost()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var appDirectory = temp.CreateDirectory("DevProjex's copied build");
+		CopyAppBuildOutputToDirectory(appDirectory);
+		var copiedAppHostPath = GetNativeAppHostExecutablePath(appDirectory);
+		MakeExecutableIfUnix(copiedAppHostPath);
+		var wrapperPath = Path.Combine(temp.Path, CommandLineExecutableAliases.UnixCommand);
+		await CreateUnixWrapperAsync(wrapperPath, copiedAppHostPath);
+
+		var result = await RunExecutableAsync(wrapperPath, CommandLineOptionTokens.Version);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal($"{MainWindowViewModel.TitleVersion}{Environment.NewLine}", result.Stdout);
+		Assert.Equal(string.Empty, result.Stderr);
+	}
+
+	[Fact]
 	public async Task WindowsExecutable_HelpPrintsHelpToRedirectedStdout()
 	{
 		if (!OperatingSystem.IsWindows())
@@ -148,6 +227,75 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Contains("Usage:", result.Stdout, StringComparison.Ordinal);
 		Assert.Contains(CommandLineOptionTokens.Help, result.Stdout, StringComparison.Ordinal);
+		Assert.Equal(string.Empty, result.Stderr);
+	}
+
+	[Fact]
+	public async Task WindowsPathCommand_UserLevelResolvesLauncherFromPathAndHandlesSpecialCharacters()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var binDirectory = temp.CreateDirectory("bin & tools");
+		var projectPath = temp.CreateDirectory("project & source");
+		SeedComplexUserProject(projectPath);
+		var launcherPath = Path.Combine(binDirectory, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		await CreateWindowsLauncherAsync(launcherPath);
+		var relativeOutputPath = Path.Combine("exports & logs", "context & output.txt");
+		var expectedOutputPath = Path.GetFullPath(Path.Combine(temp.Path, relativeOutputPath));
+
+		var versionResult = await RunWindowsPathCommandAsync(
+			"devprojex",
+			binDirectory,
+			temp.Path,
+			CommandLineOptionTokens.Version);
+		Assert.Equal(CommandLineExitCodes.Success, versionResult.ExitCode);
+		Assert.Equal($"{MainWindowViewModel.TitleVersion}{Environment.NewLine}", versionResult.Stdout);
+		Assert.Equal(string.Empty, versionResult.Stderr);
+
+		var exportResult = await RunWindowsPathCommandAsync(
+			"devprojex",
+			binDirectory,
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ShortOutput, relativeOutputPath,
+			CommandLineOptionTokens.Roots, "src app",
+			CommandLineOptionTokens.Extensions, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, exportResult.ExitCode);
+		Assert.Equal(string.Empty, exportResult.Stderr);
+		var printedOutputPath = AssertSingleOutputLine(exportResult.Stdout);
+		AssertRelativeOutputPathResolvedFromWorkingDirectory(
+			printedOutputPath,
+			expectedOutputPath,
+			projectPath,
+			relativeOutputPath);
+		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
+		Assert.Contains("Program.cs", payload, StringComparison.Ordinal);
+		Assert.Contains("public sealed class Program", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("Generated.g.cs", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", payload, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task WindowsPortableLauncher_TargetPathWithBatchMetacharactersRunsRealAppHost()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var appDirectory = temp.CreateDirectory("DevProjex & copied build");
+		CopyAppBuildOutputToDirectory(appDirectory);
+		var copiedAppHostPath = GetNativeAppHostExecutablePath(appDirectory);
+		var launcherPath = Path.Combine(temp.Path, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		await CreateWindowsLauncherAsync(launcherPath, copiedAppHostPath);
+
+		var result = await RunWindowsCommandAsync(launcherPath, CommandLineOptionTokens.Version);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal($"{MainWindowViewModel.TitleVersion}{Environment.NewLine}", result.Stdout);
 		Assert.Equal(string.Empty, result.Stderr);
 	}
 
@@ -322,6 +470,111 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Contains("class App", result.Stdout, StringComparison.Ordinal);
 		Assert.Contains("LICENSE", result.Stdout, StringComparison.Ordinal);
 		Assert.Contains("license", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_UserLevelDefaultIgnoresHideSmartGitDotEmptyAndExtensionlessNoise()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("real project");
+		SeedComplexUserProject(projectPath);
+
+		var result = await RunAppAsync(
+			projectPath,
+			CommandLineOptionTokens.Export, "tree");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("Program.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("Guide.md", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Generated.g.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex.dll", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("cache.tmp", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain(".cache", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Cached.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Empty.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("empty-folder", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_UserLevelIgnoreNoneShowsEveryUsuallyIgnoredEntry()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("real project");
+		SeedComplexUserProject(projectPath);
+
+		var result = await RunAppAsync(
+			projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("Program.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("Generated.g.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("DevProjex.dll", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("cache.tmp", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(".cache", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("Cached.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("LICENSE", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("Empty.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("empty-folder", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_UserLevelTreeContentExportIsReadOnlyAndResolvesRelativeOutputFromWorkingDirectory()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("real project");
+		SeedComplexUserProject(projectPath);
+		var before = CaptureProjectFiles(projectPath);
+		var relativeOutputPath = Path.Combine("exports", "context.txt");
+		var expectedOutputPath = Path.GetFullPath(Path.Combine(temp.Path, relativeOutputPath));
+
+		var result = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ShortOutput, relativeOutputPath,
+			CommandLineOptionTokens.Roots, "src app",
+			CommandLineOptionTokens.Extensions, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var printedOutputPath = AssertSingleOutputLine(result.Stdout);
+		AssertRelativeOutputPathResolvedFromWorkingDirectory(
+			printedOutputPath,
+			expectedOutputPath,
+			projectPath,
+			relativeOutputPath);
+		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
+		Assert.Contains("Program.cs", payload, StringComparison.Ordinal);
+		Assert.Contains("public sealed class Program", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("Readme.txt", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("Generated.g.cs", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", payload, StringComparison.Ordinal);
+		AssertProjectFilesUnchanged(projectPath, before);
+	}
+
+	[Fact]
+	public async Task NativeExecutable_UserLevelInvalidCommandReturnsUsageErrorWithoutArtifacts()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var outputPath = Path.Combine(temp.Path, "context.txt");
+		var appExecutablePath = GetNativeAppHostExecutablePath();
+
+		var result = await RunExecutableAsync(
+			appExecutablePath,
+			temp.Path,
+			CommandLineOptionTokens.Export, "zip",
+			CommandLineOptionTokens.ShortOutput, outputPath);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("Unsupported export mode 'zip'.", result.Stderr, StringComparison.Ordinal);
+		Assert.False(File.Exists(outputPath));
 	}
 
 	[Fact]
@@ -779,14 +1032,44 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 	private static void SeedUserLevelProject(TemporaryDirectory temp)
 	{
-		temp.CreateFile(".gitignore", "[Bb]in/\n[Oo]bj/\n*.g.cs\n");
-		temp.CreateFile(Path.Combine("src", "App.cs"), "namespace Smoke;\npublic static class App { }\n");
-		temp.CreateFile(Path.Combine("src", "Readme.txt"), "readme text\n");
-		temp.CreateFile(Path.Combine("docs", "Guide.md"), "# Guide\n");
-		temp.CreateFile(Path.Combine("bin", "Debug", "DevProjex.dll"), "bin placeholder\n");
-		temp.CreateFile(Path.Combine("obj", "cache.tmp"), "obj placeholder\n");
-		temp.CreateFile(Path.Combine("generated", "Generated.g.cs"), "// generated\n");
-		temp.CreateFile("LICENSE", "license text\n");
+		SeedUserLevelProject(temp.Path);
+	}
+
+	private static void SeedUserLevelProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, ".gitignore", "[Bb]in/\n[Oo]bj/\n*.g.cs\n");
+		WriteProjectFile(projectPath, Path.Combine("src", "App.cs"), "namespace Smoke;\npublic static class App { }\n");
+		WriteProjectFile(projectPath, Path.Combine("src", "Readme.txt"), "readme text\n");
+		WriteProjectFile(projectPath, Path.Combine("docs", "Guide.md"), "# Guide\n");
+		WriteProjectFile(projectPath, Path.Combine("bin", "Debug", "DevProjex.dll"), "bin placeholder\n");
+		WriteProjectFile(projectPath, Path.Combine("obj", "cache.tmp"), "obj placeholder\n");
+		WriteProjectFile(projectPath, Path.Combine("generated", "Generated.g.cs"), "// generated\n");
+		WriteProjectFile(projectPath, "LICENSE", "license text\n");
+	}
+
+	private static void SeedComplexUserProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, ".gitignore", "[Bb]in/\n[Oo]bj/\n*.g.cs\n");
+		WriteProjectFile(projectPath, Path.Combine("src app", "Program.cs"), "namespace Smoke;\npublic sealed class Program { }\n");
+		WriteProjectFile(projectPath, Path.Combine("src app", "Readme.txt"), "readme text\n");
+		WriteProjectFile(projectPath, Path.Combine("src app", "Generated.g.cs"), "// generated\n");
+		WriteProjectFile(projectPath, Path.Combine("src app", "Empty.cs"), string.Empty);
+		Directory.CreateDirectory(Path.Combine(projectPath, "src app", "empty-folder"));
+		WriteProjectFile(projectPath, Path.Combine("docs", "Guide.md"), "# Guide\n");
+		WriteProjectFile(projectPath, Path.Combine("bin", "Debug", "DevProjex.dll"), "bin placeholder\n");
+		WriteProjectFile(projectPath, Path.Combine("obj", "cache.tmp"), "obj placeholder\n");
+		WriteProjectFile(projectPath, Path.Combine(".cache", "Cached.cs"), "class Cached { }\n");
+		WriteProjectFile(projectPath, "LICENSE", "license text\n");
+	}
+
+	private static void WriteProjectFile(string rootPath, string relativePath, string content)
+	{
+		var path = Path.Combine(rootPath, relativePath);
+		var directory = Path.GetDirectoryName(path);
+		if (!string.IsNullOrEmpty(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(path, content);
 	}
 
 	private static async Task<CommandLineProcessResult> RunAppCoreAsync(string? workingDirectory, params string[] args)
@@ -812,14 +1095,74 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	private static string GetNativeAppHostExecutablePath()
+		=> GetNativeAppHostExecutablePath(Path.GetDirectoryName(typeof(App).Assembly.Location)!);
+
+	private static string GetNativeAppHostExecutablePath(string appDirectory)
 	{
-		var assemblyPath = typeof(App).Assembly.Location;
 		var appHostPath = OperatingSystem.IsWindows()
-			? Path.ChangeExtension(assemblyPath, ".exe")
-			: Path.Combine(Path.GetDirectoryName(assemblyPath)!, Path.GetFileNameWithoutExtension(assemblyPath));
+			? Path.Combine(appDirectory, CommandLineExecutableAliases.WindowsPortableExecutable)
+			: Path.Combine(appDirectory, CommandLineExecutableAliases.DisplayName);
 
 		Assert.True(File.Exists(appHostPath), $"Expected apphost executable at {appHostPath}.");
 		return appHostPath;
+	}
+
+	private static async Task CreateWindowsLauncherAsync(string launcherPath, string? appExecutablePath = null)
+	{
+		await File.WriteAllTextAsync(
+			launcherPath,
+			TerminalCommandSetupService.BuildWindowsLauncherContent(appExecutablePath ?? GetNativeAppHostExecutablePath()),
+			TestContext.Current.CancellationToken);
+	}
+
+	private static async Task CreateUnixWrapperAsync(string wrapperPath, string? appExecutablePath = null)
+	{
+		await File.WriteAllTextAsync(
+			wrapperPath,
+			TerminalCommandSetupService.BuildWrapperContent(appExecutablePath ?? GetNativeAppHostExecutablePath()),
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+			TestContext.Current.CancellationToken);
+		MakeExecutableIfUnix(wrapperPath);
+	}
+
+	private static void MakeExecutableIfUnix(string path)
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		File.SetUnixFileMode(
+			path,
+			UnixFileMode.UserRead |
+			UnixFileMode.UserWrite |
+			UnixFileMode.UserExecute |
+			UnixFileMode.GroupRead |
+			UnixFileMode.GroupExecute |
+			UnixFileMode.OtherRead |
+			UnixFileMode.OtherExecute);
+	}
+
+	private static void CopyAppBuildOutputToDirectory(string destinationDirectory)
+	{
+		var sourceDirectory = Path.GetDirectoryName(typeof(App).Assembly.Location)
+			?? throw new InvalidOperationException("Could not resolve DevProjex app output directory.");
+
+		CopyDirectory(sourceDirectory, destinationDirectory);
+	}
+
+	private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
+	{
+		Directory.CreateDirectory(destinationDirectory);
+		foreach (var sourceFilePath in Directory.EnumerateFiles(sourceDirectory))
+		{
+			var destinationFilePath = Path.Combine(destinationDirectory, Path.GetFileName(sourceFilePath));
+			File.Copy(sourceFilePath, destinationFilePath, overwrite: true);
+		}
+
+		foreach (var sourceChildDirectory in Directory.EnumerateDirectories(sourceDirectory))
+		{
+			var destinationChildDirectory = Path.Combine(destinationDirectory, Path.GetFileName(sourceChildDirectory));
+			CopyDirectory(sourceChildDirectory, destinationChildDirectory);
+		}
 	}
 
 	private static async Task<CommandLineProcessResult> RunWindowsCommandAsync(string commandPath, params string[] args)
@@ -840,6 +1183,67 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			startInfo.ArgumentList.Add(arg);
 
 		return await RunProcessAsync(startInfo);
+	}
+
+	private static async Task<CommandLineProcessResult> RunWindowsPathCommandAsync(
+		string commandName,
+		string binDirectory,
+		string? workingDirectory,
+		params string[] args)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = "cmd.exe",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		if (!string.IsNullOrWhiteSpace(workingDirectory))
+			startInfo.WorkingDirectory = workingDirectory;
+
+		startInfo.Environment["PATH"] = PrependPath(binDirectory, startInfo.Environment["PATH"]);
+		startInfo.ArgumentList.Add("/d");
+		startInfo.ArgumentList.Add("/c");
+		startInfo.ArgumentList.Add(commandName);
+		foreach (var arg in args)
+			startInfo.ArgumentList.Add(arg);
+
+		return await RunProcessAsync(startInfo);
+	}
+
+	private static async Task<CommandLineProcessResult> RunPathCommandAsync(
+		string commandName,
+		string binDirectory,
+		string? workingDirectory,
+		params string[] args)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = commandName,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		if (!string.IsNullOrWhiteSpace(workingDirectory))
+			startInfo.WorkingDirectory = workingDirectory;
+
+		startInfo.Environment["PATH"] = PrependPath(binDirectory, startInfo.Environment["PATH"]);
+		foreach (var arg in args)
+			startInfo.ArgumentList.Add(arg);
+
+		return await RunProcessAsync(startInfo);
+	}
+
+	private static string PrependPath(string directory, string? currentPath)
+	{
+		if (string.IsNullOrEmpty(currentPath))
+			return directory;
+
+		return directory + Path.PathSeparator + currentPath;
 	}
 
 	private static async Task<CommandLineProcessResult> RunExecutableAsync(string executablePath, params string[] args)
@@ -908,6 +1312,26 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		element.EnumerateArray()
 			.Select(static item => item.GetString() ?? string.Empty)
 			.ToArray();
+
+	private static ProjectFileSnapshot[] CaptureProjectFiles(string projectPath) =>
+		Directory.EnumerateFiles(projectPath, "*", SearchOption.AllDirectories)
+			.Select(path => new ProjectFileSnapshot(
+				Path.GetRelativePath(projectPath, path),
+				File.ReadAllText(path)))
+			.OrderBy(static item => item.RelativePath, StringComparer.Ordinal)
+			.ToArray();
+
+	private static void AssertProjectFilesUnchanged(string projectPath, ProjectFileSnapshot[] expected)
+	{
+		var actual = CaptureProjectFiles(projectPath);
+		Assert.Equal(expected.Select(static item => item.RelativePath), actual.Select(static item => item.RelativePath));
+
+		foreach (var expectedFile in expected)
+		{
+			var actualFile = Assert.Single(actual, item => item.RelativePath == expectedFile.RelativePath);
+			Assert.Equal(expectedFile.Content, actualFile.Content);
+		}
+	}
 
 	private static string AssertSingleOutputLine(string stdout)
 	{
@@ -995,4 +1419,6 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	private sealed record CommandLineProcessResult(int ExitCode, string Stdout, string Stderr);
+
+	private sealed record ProjectFileSnapshot(string RelativePath, string Content);
 }

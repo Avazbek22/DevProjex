@@ -37,6 +37,7 @@ public sealed class ProjectAnalysisService(
 		var selectedIgnoreOptions = ResolveSelectedIgnoreOptions(
 			rootPath,
 			selectedRootFolders,
+			useAllRootFoldersForDefaults: request.SelectedRootFolders is null,
 			request.SelectedIgnoreOptions,
 			cancellationToken);
 		var rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
@@ -120,6 +121,7 @@ public sealed class ProjectAnalysisService(
 	private IReadOnlyCollection<IgnoreOptionId> ResolveSelectedIgnoreOptions(
 		string rootPath,
 		IReadOnlyCollection<string> selectedRootFolders,
+		bool useAllRootFoldersForDefaults,
 		IReadOnlyCollection<IgnoreOptionId>? overrideOptions,
 		CancellationToken cancellationToken)
 	{
@@ -132,9 +134,12 @@ public sealed class ProjectAnalysisService(
 			.Select(static option => option.Id)
 			.ToArray();
 		var discoveryRules = ignoreRules.Build(rootPath, discoveryOptions, selectedRootFolders);
+		var discoveryRootFolders = useAllRootFoldersForDefaults
+			? scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken).Value
+			: selectedRootFolders;
 		var scan = scanOptions.GetExtensionsAndIgnoreCountsForRootFolders(
 			rootPath,
-			selectedRootFolders,
+			discoveryRootFolders,
 			discoveryRules,
 			cancellationToken);
 		var counts = scan.Value.IgnoreOptionCounts;
