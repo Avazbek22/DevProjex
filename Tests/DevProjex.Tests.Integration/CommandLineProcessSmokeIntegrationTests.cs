@@ -89,7 +89,8 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			return;
 
 		using var temp = new TemporaryDirectory();
-		SeedUserLevelProject(temp);
+		var projectPath = temp.CreateDirectory("project with spaces");
+		SeedUserLevelProject(projectPath);
 		var appExecutablePath = GetNativeAppHostExecutablePath();
 		var wrapperPath = Path.Combine(temp.Path, CommandLineExecutableAliases.UnixCommand);
 		await File.WriteAllTextAsync(
@@ -112,7 +113,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		var result = await RunExecutableWithWorkingDirectoryAsync(
 			wrapperPath,
 			temp.Path,
-			temp.Path,
+			projectPath,
 			CommandLineOptionTokens.Export, "tree-content",
 			CommandLineOptionTokens.Roots, "src",
 			CommandLineOptionTokens.Extensions, "cs",
@@ -124,7 +125,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		AssertRelativeOutputPathResolvedFromWorkingDirectory(
 			printedOutputPath,
 			expectedOutputPath,
-			temp.Path,
+			projectPath,
 			relativeOutputPath);
 		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
 		Assert.Contains("App.cs", payload, StringComparison.Ordinal);

@@ -13,18 +13,22 @@ public sealed class MainWindowStartupAutomationUiTests
 		using var project = UiTestProject.CreateDefault();
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(appDataPath);
-		var relativeProjectPath = Path.GetRelativePath(Environment.CurrentDirectory, project.RootPath);
-		var options = CommandLineOptions.Empty;
-		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
-		var window = new MainWindow(options, services)
-		{
-			Width = 1500,
-			Height = 920
-		};
-		UiTestDriver.TrackTopLevelWindow(window);
-
+		var originalCurrentDirectory = Environment.CurrentDirectory;
+		var projectParentPath = Directory.GetParent(project.RootPath)!.FullName;
+		Environment.CurrentDirectory = projectParentPath;
+		var relativeProjectPath = Path.GetRelativePath(projectParentPath, project.RootPath);
+		MainWindow? window = null;
 		try
 		{
+			var options = CommandLineOptions.Empty;
+			var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+			window = new MainWindow(options, services)
+			{
+				Width = 1500,
+				Height = 920
+			};
+			UiTestDriver.TrackTopLevelWindow(window);
+
 			window.Show();
 			await UiTestDriver.WaitForConditionAsync(
 				window,
@@ -36,11 +40,16 @@ public sealed class MainWindowStartupAutomationUiTests
 			var viewModel = UiTestDriver.GetViewModel(window);
 			Assert.Equal(project.RootPath, GetCurrentPath(window));
 			Assert.Contains(project.RootPath, viewModel.Title, StringComparison.Ordinal);
-			Assert.DoesNotContain(relativeProjectPath, viewModel.Title, StringComparison.Ordinal);
+			Assert.StartsWith(
+				$"{MainWindowViewModel.BaseTitle} - {project.RootPath}",
+				viewModel.Title,
+				StringComparison.Ordinal);
 		}
 		finally
 		{
-			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+			if (window is not null)
+				await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+			Environment.CurrentDirectory = originalCurrentDirectory;
 		}
 	}
 

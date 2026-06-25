@@ -293,15 +293,18 @@ public sealed class CancellationPatternTests
 
 		await innerTasksStarted.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken: TestContext.Current.CancellationToken);
 		cts.Cancel();
-		releaseGate.TrySetResult(true);
 
 		try
 		{
-			await outerTask;
+			await outerTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
 			exitedGracefully = true;
+		}
+		finally
+		{
+			releaseGate.TrySetResult(true);
 		}
 
 		Assert.True(exitedGracefully || outerTask.IsCanceled);
