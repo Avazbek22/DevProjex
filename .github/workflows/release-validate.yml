@@ -172,6 +172,52 @@ jobs:
             }
           }
 
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-export-project-${{ matrix.rid }}"
+          $sourceDirectory = Join-Path $projectDirectory "src"
+          New-Item -ItemType Directory -Force -Path $sourceDirectory | Out-Null
+          "class App {}" | Set-Content -LiteralPath (Join-Path $sourceDirectory "App.cs") -Encoding utf8NoBOM
+
+          $exportStdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stdout.txt"
+          $exportStderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stderr.txt"
+          Remove-Item -LiteralPath $exportStdoutPath, $exportStderrPath -ErrorAction SilentlyContinue
+          $exportArguments = @(
+            "--path", $projectDirectory,
+            "--export", "tree",
+            "--include-root", "src",
+            "--include-extension", "cs",
+            "--ignore", "none")
+
+          if ($env:RUNNER_OS -eq "Windows") {
+            $process = Start-Process `
+              -FilePath $exePath `
+              -ArgumentList $exportArguments `
+              -RedirectStandardOutput $exportStdoutPath `
+              -RedirectStandardError $exportStderrPath `
+              -NoNewWindow `
+              -Wait `
+              -PassThru
+            $exitCode = $process.ExitCode
+          }
+          else {
+            & $exePath @exportArguments > $exportStdoutPath 2> $exportStderrPath
+            $exitCode = $LASTEXITCODE
+          }
+
+          $exportStdout = Get-Content -Raw -Path $exportStdoutPath -ErrorAction SilentlyContinue
+          $exportStderr = Get-Content -Raw -Path $exportStderrPath -ErrorAction SilentlyContinue
+
+          if ($exitCode -ne 0) {
+            throw "Published export smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$exportStderr"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($exportStderr)) {
+            throw "Published export smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$exportStderr"
+          }
+
+          if ($exportStdout -notmatch "App\.cs") {
+            throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
+          }
+
           Write-Host "Command-line smoke passed for ${{ matrix.rid }}."
 
       - name: PATH Wrapper Smoke (Unix)
@@ -272,6 +318,36 @@ jobs:
             if ($reportOutput -notmatch '"schemaVersion"' -or $reportOutput -notmatch '"rootPath"') {
               throw "PATH wrapper headless report did not print the expected JSON contract for ${{ matrix.rid }}. StdOut=$reportOutput"
             }
+
+            $exportTreeOutput = Invoke-DevProjexPathCommand -Name "export-tree-stdout" -Arguments @(
+              "--path", $projectDirectory,
+              "--export", "tree",
+              "--format", "json",
+              "--roots", "src",
+              "--ext", "cs",
+              "--ignore", "none")
+
+            if ($exportTreeOutput -notmatch '"rootPath"' -or $exportTreeOutput -notmatch "App\.cs") {
+              throw "PATH wrapper export JSON tree did not print the expected payload for ${{ matrix.rid }}. StdOut=$exportTreeOutput"
+            }
+
+            $exportFilePath = Join-Path $workDirectory "context.txt"
+            $exportFileOutput = Invoke-DevProjexPathCommand -Name "export-tree-content-file" -Arguments @(
+              $projectDirectory,
+              "--export", "tree-content",
+              "-o", $exportFilePath,
+              "--roots", "src",
+              "--ext", "cs",
+              "--ignore", "none")
+
+            if ($exportFileOutput.Trim() -ne (Resolve-Path $exportFilePath).Path) {
+              throw "PATH wrapper export file did not print the expected output path for ${{ matrix.rid }}. StdOut=$exportFileOutput Expected=$exportFilePath"
+            }
+
+            $exportFileContent = Get-Content -Raw -Path $exportFilePath -ErrorAction SilentlyContinue
+            if ($exportFileContent -notmatch "App\.cs" -or $exportFileContent -notmatch "class App") {
+              throw "PATH wrapper export file did not contain the expected tree-content payload for ${{ matrix.rid }}. Content=$exportFileContent"
+            }
           }
           finally {
             $env:PATH = $previousPath
@@ -329,6 +405,50 @@ jobs:
             if ($stdout -notmatch "Usage:") {
               throw "Portable launcher $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
             }
+          }
+
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-launcher-export-project-${{ matrix.rid }}"
+          $sourceDirectory = Join-Path $projectDirectory "src"
+          New-Item -ItemType Directory -Force -Path $sourceDirectory | Out-Null
+          "class App {}" | Set-Content -LiteralPath (Join-Path $sourceDirectory "App.cs") -Encoding utf8NoBOM
+
+          $exportPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-context.txt"
+          Remove-Item -LiteralPath $stdoutPath, $stderrPath, $exportPath -ErrorAction SilentlyContinue
+          $cmdArguments = @(
+            "/d", "/c", "`"$launcherPath`"",
+            $projectDirectory,
+            "--export", "tree-content",
+            "-o", $exportPath,
+            "--roots", "src",
+            "--ext", "cs",
+            "--ignore", "none")
+          $process = Start-Process `
+            -FilePath "cmd.exe" `
+            -ArgumentList $cmdArguments `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
+          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+          if ($process.ExitCode -ne 0) {
+            throw "Portable launcher export smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            throw "Portable launcher export smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
+          }
+
+          if ($stdout.Trim() -ne (Resolve-Path $exportPath).Path) {
+            throw "Portable launcher export smoke did not print the expected output path for ${{ matrix.rid }}. StdOut=$stdout Expected=$exportPath"
+          }
+
+          $exportContent = Get-Content -Raw -Path $exportPath -ErrorAction SilentlyContinue
+          if ($exportContent -notmatch "App\.cs" -or $exportContent -notmatch "class App") {
+            throw "Portable launcher export smoke did not write the expected tree-content payload for ${{ matrix.rid }}. Content=$exportContent"
           }
 
           Write-Host "Portable launcher smoke passed for ${{ matrix.rid }}."

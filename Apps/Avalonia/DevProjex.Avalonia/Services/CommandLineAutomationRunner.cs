@@ -28,7 +28,7 @@ internal static class CommandLineAutomationRunner
 		if (parseResult.Errors.Count > 0)
 			return WriteErrors(parseResult.Errors, context.Error);
 
-		if (!parseResult.Options.NoUi)
+		if (!ShouldRunHeadlessAnalysis(parseResult.Options))
 			return CommandLineExitCodes.Success;
 
 		return await RunHeadlessAnalysisAsync(parseResult.Options, context, cancellationToken)
@@ -39,7 +39,7 @@ internal static class CommandLineAutomationRunner
 		parseResult.Errors.Count > 0 ||
 		parseResult.Options.ShowHelp ||
 		parseResult.Options.ShowVersion ||
-		parseResult.Options.NoUi;
+		ShouldRunHeadlessAnalysis(parseResult.Options);
 
 	private static async Task<int> RunHeadlessAnalysisAsync(
 		CommandLineOptions options,
@@ -48,32 +48,51 @@ internal static class CommandLineAutomationRunner
 	{
 		if (string.IsNullOrWhiteSpace(options.Path))
 		{
-			WriteError(context.Error, "--no-ui requires --path or a positional project path.");
+			WriteError(context.Error, "Headless analysis requires --path or a positional project path.");
 			return CommandLineExitCodes.UsageError;
 		}
 
-		if (!options.Report.Enabled)
+		var validationError = ValidateHeadlessOptions(options);
+		if (validationError is not null)
 		{
-			WriteError(context.Error, "--no-ui requires --report or --report-path because no window is shown.");
+			WriteError(context.Error, validationError);
 			return CommandLineExitCodes.UsageError;
 		}
 
 		try
 		{
 			var services = context.ServicesFactory(options);
-			var report = await services.ProjectAnalysisService.AnalyzeAsync(
-					new ProjectAnalysisRequest(
-						RootPath: options.Path!,
-						SelectedRootFolders: options.HasRootFolderOverrides ? options.IncludeRootFolders : null,
-						SelectedExtensions: options.HasExtensionOverrides ? options.IncludeExtensions : null,
-						SelectedIgnoreOptions: options.HasIgnoreOverrides ? options.IgnoreOptions : null),
-					cancellationToken)
-				.ConfigureAwait(false);
+			var loadedProject = services.ProjectAnalysisService.Load(
+				new ProjectAnalysisRequest(
+					RootPath: options.Path!,
+					SelectedRootFolders: options.HasRootFolderOverrides ? options.IncludeRootFolders : null,
+					SelectedExtensions: options.HasExtensionOverrides ? options.IncludeExtensions : null,
+					SelectedIgnoreOptions: options.HasIgnoreOverrides ? options.IgnoreOptions : null),
+				cancellationToken);
 
-			await WriteReportAsync(options, context, services, report, cancellationToken)
-				.ConfigureAwait(false);
+			ProjectAnalysisReport? report = null;
+			if (options.Report.Enabled)
+			{
+				report = await services.ProjectAnalysisService
+					.BuildReportFromTreeAsync(loadedProject, cancellationToken)
+					.ConfigureAwait(false);
 
-			return ResolveStrictExitCode(options, report, context.Error);
+				await WriteReportAsync(options, context, services, report, cancellationToken)
+					.ConfigureAwait(false);
+			}
+
+			if (options.Export.Enabled)
+			{
+				var exportPayload = await services.ProjectExportService
+					.BuildAsync(loadedProject, options.Export, cancellationToken)
+					.ConfigureAwait(false);
+
+				await WriteExportAsync(options, context, services, exportPayload, cancellationToken)
+					.ConfigureAwait(false);
+			}
+
+			var diagnostics = report?.Diagnostics ?? ProjectAnalysisService.BuildDiagnostics(loadedProject);
+			return ResolveStrictExitCode(options, diagnostics, context.Error);
 		}
 		catch (OperationCanceledException)
 		{
@@ -85,6 +104,66 @@ internal static class CommandLineAutomationRunner
 			WriteError(context.Error, ex.Message);
 			return CommandLineExitCodes.RuntimeError;
 		}
+	}
+
+	private static bool ShouldRunHeadlessAnalysis(CommandLineOptions options) =>
+		options.NoUi ||
+		options.Export.Enabled ||
+		HasDetachedExportOptions(options);
+
+	private static bool HasDetachedExportOptions(CommandLineOptions options) =>
+		!options.Export.Enabled &&
+		(options.Export.HasOutputPath || options.Export.FormatSpecified || options.Export.Format != TreeTextFormat.Ascii);
+
+	private static string? ValidateHeadlessOptions(CommandLineOptions options)
+	{
+		if (HasDetachedExportOptions(options))
+			return "--output and --export-format require --export.";
+
+		if (!options.Report.Enabled && !options.Export.Enabled)
+			return "Headless analysis requires --report, --report-path, or --export.";
+
+		if (options.Export.Enabled &&
+		    options.Export.Mode == StartupExportMode.Content &&
+		    options.Export.Format != TreeTextFormat.Ascii)
+			return "--export-format applies only to tree and tree-content exports.";
+
+		if (ReportAndExportUseSameExplicitFile(options))
+			return "--report-path and --output must point to different files.";
+
+		var reportWritesToStdout = options.Report.Enabled && options.Report.WriteToStandardOutput;
+		var exportWritesToStdout = options.Export.Enabled && options.Export.WriteToStandardOutput;
+		if (!reportWritesToStdout && !exportWritesToStdout)
+			return null;
+
+		// Stdout must stay machine-safe: it can contain exactly one payload and no extra path lines.
+		if (reportWritesToStdout && options.Export.Enabled)
+			return "Cannot combine --report - with --export. Write one result to a file.";
+
+		if (exportWritesToStdout && options.Report.Enabled)
+			return "Cannot combine stdout export with --report. Use --output for export or write the report to a separate command.";
+
+		return null;
+	}
+
+	private static bool ReportAndExportUseSameExplicitFile(CommandLineOptions options)
+	{
+		if (!options.Report.Enabled ||
+		    !options.Export.Enabled ||
+		    string.IsNullOrWhiteSpace(options.Report.Path) ||
+		    string.IsNullOrWhiteSpace(options.Export.Path) ||
+		    options.Report.WriteToStandardOutput ||
+		    options.Export.WriteToStandardOutput)
+		{
+			return false;
+		}
+
+		var reportPath = ResolveExplicitOutputPath(options.Report.Path);
+		var exportPath = ResolveExplicitOutputPath(options.Export.Path);
+		var comparison = OperatingSystem.IsWindows()
+			? StringComparison.OrdinalIgnoreCase
+			: StringComparison.Ordinal;
+		return string.Equals(reportPath, exportPath, comparison);
 	}
 
 	private static int WriteErrors(IReadOnlyList<CommandLineParseError> errors, TextWriter errorWriter)
@@ -115,21 +194,59 @@ internal static class CommandLineAutomationRunner
 		context.Output.WriteLine(reportPath);
 	}
 
+	private static async Task WriteExportAsync(
+		CommandLineOptions options,
+		CommandLineAutomationContext context,
+		AvaloniaAppServices services,
+		string exportPayload,
+		CancellationToken cancellationToken)
+	{
+		if (options.Export.WriteToStandardOutput)
+		{
+			if (exportPayload.Length == 0)
+				return;
+
+			await context.Output.WriteAsync(exportPayload.AsMemory(), cancellationToken).ConfigureAwait(false);
+			if (!exportPayload.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+				await context.Output.WriteLineAsync().ConfigureAwait(false);
+			return;
+		}
+
+		var exportPath = ResolveExplicitOutputPath(options.Export.Path!);
+		var directory = Path.GetDirectoryName(exportPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		await using (var stream = new FileStream(
+			             exportPath,
+			             FileMode.Create,
+			             FileAccess.Write,
+			             FileShare.Read,
+			             bufferSize: 16 * 1024,
+			             FileOptions.Asynchronous | FileOptions.SequentialScan))
+		{
+			await services.TextFileExportService.WriteAsync(stream, exportPayload, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		context.Output.WriteLine(exportPath);
+	}
+
 	private static int ResolveStrictExitCode(
 		CommandLineOptions options,
-		ProjectAnalysisReport report,
+		ProjectAnalysisDiagnosticsReport diagnostics,
 		TextWriter errorWriter)
 	{
-		if (!options.Strict || IsClean(report.Diagnostics))
+		if (!options.Strict || IsClean(diagnostics))
 			return CommandLineExitCodes.Success;
 
-		WriteError(errorWriter, "Strict mode failed because the analysis report contains diagnostics.");
-		foreach (var warning in report.Diagnostics.Warnings)
+		WriteError(errorWriter, "Strict mode failed because the analysis result contains diagnostics.");
+		foreach (var warning in diagnostics.Warnings)
 			WriteError(errorWriter, warning);
 
-		if (report.Diagnostics.RootAccessDenied)
+		if (diagnostics.RootAccessDenied)
 			WriteError(errorWriter, "Root path access was denied.");
-		if (report.Diagnostics.HadAccessDenied)
+		if (diagnostics.HadAccessDenied)
 			WriteError(errorWriter, "One or more directories could not be read.");
 
 		return CommandLineExitCodes.RuntimeError;
@@ -139,6 +256,14 @@ internal static class CommandLineAutomationRunner
 		!diagnostics.RootAccessDenied &&
 		!diagnostics.HadAccessDenied &&
 		diagnostics.Warnings.Count == 0;
+
+	private static string ResolveExplicitOutputPath(string outputPath)
+	{
+		if (Path.IsPathRooted(outputPath))
+			return Path.GetFullPath(outputPath);
+
+		return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), outputPath));
+	}
 
 	private static void WriteError(TextWriter error, string message) => error.WriteLine($"DevProjex: {message}");
 

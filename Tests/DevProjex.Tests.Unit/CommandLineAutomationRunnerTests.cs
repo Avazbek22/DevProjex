@@ -73,11 +73,11 @@ public sealed class CommandLineAutomationRunnerTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Equal(string.Empty, output.ToString());
-		Assert.Contains("--no-ui requires --path", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("Headless analysis requires --path", error.ToString(), StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public async Task RunUtilityOrHeadlessAsync_NoUiWithoutReportWritesUsageError()
+	public async Task RunUtilityOrHeadlessAsync_NoUiWithoutReportOrExportWritesUsageError()
 	{
 		using var output = new StringWriter();
 		using var error = new StringWriter();
@@ -91,7 +91,120 @@ public sealed class CommandLineAutomationRunnerTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Equal(string.Empty, output.ToString());
-		Assert.Contains("--no-ui requires --report", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("requires --report, --report-path, or --export", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_OutputWithoutExportWritesUsageErrorBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.Output, "/tmp/context.txt"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("--output and --export-format require --export", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("ascii")]
+	[InlineData("json")]
+	public async Task RunUtilityOrHeadlessAsync_FormatAliasWithoutExportWritesUsageErrorBeforeCreatingServices(string format)
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.Format, format
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("--output and --export-format require --export", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_RejectsCompetingStdoutPayloadsBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Export, "tree"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("Cannot combine --report - with --export", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_RejectsSameReportAndExportOutputPathBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.ReportPath, "/tmp/result.txt",
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Output, "/tmp/result.txt"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("--report-path and --output must point to different files", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_RejectsJsonFormatForContentExportBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.Export, "content",
+			CommandLineOptionTokens.ExportFormat, "json"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("--export-format applies only to tree", error.ToString(), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -155,6 +268,11 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Help])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Version])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.NoUi])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Export, "tree"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Output, "/tmp/context.txt"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.ShortOutput, "/tmp/context.txt"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "ascii"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "json"])));
 	}
 
 	private static CommandLineAutomationContext CreateContext(

@@ -30,6 +30,9 @@ public sealed class CommandLineOptionsTests
 			"--lang=ru",
 			"--report-path=/tmp/report.json",
 			"--report-format=json",
+			"--export=tree-content",
+			"--output=/tmp/context.txt",
+			"--export-format=json",
 			"--include-root=src",
 			"--include-extension=cs",
 			"--ignore=dot-folders"
@@ -41,6 +44,11 @@ public sealed class CommandLineOptionsTests
 		Assert.True(result.Options.Report.Enabled);
 		Assert.Equal("/tmp/report.json", result.Options.Report.Path);
 		Assert.Equal(StartupReportFormat.Json, result.Options.Report.Format);
+		Assert.True(result.Options.Export.Enabled);
+		Assert.Equal(StartupExportMode.TreeContent, result.Options.Export.Mode);
+		Assert.Equal("/tmp/context.txt", result.Options.Export.Path);
+		Assert.Equal(TreeTextFormat.Json, result.Options.Export.Format);
+		Assert.True(result.Options.Export.FormatSpecified);
 		Assert.Equal(["src"], result.Options.IncludeRootFolders);
 		Assert.Equal([".cs"], result.Options.IncludeExtensions);
 		Assert.Equal([IgnoreOptionId.DotFolders], result.Options.IgnoreOptions);
@@ -237,6 +245,171 @@ public sealed class CommandLineOptionsTests
 
 		AssertInvalid(result, "invalid-report-format");
 		Assert.True(result.Options.Report.Enabled);
+	}
+
+	[Theory]
+	[InlineData("tree", StartupExportMode.Tree)]
+	[InlineData("content", StartupExportMode.Content)]
+	[InlineData("tree-content", StartupExportMode.TreeContent)]
+	[InlineData("tree-and-content", StartupExportMode.TreeContent)]
+	[InlineData("all", StartupExportMode.TreeContent)]
+	public void Parse_ReadsExportModes(string value, StartupExportMode expectedMode)
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Export, value]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Export.Enabled);
+		Assert.Equal(expectedMode, result.Options.Export.Mode);
+		Assert.True(result.Options.Export.WriteToStandardOutput);
+	}
+
+	[Theory]
+	[InlineData("ascii", TreeTextFormat.Ascii)]
+	[InlineData("text", TreeTextFormat.Ascii)]
+	[InlineData("json", TreeTextFormat.Json)]
+	public void Parse_ReadsExportFormat(string value, TreeTextFormat expectedFormat)
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.ExportFormat, value
+		]);
+
+		AssertValid(result);
+		Assert.Equal(expectedFormat, result.Options.Export.Format);
+		Assert.True(result.Options.Export.FormatSpecified);
+	}
+
+	[Fact]
+	public void Parse_ReadsExportOutputFile()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Export, "content",
+			CommandLineOptionTokens.Output, "/tmp/context.md"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Export.Enabled);
+		Assert.Equal(StartupExportMode.Content, result.Options.Export.Mode);
+		Assert.Equal("/tmp/context.md", result.Options.Export.Path);
+		Assert.False(result.Options.Export.WriteToStandardOutput);
+	}
+
+	[Fact]
+	public void Parse_ReadsExportOutputDashAsStdout()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Export.WriteToStandardOutput);
+	}
+
+	[Fact]
+	public void Parse_ReadsConvenienceAliasesForExportAndSelection()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ShortOutput, "/tmp/context.md",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Roots, "tests",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Extensions, "json"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Export.Enabled);
+		Assert.Equal(StartupExportMode.TreeContent, result.Options.Export.Mode);
+		Assert.Equal("/tmp/context.md", result.Options.Export.Path);
+		Assert.Equal(TreeTextFormat.Json, result.Options.Export.Format);
+		Assert.True(result.Options.Export.FormatSpecified);
+		Assert.Equal(["src", "tests"], result.Options.IncludeRootFolders);
+		Assert.Equal([".cs", ".json"], result.Options.IncludeExtensions);
+	}
+
+	[Fact]
+	public void Parse_ReadsShortOutputInlineAssignment()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Export, "tree",
+			$"{CommandLineOptionTokens.ShortOutput}=/tmp/context.md"
+		]);
+
+		AssertValid(result);
+		Assert.Equal("/tmp/context.md", result.Options.Export.Path);
+	}
+
+	[Fact]
+	public void Parse_RejectsEmptyShortOutputInlineAssignment()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Export, "tree",
+			$"{CommandLineOptionTokens.ShortOutput}="
+		]);
+
+		AssertInvalid(result, "missing-value");
+		Assert.Contains(result.Errors, static error => error.Token == CommandLineOptionTokens.ShortOutput);
+	}
+
+	[Fact]
+	public void Parse_FormatAliasTargetsExportFormatAndDoesNotEnableReport()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Format, "json"
+		]);
+
+		AssertValid(result);
+		Assert.False(result.Options.Report.Enabled);
+		Assert.False(result.Options.Export.Enabled);
+		Assert.Equal(TreeTextFormat.Json, result.Options.Export.Format);
+		Assert.True(result.Options.Export.FormatSpecified);
+	}
+
+	[Fact]
+	public void Parse_FormatAliasAsciiRecordsExplicitOptionEvenThoughValueMatchesDefault()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Format, "ascii"
+		]);
+
+		AssertValid(result);
+		Assert.False(result.Options.Export.Enabled);
+		Assert.Equal(TreeTextFormat.Ascii, result.Options.Export.Format);
+		Assert.True(result.Options.Export.FormatSpecified);
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedFormatAliasValue()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Format, "yaml"
+		]);
+
+		AssertInvalid(result, "invalid-export-format");
+		Assert.Contains(result.Errors, static error => error.Token == CommandLineOptionTokens.Format);
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedExportMode()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Export, "zip"]);
+
+		AssertInvalid(result, "invalid-export-mode");
+		Assert.False(result.Options.Export.Enabled);
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedExportFormat()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.ExportFormat, "xml"
+		]);
+
+		AssertInvalid(result, "invalid-export-format");
+		Assert.True(result.Options.Export.Enabled);
 	}
 
 	[Fact]
@@ -457,6 +630,7 @@ public sealed class CommandLineOptionsTests
 			NoUi = true,
 			Strict = true,
 			Report = new StartupReportOptions(true, "/tmp/report folder/report.json", StartupReportFormat.Json),
+			Export = new StartupExportOptions(true, StartupExportMode.TreeContent, "/tmp/export folder/context.txt", TreeTextFormat.Json),
 			IncludeRootFolders = ["src"],
 			IncludeExtensions = [".cs"],
 			IgnoreOptions = [IgnoreOptionId.DotFolders],
@@ -469,12 +643,36 @@ public sealed class CommandLineOptionsTests
 		Assert.Contains("--strict", args);
 		Assert.Contains("--report", args);
 		Assert.Contains("\"/tmp/report folder/report.json\"", args);
+		Assert.Contains("--export", args);
+		Assert.Contains("tree-content", args);
+		Assert.Contains("--output", args);
+		Assert.Contains("\"/tmp/export folder/context.txt\"", args);
+		Assert.Contains("--export-format", args);
+		Assert.Contains("json", args);
 		Assert.Contains("--include-root", args);
 		Assert.Contains("src", args);
 		Assert.Contains("--include-extension", args);
 		Assert.Contains(".cs", args);
 		Assert.Contains("--ignore", args);
 		Assert.Contains("dot-folders", args);
+	}
+
+	[Fact]
+	public void ToArguments_PreservesExplicitAsciiExportFormatForRelaunch()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			Export = StartupExportOptions.Disabled with
+			{
+				Format = TreeTextFormat.Ascii,
+				FormatSpecified = true
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--export-format", args);
+		Assert.Contains("ascii", args);
 	}
 
 	[Fact]
@@ -590,6 +788,8 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(expected.ShowHelp, actual.ShowHelp);
 		Assert.Equal(expected.ShowVersion, actual.ShowVersion);
 		Assert.Equal(expected.Report, actual.Report);
+		Assert.Equal(expected.Export, actual.Export);
+		Assert.Equal(expected.Export.FormatSpecified, actual.Export.FormatSpecified);
 		Assert.Equal(expected.IncludeRootFolders, actual.IncludeRootFolders);
 		Assert.Equal(expected.IncludeExtensions, actual.IncludeExtensions);
 		Assert.Equal(expected.IgnoreOptions, actual.IgnoreOptions);
@@ -617,8 +817,15 @@ public sealed class CommandLineOptionsTests
 		{ CommandLineOptionTokens.Language, "ru" },
 		{ CommandLineOptionTokens.ReportPath, "/tmp/report.json" },
 		{ CommandLineOptionTokens.ReportFormat, "json" },
+		{ CommandLineOptionTokens.Export, "tree-content" },
+		{ CommandLineOptionTokens.Output, "/tmp/context.txt" },
+		{ CommandLineOptionTokens.ShortOutput, "/tmp/context.txt" },
+		{ CommandLineOptionTokens.ExportFormat, "json" },
+		{ CommandLineOptionTokens.Format, "json" },
 		{ CommandLineOptionTokens.IncludeRoot, "src" },
+		{ CommandLineOptionTokens.Roots, "src" },
 		{ CommandLineOptionTokens.IncludeExtension, "cs" },
+		{ CommandLineOptionTokens.Extensions, "cs" },
 		{ CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders }
 	};
 
@@ -628,8 +835,15 @@ public sealed class CommandLineOptionsTests
 		CommandLineOptionTokens.Language,
 		CommandLineOptionTokens.ReportPath,
 		CommandLineOptionTokens.ReportFormat,
+		CommandLineOptionTokens.Export,
+		CommandLineOptionTokens.Output,
+		CommandLineOptionTokens.ShortOutput,
+		CommandLineOptionTokens.ExportFormat,
+		CommandLineOptionTokens.Format,
 		CommandLineOptionTokens.IncludeRoot,
+		CommandLineOptionTokens.Roots,
 		CommandLineOptionTokens.IncludeExtension,
+		CommandLineOptionTokens.Extensions,
 		CommandLineOptionTokens.Ignore
 	};
 }

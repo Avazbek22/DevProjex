@@ -230,7 +230,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineProcessSmoke|FullyQualifiedName~CommandLineDocumentation"
+          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineProcessSmoke|FullyQualifiedName~CommandLineDocumentation"
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 
@@ -242,7 +242,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineProcessSmoke|FullyQualifiedName~CommandLineDocumentation"
+          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineProcessSmoke|FullyQualifiedName~CommandLineDocumentation"
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 

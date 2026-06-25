@@ -147,6 +147,126 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_ExportTreeToStdoutWithoutNoUi()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("docs", "Guide.md"), "# Guide\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("App.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Guide.md", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportTreeContentToRelativeOutputFromWorkingDirectory()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		temp.CreateFile(Path.Combine("project with spaces", "src", "App.cs"), "class App {}\n");
+		var relativeOutputPath = Path.Combine("exports", "context.txt");
+		var expectedOutputPath = Path.GetFullPath(Path.Combine(temp.Path, relativeOutputPath));
+
+		var result = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.Output, relativeOutputPath,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var printedOutputPath = AssertSingleOutputLine(result.Stdout);
+		Assert.Equal(expectedOutputPath, printedOutputPath);
+		Assert.True(File.Exists(expectedOutputPath));
+		var payload = await File.ReadAllTextAsync(expectedOutputPath, TestContext.Current.CancellationToken);
+		Assert.Contains("App.cs", payload, StringComparison.Ordinal);
+		Assert.Contains("class App", payload, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ConvenienceAliasesExportTreeContentToRelativeOutput()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		temp.CreateFile(Path.Combine("project with spaces", "src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("project with spaces", "src", "appsettings.json"), "{}\n");
+		temp.CreateFile(Path.Combine("project with spaces", "docs", "Guide.md"), "# Guide\n");
+		var relativeOutputPath = Path.Combine("exports", "alias-context.txt");
+		var expectedOutputPath = Path.GetFullPath(Path.Combine(temp.Path, relativeOutputPath));
+
+		var result = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ShortOutput, relativeOutputPath,
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Equal(expectedOutputPath, AssertSingleOutputLine(result.Stdout));
+		var payload = await File.ReadAllTextAsync(expectedOutputPath, TestContext.Current.CancellationToken);
+		Assert.Contains("App.cs", payload, StringComparison.Ordinal);
+		Assert.Contains("class App", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("appsettings.json", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("Guide.md", payload, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportJsonTreeToStdoutWritesJsonOnly()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.ExportFormat, "json",
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		Assert.Equal(Path.GetFullPath(temp.Path), document.RootElement.GetProperty("rootPath").GetString());
+		Assert.DoesNotContain("class App", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_FormatAliasWritesJsonTreeToStdout()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		Assert.Equal("App.cs", document.RootElement.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		Assert.DoesNotContain("class App", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task Process_ReportDashWritesJsonToStdout()
 	{
 		using var temp = new TemporaryDirectory();
@@ -329,7 +449,23 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stdout);
-		Assert.Contains("--no-ui requires --path", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains("Headless analysis requires --path", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ReportStdoutAndExportConflictReturnsUsageError()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Export, "tree");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("Cannot combine --report - with --export", result.Stderr, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -349,6 +485,58 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(string.Empty, result.Stdout);
 		Assert.Contains("Unsupported report format 'xml'.", result.Stderr, StringComparison.Ordinal);
 		Assert.False(File.Exists(reportPath));
+	}
+
+	[Fact]
+	public async Task Process_InvalidExportModeReturnsUsageErrorBeforeCreatingOutput()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var outputPath = Path.Combine(temp.Path, "context.txt");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "zip",
+			CommandLineOptionTokens.Output, outputPath);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("Unsupported export mode 'zip'.", result.Stderr, StringComparison.Ordinal);
+		Assert.False(File.Exists(outputPath));
+	}
+
+	[Fact]
+	public async Task Process_InvalidExportFormatReturnsUsageErrorBeforeCreatingOutput()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var outputPath = Path.Combine(temp.Path, "context.txt");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Output, outputPath,
+			CommandLineOptionTokens.ExportFormat, "xml");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("Unsupported export format 'xml'.", result.Stderr, StringComparison.Ordinal);
+		Assert.False(File.Exists(outputPath));
+	}
+
+	[Fact]
+	public async Task Process_FormatAliasAsciiWithoutExportReturnsUsageErrorInsteadOfOpeningUi()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Format, "ascii");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("--output and --export-format require --export", result.Stderr, StringComparison.Ordinal);
 	}
 
 	[Fact]

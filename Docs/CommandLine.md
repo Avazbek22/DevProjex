@@ -1,8 +1,8 @@
 # DevProjex Command Line
 
-DevProjex can be launched from a terminal to open a project folder, preselect filters, and generate automation reports.
+DevProjex can be launched from a terminal to open a project folder, preselect filters, generate automation reports, and export tree/content text.
 
-The command line surface is intentionally small. The desktop UI remains the primary experience; CLI options are for startup automation, repeatable checks, and scripts that need a machine-readable project analysis report.
+The desktop UI remains the primary experience. CLI options are for startup automation, repeatable checks, machine-readable project analysis reports, and script-friendly text exports.
 
 ## Usage
 
@@ -51,11 +51,14 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--report [file]` | Writes a JSON analysis report. If `file` is omitted, DevProjex writes to the default report folder. Use `--report -` to write JSON to stdout. |
 | `--report-path <file>` | Writes a JSON analysis report to a specific file. |
 | `--report-format json` | Selects the report format. JSON is the v1 format. |
-| `--include-root <name>` | Includes one root folder. Can be repeated. |
-| `--include-extension <ext>` | Includes one extension. Can be repeated. `cs` and `.cs` are equivalent. |
+| `--export <mode>` | Exports project text and exits without showing the window. Supported modes: `tree`, `content`, `tree-content`. |
+| `--output <file\|->`, `-o <file\|->` | Writes export text to a specific file, or to stdout when `-` is used. If omitted, export writes to stdout. |
+| `--export-format ascii\|json`, `--format ascii\|json` | Selects tree format for `tree` and `tree-content` exports. Content remains plain text. `--format json` is the short practical form for the rare JSON tree export. |
+| `--include-root <name>`, `--roots <name>` | Includes one root folder. Can be repeated. |
+| `--include-extension <ext>`, `--ext <ext>` | Includes one extension. Can be repeated. `cs` and `.cs` are equivalent. |
 | `--ignore <name\|none>` | Uses exact ignore options for automation. Can be repeated. |
 | `--strict` | Returns a failure exit code when the generated report contains diagnostics such as missing selected roots/extensions or access-denied folders. The report is still written first. |
-| `--no-ui`, `--silent` | Runs analysis without showing the window. Requires `--report` or `--report-path`. |
+| `--no-ui`, `--silent` | Runs analysis without showing the window. Requires `--report`, `--report-path`, or `--export`. |
 | `--version` | Prints application version and exits. |
 | `--help`, `-h`, `/?` | Prints help and exits. |
 
@@ -103,13 +106,36 @@ devprojex --no-ui --path "/home/me/projects/app" --report -
 
 In that mode stdout contains only the JSON report. If `--strict` is also used and diagnostics are present, the JSON is still written to stdout before DevProjex returns a failure exit code and writes diagnostic messages to stderr.
 
+## Exports
+
+Exports are human-readable text payloads that match the app's copy/export behavior:
+
+- `tree`: project tree only;
+- `content`: text file contents only;
+- `tree-content`: tree followed by file contents.
+
+Export commands run headlessly even when `--no-ui` is omitted:
+
+```bash
+devprojex "/home/me/projects/app" --export tree -o -
+devprojex "/home/me/projects/app" --export tree-content -o ./context.txt
+devprojex "/home/me/projects/app" --export content --roots src --ext cs -o ./src-content.md
+```
+
+`--format json` changes only the tree part. File contents remain plain text so the result is still easy to paste into tools that expect source context.
+`--format` and `--export-format` are valid for `tree` and `tree-content`; `content` exports are always plain text.
+
+When `--output` is omitted, export writes to stdout. When `--output` points to a file, DevProjex creates parent folders when needed, writes UTF-8 without BOM, prints the absolute output path to stdout, and never modifies the opened project folder unless that folder is explicitly chosen as the output location.
+When report and export are requested together, `--report-path` and `--output` must point to different files.
+
 ## Output Contract
 
 Automation-friendly output is kept strict:
 
-- `stdout`: help text, version text, the generated report path, or the JSON report when `--report -` is used.
+- `stdout`: help text, version text, generated file paths, JSON report payloads, or export payloads.
 - `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
-- no UI is created for `--help`, `--version`, or `--no-ui`.
+- no UI is created for `--help`, `--version`, `--no-ui`, or `--export`.
+- only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
 
 ## Windows Portable EXE Note
 
@@ -143,7 +169,7 @@ Linux and macOS terminal launches use the published executable directly.
 | Code | Meaning |
 | --- | --- |
 | `0` | Success, help, or version output. |
-| `1` | Runtime failure, strict-mode diagnostics, unavailable project path, or failed report write. |
+| `1` | Runtime failure, strict-mode diagnostics, unavailable project path, or failed report/export write. |
 | `2` | Invalid arguments or invalid command combination. |
 | `130` | Operation canceled. |
 
@@ -176,7 +202,25 @@ devprojex --path "/home/me/projects/app" --no-ui --report
 Run without UI with exact selection overrides:
 
 ```powershell
-DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json" --include-root src --include-extension cs --ignore none
+DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json" --roots src --ext cs --ignore none
+```
+
+Export tree and content to a file:
+
+```bash
+devprojex "/home/me/projects/app" --export tree-content -o ./context.txt --roots src --ext cs --ignore none
+```
+
+Print an ASCII tree to stdout:
+
+```bash
+devprojex "/home/me/projects/app" --export tree -o -
+```
+
+Print a JSON tree to stdout:
+
+```bash
+devprojex "/home/me/projects/app" --export tree --format json
 ```
 
 Pipe the JSON report to stdout:
@@ -188,7 +232,7 @@ devprojex --no-ui --path "/home/me/projects/app" --report -
 Fail CI when the selected report contract has warnings:
 
 ```bash
-devprojex --no-ui --path "/home/me/projects/app" --report ./devprojex-report.json --include-root src --include-extension cs --strict
+devprojex --no-ui --path "/home/me/projects/app" --report ./devprojex-report.json --roots src --ext cs --strict
 ```
 
 Run with selected ignore options:

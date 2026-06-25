@@ -8,8 +8,15 @@ public static class CommandLineOptionTokens
 	public const string Report = "--report";
 	public const string ReportPath = "--report-path";
 	public const string ReportFormat = "--report-format";
+	public const string Export = "--export";
+	public const string Output = "--output";
+	public const string ShortOutput = "-o";
+	public const string ExportFormat = "--export-format";
+	public const string Format = "--format";
 	public const string IncludeRoot = "--include-root";
+	public const string Roots = "--roots";
 	public const string IncludeExtension = "--include-extension";
+	public const string Extensions = "--ext";
 	public const string Ignore = "--ignore";
 	public const string Strict = "--strict";
 	public const string NoUi = "--no-ui";
@@ -40,8 +47,15 @@ public static class CommandLineOptionTokens
 		Report,
 		ReportPath,
 		ReportFormat,
+		Export,
+		Output,
+		ShortOutput,
+		ExportFormat,
+		Format,
 		IncludeRoot,
+		Roots,
 		IncludeExtension,
+		Extensions,
 		Ignore,
 		Strict,
 		NoUi,

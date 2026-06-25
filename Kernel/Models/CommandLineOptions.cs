@@ -13,6 +13,7 @@ public sealed record CommandLineOptions(
 	public bool ShowHelp { get; init; }
 	public bool ShowVersion { get; init; }
 	public StartupReportOptions Report { get; init; } = StartupReportOptions.Disabled;
+	public StartupExportOptions Export { get; init; } = StartupExportOptions.Disabled;
 	public IReadOnlyList<string> IncludeRootFolders { get; init; } = [];
 	public IReadOnlyList<string> IncludeExtensions { get; init; } = [];
 	public IReadOnlyList<IgnoreOptionId> IgnoreOptions { get; init; } = [];
@@ -36,6 +37,7 @@ public sealed record CommandLineOptions(
 		bool showHelp = false;
 		bool showVersion = false;
 		var report = StartupReportOptions.Disabled;
+		var export = StartupExportOptions.Disabled;
 		var includeRootFolders = new List<string>();
 		var includeExtensions = new List<string>();
 		var ignoreOptions = new List<IgnoreOptionId>();
@@ -142,7 +144,49 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals(CommandLineOptionTokens.IncludeRoot, StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.Export, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				if (!TryParseExportMode(value, out var mode))
+				{
+					errors.Add(new CommandLineParseError("invalid-export-mode", $"Unsupported export mode '{value}'.", arg));
+					continue;
+				}
+
+				export = export with { Enabled = true, Mode = mode };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.Output, StringComparison.OrdinalIgnoreCase) ||
+			    arg.Equals(CommandLineOptionTokens.ShortOutput, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				export = export with { Path = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.ExportFormat, StringComparison.OrdinalIgnoreCase) ||
+			    arg.Equals(CommandLineOptionTokens.Format, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				if (!TryParseExportFormat(value, out var format))
+				{
+					errors.Add(new CommandLineParseError("invalid-export-format", $"Unsupported export format '{value}'.", arg));
+					continue;
+				}
+
+				export = export with { Format = format, FormatSpecified = true };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.IncludeRoot, StringComparison.OrdinalIgnoreCase) ||
+			    arg.Equals(CommandLineOptionTokens.Roots, StringComparison.OrdinalIgnoreCase))
 			{
 				if (TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					includeRootFolders.Add(value);
@@ -150,7 +194,8 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
-			if (arg.Equals(CommandLineOptionTokens.IncludeExtension, StringComparison.OrdinalIgnoreCase))
+			if (arg.Equals(CommandLineOptionTokens.IncludeExtension, StringComparison.OrdinalIgnoreCase) ||
+			    arg.Equals(CommandLineOptionTokens.Extensions, StringComparison.OrdinalIgnoreCase))
 			{
 				if (TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					includeExtensions.Add(NormalizeExtension(value));
@@ -205,6 +250,7 @@ public sealed record CommandLineOptions(
 			ShowHelp = showHelp,
 			ShowVersion = showVersion,
 			Report = report,
+			Export = export,
 			IncludeRootFolders = includeRootFolders.ToArray(),
 			IncludeExtensions = includeExtensions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
 			IgnoreOptions = ignoreOptions.ToArray(),
@@ -253,6 +299,24 @@ public sealed record CommandLineOptions(
 				parts.Add(CommandLineOptionTokens.ReportFormat);
 				parts.Add(Report.Format.ToString().ToLowerInvariant());
 			}
+		}
+
+		if (Export.Enabled)
+		{
+			parts.Add(CommandLineOptionTokens.Export);
+			parts.Add(FormatExportMode(Export.Mode));
+		}
+
+		if (!string.IsNullOrWhiteSpace(Export.Path))
+		{
+			parts.Add(CommandLineOptionTokens.Output);
+			parts.Add(Quote(Export.Path!));
+		}
+
+		if (Export.FormatSpecified || Export.Format != TreeTextFormat.Ascii)
+		{
+			parts.Add(CommandLineOptionTokens.ExportFormat);
+			parts.Add(Export.Format.ToString().ToLowerInvariant());
 		}
 
 		foreach (var root in IncludeRootFolders)
@@ -394,16 +458,28 @@ public sealed record CommandLineOptions(
 		optionName = arg;
 		value = string.Empty;
 
-		if (!arg.StartsWith("--", StringComparison.Ordinal))
-			return false;
-
 		var separatorIndex = arg.IndexOf('=');
-		if (separatorIndex <= 2)
+		if (separatorIndex < 0)
 			return false;
 
-		optionName = arg[..separatorIndex];
-		value = arg[(separatorIndex + 1)..];
-		return true;
+		if (arg.StartsWith("--", StringComparison.Ordinal))
+		{
+			if (separatorIndex <= 2)
+				return false;
+
+			optionName = arg[..separatorIndex];
+			value = arg[(separatorIndex + 1)..];
+			return true;
+		}
+
+		if (arg.Length >= 3 && arg[0] == '-' && char.IsLetter(arg[1]) && separatorIndex == 2)
+		{
+			optionName = arg[..separatorIndex];
+			value = arg[(separatorIndex + 1)..];
+			return true;
+		}
+
+		return false;
 	}
 
 	private static bool IsHelpToken(string value) =>
@@ -432,6 +508,52 @@ public sealed record CommandLineOptions(
 		format = StartupReportFormat.Json;
 		return false;
 	}
+
+	private static bool TryParseExportMode(string value, out StartupExportMode mode)
+	{
+		switch (NormalizeOptionName(value))
+		{
+			case "tree":
+				mode = StartupExportMode.Tree;
+				return true;
+			case "content":
+				mode = StartupExportMode.Content;
+				return true;
+			case "tree-content":
+			case "tree-and-content":
+			case "all":
+				mode = StartupExportMode.TreeContent;
+				return true;
+			default:
+				mode = default;
+				return false;
+		}
+	}
+
+	private static bool TryParseExportFormat(string value, out TreeTextFormat format)
+	{
+		switch (NormalizeOptionName(value))
+		{
+			case "ascii":
+			case "text":
+				format = TreeTextFormat.Ascii;
+				return true;
+			case "json":
+				format = TreeTextFormat.Json;
+				return true;
+			default:
+				format = TreeTextFormat.Ascii;
+				return false;
+		}
+	}
+
+	private static string FormatExportMode(StartupExportMode mode) => mode switch
+	{
+		StartupExportMode.Tree => "tree",
+		StartupExportMode.Content => "content",
+		StartupExportMode.TreeContent => "tree-content",
+		_ => mode.ToString().ToLowerInvariant()
+	};
 
 	private static string NormalizeExtension(string value)
 	{
@@ -516,6 +638,31 @@ public sealed record StartupReportOptions(
 public enum StartupReportFormat
 {
 	Json
+}
+
+public sealed record StartupExportOptions(
+	bool Enabled,
+	StartupExportMode Mode,
+	string? Path,
+	TreeTextFormat Format)
+{
+	public static StartupExportOptions Disabled { get; } = new(false, StartupExportMode.TreeContent, null, TreeTextFormat.Ascii);
+
+	public bool FormatSpecified { get; init; }
+
+	public bool HasOutputPath => !string.IsNullOrWhiteSpace(Path);
+
+	public bool WriteToStandardOutput =>
+		Enabled &&
+		(string.IsNullOrWhiteSpace(Path) ||
+		 string.Equals(Path.Trim(), CommandLineOptionTokens.StandardOutputReportPath, StringComparison.Ordinal));
+}
+
+public enum StartupExportMode
+{
+	Tree,
+	Content,
+	TreeContent
 }
 
 public sealed record CommandLineParseResult(

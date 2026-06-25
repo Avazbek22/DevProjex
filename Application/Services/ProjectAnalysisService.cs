@@ -17,6 +17,14 @@ public sealed class ProjectAnalysisService(
 		ProjectAnalysisRequest request,
 		CancellationToken cancellationToken = default)
 	{
+		var loadedProject = Load(request, cancellationToken);
+		return await BuildReportFromTreeAsync(loadedProject, cancellationToken).ConfigureAwait(false);
+	}
+
+	public LoadedProjectAnalysisRequest Load(
+		ProjectAnalysisRequest request,
+		CancellationToken cancellationToken = default)
+	{
 		if (string.IsNullOrWhiteSpace(request.RootPath))
 			throw new ArgumentException("Root path is required.", nameof(request));
 
@@ -46,20 +54,17 @@ public sealed class ProjectAnalysisService(
 			cancellationToken);
 		loadingStopwatch.Stop();
 
-		return await BuildReportFromTreeAsync(
-				new LoadedProjectAnalysisRequest(
-					RootPath: request.RootPath,
-					Tree: treeResult,
-					AvailableRootFolders: scan.RootFolders,
-					AvailableExtensions: scan.Extensions,
-					SelectedRootFolders: allowedRootFolders,
-					SelectedExtensions: allowedExtensions,
-					SelectedIgnoreOptions: selectedIgnoreOptions,
-					RootAccessDenied: scan.RootAccessDenied || treeResult.RootAccessDenied,
-					HadAccessDenied: scan.HadAccessDenied || treeResult.HadAccessDenied,
-					KnownLoadingElapsed: loadingStopwatch.Elapsed),
-				cancellationToken)
-			.ConfigureAwait(false);
+		return new LoadedProjectAnalysisRequest(
+			RootPath: request.RootPath,
+			Tree: treeResult,
+			AvailableRootFolders: scan.RootFolders,
+			AvailableExtensions: scan.Extensions,
+			SelectedRootFolders: allowedRootFolders,
+			SelectedExtensions: allowedExtensions,
+			SelectedIgnoreOptions: selectedIgnoreOptions,
+			RootAccessDenied: scan.RootAccessDenied || treeResult.RootAccessDenied,
+			HadAccessDenied: scan.HadAccessDenied || treeResult.HadAccessDenied,
+			KnownLoadingElapsed: loadingStopwatch.Elapsed);
 	}
 
 	public async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
@@ -98,11 +103,14 @@ public sealed class ProjectAnalysisService(
 				LoadingMilliseconds: ToMilliseconds(loadingElapsed),
 				AnalysisMilliseconds: ToMilliseconds(analysisElapsed),
 				TotalMilliseconds: ToMilliseconds(totalElapsed)),
-			Diagnostics: new ProjectAnalysisDiagnosticsReport(
-				RootAccessDenied: request.RootAccessDenied,
-				HadAccessDenied: request.HadAccessDenied,
-				Warnings: BuildWarnings(request).ToArray()));
+			Diagnostics: BuildDiagnostics(request));
 	}
+
+	public static ProjectAnalysisDiagnosticsReport BuildDiagnostics(LoadedProjectAnalysisRequest request) =>
+		new(
+			RootAccessDenied: request.RootAccessDenied,
+			HadAccessDenied: request.HadAccessDenied,
+			Warnings: BuildWarnings(request).ToArray());
 
 	private IReadOnlyCollection<IgnoreOptionId> ResolveSelectedIgnoreOptions(
 		string rootPath,
