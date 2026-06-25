@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using DevProjex.Infrastructure.Reports;
 
@@ -6,6 +7,43 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowStartupAutomationUiTests
 {
+	[AvaloniaFact]
+	public async Task OpenFolder_RelativePath_NormalizesCurrentPathAndTitle()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+		var relativeProjectPath = Path.GetRelativePath(Environment.CurrentDirectory, project.RootPath);
+		var options = CommandLineOptions.Empty;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		var window = new MainWindow(options, services)
+		{
+			Width = 1500,
+			Height = 920
+		};
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.IsVisible,
+				"main window to become visible before opening a relative folder");
+
+			await UiTestDriver.OpenFolderAsync(window, relativeProjectPath);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Equal(project.RootPath, GetCurrentPath(window));
+			Assert.Contains(project.RootPath, viewModel.Title, StringComparison.Ordinal);
+			Assert.DoesNotContain(relativeProjectPath, viewModel.Title, StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task StartupReport_WritesReportAfterCommandLineProjectLoad()
 	{
@@ -108,5 +146,11 @@ public sealed class MainWindowStartupAutomationUiTests
 		{
 			window.Close();
 		}
+	}
+
+	private static string? GetCurrentPath(MainWindow window)
+	{
+		var field = typeof(MainWindow).GetField("_currentPath", BindingFlags.Instance | BindingFlags.NonPublic);
+		return Assert.IsType<string>(field?.GetValue(window));
 	}
 }

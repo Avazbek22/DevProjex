@@ -6727,15 +6727,26 @@ public partial class MainWindow : Window
 
     private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
-        if (!Directory.Exists(path))
+        string normalizedPath;
+        try
+        {
+            normalizedPath = PathUtility.Normalize(path);
+        }
+        catch
         {
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
-        if (!_scanOptions.CanReadRoot(path))
+        if (!Directory.Exists(normalizedPath))
         {
-            if (TryElevateAndRestart(path))
+            await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
+            return false;
+        }
+
+        if (!_scanOptions.CanReadRoot(normalizedPath))
+        {
+            if (TryElevateAndRestart(normalizedPath))
                 return false;
 
             if (BuildFlags.AllowElevation)
@@ -6743,7 +6754,7 @@ public partial class MainWindow : Window
             return false;
         }
 
-        await _projectLoadPipeline.OpenFolderAsync(path, fromDialog, recordRecentFolder);
+        await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
         return true;
     }
 

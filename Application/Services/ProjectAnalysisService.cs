@@ -28,14 +28,15 @@ public sealed class ProjectAnalysisService(
 		if (string.IsNullOrWhiteSpace(request.RootPath))
 			throw new ArgumentException("Root path is required.", nameof(request));
 
-		if (!Directory.Exists(request.RootPath))
+		var rootPath = PathUtility.Normalize(request.RootPath);
+		if (!Directory.Exists(rootPath))
 			throw new DirectoryNotFoundException($"Project path was not found: {request.RootPath}");
 
 		var loadingStopwatch = Stopwatch.StartNew();
 		var selectedRootFolders = NormalizeRootFolders(request.SelectedRootFolders);
-		var selectedIgnoreOptions = ResolveSelectedIgnoreOptions(request.RootPath, selectedRootFolders, request.SelectedIgnoreOptions);
-		var rules = ignoreRules.Build(request.RootPath, selectedIgnoreOptions, selectedRootFolders);
-		var scan = scanOptions.Execute(new ScanOptionsRequest(request.RootPath, rules), cancellationToken);
+		var selectedIgnoreOptions = ResolveSelectedIgnoreOptions(rootPath, selectedRootFolders, request.SelectedIgnoreOptions);
+		var rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		var scan = scanOptions.Execute(new ScanOptionsRequest(rootPath, rules), cancellationToken);
 
 		var allowedRootFolders = request.SelectedRootFolders is null
 			? scan.RootFolders.ToArray()
@@ -44,9 +45,9 @@ public sealed class ProjectAnalysisService(
 			? scan.Extensions.ToArray()
 			: NormalizeExtensions(request.SelectedExtensions).ToArray();
 
-		rules = ignoreRules.Build(request.RootPath, selectedIgnoreOptions, allowedRootFolders);
+		rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
 		var treeResult = buildTree.Execute(new BuildTreeRequest(
-			request.RootPath,
+			rootPath,
 			new TreeFilterOptions(
 				AllowedExtensions: allowedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 				AllowedRootFolders: allowedRootFolders.ToHashSet(PathComparer.Default),
@@ -55,7 +56,7 @@ public sealed class ProjectAnalysisService(
 		loadingStopwatch.Stop();
 
 		return new LoadedProjectAnalysisRequest(
-			RootPath: request.RootPath,
+			RootPath: rootPath,
 			Tree: treeResult,
 			AvailableRootFolders: scan.RootFolders,
 			AvailableExtensions: scan.Extensions,

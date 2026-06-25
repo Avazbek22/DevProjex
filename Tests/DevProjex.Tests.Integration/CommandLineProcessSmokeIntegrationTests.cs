@@ -167,6 +167,33 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_ExportTreeFromCurrentDirectory_NormalizesRootAndAppliesDefaultIgnores()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "[Bb]in/\n[Oo]bj/\n");
+		temp.CreateFile("App.csproj", "<Project />\n");
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("bin", "Debug", "DevProjex.dll"), "binary\n");
+		temp.CreateFile(Path.Combine("obj", "Release", "Generated.g.cs"), "generated\n");
+		temp.CreateFile(Path.Combine("Infrastructure_artifacts_temp", "temp-build", "obj", "Release", "net10.0", "Generated.g.cs"), "generated\n");
+
+		var result = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			".",
+			CommandLineOptionTokens.Export, "tree");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.StartsWith(Path.GetFullPath(temp.Path), result.Stdout, StringComparison.Ordinal);
+		Assert.False(result.Stdout.StartsWith($".:{Environment.NewLine}", StringComparison.Ordinal));
+		Assert.Contains("App.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("├── .", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("bin", result.Stdout, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("obj", result.Stdout, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("Generated.g.cs", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task Process_ExportTreeContentToRelativeOutputFromWorkingDirectory()
 	{
 		using var temp = new TemporaryDirectory();
