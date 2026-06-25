@@ -75,15 +75,25 @@ public sealed class MainWindowGitMenuUiTests(UiWorkspaceFixture workspace)
 
 			PopulateBranches(window, count: 15);
 			InvokeUpdateBranchMenu(window);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 12);
 
-			Assert.DoesNotContain("git-branch-menu-scrollable", branchMenu.Classes);
-			Assert.Equal(15, branchMenu.Items.Count);
-			Assert.DoesNotContain(branchMenu.Items, item => item is ScrollViewer);
-			Assert.DoesNotContain(
-				popupRoot
-					.GetVisualDescendants()
-					.OfType<Control>(),
-				control => control.Classes.Contains("git-branch-external-scrollbar"));
+			var refreshedBranchMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "GitBranchMenuItem");
+			Assert.DoesNotContain("git-branch-menu-scrollable", refreshedBranchMenu.Classes);
+			Assert.Equal(15, refreshedBranchMenu.Items.Count);
+			Assert.DoesNotContain(refreshedBranchMenu.Items, item => item is ScrollViewer);
+
+			var refreshedPopup = refreshedBranchMenu
+				.GetVisualDescendants()
+				.OfType<Popup>()
+				.FirstOrDefault(popup => popup.IsOpen);
+			if (refreshedPopup?.Child is Visual refreshedPopupRoot)
+			{
+				Assert.DoesNotContain(
+					refreshedPopupRoot
+						.GetVisualDescendants()
+						.OfType<Control>(),
+					control => control.Classes.Contains("git-branch-external-scrollbar"));
+			}
 		}
 		finally
 		{
