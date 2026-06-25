@@ -9,11 +9,11 @@ public partial class MainWindow
         _previewPipeline.Dispose();
         _refreshPipeline.Dispose();
         StopMetricsDebounceTimers();
-        CancelBackgroundMemoryCleanup();
 
         CancelAndDispose(ref _previewSelectionMetricsCts);
         CancelAndDispose(ref _previewMemoryCleanupCts);
         CancelAndDispose(ref _searchMemoryCleanupCts);
+        CancelAndDispose(ref _backgroundMemoryCleanupCts);
         CancelAndDispose(ref _previewModeSwitchCts);
 
         CancelAndDispose(ref _projectOperationCts);
@@ -27,6 +27,7 @@ public partial class MainWindow
         {
             _previewSelectionMetricsDebounceTimer.Stop();
             _previewSelectionMetricsDebounceTimer.Tick -= OnPreviewSelectionMetricsDebounceTick;
+            _previewSelectionMetricsDebounceTimer = null;
         }
 
     }

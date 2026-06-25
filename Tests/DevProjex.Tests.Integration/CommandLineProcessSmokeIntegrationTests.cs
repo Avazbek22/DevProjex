@@ -1117,9 +1117,13 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 	private static async Task CreateUnixWrapperAsync(string wrapperPath, string? appExecutablePath = null)
 	{
+		var content = TerminalCommandSetupService
+			.BuildWrapperContent(appExecutablePath ?? GetNativeAppHostExecutablePath())
+			.Replace("\r\n", "\n", StringComparison.Ordinal);
+
 		await File.WriteAllTextAsync(
 			wrapperPath,
-			TerminalCommandSetupService.BuildWrapperContent(appExecutablePath ?? GetNativeAppHostExecutablePath()),
+			content,
 			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
 			TestContext.Current.CancellationToken);
 		MakeExecutableIfUnix(wrapperPath);
@@ -1221,7 +1225,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	{
 		var startInfo = new ProcessStartInfo
 		{
-			FileName = commandName,
+			FileName = File.Exists("/usr/bin/env") ? "/usr/bin/env" : "env",
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			UseShellExecute = false,
@@ -1232,6 +1236,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			startInfo.WorkingDirectory = workingDirectory;
 
 		startInfo.Environment["PATH"] = PrependPath(binDirectory, startInfo.Environment["PATH"]);
+		startInfo.ArgumentList.Add(commandName);
 		foreach (var arg in args)
 			startInfo.ArgumentList.Add(arg);
 

@@ -172,13 +172,17 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		// The target comment is intentionally plain text so stale wrappers can be
 		// repaired without parsing shell syntax or executing anything.
-		return string.Join(
+		var script = string.Join(
 			"\n",
 			"#!/bin/sh",
 			UnixWrapperMarker,
 			UnixTargetPrefix + targetPath,
 			"exec " + ShellQuote(targetPath) + " \"$@\"",
 			string.Empty);
+
+		// Unix kernels parse the shebang before a shell sees the file; CRLF in the
+		// first line turns /bin/sh into /bin/sh\r and makes exec fail with ENOENT.
+		return script.Replace("\r\n", "\n", StringComparison.Ordinal);
 	}
 
 	internal static string BuildWindowsLauncherContent(string targetPath)
