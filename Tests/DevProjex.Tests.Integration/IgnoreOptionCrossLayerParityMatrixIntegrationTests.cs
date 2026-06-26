@@ -177,7 +177,7 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 	}
 
 	private static SelectionRefreshSnapshot ComputeConvergedSnapshot(
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshContext context)
 	{
@@ -341,7 +341,7 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 	}
 
 	private static void AssertDirectScannerParity(
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshSnapshot snapshot,
 		CrossLayerScenario scenario)
@@ -533,7 +533,7 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 	}
 
 	private static void AssertRepeatedRefreshIsStable(
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshSnapshot snapshot,
 		CrossLayerScenario scenario)
@@ -576,7 +576,7 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 
 	private static void AssertTreeInventoryProjectionMatchesDirectTree(
 		string rootPath,
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		SelectionRefreshSnapshot snapshot,
 		CrossLayerScenario scenario)
 	{

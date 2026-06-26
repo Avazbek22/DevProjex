@@ -734,7 +734,7 @@ internal static class UiTestDriver
     {
         var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
         Assert.NotNull(clipboard);
-        return await global::Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard);
+        return await ClipboardExtensions.TryGetTextAsync(clipboard);
     }
 
     public static async Task WaitForClipboardTextAsync(
@@ -758,7 +758,7 @@ internal static class UiTestDriver
             await WaitForSettledFramesAsync(frameCount: 2);
         }
 
-        throw new Xunit.Sdk.XunitException(
+        throw new XunitException(
             $"Timed out waiting for clipboard text to match the expected preview copy payload. Expected length={expectedText.Length}, actual length={lastClipboardText?.Length ?? 0}.");
     }
 
@@ -1282,10 +1282,10 @@ internal static class UiTestDriver
         return Assert.IsType<CheckBox>(FindTreeNodeCheckBox(window, displayName));
     }
 
-    private static DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator GetSelectionCoordinator(MainWindow window)
+    private static Avalonia.Coordinators.SelectionSyncCoordinator GetSelectionCoordinator(MainWindow window)
     {
         var field = typeof(MainWindow).GetField("_selectionCoordinator", BindingFlags.Instance | BindingFlags.NonPublic);
-        return Assert.IsType<DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
+        return Assert.IsType<Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
     }
 
     private static bool IsPreviewPipelineIdle(MainWindow window)
@@ -1296,10 +1296,10 @@ internal static class UiTestDriver
         return GetPreviewPipeline(window).IsIdle;
     }
 
-    private static DevProjex.Avalonia.Coordinators.PreviewWorkspacePipeline GetPreviewPipeline(MainWindow window)
+    private static Avalonia.Coordinators.PreviewWorkspacePipeline GetPreviewPipeline(MainWindow window)
     {
         var field = typeof(MainWindow).GetField("_previewPipeline", BindingFlags.Instance | BindingFlags.NonPublic);
-        return Assert.IsType<DevProjex.Avalonia.Coordinators.PreviewWorkspacePipeline>(field?.GetValue(window));
+        return Assert.IsType<Avalonia.Coordinators.PreviewWorkspacePipeline>(field?.GetValue(window));
     }
 
     private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)

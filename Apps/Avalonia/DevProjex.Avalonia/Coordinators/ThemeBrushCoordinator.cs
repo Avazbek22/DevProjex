@@ -22,7 +22,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         if (e.Source is not MenuItem menuItem)
             return;
 
-        Dispatcher.UIThread.Post(() =>
+        window.Dispatcher.Post(() =>
         {
             // Guard: if the element is already detached from the visual tree (menu/window closed), do nothing.
             if (TopLevel.GetTopLevel(menuItem) is null)

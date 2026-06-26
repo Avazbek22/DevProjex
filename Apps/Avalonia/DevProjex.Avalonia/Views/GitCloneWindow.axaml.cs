@@ -14,7 +14,7 @@ public partial class GitCloneWindow : Window
         // Focus URL textbox when window opens
         Opened += (_, _) =>
         {
-            Dispatcher.UIThread.Post(() =>
+            Dispatcher.Post(() =>
             {
                 _urlTextBox?.Focus();
                 _urlTextBox?.SelectAll();
@@ -57,7 +57,7 @@ public partial class GitCloneWindow : Window
             return;
 
         viewModel.GitCloneUrl = recent.Value;
-        Dispatcher.UIThread.Post(() =>
+        Dispatcher.Post(() =>
         {
             _urlTextBox?.Focus();
             _urlTextBox?.SelectAll();

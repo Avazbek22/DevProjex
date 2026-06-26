@@ -39,11 +39,11 @@ internal static class GitBranchMenuScrollBehavior
             return;
         }
 
-        Dispatcher.UIThread.Post(
+        menuItem.Dispatcher.Post(
             () =>
             {
                 Apply(menuItem);
-                Dispatcher.UIThread.Post(() => Apply(menuItem), DispatcherPriority.Render);
+                menuItem.Dispatcher.Post(() => Apply(menuItem), DispatcherPriority.Render);
             },
             DispatcherPriority.Loaded);
     }
@@ -232,7 +232,7 @@ internal static class GitBranchMenuScrollBehavior
         private readonly Control _track;
         private readonly Border _thumb;
         private readonly TranslateTransform _thumbTransform = new();
-        private global::Avalonia.Input.IPointer? _capturedPointer;
+        private IPointer? _capturedPointer;
 
         public ScrollIndicatorBinding(ScrollViewer scrollViewer, Control indicator, Control track, Border thumb)
         {
@@ -250,8 +250,8 @@ internal static class GitBranchMenuScrollBehavior
             _indicator.PointerReleased += OnIndicatorPointerReleased;
 
             SyncFromViewer();
-            Dispatcher.UIThread.Post(SyncFromViewer, DispatcherPriority.Loaded);
-            Dispatcher.UIThread.Post(SyncFromViewer, DispatcherPriority.Render);
+            _scrollViewer.Dispatcher.Post(SyncFromViewer, DispatcherPriority.Loaded);
+            _scrollViewer.Dispatcher.Post(SyncFromViewer, DispatcherPriority.Render);
         }
 
         public void SyncFromViewer()

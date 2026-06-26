@@ -7,7 +7,7 @@ public sealed class RecentProjectsMultiInstanceIntegrationTests
     [Fact]
     public async Task IndependentInstances_ConcurrentRecentUpdates_AreMergedWithoutHistoryLoss()
     {
-        using var temp = new Helpers.TemporaryDirectory();
+        using var temp = new TemporaryDirectory();
         var storeA = new RecentProjectsStore(() => temp.Path);
         var storeB = new RecentProjectsStore(() => temp.Path);
         var snapshotA = storeA.Load();
@@ -40,7 +40,7 @@ public sealed class RecentProjectsMultiInstanceIntegrationTests
     [Fact]
     public void TryPersist_StaleDetachedSnapshot_MergesWithNewerPersistedFolders()
     {
-        using var temp = new Helpers.TemporaryDirectory();
+        using var temp = new TemporaryDirectory();
         var writerStore = new RecentProjectsStore(() => temp.Path);
         var retryStore = new RecentProjectsStore(() => temp.Path);
         var newerFolder = temp.CreateDirectory("Workspace/Newer");

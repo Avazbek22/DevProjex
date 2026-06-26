@@ -1,6 +1,6 @@
 namespace DevProjex.Tests.Integration;
 
-using DevProjex.Tests.Integration.Helpers;
+using Helpers;
 public sealed class IgnoredSelectedRootFolderScanContractIntegrationTests
 {
 	[Fact]

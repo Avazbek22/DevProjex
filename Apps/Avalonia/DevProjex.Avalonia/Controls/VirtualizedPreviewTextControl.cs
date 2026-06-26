@@ -105,10 +105,10 @@ public sealed class VirtualizedPreviewTextControl : Control
     private MenuItem? _copyMenuItem;
     private MenuItem? _selectAllMenuItem;
     private MenuItem? _clearSelectionMenuItem;
-    private static readonly global::Avalonia.Input.Cursor PreviewTextCursor =
-        new(global::Avalonia.Input.StandardCursorType.Ibeam);
-    private static readonly global::Avalonia.Input.Cursor PreviewMenuCursor =
-        new(global::Avalonia.Input.StandardCursorType.Arrow);
+    private static readonly Cursor PreviewTextCursor =
+        new(StandardCursorType.Ibeam);
+    private static readonly Cursor PreviewMenuCursor =
+        new(StandardCursorType.Arrow);
 
     static VirtualizedPreviewTextControl()
     {
@@ -1416,7 +1416,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         if (_selectionAutoScrollTimer is null)
         {
-            _selectionAutoScrollTimer = new DispatcherTimer
+            _selectionAutoScrollTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
             {
                 Interval = AutoScrollTickInterval
             };

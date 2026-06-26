@@ -7,7 +7,7 @@ public sealed class UserSettingsPersistenceIntegrationTests
     [Fact]
     public async Task IndependentInstances_ConcurrentSaves_DoNotCorruptUserSettingsDocument()
     {
-        using var temp = new Helpers.TemporaryDirectory();
+        using var temp = new TemporaryDirectory();
         var storeA = new UserSettingsStore(() => temp.Path);
         var storeB = new UserSettingsStore(() => temp.Path);
         var firstSnapshot = storeA.Load();

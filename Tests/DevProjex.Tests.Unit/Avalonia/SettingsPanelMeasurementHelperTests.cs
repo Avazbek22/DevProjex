@@ -1,4 +1,4 @@
-using global::Avalonia.Controls;
+using Avalonia.Controls;
 using DevProjex.Avalonia.Views;
 
 namespace DevProjex.Tests.Unit.Avalonia;

@@ -187,7 +187,7 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
             string rootPath,
             SelectionRefreshSnapshot snapshot)
         {
-            var context = ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(rootPath, snapshot);
+            var context = CreateContextFromSnapshot(rootPath, snapshot);
             return context with
             {
                 RootSelectionCache = CollectCheckedVisibleRootNames(snapshot),

@@ -79,6 +79,19 @@ public partial class MainWindow : Window
         IPreviewTextDocument Document,
         PreviewSelectionRange SelectionRange);
 
+    private static async Task YieldUiAsync(DispatcherPriority priority)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            // Dispatcher.Yield is the Avalonia 12 replacement for posting an empty UI callback
+            // when the caller already runs on the UI thread.
+            await Dispatcher.Yield(priority);
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, priority);
+    }
+
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     private sealed class ProjectLoadTiming
     {
@@ -411,8 +424,6 @@ public partial class MainWindow : Window
             _dropZoneContainer.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
             _dropZoneContainer.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
             _dropZoneContainer.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
-            // Start with animation class since no project is loaded initially
-            _dropZoneContainer.Classes.Add("drop-zone-animating");
         }
 
         InitializeUserSettings();
@@ -596,8 +607,6 @@ public partial class MainWindow : Window
                 _themeBrushCoordinator.UpdateTransparencyEffect();
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
-            else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
-                UpdateDropZoneFloatAnimationState();
             else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
                      or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
                      or nameof(MainWindowViewModel.StatusProgressValue))
@@ -616,7 +625,7 @@ public partial class MainWindow : Window
             else if (args.PropertyName is nameof(MainWindowViewModel.PreviewFontSize)
                      or nameof(MainWindowViewModel.SelectedFontFamily))
             {
-                Dispatcher.UIThread.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
+                Dispatcher.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
             }
             else if (args.PropertyName is nameof(MainWindowViewModel.TreeItemSpacing)
                      or nameof(MainWindowViewModel.TreeItemPadding)
@@ -759,23 +768,10 @@ public partial class MainWindow : Window
             disposable.Dispose();
     }
 
-    private void UpdateDropZoneFloatAnimationState()
-    {
-        if (_viewModel.IsProjectLoaded)
-        {
-            // Remove animation class to stop drop-zone animations when project is loaded.
-            _dropZoneContainer?.Classes.Remove("drop-zone-animating");
-            return;
-        }
-
-        // Add animation class to enable drop-zone animations.
-        _dropZoneContainer?.Classes.Add("drop-zone-animating");
-    }
-
     private void OnThemeChanged(object? sender, EventArgs e)
     {
         // Defer update to let theme resources settle first
-        Dispatcher.UIThread.Post(
+        Dispatcher.Post(
             RefreshThemeHighlightsForActiveQuery,
             DispatcherPriority.Background);
     }
@@ -874,9 +870,9 @@ public partial class MainWindow : Window
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+        await YieldUiAsync(DispatcherPriority.Background);
         cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
         cancellationToken.ThrowIfCancellationRequested();
 
         // The first frame after a native picker closes is often the focus/activation handoff frame.
@@ -887,9 +883,9 @@ public partial class MainWindow : Window
     private static async Task YieldProjectLoadStartupFrameAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+        await YieldUiAsync(DispatcherPriority.Background);
         cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -1943,7 +1939,7 @@ public partial class MainWindow : Window
             return;
 
         _workspaceChromeRefreshPending = true;
-        Dispatcher.UIThread.Post(
+        Dispatcher.Post(
             () =>
             {
                 _workspaceChromeRefreshPending = false;
@@ -2173,19 +2169,6 @@ public partial class MainWindow : Window
             _systemDialogActivationTcs = null;
             await ShowErrorAsync(ex.Message);
         }
-    }
-
-    private void OnTreeNodeCheckBoxTapped(object? sender, TappedEventArgs e)
-    {
-        // TreeViewItem reacts to routed tap gestures as part of its own selection/expand behavior.
-        // Mark the checkbox gesture as handled after the checkbox processed it so branch toggles
-        // never reinterpret rapid checkbox clicks as expand/collapse requests.
-        e.Handled = true;
-    }
-
-    private void OnTreeNodeCheckBoxDoubleTapped(object? sender, TappedEventArgs e)
-    {
-        e.Handled = true;
     }
 
     private async void OnOpenNewWindow(object? sender, RoutedEventArgs e)
@@ -2725,7 +2708,7 @@ public partial class MainWindow : Window
                _viewModel.IsPreviewLoading &&
                stopwatch.Elapsed < timeout)
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await YieldUiAsync(DispatcherPriority.Background);
             await Task.Delay(15).ConfigureAwait(true);
         }
 
@@ -2735,13 +2718,13 @@ public partial class MainWindow : Window
 
     private void ApplyPreviewToolTipBackdrop(ToolTip toolTip)
     {
-        if (TopLevel.GetTopLevel(toolTip) is null)
+        if (GetTopLevel(toolTip) is null)
             return;
 
-        if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
+        if (GetTopLevel(toolTip) is not TopLevel tooltipLevel)
             return;
 
-        var host = TopLevel.GetTopLevel(this);
+        var host = GetTopLevel(this);
         if (host is not null && ReferenceEquals(tooltipLevel, host))
             return;
 
@@ -3024,7 +3007,7 @@ public partial class MainWindow : Window
             previousDocument?.Dispose();
 
         UpdatePreviewStickyPath();
-        Dispatcher.UIThread.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
+        Dispatcher.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
     }
 
     private void ClearPreviewDocument()
@@ -3429,7 +3412,7 @@ public partial class MainWindow : Window
             _previewPipeline.MarkClearBeforeNextRefresh();
             SchedulePreviewRefresh(immediate: true);
             // Restore keyboard shortcuts to the preview surface after the mode button steals focus.
-            Dispatcher.UIThread.Post(FocusPreviewSurface, DispatcherPriority.Background);
+            Dispatcher.Post(FocusPreviewSurface, DispatcherPriority.Background);
         }
         catch (OperationCanceledException)
         {
@@ -3702,7 +3685,7 @@ public partial class MainWindow : Window
         _previewPaneAnimating = true;
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            await YieldUiAsync(DispatcherPriority.Render);
 
             // Both containers animate as plain width transitions. The live tree stays visible here,
             // which avoids bitmap resampling artifacts during preview open.
@@ -3730,7 +3713,7 @@ public partial class MainWindow : Window
         _previewPaneAnimating = true;
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            await YieldUiAsync(DispatcherPriority.Render);
 
             // Keep the live tree visible during preview close. Preview compact is removed
             // only after the animation completes, so a bitmap snapshot here only adds
@@ -4220,7 +4203,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var topLevel = TopLevel.GetTopLevel(this);
+            var topLevel = GetTopLevel(this);
             var renderScaling = topLevel?.RenderScaling ?? 1.0;
             var pixelWidth = Math.Max(1, (int)Math.Ceiling(size.Width * renderScaling));
             var pixelHeight = Math.Max(1, (int)Math.Ceiling(size.Height * renderScaling));
@@ -4332,7 +4315,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var topLevel = TopLevel.GetTopLevel(this);
+            var topLevel = GetTopLevel(this);
             var renderScaling = topLevel?.RenderScaling ?? 1.0;
             var pixelWidth = Math.Max(1, (int)Math.Ceiling(size.Width * renderScaling));
             var pixelHeight = Math.Max(1, (int)Math.Ceiling(size.Height * renderScaling));
@@ -4430,7 +4413,7 @@ public partial class MainWindow : Window
         _settingsAnimating = true;
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            await YieldUiAsync(DispatcherPriority.Render);
 
             EnsureSettingsPanelTransitions();
             _currentSettingsPanelWidth = GetClampedSettingsPanelWidth(_currentSettingsPanelWidth);
@@ -4628,13 +4611,8 @@ public partial class MainWindow : Window
 
     private static async Task WaitForPreviewRenderPassesAsync()
     {
-        await Dispatcher.UIThread.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
-
-        await Dispatcher.UIThread.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
     }
 
     private async void AnimateFilterBar(bool show)
@@ -5262,7 +5240,7 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.Post(() =>
                 {
                     _taskbarProgress.UpdateGitClone(status);
 
@@ -5424,7 +5402,7 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.Post(() =>
                 {
                     if (GitProgressStatusParser.TryParseTrailingPercent(status, out var percent))
                         _statusOperations.UpdateProgress(percent, statusText, statusOperationId);
@@ -5497,7 +5475,7 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.Post(() =>
                 {
                     if (GitProgressStatusParser.TryParseTrailingPercent(status, out var percent))
                         _statusOperations.UpdateProgress(percent, statusText, statusOperationId);
@@ -6200,7 +6178,7 @@ public partial class MainWindow : Window
 
         // Execute toggle after the current keyboard input dispatch completes.
         // This prevents visual artifacts caused by state changes during tunnel key handling.
-        Dispatcher.UIThread.Post(() =>
+        Dispatcher.Post(() =>
         {
             try
             {
@@ -6268,7 +6246,7 @@ public partial class MainWindow : Window
 
         // Keep text editable after preview restore: place caret to the end without selecting text.
         PlaceCaretAtTextEnd(textBox);
-        _ = Dispatcher.UIThread.InvokeAsync(() => PlaceCaretAtTextEnd(textBox), DispatcherPriority.Input);
+        _ = textBox.Dispatcher.InvokeAsync(() => PlaceCaretAtTextEnd(textBox), DispatcherPriority.Input);
     }
 
     private static void PlaceCaretAtTextEnd(TextBox textBox)
@@ -6300,7 +6278,7 @@ public partial class MainWindow : Window
             if (focused)
                 return;
 
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await YieldUiAsync(DispatcherPriority.Background);
         }
     }
 
@@ -6325,7 +6303,7 @@ public partial class MainWindow : Window
             if (focused)
                 return;
 
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await YieldUiAsync(DispatcherPriority.Background);
         }
     }
 
@@ -6443,8 +6421,8 @@ public partial class MainWindow : Window
 
     private async Task RestoreSearchBoxAccentAfterOpenAsync()
     {
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
 
         if (!_viewModel.SearchVisible || !_viewModel.IsSearchFilterAvailable)
             return;
@@ -6454,8 +6432,8 @@ public partial class MainWindow : Window
 
     private async Task RestoreFilterBoxAccentAfterOpenAsync()
     {
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
 
         if (!_viewModel.FilterVisible || !_viewModel.IsSearchFilterAvailable)
             return;
@@ -6487,7 +6465,7 @@ public partial class MainWindow : Window
             InvalidateVisual();
         }, DispatcherPriority.Render);
 
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
     }
 
     private void ForceHideSearchBarVisualState()
@@ -6835,7 +6813,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await YieldUiAsync(DispatcherPriority.Background);
             var snapshot = _terminalCommandSetupService.Probe();
             var action = ResolveAutomaticTerminalCommandStartupAction(
                 _userSettingsDb.ViewSettings,
@@ -8015,7 +7993,7 @@ public partial class MainWindow : Window
 
         if (_previewSelectionMetricsDebounceTimer is null)
         {
-            _previewSelectionMetricsDebounceTimer = new DispatcherTimer
+            _previewSelectionMetricsDebounceTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
             {
                 Interval = PreviewSelectionMetricsDebounceInterval
             };

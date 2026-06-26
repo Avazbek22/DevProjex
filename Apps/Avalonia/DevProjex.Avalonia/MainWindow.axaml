@@ -353,7 +353,7 @@
     <Grid>
       <!-- Drop zone shown when no project is loaded -->
       <Border Name="DropZoneContainer"
-              Classes="drop-zone-outer"
+              Classes="drop-zone-outer drop-zone-animating"
               IsVisible="{Binding !IsProjectLoaded}"
               Background="Transparent"
               Margin="60"
@@ -549,18 +549,18 @@
                       Classes="island-panel content-island"
                       IsVisible="{Binding IsTreePaneVisible}">
                 <Grid>
-                  <TreeView Name="ProjectTree"
-                            ItemsSource="{Binding TreeNodes}"
-                            IsEnabled="{Binding IsProjectLoaded}"
-                            Padding="0,0,0,4"
-                            FontFamily="{Binding SelectedFontFamily}"
-                            FontSize="{Binding TreeFontSize}">
-                    <TreeView.ItemsPanel>
+                  <controls:ProjectTreeView Name="ProjectTree"
+                                            ItemsSource="{Binding TreeNodes}"
+                                            IsEnabled="{Binding IsProjectLoaded}"
+                                            Padding="0,0,0,4"
+                                            FontFamily="{Binding SelectedFontFamily}"
+                                            FontSize="{Binding TreeFontSize}">
+                    <controls:ProjectTreeView.ItemsPanel>
                       <ItemsPanelTemplate>
                         <VirtualizingStackPanel CacheLength="2" />
                       </ItemsPanelTemplate>
-                    </TreeView.ItemsPanel>
-                    <TreeView.ItemTemplate>
+                    </controls:ProjectTreeView.ItemsPanel>
+                    <controls:ProjectTreeView.ItemTemplate>
                       <TreeDataTemplate x:DataType="vm:TreeNodeViewModel"
                                         ItemsSource="{CompiledBinding ChildItemsSource}">
                         <Grid ColumnDefinitions="Auto,*" Background="Transparent">
@@ -574,8 +574,6 @@
                                       Spacing="{DynamicResource TreeItemSpacingResource}">
                             <CheckBox IsThreeState="True"
                                       IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
-                                      Tapped="OnTreeNodeCheckBoxTapped"
-                                      DoubleTapped="OnTreeNodeCheckBoxDoubleTapped"
                                       VerticalAlignment="Center" />
                             <Image Source="{CompiledBinding Icon}"
                                    Width="{DynamicResource TreeIconSizeResource}"
@@ -595,8 +593,8 @@
                           </StackPanel>
                         </Grid>
                       </TreeDataTemplate>
-                    </TreeView.ItemTemplate>
-                  </TreeView>
+                    </controls:ProjectTreeView.ItemTemplate>
+                  </controls:ProjectTreeView>
 
                   <Button Name="PreviewTreeHideButton"
                           Classes="menu-icon-button tree-island-close-button"

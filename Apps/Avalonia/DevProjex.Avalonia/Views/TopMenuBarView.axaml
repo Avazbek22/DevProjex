@@ -179,6 +179,7 @@
     <Popup Name="ThemePopup"
            IsOpen="{Binding ThemePopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
+           OverlayDismissEventPassThrough="False"
            Placement="Bottom"
            PlacementTarget="{Binding #ThemeMenuItem}">
       <views:ThemePopoverView Name="ThemePopover" />
@@ -188,7 +189,8 @@
     <Popup Name="HelpPopup"
            IsOpen="{Binding HelpPopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
-           PlacementConstraintAdjustment="All"
+           OverlayDismissEventPassThrough="False"
+           PlacementConstraintAdjustment="SlideX, SlideY, FlipX, FlipY, ResizeX, ResizeY"
            Placement="Bottom"
            PlacementTarget="{Binding #HelpMenuItem}">
       <views:AboutPopoverView Name="HelpPopover" />
@@ -198,7 +200,8 @@
     <Popup Name="HelpDocsPopup"
            IsOpen="{Binding HelpDocsPopoverOpen, Mode=TwoWay}"
            IsLightDismissEnabled="True"
-           PlacementConstraintAdjustment="All"
+           OverlayDismissEventPassThrough="False"
+           PlacementConstraintAdjustment="SlideX, SlideY, FlipX, FlipY, ResizeX, ResizeY"
            Placement="Bottom"
            PlacementTarget="{Binding #HelpMenuItem}">
       <views:HelpPopoverView Name="HelpDocsPopover" />
