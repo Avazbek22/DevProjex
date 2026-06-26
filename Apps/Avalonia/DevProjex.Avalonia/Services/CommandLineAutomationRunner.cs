@@ -70,15 +70,25 @@ internal static class CommandLineAutomationRunner
 					SelectedIgnoreOptions: options.HasIgnoreOverrides ? options.IgnoreOptions : null),
 				cancellationToken);
 
+			var writesImplicitStdoutReport = ShouldWriteImplicitStdoutReport(options);
 			ProjectAnalysisReport? report = null;
-			if (options.Report.Enabled)
+			if (options.Report.Enabled || writesImplicitStdoutReport)
 			{
 				report = await services.ProjectAnalysisService
 					.BuildReportFromTreeAsync(loadedProject, cancellationToken)
 					.ConfigureAwait(false);
 
-				await WriteReportAsync(options, context, services, report, cancellationToken)
-					.ConfigureAwait(false);
+				if (writesImplicitStdoutReport)
+				{
+					// Headless analysis should be immediately useful in a terminal while file output stays opt-in.
+					await services.ProjectAnalysisReportWriter.WriteAsync(report, context.Output, cancellationToken)
+						.ConfigureAwait(false);
+				}
+				else
+				{
+					await WriteReportAsync(options, context, services, report, cancellationToken)
+						.ConfigureAwait(false);
+				}
 			}
 
 			if (options.Export.Enabled)
@@ -111,6 +121,11 @@ internal static class CommandLineAutomationRunner
 		options.Export.Enabled ||
 		HasDetachedExportOptions(options);
 
+	private static bool ShouldWriteImplicitStdoutReport(CommandLineOptions options) =>
+		options.NoUi &&
+		!options.Report.Enabled &&
+		!options.Export.Enabled;
+
 	private static bool HasDetachedExportOptions(CommandLineOptions options) =>
 		!options.Export.Enabled &&
 		(options.Export.HasOutputPath || options.Export.FormatSpecified || options.Export.Format != TreeTextFormat.Ascii);
@@ -119,9 +134,6 @@ internal static class CommandLineAutomationRunner
 	{
 		if (HasDetachedExportOptions(options))
 			return "--output and --export-format require --export.";
-
-		if (!options.Report.Enabled && !options.Export.Enabled)
-			return "Headless analysis requires --report, --report-path, or --export.";
 
 		if (options.Export.Enabled &&
 		    options.Export.Mode == StartupExportMode.Content &&

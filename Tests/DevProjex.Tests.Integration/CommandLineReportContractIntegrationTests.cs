@@ -119,6 +119,76 @@ public sealed class CommandLineReportContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task NoUi_WithoutExplicitOutputWritesJsonToStdoutAndDoesNotCreateDefaultReport()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootPath = CreateCrossPlatformWorkspace(temp);
+		var documentsPath = Path.Combine(temp.Path, "Documents");
+		var defaultReportsDirectory = Path.Combine(documentsPath, "DevProjex", "reports");
+		var reportPathResolver = new ReportPathResolver(
+			specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? documentsPath : string.Empty,
+			utcNowProvider: () => new DateTimeOffset(2026, 6, 19, 10, 15, 16, TimeSpan.Zero));
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.Silent,
+			rootPath,
+			CommandLineOptionTokens.IncludeRoot, "src app",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error, services => services with { ReportPathResolver = reportPathResolver }),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(string.Empty, error.ToString());
+		Assert.False(Directory.Exists(defaultReportsDirectory));
+
+		using var document = JsonDocument.Parse(output.ToString());
+		var root = document.RootElement;
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(rootPath, root.GetProperty("rootPath").GetString());
+		Assert.Equal(["src app"], ReadStringArray(root.GetProperty("selection").GetProperty("selectedRootFolders")));
+		Assert.Equal([".cs"], ReadStringArray(root.GetProperty("selection").GetProperty("selectedExtensions")));
+	}
+
+	[Fact]
+	public async Task NoUi_StrictWithoutExplicitOutputWritesJsonBeforeReturningRuntimeError()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootPath = CreateCrossPlatformWorkspace(temp);
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Strict,
+			rootPath,
+			CommandLineOptionTokens.IncludeRoot, "missing-root",
+			CommandLineOptionTokens.IncludeExtension, "missingext",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Contains("Strict mode failed", error.ToString(), StringComparison.Ordinal);
+
+		using var document = JsonDocument.Parse(output.ToString());
+		var diagnostics = document.RootElement.GetProperty("diagnostics");
+		Assert.Contains(
+			diagnostics.GetProperty("warnings").EnumerateArray().Select(static warning => warning.GetString()),
+			warning => warning?.Contains("missing-root", StringComparison.Ordinal) == true);
+	}
+
+	[Fact]
 	public async Task NoUi_StrictReturnsRuntimeErrorAfterWritingReportWhenDiagnosticsExist()
 	{
 		using var temp = new TemporaryDirectory();

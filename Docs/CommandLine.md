@@ -58,7 +58,7 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--include-extension <ext>`, `--ext <ext>` | Includes one extension. Can be repeated. `cs` and `.cs` are equivalent. |
 | `--ignore <name\|none>` | Uses exact ignore options for automation. Can be repeated. |
 | `--strict` | Returns a failure exit code when the generated report contains diagnostics such as missing selected roots/extensions or access-denied folders. The report is still written first. |
-| `--no-ui`, `--silent` | Runs analysis without showing the window. Requires `--report`, `--report-path`, or `--export`. |
+| `--no-ui`, `--silent` | Runs analysis without showing the window. Without an explicit report or export target, writes the JSON analysis report to stdout. |
 | `--version` | Prints application version and exits. |
 | `--help`, `-h`, `/?` | Prints help and exits. |
 
@@ -90,7 +90,7 @@ Reports are JSON documents with:
 - loading, analysis, and total timing in milliseconds;
 - diagnostics and warnings.
 
-If no explicit report path is provided, reports are written to:
+When `--report` is explicitly provided without a file path, the report is written to:
 
 ```text
 <Documents>/DevProjex/reports/devprojex-report-YYYY-MM-DD_HH-mm-ss.json
@@ -98,7 +98,13 @@ If no explicit report path is provided, reports are written to:
 
 If the documents folder cannot be resolved, DevProjex falls back to the user profile folder, then the system temp folder.
 
-For pipeline-style automation, pass `-` as the report path:
+Headless analysis writes the report directly to stdout by default, so the short form is:
+
+```bash
+devprojex --silent --path "/home/me/projects/app"
+```
+
+For an explicit stdout target that is convenient in scripts, `-` remains supported:
 
 ```bash
 devprojex --no-ui --path "/home/me/projects/app" --report -
@@ -132,7 +138,7 @@ When report and export are requested together, `--report-path` and `--output` mu
 
 Automation-friendly output is kept strict:
 
-- `stdout`: help text, version text, generated file paths, JSON report payloads, or export payloads.
+- `stdout`: help text, version text, generated file paths, implicit or explicit JSON report payloads, or export payloads.
 - `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
 - no UI is created for `--help`, `--version`, `--no-ui`, or `--export`.
 - only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
@@ -193,10 +199,10 @@ Open the UI and write a startup report after the project loads:
 DevProjex --path "C:\Projects\App" --report
 ```
 
-Run without UI and write a report:
+Run without UI and print a report:
 
 ```bash
-devprojex --path "/home/me/projects/app" --no-ui --report
+devprojex --path "/home/me/projects/app" --no-ui
 ```
 
 Run without UI with exact selection overrides:

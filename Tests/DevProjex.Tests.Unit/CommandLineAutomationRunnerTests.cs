@@ -77,11 +77,19 @@ public sealed class CommandLineAutomationRunnerTests
 	}
 
 	[Fact]
-	public async Task RunUtilityOrHeadlessAsync_NoUiWithoutReportOrExportWritesUsageError()
+	public async Task RunUtilityOrHeadlessAsync_NoUiWithoutReportOrExportStartsImplicitStdoutReportAnalysis()
 	{
 		using var output = new StringWriter();
 		using var error = new StringWriter();
-		var context = CreateContext(output, error);
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new IOException("Synthetic implicit report failure.");
+			});
 		var parseResult = CommandLineOptions.Parse([CommandLineOptionTokens.NoUi, CommandLineOptionTokens.Path, "/tmp/project"]);
 
 		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
@@ -89,9 +97,10 @@ public sealed class CommandLineAutomationRunnerTests
 			context,
 			TestContext.Current.CancellationToken);
 
-		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.True(servicesCreated);
 		Assert.Equal(string.Empty, output.ToString());
-		Assert.Contains("requires --report, --report-path, or --export", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("Synthetic implicit report failure.", error.ToString(), StringComparison.Ordinal);
 	}
 
 	[Fact]

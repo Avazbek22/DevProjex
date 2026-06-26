@@ -867,6 +867,30 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_SilentWithoutReportWritesJsonToStdout()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Silent,
+			temp.Path,
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+
+		using var document = JsonDocument.Parse(result.Stdout);
+		var root = document.RootElement;
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(temp.Path, root.GetProperty("rootPath").GetString());
+		Assert.Equal(["src"], ReadStringArray(root.GetProperty("selection").GetProperty("selectedRootFolders")));
+		Assert.Equal([".cs"], ReadStringArray(root.GetProperty("selection").GetProperty("selectedExtensions")));
+	}
+
+	[Fact]
 	public async Task Process_SilentReportDashWithJsonFormatWritesOnlyJsonToStdout()
 	{
 		using var temp = new TemporaryDirectory();
