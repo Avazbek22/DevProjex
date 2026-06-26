@@ -2,7 +2,7 @@ name: Store Package Smoke
 
 on:
   push:
-    branches: [ "**" ]
+    branches: [ "master" ]
   workflow_dispatch:
 
 permissions:
@@ -17,93 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  classify-release-scope:
-    name: Classify Release Scope
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      should_run: ${{ steps.classify.outputs.should_run }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Classify branch depth
-        id: classify
-        shell: pwsh
-        run: |
-          $eventName = '${{ github.event_name }}'
-          $refName = '${{ github.ref_name }}'
-          $shouldRun = $true
-          $reason = ''
-
-          if ($eventName -eq 'workflow_dispatch') {
-            $reason = "Manual runs keep the Store package smoke path enabled."
-          }
-          elseif ($refName -eq 'master') {
-            $reason = "master always runs the Store package smoke path."
-          }
-          else {
-            git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to fetch remote branches for release-scope classification."
-            }
-
-            $currentSha = '${{ github.sha }}'
-            $masterBaseOutput = @(git merge-base $currentSha origin/master)
-            $masterBase = if ($masterBaseOutput.Count -gt 0) { [string]$masterBaseOutput[0] } else { '' }
-            $masterBase = $masterBase.Trim()
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($masterBase)) {
-              throw "Failed to calculate merge-base between $currentSha and origin/master."
-            }
-
-            $remoteBranches = @(
-              git for-each-ref refs/remotes/origin --format='%(refname:short)' |
-                Where-Object {
-                  -not [string]::IsNullOrWhiteSpace($_) -and
-                  $_ -ne 'origin/HEAD' -and
-                  $_ -ne 'origin/master' -and
-                  $_ -ne "origin/$refName"
-                }
-            )
-
-            $nestedParents = @()
-            foreach ($branch in $remoteBranches) {
-              $candidateBaseOutput = @(git merge-base $currentSha $branch 2>$null)
-              $candidateBase = if ($candidateBaseOutput.Count -gt 0) { [string]$candidateBaseOutput[0] } else { '' }
-              $candidateBase = $candidateBase.Trim()
-              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($candidateBase)) {
-                continue
-              }
-
-              git merge-base --is-ancestor $candidateBase origin/master 2>$null
-              if ($LASTEXITCODE -eq 0) {
-                continue
-              }
-
-              if ($candidateBase -ne $masterBase) {
-                $nestedParents += $branch
-              }
-            }
-
-            if ($nestedParents.Count -gt 0) {
-              $shouldRun = $false
-              $reason = "Nested branch detected. Shared non-master history with: $($nestedParents -join ', ')."
-            }
-            else {
-              $reason = "Branch shares only master history with other remote branches, so Store package smoke is enabled."
-            }
-          }
-
-          $shouldRunText = if ($shouldRun) { 'true' } else { 'false' }
-          "should_run=$shouldRunText" >> $env:GITHUB_OUTPUT
-          Write-Host "Store package smoke should_run=$shouldRunText. $reason"
-
   store-package-smoke:
     name: Store Package Smoke
-    needs: classify-release-scope
-    if: ${{ needs.classify-release-scope.outputs.should_run == 'true' }}
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
 
