@@ -202,10 +202,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			")",
 			"if exist \"%DEVPROJEX_DLL%\" (",
 			"  dotnet \"%DEVPROJEX_DLL%\" %*",
-			"  exit /b",
+			"  exit /b %ERRORLEVEL%",
 			")",
-			"start /wait \"\" \"%DEVPROJEX_EXE%\" %*",
-			"exit /b",
+			"\"%DEVPROJEX_EXE%\" %*",
+			"exit /b %ERRORLEVEL%",
 			string.Empty);
 	}
 
@@ -354,7 +354,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		{
 			var content = File.ReadAllText(commandPath);
 			return content.Contains("set \"DEVPROJEX_DLL=", StringComparison.OrdinalIgnoreCase) &&
-			       content.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", StringComparison.OrdinalIgnoreCase);
+			       content.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", StringComparison.OrdinalIgnoreCase) &&
+			       content.Contains("\"%DEVPROJEX_EXE%\" %*", StringComparison.OrdinalIgnoreCase) &&
+			       content.Contains("exit /b %ERRORLEVEL%", StringComparison.OrdinalIgnoreCase) &&
+			       !content.Contains("start /wait", StringComparison.OrdinalIgnoreCase);
 		}
 		catch (IOException)
 		{

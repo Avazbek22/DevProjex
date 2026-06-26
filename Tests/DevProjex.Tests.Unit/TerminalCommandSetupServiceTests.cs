@@ -100,7 +100,9 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Contains("set \"DEVPROJEX_EXE=" + target + "\"", launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_DLL=" + Path.ChangeExtension(target, ".dll") + "\"", launcher, StringComparison.Ordinal);
 		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", launcher, StringComparison.Ordinal);
-		Assert.Contains("start /wait \"\" \"%DEVPROJEX_EXE%\" %*", launcher, StringComparison.Ordinal);
+		Assert.Contains("\"%DEVPROJEX_EXE%\" %*", launcher, StringComparison.Ordinal);
+		Assert.Contains("exit /b %ERRORLEVEL%", launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("start /wait", launcher, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains(Path.GetDirectoryName(commandPath)!, userPath, StringComparison.OrdinalIgnoreCase);
 	}
 
@@ -114,6 +116,21 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Contains("rem target: " + target, launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_EXE=C:\\Users\\me\\100%% portable\\DevProjex.exe\"", launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_DLL=C:\\Users\\me\\100%% portable\\DevProjex.dll\"", launcher, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void BuildWindowsLauncherContent_ArgumentModeUsesConsoleRouteForSingleFilePublish()
+	{
+		var target = @"C:\Tools\DevProjex\DevProjex.exe";
+
+		var launcher = TerminalCommandSetupService.BuildWindowsLauncherContent(target);
+
+		Assert.Contains("if \"%~1\"==\"\" (", launcher, StringComparison.Ordinal);
+		Assert.Contains("  start \"\" \"%DEVPROJEX_EXE%\"", launcher, StringComparison.Ordinal);
+		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", launcher, StringComparison.Ordinal);
+		Assert.Contains("\"%DEVPROJEX_EXE%\" %*", launcher, StringComparison.Ordinal);
+		Assert.Contains("exit /b %ERRORLEVEL%", launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("start /wait", launcher, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Theory]
@@ -226,6 +243,48 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.True(install.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.Repaired, install.Outcome);
 		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", repairedLauncher, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Probe_WindowsPortableBuild_LauncherWithStartWaitArgumentFallback_ReturnsRepairableStale()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		File.WriteAllText(
+			commandPath,
+			string.Join(
+				"\r\n",
+				"@echo off",
+				"rem DevProjex terminal command wrapper",
+				"rem target: " + target,
+				"set \"DEVPROJEX_EXE=" + target + "\"",
+				"set \"DEVPROJEX_DLL=" + Path.ChangeExtension(target, ".dll") + "\"",
+				"if \"%~1\"==\"\" (",
+				"  start \"\" \"%DEVPROJEX_EXE%\"",
+				"  exit /b 0",
+				")",
+				"if exist \"%DEVPROJEX_DLL%\" (",
+				"  dotnet \"%DEVPROJEX_DLL%\" %*",
+				"  exit /b",
+				")",
+				"start /wait \"\" \"%DEVPROJEX_EXE%\" %*",
+				"exit /b",
+				string.Empty));
+		var userPath = userBin;
+		var service = CreateWindowsPortableService(temp.Path, processPath: string.Empty, () => userPath, _ => throw new InvalidOperationException(), target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+		var repairedLauncher = File.ReadAllText(commandPath);
+
+		Assert.Equal(TerminalCommandSetupState.Stale, snapshot.State);
+		Assert.True(snapshot.CanRepair);
+		Assert.True(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Repaired, install.Outcome);
+		Assert.Contains("\"%DEVPROJEX_EXE%\" %*", repairedLauncher, StringComparison.Ordinal);
+		Assert.DoesNotContain("start /wait", repairedLauncher, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]
