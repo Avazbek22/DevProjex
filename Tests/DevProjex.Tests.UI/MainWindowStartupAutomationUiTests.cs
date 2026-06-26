@@ -181,8 +181,9 @@ public sealed class MainWindowStartupAutomationUiTests
 		const string varPrefix = "/var/";
 
 		// macOS can surface the same temp directory as either /var/... or /private/var/... in UI/runtime paths.
-		return OperatingSystem.IsMacOS() && value.StartsWith(privateVarPrefix, StringComparison.Ordinal)
-			? varPrefix + value[privateVarPrefix.Length..]
+		// Titles include the path after the app prefix, so normalize every path occurrence, not only the start.
+		return OperatingSystem.IsMacOS()
+			? value.Replace(privateVarPrefix, varPrefix, StringComparison.Ordinal)
 			: value;
 	}
 }
