@@ -201,7 +201,7 @@ jobs:
 
           $versionStdout = Get-Content -Raw -Path $versionStdoutPath -ErrorAction SilentlyContinue
           $versionStderr = Get-Content -Raw -Path $versionStderrPath -ErrorAction SilentlyContinue
-          $actualVersion = $versionStdout.Trim()
+          $actualVersion = if ($null -eq $versionStdout) { "" } else { $versionStdout.Trim() }
 
           if ($exitCode -ne 0) {
             throw "Published --version smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$versionStderr"
@@ -334,6 +334,10 @@ jobs:
               throw "PATH wrapper command '$Name' wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
             }
 
+            if ($null -eq $stdout) {
+              return ""
+            }
+
             return $stdout
           }
 
@@ -353,8 +357,9 @@ jobs:
             }
 
             $versionOutput = Invoke-DevProjexPathCommand -Name "version" -Arguments @("--version")
-            if ($versionOutput.Trim() -ne $expectedVersion) {
-              throw "PATH wrapper --version printed '$($versionOutput.Trim())' for ${{ matrix.rid }}, expected '$expectedVersion'."
+            $actualPathVersion = $versionOutput.Trim()
+            if ($actualPathVersion -ne $expectedVersion) {
+              throw "PATH wrapper --version printed '$actualPathVersion' for ${{ matrix.rid }}, expected '$expectedVersion'."
             }
 
             $reportOutput = Invoke-DevProjexPathCommand -Name "silent-report-stdout" -Arguments @(
@@ -390,8 +395,10 @@ jobs:
               "--ext", "cs",
               "--ignore", "none")
 
-            if ($exportFileOutput.Trim() -ne (Resolve-Path $exportFilePath).Path) {
-              throw "PATH wrapper export file did not print the expected output path for ${{ matrix.rid }}. StdOut=$exportFileOutput Expected=$exportFilePath"
+            $expectedPathExportPath = (Resolve-Path $exportFilePath).Path
+            $actualPathExportPath = $exportFileOutput.Trim()
+            if ($actualPathExportPath -ne $expectedPathExportPath) {
+              throw "PATH wrapper export file did not print the expected output path for ${{ matrix.rid }}. StdOut=$actualPathExportPath Expected=$expectedPathExportPath"
             }
 
             $exportFileContent = Get-Content -Raw -Path $exportFilePath -ErrorAction SilentlyContinue
@@ -434,10 +441,10 @@ jobs:
             ")",
             "if exist `"%DEVPROJEX_DLL%`" (",
             "  dotnet `"%DEVPROJEX_DLL%`" %*",
-            "  exit /b",
+            "  exit /b %ERRORLEVEL%",
             ")",
-            "start /wait `"`" `"%DEVPROJEX_EXE%`" %*",
-            "exit /b"
+            "`"%DEVPROJEX_EXE%`" %*",
+            "exit /b %ERRORLEVEL%"
           ) | Set-Content -LiteralPath $launcherPath -Encoding ASCII
 
           foreach ($helpArgument in @("--help", "-h", "/?")) {
@@ -486,8 +493,9 @@ jobs:
             throw "Portable launcher --version smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
           }
 
-          if ($stdout.Trim() -ne $expectedVersion) {
-            throw "Portable launcher --version printed '$($stdout.Trim())' for ${{ matrix.rid }}, expected '$expectedVersion'."
+          $actualVersion = if ($null -eq $stdout) { "" } else { $stdout.Trim() }
+          if ($actualVersion -ne $expectedVersion) {
+            throw "Portable launcher --version printed '$actualVersion' for ${{ matrix.rid }}, expected '$expectedVersion'. StdErr=$stderr"
           }
 
           $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-launcher-export-project-${{ matrix.rid }}"
@@ -525,8 +533,10 @@ jobs:
             throw "Portable launcher export smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
           }
 
-          if ($stdout.Trim() -ne (Resolve-Path $exportPath).Path) {
-            throw "Portable launcher export smoke did not print the expected output path for ${{ matrix.rid }}. StdOut=$stdout Expected=$exportPath"
+          $expectedExportPath = (Resolve-Path $exportPath).Path
+          $actualExportPath = if ($null -eq $stdout) { "" } else { $stdout.Trim() }
+          if ($actualExportPath -ne $expectedExportPath) {
+            throw "Portable launcher export smoke did not print the expected output path for ${{ matrix.rid }}. StdOut=$actualExportPath Expected=$expectedExportPath"
           }
 
           $exportContent = Get-Content -Raw -Path $exportPath -ErrorAction SilentlyContinue

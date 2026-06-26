@@ -424,6 +424,36 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task WindowsPortableLauncher_SingleFileFallbackPreservesStdoutAndExitCode()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var targetPath = Path.Combine(temp.Path, "fake single file target.cmd");
+		await File.WriteAllLinesAsync(
+			targetPath,
+			[
+				"@echo off",
+				"if \"%~1\"==\"--version\" (",
+				"  echo 9.9-test",
+				"  exit /b 0",
+				")",
+				"echo unexpected argument",
+				"exit /b 7"
+			],
+			TestContext.Current.CancellationToken);
+		var launcherPath = Path.Combine(temp.Path, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		await CreateWindowsLauncherAsync(launcherPath, targetPath);
+
+		var result = await RunWindowsCommandAsync(launcherPath, CommandLineOptionTokens.Version);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal($"9.9-test{Environment.NewLine}", result.Stdout);
+		Assert.Equal(string.Empty, result.Stderr);
+	}
+
+	[Fact]
 	public async Task Process_HelpWinsOverInvalidArgumentsAndStillExitsZero()
 	{
 		var result = await RunAppAsync(CommandLineOptionTokens.Help, "--unknown", CommandLineOptionTokens.NoUi);
