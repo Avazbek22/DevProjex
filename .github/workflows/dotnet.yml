@@ -34,12 +34,14 @@ jobs:
         run: |
           $isFullMatrix =
             '${{ github.event_name }}' -eq 'workflow_dispatch' -or
-            '${{ github.ref }}' -eq 'refs/heads/master'
+            '${{ github.ref }}' -eq 'refs/heads/master' -or
+            '${{ github.ref }}' -eq 'refs/heads/v4.9' -or
+            '${{ github.base_ref }}' -eq 'master' -or
+            '${{ github.base_ref }}' -eq 'v4.9'
 
-          # Feature branches keep a fast confidence matrix: Windows covers the full
-          # app surface, Linux keeps non-UI integration confidence, and macOS still
-          # compiles/runs the core unit layer. Full cross-platform UI/integration
-          # coverage stays on master and on manual runs.
+          # Release-targeted pull requests must prove the full application surface on
+          # every supported OS before merge. Ordinary feature branches keep the faster
+          # confidence matrix until they are ready for a release branch.
           if ($isFullMatrix) {
             $matrix = @{
               include = @(

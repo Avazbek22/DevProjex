@@ -195,6 +195,45 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task UnixShellPathCommand_UserLevelPreservesUnicodeArgumentsAndLeavesProjectReadOnly()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var binDirectory = temp.CreateDirectory("bin");
+		var projectPath = temp.CreateDirectory("project with apostrophe ' and unicode ё");
+		SeedComplexUserProject(projectPath);
+		var projectFilesBefore = CaptureProjectFiles(projectPath);
+		await CreateUnixWrapperAsync(Path.Combine(binDirectory, CommandLineExecutableAliases.UnixCommand));
+		var relativeOutputPath = Path.Combine("exports", "контекст ё.txt");
+		var expectedOutputPath = Path.GetFullPath(Path.Combine(temp.Path, relativeOutputPath));
+
+		var result = await RunPosixShellPathCommandAsync(
+			CommandLineExecutableAliases.UnixCommand,
+			binDirectory,
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ShortOutput, relativeOutputPath,
+			CommandLineOptionTokens.Roots, "src app",
+			CommandLineOptionTokens.Extensions, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var printedOutputPath = AssertSingleOutputLine(result.Stdout);
+		AssertRelativeOutputPathResolvedFromWorkingDirectory(
+			printedOutputPath,
+			expectedOutputPath,
+			projectPath,
+			relativeOutputPath);
+		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
+		Assert.Contains("Program.cs", payload, StringComparison.Ordinal);
+		Assert.Contains("public sealed class Program", payload, StringComparison.Ordinal);
+		AssertProjectFilesUnchanged(projectPath, projectFilesBefore);
+	}
+
+	[Fact]
 	public async Task UnixPortableWrapper_TargetPathWithApostropheRunsRealAppHost()
 	{
 		if (OperatingSystem.IsWindows())
@@ -278,6 +317,90 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Contains("public sealed class Program", payload, StringComparison.Ordinal);
 		Assert.DoesNotContain("Generated.g.cs", payload, StringComparison.Ordinal);
 		Assert.DoesNotContain("LICENSE", payload, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task WindowsPowerShellPathCommand_UserLevelPreservesUnicodeArgumentsAndLeavesProjectReadOnly()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var binDirectory = temp.CreateDirectory("bin & tools");
+		var projectPath = temp.CreateDirectory("project & unicode ё");
+		SeedComplexUserProject(projectPath);
+		var projectFilesBefore = CaptureProjectFiles(projectPath);
+		await CreateWindowsLauncherAsync(
+			Path.Combine(binDirectory, CommandLineExecutableAliases.WindowsPortableCommandFileName));
+		var relativeOutputPath = Path.Combine("exports & logs", "контекст ё.txt");
+		var expectedOutputPath = Path.GetFullPath(Path.Combine(temp.Path, relativeOutputPath));
+
+		var result = await RunWindowsPowerShellPathCommandAsync(
+			"devprojex",
+			binDirectory,
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ShortOutput, relativeOutputPath,
+			CommandLineOptionTokens.Roots, "src app",
+			CommandLineOptionTokens.Extensions, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var printedOutputPath = AssertSingleOutputLine(result.Stdout);
+		AssertRelativeOutputPathResolvedFromWorkingDirectory(
+			printedOutputPath,
+			expectedOutputPath,
+			projectPath,
+			relativeOutputPath);
+		var payload = await File.ReadAllTextAsync(printedOutputPath, TestContext.Current.CancellationToken);
+		Assert.Contains("Program.cs", payload, StringComparison.Ordinal);
+		Assert.Contains("public sealed class Program", payload, StringComparison.Ordinal);
+		AssertProjectFilesUnchanged(projectPath, projectFilesBefore);
+	}
+
+	[Fact]
+	public async Task WindowsPowerShellPathCommand_UserLevelWithoutArgumentsLaunchesTheConfiguredUiApp()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var binDirectory = temp.CreateDirectory("bin");
+		var copiedAppDirectory = temp.CreateDirectory("configured app");
+		CopyAppBuildOutputToDirectory(copiedAppDirectory);
+		var copiedAppHostPath = GetNativeAppHostExecutablePath(copiedAppDirectory);
+		await CreateWindowsLauncherAsync(
+			Path.Combine(binDirectory, CommandLineExecutableAliases.WindowsPortableCommandFileName),
+			copiedAppHostPath);
+
+		using var launcherProcess = StartWindowsPowerShellPathCommand(
+			"devprojex",
+			binDirectory,
+			temp.Path);
+
+		Process? startedApp = null;
+		try
+		{
+			startedApp = await WaitForProcessStartedFromPathAsync(copiedAppHostPath);
+			await launcherProcess
+				.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+			Assert.Equal(CommandLineExitCodes.Success, launcherProcess.ExitCode);
+			Assert.False(startedApp.HasExited);
+		}
+		finally
+		{
+			if (startedApp is not null)
+			{
+				TryKill(startedApp);
+				await startedApp
+					.WaitForExitAsync(TestContext.Current.CancellationToken)
+					.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+				startedApp.Dispose();
+			}
+		}
 	}
 
 	[Fact]
@@ -1244,6 +1367,114 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		return await RunProcessAsync(startInfo);
 	}
 
+	private static async Task<CommandLineProcessResult> RunPosixShellPathCommandAsync(
+		string commandName,
+		string binDirectory,
+		string? workingDirectory,
+		params string[] args)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = File.Exists("/bin/sh") ? "/bin/sh" : "sh",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		if (!string.IsNullOrWhiteSpace(workingDirectory))
+			startInfo.WorkingDirectory = workingDirectory;
+
+		startInfo.Environment["PATH"] = PrependPath(binDirectory, startInfo.Environment["PATH"]);
+		startInfo.Environment["DEVPROJEX_TEST_COMMAND"] = commandName;
+		var argumentReferences = SetShellArgumentEnvironment(startInfo, args, "$DEVPROJEX_TEST_ARGUMENT_");
+		startInfo.ArgumentList.Add("-c");
+		startInfo.ArgumentList.Add(
+			"exec \"$DEVPROJEX_TEST_COMMAND\"" +
+			string.Concat(argumentReferences.Select(static reference => " \"" + reference + "\"")));
+
+		return await RunProcessAsync(startInfo);
+	}
+
+	private static async Task<CommandLineProcessResult> RunWindowsPowerShellPathCommandAsync(
+		string commandName,
+		string binDirectory,
+		string? workingDirectory,
+		params string[] args)
+	{
+		return await RunProcessAsync(CreateWindowsPowerShellPathCommandStartInfo(
+			commandName,
+			binDirectory,
+			workingDirectory,
+			redirectStandardStreams: true,
+			args: args));
+	}
+
+	private static Process StartWindowsPowerShellPathCommand(
+		string commandName,
+		string binDirectory,
+		string? workingDirectory,
+		params string[] args) =>
+		Process.Start(CreateWindowsPowerShellPathCommandStartInfo(
+			commandName,
+			binDirectory,
+			workingDirectory,
+			redirectStandardStreams: false,
+			args: args))
+		?? throw new InvalidOperationException("Failed to start the Windows PowerShell terminal command test process.");
+
+	private static ProcessStartInfo CreateWindowsPowerShellPathCommandStartInfo(
+		string commandName,
+		string binDirectory,
+		string? workingDirectory,
+		bool redirectStandardStreams,
+		IReadOnlyList<string> args)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = "powershell.exe",
+			RedirectStandardOutput = redirectStandardStreams,
+			RedirectStandardError = redirectStandardStreams,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		if (!string.IsNullOrWhiteSpace(workingDirectory))
+			startInfo.WorkingDirectory = workingDirectory;
+
+		startInfo.Environment["PATH"] = PrependPath(binDirectory, startInfo.Environment["PATH"]);
+		startInfo.Environment["DEVPROJEX_TEST_COMMAND"] = commandName;
+		var argumentReferences = SetShellArgumentEnvironment(startInfo, args, "$env:DEVPROJEX_TEST_ARGUMENT_");
+		startInfo.ArgumentList.Add("-NoLogo");
+		startInfo.ArgumentList.Add("-NoProfile");
+		startInfo.ArgumentList.Add("-NonInteractive");
+		startInfo.ArgumentList.Add("-Command");
+		startInfo.ArgumentList.Add(
+			"$ErrorActionPreference = 'Stop'; " +
+			"[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); " +
+			"$OutputEncoding = [Console]::OutputEncoding; " +
+			"& $env:DEVPROJEX_TEST_COMMAND @(" +
+			string.Join(", ", argumentReferences) + "); exit $LASTEXITCODE");
+
+		return startInfo;
+	}
+
+	private static IReadOnlyList<string> SetShellArgumentEnvironment(
+		ProcessStartInfo startInfo,
+		IReadOnlyList<string> args,
+		string referencePrefix)
+	{
+		var references = new string[args.Count];
+		for (var index = 0; index < args.Count; index++)
+		{
+			var variableName = $"DEVPROJEX_TEST_ARGUMENT_{index}";
+			startInfo.Environment[variableName] = args[index];
+			references[index] = referencePrefix + index;
+		}
+
+		return references;
+	}
+
 	private static string PrependPath(string directory, string? currentPath)
 	{
 		if (string.IsNullOrEmpty(currentPath))
@@ -1299,6 +1530,40 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			process.ExitCode,
 			await stdoutTask,
 			await stderrTask);
+	}
+
+	private static async Task<Process> WaitForProcessStartedFromPathAsync(string executablePath)
+	{
+		var expectedPath = Path.GetFullPath(executablePath);
+		var processName = Path.GetFileNameWithoutExtension(executablePath);
+		var deadline = DateTime.UtcNow.AddSeconds(10);
+
+		while (DateTime.UtcNow < deadline)
+		{
+			foreach (var process in Process.GetProcessesByName(processName))
+			{
+				try
+				{
+					var processPath = process.MainModule?.FileName;
+					if (string.Equals(processPath, expectedPath, StringComparison.OrdinalIgnoreCase))
+						return process;
+				}
+				catch (InvalidOperationException)
+				{
+					// The process exited while its executable path was being inspected.
+				}
+				catch (System.ComponentModel.Win32Exception)
+				{
+					// Process metadata can be temporarily unavailable during startup.
+				}
+
+				process.Dispose();
+			}
+
+			await Task.Delay(TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
+		}
+
+		throw new TimeoutException($"DevProjex did not start from the configured launcher target '{executablePath}'.");
 	}
 
 	private static void TryKill(Process process)
