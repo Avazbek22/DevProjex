@@ -60,10 +60,11 @@ public sealed class CommandLineReportContractIntegrationTests
 			documentsPath,
 			"DevProjex",
 			"reports",
-			"devprojex-report-2026-06-19_10-15-16.json");
+			"devprojex-report-2026-06-19_10-15-16-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json");
 		var reportPathResolver = new ReportPathResolver(
 			specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? documentsPath : string.Empty,
-			utcNowProvider: () => new DateTimeOffset(2026, 6, 19, 10, 15, 16, TimeSpan.Zero));
+			utcNowProvider: () => new DateTimeOffset(2026, 6, 19, 10, 15, 16, TimeSpan.Zero),
+			reportIdProvider: () => Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
 
 		await RunNoUiReportAsync(
 			expectedReportPath,

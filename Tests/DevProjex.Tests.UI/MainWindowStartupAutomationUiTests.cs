@@ -112,7 +112,7 @@ public sealed class MainWindowStartupAutomationUiTests
 			documentsPath,
 			"DevProjex",
 			"reports",
-			"devprojex-report-2026-06-19_11-12-13.json");
+			"devprojex-report-2026-06-19_11-12-13-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json");
 		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
 		{
 			Report = new StartupReportOptions(true, null, StartupReportFormat.Json),
@@ -125,7 +125,8 @@ public sealed class MainWindowStartupAutomationUiTests
 		{
 			ReportPathResolver = new ReportPathResolver(
 				specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? documentsPath : string.Empty,
-				utcNowProvider: () => new DateTimeOffset(2026, 6, 19, 11, 12, 13, TimeSpan.Zero))
+				utcNowProvider: () => new DateTimeOffset(2026, 6, 19, 11, 12, 13, TimeSpan.Zero),
+				reportIdProvider: () => Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
 		};
 		var window = new MainWindow(options, services)
 		{

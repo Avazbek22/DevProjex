@@ -2,6 +2,8 @@ namespace DevProjex.Infrastructure.Reports;
 
 public sealed class ProjectAnalysisReportWriter
 {
+	private static readonly SemaphoreSlim FileWriteLock = new(1, 1);
+
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		WriteIndented = true,
@@ -22,9 +24,12 @@ public sealed class ProjectAnalysisReportWriter
 		if (!string.IsNullOrWhiteSpace(directory))
 			Directory.CreateDirectory(directory);
 
-		var tempPath = BuildTemporaryPath(fullPath);
+		await FileWriteLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+		var tempPath = string.Empty;
 		try
 		{
+			tempPath = BuildTemporaryPath(fullPath);
 			await using (var stream = new FileStream(
 				             tempPath,
 				             FileMode.Create,
@@ -42,8 +47,13 @@ public sealed class ProjectAnalysisReportWriter
 		}
 		catch
 		{
-			TryDeleteTempFile(tempPath);
+			if (!string.IsNullOrEmpty(tempPath))
+				TryDeleteTempFile(tempPath);
 			throw;
+		}
+		finally
+		{
+			FileWriteLock.Release();
 		}
 	}
 

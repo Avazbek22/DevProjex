@@ -93,8 +93,10 @@ Reports are JSON documents with:
 When `--report` is explicitly provided without a file path, the report is written to:
 
 ```text
-<Documents>/DevProjex/reports/devprojex-report-YYYY-MM-DD_HH-mm-ss.json
+<Documents>/DevProjex/reports/devprojex-report-YYYY-MM-DD_HH-mm-ss-<unique-id>.json
 ```
+
+The unique suffix prevents reports created during the same second from overwriting each other.
 
 If the documents folder cannot be resolved, DevProjex falls back to the user profile folder, then the system temp folder.
 

@@ -1,4 +1,5 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.Reports;
 
 namespace DevProjex.Tests.Integration;
 
@@ -44,6 +45,169 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		Assert.Equal(".cs", root.GetProperty("selection").GetProperty("selectedExtensions")[0].GetString());
 		Assert.Empty(root.GetProperty("selection").GetProperty("selectedIgnoreOptions").EnumerateArray());
 		Assert.True(root.GetProperty("timing").GetProperty("totalMilliseconds").GetDouble() >= 0);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_BareReportWritesToUnicodeDocumentsFolderWithUniqueName()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var documentsPath = temp.CreateDirectory("Документы с пробелами");
+		var reportId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+		var expectedPath = Path.Combine(
+			documentsPath,
+			"DevProjex",
+			"reports",
+			"devprojex-report-2026-06-20_12-13-14-cccccccccccccccccccccccccccccccc.json");
+		var resolver = new ReportPathResolver(
+			specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? documentsPath : string.Empty,
+			utcNowProvider: () => new DateTimeOffset(2026, 6, 20, 12, 13, 14, TimeSpan.Zero),
+			reportIdProvider: () => reportId);
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Report,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error, services => services with { ReportPathResolver = resolver }),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal($"{expectedPath}{Environment.NewLine}", output.ToString());
+		Assert.Equal(string.Empty, error.ToString());
+		Assert.True(File.Exists(expectedPath));
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(expectedPath, TestContext.Current.CancellationToken));
+		Assert.Equal(temp.Path, document.RootElement.GetProperty("rootPath").GetString());
+		Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(expectedPath)!, "*.tmp"));
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_BareReportFallsBackToUnicodeUserProfileWhenDocumentsUnavailable()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var userProfilePath = temp.CreateDirectory("Профиль пользователя");
+		var reportId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+		var expectedPath = Path.Combine(
+			userProfilePath,
+			"DevProjex",
+			"reports",
+			"devprojex-report-2026-06-20_12-13-14-dddddddddddddddddddddddddddddddd.json");
+		var resolver = new ReportPathResolver(
+			specialFolderPathProvider: _ => "  ",
+			userProfilePathProvider: () => userProfilePath,
+			utcNowProvider: () => new DateTimeOffset(2026, 6, 20, 12, 13, 14, TimeSpan.Zero),
+			reportIdProvider: () => reportId);
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.Silent,
+			temp.Path,
+			CommandLineOptionTokens.Report
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error, services => services with { ReportPathResolver = resolver }),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal($"{expectedPath}{Environment.NewLine}", output.ToString());
+		Assert.Equal(string.Empty, error.ToString());
+		Assert.True(File.Exists(expectedPath));
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_ConcurrentBareReportsKeepBothFilesWhenTimestampMatches()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var documentsPath = temp.CreateDirectory("Documents");
+		var timestamp = new DateTimeOffset(2026, 6, 20, 12, 13, 14, TimeSpan.Zero);
+		var firstId = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+		var secondId = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
+		var firstPath = BuildDefaultReportPath(documentsPath, timestamp, firstId);
+		var secondPath = BuildDefaultReportPath(documentsPath, timestamp, secondId);
+		var firstResolver = new ReportPathResolver(
+			specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? documentsPath : string.Empty,
+			utcNowProvider: () => timestamp,
+			reportIdProvider: () => firstId);
+		var secondResolver = new ReportPathResolver(
+			specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? documentsPath : string.Empty,
+			utcNowProvider: () => timestamp,
+			reportIdProvider: () => secondId);
+		using var firstOutput = new StringWriter();
+		using var firstError = new StringWriter();
+		using var secondOutput = new StringWriter();
+		using var secondError = new StringWriter();
+		var firstParseResult = CommandLineOptions.Parse([CommandLineOptionTokens.NoUi, temp.Path, CommandLineOptionTokens.Report]);
+		var secondParseResult = CommandLineOptions.Parse([CommandLineOptionTokens.NoUi, temp.Path, CommandLineOptionTokens.Report]);
+
+		var exitCodes = await Task.WhenAll(
+			CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+				firstParseResult,
+				CreateContext(firstOutput, firstError, services => services with { ReportPathResolver = firstResolver }),
+				TestContext.Current.CancellationToken),
+			CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+				secondParseResult,
+				CreateContext(secondOutput, secondError, services => services with { ReportPathResolver = secondResolver }),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal([CommandLineExitCodes.Success, CommandLineExitCodes.Success], exitCodes);
+		Assert.Equal($"{firstPath}{Environment.NewLine}", firstOutput.ToString());
+		Assert.Equal($"{secondPath}{Environment.NewLine}", secondOutput.ToString());
+		Assert.Equal(string.Empty, firstError.ToString());
+		Assert.Equal(string.Empty, secondError.ToString());
+		Assert.True(File.Exists(firstPath));
+		Assert.True(File.Exists(secondPath));
+		Assert.NotEqual(firstPath, secondPath);
+		Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(firstPath)!, "*.tmp"));
+
+		using var firstDocument = JsonDocument.Parse(await File.ReadAllTextAsync(firstPath, TestContext.Current.CancellationToken));
+		using var secondDocument = JsonDocument.Parse(await File.ReadAllTextAsync(secondPath, TestContext.Current.CancellationToken));
+		Assert.Equal(temp.Path, firstDocument.RootElement.GetProperty("rootPath").GetString());
+		Assert.Equal(temp.Path, secondDocument.RootElement.GetProperty("rootPath").GetString());
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_BareReportReturnsRuntimeErrorWhenDefaultDocumentsPathIsAFile()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var blockedDocumentsPath = Path.Combine(temp.Path, "Documents file");
+		await File.WriteAllTextAsync(blockedDocumentsPath, "occupied", TestContext.Current.CancellationToken);
+		var resolver = new ReportPathResolver(
+			specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? blockedDocumentsPath : string.Empty,
+			reportIdProvider: () => Guid.Parse("abababab-abab-abab-abab-abababababab"));
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.NoUi,
+			temp.Path,
+			CommandLineOptionTokens.Report
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error, services => services with { ReportPathResolver = resolver }),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.StartsWith("DevProjex: ", error.ToString(), StringComparison.Ordinal);
+		Assert.Equal("occupied", await File.ReadAllTextAsync(blockedDocumentsPath, TestContext.Current.CancellationToken));
+		Assert.Empty(Directory.EnumerateFiles(temp.Path, "*.tmp", SearchOption.AllDirectories));
 	}
 
 	[Fact]
@@ -533,11 +697,25 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		Assert.DoesNotContain(new string('x', 64), payload, StringComparison.Ordinal);
 	}
 
-	private static CommandLineAutomationContext CreateContext(TextWriter output, TextWriter error) =>
+	private static CommandLineAutomationContext CreateContext(
+		TextWriter output,
+		TextWriter error,
+		Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null) =>
 		new(
 			Output: output,
 			Error: error,
-			ServicesFactory: AvaloniaCompositionRoot.CreateDefault,
+			ServicesFactory: options =>
+			{
+				var services = AvaloniaCompositionRoot.CreateDefault(options);
+				return configureServices?.Invoke(services) ?? services;
+			},
 			HelpContentProvider: new CommandLineHelpContentProvider(),
 			VersionProvider: () => "test-version");
+
+	private static string BuildDefaultReportPath(string documentsPath, DateTimeOffset timestamp, Guid reportId) =>
+		Path.Combine(
+			documentsPath,
+			"DevProjex",
+			"reports",
+			$"devprojex-report-{timestamp:yyyy-MM-dd_HH-mm-ss}-{reportId:N}.json");
 }

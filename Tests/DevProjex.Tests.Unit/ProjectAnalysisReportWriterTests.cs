@@ -38,6 +38,58 @@ public sealed class ProjectAnalysisReportWriterTests
 	}
 
 	[Fact]
+	public async Task WriteAsync_CanceledWriteLeavesNoReportOrTemporaryFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = Path.Combine(temp.Path, "nested", "report.json");
+		var writer = new ProjectAnalysisReportWriter();
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(
+			() => writer.WriteAsync(CreateReport("canceled"), path, cancellation.Token));
+
+		Assert.False(File.Exists(path));
+		var directory = Path.GetDirectoryName(path)!;
+		if (Directory.Exists(directory))
+			Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp"));
+	}
+
+	[Fact]
+	public async Task WriteAsync_ParentPathOccupiedByFileDoesNotLeaveTemporaryFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var occupiedParentPath = Path.Combine(temp.Path, "not-a-directory");
+		await File.WriteAllTextAsync(occupiedParentPath, "occupied", TestContext.Current.CancellationToken);
+		var writer = new ProjectAnalysisReportWriter();
+
+		await Assert.ThrowsAnyAsync<IOException>(
+			() => writer.WriteAsync(
+				CreateReport("blocked"),
+				Path.Combine(occupiedParentPath, "report.json"),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("occupied", await File.ReadAllTextAsync(occupiedParentPath, TestContext.Current.CancellationToken));
+		Assert.Empty(Directory.EnumerateFiles(temp.Path, "*.tmp", SearchOption.AllDirectories));
+	}
+
+	[Fact]
+	public async Task WriteAsync_ConcurrentExplicitWritesLeaveOneValidJsonReportWithoutTemporaryFiles()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = Path.Combine(temp.Path, "report.json");
+		var writer = new ProjectAnalysisReportWriter();
+		var rootPaths = Enumerable.Range(1, 8).Select(index => $"concurrent-{index}").ToArray();
+
+		await Task.WhenAll(rootPaths.Select(rootPath =>
+			writer.WriteAsync(CreateReport(rootPath), path, TestContext.Current.CancellationToken)));
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+		Assert.Contains(document.RootElement.GetProperty("rootPath").GetString(), rootPaths);
+		Assert.Empty(Directory.EnumerateFiles(temp.Path, "*.tmp"));
+	}
+
+	[Fact]
 	public async Task WriteAsync_TextWriterWritesJsonWithoutTouchingFileSystem()
 	{
 		var writer = new ProjectAnalysisReportWriter();
