@@ -21,6 +21,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         IsCompactMode = false,
         IsTreeAnimationEnabled = false,
         IsAdvancedIgnoreCountsEnabled = true,
+        IsTerminalCommandPromptDismissed = false,
         PreferredLanguage = null
     };
     private readonly Func<string> _appDataPathProvider =

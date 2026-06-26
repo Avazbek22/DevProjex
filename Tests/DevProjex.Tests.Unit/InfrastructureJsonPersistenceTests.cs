@@ -111,6 +111,7 @@ public sealed class InfrastructureJsonPersistenceTests
 			IsCompactMode = true,
 			IsTreeAnimationEnabled = true,
 			IsAdvancedIgnoreCountsEnabled = false,
+			IsTerminalCommandPromptDismissed = true,
 			PreferredLanguage = AppLanguage.Ru
 		};
 		db.Presets["Dark.Acrylic"] = db.Presets["Dark.Acrylic"] with
@@ -128,12 +129,14 @@ public sealed class InfrastructureJsonPersistenceTests
 
 		Assert.Equal("dark", preset.GetProperty("theme").GetString());
 		Assert.Equal("acrylic", preset.GetProperty("effect").GetString());
+		Assert.True(viewSettings.GetProperty("isTerminalCommandPromptDismissed").GetBoolean());
 		Assert.Equal("ru", viewSettings.GetProperty("preferredLanguage").GetString());
 
 		var loaded = store.Load();
 		Assert.True(loaded.ViewSettings.IsCompactMode);
 		Assert.True(loaded.ViewSettings.IsTreeAnimationEnabled);
 		Assert.False(loaded.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+		Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
 		Assert.Equal(AppLanguage.Ru, loaded.ViewSettings.PreferredLanguage);
 		Assert.Equal(ThemeEffectMode.Acrylic, loaded.Presets["Dark.Acrylic"].Effect);
 	}

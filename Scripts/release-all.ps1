@@ -35,6 +35,10 @@ $script:IsolatedRepoRoot = $null
 $script:OriginalNuGetPackages = [Environment]::GetEnvironmentVariable("NUGET_PACKAGES", "Process")
 $script:OriginalNuGetHttpCachePath = [Environment]::GetEnvironmentVariable("NUGET_HTTP_CACHE_PATH", "Process")
 $script:OriginalNuGetPluginsCachePath = [Environment]::GetEnvironmentVariable("NUGET_PLUGINS_CACHE_PATH", "Process")
+$script:StoreApplicationId = "App"
+$script:StoreExecutionAliasName = "devprojex.exe"
+$script:StoreUiPackageExecutable = "DevProjex.Avalonia\DevProjex.exe"
+$script:StoreFullTrustEntryPoint = "Windows.FullTrustApplication"
 
 function Write-Step([string]$message) {
     Write-Host ""
@@ -259,6 +263,187 @@ function Assert-VersionFormat([string]$value, [string]$name, [string]$pattern) {
     }
 }
 
+function Get-XmlChildElementsByLocalName(
+    [System.Xml.XmlNode]$node,
+    [string]$localName
+) {
+    return @(
+        $node.ChildNodes |
+            Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element -and $_.LocalName -eq $localName }
+    )
+}
+
+function Get-XmlDescendantElementsByLocalName(
+    [System.Xml.XmlNode]$node,
+    [string]$localName
+) {
+    return @($node.SelectNodes(".//*[local-name()='$localName']"))
+}
+
+function Assert-StoreExecutionAliasManifestContract(
+    [string]$manifestPath,
+    [switch]$RequirePackagedApplicationExecutable,
+    [string]$packageRoot = ""
+) {
+    Assert-Condition (Test-Path $manifestPath) "Store manifest was not found: $manifestPath"
+
+    [xml]$manifest = Get-Content -Path $manifestPath
+    $applications = @($manifest.SelectNodes("//*[local-name()='Application']"))
+    Assert-Condition ($applications.Count -eq 1) "Store package must expose exactly one Application. Found: $($applications.Count)."
+
+    $application = $applications[0]
+    $applicationId = [string]$application.GetAttribute("Id")
+    $applicationExecutable = [string]$application.GetAttribute("Executable")
+    $applicationEntryPoint = [string]$application.GetAttribute("EntryPoint")
+
+    Assert-Condition ($applicationId -eq $script:StoreApplicationId) "Store Application Id must stay '$script:StoreApplicationId'. Found: '$applicationId'."
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($applicationExecutable)) "Store Application executable is missing."
+    Assert-Condition ($applicationExecutable.IndexOf("Cli", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) "Store Application must point to the UI executable, not a separate CLI executable: '$applicationExecutable'."
+    Assert-Condition ($applicationEntryPoint -eq $script:StoreFullTrustEntryPoint) "Store Application EntryPoint must stay '$script:StoreFullTrustEntryPoint'. Found: '$applicationEntryPoint'."
+
+    if ($RequirePackagedApplicationExecutable) {
+        Assert-Condition ($applicationExecutable -eq $script:StoreUiPackageExecutable) "Packaged Store Application executable must be '$script:StoreUiPackageExecutable'. Found: '$applicationExecutable'."
+    }
+
+    $extensionsContainer = Get-XmlChildElementsByLocalName -node $application -localName "Extensions" | Select-Object -First 1
+    Assert-Condition ($null -ne $extensionsContainer) "Store Application must declare an Extensions element for AppExecutionAlias."
+
+    $aliasExtensions = @(
+        Get-XmlChildElementsByLocalName -node $extensionsContainer -localName "Extension" |
+            Where-Object { [string]$_.GetAttribute("Category") -eq "windows.appExecutionAlias" }
+    )
+    Assert-Condition ($aliasExtensions.Count -eq 1) "Store Application must declare exactly one windows.appExecutionAlias extension. Found: $($aliasExtensions.Count)."
+
+    $aliasExtension = $aliasExtensions[0]
+    $aliasExecutable = [string]$aliasExtension.GetAttribute("Executable")
+    $aliasEntryPoint = [string]$aliasExtension.GetAttribute("EntryPoint")
+
+    Assert-Condition ($aliasExecutable -eq $script:StoreUiPackageExecutable) "Store execution alias must start the packaged UI executable '$script:StoreUiPackageExecutable'. Found: '$aliasExecutable'."
+    Assert-Condition ($aliasEntryPoint -eq $script:StoreFullTrustEntryPoint) "Store execution alias EntryPoint must stay '$script:StoreFullTrustEntryPoint'. Found: '$aliasEntryPoint'."
+    Assert-Condition ($aliasExecutable.IndexOf("Cli", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) "Store execution alias must not point to a separate CLI executable: '$aliasExecutable'."
+
+    $appExecutionAliases = @(Get-XmlDescendantElementsByLocalName -node $aliasExtension -localName "AppExecutionAlias")
+    Assert-Condition ($appExecutionAliases.Count -eq 1) "Store execution alias extension must contain exactly one AppExecutionAlias element. Found: $($appExecutionAliases.Count)."
+
+    $executionAliases = @(Get-XmlDescendantElementsByLocalName -node $appExecutionAliases[0] -localName "ExecutionAlias")
+    Assert-Condition ($executionAliases.Count -eq 1) "Store AppExecutionAlias must contain exactly one ExecutionAlias element. Found: $($executionAliases.Count)."
+
+    $aliasName = [string]$executionAliases[0].GetAttribute("Alias")
+    Assert-Condition ($aliasName -eq $script:StoreExecutionAliasName) "Store execution alias must stay '$script:StoreExecutionAliasName'. Found: '$aliasName'."
+    Assert-Condition ($aliasName.EndsWith(".exe", [System.StringComparison]::Ordinal)) "Store execution alias must end with '.exe'. Found: '$aliasName'."
+    Assert-Condition ($aliasName -eq $aliasName.ToLowerInvariant()) "Store execution alias must stay lowercase for a stable terminal contract. Found: '$aliasName'."
+    Assert-Condition (-not ($aliasName -match '[<>:"/\\|?*]')) "Store execution alias contains a character that Windows aliases do not allow: '$aliasName'."
+
+    if (-not [string]::IsNullOrWhiteSpace($packageRoot)) {
+        $platformExecutablePath = $script:StoreUiPackageExecutable -replace '[\\/]', [System.IO.Path]::DirectorySeparatorChar
+        $packagedExecutablePath = Join-Path $packageRoot $platformExecutablePath
+        Assert-Condition (Test-Path $packagedExecutablePath) "Store package manifest points to '$script:StoreUiPackageExecutable', but that file was not found in the package."
+    }
+}
+
+function Expand-ZipContainer(
+    [string]$archivePath,
+    [string]$destinationPath
+) {
+    if (Test-Path $destinationPath) {
+        Remove-Item -Path $destinationPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    New-Item -ItemType Directory -Force -Path $destinationPath | Out-Null
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($archivePath, $destinationPath)
+}
+
+function Assert-StoreArtifactContainsExecutionAliasCore(
+    [string]$artifactPath,
+    [string]$tempDirectory
+) {
+    $extension = [System.IO.Path]::GetExtension($artifactPath)
+    $safeName = ([System.IO.Path]::GetFileNameWithoutExtension($artifactPath) -replace '[^a-zA-Z0-9._-]', '_')
+    $extractionPath = Join-Path $tempDirectory ($safeName + "-" + [Guid]::NewGuid().ToString("N"))
+
+    Expand-ZipContainer -archivePath $artifactPath -destinationPath $extractionPath
+
+    if ($extension.Equals(".msix", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $manifestPath = Join-Path $extractionPath "AppxManifest.xml"
+        Assert-Condition (Test-Path $manifestPath) "MSIX package '$artifactPath' does not contain AppxManifest.xml."
+
+        [xml]$packageManifest = Get-Content -Path $manifestPath
+        $applications = @($packageManifest.SelectNodes("//*[local-name()='Application']"))
+        if ($applications.Count -eq 0) {
+            Write-Host "Skipping Store resource package without Application element: $artifactPath"
+            return 0
+        }
+
+        Assert-StoreExecutionAliasManifestContract -manifestPath $manifestPath -RequirePackagedApplicationExecutable -packageRoot $extractionPath
+        return 1
+    }
+
+    if ($extension.Equals(".msixbundle", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $msixPackages = @(Get-ChildItem -Path $extractionPath -Recurse -File -Filter *.msix -ErrorAction SilentlyContinue)
+        Assert-Condition ($msixPackages.Count -gt 0) "MSIX bundle '$artifactPath' does not contain platform .msix packages."
+
+        $validatedPackageCount = 0
+        foreach ($msixPackage in $msixPackages) {
+            $validatedPackageCount += Assert-StoreArtifactContainsExecutionAliasCore -artifactPath $msixPackage.FullName -tempDirectory $tempDirectory
+        }
+
+        return $validatedPackageCount
+    }
+
+    if ($extension.Equals(".msixupload", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $innerPackages = @(
+            Get-ChildItem -Path $extractionPath -Recurse -File -Include *.msixbundle,*.msix -ErrorAction SilentlyContinue |
+                Sort-Object FullName
+        )
+        Assert-Condition ($innerPackages.Count -gt 0) "MSIX upload '$artifactPath' does not contain a .msixbundle or .msix package."
+
+        $validatedPackageCount = 0
+        foreach ($innerPackage in $innerPackages) {
+            $validatedPackageCount += Assert-StoreArtifactContainsExecutionAliasCore -artifactPath $innerPackage.FullName -tempDirectory $tempDirectory
+        }
+
+        return $validatedPackageCount
+    }
+
+    throw "Unsupported Store artifact type for execution alias validation: $artifactPath"
+}
+
+function Assert-StoreArtifactsContainExecutionAlias(
+    [object[]]$artifacts,
+    [string]$tempDirectory
+) {
+    Assert-Condition ($null -ne $artifacts -and $artifacts.Count -gt 0) "No Store artifacts were provided for execution alias validation."
+
+    if (Test-Path $tempDirectory) {
+        Remove-Item -Path $tempDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $tempDirectory | Out-Null
+
+    try {
+        $validatedPackageCount = 0
+        foreach ($artifact in $artifacts) {
+            $artifactPath = if ($artifact -is [System.IO.FileInfo]) {
+                [string]$artifact.FullName
+            }
+            else {
+                [string]$artifact
+            }
+
+            Write-Host "Validating Store execution alias in artifact: $artifactPath"
+            $validatedPackageCount += Assert-StoreArtifactContainsExecutionAliasCore -artifactPath $artifactPath -tempDirectory $tempDirectory
+        }
+
+        Assert-Condition ($validatedPackageCount -gt 0) "Store artifact validation did not inspect any platform MSIX package."
+        Write-Host "Store execution alias validated in $validatedPackageCount platform package(s)."
+    }
+    finally {
+        if (Test-Path $tempDirectory) {
+            Remove-Item -Path $tempDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Get-CsvHeaderColumns([string]$path) {
     $headerLine = Get-Content -Path $path -First 1
     if ([string]::IsNullOrWhiteSpace($headerLine)) {
@@ -303,6 +488,7 @@ function Invoke-ReleaseConfigValidation([string]$repoRoot) {
     [xml]$manifest = Get-Content -Path $manifestPath
     $manifestVersion = [string]$manifest.Package.Identity.Version
     Assert-Condition ($manifestVersion -eq $versionInfo.StorePackageVersion) "Store manifest version '$manifestVersion' does not match DevProjexStorePackageVersion '$($versionInfo.StorePackageVersion)'."
+    Assert-StoreExecutionAliasManifestContract -manifestPath $manifestPath
 
     $wapprojPath = Join-Path $repoRoot "Packaging\Windows\DevProjex.Store\DevProjex.Store.wapproj"
     [xml]$wapproj = Get-Content -Path $wapprojPath
@@ -401,6 +587,8 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
         if ($null -eq $artifacts -or $artifacts.Count -eq 0) {
             throw "Store smoke build did not produce any MSIX artifacts."
         }
+
+        Assert-StoreArtifactsContainExecutionAlias -artifacts @($artifacts) -tempDirectory (Join-Path $outputRoot "_execution_alias_validation")
 
         Write-Host "Store smoke build succeeded."
         $artifacts | Sort-Object Name | ForEach-Object { Write-Host "  $($_.FullName)" }
@@ -846,6 +1034,8 @@ function Build-StoreArtifactsInWorkspace(
     if ($null -eq $artifacts -or $artifacts.Count -eq 0) {
         throw "Store artifact (.msixupload/.msixbundle/.msix) not found in publish\store or Packaging\Windows\DevProjex.Store\publish\store"
     }
+
+    Assert-StoreArtifactsContainExecutionAlias -artifacts @($artifacts) -tempDirectory (Join-Path $publishStoreDir "_execution_alias_validation")
 
     Write-Host ""
     Write-Host "Build output:"

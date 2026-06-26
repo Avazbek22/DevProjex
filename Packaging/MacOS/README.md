@@ -112,6 +112,25 @@ cat > "DevProjex.app/Contents/Info.plist" << 'EOF'
 EOF
 ```
 
+## Optional Terminal Alias
+
+For terminal automation, use **Help -> Terminal command** in the app. DevProjex creates a user-level wrapper named `devprojex` in `~/.local/bin` and can repair it if the app bundle moves.
+
+Manual equivalent:
+
+```bash
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/devprojex <<'EOF'
+#!/bin/sh
+# DevProjex terminal command wrapper
+# target: /Applications/DevProjex.app/Contents/MacOS/DevProjex
+exec '/Applications/DevProjex.app/Contents/MacOS/DevProjex' "$@"
+EOF
+chmod +x ~/.local/bin/devprojex
+```
+
+Make sure `~/.local/bin` is in `PATH`. The app bundle itself does not modify shell profiles or global environment variables.
+
 ## Code Signing and Notarization
 
 For distribution outside the Mac App Store, the app must be signed and notarized:

@@ -37,5 +37,6 @@ public sealed record AppViewSettings
     public bool IsCompactMode { get; init; }
     public bool IsTreeAnimationEnabled { get; init; }
     public bool IsAdvancedIgnoreCountsEnabled { get; init; }
+    public bool IsTerminalCommandPromptDismissed { get; init; }
     public AppLanguage? PreferredLanguage { get; init; }
 }

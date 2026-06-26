@@ -4,7 +4,7 @@ namespace DevProjex.Tests.Integration;
 /// Integration tests for Git repository cache lifecycle management.
 /// Tests the complete flow: clone → open → cleanup.
 /// </summary>
-[Collection("GitNetworkTests")]
+[Collection(GitNetworkTestCollection.Name)]
 public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
 {
     private readonly GitRepositoryService _gitService;

@@ -12,6 +12,8 @@ using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
 using DevProjex.Kernel;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.Reports;
+using DevProjex.Infrastructure.TerminalCommands;
 using UserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
 using UserSettingsDb = DevProjex.Infrastructure.ThemePresets.UserSettingsDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
@@ -30,6 +32,19 @@ public partial class MainWindow : Window
         Tree = 0,
         PreviewWithTree = 1,
         PreviewOnly = 2
+    }
+
+    internal enum TerminalCommandPostInstallUiAction
+    {
+        None,
+        ShowError
+    }
+
+    internal enum AutomaticTerminalCommandStartupAction
+    {
+        None,
+        ShowPrompt,
+        RepairSilently
     }
 
     private enum ZoomSurfaceTarget
@@ -302,9 +317,19 @@ public partial class MainWindow : Window
     private EventHandler? _themeChangedHandler;
     private PropertyChangedEventHandler? _viewModelPropertyChangedHandler;
 
-    public MainWindow(CommandLineOptions startupOptions, AvaloniaAppServices services)
+    private readonly IReadOnlyList<CommandLineParseError> _startupCommandLineErrors;
+    private readonly ProjectAnalysisService _projectAnalysisService;
+    private readonly ReportPathResolver _reportPathResolver;
+    private readonly ProjectAnalysisReportWriter _projectAnalysisReportWriter;
+    private readonly ITerminalCommandSetupService _terminalCommandSetupService;
+
+    public MainWindow(
+        CommandLineOptions startupOptions,
+        AvaloniaAppServices services,
+        IReadOnlyList<CommandLineParseError>? startupCommandLineErrors = null)
     {
         _startupOptions = startupOptions;
+        _startupCommandLineErrors = startupCommandLineErrors ?? [];
         _localization = services.Localization;
         _scanOptions = services.ScanOptionsUseCase;
         _buildTree = services.BuildTreeUseCase;
@@ -325,6 +350,10 @@ public partial class MainWindow : Window
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
+        _projectAnalysisService = services.ProjectAnalysisService;
+        _reportPathResolver = services.ReportPathResolver;
+        _projectAnalysisReportWriter = services.ProjectAnalysisReportWriter;
+        _terminalCommandSetupService = services.TerminalCommandSetupService;
         _recentProjectsStore = services.RecentProjectsStore;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
@@ -872,8 +901,27 @@ public partial class MainWindow : Window
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
             ApplyStartupThemePreset();
 
+            if (_startupCommandLineErrors.Count > 0)
+            {
+                await ShowErrorAsync(string.Join(Environment.NewLine, _startupCommandLineErrors.Select(static error => error.Message)));
+            }
+
             if (!string.IsNullOrWhiteSpace(_startupOptions.Path))
-                await TryOpenFolderAsync(_startupOptions.Path!, fromDialog: false);
+            {
+                var startupLoadStopwatch = Stopwatch.StartNew();
+                var opened = await TryOpenFolderAsync(_startupOptions.Path!, fromDialog: false);
+                startupLoadStopwatch.Stop();
+
+                if (opened)
+                {
+                    await TryApplyStartupSelectionOverridesAsync();
+                    await TryWriteStartupReportAsync(startupLoadStopwatch.Elapsed);
+                }
+            }
+            else
+            {
+                await TryShowAutomaticTerminalCommandPromptAsync();
+            }
 
             // Clean up stale cache from previous sessions (non-blocking background task)
             _ = Task.Run(() =>
@@ -1972,6 +2020,7 @@ public partial class MainWindow : Window
             IsCompactMode = _viewModel.IsCompactMode,
             IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled,
             IsAdvancedIgnoreCountsEnabled = _isAdvancedIgnoreCountsEnabled,
+            IsTerminalCommandPromptDismissed = _userSettingsDb.ViewSettings?.IsTerminalCommandPromptDismissed ?? false,
             PreferredLanguage = _userSettingsDb.ViewSettings?.PreferredLanguage
         };
 
@@ -4908,10 +4957,66 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private async void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await ShowTerminalCommandSetupAsync(_terminalCommandSetupService.Probe(), isAutomaticPrompt: false);
+            e.Handled = true;
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+            e.Handled = true;
+        }
+    }
+
     private void OnHelpClose(object? sender, RoutedEventArgs e)
     {
         _viewModel.HelpDocsPopoverOpen = false;
         e.Handled = true;
+    }
+
+    private async Task ShowTerminalCommandSetupAsync(
+        TerminalCommandSetupSnapshot snapshot,
+        bool isAutomaticPrompt)
+    {
+        var dialogResult = await TerminalCommandSetupDialog.ShowAsync(this, _localization, snapshot, isAutomaticPrompt);
+        if (ShouldPersistTerminalCommandPromptDismissal(dialogResult))
+            SaveTerminalCommandPromptDismissed();
+
+        if (dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair)
+            return;
+
+        var installResult = _terminalCommandSetupService.InstallOrRepair();
+        if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
+        {
+            await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+        }
+    }
+
+    internal static TerminalCommandPostInstallUiAction ResolveTerminalCommandPostInstallUiAction(
+        TerminalCommandInstallResult installResult) =>
+        installResult.Success
+            ? TerminalCommandPostInstallUiAction.None
+            : TerminalCommandPostInstallUiAction.ShowError;
+
+    private void SaveTerminalCommandPromptDismissed()
+    {
+        var current = _userSettingsDb.ViewSettings ?? new AppViewSettings();
+        _userSettingsDb.ViewSettings = current with
+        {
+            IsTerminalCommandPromptDismissed = true
+        };
+        _userSettingsStore.Save(_userSettingsDb);
+    }
+
+    internal static bool ShouldPersistTerminalCommandPromptDismissal(TerminalCommandDialogResult dialogResult)
+    {
+        // Choosing install/repair is not a dismissal. If the install attempt fails,
+        // the next startup should still be allowed to offer setup again.
+        return dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair &&
+               (dialogResult.DontShowAgain || dialogResult.Action == TerminalCommandDialogAction.DismissPrompt);
     }
 
     private async void OnResetSettings(object? sender, RoutedEventArgs e)
@@ -6620,25 +6725,180 @@ public partial class MainWindow : Window
         _projectProfiles.FlushPending();
     }
 
-    private async Task TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
+    private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
-        if (!Directory.Exists(path))
+        string normalizedPath;
+        try
+        {
+            normalizedPath = PathUtility.Normalize(path);
+        }
+        catch
         {
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
-            return;
+            return false;
         }
 
-        if (!_scanOptions.CanReadRoot(path))
+        if (!Directory.Exists(normalizedPath))
         {
-            if (TryElevateAndRestart(path))
-                return;
+            await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
+            return false;
+        }
+
+        if (!_scanOptions.CanReadRoot(normalizedPath))
+        {
+            if (TryElevateAndRestart(normalizedPath))
+                return false;
 
             if (BuildFlags.AllowElevation)
                 await ShowErrorAsync(_localization["Msg.AccessDeniedRoot"]);
+            return false;
+        }
+
+        await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
+        return true;
+    }
+
+    private async Task TryApplyStartupSelectionOverridesAsync()
+    {
+        if (!_startupOptions.HasSelectionOverrides || string.IsNullOrWhiteSpace(_currentPath))
+            return;
+
+        if (_startupOptions.HasRootFolderOverrides)
+        {
+            var selectedRoots = new HashSet<string>(_startupOptions.IncludeRootFolders, PathComparer.Default);
+            foreach (var option in _viewModel.RootFolders)
+                option.IsChecked = selectedRoots.Contains(option.Name);
+        }
+
+        if (_startupOptions.HasExtensionOverrides)
+        {
+            var selectedExtensions = new HashSet<string>(_startupOptions.IncludeExtensions, StringComparer.OrdinalIgnoreCase);
+            foreach (var option in _viewModel.Extensions)
+                option.IsChecked = selectedExtensions.Contains(option.Name);
+        }
+
+        if (_startupOptions.HasIgnoreOverrides)
+        {
+            var selectedIgnoreOptions = new HashSet<IgnoreOptionId>(_startupOptions.IgnoreOptions);
+            foreach (var option in _viewModel.IgnoreOptions)
+                option.IsChecked = selectedIgnoreOptions.Contains(option.Id);
+        }
+
+        await _selectionCoordinator.WaitForPendingRefreshesAsync();
+        await RefreshTreeAsync();
+        await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath);
+        await _selectionCoordinator.WaitForPendingRefreshesAsync();
+    }
+
+    private async Task TryWriteStartupReportAsync(TimeSpan loadingElapsed)
+    {
+        if (!_startupOptions.Report.Enabled ||
+            string.IsNullOrWhiteSpace(_currentPath) ||
+            _currentTree is null)
+        {
             return;
         }
 
-        await _projectLoadPipeline.OpenFolderAsync(path, fromDialog, recordRecentFolder);
+        var reportInput = new LoadedProjectAnalysisRequest(
+            RootPath: _currentPath,
+            Tree: _currentTree,
+            AvailableRootFolders: _viewModel.RootFolders.Select(static option => option.Name).ToArray(),
+            AvailableExtensions: _viewModel.Extensions.Select(static option => option.Name).ToArray(),
+            SelectedRootFolders: _viewModel.RootFolders
+                .Where(static option => option.IsChecked)
+                .Select(static option => option.Name)
+                .ToArray(),
+            SelectedExtensions: _viewModel.Extensions
+                .Where(static option => option.IsChecked)
+                .Select(static option => option.Name)
+                .ToArray(),
+            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray(),
+            RootAccessDenied: _currentTree.RootAccessDenied,
+            HadAccessDenied: _currentTree.HadAccessDenied,
+            KnownLoadingElapsed: loadingElapsed);
+
+        try
+        {
+            var report = await Task.Run(
+                () => _projectAnalysisService.BuildReportFromTreeAsync(reportInput),
+                CancellationToken.None);
+            var reportPath = _reportPathResolver.Resolve(_startupOptions.Report);
+            await _projectAnalysisReportWriter.WriteAsync(report, reportPath);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private async Task TryShowAutomaticTerminalCommandPromptAsync()
+    {
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            var snapshot = _terminalCommandSetupService.Probe();
+            var action = ResolveAutomaticTerminalCommandStartupAction(
+                _userSettingsDb.ViewSettings,
+                snapshot,
+                !string.IsNullOrWhiteSpace(_startupOptions.Path));
+
+            if (action == AutomaticTerminalCommandStartupAction.RepairSilently)
+            {
+                _ = _terminalCommandSetupService.InstallOrRepair();
+                return;
+            }
+
+            if (action == AutomaticTerminalCommandStartupAction.ShowPrompt)
+                await ShowTerminalCommandSetupAsync(snapshot, isAutomaticPrompt: true);
+        }
+        catch
+        {
+            // Terminal setup is optional; startup must stay resilient even if probing fails.
+        }
+    }
+
+    internal static bool ShouldShowAutomaticTerminalCommandPrompt(
+        AppViewSettings settings,
+        TerminalCommandSetupSnapshot snapshot,
+        bool startedWithProjectPath) =>
+        ResolveAutomaticTerminalCommandStartupAction(settings, snapshot, startedWithProjectPath) ==
+        AutomaticTerminalCommandStartupAction.ShowPrompt;
+
+    internal static AutomaticTerminalCommandStartupAction ResolveAutomaticTerminalCommandStartupAction(
+        AppViewSettings settings,
+        TerminalCommandSetupSnapshot snapshot,
+        bool startedWithProjectPath)
+    {
+        if (!LooksLikePublishedDevProjexExecutable(snapshot.TargetExecutablePath))
+            return AutomaticTerminalCommandStartupAction.None;
+
+        if (TerminalCommandPromptPolicy.ShouldRepairAutomatically(snapshot))
+            return AutomaticTerminalCommandStartupAction.RepairSilently;
+
+        return TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, snapshot, startedWithProjectPath)
+            ? AutomaticTerminalCommandStartupAction.ShowPrompt
+            : AutomaticTerminalCommandStartupAction.None;
+    }
+
+    private static bool LooksLikePublishedDevProjexExecutable(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+            return false;
+
+        var name = GetFileNameWithoutExtensionCrossPlatform(executablePath);
+        return name.Equals("DevProjex", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetFileNameWithoutExtensionCrossPlatform(string path)
+    {
+        // Unit tests intentionally pass Windows-style paths on Linux runners.
+        // Path.GetFileName* only recognizes the current OS separator, so keep
+        // this prompt gate deterministic across CI platforms.
+        var fileNameStart = Math.Max(
+            path.LastIndexOf('/'),
+            path.LastIndexOf('\\')) + 1;
+        var fileName = path[fileNameStart..];
+        return Path.GetFileNameWithoutExtension(fileName);
     }
 
     private bool TryElevateAndRestart(string path)
@@ -6655,10 +6915,12 @@ public partial class MainWindow : Window
 
         _elevationAttempted = true;
 
-        var opts = new CommandLineOptions(
-            Path: path,
-            Language: _localization.CurrentLanguage,
-            ElevationAttempted: true);
+        var opts = _startupOptions with
+        {
+            Path = path,
+            Language = _localization.CurrentLanguage,
+            ElevationAttempted = true
+        };
 
         bool started = _elevation.TryRelaunchAsAdministrator(opts);
         if (started)

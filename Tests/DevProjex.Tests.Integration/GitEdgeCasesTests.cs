@@ -12,6 +12,7 @@ namespace DevProjex.Tests.Integration;
 /// - Special characters and internationalization
 /// - Large repositories and timeouts
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitEdgeCasesTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _service;

@@ -38,6 +38,6 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Build Store package smoke
+      - name: Build Store package and validate execution alias
         shell: pwsh
         run: ./Scripts/release-all.ps1 -SmokeStoreBuildOnly

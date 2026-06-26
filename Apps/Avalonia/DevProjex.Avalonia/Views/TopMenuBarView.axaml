@@ -86,6 +86,7 @@
       <MenuItem Name="ThemeMenuItem" Header="{Binding MenuTheme}" Click="OnThemeMenuClick" />
       <MenuItem Name="HelpMenuItem" Header="{Binding MenuHelp}">
         <MenuItem Header="{Binding MenuHelpHelp}" Click="OnHelp" />
+        <MenuItem Header="{Binding MenuHelpTerminalCommand}" Click="OnTerminalCommandSetup" />
         <MenuItem Header="{Binding MenuHelpAbout}" Click="OnAbout" />
         <Separator />
         <MenuItem Header="{Binding MenuHelpResetSettings}" Click="OnResetSettings" />

@@ -42,6 +42,7 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? LanguageDeRequested;
     public event EventHandler<RoutedEventArgs>? LanguageItRequested;
     public event EventHandler<RoutedEventArgs>? HelpRequested;
+    public event EventHandler<RoutedEventArgs>? TerminalCommandSetupRequested;
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutRequested;
     public event EventHandler<RoutedEventArgs>? AboutCloseRequested;
@@ -163,6 +164,9 @@ public partial class TopMenuBarView : UserControl
     private void OnLangIt(object? sender, RoutedEventArgs e) => LanguageItRequested?.Invoke(sender, e);
 
     private void OnHelp(object? sender, RoutedEventArgs e) => HelpRequested?.Invoke(sender, e);
+
+    private void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
+        => TerminalCommandSetupRequested?.Invoke(sender, e);
 
     private void OnAbout(object? sender, RoutedEventArgs e) => AboutRequested?.Invoke(sender, e);
 

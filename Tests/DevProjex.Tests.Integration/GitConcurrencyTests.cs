@@ -4,6 +4,7 @@ namespace DevProjex.Tests.Integration;
 /// Integration tests for concurrent Git operations.
 /// Tests thread safety, parallel execution, and resource locking.
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitConcurrencyTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _service;

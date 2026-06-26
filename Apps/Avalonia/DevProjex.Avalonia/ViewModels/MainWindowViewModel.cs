@@ -1191,6 +1191,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuLanguage { get; private set; } = string.Empty;
     public string MenuHelp { get; private set; } = string.Empty;
     public string MenuHelpHelp { get; private set; } = string.Empty;
+    public string MenuHelpTerminalCommand { get; private set; } = string.Empty;
     public string MenuHelpAbout { get; private set; } = string.Empty;
     public string MenuHelpResetSettings { get; private set; } = string.Empty;
     public string MenuHelpResetData { get; private set; } = string.Empty;
@@ -1344,6 +1345,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuLanguage = _localization["Menu.Language"];
         MenuHelp = _localization["Menu.Help"];
         MenuHelpHelp = _localization["Menu.Help.Help"];
+        MenuHelpTerminalCommand = _localization["Menu.Help.TerminalCommand"];
         MenuHelpAbout = _localization["Menu.Help.About"];
         MenuHelpResetSettings = _localization["Menu.Help.ResetSettings"];
         MenuHelpResetData = _localization["Menu.Help.ResetData"];
@@ -1480,6 +1482,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuLanguage));
         RaisePropertyChanged(nameof(MenuHelp));
         RaisePropertyChanged(nameof(MenuHelpHelp));
+        RaisePropertyChanged(nameof(MenuHelpTerminalCommand));
         RaisePropertyChanged(nameof(MenuHelpAbout));
         RaisePropertyChanged(nameof(MenuHelpResetSettings));
         RaisePropertyChanged(nameof(MenuHelpResetData));

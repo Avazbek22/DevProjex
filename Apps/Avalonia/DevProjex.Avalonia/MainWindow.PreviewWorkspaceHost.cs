@@ -1,4 +1,3 @@
-using DevProjex.Application.Preview;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 

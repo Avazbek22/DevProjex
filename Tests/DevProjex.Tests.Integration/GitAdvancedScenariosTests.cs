@@ -4,6 +4,7 @@ namespace DevProjex.Tests.Integration;
 /// Advanced integration tests for Git operations covering edge cases and complex scenarios.
 /// Tests repository state management, branch validation, and cache cleanup.
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitAdvancedScenariosTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _gitService;

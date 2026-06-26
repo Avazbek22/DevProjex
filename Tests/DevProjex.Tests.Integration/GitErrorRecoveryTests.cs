@@ -4,6 +4,7 @@ namespace DevProjex.Tests.Integration;
 /// Integration tests for Git error recovery and resilience.
 /// Tests recovery from network errors, corrupted repositories, and cancellation.
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitErrorRecoveryTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _service;

@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Avalonia;
 
 internal static class Program
@@ -6,8 +8,20 @@ internal static class Program
     private const long SkiaGpuCacheLimitBytes = 96L * 1024 * 1024;
 
     [STAThread]
-    public static void Main(string[] args) => BuildAvaloniaApp()
-        .StartWithClassicDesktopLifetime(args);
+    public static int Main(string[] args)
+    {
+        var parseResult = CommandLineOptions.Parse(args);
+        if (CommandLineAutomationRunner.ShouldRunBeforeAvalonia(parseResult))
+        {
+            WindowsParentConsole.AttachForCommandLine();
+            return CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(parseResult)
+                .GetAwaiter()
+                .GetResult();
+        }
+
+        return BuildAvaloniaApp()
+            .StartWithClassicDesktopLifetime(args);
+    }
 
     public static AppBuilder BuildAvaloniaApp()
     {

@@ -4,6 +4,7 @@ namespace DevProjex.Tests.Integration;
 /// Detailed integration tests for Git branch operations.
 /// Tests branch listing, switching, tracking, and state management.
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitBranchOperationsTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _service;

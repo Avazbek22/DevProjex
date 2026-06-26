@@ -11,6 +11,7 @@ namespace DevProjex.Tests.Integration;
 /// - Comparison with Git clone results
 /// - Large file handling
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class ZipDownloadAdvancedTests : IAsyncLifetime
 {
     private readonly ZipDownloadService _zipService;

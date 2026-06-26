@@ -1,5 +1,3 @@
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Infrastructure.FileSystem;
 
 internal static class ProjectTreeInventoryScanner

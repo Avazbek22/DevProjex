@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.Reports;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -20,6 +21,7 @@ public sealed record AvaloniaAppServices(
     TreeExportService TreeExportService,
     SelectedContentExportService ContentExportService,
     TreeAndContentExportService TreeAndContentExportService,
+    ProjectExportService ProjectExportService,
     PreviewDocumentBuilder PreviewDocumentBuilder,
     RepositoryWebPathPresentationService RepositoryWebPathPresentationService,
     TextFileExportService TextFileExportService,
@@ -29,4 +31,8 @@ public sealed record AvaloniaAppServices(
     IRepoCacheService RepoCacheService,
     IZipDownloadService ZipDownloadService,
     IFileContentAnalyzer FileContentAnalyzer,
+    ProjectAnalysisService ProjectAnalysisService,
+    ReportPathResolver ReportPathResolver,
+    ProjectAnalysisReportWriter ProjectAnalysisReportWriter,
+    ITerminalCommandSetupService TerminalCommandSetupService,
     ITaskbarProgressService TaskbarProgressService);
