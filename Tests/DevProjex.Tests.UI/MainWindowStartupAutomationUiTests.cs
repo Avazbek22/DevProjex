@@ -38,11 +38,15 @@ public sealed class MainWindowStartupAutomationUiTests
 			await UiTestDriver.OpenFolderAsync(window, relativeProjectPath);
 
 			var viewModel = UiTestDriver.GetViewModel(window);
-			Assert.Equal(project.RootPath, GetCurrentPath(window));
-			Assert.Contains(project.RootPath, viewModel.Title, StringComparison.Ordinal);
+			var expectedPath = GetComparablePath(project.RootPath);
+			var actualCurrentPath = GetComparablePath(GetCurrentPath(window));
+			var actualTitle = NormalizeMacOsPrivateVarAlias(viewModel.Title);
+
+			Assert.Equal(expectedPath, actualCurrentPath);
+			Assert.Contains(expectedPath, actualTitle, StringComparison.Ordinal);
 			Assert.StartsWith(
-				$"{MainWindowViewModel.BaseTitle} - {project.RootPath}",
-				viewModel.Title,
+				$"{MainWindowViewModel.BaseTitle} - {expectedPath}",
+				actualTitle,
 				StringComparison.Ordinal);
 		}
 		finally
@@ -162,5 +166,23 @@ public sealed class MainWindowStartupAutomationUiTests
 	{
 		var field = typeof(MainWindow).GetField("_currentPath", BindingFlags.Instance | BindingFlags.NonPublic);
 		return Assert.IsType<string>(field?.GetValue(window));
+	}
+
+	private static string GetComparablePath(string? path)
+	{
+		Assert.False(string.IsNullOrWhiteSpace(path));
+		var fullPath = Path.GetFullPath(path);
+		return NormalizeMacOsPrivateVarAlias(fullPath);
+	}
+
+	private static string NormalizeMacOsPrivateVarAlias(string value)
+	{
+		const string privateVarPrefix = "/private/var/";
+		const string varPrefix = "/var/";
+
+		// macOS can surface the same temp directory as either /var/... or /private/var/... in UI/runtime paths.
+		return OperatingSystem.IsMacOS() && value.StartsWith(privateVarPrefix, StringComparison.Ordinal)
+			? varPrefix + value[privateVarPrefix.Length..]
+			: value;
 	}
 }
