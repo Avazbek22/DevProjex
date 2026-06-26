@@ -2,9 +2,9 @@ name: Release Validation
 
 on:
   push:
-    branches: [ "master", "v4.9" ]
+    branches: [ "master" ]
   pull_request:
-    branches: [ "master", "v4.9" ]
+    branches: [ "master" ]
   workflow_dispatch:
 
 permissions:
