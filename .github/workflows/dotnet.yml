@@ -3,7 +3,7 @@ name: .NET CI
 on:
   push:
     branches:
-      - master
+      - '**'
   pull_request:
   workflow_dispatch:
 
@@ -32,40 +32,18 @@ jobs:
         id: set-matrix
         shell: pwsh
         run: |
-          $isFullMatrix =
-            '${{ github.event_name }}' -eq 'workflow_dispatch' -or
-            '${{ github.ref }}' -eq 'refs/heads/master'
-
-          # Feature branches keep a fast confidence matrix: Windows covers the full
-          # app surface, Linux keeps non-UI integration confidence, and macOS still
-          # compiles/runs the core unit layer. Full cross-platform UI/integration
-          # coverage stays on master and on manual runs.
-          if ($isFullMatrix) {
-            $matrix = @{
-              include = @(
-                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
-                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
-                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
-                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
-                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
-                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
-                @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
-                @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
-                @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' }
-              )
-            }
-          }
-          else {
-            $matrix = @{
-              include = @(
-                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
-                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
-                @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
-                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
-                @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
-                @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' }
-              )
-            }
+          $matrix = @{
+            include = @(
+              @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
+              @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
+              @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
+              @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
+              @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
+              @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
+              @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
+              @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
+              @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' }
+            )
           }
 
           "matrix=$($matrix | ConvertTo-Json -Compress -Depth 5)" >> $env:GITHUB_OUTPUT
