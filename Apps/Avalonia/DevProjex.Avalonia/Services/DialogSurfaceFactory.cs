@@ -9,13 +9,8 @@ internal static class DialogSurfaceFactory
 {
     private static readonly WindowTransparencyLevel[] DialogTransparencyHints =
     [
-        WindowTransparencyLevel.AcrylicBlur,
-        WindowTransparencyLevel.Blur,
         WindowTransparencyLevel.None
     ];
-
-    private static readonly CornerRadius CardCornerRadius = new(12);
-    private static readonly BoxShadows CardShadow = BoxShadows.Parse("0 6 20 0 #50000000");
 
     public static ThemeVariant ResolveThemeVariant(Window? owner)
     {
@@ -29,7 +24,6 @@ internal static class DialogSurfaceFactory
         var app = global::Avalonia.Application.Current;
         var appBackground = TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush");
         var appPanel = TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
-        var menuPanel = TryGetThemeBrush(app, themeVariant, "MenuPopupBrush");
         var appBorder = TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
 
         return new DialogSurfaceBrushes(
@@ -37,7 +31,7 @@ internal static class DialogSurfaceFactory
             appBackground ??
             owner?.Background ??
             CreateDefaultFallbackBrush(themeVariant),
-            menuPanel ?? appPanel,
+            TryGetThemeColorBrush(app, themeVariant, "AppPanelColor") ?? appPanel,
             TryGetThemeColorBrush(app, themeVariant, "AppBorderColor") ?? appBorder);
     }
 
@@ -58,13 +52,11 @@ internal static class DialogSurfaceFactory
             Height = height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
-            ShowInTaskbar = false,
             RequestedThemeVariant = themeVariant,
-            WindowDecorations = WindowDecorations.None,
+            WindowDecorations = WindowDecorations.Full,
             TransparencyLevelHint = DialogTransparencyHints,
-            TransparencyBackgroundFallback = brushes.Background ?? Brushes.Transparent,
-            Background = Brushes.Transparent,
-            Content = CreateCard(content, brushes)
+            Background = brushes.Background ?? Brushes.Transparent,
+            Content = content
         };
 
         if (minWidth is not null)
@@ -76,29 +68,12 @@ internal static class DialogSurfaceFactory
         return dialog;
     }
 
-    private static Border CreateCard(Control content, DialogSurfaceBrushes brushes)
-    {
-        return new Border
-        {
-            Background = brushes.Panel ?? brushes.Background,
-            BorderBrush = brushes.Border,
-            BorderThickness = new Thickness(1),
-            CornerRadius = CardCornerRadius,
-            ClipToBounds = true,
-            BoxShadow = CardShadow,
-            Child = content
-        };
-    }
-
     private static void ApplyResources(Window dialog, DialogSurfaceBrushes brushes)
     {
         if (brushes.Background is not null)
             dialog.Resources["AppBackgroundBrush"] = brushes.Background;
         if (brushes.Panel is not null)
-        {
             dialog.Resources["AppPanelBrush"] = brushes.Panel;
-            dialog.Resources["MenuPopupBrush"] = brushes.Panel;
-        }
         if (brushes.Border is not null)
             dialog.Resources["AppBorderBrush"] = brushes.Border;
     }
