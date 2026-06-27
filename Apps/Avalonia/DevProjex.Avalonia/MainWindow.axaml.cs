@@ -2718,42 +2718,11 @@ public partial class MainWindow : Window
 
     private void ApplyPreviewToolTipBackdrop(ToolTip toolTip)
     {
-        if (GetTopLevel(toolTip) is null)
-            return;
-
-        if (GetTopLevel(toolTip) is not TopLevel tooltipLevel)
-            return;
-
-        var host = GetTopLevel(this);
-        if (host is not null && ReferenceEquals(tooltipLevel, host))
-            return;
-
-        try
-        {
-            if (_viewModel.HasAnyEffect)
-            {
-                tooltipLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.Transparent,
-                    WindowTransparencyLevel.None
-                ];
-
-                tooltipLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                tooltipLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: tooltip could have closed before the backdrop was applied.
-        }
+        PopupBackdropConfigurator.TryApply(
+            toolTip,
+            GetTopLevel(this),
+            _viewModel.HasAnyEffect,
+            PopupBackdropTransparencyFallback.Transparent);
     }
 
     private void HidePreviewStickyPath()

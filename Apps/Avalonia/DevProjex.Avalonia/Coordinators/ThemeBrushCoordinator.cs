@@ -1,4 +1,5 @@
 using Avalonia.LogicalTree;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -277,7 +278,11 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
         foreach (var popup in menuItem.GetVisualDescendants().OfType<Popup>().Where(p => p.IsOpen))
         {
-            ApplyPopupHostEffect(popup);
+            PopupBackdropConfigurator.TryApply(
+                popup.Child,
+                window,
+                viewModel.HasAnyEffect,
+                PopupBackdropTransparencyFallback.Transparent);
 
             if (popup.Child is not Border border)
                 continue;
@@ -287,51 +292,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             border.BorderThickness = new Thickness(1);
             border.CornerRadius = new CornerRadius(8);
             border.Padding = new Thickness(4);
-        }
-    }
-
-    private void ApplyPopupHostEffect(Popup popup)
-    {
-        if (!popup.IsOpen)
-            return;
-
-        if (popup.Child is null)
-            return;
-
-        if (TopLevel.GetTopLevel(popup.Child) is null)
-            return;
-
-        if (TopLevel.GetTopLevel(popup.Child) is not TopLevel topLevel)
-            return;
-
-        if (ReferenceEquals(topLevel, window))
-            return;
-
-        try
-        {
-            if (viewModel.HasAnyEffect)
-            {
-                topLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.Transparent,
-                    WindowTransparencyLevel.None
-                ];
-
-                topLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                topLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: popup could have closed.
         }
     }
 

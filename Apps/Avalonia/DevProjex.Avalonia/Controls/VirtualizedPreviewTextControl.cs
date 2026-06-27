@@ -1,4 +1,5 @@
 using Avalonia.Media.TextFormatting;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Controls;
 
@@ -1271,42 +1272,14 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private void ApplyContextMenuBackdrop()
     {
-        if (_contextMenu is null || TopLevel.GetTopLevel(_contextMenu) is not TopLevel popupLevel)
-            return;
-
-        var host = TopLevel.GetTopLevel(this);
-        if (host is not null && ReferenceEquals(host, popupLevel))
-            return;
-
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        try
-        {
-            if (viewModel.HasAnyEffect)
-            {
-                popupLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.Transparent,
-                    WindowTransparencyLevel.None
-                ];
-
-                popupLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                popupLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: popup can close while the host is being configured.
-        }
+        PopupBackdropConfigurator.TryApply(
+            _contextMenu,
+            TopLevel.GetTopLevel(this),
+            viewModel.HasAnyEffect,
+            PopupBackdropTransparencyFallback.Transparent);
     }
 
     private static IBrush EnsureOpaqueSelectionBrush(IBrush brush)

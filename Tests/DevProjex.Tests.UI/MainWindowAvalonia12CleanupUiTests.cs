@@ -45,13 +45,19 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
 
             Assert.True(themePopup.IsLightDismissEnabled);
             Assert.False(themePopup.OverlayDismissEventPassThrough);
+            Assert.False(themePopup.ShouldUseOverlayLayer);
+            Assert.False(themePopup.WindowManagerAddShadowHint);
 
             Assert.True(helpPopup.IsLightDismissEnabled);
             Assert.False(helpPopup.OverlayDismissEventPassThrough);
+            Assert.False(helpPopup.ShouldUseOverlayLayer);
+            Assert.False(helpPopup.WindowManagerAddShadowHint);
             Assert.Equal(expectedAdjustment, helpPopup.PlacementConstraintAdjustment);
 
             Assert.True(helpDocsPopup.IsLightDismissEnabled);
             Assert.False(helpDocsPopup.OverlayDismissEventPassThrough);
+            Assert.False(helpDocsPopup.ShouldUseOverlayLayer);
+            Assert.False(helpDocsPopup.WindowManagerAddShadowHint);
             Assert.Equal(expectedAdjustment, helpDocsPopup.PlacementConstraintAdjustment);
         }
         finally

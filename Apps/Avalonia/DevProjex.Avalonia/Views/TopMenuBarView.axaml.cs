@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Avalonia.Views;
 
 public partial class TopMenuBarView : UserControl
@@ -308,91 +310,26 @@ public partial class TopMenuBarView : UserControl
 
     private void ApplyPopupBackdrop(Popup? popup)
     {
-        if (popup?.Child is null)
+        if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        if (TopLevel.GetTopLevel(popup.Child) is null)
-            return;
-
-        if (TopLevel.GetTopLevel(popup.Child) is not TopLevel popupLevel)
-            return;
-
-        var host = TopLevel.GetTopLevel(this);
-        if (host is not null && ReferenceEquals(popupLevel, host))
-            return;
-
-        var viewModel = DataContext as MainWindowViewModel;
-        if (viewModel is null)
-            return;
-
-        try
-        {
-            if (viewModel.HasAnyEffect)
-            {
-                popupLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.None
-                ];
-
-                popupLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                popupLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: popup could have closed.
-        }
+        PopupBackdropConfigurator.TryApply(
+            popup?.Child,
+            TopLevel.GetTopLevel(this),
+            viewModel.HasAnyEffect,
+            PopupBackdropTransparencyFallback.None);
     }
 
     private void ApplyToolTipBackdrop(ToolTip toolTip)
     {
-        if (TopLevel.GetTopLevel(toolTip) is null)
-            return;
-
-        if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
-            return;
-
-        var host = TopLevel.GetTopLevel(this);
-        if (host is not null && ReferenceEquals(tooltipLevel, host))
-            return;
-
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        try
-        {
-            if (viewModel.HasAnyEffect)
-            {
-                tooltipLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.Transparent,
-                    WindowTransparencyLevel.None
-                ];
-
-                tooltipLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                tooltipLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: tooltip could have closed.
-        }
+        PopupBackdropConfigurator.TryApply(
+            toolTip,
+            TopLevel.GetTopLevel(this),
+            viewModel.HasAnyEffect,
+            PopupBackdropTransparencyFallback.Transparent);
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
