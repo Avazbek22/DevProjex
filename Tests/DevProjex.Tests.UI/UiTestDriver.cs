@@ -258,20 +258,26 @@ internal static class UiTestDriver
 
     public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
     {
-        var checkBox = await WaitForRootFolderCheckBoxAsync(window, rootFolderName);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindRootFolderCheckBox(window, rootFolderName),
+            $"root folder checkbox '{rootFolderName}'");
     }
 
     public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
     {
-        var checkBox = await WaitForExtensionCheckBoxAsync(window, extensionName);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindExtensionCheckBox(window, extensionName),
+            $"extension checkbox '{extensionName}'");
     }
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
-        var checkBox = await WaitForIgnoreOptionCheckBoxAsync(window, optionId);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindIgnoreOptionCheckBox(window, optionId),
+            $"ignore checkbox '{optionId}'");
     }
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
@@ -336,6 +342,11 @@ internal static class UiTestDriver
         await EnsureControlVisibleAsync(window, control);
         await WaitForControlReadyForPointerAsync(window, control);
 
+        await ClickReadyControlAsync(window, control);
+    }
+
+    private static async Task ClickReadyControlAsync(MainWindow window, Control control)
+    {
         var clickPoint = GetControlCenter(control, window);
         window.MouseMove(clickPoint, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 2);
@@ -1127,13 +1138,54 @@ internal static class UiTestDriver
     {
         await WaitForConditionAsync(
             window,
-            () =>
-                control.IsVisible
-                && control.Bounds.Width > 0.5
-                && control.Bounds.Height > 0.5
-                && control.TranslatePoint(default, window).HasValue,
+            () => IsControlReadyForPointer(control, window),
             $"control '{GetControlDebugName(control)}' to be ready for pointer input");
     }
+
+    private static async Task ClickResolvedControlAsync(
+        MainWindow window,
+        Func<Control?> resolveControl,
+        string description)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        Exception? lastFailure = null;
+
+        while (stopwatch.Elapsed < DefaultTimeout)
+        {
+            var control = resolveControl();
+            if (control is null || !IsControlReadyForPointer(control, window))
+            {
+                await WaitForSettledFramesAsync(frameCount: 2);
+                await Task.Delay(PollDelay);
+                continue;
+            }
+
+            try
+            {
+                await EnsureControlVisibleAsync(window, control);
+                if (!IsControlReadyForPointer(control, window))
+                    continue;
+
+                await ClickReadyControlAsync(window, control);
+                return;
+            }
+            catch (XunitException exception)
+            {
+                lastFailure = exception;
+                await WaitForSettledFramesAsync(frameCount: 2);
+            }
+        }
+
+        var lastFailureText = lastFailure is null ? string.Empty : $" Last failure: {lastFailure.Message}";
+        throw new XunitException(
+            $"Timed out waiting for {description} to stay ready for pointer input.{lastFailureText} Current state: {DescribeState(window)}");
+    }
+
+    private static bool IsControlReadyForPointer(Control control, MainWindow window)
+        => control.IsVisible
+           && control.Bounds.Width > 0.5
+           && control.Bounds.Height > 0.5
+           && control.TranslatePoint(default, window).HasValue;
 
     private static string GetControlDebugName(Control control)
         => string.IsNullOrWhiteSpace(control.Name) ? control.GetType().Name : control.Name!;
