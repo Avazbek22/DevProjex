@@ -66,6 +66,15 @@ public partial class TopMenuBarView : UserControl
 
     public Menu? MainMenuControl => MainMenu;
     public MenuItem? RecentMenuItemControl => RecentMenuItem;
+    public MenuItem? TreeFontMenuItemControl => TreeFontMenuItem;
+    public MenuItem? LanguageRuMenuItemControl => LanguageRuMenuItem;
+    public MenuItem? LanguageEnMenuItemControl => LanguageEnMenuItem;
+    public MenuItem? LanguageUzMenuItemControl => LanguageUzMenuItem;
+    public MenuItem? LanguageTgMenuItemControl => LanguageTgMenuItem;
+    public MenuItem? LanguageKkMenuItemControl => LanguageKkMenuItem;
+    public MenuItem? LanguageFrMenuItemControl => LanguageFrMenuItem;
+    public MenuItem? LanguageDeMenuItemControl => LanguageDeMenuItem;
+    public MenuItem? LanguageItMenuItemControl => LanguageItMenuItem;
 
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => OpenFolderRequested?.Invoke(sender, e);
 

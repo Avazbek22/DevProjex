@@ -26,6 +26,7 @@ namespace DevProjex.Avalonia;
 public partial class MainWindow : Window
 {
     private const double BranchMenuItemHeight = 32;
+    private const double TreeFontMenuItemHeight = 32;
 
     private enum WorkspaceDisplayMode
     {
@@ -471,7 +472,9 @@ public partial class MainWindow : Window
         _previewTextControl = this.FindControl<VirtualizedPreviewTextControl>("PreviewTextControl");
         _previewLineNumbersControl = this.FindControl<VirtualizedLineNumbersControl>("PreviewLineNumbersControl");
         AttachRecentMenuHandlers();
+        AttachTreeFontMenuHandlers();
         RefreshRecentFoldersMenu();
+        RefreshLanguageMenuChecks();
         if (_treePaneSnapshotImage is not null)
         {
             _treePaneSnapshotTransform = _treePaneSnapshotImage.RenderTransform as TranslateTransform ?? new TranslateTransform();
@@ -580,6 +583,7 @@ public partial class MainWindow : Window
         }
 
         InitializeFonts();
+        RefreshTreeFontMenu();
         _selectionCoordinator.HookOptionListeners(_viewModel.RootFolders);
         _selectionCoordinator.HookOptionListeners(_viewModel.Extensions);
         _selectionCoordinator.HookIgnoreListeners(_viewModel.IgnoreOptions);
@@ -627,6 +631,8 @@ public partial class MainWindow : Window
             {
                 Dispatcher.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
             }
+            else if (args.PropertyName == nameof(MainWindowViewModel.PendingFontFamily))
+                RefreshTreeFontMenu();
             else if (args.PropertyName is nameof(MainWindowViewModel.TreeItemSpacing)
                      or nameof(MainWindowViewModel.TreeItemPadding)
                      or nameof(MainWindowViewModel.TreeIconSize)
@@ -711,6 +717,8 @@ public partial class MainWindow : Window
             _previewBar.SizeChanged -= OnPreviewBarSizeChanged;
         if (_settingsPanel is not null)
             _settingsPanel.MinimumWidthChanged -= OnSettingsPanelMinimumWidthChanged;
+        DetachRecentMenuHandlers();
+        DetachTreeFontMenuHandlers();
 
         // Unsubscribe from tunneled/bubbled events
         RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
@@ -2104,6 +2112,8 @@ public partial class MainWindow : Window
     {
         _viewModel.UpdateLocalization();
         _settingsPanel?.RequestMinimumWidthRefresh();
+        RefreshTreeFontMenu();
+        RefreshLanguageMenuChecks();
         UpdatePreviewToolbarPresentation(forceRefreshContent: true);
         _metrics.Recalculate(); // Update metrics text with new localization
         if (_hasPreviewSelectionMetricsSnapshot)
@@ -5067,6 +5077,12 @@ public partial class MainWindow : Window
             recentMenuItem.SubmenuOpened += OnRecentMenuSubmenuOpened;
     }
 
+    private void DetachRecentMenuHandlers()
+    {
+        if (_topMenuBar?.RecentMenuItemControl is { } recentMenuItem)
+            recentMenuItem.SubmenuOpened -= OnRecentMenuSubmenuOpened;
+    }
+
     private void OnRecentMenuSubmenuOpened(object? sender, RoutedEventArgs e)
     {
         RefreshRecentFoldersMenu();
@@ -5123,6 +5139,134 @@ public partial class MainWindow : Window
     {
         _recentProjectsDb = _recentProjectsStore.AddRepository(_recentProjectsDb, repositoryUrl);
         SyncRecentProjectsToViewModel();
+    }
+
+    #endregion
+
+    #region Language Menu
+
+    private void RefreshLanguageMenuChecks()
+    {
+        foreach (var (item, language, label) in EnumerateLanguageMenuItems())
+        {
+            if (item is null)
+                continue;
+
+            item.Header = CreateCheckedMenuHeader(_localization.CurrentLanguage == language, label);
+        }
+    }
+
+    private IEnumerable<(MenuItem? Item, AppLanguage Language, string Label)> EnumerateLanguageMenuItems()
+    {
+        var topMenuBar = _topMenuBar;
+        if (topMenuBar is null)
+            yield break;
+
+        yield return (topMenuBar.LanguageRuMenuItemControl, AppLanguage.Ru, "Русский");
+        yield return (topMenuBar.LanguageEnMenuItemControl, AppLanguage.En, "English");
+        yield return (topMenuBar.LanguageUzMenuItemControl, AppLanguage.Uz, "Oʻzbek");
+        yield return (topMenuBar.LanguageTgMenuItemControl, AppLanguage.Tg, "Тоҷикӣ");
+        yield return (topMenuBar.LanguageKkMenuItemControl, AppLanguage.Kk, "Қазақ");
+        yield return (topMenuBar.LanguageFrMenuItemControl, AppLanguage.Fr, "Français");
+        yield return (topMenuBar.LanguageDeMenuItemControl, AppLanguage.De, "Deutsch");
+        yield return (topMenuBar.LanguageItMenuItemControl, AppLanguage.It, "Italiano");
+    }
+
+    private static string CreateCheckedMenuHeader(bool isChecked, string label)
+        => isChecked ? $"✓ {label}" : $"   {label}";
+
+    #endregion
+
+    #region Tree Font Menu
+
+    private void AttachTreeFontMenuHandlers()
+    {
+        if (_topMenuBar?.TreeFontMenuItemControl is { } treeFontMenuItem)
+            treeFontMenuItem.SubmenuOpened += OnTreeFontMenuSubmenuOpened;
+    }
+
+    private void DetachTreeFontMenuHandlers()
+    {
+        if (_topMenuBar?.TreeFontMenuItemControl is { } treeFontMenuItem)
+            treeFontMenuItem.SubmenuOpened -= OnTreeFontMenuSubmenuOpened;
+    }
+
+    private void OnTreeFontMenuSubmenuOpened(object? sender, RoutedEventArgs e)
+    {
+        RefreshTreeFontMenu();
+    }
+
+    private void RefreshTreeFontMenu()
+    {
+        var treeFontMenuItem = _topMenuBar?.TreeFontMenuItemControl;
+        if (treeFontMenuItem is null)
+            return;
+
+        treeFontMenuItem.Items.Clear();
+        foreach (var fontFamily in EnumerateTreeFontMenuFamilies())
+            treeFontMenuItem.Items.Add(CreateTreeFontMenuItem(fontFamily));
+    }
+
+    private IEnumerable<FontFamily> EnumerateTreeFontMenuFamilies()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fontFamily in _viewModel.FontFamilies)
+        {
+            if (seen.Add(GetTreeFontKey(fontFamily)))
+                yield return fontFamily;
+        }
+    }
+
+    private MenuItem CreateTreeFontMenuItem(FontFamily fontFamily)
+    {
+        var displayName = GetTreeFontDisplayName(fontFamily);
+        var item = new MenuItem
+        {
+            Header = CreateCheckedMenuHeader(IsPendingTreeFont(fontFamily), displayName),
+            Tag = fontFamily,
+            MinHeight = TreeFontMenuItemHeight
+        };
+
+        item.Click += OnTreeFontMenuItemClick;
+        return item;
+    }
+
+    private void OnTreeFontMenuItemClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: FontFamily fontFamily })
+            return;
+
+        _viewModel.PendingFontFamily = fontFamily;
+        e.Handled = true;
+    }
+
+    private bool IsPendingTreeFont(FontFamily fontFamily)
+        => AreSameTreeFont(_viewModel.PendingFontFamily, fontFamily);
+
+    private string GetTreeFontDisplayName(FontFamily fontFamily)
+    {
+        if (IsDefaultTreeFont(fontFamily))
+            return _viewModel.SettingsFontDefault;
+
+        var name = fontFamily.Name?.Trim();
+        return string.IsNullOrWhiteSpace(name) ? _viewModel.SettingsFontDefault : name;
+    }
+
+    private static bool AreSameTreeFont(FontFamily? left, FontFamily? right)
+    {
+        if (IsDefaultTreeFont(left) && IsDefaultTreeFont(right))
+            return true;
+
+        return string.Equals(left?.Name, right?.Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetTreeFontKey(FontFamily fontFamily)
+        => IsDefaultTreeFont(fontFamily) ? string.Empty : fontFamily.Name ?? string.Empty;
+
+    private static bool IsDefaultTreeFont(FontFamily? fontFamily)
+    {
+        var name = fontFamily?.Name;
+        return string.IsNullOrWhiteSpace(name) || name.StartsWith("$", StringComparison.Ordinal);
     }
 
     #endregion
@@ -5536,7 +5680,7 @@ public partial class MainWindow : Window
     {
         var item = new MenuItem
         {
-            Header = branch.IsActive ? $"✓ {branch.Name}" : $"   {branch.Name}",
+            Header = CreateCheckedMenuHeader(branch.IsActive, branch.Name),
             Tag = branch.Name,
             MinHeight = BranchMenuItemHeight
         };

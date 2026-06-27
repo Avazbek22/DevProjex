@@ -46,6 +46,10 @@
         <MenuItem Header="{Binding MenuViewZoomIn}" Click="OnZoomIn" />
         <MenuItem Header="{Binding MenuViewZoomOut}" Click="OnZoomOut" />
         <MenuItem Header="{Binding MenuViewZoomReset}" Click="OnZoomReset" />
+        <MenuItem Name="TreeFontMenuItem"
+                  Header="{Binding MenuViewTreeFont}">
+          <!-- Populated dynamically from the tree-font list. -->
+        </MenuItem>
         <Separator IsVisible="{Binding IsTreePaneVisible}" />
         <MenuItem Click="OnToggleCompactMode"
                   IsVisible="{Binding IsTreePaneVisible}"
@@ -74,14 +78,14 @@
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchFilterAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />
       <MenuItem Header="{Binding MenuLanguage}">
-        <MenuItem Header="Русский" Click="OnLangRu" />
-        <MenuItem Header="English" Click="OnLangEn" />
-        <MenuItem Header="Oʻzbek" Click="OnLangUz" />
-        <MenuItem Header="Тоҷикӣ" Click="OnLangTg" />
-        <MenuItem Header="Қазақ" Click="OnLangKk" />
-        <MenuItem Header="Français" Click="OnLangFr" />
-        <MenuItem Header="Deutsch" Click="OnLangDe" />
-        <MenuItem Header="Italiano" Click="OnLangIt" />
+        <MenuItem Name="LanguageRuMenuItem" Header="Русский" Click="OnLangRu" />
+        <MenuItem Name="LanguageEnMenuItem" Header="English" Click="OnLangEn" />
+        <MenuItem Name="LanguageUzMenuItem" Header="Oʻzbek" Click="OnLangUz" />
+        <MenuItem Name="LanguageTgMenuItem" Header="Тоҷикӣ" Click="OnLangTg" />
+        <MenuItem Name="LanguageKkMenuItem" Header="Қазақ" Click="OnLangKk" />
+        <MenuItem Name="LanguageFrMenuItem" Header="Français" Click="OnLangFr" />
+        <MenuItem Name="LanguageDeMenuItem" Header="Deutsch" Click="OnLangDe" />
+        <MenuItem Name="LanguageItMenuItem" Header="Italiano" Click="OnLangIt" />
       </MenuItem>
       <MenuItem Name="ThemeMenuItem" Header="{Binding MenuTheme}" Click="OnThemeMenuClick" />
       <MenuItem Name="HelpMenuItem" Header="{Binding MenuHelp}">

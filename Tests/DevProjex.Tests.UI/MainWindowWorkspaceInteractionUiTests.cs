@@ -1,3 +1,6 @@
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.VisualTree;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
 
@@ -512,6 +515,117 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
+    public async Task SettingsPanel_RemovesFontPickerAndKeepsApplyButtonAtLeftEdge()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var panelRoot = UiTestDriver.GetRequiredControl<Border>(window, "PanelRoot");
+            var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            var ignoreHeader = UiTestDriver.GetRequiredControl<Grid>(window, "IgnoreHeaderGrid");
+
+            var panelBounds = UiTestDriver.GetBoundsInWindow(panelRoot, window);
+            var buttonBounds = UiTestDriver.GetBoundsInWindow(applyButton, window);
+            var ignoreHeaderBounds = UiTestDriver.GetBoundsInWindow(ignoreHeader, window);
+
+            Assert.DoesNotContain(
+                window.GetVisualDescendants().OfType<ComboBox>(),
+                control => string.Equals(control.Name, "FontComboBox", StringComparison.Ordinal));
+            Assert.DoesNotContain(
+                window.GetVisualDescendants().OfType<TextBlock>(),
+                control => string.Equals(control.Name, "FontPickerLabel", StringComparison.Ordinal));
+
+            Assert.Equal(HorizontalAlignment.Left, applyButton.HorizontalAlignment);
+            Assert.Equal(HorizontalAlignment.Center, applyButton.HorizontalContentAlignment);
+            Assert.Equal(new Thickness(0, 1, 0, 1), applyButton.Margin);
+
+            Assert.InRange(buttonBounds.Left - ignoreHeaderBounds.Left, -1, 1);
+            Assert.True(
+                buttonBounds.Width < ignoreHeaderBounds.Width - 20,
+                $"Apply button should keep its natural width. Button={buttonBounds.Width:F2}, Header={ignoreHeaderBounds.Width:F2}.");
+
+            var topGap = buttonBounds.Top - panelBounds.Top;
+            var headerGap = ignoreHeaderBounds.Top - buttonBounds.Bottom;
+            Assert.InRange(topGap - headerGap, -1.5, 1.5);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ViewTreeFontMenu_UsesDynamicItemsWithPendingCheck()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var defaultFont = FontFamily.Default;
+            var customFont = new FontFamily("Consolas");
+
+            viewModel.FontFamilies.Clear();
+            viewModel.FontFamilies.Add(defaultFont);
+            viewModel.FontFamilies.Add(customFont);
+            viewModel.SelectedFontFamily = defaultFont;
+            viewModel.PendingFontFamily = defaultFont;
+
+            InvokeRefreshTreeFontMenu(window);
+
+            var fontMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "TreeFontMenuItem");
+            Assert.Equal(viewModel.MenuViewTreeFont, fontMenu.Header);
+
+            var initialItems = fontMenu.Items.OfType<MenuItem>().ToArray();
+            Assert.Equal(2, initialItems.Length);
+            Assert.StartsWith("✓ ", initialItems[0].Header?.ToString());
+            Assert.Contains(viewModel.SettingsFontDefault, initialItems[0].Header?.ToString());
+            Assert.StartsWith("   ", initialItems[1].Header?.ToString());
+
+            await UiTestDriver.RaiseMenuItemClickAsync(initialItems[1]);
+
+            Assert.Equal(customFont.Name, viewModel.PendingFontFamily?.Name);
+            Assert.Equal(defaultFont.Name, viewModel.SelectedFontFamily?.Name);
+
+            InvokeRefreshTreeFontMenu(window);
+            var refreshedItems = fontMenu.Items.OfType<MenuItem>().ToArray();
+            Assert.StartsWith("   ", refreshedItems[0].Header?.ToString());
+            Assert.StartsWith("✓ ", refreshedItems[1].Header?.ToString());
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task LanguageMenu_ShowsCheckOnCurrentLanguage()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var englishItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageEnMenuItem");
+            var russianItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageRuMenuItem");
+
+            Assert.StartsWith("✓ ", englishItem.Header?.ToString());
+            Assert.StartsWith("   ", russianItem.Header?.ToString());
+
+            await UiTestDriver.RaiseMenuItemClickAsync(russianItem);
+
+            Assert.StartsWith("   ", englishItem.Header?.ToString());
+            Assert.StartsWith("✓ ", russianItem.Header?.ToString());
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task CtrlWheelOverTree_ChangesOnlyTreeZoomInsidePreviewWorkspace()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -664,5 +778,15 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static void InvokeRefreshTreeFontMenu(MainWindow window)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            "RefreshTreeFontMenu",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        method.Invoke(window, []);
     }
 }
