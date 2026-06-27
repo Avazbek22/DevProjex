@@ -549,7 +549,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
             var topGap = buttonBounds.Top - panelBounds.Top;
             var headerGap = ignoreHeaderBounds.Top - buttonBounds.Bottom;
-            Assert.InRange(topGap - headerGap, -1.5, 1.5);
+            Assert.InRange(topGap - headerGap, 3.5, 6.5);
         }
         finally
         {
