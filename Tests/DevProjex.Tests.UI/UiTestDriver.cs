@@ -334,6 +334,7 @@ internal static class UiTestDriver
     public static async Task ClickAsync(MainWindow window, Control control)
     {
         await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, control);
 
         var clickPoint = GetControlCenter(control, window);
         window.MouseMove(clickPoint, RawInputModifiers.None);
@@ -1065,7 +1066,7 @@ internal static class UiTestDriver
     {
         var origin = control.TranslatePoint(default, topLevel);
         if (!origin.HasValue)
-            throw new XunitException($"Unable to translate control '{control.Name}' into top-level coordinates.");
+            throw new XunitException($"Unable to translate control '{GetControlDebugName(control)}' into top-level coordinates.");
 
         return new Rect(origin.Value, control.Bounds.Size);
     }
@@ -1121,6 +1122,21 @@ internal static class UiTestDriver
         if (scrolled)
             await WaitForSettledFramesAsync(frameCount: 6);
     }
+
+    private static async Task WaitForControlReadyForPointerAsync(MainWindow window, Control control)
+    {
+        await WaitForConditionAsync(
+            window,
+            () =>
+                control.IsVisible
+                && control.Bounds.Width > 0.5
+                && control.Bounds.Height > 0.5
+                && control.TranslatePoint(default, window).HasValue,
+            $"control '{GetControlDebugName(control)}' to be ready for pointer input");
+    }
+
+    private static string GetControlDebugName(Control control)
+        => string.IsNullOrWhiteSpace(control.Name) ? control.GetType().Name : control.Name!;
 
     public static async Task WaitForConditionAsync(
         MainWindow window,

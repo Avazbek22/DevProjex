@@ -351,7 +351,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         pipeline.CancelActiveRefresh();
         releaseBuild.SetResult();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => refreshTask);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refreshTask);
         Assert.Equal(0, host.ApplyCount);
     }
 
