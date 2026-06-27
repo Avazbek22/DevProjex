@@ -19,7 +19,7 @@ public sealed class SearchFilterHelpContentIntegrationTests
         string expectedRule3)
     {
         var content = ReadHelpFile(fileName);
-        var section = ExtractSection(content, "## 8)", "## 9)");
+        var section = ExtractSection(content, "## 9)", "## 10)");
 
         Assert.Contains(expectedHeader, section, StringComparison.Ordinal);
         Assert.Contains(expectedRule1, section, StringComparison.Ordinal);
@@ -44,7 +44,7 @@ public sealed class SearchFilterHelpContentIntegrationTests
         string expectedRule3)
     {
         var content = ReadHelpFile(fileName);
-        var section = ExtractSection(content, "## 9)", "## 10)");
+        var section = ExtractSection(content, "## 10)", "## 11)");
 
         Assert.Contains(expectedHeader, section, StringComparison.Ordinal);
         Assert.Contains(expectedRule1, section, StringComparison.Ordinal);
@@ -64,8 +64,8 @@ public sealed class SearchFilterHelpContentIntegrationTests
     public void HelpContent_SearchAndFilterSections_ContainSingleConstraintsBlockEach(string fileName)
     {
         var content = ReadHelpFile(fileName);
-        var searchSection = ExtractSection(content, "## 8)", "## 9)");
-        var filterSection = ExtractSection(content, "## 9)", "## 10)");
+        var searchSection = ExtractSection(content, "## 9)", "## 10)");
+        var filterSection = ExtractSection(content, "## 10)", "## 11)");
 
         Assert.Equal(1, CountAnyConstraintHeader(searchSection));
         Assert.Equal(1, CountAnyConstraintHeader(filterSection));

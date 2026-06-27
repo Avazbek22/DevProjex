@@ -55,7 +55,32 @@ Regeln:
 
 Für jeden Eintrag wird der kurze Ordnername angezeigt; der vollständige Pfad ist über einen Tooltip verfügbar.
 
-## 4) Git
+## 4) Aus dem Terminal starten
+DevProjex kann aus dem Terminal gestartet werden.
+
+Wenn der Befehl bereits eingerichtet ist, öffnen Sie ein Terminal und führen Sie aus:
+`devprojex --help`
+
+So sehen Sie alle verfügbaren Befehle, Optionen und Beispiele.
+
+Beispiele:
+* `devprojex .` — den aktuellen Ordner öffnen.
+* `devprojex "C:\Projects\App"` — den angegebenen Ordner öffnen.
+* `devprojex . --export tree` — den Projektbaum im Terminal ausgeben.
+* `devprojex . --export content` — Dateiinhalte im Terminal ausgeben.
+* `devprojex . --export tree-content` — Baum und Inhalte im Terminal ausgeben.
+* `devprojex . --export tree-content -o context.txt` — das Ergebnis in eine Datei speichern.
+
+Hinweise:
+* `.` bedeutet den aktuellen Terminal-Ordner;
+* Pfade mit Leerzeichen müssen in Anführungszeichen stehen;
+* wenn keine Ausgabedatei angegeben ist, wird das Ergebnis direkt im Terminal ausgegeben;
+* der Befehl ändert keine Projektdateien — DevProjex arbeitet im Lesemodus.
+
+Wenn der Befehl `devprojex` nicht funktioniert, öffnen Sie in DevProjex:
+„Hilfe → Aus dem Terminal starten“.
+
+## 5) Git
 Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
 
 Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
@@ -78,7 +103,7 @@ Regeln:
 Wenn Sie einen Eintrag auswählen, wird die URL automatisch in das Eingabefeld eingesetzt.
 Während eines aktiven Klonvorgangs wird die Liste vorübergehend ausgeblendet.
 
-## 5) Kopieren
+## 6) Kopieren
 ### Baumformat-Schalter (ASCII/JSON)
 Der Schalter legt das Baumdarstellungsformat für Operationen fest, bei denen der Baum im Ergebnis enthalten ist.
 
@@ -131,7 +156,7 @@ Baum + Inhalt:
 * der Inhaltsblock bleibt Text;
 * Export erfolgt als `.txt`.
 
-## 6) Vorschaumodus
+## 7) Vorschaumodus
 Wird über die Schaltfläche mit dem Auge in der oberen Leiste oder mit Ctrl+B geöffnet.
 
 Zeigt das Endergebnis in einem separaten Arbeitsbereich neben dem Baum. Dieser Modus kopiert nichts in die Zwischenablage und exportiert nichts in eine Datei — er dient nur zur Vorschau.
@@ -170,7 +195,7 @@ Schaltflächen:
 Suche und Filter sind verfügbar, solange in der Vorschau die Bauminsel sichtbar ist.
 Wenn der Baum ausgeblendet ist, sind Suche und Filter vorübergehend nicht verfügbar, bis der Nur-Vorschau-Modus verlassen wird.
 
-## 7) Ansicht
+## 8) Ansicht
 ### Zoom
 * Ctrl++ / Ctrl+= — vergrößern
 * Ctrl+- — verkleinern
@@ -197,7 +222,7 @@ Zeigt/blendet Mengen in Klammern bei den Optionen im Block „Ignorieren“.
 Standardmäßig aktiviert.
 Ändert die Filterregeln nicht.
 
-## 8) Suche im Baum
+## 9) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
 * Ctrl+F — anzeigen/ausblenden
 * Enter — nächstes Ergebnis
@@ -213,7 +238,7 @@ Einschränkungen:
 * Die Suche ist in der Vorschau verfügbar, solange die Bauminsel sichtbar ist.
 * Wenn der Baum ausgeblendet ist, ist die Suche vorübergehend nicht verfügbar.
 
-## 9) Filter nach Namen
+## 10) Filter nach Namen
 Zeigt nur passende Knoten und ihre Eltern. Aktualisierung mit Verzögerung (Debounce).
 * Ctrl+Shift+N — Filter anzeigen/ausblenden
 * Esc — Filter schließen
@@ -223,7 +248,7 @@ Einschränkungen:
 * Der Filter ist in der Vorschau verfügbar, solange die Bauminsel sichtbar ist.
 * Wenn der Baum ausgeblendet ist, ist der Filter vorübergehend nicht verfügbar.
 
-## 10) Optionen
+## 11) Optionen
 Rechts befinden sich Listen:
 * Baum‑Schrift — mit Anwenden bestätigen
 * Ignorieren
@@ -254,7 +279,7 @@ Wichtig:
 * wenn nach Aktualisieren oder erneutem Öffnen ein neuer Ordner der obersten Ebene, ein neuer Dateityp oder eine neue Option in „Ignorieren“ erscheint, ist dieser Punkt standardmäßig aktiviert;
 * bereits bekannte Punkte behalten die ausdrückliche Auswahl des Benutzers: neue Dateien eines deaktivierten Typs aktivieren diesen Typ nicht erneut.
 
-## 11) Ignore
+## 12) Ignore
 Die Liste „Ignorieren“ wird automatisch aus dem aktuellen Pfad und den ausgewählten Ordnern der obersten Ebene aufgebaut.
 
 Reihenfolge der Optionen:
@@ -342,7 +367,7 @@ Blendet Dateien ohne Erweiterung (zum Beispiel: `Dockerfile`, `Makefile`, `READM
 ### 11.9 Zähler im Block „Ignorieren“
 Wenn „Ansicht → Zusätzliche Zähler“ aktiviert ist, wird bei verfügbaren Optionen die Anzahl im Format `(N)` angezeigt.
 Bei Grundregeln zeigt diese Zahl, wie viele Elemente in der aktuellen Baumkonfiguration genau durch diese Regel ausgeblendet werden.
-## 12) Wie Baum und Kennzahlen berechnet werden
+## 13) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
 * ausgewählte Ordner der obersten Ebene
 * ausgewählte Dateitypen
@@ -386,14 +411,14 @@ Neu berechnet wird:
 * beim Umschalten ASCII/JSON (für Operationen mit Baum-Ausgabe).
 * wenn die Hintergrundberechnung abgebrochen wird, werden die Zähler auf 0 gesetzt, bis die nächste vollständige Neuberechnung abgeschlossen ist.
 
-## 13) Symbole
+## 14) Symbole
 Auswahlreihenfolge:
 1) Knotentyp (Ordner/Datei)
 2) exakter Name (wenn eine Regel vorhanden ist)
 3) Erweiterung
 4) sonst — unbekannt
 
-## 14) Thema und Effekte
+## 15) Thema und Effekte
 Das Theme‑Popover ermöglicht:
 * helles/dunkles Theme
 * Transparent / Mica / Acrylic
@@ -401,7 +426,7 @@ Das Theme‑Popover ermöglicht:
 
 Einträge mit [Beta] können sich zwischen Versionen ändern.
 
-## 15) Hilfe
+## 16) Hilfe
 
 ### 15.1 Einstellungen zurücksetzen
 Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt nur visuelle UI-Parameter zurück (Theme, Effekte, Kompaktmodus, Baumanimation, zusätzliche Zähler) und ändert keine Projektdaten. Nach dem Zurücksetzen sind zusätzliche Zähler standardmäßig aktiviert.
@@ -418,10 +443,10 @@ Wichtig:
 * der Verlauf „Zuletzt verwendete Repositories“ im Git-Clone-Fenster wird nicht gelöscht;
 * Dateien und Ordner der Projekte auf dem Datenträger werden nicht geändert und nicht gelöscht.
 
-## 16) Sprachen
+## 17) Sprachen
 Die Sprache wird über das Sprache‑Menü gewählt.
 
-## 17) Fortschrittsbalken und Abbrechen
+## 18) Fortschrittsbalken und Abbrechen
 In der Mitte der Statusleiste werden aktive Operation und Fortschritt angezeigt.
 
 Fortschrittsmodi:
@@ -438,6 +463,6 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 * stoppt die Hintergrundberechnung von Daten;
 * bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
 
-## 18) Hinweise
+## 19) Hinweise
 * Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.

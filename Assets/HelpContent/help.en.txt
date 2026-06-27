@@ -55,7 +55,32 @@ Rules:
 
 Each item shows the short folder name, and the full path is available in a tooltip.
 
-## 4) Git
+## 4) Launch from terminal
+DevProjex can be launched from the terminal.
+
+If the command is already set up, open a terminal and run:
+`devprojex --help`
+
+This shows all available commands, options, and examples.
+
+Examples:
+* `devprojex .` — open the current folder.
+* `devprojex "C:\Projects\App"` — open the specified folder.
+* `devprojex . --export tree` — print the project tree in the terminal.
+* `devprojex . --export content` — print file contents in the terminal.
+* `devprojex . --export tree-content` — print the tree and contents in the terminal.
+* `devprojex . --export tree-content -o context.txt` — save the result to a file.
+
+Notes:
+* `.` means the current terminal folder;
+* paths with spaces must be wrapped in quotes;
+* if no output file is specified, the result is printed directly to the terminal;
+* the command does not modify project files — DevProjex works in read-only mode.
+
+If the `devprojex` command does not work, open in DevProjex:
+“Help → Launch from terminal”.
+
+## 5) Git
 Git menu is available only for projects cloned via DevProjex (Git Clone). The app does not touch your files — it works only with the cache.
 
 The cache is stored in the system temp folder. On Windows it is usually:
@@ -78,7 +103,7 @@ Rules:
 Selecting an item automatically fills the URL field.
 While cloning is in progress, the list is temporarily hidden.
 
-## 5) Copy
+## 6) Copy
 ### Tree format toggle (ASCII/JSON)
 The toggle defines the tree representation format for operations where the tree is part of the output.
 
@@ -131,7 +156,7 @@ Tree + content:
 * content block remains text;
 * exported as `.txt`.
 
-## 6) Preview mode
+## 7) Preview mode
 Opened with the eye icon button in the top bar or with Ctrl+B.
 
 Shows the final result in a separate workspace next to the tree. This mode does not copy to the clipboard and does not export to a file on its own — it is a viewing mode.
@@ -170,7 +195,7 @@ Buttons:
 Search and Filter are available while the tree pane is visible in Preview.
 If the tree is hidden, Search and Filter are temporarily unavailable until you leave preview-only mode.
 
-## 7) View
+## 8) View
 ### Zoom
 * Ctrl++ / Ctrl+= — zoom in
 * Ctrl+- — zoom out
@@ -197,7 +222,7 @@ Shows/hides counts in parentheses for options in the "Ignore" block.
 Enabled by default.
 Does not change filtering rules.
 
-## 8) Search (tree)
+## 9) Search (tree)
 Opens the search bar, highlights matches, and allows navigation.
 * Ctrl+F — show/hide
 * Enter — next result
@@ -213,7 +238,7 @@ Constraints:
 * Search is available in Preview while the tree pane is visible;
 * if the tree is hidden, Search is temporarily unavailable.
 
-## 9) Filter (by name)
+## 10) Filter (by name)
 Shows only nodes matching the filter string and their parents. Updates are debounced.
 * Ctrl+Shift+N — show/hide filter
 * Esc — close filter
@@ -223,7 +248,7 @@ Constraints:
 * Filter is available in Preview while the tree pane is visible;
 * if the tree is hidden, Filter is temporarily unavailable.
 
-## 10) Options (settings panel)
+## 11) Options (settings panel)
 Lists on the right:
 * Font (tree font) — apply with Apply
 * Ignore options
@@ -254,7 +279,7 @@ Important:
 * if refresh or reopening reveals a new top-level folder, file type, or option in "Ignore", it is enabled by default;
 * options already seen keep the user's explicit choice: new files of a disabled type do not enable that type again.
 
-## 11) Ignore
+## 12) Ignore
 The "Ignore" list is built automatically from the current path and selected top-level folders.
 
 Option order:
@@ -342,7 +367,7 @@ Hides files without extension (for example: `Dockerfile`, `Makefile`, `README`) 
 ### 11.9 Counters in the "Ignore" block
 When "View → Additional counters" is enabled, counts are shown near available options in the `(N)` format.
 For basic rules, this count shows how many elements are hidden by that specific rule in the current tree configuration.
-## 12) How the tree and metrics are calculated
+## 13) How the tree and metrics are calculated
 Result depends on:
 * selected Root folders
 * selected Extensions
@@ -386,14 +411,14 @@ Recalculation runs:
 * when switching ASCII/JSON (for operations where tree output is used).
 * when background calculation is canceled, counters are set to 0 until the next completed recalculation.
 
-## 13) Icons
+## 14) Icons
 Icon selection order:
 1) node type (folder/file)
 2) exact name (if rule exists)
 3) extension
 4) otherwise — unknown
 
-## 14) Theme and effects
+## 15) Theme and effects
 Theme popover lets you switch:
 * light/dark theme
 * Transparent / Mica / Acrylic
@@ -401,7 +426,7 @@ Theme popover lets you switch:
 
 Items marked [Beta] may change between versions.
 
-## 15) Help
+## 16) Help
 
 ### 15.1 Reset settings
 Reset settings (Help → Reset settings) resets only visual interface settings (theme, effects, Compact mode, Tree animation, Additional counters) and does not modify project data. After reset, Additional counters are enabled by default.
@@ -418,10 +443,10 @@ Important:
 * Recent repositories history in the Git Clone window is not cleared;
 * files and folders on disk are not modified or deleted.
 
-## 16) Languages
+## 17) Languages
 Language is selected via the Language menu.
 
-## 17) Progress bar and cancel
+## 18) Progress bar and cancel
 The center of the status bar shows the active operation and its progress.
 
 Progress modes:
@@ -438,6 +463,6 @@ X button (cancel) in the status bar:
 * stops background data calculation;
 * for operations without cancellation support, it stops status-bar indication, while the operation itself may still finish in background.
 
-## 18) Notes
+## 19) Notes
 * By default, dark theme and transparency effects are enabled (if supported).
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.
