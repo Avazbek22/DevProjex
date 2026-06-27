@@ -291,6 +291,8 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             border.BorderBrush = _currentBorderBrush;
             border.BorderThickness = new Thickness(1);
             border.CornerRadius = new CornerRadius(8);
+            border.ClipToBounds = true;
+            border.BoxShadow = default;
             border.Padding = new Thickness(4);
         }
     }

@@ -67,6 +67,25 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
     }
 
     [AvaloniaFact]
+    public async Task TopMenuPopoverCards_ClipRoundedSurfaceWithoutExternalShadow()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<ThemePopoverView>(window, "ThemePopover"));
+            AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<AboutPopoverView>(window, "HelpPopover"));
+            AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<HelpPopoverView>(window, "HelpDocsPopover"));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task TreeNodeCheckbox_ClickTogglesCheckStateWithoutSelectingTreeRow()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -96,5 +115,15 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static void AssertPopoverCard(UserControl popover)
+    {
+        var card = Assert.IsType<Border>(popover.Content);
+
+        Assert.Contains("theme-popover", card.Classes);
+        Assert.Equal(new CornerRadius(8), card.CornerRadius);
+        Assert.True(card.ClipToBounds);
+        Assert.Equal(0, card.BoxShadow.Count);
     }
 }
