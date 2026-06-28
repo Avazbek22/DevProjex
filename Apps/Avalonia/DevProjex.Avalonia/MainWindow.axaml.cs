@@ -2572,17 +2572,17 @@ public partial class MainWindow : Window
 
         var targetY = textScrollViewer.Offset.Y;
         var currentY = _previewLineNumbersControl.VerticalOffset;
-        if (Math.Abs(currentY - targetY) < 0.1)
-            return;
-
-        try
+        if (Math.Abs(currentY - targetY) >= 0.1)
         {
-            _previewScrollSyncActive = true;
-            _previewLineNumbersControl.VerticalOffset = targetY;
-        }
-        finally
-        {
-            _previewScrollSyncActive = false;
+            try
+            {
+                _previewScrollSyncActive = true;
+                _previewLineNumbersControl.VerticalOffset = targetY;
+            }
+            finally
+            {
+                _previewScrollSyncActive = false;
+            }
         }
 
         UpdatePreviewStickyPath();
@@ -2604,6 +2604,8 @@ public partial class MainWindow : Window
 
         if (_previewStickyHeaderCap is not null)
             _previewStickyHeaderCap.IsVisible = true;
+
+        SetPreviewStickyHeaderClipHeight(ResolvePreviewStickyHeaderOverlayHeight());
 
         if (_previewTextControl is not null)
         {
@@ -2746,6 +2748,8 @@ public partial class MainWindow : Window
         if (_previewStickyHeaderCap is not null)
             _previewStickyHeaderCap.IsVisible = false;
 
+        SetPreviewStickyHeaderClipHeight(0);
+
         if (_previewTextControl is not null)
         {
             _previewTextControl.StickyHeaderReserved = false;
@@ -2758,6 +2762,23 @@ public partial class MainWindow : Window
             _previewLineNumbersControl.StickyHeaderReserved = false;
             _previewLineNumbersControl.StickyHeaderVisible = false;
         }
+    }
+
+    private void SetPreviewStickyHeaderClipHeight(double height)
+    {
+        var normalizedHeight = Math.Max(0, height);
+
+        if (_previewTextControl is not null)
+            _previewTextControl.TopOverlayClipHeight = normalizedHeight;
+
+        if (_previewLineNumbersControl is not null)
+            _previewLineNumbersControl.TopOverlayClipHeight = normalizedHeight;
+    }
+
+    private double ResolvePreviewStickyHeaderOverlayHeight()
+    {
+        var fontSize = _previewTextControl?.TextFontSize ?? _viewModel.PreviewFontSize;
+        return Math.Max(24.0, Math.Ceiling(fontSize + 12.0));
     }
 
     private void OnPreviewScrollViewerPointerPressed(object? sender, PointerPressedEventArgs e)

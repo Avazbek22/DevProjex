@@ -731,11 +731,9 @@
                     Classes="island-panel content-island"
                     IsVisible="{Binding IsPreviewPaneVisible}">
             <Grid>
-              <Grid RowDefinitions="Auto,*"
-                    ColumnDefinitions="Auto,*">
+              <Grid ColumnDefinitions="Auto,*">
                 <!-- Persistent line-number background that spans the full preview height -->
-                <Grid Grid.Row="1"
-                      Grid.Column="0"
+                <Grid Grid.Column="0"
                       ClipToBounds="True">
                   <Border Name="PreviewLineNumbersBackground"
                           Classes="preview-line-numbers" />
@@ -753,8 +751,7 @@
                                                           RightPadding="8" />
                 </Grid>
 
-                <Grid Grid.Row="1"
-                      Grid.Column="1"
+                <Grid Grid.Column="1"
                       ClipToBounds="True">
                   <ScrollViewer Name="PreviewTextScrollViewer"
                                 Classes="preview-scroll"
@@ -783,51 +780,55 @@
                   </ScrollViewer>
                 </Grid>
 
-                <Border Grid.Row="0"
-                        Grid.Column="0"
-                        Name="PreviewStickyHeaderCap"
-                        Classes="preview-sticky-header-cap"
-                        IsVisible="False">
-                  <Border Classes="preview-sticky-copy-host">
-                    <Button Name="PreviewStickyHeaderCopyButton"
-                            Classes="menu-icon-button preview-sticky-copy-button"
-                            ToolTip.Placement="Right"
-                            ToolTip.ShowDelay="700"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Click="OnPreviewCopyVisibleFilePath">
-                      <ToolTip.Tip>
-                        <ToolTip Classes="preview-blurred-tooltip"
-                                 Loaded="OnPreviewToolTipLoaded">
-                          <TextBlock Text="{Binding PreviewCopyFilePathTooltip}" />
-                        </ToolTip>
-                      </ToolTip.Tip>
-                      <Viewbox Width="12"
-                               Height="12"
-                               Margin="-1,0,0,0"
-                               Stretch="Uniform">
-                        <Path Classes="preview-icon"
-                              Data="{StaticResource PreviewCopyIconGeometry}"
-                              Fill="{DynamicResource AppTextBrush}" />
-                      </Viewbox>
-                    </Button>
+                <Grid Grid.ColumnSpan="2"
+                      ColumnDefinitions="Auto,*"
+                      VerticalAlignment="Top"
+                      ZIndex="10">
+                  <Border Grid.Column="0"
+                          Name="PreviewStickyHeaderCap"
+                          Classes="preview-sticky-header-cap"
+                          Width="{Binding #PreviewLineNumbersBackground.Bounds.Width}"
+                          IsVisible="False">
+                    <Border Classes="preview-sticky-copy-host">
+                      <Button Name="PreviewStickyHeaderCopyButton"
+                              Classes="menu-icon-button preview-sticky-copy-button"
+                              ToolTip.Placement="Right"
+                              ToolTip.ShowDelay="700"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Click="OnPreviewCopyVisibleFilePath">
+                        <ToolTip.Tip>
+                          <ToolTip Classes="preview-blurred-tooltip"
+                                   Loaded="OnPreviewToolTipLoaded">
+                            <TextBlock Text="{Binding PreviewCopyFilePathTooltip}" />
+                          </ToolTip>
+                        </ToolTip.Tip>
+                        <Viewbox Width="12"
+                                 Height="12"
+                                 Margin="-1,0,0,0"
+                                 Stretch="Uniform">
+                          <Path Classes="preview-icon"
+                                Data="{StaticResource PreviewCopyIconGeometry}"
+                                Fill="{DynamicResource AppTextBrush}" />
+                        </Viewbox>
+                      </Button>
+                    </Border>
                   </Border>
-                </Border>
 
-                <Border Grid.Row="0"
-                        Grid.Column="1"
-                        Name="PreviewStickyHeaderContainer"
-                        Classes="preview-sticky-header"
-                        IsVisible="False">
-                  <TextBlock Name="PreviewStickyHeaderText"
-                             Classes="preview-sticky-header-text"
-                             FontFamily="{Binding SelectedFontFamily}"
-                             FontSize="{Binding PreviewFontSize}"
-                             Margin="10,4,10,4"
-                             MinWidth="0"
-                             VerticalAlignment="Center"
-                             TextTrimming="CharacterEllipsis" />
-                </Border>
+                  <Border Grid.Column="1"
+                          Name="PreviewStickyHeaderContainer"
+                          Classes="preview-sticky-header"
+                          IsVisible="False">
+                    <TextBlock Name="PreviewStickyHeaderText"
+                               Classes="preview-sticky-header-text"
+                               FontFamily="{Binding SelectedFontFamily}"
+                               FontSize="{Binding PreviewFontSize}"
+                               Margin="10,4,10,4"
+                               MinWidth="0"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </Border>
+                </Grid>
               </Grid>
             </Grid>
             </Border>

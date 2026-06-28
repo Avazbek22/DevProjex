@@ -52,6 +52,9 @@ public sealed class VirtualizedLineNumbersControl : Control
     public static readonly StyledProperty<bool> StickyHeaderReservedProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, bool>(nameof(StickyHeaderReserved));
 
+    public static readonly StyledProperty<double> TopOverlayClipHeightProperty =
+        AvaloniaProperty.Register<VirtualizedLineNumbersControl, double>(nameof(TopOverlayClipHeight));
+
     public static readonly StyledProperty<IBrush?> StickyHeaderBackgroundBrushProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, IBrush?>(nameof(StickyHeaderBackgroundBrush));
 
@@ -74,6 +77,7 @@ public sealed class VirtualizedLineNumbersControl : Control
             NumberBrushProperty,
             StickyHeaderVisibleProperty,
             StickyHeaderReservedProperty,
+            TopOverlayClipHeightProperty,
             StickyHeaderBackgroundBrushProperty,
             StickyHeaderBorderBrushProperty);
 
@@ -151,6 +155,12 @@ public sealed class VirtualizedLineNumbersControl : Control
         set => SetValue(StickyHeaderReservedProperty, value);
     }
 
+    public double TopOverlayClipHeight
+    {
+        get => GetValue(TopOverlayClipHeightProperty);
+        set => SetValue(TopOverlayClipHeightProperty, value);
+    }
+
     public IBrush? StickyHeaderBackgroundBrush
     {
         get => GetValue(StickyHeaderBackgroundBrushProperty);
@@ -215,8 +225,24 @@ public sealed class VirtualizedLineNumbersControl : Control
         var text = BuildVisibleLineNumbersText(firstVisibleLine, lastVisibleLine);
         var formattedText = BuildFormattedText(text, typeface);
         var originY = contentTop + (firstVisibleLine - 1) * lineHeight - viewportTop;
-        context.DrawText(formattedText, new Point(LeftPadding, originY));
+        using (PushTopOverlayClip(context))
+        {
+            context.DrawText(formattedText, new Point(LeftPadding, originY));
+        }
+
         DrawStickyHeaderMask(context);
+    }
+
+    private IDisposable? PushTopOverlayClip(DrawingContext context)
+    {
+        var clipHeight = Math.Max(0, TopOverlayClipHeight);
+        if (clipHeight <= 0)
+            return null;
+
+        var clipRectHeight = Math.Max(0, Bounds.Height - clipHeight);
+        return clipRectHeight > 0
+            ? context.PushClip(new Rect(0, clipHeight, Bounds.Width, clipRectHeight))
+            : null;
     }
 
     private string BuildVisibleLineNumbersText(int firstVisibleLine, int lastVisibleLine)

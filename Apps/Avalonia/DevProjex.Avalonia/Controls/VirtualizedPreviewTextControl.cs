@@ -66,6 +66,9 @@ public sealed class VirtualizedPreviewTextControl : Control
     public static readonly StyledProperty<bool> StickyHeaderReservedProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, bool>(nameof(StickyHeaderReserved));
 
+    public static readonly StyledProperty<double> TopOverlayClipHeightProperty =
+        AvaloniaProperty.Register<VirtualizedPreviewTextControl, double>(nameof(TopOverlayClipHeight));
+
     public static readonly StyledProperty<IBrush?> StickyHeaderBackgroundBrushProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, IBrush?>(nameof(StickyHeaderBackgroundBrush));
 
@@ -134,6 +137,7 @@ public sealed class VirtualizedPreviewTextControl : Control
             StickyHeaderTextProperty,
             StickyHeaderVisibleProperty,
             StickyHeaderReservedProperty,
+            TopOverlayClipHeightProperty,
             StickyHeaderBackgroundBrushProperty,
             StickyHeaderBorderBrushProperty,
             CopyMenuHeaderProperty,
@@ -279,6 +283,12 @@ public sealed class VirtualizedPreviewTextControl : Control
         set => SetValue(StickyHeaderReservedProperty, value);
     }
 
+    public double TopOverlayClipHeight
+    {
+        get => GetValue(TopOverlayClipHeightProperty);
+        set => SetValue(TopOverlayClipHeightProperty, value);
+    }
+
     public IBrush? StickyHeaderBackgroundBrush
     {
         get => GetValue(StickyHeaderBackgroundBrushProperty);
@@ -405,26 +415,45 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         var origin = new Point(LeftPadding, contentTopPadding + (firstVisibleLine - 1) * lineHeight);
 
-        DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight);
-
-        if (!TryGetVisibleSelectionRange(visibleWindow, out var selectionStart, out var selectionLength))
+        using (PushTopOverlayClip(context, viewportTop))
         {
-            DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
-            DrawStickyHeader(context, typeface);
-            return;
+            DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight);
+
+            if (!TryGetVisibleSelectionRange(visibleWindow, out var selectionStart, out var selectionLength))
+            {
+                DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
+            }
+            else
+            {
+                var formattedText = BuildFormattedText(visibleWindow.Text, typeface);
+                if (selectionLength > 0)
+                {
+                    var (selectionBackground, selectionForeground) = ResolveSelectionBrushes();
+                    if (selectionForeground is not null)
+                        formattedText.SetForegroundBrush(selectionForeground, selectionStart, selectionLength);
+                    DrawSelectionBackgrounds(context, visibleWindow, selectionBackground, typeface, lineHeight);
+                }
+
+                context.DrawText(formattedText, origin);
+            }
         }
 
-        var formattedText = BuildFormattedText(visibleWindow.Text, typeface);
-        if (selectionLength > 0)
-        {
-            var (selectionBackground, selectionForeground) = ResolveSelectionBrushes();
-            if (selectionForeground is not null)
-                formattedText.SetForegroundBrush(selectionForeground, selectionStart, selectionLength);
-            DrawSelectionBackgrounds(context, visibleWindow, selectionBackground, typeface, lineHeight);
-        }
-
-        context.DrawText(formattedText, origin);
         DrawStickyHeader(context, typeface);
+    }
+
+    private IDisposable? PushTopOverlayClip(DrawingContext context, double viewportTop)
+    {
+        var clipHeight = Math.Max(0, TopOverlayClipHeight);
+        if (clipHeight <= 0)
+            return null;
+
+        var clipTop = viewportTop + clipHeight;
+        var clipWidth = Math.Max(Bounds.Width, HorizontalOffset + Math.Max(ViewportWidth, 1));
+        var clipBottom = Math.Max(Bounds.Height, viewportTop + Math.Max(ViewportHeight, 1));
+        var clipRectHeight = Math.Max(0, clipBottom - clipTop);
+        return clipRectHeight > 0
+            ? context.PushClip(new Rect(0, clipTop, clipWidth, clipRectHeight))
+            : null;
     }
 
     private void DrawVisibleTextLines(
