@@ -3,6 +3,7 @@
         xmlns:vm="using:DevProjex.Avalonia.ViewModels"
         x:Class="DevProjex.Avalonia.Views.GitCloneWindow"
         x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
         Title="{Binding GitCloneTitle}"
         Width="420"
         MinWidth="360"

@@ -3,7 +3,8 @@
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
              x:Class="DevProjex.Avalonia.Views.SettingsPanelView"
              Name="SettingsPanelViewRoot"
-             x:DataType="vm:MainWindowViewModel">
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
   <UserControl.Styles>
     <Style Selector="StackPanel.settings-list-panel">
       <Setter Property="Spacing" Value="-3" />
