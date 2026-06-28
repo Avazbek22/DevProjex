@@ -3,7 +3,8 @@
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
              xmlns:views="using:DevProjex.Avalonia.Views"
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
-             x:DataType="vm:MainWindowViewModel">
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
   <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
     <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
     <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,110,0">

@@ -35,6 +35,8 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             var themePopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "ThemePopup");
             var helpPopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "HelpPopup");
             var helpDocsPopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "HelpDocsPopup");
+            var themeMenuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "ThemeMenuItem");
+            var helpMenuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "HelpMenuItem");
             var expectedAdjustment =
                 PopupPositionerConstraintAdjustment.SlideX |
                 PopupPositionerConstraintAdjustment.SlideY |
@@ -47,18 +49,21 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             Assert.False(themePopup.OverlayDismissEventPassThrough);
             Assert.False(themePopup.ShouldUseOverlayLayer);
             Assert.False(themePopup.WindowManagerAddShadowHint);
+            Assert.Same(themeMenuItem, themePopup.PlacementTarget);
 
             Assert.True(helpPopup.IsLightDismissEnabled);
             Assert.False(helpPopup.OverlayDismissEventPassThrough);
             Assert.False(helpPopup.ShouldUseOverlayLayer);
             Assert.False(helpPopup.WindowManagerAddShadowHint);
             Assert.Equal(expectedAdjustment, helpPopup.PlacementConstraintAdjustment);
+            Assert.Same(helpMenuItem, helpPopup.PlacementTarget);
 
             Assert.True(helpDocsPopup.IsLightDismissEnabled);
             Assert.False(helpDocsPopup.OverlayDismissEventPassThrough);
             Assert.False(helpDocsPopup.ShouldUseOverlayLayer);
             Assert.False(helpDocsPopup.WindowManagerAddShadowHint);
             Assert.Equal(expectedAdjustment, helpDocsPopup.PlacementConstraintAdjustment);
+            Assert.Same(helpMenuItem, helpDocsPopup.PlacementTarget);
         }
         finally
         {

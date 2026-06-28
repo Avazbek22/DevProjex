@@ -723,13 +723,13 @@
 
     <!-- Ensure list-item labels track the CheckBox FontSize in compact mode. -->
     <Style Selector="Window.compact-mode CheckBox.list-item TextBlock">
-        <Setter Property="FontSize" Value="{Binding $parent[CheckBox].FontSize}" />
+        <Setter Property="FontSize" Value="{ReflectionBinding $parent[CheckBox].FontSize}" />
         <Setter Property="TextWrapping" Value="NoWrap" />
     </Style>
 
     <!-- Fluent CheckBox template may render string content through AccessText. -->
     <Style Selector="Window.compact-mode CheckBox.list-item AccessText">
-        <Setter Property="FontSize" Value="{Binding $parent[CheckBox].FontSize}" />
+        <Setter Property="FontSize" Value="{ReflectionBinding $parent[CheckBox].FontSize}" />
         <Setter Property="TextWrapping" Value="NoWrap" />
     </Style>
 
@@ -737,7 +737,7 @@
     <Style Selector="Window.compact-mode CheckBox.list-item /template/ ContentPresenter">
         <Setter Property="Margin" Value="4,0,0,0" />
         <!-- Fluent template can override FontSize on the presenter; force it here. -->
-        <Setter Property="FontSize" Value="{Binding $parent[CheckBox].FontSize}" />
+        <Setter Property="FontSize" Value="{ReflectionBinding $parent[CheckBox].FontSize}" />
     </Style>
 
     <Style Selector="Window.compact-mode Border.ignore-option-separator">
@@ -791,8 +791,8 @@
 
     <!-- Fix font inheritance for TextBlock in TreeView -->
     <Style Selector="TreeView TextBlock">
-        <Setter Property="FontFamily" Value="{Binding $parent[TreeView].FontFamily}" />
-        <Setter Property="FontSize" Value="{Binding $parent[TreeView].FontSize}" />
+        <Setter Property="FontFamily" Value="{ReflectionBinding $parent[TreeView].FontFamily}" />
+        <Setter Property="FontSize" Value="{ReflectionBinding $parent[TreeView].FontSize}" />
     </Style>
 
     <!-- Theme Popover Styles (Win11 Settings-like card) -->
