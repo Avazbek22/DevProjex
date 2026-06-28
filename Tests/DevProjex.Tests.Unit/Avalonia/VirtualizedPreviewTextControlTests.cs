@@ -98,4 +98,36 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.False(control.HasSelection);
         Assert.False(control.TryGetSelectionRange(out _));
     }
+
+    [AvaloniaFact]
+    public void GetLineNumberAtVerticalOffset_RecalculatesMetricsWhenFontSizeChanges()
+    {
+        var control = new VirtualizedPreviewTextControl
+        {
+            Text = "one\ntwo\nthree",
+            TopPadding = 0,
+            TextFontSize = 10
+        };
+
+        var smallLineHeight = InvokeResolveLineHeight(control);
+        Assert.Equal(2, control.GetLineNumberAtVerticalOffset(smallLineHeight + 0.1));
+
+        control.TextFontSize = 30;
+
+        var largeLineHeight = InvokeResolveLineHeight(control);
+        Assert.True(largeLineHeight > smallLineHeight);
+        Assert.Equal(1, control.GetLineNumberAtVerticalOffset(smallLineHeight + 0.1));
+        Assert.Equal(2, control.GetLineNumberAtVerticalOffset(largeLineHeight + 0.1));
+    }
+
+    private static double InvokeResolveLineHeight(VirtualizedPreviewTextControl control)
+    {
+        var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+            "ResolveLineHeight",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        return (double)method!.Invoke(control, [])!;
+    }
 }

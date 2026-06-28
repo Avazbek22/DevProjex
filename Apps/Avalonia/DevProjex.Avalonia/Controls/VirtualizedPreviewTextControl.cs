@@ -87,6 +87,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     private const double AutoScrollEdgeThreshold = 28.0;
     private static readonly TimeSpan AutoScrollTickInterval = TimeSpan.FromMilliseconds(16);
     private readonly List<int> _lineStarts = [0];
+    private readonly PreviewFontMetricsCache _fontMetricsCache = new();
     private DispatcherTimer? _selectionAutoScrollTimer;
     private VisibleTextWindow? _cachedVisibleWindow;
     private IPreviewTextDocument? _cachedVisibleWindowDocument;
@@ -102,6 +103,8 @@ public sealed class VirtualizedPreviewTextControl : Control
     private ThemeVariant? _cachedSelectionTheme;
     private IBrush? _cachedSelectionBackground;
     private IBrush? _cachedSelectionForeground;
+    private StickyHeaderTrimCacheKey? _cachedStickyHeaderTrimKey;
+    private string? _cachedStickyHeaderTrimText;
     private ContextMenu? _contextMenu;
     private MenuItem? _copyMenuItem;
     private MenuItem? _selectAllMenuItem;
@@ -351,8 +354,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     public int GetLineNumberAtVerticalOffset(double verticalOffset)
     {
-        var typeface = ResolveTypeface();
-        var lineHeight = ResolveLineHeight(typeface);
+        var lineHeight = ResolveLineHeight();
         if (lineHeight <= 0)
             return 1;
 
@@ -363,9 +365,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     protected override Size MeasureOverride(Size availableSize)
     {
-        var typeface = ResolveTypeface();
-        var lineHeight = ResolveLineHeight(typeface);
-        var width = Math.Max(CalculateRequiredWidth(typeface), Math.Ceiling(Math.Max(0, ViewportWidth)));
+        var lineHeight = ResolveLineHeight();
+        var width = Math.Max(CalculateRequiredWidth(), Math.Ceiling(Math.Max(0, ViewportWidth)));
         var height = Math.Ceiling(ResolveContentTopPadding() + BottomPadding + (ResolveLineCount() * lineHeight));
 
         return new Size(Math.Max(1, width), Math.Max(1, height));
@@ -380,7 +381,7 @@ public sealed class VirtualizedPreviewTextControl : Control
             return;
 
         var typeface = ResolveTypeface();
-        var lineHeight = ResolveLineHeight(typeface);
+        var lineHeight = ResolveLineHeight();
         if (lineHeight <= 0)
             return;
 
@@ -750,7 +751,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (lastSelectedLine < firstSelectedLine)
             return;
 
-        var minimumSelectionWidth = ResolveMinimumSelectionWidth(typeface);
+        var minimumSelectionWidth = ResolveMinimumSelectionWidth();
 
         for (var lineNumber = firstSelectedLine; lineNumber <= lastSelectedLine; lineNumber++)
         {
@@ -798,7 +799,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         }
 
         var typeface = ResolveTypeface();
-        var lineHeight = ResolveLineHeight(typeface);
+        var lineHeight = ResolveLineHeight();
         if (lineHeight <= 0)
             return new SelectionHitResult(new SelectionPosition(1, 0), SelectionHitKind.Empty);
 
@@ -878,10 +879,10 @@ public sealed class VirtualizedPreviewTextControl : Control
         return layout.TextLines[0].GetDistanceFromCharacterHit(new CharacterHit(clampedColumn, 0));
     }
 
-    private double ResolveMinimumSelectionWidth(Typeface typeface)
+    private double ResolveMinimumSelectionWidth()
     {
-        var sample = BuildFormattedText(" ", typeface);
-        return Math.Max(4.0, Math.Ceiling(sample.Width));
+        var spaceWidth = _fontMetricsCache.GetMetrics(TextFontFamily, TextFontSize).SpaceWidth;
+        return Math.Max(4.0, Math.Ceiling(spaceWidth));
     }
 
     private void UpdateSelectionActivePosition(SelectionPosition position)
@@ -1136,12 +1137,22 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (string.IsNullOrEmpty(text) || availableWidth <= 0)
             return string.Empty;
 
+        var cacheKey = StickyHeaderTrimCacheKey.Create(text, availableWidth, TextFontFamily, TextFontSize);
+        if (_cachedStickyHeaderTrimKey == cacheKey && _cachedStickyHeaderTrimText is not null)
+            return _cachedStickyHeaderTrimText;
+
         if (BuildFormattedText(text, typeface).Width <= availableWidth)
+        {
+            CacheStickyHeaderTrim(cacheKey, text);
             return text;
+        }
 
         const string ellipsis = "...";
         if (BuildFormattedText(ellipsis, typeface).Width > availableWidth)
+        {
+            CacheStickyHeaderTrim(cacheKey, string.Empty);
             return string.Empty;
+        }
 
         var low = 0;
         var high = text.Length;
@@ -1155,24 +1166,30 @@ public sealed class VirtualizedPreviewTextControl : Control
                 high = mid - 1;
         }
 
-        return low <= 0 ? ellipsis : text[..low] + ellipsis;
+        var trimmedText = low <= 0 ? ellipsis : text[..low] + ellipsis;
+        CacheStickyHeaderTrim(cacheKey, trimmedText);
+        return trimmedText;
+    }
+
+    private void CacheStickyHeaderTrim(StickyHeaderTrimCacheKey key, string text)
+    {
+        _cachedStickyHeaderTrimKey = key;
+        _cachedStickyHeaderTrimText = text;
     }
 
     private Typeface ResolveTypeface() =>
         new(TextFontFamily ?? FontFamily.Default, FontStyle.Normal, FontWeight.Normal);
 
-    private double CalculateRequiredWidth(Typeface typeface)
+    private double CalculateRequiredWidth()
     {
-        var sample = BuildFormattedText("W", typeface);
-        var glyphWidth = Math.Max(1.0, sample.Width);
+        var glyphWidth = _fontMetricsCache.GetMetrics(TextFontFamily, TextFontSize).WideGlyphWidth;
         var contentWidth = (Document?.MaxLineLength ?? _maxLineLength) * glyphWidth;
         return Math.Ceiling(LeftPadding + contentWidth + RightPadding);
     }
 
-    private double ResolveLineHeight(Typeface typeface)
+    private double ResolveLineHeight()
     {
-        var sample = BuildFormattedText("8", typeface);
-        return Math.Max(1.0, sample.Height);
+        return _fontMetricsCache.GetMetrics(TextFontFamily, TextFontSize).LineHeight;
     }
 
     private FormattedText BuildFormattedText(string text, Typeface typeface)
@@ -1475,6 +1492,29 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private readonly record struct SelectionHitResult(SelectionPosition Position, SelectionHitKind Kind);
     private readonly record struct SelectionPosition(int Line, int Column);
+    private readonly record struct StickyHeaderTrimCacheKey(
+        string Text,
+        double AvailableWidth,
+        string FontFamilyName,
+        double FontSize,
+        string CultureName)
+    {
+        public static StickyHeaderTrimCacheKey Create(
+            string text,
+            double availableWidth,
+            FontFamily? fontFamily,
+            double fontSize)
+        {
+            var resolvedFamily = fontFamily ?? FontFamily.Default;
+            return new StickyHeaderTrimCacheKey(
+                text,
+                availableWidth,
+                resolvedFamily.Name,
+                fontSize,
+                CultureInfo.CurrentUICulture.Name);
+        }
+    }
+
     private enum SelectionHitKind
     {
         Empty = 0,
