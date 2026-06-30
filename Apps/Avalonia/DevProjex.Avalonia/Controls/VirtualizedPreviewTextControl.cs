@@ -1,4 +1,3 @@
-using Avalonia.Media.TextFormatting;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Controls;
@@ -419,22 +418,15 @@ public sealed class VirtualizedPreviewTextControl : Control
         {
             DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight);
 
-            if (!TryGetVisibleSelectionRange(visibleWindow, out var selectionStart, out var selectionLength))
+            if (!TryGetVisibleSelectionRange(visibleWindow, out _, out _))
             {
                 DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
             }
             else
             {
-                var formattedText = BuildFormattedText(visibleWindow.Text, typeface);
-                if (selectionLength > 0)
-                {
-                    var (selectionBackground, selectionForeground) = ResolveSelectionBrushes();
-                    if (selectionForeground is not null)
-                        formattedText.SetForegroundBrush(selectionForeground, selectionStart, selectionLength);
-                    DrawSelectionBackgrounds(context, visibleWindow, selectionBackground, typeface, lineHeight);
-                }
-
-                context.DrawText(formattedText, origin);
+                var (selectionBackground, selectionForeground) = ResolveSelectionBrushes();
+                DrawSelectionBackgrounds(context, visibleWindow, selectionBackground, typeface, lineHeight);
+                DrawVisibleTextLinesWithSelection(context, visibleWindow, origin, typeface, lineHeight, selectionForeground);
             }
         }
 
@@ -469,6 +461,38 @@ public sealed class VirtualizedPreviewTextControl : Control
             var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
             context.DrawText(BuildFormattedText(line, typeface), lineOrigin);
             lineIndex++;
+        }
+    }
+
+    private void DrawVisibleTextLinesWithSelection(
+        DrawingContext context,
+        VisibleTextWindow visibleWindow,
+        Point origin,
+        Typeface typeface,
+        double lineHeight,
+        IBrush? selectionForeground)
+    {
+        if (!TryGetNormalizedSelection(out var selectionStart, out var selectionEnd))
+        {
+            DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
+            return;
+        }
+
+        var lineNumber = visibleWindow.FirstLine;
+        foreach (var lineText in visibleWindow.Text.Split('\n'))
+        {
+            // Keep selected text on the same per-line baseline model as normal preview rendering.
+            var formattedText = BuildFormattedText(lineText, typeface);
+            if (selectionForeground is not null &&
+                TryGetSelectedTextColumns(lineNumber, lineText.Length, selectionStart, selectionEnd, out var startColumn, out var endColumn))
+            {
+                formattedText.SetForegroundBrush(selectionForeground, startColumn, endColumn - startColumn);
+            }
+
+            var lineIndex = lineNumber - visibleWindow.FirstLine;
+            var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
+            context.DrawText(formattedText, lineOrigin);
+            lineNumber++;
         }
     }
 
@@ -811,6 +835,30 @@ public sealed class VirtualizedPreviewTextControl : Control
         }
     }
 
+    private static bool TryGetSelectedTextColumns(
+        int lineNumber,
+        int lineLength,
+        SelectionPosition selectionStart,
+        SelectionPosition selectionEnd,
+        out int startColumn,
+        out int endColumn)
+    {
+        startColumn = 0;
+        endColumn = 0;
+
+        if (lineNumber < selectionStart.Line || lineNumber > selectionEnd.Line)
+            return false;
+
+        startColumn = lineNumber == selectionStart.Line
+            ? Math.Clamp(selectionStart.Column, 0, lineLength)
+            : 0;
+        endColumn = lineNumber == selectionEnd.Line
+            ? Math.Clamp(selectionEnd.Column, startColumn, lineLength)
+            : lineLength;
+
+        return endColumn > startColumn;
+    }
+
     private SelectionPosition HitTestSelectionPosition(Point point)
         => HitTestSelection(point).Position;
 
@@ -878,17 +926,23 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (string.IsNullOrEmpty(lineText) || distance <= 0)
             return 0;
 
-        var layout = new TextLayout(
-            lineText,
-            typeface,
-            TextFontSize,
-            TextBrush ?? Brushes.White);
-        if (layout.TextLines.Count == 0)
-            return 0;
+        var fullWidth = ResolveDistanceFromColumn(lineText, lineText.Length, typeface);
+        if (distance >= fullWidth)
+            return lineText.Length;
 
-        var characterHit = layout.TextLines[0].GetCharacterHitFromDistance(distance);
-        var column = characterHit.FirstCharacterIndex + Math.Max(0, characterHit.TrailingLength);
-        return Math.Clamp(column, 0, lineText.Length);
+        var low = 0;
+        var high = lineText.Length;
+        while (low < high)
+        {
+            var mid = (low + high) / 2;
+            var midpoint = ResolveCharacterMidpoint(lineText, mid, typeface);
+            if (distance < midpoint)
+                high = mid;
+            else
+                low = mid + 1;
+        }
+
+        return low;
     }
 
     private double ResolveDistanceFromColumn(string lineText, int column, Typeface typeface)
@@ -897,15 +951,15 @@ public sealed class VirtualizedPreviewTextControl : Control
             return 0;
 
         var clampedColumn = Math.Clamp(column, 0, lineText.Length);
-        var layout = new TextLayout(
-            lineText,
-            typeface,
-            TextFontSize,
-            TextBrush ?? Brushes.White);
-        if (layout.TextLines.Count == 0)
-            return 0;
+        // Hit-testing must use the same text geometry as DrawText, including trailing code whitespace.
+        return BuildFormattedText(lineText[..clampedColumn], typeface).WidthIncludingTrailingWhitespace;
+    }
 
-        return layout.TextLines[0].GetDistanceFromCharacterHit(new CharacterHit(clampedColumn, 0));
+    private double ResolveCharacterMidpoint(string lineText, int column, Typeface typeface)
+    {
+        var left = ResolveDistanceFromColumn(lineText, column, typeface);
+        var right = ResolveDistanceFromColumn(lineText, column + 1, typeface);
+        return left + ((right - left) / 2.0);
     }
 
     private double ResolveMinimumSelectionWidth()
@@ -1389,7 +1443,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         var selectionPosition = hit.Position;
         if (!keyModifiers.HasFlag(KeyModifiers.Shift) || _selectionAnchor is null)
-        _selectionAnchor = selectionPosition;
+        {
+            _selectionAnchor = selectionPosition;
+        }
 
         UpdateSelectionActivePosition(selectionPosition);
         _isSelecting = true;
