@@ -1,3 +1,5 @@
+using CompositionBackdropCornerRadiusCoordinator = DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator;
+
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class ProgramWindowsPlatformOptionsTests
@@ -20,23 +22,28 @@ public sealed class ProgramWindowsPlatformOptionsTests
     }
 
     [Fact]
-    public void CompositionBackdropCornerRadiusCoordinator_SwitchesOnlyOnWindows()
+    public void CompositionBackdropCornerRadiusCoordinator_UsesSeparateSurfaceProfilesOnlyOnWindows()
     {
         var options = new Win32PlatformOptions
         {
             WinUICompositionBackdropCornerRadius = 4f
         };
 
-        DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator.Attach(options);
-        DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator.UseSharpCornersForDecoratedWindow();
+        CompositionBackdropCornerRadiusCoordinator.Attach(options);
+        CompositionBackdropCornerRadiusCoordinator.UseSharpCornersForDecoratedWindow();
 
         if (OperatingSystem.IsWindows())
         {
             Assert.Null(options.WinUICompositionBackdropCornerRadius);
 
-            DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForPopupSurface();
+            CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForPopupSurface();
             Assert.Equal(
-                DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator.RoundedBackdropCornerRadius,
+                CompositionBackdropCornerRadiusCoordinator.PopupBackdropCornerRadius,
+                options.WinUICompositionBackdropCornerRadius);
+
+            CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForBorderlessDialogSurface();
+            Assert.Equal(
+                CompositionBackdropCornerRadiusCoordinator.BorderlessDialogBackdropCornerRadius,
                 options.WinUICompositionBackdropCornerRadius);
         }
         else

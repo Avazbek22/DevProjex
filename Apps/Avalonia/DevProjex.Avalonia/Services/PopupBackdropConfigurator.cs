@@ -53,7 +53,11 @@ internal static class PopupBackdropConfigurator
         try
         {
             if (enableBackdrop)
+            {
+                // Menu/popover surfaces intentionally use the smaller popup radius.
+                // Borderless dialogs have a separate profile because their outer card is 12px.
                 CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForPopupSurface();
+            }
 
             popupLevel.TransparencyLevelHint = enableBackdrop
                 ? ResolveEffectHints(fallback)

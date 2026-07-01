@@ -11,7 +11,11 @@ public partial class GitCloneWindow : Window
 
     public GitCloneWindow()
     {
-        CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForPopupSurface();
+        // Keep the native WinUI acrylic layer aligned with CloneWindowCard.CornerRadius.
+        // The acrylic/backdrop layer lives behind Avalonia visuals, so the XAML Border
+        // cannot clip it. If this falls back to the generic 8px popup profile, Windows
+        // shows a second, less rounded rectangle behind the 12px dialog card.
+        CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForBorderlessDialogSurface();
 
         AvaloniaXamlLoader.Load(this);
         _urlTextBox = this.FindControl<TextBox>("UrlTextBox");

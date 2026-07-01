@@ -50,6 +50,39 @@ public sealed class PopupBackdropConfiguratorTests
     }
 
     [AvaloniaFact]
+    public void TryApplyToTopLevel_WithEffect_UsesPopupBackdropRadiusProfile()
+    {
+        var options = new Win32PlatformOptions
+        {
+            WinUICompositionBackdropCornerRadius = CompositionBackdropCornerRadiusCoordinator.BorderlessDialogBackdropCornerRadius
+        };
+        var popupLevel = new Window();
+        var host = new Window();
+
+        CompositionBackdropCornerRadiusCoordinator.Attach(options);
+
+        var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
+            popupLevel,
+            host,
+            enableBackdrop: true,
+            PopupBackdropTransparencyFallback.None);
+
+        Assert.True(applied);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal(
+                CompositionBackdropCornerRadiusCoordinator.PopupBackdropCornerRadius,
+                options.WinUICompositionBackdropCornerRadius);
+        }
+        else
+        {
+            Assert.Equal(
+                CompositionBackdropCornerRadiusCoordinator.BorderlessDialogBackdropCornerRadius,
+                options.WinUICompositionBackdropCornerRadius);
+        }
+    }
+
+    [AvaloniaFact]
     public void TryApplyToTopLevel_WithoutEffect_KeepsHostBackgroundUntouched()
     {
         var popupLevel = new Window

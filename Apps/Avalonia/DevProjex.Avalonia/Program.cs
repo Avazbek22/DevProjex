@@ -46,7 +46,10 @@ internal static class Program
     {
         var options = new Win32PlatformOptions
         {
-            // Main decorated windows need sharp backdrop corners; popup-like surfaces opt into rounded corners later.
+            // Keep decorated main windows sharp by default. Popup-like and borderless
+            // surfaces opt into their own radii right before Avalonia creates their
+            // WinUI composition backdrop; using one rounded default reopens the tiny
+            // menu-belt corner holes under the custom title bar on Windows.
             WinUICompositionBackdropCornerRadius = null
         };
 
