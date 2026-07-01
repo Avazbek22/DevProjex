@@ -40,7 +40,7 @@ public sealed class UserSettingsStoreBackupTests
         Assert.Equal("Light.Acrylic", recovered.LastSelected);
         Assert.True(recovered.ViewSettings.IsCompactMode);
         Assert.False(recovered.ViewSettings.IsTreeAnimationEnabled);
-        Assert.False(recovered.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+        Assert.True(recovered.ViewSettings.IsAdvancedIgnoreCountsEnabled);
         Assert.Equal(AppLanguage.De, recovered.ViewSettings.PreferredLanguage);
         Assert.DoesNotContain("{ invalid", File.ReadAllText(store.GetPath()), StringComparison.Ordinal);
     }

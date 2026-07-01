@@ -50,7 +50,7 @@ public sealed class UserSettingsPersistenceIntegrationTests
             string.Equals(reloaded.LastSelected, firstSnapshot.LastSelected, StringComparison.Ordinal) &&
             reloaded.ViewSettings.IsCompactMode &&
             !reloaded.ViewSettings.IsTreeAnimationEnabled &&
-            !reloaded.ViewSettings.IsAdvancedIgnoreCountsEnabled &&
+            reloaded.ViewSettings.IsAdvancedIgnoreCountsEnabled &&
             reloaded.ViewSettings.PreferredLanguage == AppLanguage.De;
         var matchesSecondSnapshot =
             string.Equals(reloaded.LastSelected, secondSnapshot.LastSelected, StringComparison.Ordinal) &&

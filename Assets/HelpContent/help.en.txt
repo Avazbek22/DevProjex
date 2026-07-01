@@ -217,11 +217,6 @@ While the preview workspace is active, Compact Mode is enabled automatically.
 ### Tree animation
 Enables smooth slide animation when hovering over tree rows.
 
-### Additional counters
-Shows/hides counts in parentheses for options in the "Ignore" block.
-Enabled by default.
-Does not change filtering rules.
-
 ## 9) Search (tree)
 Opens the search bar, highlights matches, and allows navigation.
 * Ctrl+F — show/hide
@@ -365,7 +360,7 @@ Hides empty files with size 0 bytes from the tree and from copy/export results.
 Hides files without extension (for example: `Dockerfile`, `Makefile`, `README`) from the tree and from copy/export results.
 
 ### 11.9 Counters in the "Ignore" block
-When "View → Additional counters" is enabled, counts are shown near available options in the `(N)` format.
+Counts are shown near available options in the `(N)` format.
 For basic rules, this count shows how many elements are hidden by that specific rule in the current tree configuration.
 ## 13) How the tree and metrics are calculated
 Result depends on:
@@ -429,7 +424,7 @@ Items marked [Beta] may change between versions.
 ## 16) Help
 
 ### 15.1 Reset settings
-Reset settings (Help → Reset settings) resets only visual interface settings (theme, effects, Compact mode, Tree animation, Additional counters) and does not modify project data. After reset, Additional counters are enabled by default.
+Reset settings (Help → Reset settings) resets only visual interface settings (theme, effects, Compact mode, Tree animation) and does not modify project data.
 Reset settings also clears the saved interface language selection.
 
 ### 15.2 Reset data

@@ -68,13 +68,6 @@
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>
-        <MenuItem Click="OnToggleAdvancedCounts" IsVisible="{Binding IsTreePaneVisible}">
-          <MenuItem.Header>
-            <CheckBox Content="{Binding MenuViewAdditionalCounts}"
-                      IsChecked="{Binding IsAdvancedIgnoreCountsEnabled}"
-                      IsHitTestVisible="False"/>
-          </MenuItem.Header>
-        </MenuItem>
       </MenuItem>
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchFilterAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />

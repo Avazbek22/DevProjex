@@ -119,6 +119,12 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         db.SchemaVersion = CurrentSchemaVersion;
         db.Presets ??= new Dictionary<string, ThemePreset>();
         db.ViewSettings ??= DefaultViewSettings;
+        db.ViewSettings = db.ViewSettings with
+        {
+            // The UI toggle was removed, but older settings files can still contain false.
+            // Keep the current behavior deterministic until a raw JSON migration removes the field.
+            IsAdvancedIgnoreCountsEnabled = true
+        };
 
         foreach (var preset in CreateDefaultPresets())
         {

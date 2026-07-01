@@ -95,7 +95,7 @@ public sealed class UserSettingsStoreTests
 
 	[Fact]
 	// Ensures view settings are persisted together with theme presets.
-	public void Save_And_Load_RoundTripsViewSettings()
+	public void Save_And_Load_RoundTripsViewSettingsWithAdvancedCountsAlwaysEnabled()
 	{
 		using var scope = new AppDataScope();
 		var store = new UserSettingsStore();
@@ -118,8 +118,41 @@ public sealed class UserSettingsStoreTests
 
 		Assert.True(loaded.ViewSettings.IsCompactMode);
 		Assert.True(loaded.ViewSettings.IsTreeAnimationEnabled);
-		Assert.False(loaded.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+		Assert.True(loaded.ViewSettings.IsAdvancedIgnoreCountsEnabled);
 		Assert.Equal(AppLanguage.Fr, loaded.ViewSettings.PreferredLanguage);
+	}
+
+	[Fact]
+	// Ensures old files cannot keep the removed additional-counts toggle disabled.
+	public void Load_LegacyAdvancedCountsFalse_NormalizesToEnabledAndRewritesFile()
+	{
+		using var scope = new AppDataScope();
+		var store = new UserSettingsStore();
+		var path = store.GetPath();
+		var db = new UserSettingsDb
+		{
+			SchemaVersion = 1,
+			Presets = new Dictionary<string, ThemePreset>(),
+			LastSelected = "Dark.Transparent",
+			ViewSettings = new AppViewSettings
+			{
+				IsCompactMode = true,
+				IsTreeAnimationEnabled = true,
+				IsAdvancedIgnoreCountsEnabled = false,
+				PreferredLanguage = AppLanguage.Fr
+			}
+		};
+
+		WritePresetFile(path, db);
+
+		var loaded = store.Load();
+
+		Assert.True(loaded.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+		using var document = JsonDocument.Parse(File.ReadAllText(path));
+		Assert.True(document.RootElement
+			.GetProperty("viewSettings")
+			.GetProperty("isAdvancedIgnoreCountsEnabled")
+			.GetBoolean());
 	}
 
 	[Fact]
