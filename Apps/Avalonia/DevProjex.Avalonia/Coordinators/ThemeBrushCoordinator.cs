@@ -41,6 +41,8 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
     public void UpdateTransparencyEffect()
     {
+        CompositionBackdropCornerRadiusCoordinator.UseSharpCornersForDecoratedWindow();
+
         if (!viewModel.HasAnyEffect)
         {
             window.TransparencyLevelHint =

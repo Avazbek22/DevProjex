@@ -11,6 +11,8 @@ public partial class GitCloneWindow : Window
 
     public GitCloneWindow()
     {
+        CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForPopupSurface();
+
         AvaloniaXamlLoader.Load(this);
         _urlTextBox = this.FindControl<TextBox>("UrlTextBox");
         _recentRepositoriesComboBox = this.FindControl<ComboBox>("RecentRepositoriesComboBox");

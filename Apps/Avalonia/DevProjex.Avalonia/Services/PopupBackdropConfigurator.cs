@@ -52,6 +52,9 @@ internal static class PopupBackdropConfigurator
 
         try
         {
+            if (enableBackdrop)
+                CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForPopupSurface();
+
             popupLevel.TransparencyLevelHint = enableBackdrop
                 ? ResolveEffectHints(fallback)
                 : NoEffectHints;

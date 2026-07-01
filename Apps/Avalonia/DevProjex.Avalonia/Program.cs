@@ -6,7 +6,6 @@ internal static class Program
 {
     // Conservative GPU cache limit to avoid long-session native memory growth.
     private const long SkiaGpuCacheLimitBytes = 96L * 1024 * 1024;
-    private const float PopupBackdropCornerRadius = 8f;
 
     [STAThread]
     public static int Main(string[] args)
@@ -45,10 +44,13 @@ internal static class Program
 
     private static Win32PlatformOptions CreateWin32PlatformOptions()
     {
-        return new Win32PlatformOptions
+        var options = new Win32PlatformOptions
         {
-            // Composition blur brushes do not inherit Border.CornerRadius from popup content.
-            WinUICompositionBackdropCornerRadius = PopupBackdropCornerRadius
+            // Main decorated windows need sharp backdrop corners; popup-like surfaces opt into rounded corners later.
+            WinUICompositionBackdropCornerRadius = null
         };
+
+        CompositionBackdropCornerRadiusCoordinator.Attach(options);
+        return options;
     }
 }

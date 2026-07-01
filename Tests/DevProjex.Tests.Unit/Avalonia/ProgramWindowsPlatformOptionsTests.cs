@@ -3,7 +3,7 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class ProgramWindowsPlatformOptionsTests
 {
     [Fact]
-    public void CreateWin32PlatformOptions_ConfiguresCompositionBackdropCornerRadius()
+    public void CreateWin32PlatformOptions_UsesSharpMainWindowBackdropCorners()
     {
         var method = typeof(Program).GetMethod(
             "CreateWin32PlatformOptions",
@@ -16,7 +16,32 @@ public sealed class ProgramWindowsPlatformOptionsTests
         var radiusProperty = options!.GetType().GetProperty("WinUICompositionBackdropCornerRadius");
         Assert.NotNull(radiusProperty);
 
-        var radius = Assert.IsType<float>(radiusProperty!.GetValue(options));
-        Assert.Equal(8f, radius);
+        Assert.Null(radiusProperty!.GetValue(options));
+    }
+
+    [Fact]
+    public void CompositionBackdropCornerRadiusCoordinator_SwitchesOnlyOnWindows()
+    {
+        var options = new Win32PlatformOptions
+        {
+            WinUICompositionBackdropCornerRadius = 4f
+        };
+
+        DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator.Attach(options);
+        DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator.UseSharpCornersForDecoratedWindow();
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Null(options.WinUICompositionBackdropCornerRadius);
+
+            DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForPopupSurface();
+            Assert.Equal(
+                DevProjex.Avalonia.Services.CompositionBackdropCornerRadiusCoordinator.RoundedBackdropCornerRadius,
+                options.WinUICompositionBackdropCornerRadius);
+        }
+        else
+        {
+            Assert.Equal(4f, options.WinUICompositionBackdropCornerRadius);
+        }
     }
 }
