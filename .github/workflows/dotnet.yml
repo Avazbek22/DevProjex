@@ -117,7 +117,7 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem -Path "." -Recurse -Directory -Filter "TestResults" |
-            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter "*.log" } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Include "*.log", "*.trx", "*.txt" } |
             ForEach-Object {
               Write-Host "::group::$($_.FullName)"
               Get-Content -Path $_.FullName -Raw
@@ -238,6 +238,18 @@ jobs:
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 
+      - name: Print terminal command test runner logs
+        if: ${{ failure() }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "." -Recurse -Directory -Filter "TestResults" |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Include "*.log", "*.trx", "*.txt" } |
+            ForEach-Object {
+              Write-Host "::group::$($_.FullName)"
+              Get-Content -Path $_.FullName -Raw
+              Write-Host "::endgroup::"
+            }
+
       - name: Upload terminal command results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -301,6 +313,18 @@ jobs:
           --filter "FullyQualifiedName~Ignore|FullyQualifiedName~Scanner|FullyQualifiedName~ReparsePoint|FullyQualifiedName~FileSystemMutation"
           --logger "trx;LogFileName=ignore-scanner.trx"
           --results-directory "TestResults/ignore-scanner"
+
+      - name: Print ignore/scanner test runner logs
+        if: ${{ failure() }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "." -Recurse -Directory -Filter "TestResults" |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Include "*.log", "*.trx", "*.txt" } |
+            ForEach-Object {
+              Write-Host "::group::$($_.FullName)"
+              Get-Content -Path $_.FullName -Raw
+              Write-Host "::endgroup::"
+            }
 
       - name: Upload ignore/scanner results
         if: ${{ always() }}

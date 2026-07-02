@@ -696,6 +696,40 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 	}
 
 	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_ReportAndJsonTreeExportWithExplicitIgnoresShareEffectiveTree()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedFullIgnoreOverrideWorkspace(temp);
+		var reportPath = Path.Combine(temp.Path, "out", "report.json");
+		var exportPath = Path.Combine(temp.Path, "out", "tree.json");
+
+		var result = await RunAutomationAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Output, exportPath,
+			CommandLineOptionTokens.ExportFormat, "json",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreGitIgnore,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+
+		AssertCommandSucceeded(result);
+		Assert.Equal(
+			$"{Path.GetFullPath(reportPath)}{Environment.NewLine}{Path.GetFullPath(exportPath)}{Environment.NewLine}",
+			result.Stdout);
+		using var reportDocument = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
+		using var exportDocument = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath, TestContext.Current.CancellationToken));
+		var reportRoot = reportDocument.RootElement;
+		var exportRoot = exportDocument.RootElement.GetProperty("root");
+
+		Assert.Equal(["smartIgnore", "useGitIgnore"], ReadStringArray(reportRoot.GetProperty("selection").GetProperty("selectedIgnoreOptions")));
+		Assert.Equal(ReadTreeFileCount(reportRoot), CountJsonTreeFiles(exportRoot));
+		Assert.True(JsonTreeContainsFile(exportRoot, "GitApp.cs"));
+		Assert.True(JsonTreeContainsFile(exportRoot, "WebApp.cs"));
+		Assert.False(JsonTreeContainsFile(exportRoot, "git-generated.txt"));
+		Assert.False(JsonTreeContainsFile(exportRoot, "bundle.js"));
+	}
+
+	[Fact]
 	public async Task RunUtilityOrHeadlessAsync_ReportFileAndStdoutExportReturnsUsageErrorWithoutWritingReport()
 	{
 		using var temp = new TemporaryDirectory();
@@ -1022,6 +1056,35 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 
 	private static int ReadTreeFileCount(JsonElement root) =>
 		root.GetProperty("inventory").GetProperty("tree").GetProperty("fileCount").GetInt32();
+
+	private static int CountJsonTreeFiles(JsonElement node)
+	{
+		var count = 0;
+		if (node.TryGetProperty("files", out var files))
+			count += files.GetArrayLength();
+
+		if (node.TryGetProperty("dirs", out var directories))
+		{
+			foreach (var directory in directories.EnumerateArray())
+				count += CountJsonTreeFiles(directory);
+		}
+
+		return count;
+	}
+
+	private static bool JsonTreeContainsFile(JsonElement node, string fileName)
+	{
+		if (node.TryGetProperty("files", out var files) &&
+		    files.EnumerateArray().Any(file => string.Equals(file.GetString(), fileName, StringComparison.Ordinal)))
+		{
+			return true;
+		}
+
+		if (!node.TryGetProperty("dirs", out var directories))
+			return false;
+
+		return directories.EnumerateArray().Any(directory => JsonTreeContainsFile(directory, fileName));
+	}
 
 	private static CommandLineAutomationContext CreateContext(
 		TextWriter output,

@@ -89,32 +89,12 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		var projectPath = temp.CreateDirectory("project with spaces");
 		SeedUserLevelProject(projectPath);
 
-		CommandLineProcessResult result;
-		if (OperatingSystem.IsWindows())
-		{
-			var binDirectory = temp.CreateDirectory("bin & tools");
-			await CreateWindowsLauncherAsync(
-				Path.Combine(binDirectory, CommandLineExecutableAliases.WindowsPortableCommandFileName));
-			result = await RunWindowsPathCommandAsync(
-				"devprojex",
-				binDirectory,
-				temp.Path,
-				CommandLineOptionTokens.NoUi,
-				CommandLineOptionTokens.Path, projectPath,
-				CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath);
-		}
-		else
-		{
-			var binDirectory = temp.CreateDirectory("bin");
-			await CreateUnixWrapperAsync(Path.Combine(binDirectory, CommandLineExecutableAliases.UnixCommand));
-			result = await RunPathCommandAsync(
-				CommandLineExecutableAliases.UnixCommand,
-				binDirectory,
-				temp.Path,
-				CommandLineOptionTokens.NoUi,
-				CommandLineOptionTokens.Path, projectPath,
-				CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath);
-		}
+		var result = await RunUserLevelTerminalCommandAsync(
+			temp,
+			temp.Path,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath);
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
@@ -125,6 +105,40 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			GetComparablePath(projectPath),
 			GetComparablePath(root.GetProperty("rootPath").GetString()!));
 		Assert.Contains(".cs", ReadStringArray(root.GetProperty("inventory").GetProperty("availableExtensions")));
+		Assert.DoesNotContain("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex:", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task UserLevelTerminalCommand_TreeContentJsonStdoutKeepsJsonTreeAndPlainTextContent()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		SeedUserLevelProject(projectPath);
+
+		var result = await RunUserLevelTerminalCommandAsync(
+			temp,
+			temp.Path,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ExportFormat, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var (jsonPart, contentPart) = SplitTreeContentJsonStdout(result.Stdout);
+		using var document = JsonDocument.Parse(jsonPart);
+		var root = document.RootElement;
+		Assert.Equal(GetComparablePath(projectPath), GetComparablePath(root.GetProperty("rootPath").GetString()!));
+		Assert.Equal("App.cs", root.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		Assert.Contains("App.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("public static class App", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("Readme.txt", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("bin placeholder", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("generated", result.Stdout, StringComparison.Ordinal);
 		Assert.DoesNotContain("Usage:", result.Stdout, StringComparison.Ordinal);
 		Assert.DoesNotContain("DevProjex:", result.Stdout, StringComparison.Ordinal);
 	}
@@ -1354,6 +1368,24 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		MakeExecutableIfUnix(wrapperPath);
 	}
 
+	private static async Task<CommandLineProcessResult> RunUserLevelTerminalCommandAsync(
+		TemporaryDirectory temp,
+		string workingDirectory,
+		params string[] args)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			var binDirectory = temp.CreateDirectory("bin & tools");
+			await CreateWindowsLauncherAsync(
+				Path.Combine(binDirectory, CommandLineExecutableAliases.WindowsPortableCommandFileName));
+			return await RunWindowsPathCommandAsync("devprojex", binDirectory, workingDirectory, args);
+		}
+
+		var unixBinDirectory = temp.CreateDirectory("bin");
+		await CreateUnixWrapperAsync(Path.Combine(unixBinDirectory, CommandLineExecutableAliases.UnixCommand));
+		return await RunPathCommandAsync(CommandLineExecutableAliases.UnixCommand, unixBinDirectory, workingDirectory, args);
+	}
+
 	private static void MakeExecutableIfUnix(string path)
 	{
 		if (OperatingSystem.IsWindows())
@@ -1684,6 +1716,14 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		element.EnumerateArray()
 			.Select(static item => item.GetString() ?? string.Empty)
 			.ToArray();
+
+	private static (string JsonPart, string ContentPart) SplitTreeContentJsonStdout(string stdout)
+	{
+		// Tree-content JSON intentionally keeps only the tree as JSON; selected file content stays plain text after NBSP separators.
+		var separatorIndex = stdout.IndexOf("\u00A0", StringComparison.Ordinal);
+		Assert.True(separatorIndex > 0, "Expected JSON tree-content stdout to contain the NBSP separator before plain text content.");
+		return (stdout[..separatorIndex].TrimEnd('\r', '\n'), stdout[separatorIndex..]);
+	}
 
 	private static ProjectFileSnapshot[] CaptureProjectFiles(string projectPath) =>
 		Directory.EnumerateFiles(projectPath, "*", SearchOption.AllDirectories)
