@@ -258,20 +258,26 @@ internal static class UiTestDriver
 
     public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
     {
-        var checkBox = await WaitForRootFolderCheckBoxAsync(window, rootFolderName);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindRootFolderCheckBox(window, rootFolderName),
+            $"root folder checkbox '{rootFolderName}'");
     }
 
     public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
     {
-        var checkBox = await WaitForExtensionCheckBoxAsync(window, extensionName);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindExtensionCheckBox(window, extensionName),
+            $"extension checkbox '{extensionName}'");
     }
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
-        var checkBox = await WaitForIgnoreOptionCheckBoxAsync(window, optionId);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindIgnoreOptionCheckBox(window, optionId),
+            $"ignore checkbox '{optionId}'");
     }
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
@@ -334,7 +340,13 @@ internal static class UiTestDriver
     public static async Task ClickAsync(MainWindow window, Control control)
     {
         await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, control);
 
+        await ClickReadyControlAsync(window, control);
+    }
+
+    private static async Task ClickReadyControlAsync(MainWindow window, Control control)
+    {
         var clickPoint = GetControlCenter(control, window);
         window.MouseMove(clickPoint, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 2);
@@ -734,7 +746,7 @@ internal static class UiTestDriver
     {
         var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
         Assert.NotNull(clipboard);
-        return await global::Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard);
+        return await ClipboardExtensions.TryGetTextAsync(clipboard);
     }
 
     public static async Task WaitForClipboardTextAsync(
@@ -758,7 +770,7 @@ internal static class UiTestDriver
             await WaitForSettledFramesAsync(frameCount: 2);
         }
 
-        throw new Xunit.Sdk.XunitException(
+        throw new XunitException(
             $"Timed out waiting for clipboard text to match the expected preview copy payload. Expected length={expectedText.Length}, actual length={lastClipboardText?.Length ?? 0}.");
     }
 
@@ -1065,7 +1077,7 @@ internal static class UiTestDriver
     {
         var origin = control.TranslatePoint(default, topLevel);
         if (!origin.HasValue)
-            throw new XunitException($"Unable to translate control '{control.Name}' into top-level coordinates.");
+            throw new XunitException($"Unable to translate control '{GetControlDebugName(control)}' into top-level coordinates.");
 
         return new Rect(origin.Value, control.Bounds.Size);
     }
@@ -1121,6 +1133,62 @@ internal static class UiTestDriver
         if (scrolled)
             await WaitForSettledFramesAsync(frameCount: 6);
     }
+
+    private static async Task WaitForControlReadyForPointerAsync(MainWindow window, Control control)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => IsControlReadyForPointer(control, window),
+            $"control '{GetControlDebugName(control)}' to be ready for pointer input");
+    }
+
+    private static async Task ClickResolvedControlAsync(
+        MainWindow window,
+        Func<Control?> resolveControl,
+        string description)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        Exception? lastFailure = null;
+
+        while (stopwatch.Elapsed < DefaultTimeout)
+        {
+            var control = resolveControl();
+            if (control is null || !IsControlReadyForPointer(control, window))
+            {
+                await WaitForSettledFramesAsync(frameCount: 2);
+                await Task.Delay(PollDelay);
+                continue;
+            }
+
+            try
+            {
+                await EnsureControlVisibleAsync(window, control);
+                if (!IsControlReadyForPointer(control, window))
+                    continue;
+
+                await ClickReadyControlAsync(window, control);
+                return;
+            }
+            catch (XunitException exception)
+            {
+                lastFailure = exception;
+                await WaitForSettledFramesAsync(frameCount: 2);
+            }
+        }
+
+        var lastFailureText = lastFailure is null ? string.Empty : $" Last failure: {lastFailure.Message}";
+        throw new XunitException(
+            $"Timed out waiting for {description} to stay ready for pointer input.{lastFailureText} Current state: {DescribeState(window)}");
+    }
+
+    private static bool IsControlReadyForPointer(Control control, MainWindow window)
+        => control.IsVisible
+           && control.Bounds.Width > 0.5
+           && control.Bounds.Height > 0.5
+           && control.TranslatePoint(default, window).HasValue;
+
+    private static string GetControlDebugName(Control control)
+        => string.IsNullOrWhiteSpace(control.Name) ? control.GetType().Name : control.Name!;
 
     public static async Task WaitForConditionAsync(
         MainWindow window,
@@ -1282,10 +1350,10 @@ internal static class UiTestDriver
         return Assert.IsType<CheckBox>(FindTreeNodeCheckBox(window, displayName));
     }
 
-    private static DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator GetSelectionCoordinator(MainWindow window)
+    private static Avalonia.Coordinators.SelectionSyncCoordinator GetSelectionCoordinator(MainWindow window)
     {
         var field = typeof(MainWindow).GetField("_selectionCoordinator", BindingFlags.Instance | BindingFlags.NonPublic);
-        return Assert.IsType<DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
+        return Assert.IsType<Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
     }
 
     private static bool IsPreviewPipelineIdle(MainWindow window)
@@ -1296,10 +1364,10 @@ internal static class UiTestDriver
         return GetPreviewPipeline(window).IsIdle;
     }
 
-    private static DevProjex.Avalonia.Coordinators.PreviewWorkspacePipeline GetPreviewPipeline(MainWindow window)
+    private static Avalonia.Coordinators.PreviewWorkspacePipeline GetPreviewPipeline(MainWindow window)
     {
         var field = typeof(MainWindow).GetField("_previewPipeline", BindingFlags.Instance | BindingFlags.NonPublic);
-        return Assert.IsType<DevProjex.Avalonia.Coordinators.PreviewWorkspacePipeline>(field?.GetValue(window));
+        return Assert.IsType<Avalonia.Coordinators.PreviewWorkspacePipeline>(field?.GetValue(window));
     }
 
     private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)

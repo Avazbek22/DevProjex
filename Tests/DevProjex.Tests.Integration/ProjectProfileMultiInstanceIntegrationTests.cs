@@ -5,7 +5,7 @@ public sealed class ProjectProfileMultiInstanceIntegrationTests
     [Fact]
     public async Task IndependentInstances_ConcurrentProfileSavesForDifferentProjects_PreserveBothSnapshots()
     {
-        using var temp = new Helpers.TemporaryDirectory();
+        using var temp = new TemporaryDirectory();
         var storeA = new ProjectProfileStore(() => temp.Path);
         var storeB = new ProjectProfileStore(() => temp.Path);
         var firstProjectPath = temp.CreateDirectory("Workspace/RepoA");
@@ -44,7 +44,7 @@ public sealed class ProjectProfileMultiInstanceIntegrationTests
     [Fact]
     public void TrySaveProfile_OlderRetryTimestamp_DoesNotOverwriteNewerPersistedSnapshot()
     {
-        using var temp = new Helpers.TemporaryDirectory();
+        using var temp = new TemporaryDirectory();
         var initialStore = new ProjectProfileStore(() => temp.Path);
         var retryStore = new ProjectProfileStore(() => temp.Path);
         var projectPath = temp.CreateDirectory("Workspace/RepoA");

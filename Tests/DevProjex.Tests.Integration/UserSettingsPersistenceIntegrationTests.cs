@@ -7,7 +7,7 @@ public sealed class UserSettingsPersistenceIntegrationTests
     [Fact]
     public async Task IndependentInstances_ConcurrentSaves_DoNotCorruptUserSettingsDocument()
     {
-        using var temp = new Helpers.TemporaryDirectory();
+        using var temp = new TemporaryDirectory();
         var storeA = new UserSettingsStore(() => temp.Path);
         var storeB = new UserSettingsStore(() => temp.Path);
         var firstSnapshot = storeA.Load();
@@ -50,7 +50,7 @@ public sealed class UserSettingsPersistenceIntegrationTests
             string.Equals(reloaded.LastSelected, firstSnapshot.LastSelected, StringComparison.Ordinal) &&
             reloaded.ViewSettings.IsCompactMode &&
             !reloaded.ViewSettings.IsTreeAnimationEnabled &&
-            !reloaded.ViewSettings.IsAdvancedIgnoreCountsEnabled &&
+            reloaded.ViewSettings.IsAdvancedIgnoreCountsEnabled &&
             reloaded.ViewSettings.PreferredLanguage == AppLanguage.De;
         var matchesSecondSnapshot =
             string.Equals(reloaded.LastSelected, secondSnapshot.LastSelected, StringComparison.Ordinal) &&

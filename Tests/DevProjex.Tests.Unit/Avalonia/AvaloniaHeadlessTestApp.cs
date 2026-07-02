@@ -5,5 +5,9 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public static class AvaloniaHeadlessTestApp
 {
 	public static AppBuilder BuildAvaloniaApp()
-		=> AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions());
+		=> AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions
+		{
+			Fps = 120,
+			ShouldRenderOnUIThread = true
+		});
 }

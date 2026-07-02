@@ -131,11 +131,12 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal("acrylic", preset.GetProperty("effect").GetString());
 		Assert.True(viewSettings.GetProperty("isTerminalCommandPromptDismissed").GetBoolean());
 		Assert.Equal("ru", viewSettings.GetProperty("preferredLanguage").GetString());
+		Assert.True(viewSettings.GetProperty("isAdvancedIgnoreCountsEnabled").GetBoolean());
 
 		var loaded = store.Load();
 		Assert.True(loaded.ViewSettings.IsCompactMode);
 		Assert.True(loaded.ViewSettings.IsTreeAnimationEnabled);
-		Assert.False(loaded.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+		Assert.True(loaded.ViewSettings.IsAdvancedIgnoreCountsEnabled);
 		Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
 		Assert.Equal(AppLanguage.Ru, loaded.ViewSettings.PreferredLanguage);
 		Assert.Equal(ThemeEffectMode.Acrylic, loaded.Presets["Dark.Acrylic"].Effect);

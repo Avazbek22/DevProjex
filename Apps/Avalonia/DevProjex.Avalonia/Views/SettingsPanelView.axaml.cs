@@ -131,7 +131,7 @@ public partial class SettingsPanelView : UserControl
         _minimumWidthRefreshQueued = true;
         // Post to Render so all header text/check box measurements are stable before we
         // report a new minimum width to the window layout.
-        Dispatcher.UIThread.Post(
+        Dispatcher.Post(
             FlushPendingMinimumWidthRefresh,
             DispatcherPriority.Render);
     }

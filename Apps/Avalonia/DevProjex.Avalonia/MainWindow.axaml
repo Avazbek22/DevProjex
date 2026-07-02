@@ -6,6 +6,7 @@
         xmlns:converters="using:DevProjex.Avalonia.Converters"
         x:Class="DevProjex.Avalonia.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
         Title="{Binding Title}"
         Icon="avares://DevProjex/AppIcon/icon-256.png"
         Width="1200" Height="800"
@@ -220,7 +221,6 @@
                           ZoomResetRequested="OnZoomReset"
                           ToggleCompactModeRequested="OnToggleCompactMode"
                           ToggleTreeAnimationRequested="OnToggleTreeAnimation"
-                          ToggleAdvancedCountsRequested="OnToggleAdvancedIgnoreCounts"
                           ToggleSearchRequested="OnToggleSearch"
                           ToggleSettingsRequested="OnToggleSettings"
                           TogglePreviewRequested="OnTogglePreview"
@@ -353,7 +353,7 @@
     <Grid>
       <!-- Drop zone shown when no project is loaded -->
       <Border Name="DropZoneContainer"
-              Classes="drop-zone-outer"
+              Classes="drop-zone-outer drop-zone-animating"
               IsVisible="{Binding !IsProjectLoaded}"
               Background="Transparent"
               Margin="60"
@@ -549,18 +549,18 @@
                       Classes="island-panel content-island"
                       IsVisible="{Binding IsTreePaneVisible}">
                 <Grid>
-                  <TreeView Name="ProjectTree"
-                            ItemsSource="{Binding TreeNodes}"
-                            IsEnabled="{Binding IsProjectLoaded}"
-                            Padding="0,0,0,4"
-                            FontFamily="{Binding SelectedFontFamily}"
-                            FontSize="{Binding TreeFontSize}">
-                    <TreeView.ItemsPanel>
+                  <controls:ProjectTreeView Name="ProjectTree"
+                                            ItemsSource="{Binding TreeNodes}"
+                                            IsEnabled="{Binding IsProjectLoaded}"
+                                            Padding="0,0,0,4"
+                                            FontFamily="{Binding SelectedFontFamily}"
+                                            FontSize="{Binding TreeFontSize}">
+                    <controls:ProjectTreeView.ItemsPanel>
                       <ItemsPanelTemplate>
                         <VirtualizingStackPanel CacheLength="2" />
                       </ItemsPanelTemplate>
-                    </TreeView.ItemsPanel>
-                    <TreeView.ItemTemplate>
+                    </controls:ProjectTreeView.ItemsPanel>
+                    <controls:ProjectTreeView.ItemTemplate>
                       <TreeDataTemplate x:DataType="vm:TreeNodeViewModel"
                                         ItemsSource="{CompiledBinding ChildItemsSource}">
                         <Grid ColumnDefinitions="Auto,*" Background="Transparent">
@@ -574,8 +574,6 @@
                                       Spacing="{DynamicResource TreeItemSpacingResource}">
                             <CheckBox IsThreeState="True"
                                       IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
-                                      Tapped="OnTreeNodeCheckBoxTapped"
-                                      DoubleTapped="OnTreeNodeCheckBoxDoubleTapped"
                                       VerticalAlignment="Center" />
                             <Image Source="{CompiledBinding Icon}"
                                    Width="{DynamicResource TreeIconSizeResource}"
@@ -595,8 +593,8 @@
                           </StackPanel>
                         </Grid>
                       </TreeDataTemplate>
-                    </TreeView.ItemTemplate>
-                  </TreeView>
+                    </controls:ProjectTreeView.ItemTemplate>
+                  </controls:ProjectTreeView>
 
                   <Button Name="PreviewTreeHideButton"
                           Classes="menu-icon-button tree-island-close-button"
@@ -606,8 +604,30 @@
                           Margin="0,8,13,0"
                           Width="28"
                           Height="28"
-                          Content="✕"
-                          Click="OnPreviewTreeHide" />
+                          Click="OnPreviewTreeHide">
+                    <Grid>
+                      <ExperimentalAcrylicBorder CornerRadius="6"
+                                                ClipToBounds="True"
+                                                IsHitTestVisible="False">
+                        <ExperimentalAcrylicBorder.Material>
+                          <ExperimentalAcrylicMaterial BackgroundSource="Digger"
+                                                        TintColor="{DynamicResource TreeIslandCloseBlurTintColor}"
+                                                        TintOpacity="{DynamicResource TreeIslandCloseBlurTintOpacity}"
+                                                        MaterialOpacity="{DynamicResource TreeIslandCloseBlurMaterialOpacity}"
+                                                        PlatformTransparencyCompensationLevel="{DynamicResource TreeIslandCloseBlurCompensationLevel}"
+                                                        FallbackColor="{DynamicResource TreeIslandCloseBlurFallbackColor}" />
+                        </ExperimentalAcrylicBorder.Material>
+                      </ExperimentalAcrylicBorder>
+                      <Border Classes="tree-island-close-surface"
+                              IsHitTestVisible="False" />
+                      <TextBlock Text="✕"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 FontSize="12"
+                                 FontWeight="SemiBold"
+                                 Foreground="{DynamicResource AppTextBrush}" />
+                    </Grid>
+                  </Button>
                 </Grid>
               </Border>
             </Grid>
@@ -732,11 +752,9 @@
                     Classes="island-panel content-island"
                     IsVisible="{Binding IsPreviewPaneVisible}">
             <Grid>
-              <Grid RowDefinitions="Auto,*"
-                    ColumnDefinitions="Auto,*">
+              <Grid ColumnDefinitions="Auto,*">
                 <!-- Persistent line-number background that spans the full preview height -->
-                <Grid Grid.Row="1"
-                      Grid.Column="0"
+                <Grid Grid.Column="0"
                       ClipToBounds="True">
                   <Border Name="PreviewLineNumbersBackground"
                           Classes="preview-line-numbers" />
@@ -754,12 +772,10 @@
                                                           RightPadding="8" />
                 </Grid>
 
-                <Grid Grid.Row="1"
-                      Grid.Column="1"
+                <Grid Grid.Column="1"
                       ClipToBounds="True">
                   <ScrollViewer Name="PreviewTextScrollViewer"
                                 Classes="preview-scroll"
-                                Margin="0,0,0,8"
                                 Cursor="Arrow"
                                 IsScrollInertiaEnabled="True"
                                 HorizontalScrollBarVisibility="Auto"
@@ -784,51 +800,55 @@
                   </ScrollViewer>
                 </Grid>
 
-                <Border Grid.Row="0"
-                        Grid.Column="0"
-                        Name="PreviewStickyHeaderCap"
-                        Classes="preview-sticky-header-cap"
-                        IsVisible="False">
-                  <Border Classes="preview-sticky-copy-host">
-                    <Button Name="PreviewStickyHeaderCopyButton"
-                            Classes="menu-icon-button preview-sticky-copy-button"
-                            ToolTip.Placement="Right"
-                            ToolTip.ShowDelay="700"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Click="OnPreviewCopyVisibleFilePath">
-                      <ToolTip.Tip>
-                        <ToolTip Classes="preview-blurred-tooltip"
-                                 Loaded="OnPreviewToolTipLoaded">
-                          <TextBlock Text="{Binding PreviewCopyFilePathTooltip}" />
-                        </ToolTip>
-                      </ToolTip.Tip>
-                      <Viewbox Width="12"
-                               Height="12"
-                               Margin="-1,0,0,0"
-                               Stretch="Uniform">
-                        <Path Classes="preview-icon"
-                              Data="{StaticResource PreviewCopyIconGeometry}"
-                              Fill="{DynamicResource AppTextBrush}" />
-                      </Viewbox>
-                    </Button>
+                <Grid Grid.ColumnSpan="2"
+                      ColumnDefinitions="Auto,*"
+                      VerticalAlignment="Top"
+                      ZIndex="10">
+                  <Border Grid.Column="0"
+                          Name="PreviewStickyHeaderCap"
+                          Classes="preview-sticky-header-cap"
+                          Width="{Binding #PreviewLineNumbersBackground.Bounds.Width}"
+                          IsVisible="False">
+                    <Border Classes="preview-sticky-copy-host">
+                      <Button Name="PreviewStickyHeaderCopyButton"
+                              Classes="menu-icon-button preview-sticky-copy-button"
+                              ToolTip.Placement="Right"
+                              ToolTip.ShowDelay="700"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Click="OnPreviewCopyVisibleFilePath">
+                        <ToolTip.Tip>
+                          <ToolTip Classes="preview-blurred-tooltip"
+                                   Loaded="OnPreviewToolTipLoaded">
+                            <TextBlock Text="{Binding PreviewCopyFilePathTooltip}" />
+                          </ToolTip>
+                        </ToolTip.Tip>
+                        <Viewbox Width="12"
+                                 Height="12"
+                                 Margin="-1,0,0,0"
+                                 Stretch="Uniform">
+                          <Path Classes="preview-icon"
+                                Data="{StaticResource PreviewCopyIconGeometry}"
+                                Fill="{DynamicResource AppTextBrush}" />
+                        </Viewbox>
+                      </Button>
+                    </Border>
                   </Border>
-                </Border>
 
-                <Border Grid.Row="0"
-                        Grid.Column="1"
-                        Name="PreviewStickyHeaderContainer"
-                        Classes="preview-sticky-header"
-                        IsVisible="False">
-                  <TextBlock Name="PreviewStickyHeaderText"
-                             Classes="preview-sticky-header-text"
-                             FontFamily="{Binding SelectedFontFamily}"
-                             FontSize="{Binding PreviewFontSize}"
-                             Margin="10,4,10,4"
-                             MinWidth="0"
-                             VerticalAlignment="Center"
-                             TextTrimming="CharacterEllipsis" />
-                </Border>
+                  <Border Grid.Column="1"
+                          Name="PreviewStickyHeaderContainer"
+                          Classes="preview-sticky-header"
+                          IsVisible="False">
+                    <TextBlock Name="PreviewStickyHeaderText"
+                               Classes="preview-sticky-header-text"
+                               FontFamily="{Binding SelectedFontFamily}"
+                               FontSize="{Binding PreviewFontSize}"
+                               Margin="10,4,10,4"
+                               MinWidth="0"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </Border>
+                </Grid>
               </Grid>
             </Grid>
             </Border>

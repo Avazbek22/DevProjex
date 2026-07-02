@@ -83,6 +83,67 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task UserLevelTerminalCommand_NoUiReportDashWritesOnlyJsonToStdout()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		SeedUserLevelProject(projectPath);
+
+		var result = await RunUserLevelTerminalCommandAsync(
+			temp,
+			temp.Path,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		var root = document.RootElement;
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(
+			GetComparablePath(projectPath),
+			GetComparablePath(root.GetProperty("rootPath").GetString()!));
+		Assert.Contains(".cs", ReadStringArray(root.GetProperty("inventory").GetProperty("availableExtensions")));
+		Assert.DoesNotContain("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex:", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task UserLevelTerminalCommand_TreeContentJsonStdoutKeepsJsonTreeAndPlainTextContent()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		SeedUserLevelProject(projectPath);
+
+		var result = await RunUserLevelTerminalCommandAsync(
+			temp,
+			temp.Path,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.ExportFormat, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.IncludeRoot, "src",
+			CommandLineOptionTokens.IncludeExtension, "cs");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var (jsonPart, contentPart) = SplitTreeContentJsonStdout(result.Stdout);
+		using var document = JsonDocument.Parse(jsonPart);
+		var root = document.RootElement;
+		Assert.Equal(GetComparablePath(projectPath), GetComparablePath(root.GetProperty("rootPath").GetString()!));
+		Assert.Equal("App.cs", root.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		Assert.Contains("App.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("public static class App", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("Readme.txt", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("bin placeholder", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("generated", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex:", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task UnixPortableWrapper_UserLevelTreeContentExportUsesCurrentExecutableAndShellSemantics()
 	{
 		if (OperatingSystem.IsWindows())
@@ -1307,6 +1368,24 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		MakeExecutableIfUnix(wrapperPath);
 	}
 
+	private static async Task<CommandLineProcessResult> RunUserLevelTerminalCommandAsync(
+		TemporaryDirectory temp,
+		string workingDirectory,
+		params string[] args)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			var binDirectory = temp.CreateDirectory("bin & tools");
+			await CreateWindowsLauncherAsync(
+				Path.Combine(binDirectory, CommandLineExecutableAliases.WindowsPortableCommandFileName));
+			return await RunWindowsPathCommandAsync("devprojex", binDirectory, workingDirectory, args);
+		}
+
+		var unixBinDirectory = temp.CreateDirectory("bin");
+		await CreateUnixWrapperAsync(Path.Combine(unixBinDirectory, CommandLineExecutableAliases.UnixCommand));
+		return await RunPathCommandAsync(CommandLineExecutableAliases.UnixCommand, unixBinDirectory, workingDirectory, args);
+	}
+
 	private static void MakeExecutableIfUnix(string path)
 	{
 		if (OperatingSystem.IsWindows())
@@ -1637,6 +1716,84 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		element.EnumerateArray()
 			.Select(static item => item.GetString() ?? string.Empty)
 			.ToArray();
+
+	private static (string JsonPart, string ContentPart) SplitTreeContentJsonStdout(string stdout)
+	{
+		// Tree-content JSON intentionally keeps only the tree as JSON; selected file content stays plain text after it.
+		// Windows command shells can transcode NBSP separators, so this smoke test splits on the JSON object boundary
+		// instead of asserting the exact separator character that the lower-level export service already owns.
+		var jsonEndIndex = FindTopLevelJsonObjectEnd(stdout);
+		Assert.True(jsonEndIndex > 0, "Expected tree-content stdout to start with a complete JSON tree object.");
+		var contentPart = stdout[jsonEndIndex..];
+		Assert.False(string.IsNullOrWhiteSpace(contentPart), "Expected tree-content stdout to include plain text content after the JSON tree.");
+		return (stdout[..jsonEndIndex], contentPart);
+	}
+
+	private static int FindTopLevelJsonObjectEnd(string value)
+	{
+		var started = false;
+		var inString = false;
+		var escaped = false;
+		var depth = 0;
+
+		for (var i = 0; i < value.Length; i++)
+		{
+			var current = value[i];
+			if (!started)
+			{
+				if (char.IsWhiteSpace(current))
+					continue;
+
+				if (current != '{')
+					return -1;
+
+				started = true;
+				depth = 1;
+				continue;
+			}
+
+			if (inString)
+			{
+				if (escaped)
+				{
+					escaped = false;
+					continue;
+				}
+
+				if (current == '\\')
+				{
+					escaped = true;
+					continue;
+				}
+
+				if (current == '"')
+					inString = false;
+
+				continue;
+			}
+
+			if (current == '"')
+			{
+				inString = true;
+				continue;
+			}
+
+			if (current == '{')
+			{
+				depth++;
+				continue;
+			}
+
+			if (current != '}')
+				continue;
+
+			depth--;
+			if (depth == 0)
+				return i + 1;
+		}
+
+		return -1;
+	}
 
 	private static ProjectFileSnapshot[] CaptureProjectFiles(string projectPath) =>
 		Directory.EnumerateFiles(projectPath, "*", SearchOption.AllDirectories)

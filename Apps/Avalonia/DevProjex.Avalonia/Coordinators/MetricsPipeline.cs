@@ -58,6 +58,19 @@ internal sealed class MetricsPipeline(
             ".bin", ".dat", ".db", ".sqlite", ".mdb"
         }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
+    private static async Task YieldUiAsync(DispatcherPriority priority)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            // Avalonia 12 exposes an explicit dispatcher yield, which makes these
+            // warmup waits read as scheduling points instead of empty callbacks.
+            await Dispatcher.Yield(priority);
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, priority);
+    }
+
     private readonly object _metricsLock = new();
     private readonly object _computationCacheLock = new();
     private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(PathComparer.Default);
@@ -194,10 +207,10 @@ internal sealed class MetricsPipeline(
 
     private async Task WaitForInitialMetricsWarmupSlotAsync(CancellationToken cancellationToken)
     {
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+        await YieldUiAsync(DispatcherPriority.Background);
         cancellationToken.ThrowIfCancellationRequested();
 
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
         cancellationToken.ThrowIfCancellationRequested();
 
         var warmupDelay = UiTimingProfile.Scale(

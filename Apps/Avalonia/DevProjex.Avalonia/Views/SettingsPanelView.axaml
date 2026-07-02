@@ -1,14 +1,10 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
-             xmlns:media="using:Avalonia.Media"
-             xmlns:converters="using:DevProjex.Avalonia.Converters"
              x:Class="DevProjex.Avalonia.Views.SettingsPanelView"
              Name="SettingsPanelViewRoot"
-             x:DataType="vm:MainWindowViewModel">
-  <UserControl.Resources>
-    <converters:FontFamilyDisplayNameConverter x:Key="FontFamilyDisplayNameConverter" />
-  </UserControl.Resources>
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
   <UserControl.Styles>
     <Style Selector="StackPanel.settings-list-panel">
       <Setter Property="Spacing" Value="-3" />
@@ -25,31 +21,19 @@
           BorderThickness="0"
           IsEnabled="{Binding IsProjectLoaded}">
     <Grid RowDefinitions="Auto,*,*,*">
-      <!-- Font section - Auto height -->
-      <StackPanel Grid.Row="0" Spacing="6">
-        <TextBlock Classes="section-title" Text="{Binding SettingsFont}" FontSize="15"/>
-        <ComboBox Name="FontComboBox" ItemsSource="{Binding FontFamilies}" SelectedItem="{Binding PendingFontFamily, Mode=TwoWay}"
-                  Tag="{Binding SettingsFontDefault}">
-          <ComboBox.ItemTemplate>
-            <DataTemplate x:DataType="media:FontFamily">
-              <TextBlock>
-                <TextBlock.Text>
-                  <MultiBinding Converter="{StaticResource FontFamilyDisplayNameConverter}">
-                    <Binding />
-                    <Binding Path="Tag" ElementName="FontComboBox" />
-                  </MultiBinding>
-                </TextBlock.Text>
-              </TextBlock>
-            </DataTemplate>
-          </ComboBox.ItemTemplate>
-        </ComboBox>
-
-        <Button Content="{Binding SettingsApply}" Click="OnApplySettings" Margin="0,10,0,0"
-                Classes="primary-action" CornerRadius="3"/>
-      </StackPanel>
+      <!-- Apply stays at the top because filter options remain intentionally staged. -->
+      <Button Name="ApplySettingsButton"
+              Grid.Row="0"
+              Content="{Binding SettingsApply}"
+              Click="OnApplySettings"
+              Margin="0,5,0,1"
+              HorizontalAlignment="Left"
+              HorizontalContentAlignment="Center"
+              Classes="primary-action"
+              CornerRadius="3"/>
 
       <!-- Ignore section - equal star height -->
-      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,2,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="IgnoreHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="IgnoreHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
           <CheckBox Name="IgnoreAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"

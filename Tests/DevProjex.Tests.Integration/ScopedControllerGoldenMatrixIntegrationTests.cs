@@ -806,7 +806,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 	}
 
 	private static SelectionRefreshSnapshot ComputeConvergedSnapshot(
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshContext context)
 	{
@@ -1038,7 +1038,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 
 	private static void AssertGoldenTree(
 		string rootPath,
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		SelectionRefreshSnapshot snapshot,
 		ScopedGoldenCase testCase)
 	{
@@ -1051,7 +1051,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 
 	private static TreeBuildResult BuildTreeFromSnapshot(
 		string rootPath,
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		SelectionRefreshSnapshot snapshot,
 		ProjectTreeInventorySnapshot? inventory = null)
 	{

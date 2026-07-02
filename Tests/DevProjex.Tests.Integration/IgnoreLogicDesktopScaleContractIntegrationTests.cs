@@ -261,7 +261,7 @@ public sealed class IgnoreLogicDesktopScaleContractIntegrationTests
 	}
 
 	private static SelectionRefreshSnapshot ComputeConvergedSnapshot(
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshContext context)
 	{
@@ -388,7 +388,7 @@ public sealed class IgnoreLogicDesktopScaleContractIntegrationTests
 	}
 
 	private static void AssertScanPipelinesAgree(
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshSnapshot snapshot,
 		int expectedDotFolders)
@@ -432,7 +432,7 @@ public sealed class IgnoreLogicDesktopScaleContractIntegrationTests
 	}
 
 	private static void AssertTreeProjectionMatchesDirectBuild(
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshSnapshot snapshot,
 		ProjectTreeInventorySnapshot inventory,

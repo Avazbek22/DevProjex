@@ -6,6 +6,11 @@ namespace DevProjex.Avalonia.Controls;
 /// </summary>
 public sealed class VirtualizedLineNumbersControl : Control
 {
+    private readonly PreviewFontMetricsCache _fontMetricsCache = new();
+    private int _cachedLineNumbersFirstLine;
+    private int _cachedLineNumbersLastLine;
+    private string? _cachedLineNumbersText;
+
     public static readonly StyledProperty<int> LineCountProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, int>(nameof(LineCount), 1);
 
@@ -47,6 +52,9 @@ public sealed class VirtualizedLineNumbersControl : Control
     public static readonly StyledProperty<bool> StickyHeaderReservedProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, bool>(nameof(StickyHeaderReserved));
 
+    public static readonly StyledProperty<double> TopOverlayClipHeightProperty =
+        AvaloniaProperty.Register<VirtualizedLineNumbersControl, double>(nameof(TopOverlayClipHeight));
+
     public static readonly StyledProperty<IBrush?> StickyHeaderBackgroundBrushProperty =
         AvaloniaProperty.Register<VirtualizedLineNumbersControl, IBrush?>(nameof(StickyHeaderBackgroundBrush));
 
@@ -69,6 +77,7 @@ public sealed class VirtualizedLineNumbersControl : Control
             NumberBrushProperty,
             StickyHeaderVisibleProperty,
             StickyHeaderReservedProperty,
+            TopOverlayClipHeightProperty,
             StickyHeaderBackgroundBrushProperty,
             StickyHeaderBorderBrushProperty);
 
@@ -146,6 +155,12 @@ public sealed class VirtualizedLineNumbersControl : Control
         set => SetValue(StickyHeaderReservedProperty, value);
     }
 
+    public double TopOverlayClipHeight
+    {
+        get => GetValue(TopOverlayClipHeightProperty);
+        set => SetValue(TopOverlayClipHeightProperty, value);
+    }
+
     public IBrush? StickyHeaderBackgroundBrush
     {
         get => GetValue(StickyHeaderBackgroundBrushProperty);
@@ -187,7 +202,7 @@ public sealed class VirtualizedLineNumbersControl : Control
             return;
 
         var typeface = new Typeface(NumberFontFamily ?? FontFamily.Default, FontStyle.Normal, FontWeight.Normal);
-        var lineHeight = ResolveLineHeight(totalLines, typeface);
+        var lineHeight = ResolveLineHeight(totalLines);
         if (lineHeight <= 0)
             return;
 
@@ -207,6 +222,38 @@ public sealed class VirtualizedLineNumbersControl : Control
         if (lastVisibleLine < firstVisibleLine)
             return;
 
+        var text = BuildVisibleLineNumbersText(firstVisibleLine, lastVisibleLine);
+        var formattedText = BuildFormattedText(text, typeface);
+        var originY = contentTop + (firstVisibleLine - 1) * lineHeight - viewportTop;
+        using (PushTopOverlayClip(context))
+        {
+            context.DrawText(formattedText, new Point(LeftPadding, originY));
+        }
+
+        DrawStickyHeaderMask(context);
+    }
+
+    private IDisposable? PushTopOverlayClip(DrawingContext context)
+    {
+        var clipHeight = Math.Max(0, TopOverlayClipHeight);
+        if (clipHeight <= 0)
+            return null;
+
+        var clipRectHeight = Math.Max(0, Bounds.Height - clipHeight);
+        return clipRectHeight > 0
+            ? context.PushClip(new Rect(0, clipHeight, Bounds.Width, clipRectHeight))
+            : null;
+    }
+
+    private string BuildVisibleLineNumbersText(int firstVisibleLine, int lastVisibleLine)
+    {
+        if (_cachedLineNumbersText is not null &&
+            _cachedLineNumbersFirstLine == firstVisibleLine &&
+            _cachedLineNumbersLastLine == lastVisibleLine)
+        {
+            return _cachedLineNumbersText;
+        }
+
         var linesCount = lastVisibleLine - firstVisibleLine + 1;
         var builder = new StringBuilder(linesCount * 6);
         for (var line = firstVisibleLine; line <= lastVisibleLine; line++)
@@ -216,20 +263,19 @@ public sealed class VirtualizedLineNumbersControl : Control
                 builder.Append('\n');
         }
 
-        var text = BuildFormattedText(builder.ToString(), typeface);
-        var originY = contentTop + (firstVisibleLine - 1) * lineHeight - viewportTop;
-        context.DrawText(text, new Point(LeftPadding, originY));
-        DrawStickyHeaderMask(context);
+        _cachedLineNumbersFirstLine = firstVisibleLine;
+        _cachedLineNumbersLastLine = lastVisibleLine;
+        _cachedLineNumbersText = builder.ToString();
+        return _cachedLineNumbersText;
     }
 
     private double CalculateRequiredWidth()
     {
         var digits = Math.Max(1, Math.Max(1, LineCount).ToString(CultureInfo.InvariantCulture).Length);
         var sampleDigits = new string('8', digits);
-        var typeface = new Typeface(NumberFontFamily ?? FontFamily.Default, FontStyle.Normal, FontWeight.Normal);
-        var sample = BuildFormattedText(sampleDigits, typeface);
+        var sampleWidth = _fontMetricsCache.GetSampleWidth(sampleDigits, NumberFontFamily, NumberFontSize);
 
-        return Math.Ceiling(sample.Width + LeftPadding + RightPadding);
+        return Math.Ceiling(sampleWidth + LeftPadding + RightPadding);
     }
 
     private FormattedText BuildFormattedText(string text, Typeface typeface)
@@ -243,7 +289,7 @@ public sealed class VirtualizedLineNumbersControl : Control
             NumberBrush ?? Brushes.Gray);
     }
 
-    private double ResolveLineHeight(int totalLines, Typeface typeface)
+    private double ResolveLineHeight(int totalLines)
     {
         // Prefer deriving line height from actual scroll extent to avoid cumulative drift
         // on very large previews.
@@ -259,8 +305,7 @@ public sealed class VirtualizedLineNumbersControl : Control
             }
         }
 
-        var sample = BuildFormattedText("8", typeface);
-        return Math.Max(1.0, sample.Height);
+        return _fontMetricsCache.GetMetrics(NumberFontFamily, NumberFontSize).LineHeight;
     }
 
     private void DrawStickyHeaderMask(DrawingContext context)

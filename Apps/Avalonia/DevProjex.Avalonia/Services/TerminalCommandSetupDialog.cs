@@ -22,9 +22,7 @@ internal static class TerminalCommandSetupDialog
 		TerminalCommandSetupSnapshot snapshot,
 		bool isAutomaticPrompt)
 	{
-		var themeVariant = owner.ActualThemeVariant
-		                   ?? global::Avalonia.Application.Current?.ActualThemeVariant
-		                   ?? ThemeVariant.Default;
+		var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
 		var brushes = ResolveDialogBrushes(owner, themeVariant);
 		var content = TerminalCommandSetupDialogText.Create(localization, snapshot, isAutomaticPrompt);
 		var completion = new TaskCompletionSource<TerminalCommandDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -37,22 +35,15 @@ internal static class TerminalCommandSetupDialog
 		};
 
 		var body = BuildContent(owner, localization, content, snapshot, isAutomaticPrompt, dontShowAgain, completion);
-		var dialog = new Window
-		{
-			Title = content.Title,
-			Width = dimensions.Width,
-			Height = dimensions.Height,
-			MinWidth = dimensions.MinWidth,
-			MinHeight = dimensions.MinHeight,
-			WindowStartupLocation = WindowStartupLocation.CenterOwner,
-			CanResize = false,
-			RequestedThemeVariant = themeVariant,
-			TransparencyLevelHint = [WindowTransparencyLevel.None],
-			Background = brushes.Background,
-			Content = body
-		};
-
-		ApplyDialogResources(dialog, brushes);
+		var dialog = DialogSurfaceFactory.CreateWindow(
+			content.Title,
+			themeVariant,
+			brushes,
+			body,
+			dimensions.Width,
+			dimensions.Height,
+			dimensions.MinWidth,
+			dimensions.MinHeight);
 
 		dialog.Closed += (_, _) =>
 		{
@@ -252,48 +243,11 @@ internal static class TerminalCommandSetupDialog
 		return inlines;
 	}
 
-	internal static TerminalCommandDialogBrushes ResolveDialogBrushes(Window? owner, ThemeVariant themeVariant)
+	internal static DialogSurfaceBrushes ResolveDialogBrushes(Window? owner, ThemeVariant themeVariant)
 	{
-		var app = global::Avalonia.Application.Current;
-		var appBackground = TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush");
-		var appPanel = TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
-		var appBorder = TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
-
-		return new TerminalCommandDialogBrushes(
-			TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor") ?? appBackground ?? owner?.Background,
-			TryGetThemeColorBrush(app, themeVariant, "AppPanelColor") ?? appPanel,
-			TryGetThemeColorBrush(app, themeVariant, "AppBorderColor") ?? appBorder);
-	}
-
-	private static void ApplyDialogResources(Window dialog, TerminalCommandDialogBrushes brushes)
-	{
-		if (brushes.Background is not null)
-			dialog.Resources["AppBackgroundBrush"] = brushes.Background;
-		if (brushes.Panel is not null)
-			dialog.Resources["AppPanelBrush"] = brushes.Panel;
-		if (brushes.Border is not null)
-			dialog.Resources["AppBorderBrush"] = brushes.Border;
-	}
-
-	private static IBrush? TryGetThemeBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)
-	{
-		return app?.TryFindResource(key, themeVariant, out var resource) == true
-			? resource as IBrush
-			: null;
-	}
-
-	private static IBrush? TryGetThemeColorBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)
-	{
-		if (app?.TryFindResource(key, themeVariant, out var resource) == true && resource is Color color)
-			return new SolidColorBrush(color);
-		return null;
+		return DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
 	}
 }
-
-internal sealed record TerminalCommandDialogBrushes(
-	IBrush? Background,
-	IBrush? Panel,
-	IBrush? Border);
 
 internal sealed record TerminalCommandDialogDimensions(
 	double Width,

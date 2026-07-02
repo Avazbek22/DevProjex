@@ -32,10 +32,28 @@ internal static class Program
                 MaxGpuResourceSizeBytes = SkiaGpuCacheLimitBytes
             });
 
+        if (OperatingSystem.IsWindows())
+            builder = builder.With(CreateWin32PlatformOptions());
+
 #if DEBUG
         builder = builder.LogToTrace();
 #endif
 
         return builder;
+    }
+
+    private static Win32PlatformOptions CreateWin32PlatformOptions()
+    {
+        var options = new Win32PlatformOptions
+        {
+            // Keep decorated main windows sharp by default. Popup-like and borderless
+            // surfaces opt into their own radii right before Avalonia creates their
+            // WinUI composition backdrop; using one rounded default reopens the tiny
+            // menu-belt corner holes under the custom title bar on Windows.
+            WinUICompositionBackdropCornerRadius = null
+        };
+
+        CompositionBackdropCornerRadiusCoordinator.Attach(options);
+        return options;
     }
 }

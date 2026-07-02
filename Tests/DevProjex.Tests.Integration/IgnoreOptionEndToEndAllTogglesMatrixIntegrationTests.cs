@@ -230,7 +230,7 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 	}
 
 	private static SelectionRefreshSnapshot ComputeConvergedSnapshot(
-		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
+		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshContext context)
 	{

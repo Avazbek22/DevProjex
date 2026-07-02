@@ -1,4 +1,3 @@
-using Avalonia.Media;
 using DevProjex.Avalonia.Controls;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -83,6 +82,41 @@ public sealed class VirtualizedLineNumbersControlTests
         Assert.False(TryCalculateExtentLineHeight(control, lineCount, out _));
     }
 
+    [AvaloniaFact]
+    public void CalculateRequiredWidth_RespondsToDigitCountAndFontSize()
+    {
+        var control = new VirtualizedLineNumbersControl
+        {
+            LineCount = 9
+        };
+
+        var oneDigitWidth = InvokeCalculateRequiredWidth(control);
+
+        control.LineCount = 1000;
+        var fourDigitWidth = InvokeCalculateRequiredWidth(control);
+
+        control.NumberFontSize = 30;
+        var largeFontWidth = InvokeCalculateRequiredWidth(control);
+
+        Assert.True(fourDigitWidth > oneDigitWidth);
+        Assert.True(largeFontWidth > fourDigitWidth);
+    }
+
+    [AvaloniaFact]
+    public void BuildVisibleLineNumbersText_ReusesCachedRangeAndUpdatesWhenRangeChanges()
+    {
+        var control = new VirtualizedLineNumbersControl();
+
+        var first = InvokeBuildVisibleLineNumbersText(control, 4, 7);
+        var second = InvokeBuildVisibleLineNumbersText(control, 4, 7);
+        var shifted = InvokeBuildVisibleLineNumbersText(control, 5, 7);
+
+        Assert.Same(first, second);
+        Assert.Equal("4\n5\n6\n7", first);
+        Assert.Equal("5\n6\n7", shifted);
+        Assert.NotSame(first, shifted);
+    }
+
     private static double InvokeResolveLineHeight(VirtualizedLineNumbersControl control, int lineCount)
     {
         var method = typeof(VirtualizedLineNumbersControl).GetMethod(
@@ -91,8 +125,30 @@ public sealed class VirtualizedLineNumbersControlTests
 
         Assert.NotNull(method);
 
-        var typeface = new Typeface(control.NumberFontFamily ?? FontFamily.Default, FontStyle.Normal, FontWeight.Normal);
-        return (double)method!.Invoke(control, [lineCount, typeface])!;
+        return (double)method!.Invoke(control, [lineCount])!;
+    }
+
+    private static double InvokeCalculateRequiredWidth(VirtualizedLineNumbersControl control)
+    {
+        var method = typeof(VirtualizedLineNumbersControl).GetMethod(
+            "CalculateRequiredWidth",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        return (double)method!.Invoke(control, [])!;
+    }
+
+    private static string InvokeBuildVisibleLineNumbersText(
+        VirtualizedLineNumbersControl control,
+        int firstVisibleLine,
+        int lastVisibleLine)
+    {
+        var method = typeof(VirtualizedLineNumbersControl).GetMethod(
+            "BuildVisibleLineNumbersText",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        return (string)method!.Invoke(control, [firstVisibleLine, lastVisibleLine])!;
     }
 
     private static bool TryCalculateExtentLineHeight(

@@ -657,7 +657,7 @@ public sealed class TreeSearchCoordinator(
 
             if (endIndex < removedNodes.Length)
             {
-                Dispatcher.UIThread.Post(() => ApplyRemovedBatch(endIndex), DispatcherPriority.Background);
+                treeView.Dispatcher.Post(() => ApplyRemovedBatch(endIndex), DispatcherPriority.Background);
                 return;
             }
 
@@ -677,7 +677,7 @@ public sealed class TreeSearchCoordinator(
             }
 
             if (endIndex < addedNodes.Length)
-                Dispatcher.UIThread.Post(() => ApplyAddedBatch(endIndex), DispatcherPriority.Background);
+                treeView.Dispatcher.Post(() => ApplyAddedBatch(endIndex), DispatcherPriority.Background);
         }
 
         ApplyRemovedBatch(0);
@@ -985,7 +985,7 @@ public sealed class TreeSearchCoordinator(
 
             if (endIndex < removedNodes.Length)
             {
-                Dispatcher.UIThread.Post(() => ApplyRemovedBatch(endIndex), DispatcherPriority.Background);
+                treeView.Dispatcher.Post(() => ApplyRemovedBatch(endIndex), DispatcherPriority.Background);
                 return;
             }
 
@@ -1002,7 +1002,7 @@ public sealed class TreeSearchCoordinator(
                 addedNodes[i].UpdateSearchHighlight(query, highlightBackground, highlightForeground, normalForeground, currentBackground);
 
             if (endIndex < addedNodes.Length)
-                Dispatcher.UIThread.Post(() => ApplyAddedBatch(endIndex), DispatcherPriority.Background);
+                treeView.Dispatcher.Post(() => ApplyAddedBatch(endIndex), DispatcherPriority.Background);
         }
 
         ApplyRemovedBatch(0);
@@ -1018,7 +1018,7 @@ public sealed class TreeSearchCoordinator(
             return;
 
         var priority = BringIntoViewRetryPriorities[Math.Min(attempt, BringIntoViewRetryPriorities.Length - 1)];
-        Dispatcher.UIThread.Post(
+        treeView.Dispatcher.Post(
             () => TryBringNodeIntoViewWithRetries(node, version, attempt + 1),
             priority);
     }

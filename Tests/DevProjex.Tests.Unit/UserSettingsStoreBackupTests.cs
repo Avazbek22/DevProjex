@@ -7,7 +7,7 @@ public sealed class UserSettingsStoreBackupTests
     [Fact]
     public void Save_CreatesBackupSnapshotAlongsidePrimaryFile()
     {
-        using var temp = new Helpers.TemporaryDirectory();
+        using var temp = new TemporaryDirectory();
         var store = new UserSettingsStore(() => temp.Path);
         var db = store.Load();
 
@@ -20,7 +20,7 @@ public sealed class UserSettingsStoreBackupTests
     [Fact]
     public void Load_InvalidPrimaryFile_RecoversFromBackupAndRestoresPrimary()
     {
-        using var temp = new Helpers.TemporaryDirectory();
+        using var temp = new TemporaryDirectory();
         var store = new UserSettingsStore(() => temp.Path);
         var db = store.Load();
         db.LastSelected = "Light.Acrylic";
@@ -40,7 +40,7 @@ public sealed class UserSettingsStoreBackupTests
         Assert.Equal("Light.Acrylic", recovered.LastSelected);
         Assert.True(recovered.ViewSettings.IsCompactMode);
         Assert.False(recovered.ViewSettings.IsTreeAnimationEnabled);
-        Assert.False(recovered.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+        Assert.True(recovered.ViewSettings.IsAdvancedIgnoreCountsEnabled);
         Assert.Equal(AppLanguage.De, recovered.ViewSettings.PreferredLanguage);
         Assert.DoesNotContain("{ invalid", File.ReadAllText(store.GetPath()), StringComparison.Ordinal);
     }

@@ -93,6 +93,57 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 		Assert.Equal([IgnoreOptionId.DotFolders], report.Selection.SelectedIgnoreOptions);
 	}
 
+	[Fact]
+	public async Task BuildReportFromTreeAsync_PropagatesAccessDeniedDiagnosticsFromLoadedTree()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var deniedDirectoryPath = Path.Combine(temp.Path, "protected");
+		var root = new TreeNodeDescriptor(
+			DisplayName: "workspace",
+			FullPath: temp.Path,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children:
+			[
+				new TreeNodeDescriptor(
+					DisplayName: "protected",
+					FullPath: deniedDirectoryPath,
+					IsDirectory: true,
+					IsAccessDenied: true,
+					IconKey: "folder",
+					Children: []),
+				new TreeNodeDescriptor(
+					DisplayName: "App.cs",
+					FullPath: file,
+					IsDirectory: false,
+					IsAccessDenied: false,
+					IconKey: "file",
+					Children: [])
+			]);
+		var service = CreateService();
+
+		var report = await service.BuildReportFromTreeAsync(new LoadedProjectAnalysisRequest(
+			RootPath: temp.Path,
+			Tree: new BuildTreeResult(root, RootAccessDenied: false, HadAccessDenied: true, OrderedFilePaths: [file]),
+			AvailableRootFolders: ["src"],
+			AvailableExtensions: [".cs"],
+			SelectedRootFolders: ["src"],
+			SelectedExtensions: [".cs"],
+			SelectedIgnoreOptions: [],
+			RootAccessDenied: false,
+			HadAccessDenied: true,
+			KnownLoadingElapsed: TimeSpan.Zero), TestContext.Current.CancellationToken);
+
+		Assert.False(report.Diagnostics.RootAccessDenied);
+		Assert.True(report.Diagnostics.HadAccessDenied);
+		Assert.Empty(report.Diagnostics.Warnings);
+		Assert.Equal(2, report.Inventory.Tree.DirectoryCount);
+		Assert.Equal(1, report.Inventory.Tree.FileCount);
+		Assert.Equal(1, report.Inventory.Tree.AccessDeniedDirectoryCount);
+	}
+
 	private static ProjectAnalysisService CreateService()
 	{
 		var localization = new LocalizationService(new TestLocalizationCatalog(), AppLanguage.En);

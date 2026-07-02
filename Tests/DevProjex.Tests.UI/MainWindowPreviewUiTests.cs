@@ -365,6 +365,50 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task StickyPath_DoesNotResizePreviewViewportWhenItAppears()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+
+            var stickyHeader = UiTestDriver.GetRequiredControl<Border>(window, "PreviewStickyHeaderContainer");
+            var scrollViewer = UiTestDriver.GetRequiredPreviewScrollViewer(window);
+            var previewTextControl = UiTestDriver.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(window, "PreviewTextControl");
+            var lineNumbersControl = UiTestDriver.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedLineNumbersControl>(window, "PreviewLineNumbersControl");
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => scrollViewer.Viewport.Height > 0 &&
+                      scrollViewer.Extent.Height > scrollViewer.Viewport.Height,
+                "preview scroll range to become measurable before sticky header appears");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            Assert.False(stickyHeader.IsVisible);
+            Assert.Equal(0, previewTextControl.TopOverlayClipHeight);
+            Assert.Equal(0, lineNumbersControl.TopOverlayClipHeight);
+            var viewportHeightBeforeStickyHeader = scrollViewer.Viewport.Height;
+
+            await UiTestDriver.ScrollPreviewUntilStickyHeaderVisibleAsync(window);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            Assert.True(stickyHeader.IsVisible);
+            Assert.True(previewTextControl.TopOverlayClipHeight > 0);
+            Assert.Equal(previewTextControl.TopOverlayClipHeight, lineNumbersControl.TopOverlayClipHeight);
+            Assert.InRange(
+                Math.Abs(scrollViewer.Viewport.Height - viewportHeightBeforeStickyHeader),
+                0,
+                1);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task StickyPathCopyButton_IsVisibleInsideLineNumberCap_AndUsesCompactSize()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -379,14 +423,18 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             var stickyHeaderContainer = UiTestDriver.GetRequiredControl<Border>(window, "PreviewStickyHeaderContainer");
             var stickyHeaderCopyButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewStickyHeaderCopyButton");
             var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
+            var lineNumbersBackground = UiTestDriver.GetRequiredControl<Border>(window, "PreviewLineNumbersBackground");
 
             var capBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderCap, window);
             var headerBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderContainer, window);
             var buttonBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderCopyButton, window);
             var textBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderText, window);
+            var lineNumbersBounds = UiTestDriver.GetBoundsInWindow(lineNumbersBackground, window);
 
             Assert.True(stickyHeaderCap.IsVisible);
             Assert.True(stickyHeaderContainer.IsVisible);
+            Assert.InRange(Math.Abs(capBounds.Width - lineNumbersBounds.Width), 0, 1.5);
+            Assert.InRange(Math.Abs(buttonBounds.Center.X - capBounds.Center.X), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Width - 24), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Height - 24), 0, 1.5);
             Assert.True(stickyHeaderCopyButton.BorderThickness.Left >= 0.9);

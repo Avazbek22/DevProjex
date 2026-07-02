@@ -68,7 +68,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isDarkTheme = true;
     private bool _isCompactMode;
     private bool _isTreeAnimationEnabled;
-    private bool _isAdvancedIgnoreCountsEnabled;
     private bool _filterVisible;
     private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
     private PreviewContentMode _selectedPreviewContentMode = PreviewContentMode.Tree;
@@ -465,17 +464,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (_isTreeAnimationEnabled == value) return;
             _isTreeAnimationEnabled = value;
-            RaisePropertyChanged();
-        }
-    }
-
-    public bool IsAdvancedIgnoreCountsEnabled
-    {
-        get => _isAdvancedIgnoreCountsEnabled;
-        set
-        {
-            if (_isAdvancedIgnoreCountsEnabled == value) return;
-            _isAdvancedIgnoreCountsEnabled = value;
             RaisePropertyChanged();
         }
     }
@@ -972,7 +960,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Selected in ComboBox (same as WinForms _pendingFontName)
+    // Staged tree font selection; Apply commits it to SelectedFontFamily.
     public FontFamily? PendingFontFamily
     {
         get => _pendingFontFamily;
@@ -1178,6 +1166,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuViewZoomIn { get; private set; } = string.Empty;
     public string MenuViewZoomOut { get; private set; } = string.Empty;
     public string MenuViewZoomReset { get; private set; } = string.Empty;
+    public string MenuViewTreeFont { get; private set; } = string.Empty;
     public string MenuViewThemeTitle { get; private set; } = string.Empty;
     public string MenuViewLightTheme { get; private set; } = string.Empty;
     public string MenuViewDarkTheme { get; private set; } = string.Empty;
@@ -1185,7 +1174,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuViewAcrylic { get; private set; } = string.Empty;
     public string MenuViewCompactMode { get; private set; } = string.Empty;
     public string MenuViewTreeAnimation { get; private set; } = string.Empty;
-    public string MenuViewAdditionalCounts { get; private set; } = string.Empty;
     public string MenuOptions { get; private set; } = string.Empty;
     public string MenuOptionsTreeSettings { get; private set; } = string.Empty;
     public string MenuLanguage { get; private set; } = string.Empty;
@@ -1332,6 +1320,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuViewZoomIn = _localization["Menu.View.ZoomIn"];
         MenuViewZoomOut = _localization["Menu.View.ZoomOut"];
         MenuViewZoomReset = _localization["Menu.View.ZoomReset"];
+        MenuViewTreeFont = _localization["Menu.View.TreeFont"];
         MenuViewThemeTitle = _localization["Menu.View.Theme"];
         MenuViewLightTheme = _localization["Menu.View.LightTheme"];
         MenuViewDarkTheme = _localization["Menu.View.DarkTheme"];
@@ -1339,7 +1328,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuViewAcrylic = _localization["Menu.View.Acrylic"];
         MenuViewCompactMode = _localization["Menu.View.CompactMode"];
         MenuViewTreeAnimation = _localization["Menu.View.TreeAnimation"];
-        MenuViewAdditionalCounts = _localization["Menu.View.AdditionalCounts"];
         MenuOptions = _localization["Menu.Options"];
         MenuOptionsTreeSettings = _localization["Menu.Options.TreeSettings"];
         MenuLanguage = _localization["Menu.Language"];
@@ -1469,6 +1457,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuViewZoomIn));
         RaisePropertyChanged(nameof(MenuViewZoomOut));
         RaisePropertyChanged(nameof(MenuViewZoomReset));
+        RaisePropertyChanged(nameof(MenuViewTreeFont));
         RaisePropertyChanged(nameof(MenuViewThemeTitle));
         RaisePropertyChanged(nameof(MenuViewLightTheme));
         RaisePropertyChanged(nameof(MenuViewDarkTheme));
@@ -1476,7 +1465,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuViewAcrylic));
         RaisePropertyChanged(nameof(MenuViewCompactMode));
         RaisePropertyChanged(nameof(MenuViewTreeAnimation));
-        RaisePropertyChanged(nameof(MenuViewAdditionalCounts));
         RaisePropertyChanged(nameof(MenuOptions));
         RaisePropertyChanged(nameof(MenuOptionsTreeSettings));
         RaisePropertyChanged(nameof(MenuLanguage));

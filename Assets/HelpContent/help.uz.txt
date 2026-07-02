@@ -55,7 +55,32 @@ Qoidalar:
 
 Har bir element uchun jildning qisqa nomi ko‘rsatiladi, to‘liq yo‘l esa tooltip’da mavjud bo‘ladi.
 
-## 4) Git
+## 4) Terminaldan ishga tushirish
+DevProjex-ni terminaldan ishga tushirish mumkin.
+
+Agar buyruq allaqachon sozlangan bo‘lsa, terminalni ochib bajaring:
+`devprojex --help`
+
+Shunda barcha mavjud buyruqlar, parametrlar va misollarni ko‘rasiz.
+
+Misollar:
+* `devprojex .` — joriy papkani ochish.
+* `devprojex "C:\Projects\App"` — ko‘rsatilgan papkani ochish.
+* `devprojex . --export tree` — loyiha daraxtini terminalga chiqarish.
+* `devprojex . --export content` — fayllar mazmunini terminalga chiqarish.
+* `devprojex . --export tree-content` — daraxt va mazmunni terminalga chiqarish.
+* `devprojex . --export tree-content -o context.txt` — natijani faylga saqlash.
+
+Xususiyatlar:
+* `.` terminaldagi joriy papkani bildiradi;
+* bo‘sh joyli yo‘llar qo‘shtirnoqqa olinishi kerak;
+* chiqish fayli ko‘rsatilmasa, natija bevosita terminalga chiqariladi;
+* buyruq loyiha fayllarini o‘zgartirmaydi — DevProjex read-only rejimida ishlaydi.
+
+Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:
+«Yordam → Terminaldan ishga tushirish».
+
+## 5) Git
 Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
 
 Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
@@ -78,7 +103,7 @@ Qoidalar:
 Ro‘yxatdan element tanlansa, URL avtomatik ravishda kiritish maydoniga qo‘yiladi.
 Faol klonlash vaqtida ro‘yxat vaqtincha yashiriladi.
 
-## 5) Nusxa
+## 6) Nusxa
 ### Daraxt formati tumbleri (ASCII/JSON)
 Tumbler natijada daraxt ishtirok etadigan amallar uchun daraxt ko‘rinishi formatini belgilaydi.
 
@@ -131,7 +156,7 @@ Daraxt + mazmun:
 * mazmun bloki matn bo‘lib qoladi;
 * eksport `.txt` formatida saqlanadi.
 
-## 6) Preview rejimi
+## 7) Preview rejimi
 Yuqori paneldagi ko‘zcha ikonali tugma yoki Ctrl+B orqali ochiladi.
 
 Yakuniy natijani daraxt yonidagi alohida ishchi hududda ko‘rsatadi. Bu rejim o‘zi hech narsani clipboardga nusxalamaydi va faylga eksport qilmaydi — u faqat ko‘rish uchun xizmat qiladi.
@@ -170,7 +195,7 @@ Tugmalar:
 Qidiruv va filtr preview ichida daraxt oroli ko‘rinib turgan paytda ishlaydi.
 Agar daraxt yashirilsa, qidiruv va filtr preview-only rejimidan chiqquncha vaqtincha ishlamaydi.
 
-## 7) Ko‘rinish
+## 8) Ko‘rinish
 ### Masshtab
 * Ctrl++ / Ctrl+= — kattalashtirish
 * Ctrl+- — kichraytirish
@@ -192,12 +217,12 @@ Preview workspace faol bo‘lganda ixcham rejim avtomatik ravishda yoqiladi.
 ### Daraxt animatsiyasi
 Daraxt qatorlarini kursorga tutganda silliq siljish animatsiyasini yoqadi.
 
-### Qo‘shimcha hisoblagichlar
-«E’tiborsiz qoldirish» blokidagi bandlar yonidagi qavs ichidagi sonni ko‘rsatadi/yashiradi.
-Standart holatda yoqilgan.
-Filtrlash qoidalariga ta’sir qilmaydi.
+### Daraxt shrifti
+Daraxt shrifti «Ko‘rinish → Daraxt shrifti» orqali tanlanadi.
+«Standart» daraxtning odatiy shriftini qaytaradi.
+Tanlangan shrift sozlamalar panelidagi «Sozlamalarni qo‘llash» tugmasi bosilgandan keyin qo‘llanadi.
 
-## 8) Daraxt bo'yicha qidiruv
+## 9) Daraxt bo'yicha qidiruv
 Qidiruv panelini ochadi, mosliklarni yoritadi va navigatsiya qiladi.
 * Ctrl+F — ko‘rsatish/yashirish
 * Enter — keyingi
@@ -213,7 +238,7 @@ Cheklovlar:
 * qidiruv preview ichida daraxt oroli ko‘rinib turgan paytda mavjud;
 * daraxt yashirilsa, qidiruv vaqtincha mavjud emas.
 
-## 9) Nom bo‘yicha filtr
+## 10) Nom bo‘yicha filtr
 Filtr satriga mos tugunlar va ularning ota‑onalarini ko‘rsatadi. Yangilanish kechikish bilan.
 * Ctrl+Shift+N — filtrni ko‘rsatish/yashirish
 * Esc — filtrni yopish
@@ -223,12 +248,14 @@ Cheklovlar:
 * filtr preview ichida daraxt oroli ko‘rinib turgan paytda mavjud;
 * daraxt yashirilsa, filtr vaqtincha mavjud emas.
 
-## 10) Sozlamalar
-O‘ng tomonda ro‘yxatlar:
-* Daraxt shrift — Sozlamalarni qo‘llash tugmasi bilan
+## 11) Sozlamalar
+O‘ng tomonda mavjud:
+* Sozlamalarni qo‘llash
 * E’tiborsiz qoldirish
 * Fayl turlari
 * Yuqori darajadagi jildlar
+
+«E’tiborsiz qoldirish», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi va «Sozlamalarni qo‘llash» bosilgandan keyin qo‘llanadi.
 
 Har bir ro‘yxatda Barchasi tugmasi bor.
 
@@ -238,7 +265,7 @@ Har bir ro‘yxatda Barchasi tugmasi bor.
 
 Ctrl+P — panelni ko‘rsatish/yashirish.
 
-### 10.1 Mahalliy loyiha parametr profillari
+### 11.1 Mahalliy loyiha parametr profillari
 Mahalliy jildlar uchun DevProjex loyihaning oxirgi qo‘llangan parametrlarini eslab qoladi:
 * tanlangan yuqori darajadagi jildlar;
 * tanlangan fayl turlari;
@@ -254,7 +281,7 @@ Muhim:
 * yangilash yoki qayta ochishdan keyin yangi yuqori darajadagi jild, yangi fayl turi yoki «E’tiborsiz qoldirish» ichida yangi band paydo bo‘lsa, u odatda yoqilgan bo‘ladi;
 * avvaldan ma’lum bandlar foydalanuvchining aniq tanlovini saqlaydi: o‘chirilgan turdagi yangi fayllar bu turni qayta yoqmaydi.
 
-## 11) Ignorlash
+## 12) Ignorlash
 "Ignorlash" roʻyxati joriy yoʻl va tanlangan yuqori darajadagi papkalar asosida avtomatik shakllanadi.
 
 Variantlar tartibi:
@@ -273,26 +300,27 @@ Asosiy qoidalar bandlari (yashirin, nuqtali, bo‘sh, kengaytmasiz) faqat mos el
 
 ".gitignore dan foydalanish" ostidagi chiziq Git/Smart qoidalarni asosiy ko‘rinish qoidalaridan ajratadi.
 
-### 11.1 Qoidalar qo‘llanadigan hudud
+### 12.1 Qoidalar qo‘llanadigan hudud
 Ilova ignore qoidalari ishlaydigan loyiha hududlarini (scope) tuzadi:
 * root (agar root’da `.gitignore` yoki loyiha belgisi bo‘lsa)
 * birinchi darajadagi papkalar
 * ichki loyiha papkalari
 
 Ichki loyiha hududlarini qidirish chuqurligi qat’iy: 2 daraja.
+Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga tegishli. Hudud topilgach, qoidalar uning ichidagi kontentga oddiy daraxt skani orqali qo‘llanadi.
 
-### 11.2 ".gitignore dan foydalanish"
+### 12.2 ".gitignore dan foydalanish"
 * Yoqilgan: `.gitignore` qoidalari aniqlangan hududlarda qo‘llanadi.
 * O‘chirilgan: `.gitignore` qoidalari to‘liq o‘chiriladi.
 
 Ko‘p loyihali papkada bir loyiha `.gitignore` qoidasi o‘z hududidan tashqaridagi qo‘shni loyihalarga qo‘llanmaydi.
 
-### 11.3 "Smart ignore"
+### 12.3 "Smart ignore"
 * Faqat mos holatda ko‘rsatiladi.
 * Yoqilgan: build/tool artefaktlari qo‘shimcha yashiriladi.
 * O‘chirilgan: smart-qoidalar qo‘llanmaydi.
 
-### 11.4 Asosiy qoidalar
+### 12.4 Asosiy qoidalar
 Variantlar:
 * Yashirin papkalar
 * Yashirin fayllar
@@ -305,7 +333,7 @@ Variantlar:
 Band yoqilganda mos elementlar daraxtdan va nusxalash/eksport natijalaridan yashiriladi.
 Asosiy qoidalar `.gitignore` va Smart Ignore’dan alohida yoqiladi, ammo yakuniy natija har doim barcha faol filtrlardan keyingi joriy daraxt bo‘yicha hisoblanadi.
 
-### 11.5 Ichki ishlash: odatiy holatlar
+### 12.5 Ichki ishlash: odatiy holatlar
 1. Bitta loyiha, `.gitignore` bor.
 Odatda faqat ".gitignore dan foydalanish" ko‘rinadi.
 Yoqilganda, `.gitignore` va Smart Ignore birga ishlaydi.
@@ -328,21 +356,21 @@ Smart Ignore (yoqilgan bo‘lsa) aniqlangan hududlarda filtrlashni to‘ldiradi.
 Agar `.gitignore` topilmasa va Smart Ignore mos bo‘lmasa, bu variantlar ko‘rsatilmaydi.
 Faqat asosiy ko‘rinish qoidalari qoladi.
 
-### 11.6 Bo‘sh papkalar
+### 12.6 Bo‘sh papkalar
 Mantiqan bo‘sh papkalarni daraxtdan va nusxalash/eksport natijalaridan yashiradi.
 Mantiqan bo‘sh papka — joriy ko‘rinish qoidalari, `.gitignore`, Smart Ignore va tanlangan fayl turlari qo‘llangandan keyin ichida ko‘rinadigan avlodlar qolmaydigan papka.
 Agar papkaning o‘zi boshqa qoidalar bilan yashirilmagan bo‘lsa, uni daraxtdan olib tashlash aynan shu band bilan boshqariladi.
 
-### 11.7 Bo‘sh fayllar
+### 12.7 Bo‘sh fayllar
 Hajmi 0 bayt bo‘lgan bo‘sh fayllarni daraxtdan va nusxalash/eksport natijalaridan yashiradi.
 
-### 11.8 Kengaytmasiz fayllar
+### 12.8 Kengaytmasiz fayllar
 Kengaytmasi yo‘q fayllarni (masalan: `Dockerfile`, `Makefile`, `README`) daraxtdan va nusxalash/eksport natijalaridan yashiradi.
 
-### 11.9 «E’tiborsiz qoldirish» blokidagi hisoblagichlar
-«Ko‘rinish → Qo‘shimcha hisoblagichlar» yoqilganda, mavjud bandlar yonida son `(N)` formatida ko‘rsatiladi.
+### 12.9 «E’tiborsiz qoldirish» blokidagi hisoblagichlar
+Mavjud bandlar yonida son `(N)` formatida ko‘rsatiladi.
 Asosiy qoidalar uchun bu son joriy daraxt konfiguratsiyasida aynan shu qoida nechta elementni yashirishini ko‘rsatadi.
-## 12) Daraxt va metrikalar qanday hisoblanadi
+## 13) Daraxt va metrikalar qanday hisoblanadi
 Natija quyidagilarga bog‘liq:
 * tanlangan yuqori darajadagi jildlar
 * tanlangan fayl turlari
@@ -352,7 +380,7 @@ Natija quyidagilarga bog‘liq:
 
 Agar ruxsat bo‘lmasa, tugun "Kirish taqiqlangan" deb belgilanadi.
 
-### 12.1 Status-bardagi hisoblagichlar nimani ko‘rsatadi
+### 13.1 Status-bardagi hisoblagichlar nimani ko‘rsatadi
 Status-barda ikki blok bor:
 * Daraxt — daraxtning matnli chiqishi metrikalari;
 * Mazmun — fayl mazmuni chiqishi metrikalari.
@@ -368,7 +396,7 @@ Muhim:
 * «Satrlar» («Daraxt» blokida) diskdagi fayllar soni emas, daraxtning yakuniy ko‘rinishidagi satrlar sonini bildiradi;
 * bu qiymatga papkalar, fayllar va daraxtning xizmat elementlari (masalan, kirish taqiqlangan tugunlar) kiradi.
 
-### 12.2 Metrikalar qanday hisoblanadi
+### 13.2 Metrikalar qanday hisoblanadi
 Daraxt metrikalari:
 * aynan eksport pipeline’i yaratadigan real daraxt matni bo‘yicha hisoblanadi;
 * joriy ASCII/JSON formatini hisobga oladi.
@@ -378,7 +406,7 @@ Mazmun metrikalari:
 * binar fayllar kiritilmaydi;
 * bo‘sh va faqat bo‘sh joyli fayllar servis markerlari orqali hisoblanadi (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
-### 12.3 Hisoblagichlar qachon yangilanadi
+### 13.3 Hisoblagichlar qachon yangilanadi
 Qayta hisoblash quyidagi holatlarda bajariladi:
 * loyiha ochilgandan/yangilangandan keyin;
 * sozlamalar qo‘llangandan keyin (ignore, fayl turlari, root jildlar);
@@ -386,14 +414,14 @@ Qayta hisoblash quyidagi holatlarda bajariladi:
 * ASCII/JSON almashtirilganda (daraxt ishlatiladigan amallar uchun).
 * fon hisoblash bekor qilinsa, keyingi to‘liq yakunlangan qayta hisoblashgacha hisoblagichlar 0 ga o‘rnatiladi.
 
-## 13) Ikonkalar
+## 14) Ikonkalar
 Ikonka tanlash tartibi:
 1) tugun turi (papka/fayl)
 2) aniq nom (qoida bo‘lsa)
 3) kengaytma
 4) aks holda — noma’lum
 
-## 14) Mavzu va effektlar
+## 15) Mavzu va effektlar
 Tema popoveri quyilarni almashtiradi:
 * yorug'/qorong'i mavzu
 * Shaffof / Mica / Acrylic
@@ -401,13 +429,13 @@ Tema popoveri quyilarni almashtiradi:
 
 [Beta] belgilari versiyalar oralig‘ida o‘zgarishi mumkin.
 
-## 15) Yordam
+## 16) Yordam
 
-### 15.1 Sozlamalarni tiklash
-Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) faqat interfeysning vizual sozlamalarini tiklaydi (tema, effektlar, ixcham rejim, daraxt animatsiyasi, qo‘shimcha hisoblagichlar) va loyiha ma’lumotlarini o‘zgartirmaydi. Tiklangandan keyin qo‘shimcha hisoblagichlar standart holatda yoqilgan bo‘ladi.
+### 16.1 Sozlamalarni tiklash
+Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) faqat interfeysning vizual sozlamalarini tiklaydi (tema, effektlar, ixcham rejim, daraxt animatsiyasi) va loyiha ma’lumotlarini o‘zgartirmaydi.
 Bu amal interfeys tilining saqlangan tanlovini ham tozalaydi.
 
-### 15.2 Ma’lumotlarni tiklash
+### 16.2 Ma’lumotlarni tiklash
 Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:
 * tanlangan yuqori darajadagi jildlar;
 * tanlangan fayl turlari;
@@ -418,10 +446,11 @@ Muhim:
 * Git Clone oynasidagi “So‘nggi repozitoriylar” tarixi tozalanmaydi;
 * diskdagi loyiha fayllari va jildlari o‘zgartirilmaydi va o‘chirilmaydi.
 
-## 16) Tillar
+## 17) Tillar
 Til menyusi orqali tanlanadi.
+Tanlangan til ilova qayta ishga tushirilganda saqlanadi. «Yordam → Sozlamalarni tiklash» saqlangan til tanlovini tozalaydi va interfeys tilini standart holatga qaytaradi.
 
-## 17) Progress-bar va bekor qilish
+## 18) Progress-bar va bekor qilish
 Status-bar markazida faol amal va progress ko‘rsatiladi.
 
 Progress rejimlari:
@@ -438,6 +467,6 @@ Status-bardagi X (bekor qilish) tugmasi:
 * fon rejimidagi ma’lumot hisoblashni to‘xtatadi;
 * bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
 
-## 18) Eslatmalar
+## 19) Eslatmalar
 * Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.

@@ -109,6 +109,37 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task SearchAndFilter_OpenFocusesInputTextBox()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenSearchAsync(window);
+
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => searchBox.IsFocused,
+                "search textbox to receive focus after opening");
+
+            await UiTestDriver.OpenFilterAsync(window);
+
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            var filterBox = Assert.IsType<TextBox>(filterBar.FilterBoxControl);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => filterBox.IsFocused,
+                "filter textbox to receive focus after opening");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SearchHotkey_IsIgnoredInPreviewOnly()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

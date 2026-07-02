@@ -34,6 +34,14 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 
 ---
 
+## Quick Start ⚡
+
+1. Open or drop a project folder.
+2. Select the folders, files, filters, ignore rules, and output mode you need.
+3. Preview the result, then copy, export, or run the same workflow from the terminal.
+
+---
+
 ## App Screenshots 🖼️
 
 > <img width="1723" height="1183" src="https://github.com/user-attachments/assets/a6752e4d-2616-42d4-85fd-cd541506f0cf" />
@@ -67,7 +75,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **Animated toasts** for user feedback
 * **Localization** (8 languages)
 * **Responsive async scanning** (UI stays smooth on big folders)
-* **Command-line startup automation** with optional JSON analysis reports
+* **Terminal automation mode**: generate AI-ready context, JSON reports, CI-friendly diagnostics, and tree/content exports from the same desktop executable
 
 ---
 
@@ -87,15 +95,23 @@ DevProjex works with any language, repository, or project structure.
 
 ## Command Line ⚙️
 
-DevProjex can also be launched from a terminal to open a folder, preselect filters, or generate a JSON analysis report for automation.
+DevProjex is not only a desktop context builder. The same app can run from the terminal for repeatable, script-friendly project analysis and AI-context export.
 
 ```bash
-devprojex --path "/path/to/project" --no-ui --report
+devprojex "/path/to/project" --export tree-content -o ./context.txt --roots src --ext cs
 devprojex --path "/path/to/project" --no-ui --report -
 devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
 ```
 
-See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, exit codes, and report behavior.
+Use it to:
+
+* generate clean AI-ready context without opening the UI;
+* export selected tree/content payloads directly to files or stdout;
+* produce machine-readable JSON analysis reports;
+* fail CI when selected roots/extensions produce diagnostics;
+* reuse the same ignore logic as the desktop app.
+
+See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, export modes, exit codes, and report behavior.
 
 ---
 
@@ -136,7 +152,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
 * **Avalonia UI** (cross-platform)
 * Cleanly separated architecture (Core / Services / UI)
 * JSON-based resources (localization, icon mappings, presets)
-* 6000+ automated tests (unit + integration)
+* 10000+ automated tests (unit + integration + UI)
 
 ---
 

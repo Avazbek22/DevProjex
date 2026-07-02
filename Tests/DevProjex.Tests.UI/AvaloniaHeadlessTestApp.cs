@@ -9,6 +9,10 @@ public static class AvaloniaHeadlessTestApp
     public static AppBuilder BuildAvaloniaApp()
     {
         Environment.SetEnvironmentVariable("DEVPROJEX_FAST_UI_TESTS", "1");
-        return AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions());
+        return AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions
+        {
+            Fps = 120,
+            ShouldRenderOnUIThread = true
+        });
     }
 }

@@ -1,3 +1,4 @@
+using Avalonia.Media;
 using DevProjex.Application.Preview;
 using DevProjex.Avalonia.Controls;
 
@@ -98,4 +99,164 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.False(control.HasSelection);
         Assert.False(control.TryGetSelectionRange(out _));
     }
+
+    [AvaloniaFact]
+    public void GetLineNumberAtVerticalOffset_RecalculatesMetricsWhenFontSizeChanges()
+    {
+        var control = new VirtualizedPreviewTextControl
+        {
+            Text = "one\ntwo\nthree",
+            TopPadding = 0,
+            TextFontSize = 10
+        };
+
+        var smallLineHeight = InvokeResolveLineHeight(control);
+        Assert.Equal(2, control.GetLineNumberAtVerticalOffset(smallLineHeight + 0.1));
+
+        control.TextFontSize = 30;
+
+        var largeLineHeight = InvokeResolveLineHeight(control);
+        Assert.True(largeLineHeight > smallLineHeight);
+        Assert.Equal(1, control.GetLineNumberAtVerticalOffset(smallLineHeight + 0.1));
+        Assert.Equal(2, control.GetLineNumberAtVerticalOffset(largeLineHeight + 0.1));
+    }
+
+    [AvaloniaFact]
+    public void SelectionHitTesting_UsesRenderedPreviewTextGeometry()
+    {
+        var lineText = "mmmmiiWW preview selection geometry check 12345";
+        var startColumn = 7;
+        var endColumn = 38;
+        var control = new VirtualizedPreviewTextControl
+        {
+            Text = $"before\n{lineText}\nafter",
+            Width = 720,
+            Height = 180,
+            TopPadding = 8,
+            BottomPadding = 8,
+            LeftPadding = 12,
+            RightPadding = 12,
+            TextFontFamily = FontFamily.Default,
+            TextFontSize = 18,
+            TextBrush = Brushes.White
+        };
+        var typeface = ResolveTestTypeface(control);
+        var lineHeight = InvokeResolveLineHeight(control);
+        var y = control.TopPadding + lineHeight + (lineHeight / 2.0);
+        var startX = control.LeftPadding + MeasureRenderedPrefixWidth(control, lineText, startColumn, typeface);
+        var endX = control.LeftPadding + MeasureRenderedPrefixWidth(control, lineText, endColumn, typeface);
+        var startPosition = InvokeHitTestSelectionPosition(control, new Point(startX, y));
+
+        SetSelectionAnchor(control, startPosition);
+        InvokeUpdateSelectionActivePosition(
+            control,
+            InvokeHitTestSelectionPosition(control, new Point(endX, y)));
+
+        Assert.True(control.TryGetSelectionRange(out var selectionRange));
+        Assert.Equal(new PreviewSelectionRange(2, startColumn, 2, endColumn), selectionRange);
+        Assert.Equal(lineText[startColumn..endColumn], control.GetSelectedText());
+    }
+
+    [AvaloniaFact]
+    public void ResolveDistanceFromColumn_IncludesRenderedTrailingWhitespace()
+    {
+        var control = new VirtualizedPreviewTextControl
+        {
+            TextFontFamily = FontFamily.Default,
+            TextFontSize = 18,
+            TextBrush = Brushes.White
+        };
+        var typeface = ResolveTestTypeface(control);
+        const string lineText = "abc   ";
+
+        var beforeTrailingSpaces = InvokeResolveDistanceFromColumn(control, lineText, 3, typeface);
+        var fullLineWidth = InvokeResolveDistanceFromColumn(control, lineText, lineText.Length, typeface);
+
+        Assert.Equal(
+            MeasureRenderedPrefixWidth(control, lineText, lineText.Length, typeface),
+            fullLineWidth,
+            precision: 6);
+        Assert.True(fullLineWidth > beforeTrailingSpaces);
+    }
+
+    private static double InvokeResolveLineHeight(VirtualizedPreviewTextControl control)
+    {
+        var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+            "ResolveLineHeight",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        return (double)method!.Invoke(control, [])!;
+    }
+
+    private static double InvokeResolveDistanceFromColumn(
+        VirtualizedPreviewTextControl control,
+        string lineText,
+        int column,
+        Typeface typeface)
+    {
+        var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+            "ResolveDistanceFromColumn",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        return (double)method!.Invoke(control, [lineText, column, typeface])!;
+    }
+
+    private static object InvokeHitTestSelectionPosition(VirtualizedPreviewTextControl control, Point point)
+    {
+        var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+            "HitTestSelectionPosition",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        return method!.Invoke(control, [point])!;
+    }
+
+    private static void InvokeUpdateSelectionActivePosition(
+        VirtualizedPreviewTextControl control,
+        object selectionPosition)
+    {
+        var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+            "UpdateSelectionActivePosition",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        method!.Invoke(control, [selectionPosition]);
+    }
+
+    private static void SetSelectionAnchor(VirtualizedPreviewTextControl control, object selectionPosition)
+    {
+        var field = typeof(VirtualizedPreviewTextControl).GetField(
+            "_selectionAnchor",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(field);
+        field!.SetValue(control, selectionPosition);
+    }
+
+    private static Typeface ResolveTestTypeface(VirtualizedPreviewTextControl control)
+        => new(control.TextFontFamily ?? FontFamily.Default, FontStyle.Normal, FontWeight.Normal);
+
+    private static double MeasureRenderedPrefixWidth(
+        VirtualizedPreviewTextControl control,
+        string lineText,
+        int column,
+        Typeface typeface)
+    {
+        var clampedColumn = Math.Clamp(column, 0, lineText.Length);
+        var formattedText = new FormattedText(
+            lineText[..clampedColumn],
+            CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            control.TextFontSize,
+            control.TextBrush ?? Brushes.White);
+
+        return formattedText.WidthIncludingTrailingWhitespace;
+    }
+
 }

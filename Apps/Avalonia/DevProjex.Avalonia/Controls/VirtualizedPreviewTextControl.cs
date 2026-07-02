@@ -1,4 +1,4 @@
-using Avalonia.Media.TextFormatting;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Controls;
 
@@ -65,6 +65,9 @@ public sealed class VirtualizedPreviewTextControl : Control
     public static readonly StyledProperty<bool> StickyHeaderReservedProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, bool>(nameof(StickyHeaderReserved));
 
+    public static readonly StyledProperty<double> TopOverlayClipHeightProperty =
+        AvaloniaProperty.Register<VirtualizedPreviewTextControl, double>(nameof(TopOverlayClipHeight));
+
     public static readonly StyledProperty<IBrush?> StickyHeaderBackgroundBrushProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, IBrush?>(nameof(StickyHeaderBackgroundBrush));
 
@@ -86,6 +89,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     private const double AutoScrollEdgeThreshold = 28.0;
     private static readonly TimeSpan AutoScrollTickInterval = TimeSpan.FromMilliseconds(16);
     private readonly List<int> _lineStarts = [0];
+    private readonly PreviewFontMetricsCache _fontMetricsCache = new();
     private DispatcherTimer? _selectionAutoScrollTimer;
     private VisibleTextWindow? _cachedVisibleWindow;
     private IPreviewTextDocument? _cachedVisibleWindowDocument;
@@ -101,14 +105,16 @@ public sealed class VirtualizedPreviewTextControl : Control
     private ThemeVariant? _cachedSelectionTheme;
     private IBrush? _cachedSelectionBackground;
     private IBrush? _cachedSelectionForeground;
+    private StickyHeaderTrimCacheKey? _cachedStickyHeaderTrimKey;
+    private string? _cachedStickyHeaderTrimText;
     private ContextMenu? _contextMenu;
     private MenuItem? _copyMenuItem;
     private MenuItem? _selectAllMenuItem;
     private MenuItem? _clearSelectionMenuItem;
-    private static readonly global::Avalonia.Input.Cursor PreviewTextCursor =
-        new(global::Avalonia.Input.StandardCursorType.Ibeam);
-    private static readonly global::Avalonia.Input.Cursor PreviewMenuCursor =
-        new(global::Avalonia.Input.StandardCursorType.Arrow);
+    private static readonly Cursor PreviewTextCursor =
+        new(StandardCursorType.Ibeam);
+    private static readonly Cursor PreviewMenuCursor =
+        new(StandardCursorType.Arrow);
 
     static VirtualizedPreviewTextControl()
     {
@@ -130,6 +136,7 @@ public sealed class VirtualizedPreviewTextControl : Control
             StickyHeaderTextProperty,
             StickyHeaderVisibleProperty,
             StickyHeaderReservedProperty,
+            TopOverlayClipHeightProperty,
             StickyHeaderBackgroundBrushProperty,
             StickyHeaderBorderBrushProperty,
             CopyMenuHeaderProperty,
@@ -275,6 +282,12 @@ public sealed class VirtualizedPreviewTextControl : Control
         set => SetValue(StickyHeaderReservedProperty, value);
     }
 
+    public double TopOverlayClipHeight
+    {
+        get => GetValue(TopOverlayClipHeightProperty);
+        set => SetValue(TopOverlayClipHeightProperty, value);
+    }
+
     public IBrush? StickyHeaderBackgroundBrush
     {
         get => GetValue(StickyHeaderBackgroundBrushProperty);
@@ -350,8 +363,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     public int GetLineNumberAtVerticalOffset(double verticalOffset)
     {
-        var typeface = ResolveTypeface();
-        var lineHeight = ResolveLineHeight(typeface);
+        var lineHeight = ResolveLineHeight();
         if (lineHeight <= 0)
             return 1;
 
@@ -362,9 +374,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     protected override Size MeasureOverride(Size availableSize)
     {
-        var typeface = ResolveTypeface();
-        var lineHeight = ResolveLineHeight(typeface);
-        var width = Math.Max(CalculateRequiredWidth(typeface), Math.Ceiling(Math.Max(0, ViewportWidth)));
+        var lineHeight = ResolveLineHeight();
+        var width = Math.Max(CalculateRequiredWidth(), Math.Ceiling(Math.Max(0, ViewportWidth)));
         var height = Math.Ceiling(ResolveContentTopPadding() + BottomPadding + (ResolveLineCount() * lineHeight));
 
         return new Size(Math.Max(1, width), Math.Max(1, height));
@@ -379,7 +390,7 @@ public sealed class VirtualizedPreviewTextControl : Control
             return;
 
         var typeface = ResolveTypeface();
-        var lineHeight = ResolveLineHeight(typeface);
+        var lineHeight = ResolveLineHeight();
         if (lineHeight <= 0)
             return;
 
@@ -403,26 +414,38 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         var origin = new Point(LeftPadding, contentTopPadding + (firstVisibleLine - 1) * lineHeight);
 
-        DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight);
-
-        if (!TryGetVisibleSelectionRange(visibleWindow, out var selectionStart, out var selectionLength))
+        using (PushTopOverlayClip(context, viewportTop))
         {
-            DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
-            DrawStickyHeader(context, typeface);
-            return;
+            DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight);
+
+            if (!TryGetVisibleSelectionRange(visibleWindow, out _, out _))
+            {
+                DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
+            }
+            else
+            {
+                var (selectionBackground, selectionForeground) = ResolveSelectionBrushes();
+                DrawSelectionBackgrounds(context, visibleWindow, selectionBackground, typeface, lineHeight);
+                DrawVisibleTextLinesWithSelection(context, visibleWindow, origin, typeface, lineHeight, selectionForeground);
+            }
         }
 
-        var formattedText = BuildFormattedText(visibleWindow.Text, typeface);
-        if (selectionLength > 0)
-        {
-            var (selectionBackground, selectionForeground) = ResolveSelectionBrushes();
-            if (selectionForeground is not null)
-                formattedText.SetForegroundBrush(selectionForeground, selectionStart, selectionLength);
-            DrawSelectionBackgrounds(context, visibleWindow, selectionBackground, typeface, lineHeight);
-        }
-
-        context.DrawText(formattedText, origin);
         DrawStickyHeader(context, typeface);
+    }
+
+    private IDisposable? PushTopOverlayClip(DrawingContext context, double viewportTop)
+    {
+        var clipHeight = Math.Max(0, TopOverlayClipHeight);
+        if (clipHeight <= 0)
+            return null;
+
+        var clipTop = viewportTop + clipHeight;
+        var clipWidth = Math.Max(Bounds.Width, HorizontalOffset + Math.Max(ViewportWidth, 1));
+        var clipBottom = Math.Max(Bounds.Height, viewportTop + Math.Max(ViewportHeight, 1));
+        var clipRectHeight = Math.Max(0, clipBottom - clipTop);
+        return clipRectHeight > 0
+            ? context.PushClip(new Rect(0, clipTop, clipWidth, clipRectHeight))
+            : null;
     }
 
     private void DrawVisibleTextLines(
@@ -438,6 +461,38 @@ public sealed class VirtualizedPreviewTextControl : Control
             var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
             context.DrawText(BuildFormattedText(line, typeface), lineOrigin);
             lineIndex++;
+        }
+    }
+
+    private void DrawVisibleTextLinesWithSelection(
+        DrawingContext context,
+        VisibleTextWindow visibleWindow,
+        Point origin,
+        Typeface typeface,
+        double lineHeight,
+        IBrush? selectionForeground)
+    {
+        if (!TryGetNormalizedSelection(out var selectionStart, out var selectionEnd))
+        {
+            DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
+            return;
+        }
+
+        var lineNumber = visibleWindow.FirstLine;
+        foreach (var lineText in visibleWindow.Text.Split('\n'))
+        {
+            // Keep selected text on the same per-line baseline model as normal preview rendering.
+            var formattedText = BuildFormattedText(lineText, typeface);
+            if (selectionForeground is not null &&
+                TryGetSelectedTextColumns(lineNumber, lineText.Length, selectionStart, selectionEnd, out var startColumn, out var endColumn))
+            {
+                formattedText.SetForegroundBrush(selectionForeground, startColumn, endColumn - startColumn);
+            }
+
+            var lineIndex = lineNumber - visibleWindow.FirstLine;
+            var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
+            context.DrawText(formattedText, lineOrigin);
+            lineNumber++;
         }
     }
 
@@ -749,7 +804,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (lastSelectedLine < firstSelectedLine)
             return;
 
-        var minimumSelectionWidth = ResolveMinimumSelectionWidth(typeface);
+        var minimumSelectionWidth = ResolveMinimumSelectionWidth();
 
         for (var lineNumber = firstSelectedLine; lineNumber <= lastSelectedLine; lineNumber++)
         {
@@ -780,6 +835,30 @@ public sealed class VirtualizedPreviewTextControl : Control
         }
     }
 
+    private static bool TryGetSelectedTextColumns(
+        int lineNumber,
+        int lineLength,
+        SelectionPosition selectionStart,
+        SelectionPosition selectionEnd,
+        out int startColumn,
+        out int endColumn)
+    {
+        startColumn = 0;
+        endColumn = 0;
+
+        if (lineNumber < selectionStart.Line || lineNumber > selectionEnd.Line)
+            return false;
+
+        startColumn = lineNumber == selectionStart.Line
+            ? Math.Clamp(selectionStart.Column, 0, lineLength)
+            : 0;
+        endColumn = lineNumber == selectionEnd.Line
+            ? Math.Clamp(selectionEnd.Column, startColumn, lineLength)
+            : lineLength;
+
+        return endColumn > startColumn;
+    }
+
     private SelectionPosition HitTestSelectionPosition(Point point)
         => HitTestSelection(point).Position;
 
@@ -797,7 +876,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         }
 
         var typeface = ResolveTypeface();
-        var lineHeight = ResolveLineHeight(typeface);
+        var lineHeight = ResolveLineHeight();
         if (lineHeight <= 0)
             return new SelectionHitResult(new SelectionPosition(1, 0), SelectionHitKind.Empty);
 
@@ -847,17 +926,23 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (string.IsNullOrEmpty(lineText) || distance <= 0)
             return 0;
 
-        var layout = new TextLayout(
-            lineText,
-            typeface,
-            TextFontSize,
-            TextBrush ?? Brushes.White);
-        if (layout.TextLines.Count == 0)
-            return 0;
+        var fullWidth = ResolveDistanceFromColumn(lineText, lineText.Length, typeface);
+        if (distance >= fullWidth)
+            return lineText.Length;
 
-        var characterHit = layout.TextLines[0].GetCharacterHitFromDistance(distance);
-        var column = characterHit.FirstCharacterIndex + Math.Max(0, characterHit.TrailingLength);
-        return Math.Clamp(column, 0, lineText.Length);
+        var low = 0;
+        var high = lineText.Length;
+        while (low < high)
+        {
+            var mid = (low + high) / 2;
+            var midpoint = ResolveCharacterMidpoint(lineText, mid, typeface);
+            if (distance < midpoint)
+                high = mid;
+            else
+                low = mid + 1;
+        }
+
+        return low;
     }
 
     private double ResolveDistanceFromColumn(string lineText, int column, Typeface typeface)
@@ -866,21 +951,21 @@ public sealed class VirtualizedPreviewTextControl : Control
             return 0;
 
         var clampedColumn = Math.Clamp(column, 0, lineText.Length);
-        var layout = new TextLayout(
-            lineText,
-            typeface,
-            TextFontSize,
-            TextBrush ?? Brushes.White);
-        if (layout.TextLines.Count == 0)
-            return 0;
-
-        return layout.TextLines[0].GetDistanceFromCharacterHit(new CharacterHit(clampedColumn, 0));
+        // Hit-testing must use the same text geometry as DrawText, including trailing code whitespace.
+        return BuildFormattedText(lineText[..clampedColumn], typeface).WidthIncludingTrailingWhitespace;
     }
 
-    private double ResolveMinimumSelectionWidth(Typeface typeface)
+    private double ResolveCharacterMidpoint(string lineText, int column, Typeface typeface)
     {
-        var sample = BuildFormattedText(" ", typeface);
-        return Math.Max(4.0, Math.Ceiling(sample.Width));
+        var left = ResolveDistanceFromColumn(lineText, column, typeface);
+        var right = ResolveDistanceFromColumn(lineText, column + 1, typeface);
+        return left + ((right - left) / 2.0);
+    }
+
+    private double ResolveMinimumSelectionWidth()
+    {
+        var spaceWidth = _fontMetricsCache.GetMetrics(TextFontFamily, TextFontSize).SpaceWidth;
+        return Math.Max(4.0, Math.Ceiling(spaceWidth));
     }
 
     private void UpdateSelectionActivePosition(SelectionPosition position)
@@ -1135,12 +1220,22 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (string.IsNullOrEmpty(text) || availableWidth <= 0)
             return string.Empty;
 
+        var cacheKey = StickyHeaderTrimCacheKey.Create(text, availableWidth, TextFontFamily, TextFontSize);
+        if (_cachedStickyHeaderTrimKey == cacheKey && _cachedStickyHeaderTrimText is not null)
+            return _cachedStickyHeaderTrimText;
+
         if (BuildFormattedText(text, typeface).Width <= availableWidth)
+        {
+            CacheStickyHeaderTrim(cacheKey, text);
             return text;
+        }
 
         const string ellipsis = "...";
         if (BuildFormattedText(ellipsis, typeface).Width > availableWidth)
+        {
+            CacheStickyHeaderTrim(cacheKey, string.Empty);
             return string.Empty;
+        }
 
         var low = 0;
         var high = text.Length;
@@ -1154,24 +1249,30 @@ public sealed class VirtualizedPreviewTextControl : Control
                 high = mid - 1;
         }
 
-        return low <= 0 ? ellipsis : text[..low] + ellipsis;
+        var trimmedText = low <= 0 ? ellipsis : text[..low] + ellipsis;
+        CacheStickyHeaderTrim(cacheKey, trimmedText);
+        return trimmedText;
+    }
+
+    private void CacheStickyHeaderTrim(StickyHeaderTrimCacheKey key, string text)
+    {
+        _cachedStickyHeaderTrimKey = key;
+        _cachedStickyHeaderTrimText = text;
     }
 
     private Typeface ResolveTypeface() =>
         new(TextFontFamily ?? FontFamily.Default, FontStyle.Normal, FontWeight.Normal);
 
-    private double CalculateRequiredWidth(Typeface typeface)
+    private double CalculateRequiredWidth()
     {
-        var sample = BuildFormattedText("W", typeface);
-        var glyphWidth = Math.Max(1.0, sample.Width);
+        var glyphWidth = _fontMetricsCache.GetMetrics(TextFontFamily, TextFontSize).WideGlyphWidth;
         var contentWidth = (Document?.MaxLineLength ?? _maxLineLength) * glyphWidth;
         return Math.Ceiling(LeftPadding + contentWidth + RightPadding);
     }
 
-    private double ResolveLineHeight(Typeface typeface)
+    private double ResolveLineHeight()
     {
-        var sample = BuildFormattedText("8", typeface);
-        return Math.Max(1.0, sample.Height);
+        return _fontMetricsCache.GetMetrics(TextFontFamily, TextFontSize).LineHeight;
     }
 
     private FormattedText BuildFormattedText(string text, Typeface typeface)
@@ -1271,42 +1372,14 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private void ApplyContextMenuBackdrop()
     {
-        if (_contextMenu is null || TopLevel.GetTopLevel(_contextMenu) is not TopLevel popupLevel)
-            return;
-
-        var host = TopLevel.GetTopLevel(this);
-        if (host is not null && ReferenceEquals(host, popupLevel))
-            return;
-
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        try
-        {
-            if (viewModel.HasAnyEffect)
-            {
-                popupLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.Transparent,
-                    WindowTransparencyLevel.None
-                ];
-
-                popupLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                popupLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: popup can close while the host is being configured.
-        }
+        PopupBackdropConfigurator.TryApply(
+            _contextMenu,
+            TopLevel.GetTopLevel(this),
+            viewModel.HasAnyEffect,
+            PopupBackdropTransparencyFallback.Transparent);
     }
 
     private static IBrush EnsureOpaqueSelectionBrush(IBrush brush)
@@ -1370,7 +1443,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         var selectionPosition = hit.Position;
         if (!keyModifiers.HasFlag(KeyModifiers.Shift) || _selectionAnchor is null)
-        _selectionAnchor = selectionPosition;
+        {
+            _selectionAnchor = selectionPosition;
+        }
 
         UpdateSelectionActivePosition(selectionPosition);
         _isSelecting = true;
@@ -1416,7 +1491,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         if (_selectionAutoScrollTimer is null)
         {
-            _selectionAutoScrollTimer = new DispatcherTimer
+            _selectionAutoScrollTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
             {
                 Interval = AutoScrollTickInterval
             };
@@ -1502,6 +1577,29 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private readonly record struct SelectionHitResult(SelectionPosition Position, SelectionHitKind Kind);
     private readonly record struct SelectionPosition(int Line, int Column);
+    private readonly record struct StickyHeaderTrimCacheKey(
+        string Text,
+        double AvailableWidth,
+        string FontFamilyName,
+        double FontSize,
+        string CultureName)
+    {
+        public static StickyHeaderTrimCacheKey Create(
+            string text,
+            double availableWidth,
+            FontFamily? fontFamily,
+            double fontSize)
+        {
+            var resolvedFamily = fontFamily ?? FontFamily.Default;
+            return new StickyHeaderTrimCacheKey(
+                text,
+                availableWidth,
+                resolvedFamily.Name,
+                fontSize,
+                CultureInfo.CurrentUICulture.Name);
+        }
+    }
+
     private enum SelectionHitKind
     {
         Empty = 0,
