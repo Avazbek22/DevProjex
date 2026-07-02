@@ -146,7 +146,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
 * **Avalonia UI** (cross-platform)
 * Cleanly separated architecture (Core / Services / UI)
 * JSON-based resources (localization, icon mappings, presets)
-* 6000+ automated tests (unit + integration)
+* 10000+ automated tests (unit + integration + UI)
 
 ---
 
