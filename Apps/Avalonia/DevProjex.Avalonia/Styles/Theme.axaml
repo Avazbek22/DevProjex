@@ -20,6 +20,14 @@
     <Color x:Key="MenuHoverColor">#E6E6E6</Color>
     <Color x:Key="MenuPressedColor">#D9D9D9</Color>
     <Color x:Key="ToastSurfaceColor">#F3F3F3</Color>
+    <Color x:Key="TreeIslandCloseBlurTintColor">#F8FBFF</Color>
+    <Color x:Key="TreeIslandCloseBlurFallbackColor">#F3F3F3</Color>
+    <Color x:Key="TreeIslandCloseSurfaceColor">#EAF3F3F3</Color>
+    <Color x:Key="TreeIslandCloseHoverColor">#F2E6E6E6</Color>
+    <Color x:Key="TreeIslandClosePressedColor">#F2D9D9D9</Color>
+    <x:Double x:Key="TreeIslandCloseBlurTintOpacity">0.32</x:Double>
+    <x:Double x:Key="TreeIslandCloseBlurMaterialOpacity">0.42</x:Double>
+    <x:Double x:Key="TreeIslandCloseBlurCompensationLevel">0.0</x:Double>
     <Color x:Key="PreviewSectionDividerColor">#A8ACB3</Color>
 
     <!-- Drop Zone Colors - Light Theme -->
@@ -55,6 +63,9 @@
     <SolidColorBrush x:Key="MenuChildHoverBrush" Color="{StaticResource MenuHoverColor}"/>
     <SolidColorBrush x:Key="MenuChildPressedBrush" Color="{StaticResource MenuPressedColor}"/>
     <SolidColorBrush x:Key="ToastSurfaceBrush" Color="{StaticResource ToastSurfaceColor}" />
+    <SolidColorBrush x:Key="TreeIslandCloseSurfaceBrush" Color="{StaticResource TreeIslandCloseSurfaceColor}" />
+    <SolidColorBrush x:Key="TreeIslandCloseHoverBrush" Color="{StaticResource TreeIslandCloseHoverColor}" />
+    <SolidColorBrush x:Key="TreeIslandClosePressedBrush" Color="{StaticResource TreeIslandClosePressedColor}" />
     <SolidColorBrush x:Key="PreviewSectionDividerBrush" Color="{StaticResource PreviewSectionDividerColor}" />
 
     <!-- Drop Zone Brushes - Light Theme -->
@@ -85,6 +96,14 @@
     <Color x:Key="MenuHoverColor">#3A3D44</Color>
     <Color x:Key="MenuPressedColor">#4A4D54</Color>
     <Color x:Key="ToastSurfaceColor">#1B1D22</Color>
+    <Color x:Key="TreeIslandCloseBlurTintColor">#000000</Color>
+    <Color x:Key="TreeIslandCloseBlurFallbackColor">#17171A</Color>
+    <Color x:Key="TreeIslandCloseSurfaceColor">#E617171A</Color>
+    <Color x:Key="TreeIslandCloseHoverColor">#F03A3D44</Color>
+    <Color x:Key="TreeIslandClosePressedColor">#F04A4D54</Color>
+    <x:Double x:Key="TreeIslandCloseBlurTintOpacity">0.0</x:Double>
+    <x:Double x:Key="TreeIslandCloseBlurMaterialOpacity">0.55</x:Double>
+    <x:Double x:Key="TreeIslandCloseBlurCompensationLevel">0.0</x:Double>
     <Color x:Key="PreviewSectionDividerColor">#4A5566</Color>
 
     <!-- Drop Zone Colors - Dark Theme -->
@@ -120,6 +139,9 @@
     <SolidColorBrush x:Key="MenuChildHoverBrush" Color="{StaticResource MenuHoverColor}"/>
     <SolidColorBrush x:Key="MenuChildPressedBrush" Color="{StaticResource MenuPressedColor}"/>
     <SolidColorBrush x:Key="ToastSurfaceBrush" Color="{StaticResource ToastSurfaceColor}" />
+    <SolidColorBrush x:Key="TreeIslandCloseSurfaceBrush" Color="{StaticResource TreeIslandCloseSurfaceColor}" />
+    <SolidColorBrush x:Key="TreeIslandCloseHoverBrush" Color="{StaticResource TreeIslandCloseHoverColor}" />
+    <SolidColorBrush x:Key="TreeIslandClosePressedBrush" Color="{StaticResource TreeIslandClosePressedColor}" />
     <SolidColorBrush x:Key="PreviewSectionDividerBrush" Color="{StaticResource PreviewSectionDividerColor}" />
 
     <!-- Drop Zone Brushes - Dark Theme -->
@@ -1236,16 +1258,38 @@
     </Style>
 
     <Style Selector="Button.tree-island-close-button">
-        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
     </Style>
 
     <Style Selector="Button.tree-island-close-button:pointerover">
-        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Button.tree-island-close-button:pressed">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- The visible surface is inside the Button content, so hover/pressed states must target it directly. -->
+    <Style Selector="Button.tree-island-close-button Border.tree-island-close-surface">
+        <Setter Property="Background" Value="{DynamicResource TreeIslandCloseSurfaceBrush}" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="Button.tree-island-close-button:pointerover Border.tree-island-close-surface">
+        <Setter Property="Background" Value="{DynamicResource TreeIslandCloseHoverBrush}" />
+    </Style>
+
+    <Style Selector="Button.tree-island-close-button:pressed Border.tree-island-close-surface">
+        <Setter Property="Background" Value="{DynamicResource TreeIslandClosePressedBrush}" />
     </Style>
 
     <Style Selector="Border.preview-panel.preview-toolbar-compact Grid#PreviewBarLayoutGrid">

@@ -604,8 +604,30 @@
                           Margin="0,8,13,0"
                           Width="28"
                           Height="28"
-                          Content="✕"
-                          Click="OnPreviewTreeHide" />
+                          Click="OnPreviewTreeHide">
+                    <Grid>
+                      <ExperimentalAcrylicBorder CornerRadius="6"
+                                                ClipToBounds="True"
+                                                IsHitTestVisible="False">
+                        <ExperimentalAcrylicBorder.Material>
+                          <ExperimentalAcrylicMaterial BackgroundSource="Digger"
+                                                        TintColor="{DynamicResource TreeIslandCloseBlurTintColor}"
+                                                        TintOpacity="{DynamicResource TreeIslandCloseBlurTintOpacity}"
+                                                        MaterialOpacity="{DynamicResource TreeIslandCloseBlurMaterialOpacity}"
+                                                        PlatformTransparencyCompensationLevel="{DynamicResource TreeIslandCloseBlurCompensationLevel}"
+                                                        FallbackColor="{DynamicResource TreeIslandCloseBlurFallbackColor}" />
+                        </ExperimentalAcrylicBorder.Material>
+                      </ExperimentalAcrylicBorder>
+                      <Border Classes="tree-island-close-surface"
+                              IsHitTestVisible="False" />
+                      <TextBlock Text="✕"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 FontSize="12"
+                                 FontWeight="SemiBold"
+                                 Foreground="{DynamicResource AppTextBrush}" />
+                    </Grid>
+                  </Button>
                 </Grid>
               </Border>
             </Grid>
