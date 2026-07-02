@@ -217,10 +217,10 @@ Während der Vorschau-Arbeitsbereich aktiv ist, wird der Kompaktmodus automatisc
 ### Baumanimation
 Aktiviert eine sanfte Schiebe-Animation beim Überfahren von Baumzeilen.
 
-### Zusätzliche Zähler
-Zeigt/blendet Mengen in Klammern bei den Optionen im Block „Ignorieren“.
-Standardmäßig aktiviert.
-Ändert die Filterregeln nicht.
+### Baum-Schrift
+Die Baum-Schrift wird über „Ansicht → Baum-Schrift“ ausgewählt.
+„Standard“ stellt die normale Baum-Schrift wieder her.
+Die ausgewählte Schrift wird nach dem Klick auf „Anwenden“ im Einstellungen-Panel angewendet.
 
 ## 9) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
@@ -249,11 +249,13 @@ Einschränkungen:
 * Wenn der Baum ausgeblendet ist, ist der Filter vorübergehend nicht verfügbar.
 
 ## 11) Optionen
-Rechts befinden sich Listen:
-* Baum‑Schrift — mit Anwenden bestätigen
+Rechts verfügbar:
+* Anwenden
 * Ignorieren
 * Dateitypen
 * Ordner der obersten Ebene
+
+Änderungen in „Ignorieren“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet und nach dem Klick auf „Anwenden“ angewendet.
 
 Jede Liste hat einen Alle‑Schalter.
 
@@ -263,7 +265,7 @@ Hinweis zu „Dateitypen“:
 
 Ctrl+P — Panel anzeigen/ausblenden.
 
-### 10.1 Profile lokaler Projektparameter
+### 11.1 Profile lokaler Projektparameter
 Für lokale Ordner merkt sich DevProjex die zuletzt angewendeten Projektparameter:
 * ausgewählte Ordner der obersten Ebene;
 * ausgewählte Dateitypen;
@@ -298,26 +300,27 @@ Wenn eine Option in „Ignorieren“ erstmals verfügbar wird, ist sie standardm
 
 Die Trennlinie unter „.gitignore verwenden“ trennt Git/Smart-Regeln von den grundlegenden Sichtbarkeitsregeln.
 
-### 11.1 Geltungsbereich der Regeln
+### 12.1 Geltungsbereich der Regeln
 Die Anwendung bildet Projektbereiche (Scopes), in denen die Ignore-Regeln gelten:
 * Wurzelordner (wenn im Root `.gitignore` oder ein Projektmarker vorhanden ist)
 * Ordner der ersten Ebene
 * verschachtelte Projekt-Unterordner
 
 Die Suchtiefe für verschachtelte Projektbereiche ist fest: 2 Ebenen.
+Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.gitignore` und Smart Ignore. Sobald ein Bereich gefunden wurde, werden die Regeln auf seinen Inhalt durch den normalen Baum-Scan angewendet.
 
-### 11.2 „.gitignore verwenden“
+### 12.2 „.gitignore verwenden“
 * Aktiviert: `.gitignore`-Regeln werden in den gefundenen Bereichen angewendet.
 * Deaktiviert: `.gitignore`-Regeln werden vollständig abgeschaltet.
 
 Bei Ordnern mit mehreren Projekten gilt die `.gitignore` eines Projekts nicht für benachbarte Projekte außerhalb seines Bereichs.
 
-### 11.3 „Smart Ignore“
+### 12.3 „Smart Ignore“
 * Wird nur angezeigt, wenn es sinnvoll ist.
 * Aktiviert: typische Build-/Tool-Artefakte werden zusätzlich ausgeblendet.
 * Deaktiviert: Smart-Regeln werden nicht angewendet.
 
-### 11.4 Grundregeln
+### 12.4 Grundregeln
 Optionen:
 * Versteckte Ordner
 * Versteckte Dateien
@@ -330,7 +333,7 @@ Optionen:
 Wenn aktiviert, blendet eine Option die passenden Elemente im Baum sowie in Kopier-/Exportergebnissen aus.
 Die Grundregeln werden getrennt von `.gitignore` und Smart Ignore aktiviert, aber das Endergebnis wird immer anhand des aktuellen Baums nach Anwendung aller aktiven Filter berechnet.
 
-### 11.5 Internes Verhalten: typische Fälle
+### 12.5 Internes Verhalten: typische Fälle
 1. Ein Projekt mit `.gitignore`.
 Meist wird nur „.gitignore verwenden“ angezeigt.
 Bei Aktivierung arbeiten `.gitignore` und Smart Ignore zusammen.
@@ -353,19 +356,19 @@ Smart Ignore (wenn aktiviert) ergänzt die Filterung in den gefundenen Bereichen
 Wenn keine `.gitignore` gefunden wird und Smart Ignore nicht relevant ist, werden diese Punkte nicht angezeigt.
 Es bleiben nur die grundlegenden Sichtbarkeitsregeln.
 
-### 11.6 Leere Ordner
+### 12.6 Leere Ordner
 Blendet logisch leere Ordner im Baum sowie in Kopier-/Exportergebnissen aus.
 Ein logisch leerer Ordner ist ein Ordner, in dem nach Anwendung der aktuellen Sichtbarkeitsregeln, von `.gitignore`, Smart Ignore und der ausgewählten Dateitypen keine sichtbaren Nachfolger mehr verbleiben.
 Wenn der Ordner selbst nicht durch andere Regeln ausgeblendet wird, wird seine Entfernung aus dem Baum genau durch diese Option gesteuert.
 
-### 11.7 Leere Dateien
+### 12.7 Leere Dateien
 Blendet leere Dateien mit Größe 0 Byte im Baum sowie in Kopier-/Exportergebnissen aus.
 
-### 11.8 Dateien ohne Erweiterung
+### 12.8 Dateien ohne Erweiterung
 Blendet Dateien ohne Erweiterung (zum Beispiel: `Dockerfile`, `Makefile`, `README`) im Baum sowie in Kopier-/Exportergebnissen aus.
 
-### 11.9 Zähler im Block „Ignorieren“
-Wenn „Ansicht → Zusätzliche Zähler“ aktiviert ist, wird bei verfügbaren Optionen die Anzahl im Format `(N)` angezeigt.
+### 12.9 Zähler im Block „Ignorieren“
+Bei verfügbaren Optionen wird die Anzahl im Format `(N)` angezeigt.
 Bei Grundregeln zeigt diese Zahl, wie viele Elemente in der aktuellen Baumkonfiguration genau durch diese Regel ausgeblendet werden.
 ## 13) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
@@ -377,7 +380,7 @@ Das Ergebnis hängt ab von:
 
 Wenn der Zugriff verweigert wird, wird der Knoten als Zugriff verweigert markiert.
 
-### 12.1 Was die Zähler in der Statusleiste zeigen
+### 13.1 Was die Zähler in der Statusleiste zeigen
 Die Statusleiste hat zwei Blöcke:
 * Baum — Kennzahlen der Baum-Textausgabe;
 * Inhalt — Kennzahlen der exportierten Dateiinhalte.
@@ -393,7 +396,7 @@ Wichtig:
 * „Zeilen“ im Block „Baum“ ist die Anzahl der Zeilen in der finalen Baumdarstellung, nicht die Anzahl der Dateien auf dem Datenträger;
 * in diesen Wert fließen Ordner, Dateien und Service-Elemente des Baums ein (z. B. Knoten mit Zugriff verweigert).
 
-### 12.2 Wie die Kennzahlen berechnet werden
+### 13.2 Wie die Kennzahlen berechnet werden
 Baum-Kennzahlen:
 * werden aus der tatsächlichen Baum-Ausgabe berechnet, die von derselben Export-Pipeline erzeugt wird;
 * berücksichtigen das aktuelle ASCII/JSON-Format.
@@ -403,7 +406,7 @@ Inhalt-Kennzahlen:
 * Binärdateien werden ausgeschlossen;
 * leere und nur aus Leerraum bestehende Dateien werden über Servicemarker gezählt (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
-### 12.3 Wann die Zähler aktualisiert werden
+### 13.3 Wann die Zähler aktualisiert werden
 Neu berechnet wird:
 * nach dem Öffnen/Aktualisieren eines Projekts;
 * nach dem Anwenden von Einstellungen (Ignore, Dateitypen, Root-Ordner);
@@ -428,11 +431,11 @@ Einträge mit [Beta] können sich zwischen Versionen ändern.
 
 ## 16) Hilfe
 
-### 15.1 Einstellungen zurücksetzen
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt nur visuelle UI-Parameter zurück (Theme, Effekte, Kompaktmodus, Baumanimation, zusätzliche Zähler) und ändert keine Projektdaten. Nach dem Zurücksetzen sind zusätzliche Zähler standardmäßig aktiviert.
+### 16.1 Einstellungen zurücksetzen
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt nur visuelle UI-Parameter zurück (Theme, Effekte, Kompaktmodus, Baumanimation) und ändert keine Projektdaten.
 Einstellungen zurücksetzen löscht außerdem die gespeicherte Sprachauswahl der Oberfläche.
 
-### 15.2 Daten zurücksetzen
+### 16.2 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
 * ausgewählte Ordner der obersten Ebene;
 * ausgewählte Dateitypen;
@@ -445,6 +448,7 @@ Wichtig:
 
 ## 17) Sprachen
 Die Sprache wird über das Sprache‑Menü gewählt.
+Die ausgewählte Sprache wird zwischen App-Starts gespeichert. „Hilfe → Einstellungen zurücksetzen“ löscht die gespeicherte Sprachauswahl und setzt die Oberfläche auf die Standardsprache zurück.
 
 ## 18) Fortschrittsbalken und Abbrechen
 In der Mitte der Statusleiste werden aktive Operation und Fortschritt angezeigt.

@@ -217,10 +217,10 @@ Quand l’espace de travail d’aperçu est actif, le mode compact est activé a
 ### Animation de l'arborescence
 Active une animation de glissement fluide au survol des lignes de l'arborescence.
 
-### Compteurs supplémentaires
-Affiche/masque les quantités entre parenthèses pour les options du bloc « Ignorer ».
-Activés par défaut.
-N’affecte pas les règles de filtrage.
+### Police de l’arborescence
+La police de l’arborescence se choisit via « Affichage → Police de l’arborescence ».
+« Par défaut » rétablit la police standard de l’arborescence.
+La police choisie est appliquée après clic sur « Appliquer » dans le panneau des paramètres.
 
 ## 9) Recherche dans l'arbre
 Ouvre la recherche, met en évidence les correspondances et permet la navigation.
@@ -249,11 +249,13 @@ Limitations :
 * si l’arborescence est masquée, le filtre devient temporairement indisponible.
 
 ## 11) Options
-Listes à droite :
-* Police de l’arborescence — appliquer avec Appliquer
+À droite sont disponibles :
+* Appliquer
 * Ignorer
 * Types de fichiers
 * Dossiers de premier niveau
+
+Les changements dans « Ignorer », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
 
 Chaque liste a un bouton Tous.
 
@@ -263,7 +265,7 @@ Remarque sur « Types de fichiers » :
 
 Ctrl+P — afficher/masquer le panneau.
 
-### 10.1 Profils de paramètres des projets locaux
+### 11.1 Profils de paramètres des projets locaux
 Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
@@ -298,26 +300,27 @@ Quand une option dans « Ignorer » devient disponible pour la première fois, e
 
 La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
 
-### 11.1 Portée des règles
+### 12.1 Portée des règles
 L’application construit des zones de projet (scopes) où les règles d’ignore sont appliquées :
 * racine (si la racine contient `.gitignore` ou un marqueur de projet)
 * dossiers du premier niveau
 * sous-dossiers de projet imbriqués
 
 La profondeur de recherche des zones de projet imbriquées est fixe : 2 niveaux.
+Cette limite concerne uniquement la détection des zones imbriquées pour `.gitignore` et Smart Ignore. Une fois la zone trouvée, les règles sont appliquées à son contenu par le parcours normal de l’arbre.
 
-### 11.2 « Utiliser .gitignore »
+### 12.2 « Utiliser .gitignore »
 * Activé : les règles `.gitignore` sont appliquées dans les zones détectées.
 * Désactivé : les règles `.gitignore` sont entièrement désactivées.
 
 Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
 
-### 11.3 « Smart ignore »
+### 12.3 « Smart ignore »
 * Affiché uniquement lorsqu’il est pertinent.
 * Activé : les artefacts courants de build/outils sont masqués en plus.
 * Désactivé : les règles smart ne sont pas appliquées.
 
-### 11.4 Règles de base
+### 12.4 Règles de base
 Options :
 * Dossiers cachés
 * Fichiers cachés
@@ -330,7 +333,7 @@ Options :
 Quand une option est activée, elle masque les éléments correspondants dans l’arbre et dans les résultats de copie/export.
 Les règles de base s’activent séparément de `.gitignore` et de Smart Ignore, mais le résultat final est toujours calculé à partir de l’arbre courant après application de tous les filtres actifs.
 
-### 11.5 Fonctionnement interne : cas typiques
+### 12.5 Fonctionnement interne : cas typiques
 1. Projet unique avec `.gitignore`.
 En général, seule l’option « Utiliser .gitignore » est affichée.
 Quand elle est activée, `.gitignore` et Smart Ignore fonctionnent ensemble.
@@ -353,19 +356,19 @@ Smart Ignore (s’il est activé) complète le filtrage dans les zones détecté
 Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’est pas pertinent, ces options sont masquées.
 Seules les règles de visibilité de base restent actives.
 
-### 11.6 Dossiers vides
+### 12.6 Dossiers vides
 Masque les dossiers logiquement vides dans l’arbre et dans les résultats de copie/export.
 Un dossier logiquement vide est un dossier dans lequel il ne reste plus aucun descendant visible après application des règles de visibilité actuelles, de `.gitignore`, de Smart Ignore et des types de fichiers sélectionnés.
 Si le dossier lui-même n’est pas masqué par d’autres règles, sa suppression de l’arbre est contrôlée précisément par cette option.
 
-### 11.7 Fichiers vides
+### 12.7 Fichiers vides
 Masque les fichiers vides de taille 0 octet dans l’arbre et dans les résultats de copie/export.
 
-### 11.8 Fichiers sans extension
+### 12.8 Fichiers sans extension
 Masque les fichiers sans extension (par exemple : `Dockerfile`, `Makefile`, `README`) dans l’arbre et dans les résultats de copie/export.
 
-### 11.9 Compteurs dans le bloc « Ignorer »
-Quand « Affichage → Compteurs supplémentaires » est activé, le nombre est affiché à côté des options disponibles au format `(N)`.
+### 12.9 Compteurs dans le bloc « Ignorer »
+Le nombre est affiché à côté des options disponibles au format `(N)`.
 Pour les règles de base, ce nombre indique combien d’éléments sont masqués précisément par cette règle dans la configuration actuelle de l’arbre.
 ## 13) Comment l'arbre et les métriques sont calculés
 Le résultat dépend de :
@@ -377,7 +380,7 @@ Le résultat dépend de :
 
 Si l’accès est refusé, le nœud est marqué Accès refusé.
 
-### 12.1 Ce que montrent les compteurs de la barre d’état
+### 13.1 Ce que montrent les compteurs de la barre d’état
 La barre d’état contient deux blocs :
 * Arbre — métriques de la sortie texte de l’arborescence ;
 * Contenu — métriques de la sortie de contenu des fichiers.
@@ -393,7 +396,7 @@ Important :
 * « Lignes » dans le bloc « Arbre » correspond au nombre de lignes de la représentation finale de l’arborescence, et non au nombre de fichiers sur le disque ;
 * cette valeur inclut les dossiers, les fichiers et les éléments techniques de l’arbre (par exemple, les nœuds avec accès refusé).
 
-### 12.2 Comment les métriques sont calculées
+### 13.2 Comment les métriques sont calculées
 Métriques de l’arbre :
 * sont calculées à partir de la sortie réelle de l’arbre générée par le même pipeline d’export ;
 * respectent le format ASCII/JSON courant.
@@ -403,7 +406,7 @@ Métriques du contenu :
 * les fichiers binaires sont exclus ;
 * les fichiers vides et uniquement blancs sont comptés via des marqueurs de service (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
-### 12.3 Quand les compteurs sont mis à jour
+### 13.3 Quand les compteurs sont mis à jour
 Le recalcul est effectué :
 * après ouverture/actualisation d’un projet ;
 * après application des paramètres (ignore, types de fichiers, dossiers racine) ;
@@ -428,11 +431,11 @@ Les éléments [Beta] peuvent évoluer entre versions.
 
 ## 16) Aide
 
-### 15.1 Réinitialiser les paramètres
-Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) réinitialise uniquement les paramètres visuels de l’interface (thème, effets, mode compact, animation de l'arborescence, compteurs supplémentaires) et ne modifie pas les données du projet. Après réinitialisation, les compteurs supplémentaires sont activés par défaut.
+### 16.1 Réinitialiser les paramètres
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) réinitialise uniquement les paramètres visuels de l’interface (thème, effets, mode compact, animation de l'arborescence) et ne modifie pas les données du projet.
 Cette action efface aussi le choix de langue de l’interface enregistré.
 
-### 15.2 Réinitialiser les données
+### 16.2 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
@@ -445,6 +448,7 @@ Important :
 
 ## 17) Langues
 La langue se choisit via le menu Langue.
+La langue choisie est conservée entre les lancements. « Aide → Réinitialiser les paramètres » efface ce choix enregistré et revient à la langue par défaut.
 
 ## 18) Barre de progression et annulation
 La partie centrale de la barre d’état affiche l’opération active et sa progression.
