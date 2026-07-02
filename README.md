@@ -34,6 +34,14 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 
 ---
 
+## Quick Start ⚡
+
+1. Open or drop a project folder.
+2. Select the folders, files, filters, ignore rules, and output mode you need.
+3. Preview the result, then copy, export, or run the same workflow from the terminal.
+
+---
+
 ## App Screenshots 🖼️
 
 > <img width="1723" height="1183" src="https://github.com/user-attachments/assets/a6752e4d-2616-42d4-85fd-cd541506f0cf" />
@@ -87,15 +95,17 @@ DevProjex works with any language, repository, or project structure.
 
 ## Command Line ⚙️
 
-DevProjex can also be launched from a terminal to open a folder, preselect filters, or generate a JSON analysis report for automation.
+DevProjex can also be launched from a terminal to open a folder, preselect filters, export tree/content text, or generate a JSON analysis report for automation.
 
 ```bash
 devprojex --path "/path/to/project" --no-ui --report
 devprojex --path "/path/to/project" --no-ui --report -
 devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
+devprojex "/path/to/project" --export tree -o -
+devprojex "/path/to/project" --export tree-content -o ./context.txt
 ```
 
-See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, exit codes, and report behavior.
+See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, export modes, exit codes, and report behavior.
 
 ---
 
