@@ -75,7 +75,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **Animated toasts** for user feedback
 * **Localization** (8 languages)
 * **Responsive async scanning** (UI stays smooth on big folders)
-* **Command-line startup automation** with optional JSON analysis reports
+* **Terminal automation mode**: generate AI-ready context, JSON reports, CI-friendly diagnostics, and tree/content exports from the same desktop executable
 
 ---
 
@@ -95,15 +95,21 @@ DevProjex works with any language, repository, or project structure.
 
 ## Command Line ⚙️
 
-DevProjex can also be launched from a terminal to open a folder, preselect filters, export tree/content text, or generate a JSON analysis report for automation.
+DevProjex is not only a desktop context builder. The same app can run from the terminal for repeatable, script-friendly project analysis and AI-context export.
 
 ```bash
-devprojex --path "/path/to/project" --no-ui --report
+devprojex "/path/to/project" --export tree-content -o ./context.txt --roots src --ext cs
 devprojex --path "/path/to/project" --no-ui --report -
 devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
-devprojex "/path/to/project" --export tree -o -
-devprojex "/path/to/project" --export tree-content -o ./context.txt
 ```
+
+Use it to:
+
+* generate clean AI-ready context without opening the UI;
+* export selected tree/content payloads directly to files or stdout;
+* produce machine-readable JSON analysis reports;
+* fail CI when selected roots/extensions produce diagnostics;
+* reuse the same ignore logic as the desktop app.
 
 See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, export modes, exit codes, and report behavior.
 
