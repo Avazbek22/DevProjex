@@ -776,7 +776,6 @@
                       ClipToBounds="True">
                   <ScrollViewer Name="PreviewTextScrollViewer"
                                 Classes="preview-scroll"
-                                Margin="0,0,0,8"
                                 Cursor="Arrow"
                                 IsScrollInertiaEnabled="True"
                                 HorizontalScrollBarVisibility="Auto"

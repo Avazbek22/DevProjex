@@ -803,6 +803,16 @@
         <Setter Property="Cursor" Value="Arrow" />
     </Style>
 
+    <!-- Fluent ScrollViewer reserves the bottom-right separator cell for the horizontal scrollbar corner.
+         Preview keeps horizontal scrolling for long lines, but the reserved cell visually cuts the vertical rail short. -->
+    <Style Selector="ScrollViewer.preview-scroll /template/ ScrollBar#PART_VerticalScrollBar">
+        <Setter Property="Grid.RowSpan" Value="2" />
+    </Style>
+
+    <Style Selector="ScrollViewer.preview-scroll /template/ Panel#PART_ScrollBarsSeparator">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+
     <Style Selector="ScrollViewer.preview-scroll RepeatButton">
         <Setter Property="Cursor" Value="Arrow" />
     </Style>
