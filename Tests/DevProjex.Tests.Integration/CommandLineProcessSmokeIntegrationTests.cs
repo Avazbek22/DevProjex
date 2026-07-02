@@ -1719,10 +1719,80 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 	private static (string JsonPart, string ContentPart) SplitTreeContentJsonStdout(string stdout)
 	{
-		// Tree-content JSON intentionally keeps only the tree as JSON; selected file content stays plain text after NBSP separators.
-		var separatorIndex = stdout.IndexOf("\u00A0", StringComparison.Ordinal);
-		Assert.True(separatorIndex > 0, "Expected JSON tree-content stdout to contain the NBSP separator before plain text content.");
-		return (stdout[..separatorIndex].TrimEnd('\r', '\n'), stdout[separatorIndex..]);
+		// Tree-content JSON intentionally keeps only the tree as JSON; selected file content stays plain text after it.
+		// Windows command shells can transcode NBSP separators, so this smoke test splits on the JSON object boundary
+		// instead of asserting the exact separator character that the lower-level export service already owns.
+		var jsonEndIndex = FindTopLevelJsonObjectEnd(stdout);
+		Assert.True(jsonEndIndex > 0, "Expected tree-content stdout to start with a complete JSON tree object.");
+		var contentPart = stdout[jsonEndIndex..];
+		Assert.False(string.IsNullOrWhiteSpace(contentPart), "Expected tree-content stdout to include plain text content after the JSON tree.");
+		return (stdout[..jsonEndIndex], contentPart);
+	}
+
+	private static int FindTopLevelJsonObjectEnd(string value)
+	{
+		var started = false;
+		var inString = false;
+		var escaped = false;
+		var depth = 0;
+
+		for (var i = 0; i < value.Length; i++)
+		{
+			var current = value[i];
+			if (!started)
+			{
+				if (char.IsWhiteSpace(current))
+					continue;
+
+				if (current != '{')
+					return -1;
+
+				started = true;
+				depth = 1;
+				continue;
+			}
+
+			if (inString)
+			{
+				if (escaped)
+				{
+					escaped = false;
+					continue;
+				}
+
+				if (current == '\\')
+				{
+					escaped = true;
+					continue;
+				}
+
+				if (current == '"')
+					inString = false;
+
+				continue;
+			}
+
+			if (current == '"')
+			{
+				inString = true;
+				continue;
+			}
+
+			if (current == '{')
+			{
+				depth++;
+				continue;
+			}
+
+			if (current != '}')
+				continue;
+
+			depth--;
+			if (depth == 0)
+				return i + 1;
+		}
+
+		return -1;
 	}
 
 	private static ProjectFileSnapshot[] CaptureProjectFiles(string projectPath) =>
