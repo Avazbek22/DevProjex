@@ -83,6 +83,53 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task UserLevelTerminalCommand_NoUiReportDashWritesOnlyJsonToStdout()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		SeedUserLevelProject(projectPath);
+
+		CommandLineProcessResult result;
+		if (OperatingSystem.IsWindows())
+		{
+			var binDirectory = temp.CreateDirectory("bin & tools");
+			await CreateWindowsLauncherAsync(
+				Path.Combine(binDirectory, CommandLineExecutableAliases.WindowsPortableCommandFileName));
+			result = await RunWindowsPathCommandAsync(
+				"devprojex",
+				binDirectory,
+				temp.Path,
+				CommandLineOptionTokens.NoUi,
+				CommandLineOptionTokens.Path, projectPath,
+				CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath);
+		}
+		else
+		{
+			var binDirectory = temp.CreateDirectory("bin");
+			await CreateUnixWrapperAsync(Path.Combine(binDirectory, CommandLineExecutableAliases.UnixCommand));
+			result = await RunPathCommandAsync(
+				CommandLineExecutableAliases.UnixCommand,
+				binDirectory,
+				temp.Path,
+				CommandLineOptionTokens.NoUi,
+				CommandLineOptionTokens.Path, projectPath,
+				CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath);
+		}
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		var root = document.RootElement;
+		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(
+			GetComparablePath(projectPath),
+			GetComparablePath(root.GetProperty("rootPath").GetString()!));
+		Assert.Contains(".cs", ReadStringArray(root.GetProperty("inventory").GetProperty("availableExtensions")));
+		Assert.DoesNotContain("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex:", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task UnixPortableWrapper_UserLevelTreeContentExportUsesCurrentExecutableAndShellSemantics()
 	{
 		if (OperatingSystem.IsWindows())
