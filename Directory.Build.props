@@ -14,6 +14,9 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <TestTfmsInParallel>false</TestTfmsInParallel>
+    <!-- GitHub macOS runners have intermittently produced unreadable obj/ref assemblies for project references.
+         CI can safely compile against implementation assemblies instead; local builds keep the faster default path. -->
+    <ProduceReferenceAssembly Condition="'$(CI)'=='true'">false</ProduceReferenceAssembly>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='ReleaseStore'">
