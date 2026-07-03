@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.Collections.Frozen;
 using System.Runtime;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -14,6 +12,8 @@ using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
 using DevProjex.Kernel;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.Reports;
+using DevProjex.Infrastructure.TerminalCommands;
 using UserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
 using UserSettingsDb = DevProjex.Infrastructure.ThemePresets.UserSettingsDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
@@ -25,11 +25,27 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow : Window
 {
+    private const double BranchMenuItemHeight = 32;
+    private const double TreeFontMenuItemHeight = 32;
+
     private enum WorkspaceDisplayMode
     {
         Tree = 0,
         PreviewWithTree = 1,
         PreviewOnly = 2
+    }
+
+    internal enum TerminalCommandPostInstallUiAction
+    {
+        None,
+        ShowError
+    }
+
+    internal enum AutomaticTerminalCommandStartupAction
+    {
+        None,
+        ShowPrompt,
+        RepairSilently
     }
 
     private enum ZoomSurfaceTarget
@@ -60,69 +76,31 @@ public partial class MainWindow : Window
         Filter = 2
     }
 
-    private enum StatusOperationType
-    {
-        None = 0,
-        LoadProject = 1,
-        RefreshProject = 2,
-        MetricsCalculation = 3,
-        GitPullUpdates = 4,
-        GitSwitchBranch = 5,
-        PreviewBuild = 6
-    }
-
-    private sealed record SelectionOptionSnapshot(string Name, bool IsChecked);
-
-    private sealed record IgnoreOptionSnapshot(IgnoreOptionId Id, string Label, bool IsChecked);
-
-    private readonly record struct PreviewWarmupSnapshot(string Text, int LineCount);
-    private readonly record struct PreviewBuildResult(IPreviewTextDocument Document);
     private readonly record struct PreviewSelectionMetricsSnapshot(
         IPreviewTextDocument Document,
         PreviewSelectionRange SelectionRange);
-    private readonly record struct ProjectProfileLoadSnapshot(bool HasProfile, ProjectSelectionProfile? Profile);
 
-    private readonly record struct TreeMetricsCacheKey(
-        int TreeIdentity,
-        TreeTextFormat Format,
-        int SelectedCount,
-        int SelectedHash,
-        int PathPresentationIdentity);
+    private static async Task YieldUiAsync(DispatcherPriority priority)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            // Dispatcher.Yield is the Avalonia 12 replacement for posting an empty UI callback
+            // when the caller already runs on the UI thread.
+            await Dispatcher.Yield(priority);
+            return;
+        }
 
-    private readonly record struct ContentMetricsCacheKey(
-        int TreeIdentity,
-        int SelectedCount,
-        int SelectedHash,
-        int PathMapperIdentity);
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, priority);
+    }
 
-    private readonly record struct StatusOperationSnapshot(
-        long OperationId,
-        StatusOperationType OperationType,
-        Action? CancelAction);
-
-    private sealed record ProjectLoadCancellationSnapshot(
-        bool HadLoadedProjectBefore,
-        string? Path,
-        string? ProjectDisplayName,
-        string? RepositoryUrl,
-        BuildTreeResult? Tree,
-        ProjectSourceType ProjectSourceType,
-        string CurrentBranch,
-        IReadOnlyList<GitBranch> GitBranches,
-        bool SettingsVisible,
-        bool SearchVisible,
-        bool FilterVisible,
-        PreviewWorkspaceMode PreviewWorkspaceMode,
-        bool StatusMetricsVisible,
-        string StatusTreeStatsText,
-        string StatusContentStatsText,
-        bool AllRootFoldersChecked,
-        bool AllExtensionsChecked,
-        bool AllIgnoreChecked,
-        bool HasCompleteMetricsBaseline,
-        IReadOnlyList<SelectionOptionSnapshot> RootFolders,
-        IReadOnlyList<SelectionOptionSnapshot> Extensions,
-        IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions);
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    private sealed class ProjectLoadTiming
+    {
+        public Stopwatch LoadingStopwatch { get; } = Stopwatch.StartNew();
+        public TimeSpan LoadingElapsed { get; set; }
+        public bool HasLoadingElapsed { get; set; }
+    }
+#endif
 
     public MainWindow()
         : this(CommandLineOptions.Empty, AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty))
@@ -151,11 +129,9 @@ public partial class MainWindow : Window
     private readonly IElevationService _elevation;
     private readonly IAppInstanceLauncher _appInstanceLauncher;
     private readonly UserSettingsStore _userSettingsStore;
-    private readonly IProjectProfileStore _projectProfileStore;
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
-    private readonly IFileContentAnalyzer _fileContentAnalyzer;
     private readonly RecentProjectsStore _recentProjectsStore;
 
     private readonly MainWindowViewModel _viewModel;
@@ -163,9 +139,19 @@ public partial class MainWindow : Window
     private readonly NameFilterCoordinator _filterCoordinator;
     private readonly ThemeBrushCoordinator _themeBrushCoordinator;
     private readonly SelectionSyncCoordinator _selectionCoordinator;
+    private readonly StatusOperationCoordinator _statusOperations;
+    private readonly MetricsPipeline _metrics;
+    private readonly ProjectLoadPipeline _projectLoadPipeline;
+    private readonly ProjectLoadSnapshotPipeline _projectLoadSnapshotPipeline;
+    private readonly PreviewWorkspacePipeline _previewPipeline;
+    private readonly RefreshTreePipeline _refreshPipeline;
+    private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
+    private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
+    private readonly TaskbarProgressCoordinator _taskbarProgress;
 
     private BuildTreeResult? _currentTree;
     private BuildTreeResult? _filterBaseTree;
+    private ProjectTreeInventoryState? _currentTreeInventory;
     private TreeNodeDescriptor? _lastInteractiveFilteredRoot;
     private TreeNodeDescriptor? _lastInteractiveFilterBaseRoot;
     private string? _lastInteractiveFilterQuery;
@@ -173,10 +159,12 @@ public partial class MainWindow : Window
     private readonly LinkedList<string> _interactiveFilterQueryCacheLru = [];
     private readonly Dictionary<string, LinkedListNode<string>> _interactiveFilterQueryCacheNodes = new(StringComparer.OrdinalIgnoreCase);
     private const int InteractiveFilterQueryCacheLimit = 8;
+    // Advanced ignore counts are always part of the ignore-options UX now. The old
+    // persisted toggle is normalized to true so legacy settings cannot hide counts.
+    private const bool AdvancedIgnoreCountsAlwaysEnabled = true;
     private string? _currentPath;
     private string? _currentProjectDisplayName;
     private string? _currentRepositoryUrl;
-    private bool _isAdvancedIgnoreCountsEnabled;
     private string? _cachedPathPresentationProjectPath;
     private string? _cachedPathPresentationRepositoryUrl;
     private ExportPathPresentation? _cachedPathPresentation;
@@ -224,17 +212,15 @@ public partial class MainWindow : Window
     private int _filterApplyVersion;
     private SuspendedTreeToolMode _previewOnlySuspendedTreeToolMode;
     private CancellationTokenSource? _projectOperationCts;
-    private CancellationTokenSource? _refreshCts;
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
-    private bool _projectProfilePersistencePending;
-    private string? _lastPersistedProjectProfilePath;
-    private ProjectSelectionProfile? _lastPersistedProjectProfile;
-    private DateTimeOffset _lastPersistedProjectProfileUpdatedUtc;
     private Border? _dropZoneContainer;
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    private ProjectLoadTiming? _projectLoadTiming;
+#endif
 
     // Settings panel animation
     private Border? _settingsContainer;
@@ -318,21 +304,15 @@ public partial class MainWindow : Window
     private PreviewToolbarLayoutMode _previewToolbarLayoutMode = PreviewToolbarLayoutMode.Wide;
 
     // Preview generation
-    private CancellationTokenSource? _previewBuildCts;
-    private DispatcherTimer? _previewDebounceTimer;
-    private int _previewBuildVersion;
-    private volatile bool _previewRefreshRequested;
     private bool _previewScrollSyncActive;
     private CancellationTokenSource? _previewMemoryCleanupCts;
     private int _previewMemoryCleanupVersion;
     private CancellationTokenSource? _searchMemoryCleanupCts;
     private int _searchMemoryCleanupVersion;
     private CancellationTokenSource? _backgroundMemoryCleanupCts;
-    private PreviewCacheKeyData? _cachedPreviewKey;
     private CancellationTokenSource? _previewModeSwitchCts;
     private int _previewModeSwitchVersion;
     private bool _previewModeSwitchInProgress;
-    private bool _clearPreviewBeforeNextRefresh;
     private bool _previewFontInitialized;
     private int _suppressSearchFilterRealtimeDepth;
     private static readonly int TreeViewModelBuildParallelism =
@@ -340,66 +320,32 @@ public partial class MainWindow : Window
     private const int TreeViewModelParallelChildrenThreshold = 24;
 
     // Real-time metrics calculation
-    private readonly object _metricsLock = new();
-    private readonly object _metricsComputationCacheLock = new();
-    private CancellationTokenSource? _metricsCalculationCts;
-    private DispatcherTimer? _metricsDebounceTimer;
     private CancellationTokenSource? _previewSelectionMetricsCts;
     private DispatcherTimer? _previewSelectionMetricsDebounceTimer;
 
-    private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(PathComparer.Default);
-    private readonly HashSet<string> _inspectedFileMetricsPaths = new(PathComparer.Default);
-    private volatile bool _isBackgroundMetricsActive;
-    private int _metricsRecalcVersion;
     private int _previewSelectionMetricsVersion;
-    private const double CompactStatusMetricsThresholdWidth = 1050;
     private static readonly TimeSpan PreviewSelectionMetricsDebounceInterval = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80));
-    private int _lastStatusTreeLines;
-    private int _lastStatusTreeChars;
-    private int _lastStatusTreeTokens;
-    private int _lastStatusContentLines;
-    private int _lastStatusContentChars;
-    private int _lastStatusContentTokens;
-    private bool _hasStatusMetricsSnapshot;
     private ExportOutputMetrics _lastPreviewSelectionMetrics = ExportOutputMetrics.Empty;
     private bool _hasPreviewSelectionMetricsSnapshot;
-    private CancellationTokenSource? _recalculateMetricsCts;
-    private bool _hasTreeMetricsCache;
-    private TreeMetricsCacheKey _treeMetricsCacheKey;
-    private ExportOutputMetrics _treeMetricsCacheValue = ExportOutputMetrics.Empty;
-    private bool _hasContentMetricsCache;
-    private ContentMetricsCacheKey _contentMetricsCacheKey;
-    private ExportOutputMetrics _contentMetricsCacheValue = ExportOutputMetrics.Empty;
-    private int _allOrderedFilePathsTreeIdentity;
-    private IReadOnlyList<string>? _allOrderedFilePathsCache;
-    private long _statusOperationSequence;
-    private readonly object _statusOperationLock = new();
-    private long _activeStatusOperationId;
-    private StatusOperationType _activeStatusOperationType;
-    private Action? _activeStatusCancelAction;
-    private bool _metricsCancellationRequestedByUser;
-    private volatile bool _hasCompleteMetricsBaseline;
-    private ProjectLoadCancellationSnapshot? _activeProjectLoadCancellationSnapshot;
-    private static readonly FrozenSet<string> MetricsWarmupBinaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
-        ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
-        ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
-        ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
-        ".exe", ".dll", ".so", ".dylib", ".pdb", ".ilk",
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".ttf", ".otf", ".woff", ".woff2", ".eot",
-        ".bin", ".dat", ".db", ".sqlite", ".mdb"
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
     private EventHandler? _themeChangedHandler;
     private PropertyChangedEventHandler? _viewModelPropertyChangedHandler;
 
-    public MainWindow(CommandLineOptions startupOptions, AvaloniaAppServices services)
+    private readonly IReadOnlyList<CommandLineParseError> _startupCommandLineErrors;
+    private readonly ProjectAnalysisService _projectAnalysisService;
+    private readonly ReportPathResolver _reportPathResolver;
+    private readonly ProjectAnalysisReportWriter _projectAnalysisReportWriter;
+    private readonly ITerminalCommandSetupService _terminalCommandSetupService;
+
+    public MainWindow(
+        CommandLineOptions startupOptions,
+        AvaloniaAppServices services,
+        IReadOnlyList<CommandLineParseError>? startupCommandLineErrors = null)
     {
         _startupOptions = startupOptions;
+        _startupCommandLineErrors = startupCommandLineErrors ?? [];
         _localization = services.Localization;
         _scanOptions = services.ScanOptionsUseCase;
         _buildTree = services.BuildTreeUseCase;
@@ -417,14 +363,55 @@ public partial class MainWindow : Window
         _elevation = services.Elevation;
         _appInstanceLauncher = services.AppInstanceLauncher;
         _userSettingsStore = services.UserSettingsStore;
-        _projectProfileStore = services.ProjectProfileStore;
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
-        _fileContentAnalyzer = services.FileContentAnalyzer;
+        _projectAnalysisService = services.ProjectAnalysisService;
+        _reportPathResolver = services.ReportPathResolver;
+        _projectAnalysisReportWriter = services.ProjectAnalysisReportWriter;
+        _terminalCommandSetupService = services.TerminalCommandSetupService;
         _recentProjectsStore = services.RecentProjectsStore;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
+        _statusOperations = new StatusOperationCoordinator(
+            _viewModel,
+            IsBackgroundMetricsActive,
+            () => _viewModel.StatusOperationCalculatingData);
+        _metrics = new MetricsPipeline(
+            _viewModel,
+            _localization,
+            services.FileContentAnalyzer,
+            _treeExport,
+            _statusOperations,
+            () => _currentTree,
+            () => _currentPath,
+            GetCheckedPaths,
+            GetCurrentTreeTextFormat,
+            CreateExportPathPresentation,
+            () => Bounds.Width);
+        _previewPipeline = new PreviewWorkspacePipeline(
+            this,
+            // 350ms delay ensures thumb animation (250ms) completes fully before loading.
+            UiTimingProfile.Scale(TimeSpan.FromMilliseconds(350)));
+        _refreshPipeline = new RefreshTreePipeline(this);
+        _selectionCoordinator = new SelectionSyncCoordinator(
+            _viewModel,
+            _scanOptions,
+            _filterSelectionService,
+            _ignoreOptionsService,
+            BuildIgnoreRules,
+            GetIgnoreOptionsAvailability,
+            TryElevateAndRestart,
+            () => _currentPath);
+        _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
+        _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
+        _projectProfiles = new ProjectProfilePersistenceCoordinator(
+            _viewModel,
+            _selectionCoordinator,
+            services.ProjectProfileStore);
+        _taskbarProgress = new TaskbarProgressCoordinator(
+            _viewModel,
+            services.TaskbarProgressService);
         _viewModel.SetToastItems(_toastService.Items);
         EnsureAppStateStoresExist();
         LoadRecentProjects();
@@ -440,8 +427,6 @@ public partial class MainWindow : Window
             _dropZoneContainer.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
             _dropZoneContainer.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
             _dropZoneContainer.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
-            // Start with animation class since no project is loaded initially
-            _dropZoneContainer.Classes.Add("drop-zone-animating");
         }
 
         InitializeUserSettings();
@@ -489,7 +474,9 @@ public partial class MainWindow : Window
         _previewTextControl = this.FindControl<VirtualizedPreviewTextControl>("PreviewTextControl");
         _previewLineNumbersControl = this.FindControl<VirtualizedLineNumbersControl>("PreviewLineNumbersControl");
         AttachRecentMenuHandlers();
+        AttachTreeFontMenuHandlers();
         RefreshRecentFoldersMenu();
+        RefreshLanguageMenuChecks();
         if (_treePaneSnapshotImage is not null)
         {
             _treePaneSnapshotTransform = _treePaneSnapshotImage.RenderTransform as TranslateTransform ?? new TranslateTransform();
@@ -580,16 +567,6 @@ public partial class MainWindow : Window
             () => !string.IsNullOrWhiteSpace(_viewModel.NameFilter),
             _viewModel.SetFilterInProgress);
         _themeBrushCoordinator = new ThemeBrushCoordinator(this, _viewModel, () => _topMenuBar?.MainMenuControl);
-        _selectionCoordinator = new SelectionSyncCoordinator(
-            _viewModel,
-            _scanOptions,
-            _filterSelectionService,
-            _ignoreOptionsService,
-            BuildIgnoreRules,
-            GetIgnoreOptionsAvailability,
-            TryElevateAndRestart,
-            () => _currentPath);
-
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
@@ -608,6 +585,7 @@ public partial class MainWindow : Window
         }
 
         InitializeFonts();
+        RefreshTreeFontMenu();
         _selectionCoordinator.HookOptionListeners(_viewModel.RootFolders);
         _selectionCoordinator.HookOptionListeners(_viewModel.Extensions);
         _selectionCoordinator.HookIgnoreListeners(_viewModel.IgnoreOptions);
@@ -635,11 +613,13 @@ public partial class MainWindow : Window
                 _themeBrushCoordinator.UpdateTransparencyEffect();
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
-            else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
-                UpdateDropZoneFloatAnimationState();
+            else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
+                     or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
+                     or nameof(MainWindowViewModel.StatusProgressValue))
+                _taskbarProgress.SyncWithStatusBar();
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
             {
-                RecalculateMetricsAsync(); // Update tree metrics when format changes (ASCII vs JSON)
+                _metrics.Recalculate(); // Update tree metrics when format changes (ASCII vs JSON)
                 InvalidatePreviewCache();
                 SchedulePreviewRefresh();
             }
@@ -651,8 +631,10 @@ public partial class MainWindow : Window
             else if (args.PropertyName is nameof(MainWindowViewModel.PreviewFontSize)
                      or nameof(MainWindowViewModel.SelectedFontFamily))
             {
-                Dispatcher.UIThread.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
+                Dispatcher.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
             }
+            else if (args.PropertyName == nameof(MainWindowViewModel.PendingFontFamily))
+                RefreshTreeFontMenu();
             else if (args.PropertyName is nameof(MainWindowViewModel.TreeItemSpacing)
                      or nameof(MainWindowViewModel.TreeItemPadding)
                      or nameof(MainWindowViewModel.TreeIconSize)
@@ -673,6 +655,7 @@ public partial class MainWindow : Window
 
         // Hook menu item submenu opening to apply brushes directly
         AddHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened, RoutingStrategies.Bubble);
+        AddHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened, RoutingStrategies.Bubble);
     }
 
     private void EnsureAppStateStoresExist()
@@ -683,7 +666,7 @@ public partial class MainWindow : Window
             // recover from partial external cleanup without waiting for a later save path.
             _userSettingsStore.EnsureStorageExists();
             _recentProjectsStore.EnsureStorageExists();
-            _projectProfileStore.EnsureStorageExists();
+            _projectProfiles.EnsureStorageExists();
         }
         catch
         {
@@ -736,11 +719,14 @@ public partial class MainWindow : Window
             _previewBar.SizeChanged -= OnPreviewBarSizeChanged;
         if (_settingsPanel is not null)
             _settingsPanel.MinimumWidthChanged -= OnSettingsPanelMinimumWidthChanged;
+        DetachRecentMenuHandlers();
+        DetachTreeFontMenuHandlers();
 
         // Unsubscribe from tunneled/bubbled events
         RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
         RemoveHandler(KeyDownEvent, OnKeyDown);
         RemoveHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened);
+        RemoveHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened);
 
         // Unsubscribe from window lifecycle events
         Opened -= OnOpened;
@@ -748,39 +734,7 @@ public partial class MainWindow : Window
         Activated -= OnActivated;
         Deactivated -= OnDeactivated;
 
-        // Cancel metrics calculation
-        _metricsCalculationCts?.Cancel();
-        _metricsCalculationCts?.Dispose();
-        _recalculateMetricsCts?.Cancel();
-        _recalculateMetricsCts?.Dispose();
-        // Properly clean up debounce timers
-        if (_metricsDebounceTimer is not null)
-        {
-            _metricsDebounceTimer.Stop();
-            _metricsDebounceTimer.Tick -= OnMetricsDebounceTimerTick;
-        }
-        CancelBackgroundMemoryCleanup();
-        _previewSelectionMetricsCts?.Cancel();
-        _previewSelectionMetricsCts?.Dispose();
-        if (_previewSelectionMetricsDebounceTimer is not null)
-        {
-            _previewSelectionMetricsDebounceTimer.Stop();
-            _previewSelectionMetricsDebounceTimer.Tick -= OnPreviewSelectionMetricsDebounceTick;
-        }
-
-        _previewBuildCts?.Cancel();
-        _previewBuildCts?.Dispose();
-        if (_previewDebounceTimer is not null)
-        {
-            _previewDebounceTimer.Stop();
-            _previewDebounceTimer.Tick -= OnPreviewDebounceTick;
-        }
-        _previewMemoryCleanupCts?.Cancel();
-        _previewMemoryCleanupCts?.Dispose();
-        _searchMemoryCleanupCts?.Cancel();
-        _searchMemoryCleanupCts?.Dispose();
-        _previewModeSwitchCts?.Cancel();
-        _previewModeSwitchCts?.Dispose();
+        CancelAndDisposeWindowOperations();
 
         // Dispose coordinators
         _searchCoordinator.Dispose();
@@ -790,18 +744,6 @@ public partial class MainWindow : Window
 
         // Dispose ViewModel to clean up collection event handlers
         _viewModel.Dispose();
-
-        // Cancel and dispose refresh token
-        _projectOperationCts?.Cancel();
-        _projectOperationCts?.Dispose();
-        _refreshCts?.Cancel();
-        _refreshCts?.Dispose();
-
-        // Cancel and dispose git clone token
-        _gitCloneCts?.Cancel();
-        _gitCloneCts?.Dispose();
-        _gitOperationCts?.Cancel();
-        _gitOperationCts?.Dispose();
 
         // Dispose icon cache to release bitmap resources
         _iconCache.Dispose();
@@ -816,40 +758,30 @@ public partial class MainWindow : Window
         _viewModel.TreeNodes.Clear();
         _currentTree = null;
         _filterBaseTree = null;
+        _currentTreeInventory = null;
         _filterExpansionSnapshot = null;
         _previewOnlySuspendedTreeToolMode = SuspendedTreeToolMode.None;
         ResetPreviewTreePaneVisualState();
         ResetInteractiveFilterCache();
-        InvalidateComputedMetricsCaches();
+        _metrics.InvalidateComputedCaches();
 
         // Clear file metrics cache
-        ClearFileMetricsCache(trimCapacity: true);
+        _metrics.ClearFileMetricsCache(trimCapacity: true);
 
         // Clean up repository cache on exit
         _repoCacheService.ClearAllCache();
+
+        _taskbarProgress.Dispose();
 
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
             disposable.Dispose();
     }
 
-    private void UpdateDropZoneFloatAnimationState()
-    {
-        if (_viewModel.IsProjectLoaded)
-        {
-            // Remove animation class to stop drop-zone animations when project is loaded.
-            _dropZoneContainer?.Classes.Remove("drop-zone-animating");
-            return;
-        }
-
-        // Add animation class to enable drop-zone animations.
-        _dropZoneContainer?.Classes.Add("drop-zone-animating");
-    }
-
     private void OnThemeChanged(object? sender, EventArgs e)
     {
         // Defer update to let theme resources settle first
-        Dispatcher.UIThread.Post(
+        Dispatcher.Post(
             RefreshThemeHighlightsForActiveQuery,
             DispatcherPriority.Background);
     }
@@ -881,8 +813,8 @@ public partial class MainWindow : Window
             ClampSettingsPanelWidthToAvailableSpace(applyToVisual: ShouldApplySettingsPanelWidthToVisual());
             UpdatePreviewSettingsSplitterState();
             UpdateAdaptiveWorkspaceChrome();
-            if (_hasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
-                RenderStatusBarMetrics();
+            if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+                _metrics.RenderStatusBarMetrics();
             if (_hasPreviewSelectionMetricsSnapshot)
                 RenderPreviewSelectionMetrics();
             if (_viewModel.IsAnyPreviewVisible && !_previewModeSwitchInProgress)
@@ -948,9 +880,9 @@ public partial class MainWindow : Window
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+        await YieldUiAsync(DispatcherPriority.Background);
         cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
         cancellationToken.ThrowIfCancellationRequested();
 
         // The first frame after a native picker closes is often the focus/activation handoff frame.
@@ -961,20 +893,41 @@ public partial class MainWindow : Window
     private static async Task YieldProjectLoadStartupFrameAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+        await YieldUiAsync(DispatcherPriority.Background);
         cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
     }
 
     private async void OnOpened(object? sender, EventArgs e)
     {
         try
         {
+            _taskbarProgress.Attach(this);
+
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
             ApplyStartupThemePreset();
 
+            if (_startupCommandLineErrors.Count > 0)
+            {
+                await ShowErrorAsync(string.Join(Environment.NewLine, _startupCommandLineErrors.Select(static error => error.Message)));
+            }
+
             if (!string.IsNullOrWhiteSpace(_startupOptions.Path))
-                await TryOpenFolderAsync(_startupOptions.Path!, fromDialog: false);
+            {
+                var startupLoadStopwatch = Stopwatch.StartNew();
+                var opened = await TryOpenFolderAsync(_startupOptions.Path!, fromDialog: false);
+                startupLoadStopwatch.Stop();
+
+                if (opened)
+                {
+                    await TryApplyStartupSelectionOverridesAsync();
+                    await TryWriteStartupReportAsync(startupLoadStopwatch.Elapsed);
+                }
+            }
+            else
+            {
+                await TryShowAutomaticTerminalCommandPromptAsync();
+            }
 
             // Clean up stale cache from previous sessions (non-blocking background task)
             _ = Task.Run(() =>
@@ -1131,10 +1084,8 @@ public partial class MainWindow : Window
 
     private void ApplyViewSettings(AppViewSettings settings)
     {
-        _isAdvancedIgnoreCountsEnabled = settings.IsAdvancedIgnoreCountsEnabled;
         _viewModel.IsCompactMode = settings.IsCompactMode;
         _viewModel.IsTreeAnimationEnabled = settings.IsTreeAnimationEnabled;
-        _viewModel.IsAdvancedIgnoreCountsEnabled = _isAdvancedIgnoreCountsEnabled;
 
         UpdateCompactModeVisualState();
 
@@ -1996,7 +1947,7 @@ public partial class MainWindow : Window
             return;
 
         _workspaceChromeRefreshPending = true;
-        Dispatcher.UIThread.Post(
+        Dispatcher.Post(
             () =>
             {
                 _workspaceChromeRefreshPending = false;
@@ -2072,7 +2023,8 @@ public partial class MainWindow : Window
         {
             IsCompactMode = _viewModel.IsCompactMode,
             IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled,
-            IsAdvancedIgnoreCountsEnabled = _isAdvancedIgnoreCountsEnabled,
+            IsAdvancedIgnoreCountsEnabled = AdvancedIgnoreCountsAlwaysEnabled,
+            IsTerminalCommandPromptDismissed = _userSettingsDb.ViewSettings?.IsTerminalCommandPromptDismissed ?? false,
             PreferredLanguage = _userSettingsDb.ViewSettings?.PreferredLanguage
         };
 
@@ -2160,8 +2112,10 @@ public partial class MainWindow : Window
     {
         _viewModel.UpdateLocalization();
         _settingsPanel?.RequestMinimumWidthRefresh();
+        RefreshTreeFontMenu();
+        RefreshLanguageMenuChecks();
         UpdatePreviewToolbarPresentation(forceRefreshContent: true);
-        RecalculateMetricsAsync(); // Update metrics text with new localization
+        _metrics.Recalculate(); // Update metrics text with new localization
         if (_hasPreviewSelectionMetricsSnapshot)
             RenderPreviewSelectionMetrics();
         if (_viewModel.IsAnyPreviewVisible)
@@ -2227,19 +2181,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnTreeNodeCheckBoxTapped(object? sender, TappedEventArgs e)
-    {
-        // TreeViewItem reacts to routed tap gestures as part of its own selection/expand behavior.
-        // Mark the checkbox gesture as handled after the checkbox processed it so branch toggles
-        // never reinterpret rapid checkbox clicks as expand/collapse requests.
-        e.Handled = true;
-    }
-
-    private void OnTreeNodeCheckBoxDoubleTapped(object? sender, TappedEventArgs e)
-    {
-        e.Handled = true;
-    }
-
     private async void OnOpenNewWindow(object? sender, RoutedEventArgs e)
     {
         var launchResult = _appInstanceLauncher.LaunchNewInstance();
@@ -2258,7 +2199,7 @@ public partial class MainWindow : Window
         CancelPreviewRefresh();
         var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = refreshCts.Token;
-        var statusOperationId = BeginStatusOperation(
+        var statusOperationId = _statusOperations.Begin(
             _viewModel.StatusOperationRefreshingProject,
             indeterminate: true,
             operationType: StatusOperationType.RefreshProject,
@@ -2266,18 +2207,18 @@ public partial class MainWindow : Window
         try
         {
             await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.RefreshProject);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
         finally
@@ -2315,7 +2256,7 @@ public partial class MainWindow : Window
             if (!EnsureTreeReady()) return;
 
             // Cancel background metrics calculation - user wants immediate action
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
 
             var selected = GetCheckedPaths();
             var files = BuildOrderedUniqueFilePaths(selected);
@@ -2330,7 +2271,7 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
-            statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin("Preparing content...", indeterminate: true);
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2338,18 +2279,18 @@ public partial class MainWindow : Window
                 pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
             await SetClipboardTextAsync(content);
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2362,13 +2303,13 @@ public partial class MainWindow : Window
             if (!EnsureTreeReady()) return;
 
             // Cancel background metrics calculation - user wants immediate action
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
 
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
             // Run file reading off UI thread
-            statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2378,12 +2319,12 @@ public partial class MainWindow : Window
                     CancellationToken.None,
                     pathPresentation));
             await SetClipboardTextAsync(content);
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2422,7 +2363,7 @@ public partial class MainWindow : Window
         {
             if (!EnsureTreeReady()) return;
 
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
 
             var selected = GetCheckedPaths();
             var files = BuildOrderedUniqueFilePaths(selected);
@@ -2436,7 +2377,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            statusOperationId = BeginStatusOperation("Preparing content...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin("Preparing content...", indeterminate: true);
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2444,7 +2385,7 @@ public partial class MainWindow : Window
                 pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
@@ -2456,13 +2397,13 @@ public partial class MainWindow : Window
                 useJsonDefaultExtension: false,
                 allowBothExtensions: false);
 
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             if (saved)
                 _toastService.Show(_localization["Toast.Export.Content"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2474,14 +2415,14 @@ public partial class MainWindow : Window
         {
             if (!EnsureTreeReady()) return;
 
-            CancelBackgroundMetricsCalculation();
+            _metrics.CancelBackgroundCalculation();
 
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
             var saveAsJson = false;
             var pathPresentation = CreateExportPathPresentation();
 
-            statusOperationId = BeginStatusOperation("Building export...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2498,13 +2439,13 @@ public partial class MainWindow : Window
                 useJsonDefaultExtension: false,
                 allowBothExtensions: false);
 
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             if (saved)
                 _toastService.Show(_localization["Toast.Export.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2599,45 +2540,12 @@ public partial class MainWindow : Window
 
     private void SchedulePreviewRefresh(bool immediate = false)
     {
-        _previewRefreshRequested = true;
-
-        if (!_viewModel.IsProjectLoaded || !_viewModel.IsAnyPreviewVisible)
-            return;
-
-        if (immediate)
-        {
-            _previewDebounceTimer?.Stop();
-            _ = RefreshPreviewAsync();
-            return;
-        }
-
-        if (_previewDebounceTimer is null)
-        {
-            _previewDebounceTimer = new DispatcherTimer
-            {
-                // 350ms delay ensures thumb animation (250ms) completes fully before loading
-                Interval = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(350))
-            };
-            _previewDebounceTimer.Tick += OnPreviewDebounceTick;
-        }
-
-        _previewDebounceTimer.Stop();
-        _previewDebounceTimer.Start();
+        _previewPipeline.ScheduleRefresh(immediate);
     }
 
     private void CancelPreviewRefresh()
     {
-        _previewRefreshRequested = false;
-        _previewDebounceTimer?.Stop();
-        _previewBuildCts?.Cancel();
-        _clearPreviewBeforeNextRefresh = false;
-        _viewModel.IsPreviewLoading = false;
-    }
-
-    private void OnPreviewDebounceTick(object? sender, EventArgs e)
-    {
-        _previewDebounceTimer?.Stop();
-        _ = RefreshPreviewAsync();
+        _previewPipeline.CancelRefresh();
     }
 
     private void OnPreviewTextScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -2664,17 +2572,17 @@ public partial class MainWindow : Window
 
         var targetY = textScrollViewer.Offset.Y;
         var currentY = _previewLineNumbersControl.VerticalOffset;
-        if (Math.Abs(currentY - targetY) < 0.1)
-            return;
-
-        try
+        if (Math.Abs(currentY - targetY) >= 0.1)
         {
-            _previewScrollSyncActive = true;
-            _previewLineNumbersControl.VerticalOffset = targetY;
-        }
-        finally
-        {
-            _previewScrollSyncActive = false;
+            try
+            {
+                _previewScrollSyncActive = true;
+                _previewLineNumbersControl.VerticalOffset = targetY;
+            }
+            finally
+            {
+                _previewScrollSyncActive = false;
+            }
         }
 
         UpdatePreviewStickyPath();
@@ -2696,6 +2604,8 @@ public partial class MainWindow : Window
 
         if (_previewStickyHeaderCap is not null)
             _previewStickyHeaderCap.IsVisible = true;
+
+        SetPreviewStickyHeaderClipHeight(ResolvePreviewStickyHeaderOverlayHeight());
 
         if (_previewTextControl is not null)
         {
@@ -2810,7 +2720,7 @@ public partial class MainWindow : Window
                _viewModel.IsPreviewLoading &&
                stopwatch.Elapsed < timeout)
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await YieldUiAsync(DispatcherPriority.Background);
             await Task.Delay(15).ConfigureAwait(true);
         }
 
@@ -2820,42 +2730,11 @@ public partial class MainWindow : Window
 
     private void ApplyPreviewToolTipBackdrop(ToolTip toolTip)
     {
-        if (toolTip.GetVisualRoot() is null)
-            return;
-
-        if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
-            return;
-
-        var host = TopLevel.GetTopLevel(this);
-        if (host is not null && ReferenceEquals(tooltipLevel, host))
-            return;
-
-        try
-        {
-            if (_viewModel.HasAnyEffect)
-            {
-                tooltipLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.Transparent,
-                    WindowTransparencyLevel.None
-                ];
-
-                tooltipLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                tooltipLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: tooltip could have closed before the backdrop was applied.
-        }
+        PopupBackdropConfigurator.TryApply(
+            toolTip,
+            GetTopLevel(this),
+            _viewModel.HasAnyEffect,
+            PopupBackdropTransparencyFallback.Transparent);
     }
 
     private void HidePreviewStickyPath()
@@ -2869,6 +2748,8 @@ public partial class MainWindow : Window
         if (_previewStickyHeaderCap is not null)
             _previewStickyHeaderCap.IsVisible = false;
 
+        SetPreviewStickyHeaderClipHeight(0);
+
         if (_previewTextControl is not null)
         {
             _previewTextControl.StickyHeaderReserved = false;
@@ -2881,6 +2762,23 @@ public partial class MainWindow : Window
             _previewLineNumbersControl.StickyHeaderReserved = false;
             _previewLineNumbersControl.StickyHeaderVisible = false;
         }
+    }
+
+    private void SetPreviewStickyHeaderClipHeight(double height)
+    {
+        var normalizedHeight = Math.Max(0, height);
+
+        if (_previewTextControl is not null)
+            _previewTextControl.TopOverlayClipHeight = normalizedHeight;
+
+        if (_previewLineNumbersControl is not null)
+            _previewLineNumbersControl.TopOverlayClipHeight = normalizedHeight;
+    }
+
+    private double ResolvePreviewStickyHeaderOverlayHeight()
+    {
+        var fontSize = _previewTextControl?.TextFontSize ?? _viewModel.PreviewFontSize;
+        return Math.Max(24.0, Math.Ceiling(fontSize + 12.0));
     }
 
     private void OnPreviewScrollViewerPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -2930,152 +2828,6 @@ public partial class MainWindow : Window
     private void OnPreviewSelectionChanged(object? sender, EventArgs e)
     {
         SchedulePreviewSelectionMetricsUpdate();
-    }
-
-    private async Task RefreshPreviewAsync()
-    {
-        if (!_previewRefreshRequested || !_viewModel.IsProjectLoaded || !_viewModel.IsAnyPreviewVisible)
-            return;
-        if (_previewModeSwitchInProgress)
-            return;
-
-        if (!EnsureTreeReady())
-        {
-            ApplyPreviewText(_viewModel.PreviewNoDataText);
-            _previewRefreshRequested = false;
-            SchedulePreviewMemoryCleanup(force: false);
-            return;
-        }
-
-        var previewCts = ReplaceCancellationSource(ref _previewBuildCts);
-        var cancellationToken = previewCts.Token;
-        var buildVersion = Interlocked.Increment(ref _previewBuildVersion);
-        _viewModel.IsPreviewLoading = true;
-
-        // Show progress bar immediately with cancel support
-        var operationId = BeginStatusOperation(
-            _viewModel.StatusOperationPreparingPreview,
-            indeterminate: true,
-            operationType: StatusOperationType.PreviewBuild,
-            cancelAction: () =>
-            {
-                previewCts.Cancel();
-                _toastService.Show(_viewModel.ToastPreviewCanceled);
-            });
-
-        try
-        {
-            if (_clearPreviewBeforeNextRefresh)
-            {
-                // Keep old content visible during thumb animation and clear it only
-                // after preview progress becomes visible for a smoother sequence.
-                ClearPreviewDocument();
-                _clearPreviewBeforeNextRefresh = false;
-            }
-
-            // Capture state on UI thread before background work
-            var selectedPaths = GetCheckedPaths();
-            var selectedMode = _viewModel.SelectedPreviewContentMode;
-            var treeFormat = GetCurrentTreeTextFormat();
-            var hasSelection = selectedPaths.Count > 0;
-            var noCheckedFilesText = _localization["Msg.NoCheckedFilesShort"];
-            var noTextContentText = _localization["Msg.NoTextContent"];
-            var currentPath = _currentPath;
-            var currentTreeRoot = _currentTree?.Root;
-            var noDataText = _viewModel.PreviewNoDataText;
-            var pathPresentation = CreateExportPathPresentation();
-            var previewKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
-                projectPath: currentPath,
-                treeRoot: currentTreeRoot,
-                mode: selectedMode,
-                treeFormat: treeFormat,
-                selectedPaths: selectedPaths);
-
-            if (IsCurrentPreviewCacheHit(previewKey) && _viewModel.PreviewDocument is { } currentPreviewDocument)
-            {
-                if (buildVersion == Volatile.Read(ref _previewBuildVersion))
-                {
-                    ApplyPreviewDocument(currentPreviewDocument);
-                    _previewRefreshRequested = false;
-                    SchedulePreviewMemoryCleanup(
-                        force: PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
-                            currentPreviewDocument.CharacterCount,
-                            currentPreviewDocument.LineCount));
-                }
-
-                return;
-            }
-
-            var warmupSnapshot = await TryBuildPreviewWarmupSnapshotAsync(
-                mode: selectedMode,
-                treeFormat: treeFormat,
-                hasSelection: hasSelection,
-                selectedPaths: selectedPaths,
-                currentPath: currentPath,
-                currentTreeRoot: currentTreeRoot,
-                pathPresentation: pathPresentation,
-                noTextContentText: noTextContentText,
-                noCheckedFilesText: noCheckedFilesText,
-                cancellationToken: cancellationToken);
-
-            if (warmupSnapshot is { } warmup &&
-                buildVersion == Volatile.Read(ref _previewBuildVersion))
-            {
-                ApplyPreviewText(warmup.Text, warmup.LineCount);
-            }
-
-            // Run all heavy work in background thread
-            var previewResult = await Task.Run(() =>
-                BuildPreviewDocument(
-                    selectedMode,
-                    selectedPaths,
-                    hasSelection,
-                    treeFormat,
-                    noCheckedFilesText,
-                    noTextContentText,
-                    noDataText,
-                    currentPath,
-                    currentTreeRoot,
-                    pathPresentation,
-                    cancellationToken),
-                cancellationToken);
-
-            if (buildVersion != Volatile.Read(ref _previewBuildVersion))
-            {
-                previewResult.Document.Dispose();
-                return;
-            }
-
-            CachePreview(previewKey);
-            ApplyPreviewDocument(previewResult.Document);
-            _previewRefreshRequested = false;
-            SchedulePreviewMemoryCleanup(force: PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
-                previewResult.Document.CharacterCount,
-                previewResult.Document.LineCount));
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Ignore stale preview builds.
-        }
-        catch (Exception ex)
-        {
-            if (buildVersion == Volatile.Read(ref _previewBuildVersion))
-            {
-                InvalidatePreviewCache();
-                ApplyPreviewText(ex.Message);
-                SchedulePreviewMemoryCleanup(force: false);
-            }
-        }
-        finally
-        {
-            if (buildVersion == Volatile.Read(ref _previewBuildVersion))
-                _viewModel.IsPreviewLoading = false;
-
-            // Always hide progress bar
-            CompleteStatusOperation(operationId);
-
-            DisposeIfCurrent(ref _previewBuildCts, previewCts);
-        }
     }
 
     private async Task<PreviewWarmupSnapshot?> TryBuildPreviewWarmupSnapshotAsync(
@@ -3255,7 +3007,7 @@ public partial class MainWindow : Window
             previousDocument?.Dispose();
 
         UpdatePreviewStickyPath();
-        Dispatcher.UIThread.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
+        Dispatcher.Post(UpdatePreviewStickyPath, DispatcherPriority.Render);
     }
 
     private void ClearPreviewDocument()
@@ -3281,6 +3033,7 @@ public partial class MainWindow : Window
         string noDataText,
         string? currentPath,
         TreeNodeDescriptor? currentTreeRoot,
+        IReadOnlyList<string>? currentTreeOrderedFilePaths,
         ExportPathPresentation? pathPresentation,
         CancellationToken cancellationToken)
     {
@@ -3298,7 +3051,7 @@ public partial class MainWindow : Window
                 ? BuildOrderedSelectedFilePaths(currentTreeRoot, selectedPaths)
                 : []
             : currentTreeRoot is not null
-                ? GetOrBuildAllOrderedFilePaths(currentTreeRoot)
+                ? currentTreeOrderedFilePaths ?? _metrics.GetOrBuildAllOrderedFilePaths(currentTreeRoot)
                 : [];
 
         if (selectedMode == PreviewContentMode.Content)
@@ -3397,29 +3150,13 @@ public partial class MainWindow : Window
         PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths);
 
     private bool IsCurrentPreviewCacheHit(PreviewCacheKeyData key)
-        => _cachedPreviewKey == key && _viewModel.PreviewDocument is not null;
+        => _previewPipeline.IsCurrentCacheHit(key, _viewModel.PreviewDocument);
 
-    private void CachePreview(PreviewCacheKeyData key) => _cachedPreviewKey = key;
+    private void CachePreview(PreviewCacheKeyData key) => _previewPipeline.CachePreview(key);
 
     private void InvalidatePreviewCache()
     {
-        _cachedPreviewKey = null;
-    }
-
-    /// <summary>
-    /// Clears computed tree/content metrics caches that depend on current tree snapshot.
-    /// </summary>
-    private void InvalidateComputedMetricsCaches()
-    {
-        lock (_metricsComputationCacheLock)
-        {
-            _hasTreeMetricsCache = false;
-            _treeMetricsCacheValue = ExportOutputMetrics.Empty;
-            _hasContentMetricsCache = false;
-            _contentMetricsCacheValue = ExportOutputMetrics.Empty;
-            _allOrderedFilePathsCache = null;
-            _allOrderedFilePathsTreeIdentity = 0;
-        }
+        _previewPipeline.InvalidateCache();
     }
 
     private static bool ShouldForcePreviewMemoryCleanup(long textLength, int lineCount) =>
@@ -3657,8 +3394,7 @@ public partial class MainWindow : Window
         try
         {
             // Cancel any in-flight preview work so stale content cannot render.
-            CancelPreviewRefresh();
-            Interlocked.Increment(ref _previewBuildVersion);
+            _previewPipeline.CancelActiveBuildAndInvalidate();
 
             _viewModel.SelectedPreviewContentMode = targetMode;
             UpdatePreviewSegmentThumbPosition(animate: true);
@@ -3673,10 +3409,10 @@ public partial class MainWindow : Window
             // RefreshPreviewAsync exits early while switch is still in-progress.
             _previewModeSwitchInProgress = false;
             // Clear preview only when refresh actually starts (after progress is shown).
-            _clearPreviewBeforeNextRefresh = true;
+            _previewPipeline.MarkClearBeforeNextRefresh();
             SchedulePreviewRefresh(immediate: true);
             // Restore keyboard shortcuts to the preview surface after the mode button steals focus.
-            Dispatcher.UIThread.Post(FocusPreviewSurface, DispatcherPriority.Background);
+            Dispatcher.Post(FocusPreviewSurface, DispatcherPriority.Background);
         }
         catch (OperationCanceledException)
         {
@@ -3949,7 +3685,7 @@ public partial class MainWindow : Window
         _previewPaneAnimating = true;
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            await YieldUiAsync(DispatcherPriority.Render);
 
             // Both containers animate as plain width transitions. The live tree stays visible here,
             // which avoids bitmap resampling artifacts during preview open.
@@ -3977,7 +3713,7 @@ public partial class MainWindow : Window
         _previewPaneAnimating = true;
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            await YieldUiAsync(DispatcherPriority.Render);
 
             // Keep the live tree visible during preview close. Preview compact is removed
             // only after the animation completes, so a bitmap snapshot here only adds
@@ -4467,7 +4203,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var topLevel = TopLevel.GetTopLevel(this);
+            var topLevel = GetTopLevel(this);
             var renderScaling = topLevel?.RenderScaling ?? 1.0;
             var pixelWidth = Math.Max(1, (int)Math.Ceiling(size.Width * renderScaling));
             var pixelHeight = Math.Max(1, (int)Math.Ceiling(size.Height * renderScaling));
@@ -4579,7 +4315,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var topLevel = TopLevel.GetTopLevel(this);
+            var topLevel = GetTopLevel(this);
             var renderScaling = topLevel?.RenderScaling ?? 1.0;
             var pixelWidth = Math.Max(1, (int)Math.Ceiling(size.Width * renderScaling));
             var pixelHeight = Math.Max(1, (int)Math.Ceiling(size.Height * renderScaling));
@@ -4652,9 +4388,7 @@ public partial class MainWindow : Window
 
     private bool SuspendPreviewRefreshForTreeHide()
     {
-        var shouldResume = _previewRefreshRequested || _viewModel.IsPreviewLoading;
-        CancelPreviewRefresh();
-        return shouldResume;
+        return _previewPipeline.SuspendForTreeHide();
     }
 
     private void SetPreviewToolbarInteractionSuspended(bool suspended)
@@ -4679,7 +4413,7 @@ public partial class MainWindow : Window
         _settingsAnimating = true;
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            await YieldUiAsync(DispatcherPriority.Render);
 
             EnsureSettingsPanelTransitions();
             _currentSettingsPanelWidth = GetClampedSettingsPanelWidth(_currentSettingsPanelWidth);
@@ -4877,13 +4611,8 @@ public partial class MainWindow : Window
 
     private static async Task WaitForPreviewRenderPassesAsync()
     {
-        await Dispatcher.UIThread.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
-
-        await Dispatcher.UIThread.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
     }
 
     private async void AnimateFilterBar(bool show)
@@ -5119,14 +4848,6 @@ public partial class MainWindow : Window
         SaveCurrentViewSettings();
     }
 
-    private void OnToggleAdvancedIgnoreCounts(object? sender, RoutedEventArgs e)
-    {
-        _isAdvancedIgnoreCountsEnabled = !_isAdvancedIgnoreCountsEnabled;
-        _viewModel.IsAdvancedIgnoreCountsEnabled = _isAdvancedIgnoreCountsEnabled;
-        SaveCurrentViewSettings();
-        _selectionCoordinator.RefreshIgnoreOptionsForCurrentSelection(_currentPath);
-    }
-
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {
         _viewModel.ThemePopoverOpen = !_viewModel.ThemePopoverOpen;
@@ -5206,10 +4927,66 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private async void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await ShowTerminalCommandSetupAsync(_terminalCommandSetupService.Probe(), isAutomaticPrompt: false);
+            e.Handled = true;
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+            e.Handled = true;
+        }
+    }
+
     private void OnHelpClose(object? sender, RoutedEventArgs e)
     {
         _viewModel.HelpDocsPopoverOpen = false;
         e.Handled = true;
+    }
+
+    private async Task ShowTerminalCommandSetupAsync(
+        TerminalCommandSetupSnapshot snapshot,
+        bool isAutomaticPrompt)
+    {
+        var dialogResult = await TerminalCommandSetupDialog.ShowAsync(this, _localization, snapshot, isAutomaticPrompt);
+        if (ShouldPersistTerminalCommandPromptDismissal(dialogResult))
+            SaveTerminalCommandPromptDismissed();
+
+        if (dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair)
+            return;
+
+        var installResult = _terminalCommandSetupService.InstallOrRepair();
+        if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
+        {
+            await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+        }
+    }
+
+    internal static TerminalCommandPostInstallUiAction ResolveTerminalCommandPostInstallUiAction(
+        TerminalCommandInstallResult installResult) =>
+        installResult.Success
+            ? TerminalCommandPostInstallUiAction.None
+            : TerminalCommandPostInstallUiAction.ShowError;
+
+    private void SaveTerminalCommandPromptDismissed()
+    {
+        var current = _userSettingsDb.ViewSettings ?? new AppViewSettings();
+        _userSettingsDb.ViewSettings = current with
+        {
+            IsTerminalCommandPromptDismissed = true
+        };
+        _userSettingsStore.Save(_userSettingsDb);
+    }
+
+    internal static bool ShouldPersistTerminalCommandPromptDismissal(TerminalCommandDialogResult dialogResult)
+    {
+        // Choosing install/repair is not a dismissal. If the install attempt fails,
+        // the next startup should still be allowed to offer setup again.
+        return dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair &&
+               (dialogResult.DontShowAgain || dialogResult.Action == TerminalCommandDialogAction.DismissPrompt);
     }
 
     private async void OnResetSettings(object? sender, RoutedEventArgs e)
@@ -5247,7 +5024,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _projectProfileStore.ClearAllProfiles();
+        _projectProfiles.ClearAllProfiles();
         _toastService.Show(_localization["Toast.Data.Reset"]);
         e.Handled = true;
     }
@@ -5313,6 +5090,12 @@ public partial class MainWindow : Window
             recentMenuItem.SubmenuOpened += OnRecentMenuSubmenuOpened;
     }
 
+    private void DetachRecentMenuHandlers()
+    {
+        if (_topMenuBar?.RecentMenuItemControl is { } recentMenuItem)
+            recentMenuItem.SubmenuOpened -= OnRecentMenuSubmenuOpened;
+    }
+
     private void OnRecentMenuSubmenuOpened(object? sender, RoutedEventArgs e)
     {
         RefreshRecentFoldersMenu();
@@ -5373,6 +5156,134 @@ public partial class MainWindow : Window
 
     #endregion
 
+    #region Language Menu
+
+    private void RefreshLanguageMenuChecks()
+    {
+        foreach (var (item, language, label) in EnumerateLanguageMenuItems())
+        {
+            if (item is null)
+                continue;
+
+            item.Header = CreateCheckedMenuHeader(_localization.CurrentLanguage == language, label);
+        }
+    }
+
+    private IEnumerable<(MenuItem? Item, AppLanguage Language, string Label)> EnumerateLanguageMenuItems()
+    {
+        var topMenuBar = _topMenuBar;
+        if (topMenuBar is null)
+            yield break;
+
+        yield return (topMenuBar.LanguageRuMenuItemControl, AppLanguage.Ru, "Русский");
+        yield return (topMenuBar.LanguageEnMenuItemControl, AppLanguage.En, "English");
+        yield return (topMenuBar.LanguageUzMenuItemControl, AppLanguage.Uz, "Oʻzbek");
+        yield return (topMenuBar.LanguageTgMenuItemControl, AppLanguage.Tg, "Тоҷикӣ");
+        yield return (topMenuBar.LanguageKkMenuItemControl, AppLanguage.Kk, "Қазақ");
+        yield return (topMenuBar.LanguageFrMenuItemControl, AppLanguage.Fr, "Français");
+        yield return (topMenuBar.LanguageDeMenuItemControl, AppLanguage.De, "Deutsch");
+        yield return (topMenuBar.LanguageItMenuItemControl, AppLanguage.It, "Italiano");
+    }
+
+    private static string CreateCheckedMenuHeader(bool isChecked, string label)
+        => isChecked ? $"✓ {label}" : $"   {label}";
+
+    #endregion
+
+    #region Tree Font Menu
+
+    private void AttachTreeFontMenuHandlers()
+    {
+        if (_topMenuBar?.TreeFontMenuItemControl is { } treeFontMenuItem)
+            treeFontMenuItem.SubmenuOpened += OnTreeFontMenuSubmenuOpened;
+    }
+
+    private void DetachTreeFontMenuHandlers()
+    {
+        if (_topMenuBar?.TreeFontMenuItemControl is { } treeFontMenuItem)
+            treeFontMenuItem.SubmenuOpened -= OnTreeFontMenuSubmenuOpened;
+    }
+
+    private void OnTreeFontMenuSubmenuOpened(object? sender, RoutedEventArgs e)
+    {
+        RefreshTreeFontMenu();
+    }
+
+    private void RefreshTreeFontMenu()
+    {
+        var treeFontMenuItem = _topMenuBar?.TreeFontMenuItemControl;
+        if (treeFontMenuItem is null)
+            return;
+
+        treeFontMenuItem.Items.Clear();
+        foreach (var fontFamily in EnumerateTreeFontMenuFamilies())
+            treeFontMenuItem.Items.Add(CreateTreeFontMenuItem(fontFamily));
+    }
+
+    private IEnumerable<FontFamily> EnumerateTreeFontMenuFamilies()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fontFamily in _viewModel.FontFamilies)
+        {
+            if (seen.Add(GetTreeFontKey(fontFamily)))
+                yield return fontFamily;
+        }
+    }
+
+    private MenuItem CreateTreeFontMenuItem(FontFamily fontFamily)
+    {
+        var displayName = GetTreeFontDisplayName(fontFamily);
+        var item = new MenuItem
+        {
+            Header = CreateCheckedMenuHeader(IsPendingTreeFont(fontFamily), displayName),
+            Tag = fontFamily,
+            MinHeight = TreeFontMenuItemHeight
+        };
+
+        item.Click += OnTreeFontMenuItemClick;
+        return item;
+    }
+
+    private void OnTreeFontMenuItemClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: FontFamily fontFamily })
+            return;
+
+        _viewModel.PendingFontFamily = fontFamily;
+        e.Handled = true;
+    }
+
+    private bool IsPendingTreeFont(FontFamily fontFamily)
+        => AreSameTreeFont(_viewModel.PendingFontFamily, fontFamily);
+
+    private string GetTreeFontDisplayName(FontFamily fontFamily)
+    {
+        if (IsDefaultTreeFont(fontFamily))
+            return _viewModel.SettingsFontDefault;
+
+        var name = fontFamily.Name?.Trim();
+        return string.IsNullOrWhiteSpace(name) ? _viewModel.SettingsFontDefault : name;
+    }
+
+    private static bool AreSameTreeFont(FontFamily? left, FontFamily? right)
+    {
+        if (IsDefaultTreeFont(left) && IsDefaultTreeFont(right))
+            return true;
+
+        return string.Equals(left?.Name, right?.Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetTreeFontKey(FontFamily fontFamily)
+        => IsDefaultTreeFont(fontFamily) ? string.Empty : fontFamily.Name ?? string.Empty;
+
+    private static bool IsDefaultTreeFont(FontFamily? fontFamily)
+    {
+        var name = fontFamily?.Name;
+        return string.IsNullOrWhiteSpace(name) || name.StartsWith("$", StringComparison.Ordinal);
+    }
+
+    #endregion
+
     #region Git Operations
 
     private void OnGitClone(object? sender, RoutedEventArgs e)
@@ -5423,6 +5334,7 @@ public partial class MainWindow : Window
 
         _viewModel.GitCloneInProgress = true;
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
+        _taskbarProgress.BeginGitClone();
 
         string? targetPath = null;
 
@@ -5435,6 +5347,7 @@ public partial class MainWindow : Window
                 _viewModel.GitCloneInProgress = false;
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
+                _taskbarProgress.MarkGitCloneError();
                 await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
                 return;
             }
@@ -5453,8 +5366,10 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.Post(() =>
                 {
+                    _taskbarProgress.UpdateGitClone(status);
+
                     // Handle phase transition markers
                     if (status == "::EXTRACTING::")
                     {
@@ -5485,6 +5400,7 @@ public partial class MainWindow : Window
             {
                 currentOperation = _viewModel.GitCloneProgressCloning;
                 _viewModel.GitCloneStatus = currentOperation;
+                _taskbarProgress.SetGitCloneIndeterminate();
                 result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
             }
             else
@@ -5495,6 +5411,7 @@ public partial class MainWindow : Window
 
                 currentOperation = _viewModel.GitCloneProgressDownloading;
                 _viewModel.GitCloneStatus = currentOperation;
+                _taskbarProgress.SetGitCloneIndeterminate();
                 result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
             }
 
@@ -5506,6 +5423,7 @@ public partial class MainWindow : Window
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
+                _taskbarProgress.MarkGitCloneError();
                 await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
                 _toastService.Show(_localization["Toast.Git.CloneError"]);
                 return;
@@ -5554,12 +5472,14 @@ public partial class MainWindow : Window
 
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
+            _taskbarProgress.MarkGitCloneError();
             await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
             _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
         {
             _viewModel.GitCloneInProgress = false;
+            _taskbarProgress.CompleteGitClone();
             DisposeIfCurrent(ref _gitCloneCts, gitCloneCts);
         }
 
@@ -5584,6 +5504,7 @@ public partial class MainWindow : Window
     {
         _gitCloneCts?.Cancel();
         _viewModel.GitCloneInProgress = false;
+        _taskbarProgress.CompleteGitClone();
     }
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
@@ -5599,7 +5520,7 @@ public partial class MainWindow : Window
             var statusText = string.IsNullOrWhiteSpace(_viewModel.CurrentBranch)
                 ? _viewModel.StatusOperationGettingUpdates
                 : _localization.Format("Status.Operation.GettingUpdatesBranch", _viewModel.CurrentBranch);
-            statusOperationId = BeginStatusOperation(
+            statusOperationId = _statusOperations.Begin(
                 statusText,
                 indeterminate: true,
                 operationType: StatusOperationType.GitPullUpdates,
@@ -5607,12 +5528,12 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.Post(() =>
                 {
-                    if (TryParseTrailingPercent(status, out var percent))
-                        UpdateStatusOperationProgress(percent, statusText, statusOperationId);
+                    if (GitProgressStatusParser.TryParseTrailingPercent(status, out var percent))
+                        _statusOperations.UpdateProgress(percent, statusText, statusOperationId);
                     else
-                        UpdateStatusOperationText(statusText, statusOperationId);
+                        _statusOperations.UpdateText(statusText, statusOperationId);
                 });
             });
             var beforeHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
@@ -5620,7 +5541,7 @@ public partial class MainWindow : Window
 
             if (!success)
             {
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
                 return;
             }
@@ -5633,24 +5554,24 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
             {
                 _toastService.Show(_localization["Toast.Git.NoUpdates"]);
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
             }
             else
             {
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 // Clean up memory from old tree after successful update.
                 ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.GitPullUpdate);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Operation.GitCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
         }
         finally
@@ -5672,7 +5593,7 @@ public partial class MainWindow : Window
         try
         {
             var statusText = _localization.Format("Status.Operation.SwitchingBranch", branchName);
-            statusOperationId = BeginStatusOperation(
+            statusOperationId = _statusOperations.Begin(
                 statusText,
                 indeterminate: true,
                 operationType: StatusOperationType.GitSwitchBranch,
@@ -5680,12 +5601,12 @@ public partial class MainWindow : Window
 
             var progress = new Progress<string>(status =>
             {
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.Post(() =>
                 {
-                    if (TryParseTrailingPercent(status, out var percent))
-                        UpdateStatusOperationProgress(percent, statusText, statusOperationId);
+                    if (GitProgressStatusParser.TryParseTrailingPercent(status, out var percent))
+                        _statusOperations.UpdateProgress(percent, statusText, statusOperationId);
                     else
-                        UpdateStatusOperationText(statusText, statusOperationId);
+                        _statusOperations.UpdateText(statusText, statusOperationId);
                 });
             });
             var success = await _gitService.SwitchBranchAsync(_currentPath, branchName, progress, cancellationToken);
@@ -5696,7 +5617,7 @@ public partial class MainWindow : Window
 
             if (!success)
             {
-                CompleteStatusOperation(statusOperationId);
+                _statusOperations.Complete(statusOperationId);
                 await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
                 return;
             }
@@ -5705,7 +5626,7 @@ public partial class MainWindow : Window
             // This keeps UI stable if reload fails or gets cancelled mid-flight.
             await ReloadProjectAsync(cancellationToken);
             await RefreshGitBranchesAsync(_currentPath, cancellationToken);
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
 
             _viewModel.CurrentBranch = branchName;
             UpdateTitle();
@@ -5716,12 +5637,12 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             _toastService.Show(_localization["Toast.Operation.GitCanceled"]);
         }
         catch (Exception ex)
         {
-            CompleteStatusOperation(statusOperationId);
+            _statusOperations.Complete(statusOperationId);
             await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
         }
         finally
@@ -5762,20 +5683,24 @@ public partial class MainWindow : Window
         // Clear old items - they will be garbage collected since they have no external references
         // and we're using a named handler method instead of lambda captures
         branchMenuItem.Items.Clear();
+        GitBranchMenuScrollBehavior.SetScrollable(branchMenuItem, _viewModel.GitBranches.Count);
 
         foreach (var branch in _viewModel.GitBranches)
+            branchMenuItem.Items.Add(CreateBranchMenuItem(branch));
+    }
+
+    private MenuItem CreateBranchMenuItem(GitBranch branch)
+    {
+        var item = new MenuItem
         {
-            var item = new MenuItem
-            {
-                Header = branch.IsActive ? $"✓ {branch.Name}" : $"   {branch.Name}",
-                Tag = branch.Name
-            };
+            Header = CreateCheckedMenuHeader(branch.IsActive, branch.Name),
+            Tag = branch.Name,
+            MinHeight = BranchMenuItemHeight
+        };
 
-            // Use named handler to avoid closure capture memory leaks
-            item.Click += OnBranchMenuItemClick;
-
-            branchMenuItem.Items.Add(item);
-        }
+        // Use a named handler to avoid closure captures and keep menu rebuilds cheap.
+        item.Click += OnBranchMenuItemClick;
+        return item;
     }
 
     private void OnBranchMenuItemClick(object? sender, RoutedEventArgs e)
@@ -6379,7 +6304,7 @@ public partial class MainWindow : Window
 
         // Execute toggle after the current keyboard input dispatch completes.
         // This prevents visual artifacts caused by state changes during tunnel key handling.
-        Dispatcher.UIThread.Post(() =>
+        Dispatcher.Post(() =>
         {
             try
             {
@@ -6447,7 +6372,7 @@ public partial class MainWindow : Window
 
         // Keep text editable after preview restore: place caret to the end without selecting text.
         PlaceCaretAtTextEnd(textBox);
-        _ = Dispatcher.UIThread.InvokeAsync(() => PlaceCaretAtTextEnd(textBox), DispatcherPriority.Input);
+        _ = textBox.Dispatcher.InvokeAsync(() => PlaceCaretAtTextEnd(textBox), DispatcherPriority.Input);
     }
 
     private static void PlaceCaretAtTextEnd(TextBox textBox)
@@ -6479,7 +6404,7 @@ public partial class MainWindow : Window
             if (focused)
                 return;
 
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await YieldUiAsync(DispatcherPriority.Background);
         }
     }
 
@@ -6504,7 +6429,7 @@ public partial class MainWindow : Window
             if (focused)
                 return;
 
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            await YieldUiAsync(DispatcherPriority.Background);
         }
     }
 
@@ -6622,8 +6547,8 @@ public partial class MainWindow : Window
 
     private async Task RestoreSearchBoxAccentAfterOpenAsync()
     {
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
 
         if (!_viewModel.SearchVisible || !_viewModel.IsSearchFilterAvailable)
             return;
@@ -6633,8 +6558,8 @@ public partial class MainWindow : Window
 
     private async Task RestoreFilterBoxAccentAfterOpenAsync()
     {
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
 
         if (!_viewModel.FilterVisible || !_viewModel.IsSearchFilterAvailable)
             return;
@@ -6666,7 +6591,7 @@ public partial class MainWindow : Window
             InvalidateVisual();
         }, DispatcherPriority.Render);
 
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        await YieldUiAsync(DispatcherPriority.Render);
     }
 
     private void ForceHideSearchBarVisualState()
@@ -6870,11 +6795,18 @@ public partial class MainWindow : Window
                 _viewModel.SelectedFontFamily = pending;
             }
 
-            await RefreshTreeAsync();
-            // Keep dynamic ignore counts aligned with the tree that was just applied.
-            await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionAsync(_currentPath);
+            // Apply must observe the latest converged section state. A user can click Apply
+            // while an earlier ignore refresh is still finishing; rebuilding the tree first
+            // would capture stale root-folder availability and keep newly revealed folders hidden.
             await _selectionCoordinator.WaitForPendingRefreshesAsync();
-            PersistLocalProjectProfileIfNeeded();
+            await RefreshTreeAsync();
+            // Most checkbox changes already queue and apply a converged selection snapshot
+            // before Apply rebuilds the tree. Running another live refresh unconditionally
+            // doubles the expensive scan path on large projects, so only do it if a new
+            // selection change landed while the tree was rebuilding.
+            await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath);
+            await _selectionCoordinator.WaitForPendingRefreshesAsync();
+            _projectProfiles.PersistIfNeeded(_currentPath);
         }
         catch (OperationCanceledException)
         {
@@ -6886,61 +6818,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PersistLocalProjectProfileIfNeeded()
-    {
-        if (!IsLocalProjectProfilePersistenceApplicable())
-            return;
-
-        if (string.IsNullOrWhiteSpace(_currentPath))
-            return;
-
-        var profile = CaptureCurrentProjectSelectionProfile();
-        var persistedAtUtc = DateTimeOffset.UtcNow;
-        _lastPersistedProjectProfilePath = _currentPath;
-        _lastPersistedProjectProfile = CloneProjectSelectionProfile(profile);
-        _lastPersistedProjectProfileUpdatedUtc = persistedAtUtc;
-        _projectProfilePersistencePending = !_projectProfileStore.TrySaveProfile(_currentPath, profile, persistedAtUtc);
-    }
-
-    private bool TryGetLocalProjectProfile(out ProjectSelectionProfile profile)
-    {
-        profile = new ProjectSelectionProfile(
-            SelectedRootFolders: [],
-            SelectedExtensions: [],
-            SelectedIgnoreOptions: []);
-
-        if (!IsLocalProjectProfilePersistenceApplicable() || string.IsNullOrWhiteSpace(_currentPath))
-            return false;
-
-        return _projectProfileStore.TryLoadProfile(_currentPath, out profile);
-    }
-
-    private ProjectProfileLoadSnapshot LoadProjectProfileSnapshot()
-    {
-        return TryGetLocalProjectProfile(out var profile)
-            ? new ProjectProfileLoadSnapshot(true, profile)
-            : new ProjectProfileLoadSnapshot(false, null);
-    }
-
-    private bool IsLocalProjectProfilePersistenceApplicable()
-        => _viewModel.ProjectSourceType == ProjectSourceType.LocalFolder;
-
-    private ProjectSelectionProfile CaptureCurrentProjectSelectionProfile()
-    {
-        return new ProjectSelectionProfile(
-            SelectedRootFolders: CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default),
-            SelectedExtensions: CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase),
-            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray());
-    }
-
-    private static ProjectSelectionProfile CloneProjectSelectionProfile(ProjectSelectionProfile profile)
-    {
-        return new ProjectSelectionProfile(
-            SelectedRootFolders: profile.SelectedRootFolders.ToArray(),
-            SelectedExtensions: profile.SelectedExtensions.ToArray(),
-            SelectedIgnoreOptions: profile.SelectedIgnoreOptions.ToArray());
-    }
-
     private void FlushPersistedStateOnWindowClose()
     {
         // Give persistence one last synchronous chance before the process exits.
@@ -6949,134 +6826,183 @@ public partial class MainWindow : Window
         if (_recentProjectsDb.RecentFolders.Count > 0 || _recentProjectsDb.RecentRepositories.Count > 0)
             _recentProjectsStore.TryPersist(_recentProjectsDb);
 
-        if (!_projectProfilePersistencePending ||
-            string.IsNullOrWhiteSpace(_lastPersistedProjectProfilePath) ||
-            _lastPersistedProjectProfile is null)
-        {
-            return;
-        }
-
-        if (_projectProfileStore.TrySaveProfile(
-                _lastPersistedProjectProfilePath,
-                CloneProjectSelectionProfile(_lastPersistedProjectProfile),
-                _lastPersistedProjectProfileUpdatedUtc))
-        {
-            _projectProfilePersistencePending = false;
-        }
+        _projectProfiles.FlushPending();
     }
 
-    private async Task TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
+    private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
-        if (!Directory.Exists(path))
-        {
-            await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
-            return;
-        }
-
-        if (!_scanOptions.CanReadRoot(path))
-        {
-            if (TryElevateAndRestart(path))
-                return;
-
-            if (BuildFlags.AllowElevation)
-                await ShowErrorAsync(_localization["Msg.AccessDeniedRoot"]);
-            return;
-        }
-
-        _activeProjectLoadCancellationSnapshot = CaptureProjectLoadCancellationSnapshot();
-        await PrepareSearchAndFilterForProjectLoadAsync();
-        CancelBackgroundMemoryCleanup();
-        CancelPreviewRefresh();
-        var hadLoadedProjectBefore = _viewModel.IsProjectLoaded;
-        var cachedRepoPathToDeleteOnSuccess = fromDialog ? _currentCachedRepoPath : null;
-        var projectLoadCts = ReplaceCancellationSource(ref _projectOperationCts);
-        var cancellationToken = projectLoadCts.Token;
-        _viewModel.StatusMetricsVisible = false;
-        var statusOperationId = BeginStatusOperation(
-            _viewModel.StatusOperationLoadingProject,
-            indeterminate: true,
-            operationType: StatusOperationType.LoadProject,
-            cancelAction: () => projectLoadCts.Cancel());
+        string normalizedPath;
         try
         {
-            if (hadLoadedProjectBefore)
-            {
-                // Render the loading shell before the blocking compacting GC runs.
-                // The pause still exists, but it now happens after the user sees an explicit
-                // project-switch transition instead of an unexplained UI hitch.
-                await YieldProjectLoadStartupFrameAsync(cancellationToken);
-                ClearPreviousProjectState(forceCompactingGc: true);
-            }
-
-            _currentPath = path;
-            _viewModel.IsProjectLoaded = true;
-            _viewModel.SettingsVisible = true;
-            _viewModel.SearchVisible = false;
-
-            // Set project source type based on how it was opened
-            // If opened from dialog (File → Open), it's LocalFolder
-            // If opened from Git clone, the source type is already set
-            if (fromDialog)
-            {
-                _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
-                _viewModel.CurrentBranch = string.Empty;
-                _viewModel.GitBranches.Clear();
-                _currentProjectDisplayName = null;
-                _currentRepositoryUrl = null;
-            }
-
-            UpdateTitle();
-            await YieldProjectLoadStartupFrameAsync(cancellationToken);
-
-            await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
-            if (recordRecentFolder)
-                RecordRecentFolder(path);
-
-            // Clear cached repo path only after the new local project load has completed successfully.
-            if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))
-            {
-                _repoCacheService.DeleteRepositoryDirectory(cachedRepoPathToDeleteOnSuccess);
-                _currentCachedRepoPath = null;
-            }
-
-            _activeProjectLoadCancellationSnapshot = null;
-            CompleteStatusOperation(statusOperationId);
-
-            // First project load has nothing meaningful to reclaim yet. Skip the post-load sweep there
-            // so the initial settings reveal and early interaction stay as smooth as possible.
-            if (hadLoadedProjectBefore)
-            {
-                // Clean up memory from previous project (old tree, strings, etc.)
-                // Must be AFTER loading new project so old references are replaced, but also
-                // after the new UI has had a chance to render at least one stable frame.
-                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.ProjectSwitchPostLoad);
-            }
-            else
-            {
-                // First load still creates temporary buffers and transient strings, but reclaim them
-                // only after the initial UI settles so opening the project keeps feeling smooth.
-                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.InitialProjectLoad);
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            if (IsStatusOperationActive(statusOperationId) && TryApplyActiveProjectLoadCancellationFallback())
-            {
-                _toastService.Show(_localization["Toast.Operation.LoadCanceled"]);
-            }
-
-            CompleteStatusOperation(statusOperationId);
+            normalizedPath = PathUtility.Normalize(path);
         }
         catch
         {
-            _activeProjectLoadCancellationSnapshot = null;
-            CompleteStatusOperation(statusOperationId);
-            throw;
+            await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
+            return false;
         }
-        finally
+
+        if (!Directory.Exists(normalizedPath))
         {
-            DisposeIfCurrent(ref _projectOperationCts, projectLoadCts);
+            await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
+            return false;
         }
+
+        if (!_scanOptions.CanReadRoot(normalizedPath))
+        {
+            if (TryElevateAndRestart(normalizedPath))
+                return false;
+
+            if (BuildFlags.AllowElevation)
+                await ShowErrorAsync(_localization["Msg.AccessDeniedRoot"]);
+            return false;
+        }
+
+        await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
+        return true;
+    }
+
+    private async Task TryApplyStartupSelectionOverridesAsync()
+    {
+        if (!_startupOptions.HasSelectionOverrides || string.IsNullOrWhiteSpace(_currentPath))
+            return;
+
+        if (_startupOptions.HasRootFolderOverrides)
+        {
+            var selectedRoots = new HashSet<string>(_startupOptions.IncludeRootFolders, PathComparer.Default);
+            foreach (var option in _viewModel.RootFolders)
+                option.IsChecked = selectedRoots.Contains(option.Name);
+        }
+
+        if (_startupOptions.HasExtensionOverrides)
+        {
+            var selectedExtensions = new HashSet<string>(_startupOptions.IncludeExtensions, StringComparer.OrdinalIgnoreCase);
+            foreach (var option in _viewModel.Extensions)
+                option.IsChecked = selectedExtensions.Contains(option.Name);
+        }
+
+        if (_startupOptions.HasIgnoreOverrides)
+        {
+            var selectedIgnoreOptions = new HashSet<IgnoreOptionId>(_startupOptions.IgnoreOptions);
+            foreach (var option in _viewModel.IgnoreOptions)
+                option.IsChecked = selectedIgnoreOptions.Contains(option.Id);
+        }
+
+        await _selectionCoordinator.WaitForPendingRefreshesAsync();
+        await RefreshTreeAsync();
+        await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath);
+        await _selectionCoordinator.WaitForPendingRefreshesAsync();
+    }
+
+    private async Task TryWriteStartupReportAsync(TimeSpan loadingElapsed)
+    {
+        if (!_startupOptions.Report.Enabled ||
+            string.IsNullOrWhiteSpace(_currentPath) ||
+            _currentTree is null)
+        {
+            return;
+        }
+
+        var reportInput = new LoadedProjectAnalysisRequest(
+            RootPath: _currentPath,
+            Tree: _currentTree,
+            AvailableRootFolders: _viewModel.RootFolders.Select(static option => option.Name).ToArray(),
+            AvailableExtensions: _viewModel.Extensions.Select(static option => option.Name).ToArray(),
+            SelectedRootFolders: _viewModel.RootFolders
+                .Where(static option => option.IsChecked)
+                .Select(static option => option.Name)
+                .ToArray(),
+            SelectedExtensions: _viewModel.Extensions
+                .Where(static option => option.IsChecked)
+                .Select(static option => option.Name)
+                .ToArray(),
+            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray(),
+            RootAccessDenied: _currentTree.RootAccessDenied,
+            HadAccessDenied: _currentTree.HadAccessDenied,
+            KnownLoadingElapsed: loadingElapsed);
+
+        try
+        {
+            var report = await Task.Run(
+                () => _projectAnalysisService.BuildReportFromTreeAsync(reportInput),
+                CancellationToken.None);
+            var reportPath = _reportPathResolver.Resolve(_startupOptions.Report);
+            await _projectAnalysisReportWriter.WriteAsync(report, reportPath);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync(ex.Message);
+        }
+    }
+
+    private async Task TryShowAutomaticTerminalCommandPromptAsync()
+    {
+        try
+        {
+            await YieldUiAsync(DispatcherPriority.Background);
+            var snapshot = _terminalCommandSetupService.Probe();
+            var action = ResolveAutomaticTerminalCommandStartupAction(
+                _userSettingsDb.ViewSettings,
+                snapshot,
+                !string.IsNullOrWhiteSpace(_startupOptions.Path));
+
+            if (action == AutomaticTerminalCommandStartupAction.RepairSilently)
+            {
+                _ = _terminalCommandSetupService.InstallOrRepair();
+                return;
+            }
+
+            if (action == AutomaticTerminalCommandStartupAction.ShowPrompt)
+                await ShowTerminalCommandSetupAsync(snapshot, isAutomaticPrompt: true);
+        }
+        catch
+        {
+            // Terminal setup is optional; startup must stay resilient even if probing fails.
+        }
+    }
+
+    internal static bool ShouldShowAutomaticTerminalCommandPrompt(
+        AppViewSettings settings,
+        TerminalCommandSetupSnapshot snapshot,
+        bool startedWithProjectPath) =>
+        ResolveAutomaticTerminalCommandStartupAction(settings, snapshot, startedWithProjectPath) ==
+        AutomaticTerminalCommandStartupAction.ShowPrompt;
+
+    internal static AutomaticTerminalCommandStartupAction ResolveAutomaticTerminalCommandStartupAction(
+        AppViewSettings settings,
+        TerminalCommandSetupSnapshot snapshot,
+        bool startedWithProjectPath)
+    {
+        if (!LooksLikePublishedDevProjexExecutable(snapshot.TargetExecutablePath))
+            return AutomaticTerminalCommandStartupAction.None;
+
+        if (TerminalCommandPromptPolicy.ShouldRepairAutomatically(snapshot))
+            return AutomaticTerminalCommandStartupAction.RepairSilently;
+
+        return TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(settings, snapshot, startedWithProjectPath)
+            ? AutomaticTerminalCommandStartupAction.ShowPrompt
+            : AutomaticTerminalCommandStartupAction.None;
+    }
+
+    private static bool LooksLikePublishedDevProjexExecutable(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+            return false;
+
+        var name = GetFileNameWithoutExtensionCrossPlatform(executablePath);
+        return name.Equals("DevProjex", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetFileNameWithoutExtensionCrossPlatform(string path)
+    {
+        // Unit tests intentionally pass Windows-style paths on Linux runners.
+        // Path.GetFileName* only recognizes the current OS separator, so keep
+        // this prompt gate deterministic across CI platforms.
+        var fileNameStart = Math.Max(
+            path.LastIndexOf('/'),
+            path.LastIndexOf('\\')) + 1;
+        var fileName = path[fileNameStart..];
+        return Path.GetFileNameWithoutExtension(fileName);
     }
 
     private bool TryElevateAndRestart(string path)
@@ -7093,10 +7019,12 @@ public partial class MainWindow : Window
 
         _elevationAttempted = true;
 
-        var opts = new CommandLineOptions(
-            Path: path,
-            Language: _localization.CurrentLanguage,
-            ElevationAttempted: true);
+        var opts = _startupOptions with
+        {
+            Path = path,
+            Language = _localization.CurrentLanguage,
+            ElevationAttempted = true
+        };
 
         bool started = _elevation.TryRelaunchAsAdministrator(opts);
         if (started)
@@ -7116,9 +7044,16 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(_currentPath)) return;
         cancellationToken.ThrowIfCancellationRequested();
 
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+        var timing = new ProjectLoadTiming();
+        _projectLoadTiming = timing;
+#endif
+
         if (applyStoredProfile)
         {
-            var profileSnapshot = await Task.Run(LoadProjectProfileSnapshot, cancellationToken);
+            var profileSnapshot = await Task.Run(
+                () => _projectProfiles.LoadSnapshot(_currentPath),
+                cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
             if (profileSnapshot is { HasProfile: true, Profile: not null })
@@ -7127,10 +7062,7 @@ public partial class MainWindow : Window
                 _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
         }
 
-        // Keep root/extension scans sequenced to avoid inconsistent UI states.
-        await _selectionCoordinator.RefreshRootAndDependentsAsync(_currentPath, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        await RefreshTreeAsync(cancellationToken: cancellationToken);
+        await _projectLoadSnapshotPipeline.ReloadAsync(_currentPath, cancellationToken);
     }
 
     /// <summary>
@@ -7144,7 +7076,7 @@ public partial class MainWindow : Window
 
         // Background metrics become stale as soon as the visible tree is about to change.
         // Cancel them before tearing down the current project state to avoid wasted I/O.
-        CancelBackgroundMetricsCalculation();
+        _metrics.CancelBackgroundCalculation();
 
         // Clear search state first (holds references to TreeNodeViewModel)
         _searchCoordinator.ClearSearchState();
@@ -7172,7 +7104,7 @@ public partial class MainWindow : Window
         foreach (var node in _viewModel.TreeNodes)
             node.ClearRecursive();
         _viewModel.ResetTreeNodes();
-        ClearFileMetricsCache(trimCapacity: true);
+        _metrics.ClearFileMetricsCache(trimCapacity: true);
 
         // Reconnect ItemsSource
         if (_treeView is not null)
@@ -7181,14 +7113,15 @@ public partial class MainWindow : Window
         // Clear current tree descriptor reference (this is the second copy of the tree)
         _currentTree = null;
         _filterBaseTree = null;
-        _hasCompleteMetricsBaseline = false;
+        _currentTreeInventory = null;
+        _metrics.HasCompleteBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;
         _viewModel.StatusContentStatsText = string.Empty;
         ClearPreviewDocument();
         _viewModel.IsPreviewLoading = false;
         InvalidatePreviewCache();
-        InvalidateComputedMetricsCaches();
+        _metrics.InvalidateComputedCaches();
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
@@ -7457,148 +7390,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshTreeAsync(bool interactiveFilter = false, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_currentPath)) return;
-        cancellationToken.ThrowIfCancellationRequested();
-
-        using var _ = PerformanceMetrics.Measure("RefreshTreeAsync");
-
-        // Cancel any previous refresh operation to avoid race conditions
-        var refreshCts = new CancellationTokenSource();
-        var previousRefreshCts = Interlocked.Exchange(ref _refreshCts, refreshCts);
-        previousRefreshCts?.Cancel();
-        previousRefreshCts?.Dispose();
-
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(refreshCts.Token, cancellationToken);
-        var linkedToken = linkedCts.Token;
-
-        var allowedExt = CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
-        var allowedRoot = CollectCheckedOptionNames(_viewModel.RootFolders, PathComparer.Default);
-
-        var selectedIgnoreOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
-        var ignoreRules = BuildIgnoreRules(_currentPath, selectedIgnoreOptions, allowedRoot);
-
-        var nameFilter = string.IsNullOrWhiteSpace(_viewModel.NameFilter) ? null : _viewModel.NameFilter.Trim();
-
-        var options = new TreeFilterOptions(
-            AllowedExtensions: allowedExt,
-            AllowedRootFolders: allowedRoot,
-            IgnoreRules: ignoreRules,
-            NameFilter: nameFilter);
-
-        if (!interactiveFilter)
-        {
-            // Full-tree refresh invalidates the active metrics baseline.
-            // Cancel early so obsolete file reads stop before we start the next build.
-            CancelBackgroundMetricsCalculation();
-            _viewModel.StatusMetricsVisible = false;
-        }
-
-        try
-        {
-            BuildTreeResult result;
-            var usedInMemoryFilter = false;
-
-            if (interactiveFilter && TryBuildInteractiveFilteredTreeResult(nameFilter, linkedToken, out var filteredResult))
-            {
-                result = filteredResult;
-                usedInMemoryFilter = true;
-            }
-            else
-            {
-                // Build the tree off the UI thread to keep the window responsive on large folders.
-                using (PerformanceMetrics.Measure("BuildTree"))
-                {
-                    result = await Task.Run(
-                        () => _buildTree.Execute(new BuildTreeRequest(_currentPath, options), linkedToken),
-                        linkedToken);
-                }
-            }
-
-            // Check if this operation was superseded by a newer one
-            linkedToken.ThrowIfCancellationRequested();
-
-            if (result.RootAccessDenied && TryElevateAndRestart(_currentPath))
-                return;
-
-            // Build ViewModel tree off the UI thread for better responsiveness.
-            // IconCache is now thread-safe, enabling parallel icon loading.
-            var displayName = !string.IsNullOrEmpty(_currentProjectDisplayName)
-                ? _currentProjectDisplayName
-                : GetDirectoryNameSafe(_currentPath!);
-
-            TreeNodeViewModel root;
-            using (PerformanceMetrics.Measure("BuildTreeViewModel"))
-            {
-                root = await Task.Run(() =>
-                {
-                    var node = BuildTreeViewModel(result.Root, null);
-                    node.DisplayName = displayName;
-                    return node;
-                }, linkedToken);
-            }
-
-            linkedToken.ThrowIfCancellationRequested();
-
-            // Swap trees only after the new root is fully materialized.
-            // This prevents losing the previously visible project on cancellation.
-            _searchCoordinator.ClearSearchState();
-            if (_treeView is not null)
-                _treeView.SelectedItem = null;
-
-            foreach (var node in _viewModel.TreeNodes)
-                node.ClearRecursive();
-            _viewModel.TreeNodes.Clear();
-
-            _currentTree = result;
-            InvalidateComputedMetricsCaches();
-
-            if (!interactiveFilter)
-            {
-                // Keep a baseline snapshot for low-latency in-memory filter updates.
-                _filterBaseTree = string.IsNullOrWhiteSpace(nameFilter) ? result : null;
-                ResetInteractiveFilterCache();
-            }
-            else if (!usedInMemoryFilter && string.IsNullOrWhiteSpace(nameFilter))
-            {
-                // Recover baseline after fallback interactive rebuilds.
-                _filterBaseTree = result;
-                ResetInteractiveFilterCache();
-            }
-
-            _viewModel.TreeNodes.Add(root);
-            root.IsExpanded = true;
-
-            if (!interactiveFilter && !string.IsNullOrWhiteSpace(nameFilter) && root.Children.Count == 0)
-                _toastService.Show(_localization["Toast.NoMatches"]);
-
-            // Project-load and refresh paths usually arrive here with an empty search state.
-            // Skip the tree-wide search normalization unless there is an active query or a
-            // non-empty cached result set that still needs to be rebound to the new tree.
-            if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery) || _searchCoordinator.HasMatches)
-                _searchCoordinator.UpdateSearchMatches();
-
-            // Initialize file metrics cache in background for real-time status bar updates
-            // Only do full scan on initial load, not on interactive filter changes
-            if (!interactiveFilter)
-            {
-                StartPostLoadBackgroundWork(result.Root, cancellationToken);
-            }
-            else
-            {
-                // For filter changes, just recalculate from existing cache
-                RecalculateMetricsAsync();
-            }
-
-            SchedulePreviewRefresh(immediate: true);
-
-            // Do not force GC from the hot end-of-load path.
-            // Large sessions still get a heavy cleanup, but only through the explicit
-            // deferred scheduler once the UI has finished the visible transition.
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _refreshCts, refreshCts);
-        }
+        await _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
     }
 
     private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
@@ -7688,15 +7480,59 @@ public partial class MainWindow : Window
         return realizedChildren;
     }
 
-    private void StartPostLoadBackgroundWork(TreeNodeDescriptor treeRoot, CancellationToken cancellationToken)
+    private void StartPostLoadBackgroundWork(BuildTreeResult currentTree, CancellationToken cancellationToken)
     {
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         StartDeferredSettingsPanelAnimation(cancellationToken);
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+        var timing = _projectLoadTiming;
+        if (timing is not null && !timing.HasLoadingElapsed)
+        {
+            timing.LoadingElapsed = timing.LoadingStopwatch.Elapsed;
+            timing.HasLoadingElapsed = true;
+        }
+
         ObserveDetachedTask(
-            InitializeFileMetricsCacheSoonAfterFirstPaintAsync(treeRoot, cancellationToken),
+            TrackProjectAnalysisTimingAsync(
+                _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(currentTree, cancellationToken),
+                timing),
             "InitializeFileMetricsCache");
+#else
+        ObserveDetachedTask(
+            _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(currentTree, cancellationToken),
+            "InitializeFileMetricsCache");
+#endif
     }
+
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    private async Task TrackProjectAnalysisTimingAsync(
+        Task<TimeSpan> metricsWarmupTask,
+        ProjectLoadTiming? timing)
+    {
+        var analysisElapsed = await metricsWarmupTask;
+
+        if (timing is null ||
+            !timing.HasLoadingElapsed ||
+            !ReferenceEquals(_projectLoadTiming, timing))
+        {
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(
+            () =>
+            {
+                if (!ReferenceEquals(_projectLoadTiming, timing))
+                    return;
+
+                ApplyProjectLoadTimingTitleSuffix(
+                    timing.LoadingElapsed,
+                    analysisElapsed);
+                _projectLoadTiming = null;
+            },
+            DispatcherPriority.Background);
+    }
+#endif
 
     private void StartDeferredSettingsPanelAnimation(CancellationToken cancellationToken)
     {
@@ -7713,28 +7549,6 @@ public partial class MainWindow : Window
         await WaitForTreeRenderStabilizationAsync(cancellationToken);
         if (_viewModel.SettingsVisible && !_settingsAnimating)
             AnimateSettingsPanel(true);
-    }
-
-    private async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
-        TreeNodeDescriptor treeRoot,
-        CancellationToken cancellationToken)
-    {
-        // Two quick frames are enough for the freshly swapped tree to become visible and for the
-        // loading status strip to enter a stable state. Waiting for the full settings-panel
-        // choreography was adding visible latency before the metrics warmup even started.
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var warmupDelay = UiTimingProfile.Scale(
-            MetricsCalculationPolicy.GetInitialWarmupStartDelay(_viewModel.SettingsVisible));
-        if (warmupDelay > TimeSpan.Zero)
-            await Task.Delay(warmupDelay, cancellationToken);
-
-        cancellationToken.ThrowIfCancellationRequested();
-        await InitializeFileMetricsCacheAsync(treeRoot, cancellationToken);
     }
 
     private static async void ObserveDetachedTask(Task task, string operationName)
@@ -7828,6 +7642,26 @@ public partial class MainWindow : Window
             _currentProjectDisplayName);
     }
 
+#if DEVPROJEX_PROJECT_LOAD_TIMING
+    private void ApplyProjectLoadTimingTitleSuffix(TimeSpan loadingElapsed, TimeSpan analysisElapsed)
+    {
+        var baseTitle = BuildWindowTitle(
+            _currentPath,
+            _viewModel.IsGitMode,
+            _currentRepositoryUrl,
+            _viewModel.CurrentBranch,
+            _currentProjectDisplayName);
+        var totalElapsed = loadingElapsed + analysisElapsed;
+        var timingSuffix =
+            $"[{FormatSeconds(loadingElapsed)} + {FormatSeconds(analysisElapsed)} = {FormatSeconds(totalElapsed)}]";
+
+        _viewModel.Title = $"{baseTitle} {timingSuffix}";
+
+        static string FormatSeconds(TimeSpan elapsed) =>
+            elapsed.TotalSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+    }
+#endif
+
     private IgnoreRules BuildIgnoreRules(
         string rootPath,
         IReadOnlyCollection<IgnoreOptionId> selectedOptions,
@@ -7843,7 +7677,7 @@ public partial class MainWindow : Window
         var availability = _ignoreRulesService.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
         return availability with
         {
-            ShowAdvancedCounts = _isAdvancedIgnoreCountsEnabled
+            ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled
         };
     }
 
@@ -7854,113 +7688,10 @@ public partial class MainWindow : Window
         return BuildIgnoreRules(rootPath, selected, selectedRoots);
     }
 
-    private long BeginStatusOperation(
-        string text,
-        bool indeterminate = true,
-        StatusOperationType operationType = StatusOperationType.None,
-        Action? cancelAction = null)
-    {
-        var operationId = Interlocked.Increment(ref _statusOperationSequence);
-
-        lock (_statusOperationLock)
-        {
-            _activeStatusOperationId = operationId;
-            _activeStatusOperationType = operationType;
-            _activeStatusCancelAction = cancelAction;
-        }
-
-        _viewModel.StatusOperationText = text;
-        _viewModel.StatusBusy = true;
-        _viewModel.StatusProgressIsIndeterminate = indeterminate;
-        _viewModel.StatusProgressValue = 0;
-
-        return operationId;
-    }
-
-    private void UpdateStatusOperationText(string text, long? operationId = null)
-    {
-        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
-            return;
-
-        _viewModel.StatusOperationText = text;
-    }
-
-    private void UpdateStatusOperationProgress(double percent, string? text = null, long? operationId = null)
-    {
-        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
-            return;
-
-        if (!string.IsNullOrWhiteSpace(text))
-            _viewModel.StatusOperationText = text;
-
-        _viewModel.StatusBusy = true;
-        _viewModel.StatusProgressIsIndeterminate = false;
-        _viewModel.StatusProgressValue = Math.Clamp(percent, 0, 100);
-    }
-
-    private void CompleteStatusOperation(long? operationId = null)
-    {
-        if (operationId.HasValue && !IsStatusOperationActive(operationId.Value))
-            return;
-
-        StatusOperationType activeOperationType;
-        lock (_statusOperationLock)
-            activeOperationType = _activeStatusOperationType;
-
-        // Keep progress visible only for the active metrics operation.
-        if (_isBackgroundMetricsActive && activeOperationType == StatusOperationType.MetricsCalculation)
-        {
-            UpdateStatusOperationText(_viewModel.StatusOperationCalculatingData);
-            return;
-        }
-
-        lock (_statusOperationLock)
-        {
-            if (operationId.HasValue && _activeStatusOperationId != operationId.Value)
-                return;
-
-            _activeStatusOperationId = 0;
-            _activeStatusOperationType = StatusOperationType.None;
-            _activeStatusCancelAction = null;
-        }
-
-        _viewModel.StatusOperationText = string.Empty;
-        _viewModel.StatusBusy = false;
-        _viewModel.StatusProgressIsIndeterminate = true;
-        _viewModel.StatusProgressValue = 0;
-    }
-
-    private bool IsStatusOperationActive(long operationId)
-    {
-        lock (_statusOperationLock)
-            return _activeStatusOperationId == operationId;
-    }
-
-    private StatusOperationSnapshot GetActiveStatusOperationSnapshot()
-    {
-        lock (_statusOperationLock)
-        {
-            return new StatusOperationSnapshot(
-                _activeStatusOperationId,
-                _activeStatusOperationType,
-                _activeStatusCancelAction);
-        }
-    }
-
     /// <summary>
     /// Cancels any active background metrics calculation.
     /// Call this before starting user-initiated operations that need the status bar.
     /// </summary>
-    private void CancelBackgroundMetricsCalculation()
-    {
-        if (_isBackgroundMetricsActive)
-            _hasCompleteMetricsBaseline = false;
-
-        _isBackgroundMetricsActive = false;
-        _metricsCalculationCts?.Cancel();
-        _recalculateMetricsCts?.Cancel();
-    }
-
     private ProjectLoadCancellationSnapshot CaptureProjectLoadCancellationSnapshot()
     {
         var hadLoadedProjectBefore = _viewModel.IsProjectLoaded && !string.IsNullOrWhiteSpace(_currentPath);
@@ -7984,7 +7715,7 @@ public partial class MainWindow : Window
             AllRootFoldersChecked: _viewModel.AllRootFoldersChecked,
             AllExtensionsChecked: _viewModel.AllExtensionsChecked,
             AllIgnoreChecked: _viewModel.AllIgnoreChecked,
-            HasCompleteMetricsBaseline: _hasCompleteMetricsBaseline,
+            HasCompleteMetricsBaseline: _metrics.HasCompleteBaseline,
             RootFolders: _viewModel.RootFolders
                 .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
                 .ToArray(),
@@ -7998,25 +7729,9 @@ public partial class MainWindow : Window
 
     private bool TryApplyActiveProjectLoadCancellationFallback()
     {
-        var snapshot = _activeProjectLoadCancellationSnapshot;
-        if (snapshot is null)
-            return false;
-
-        _activeProjectLoadCancellationSnapshot = null;
-        ApplyProjectLoadCancellationFallback(snapshot);
-        return true;
-    }
-
-    private void ApplyProjectLoadCancellationFallback(ProjectLoadCancellationSnapshot snapshot)
-    {
-        var fallback = ProjectLoadCancellationFallbackResolver.Resolve(snapshot.HadLoadedProjectBefore);
-        if (fallback == ProjectLoadCancellationFallback.ResetToInitialState)
-        {
-            ResetToInitialProjectStateAfterCancellation();
-            return;
-        }
-
-        RestorePreviousProjectStateAfterCancellation(snapshot);
+        return _projectLoadCancellation.TryApply(
+            ResetToInitialProjectStateAfterCancellation,
+            RestorePreviousProjectStateAfterCancellation);
     }
 
     private void RestorePreviousProjectStateAfterCancellation(ProjectLoadCancellationSnapshot snapshot)
@@ -8026,9 +7741,10 @@ public partial class MainWindow : Window
         _currentRepositoryUrl = snapshot.RepositoryUrl;
         _currentTree = snapshot.Tree;
         _filterBaseTree = snapshot.Tree;
+        _currentTreeInventory = null;
         _previewOnlySuspendedTreeToolMode = SuspendedTreeToolMode.None;
         ResetInteractiveFilterCache();
-        InvalidateComputedMetricsCaches();
+        _metrics.InvalidateComputedCaches();
 
         _viewModel.IsProjectLoaded = true;
         _viewModel.SettingsVisible = snapshot.SettingsVisible;
@@ -8061,7 +7777,7 @@ public partial class MainWindow : Window
         _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
         _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
         _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
-        _hasCompleteMetricsBaseline = snapshot.HasCompleteMetricsBaseline;
+        _metrics.HasCompleteBaseline = snapshot.HasCompleteMetricsBaseline;
         UpdateCompactModeVisualState();
         UpdateWorkspaceLayoutForCurrentMode();
         SyncSearchAndFilterVisualStateFromFlags();
@@ -8102,14 +7818,15 @@ public partial class MainWindow : Window
 
     private void ResetToInitialProjectStateAfterCancellation()
     {
-        _activeProjectLoadCancellationSnapshot = null;
-        CancelBackgroundMetricsCalculation();
+        _projectLoadCancellation.Clear();
+        _metrics.CancelBackgroundCalculation();
         CancelPreviewRefresh();
         ClearPreviousProjectState();
 
         _currentPath = null;
         _currentTree = null;
         _filterBaseTree = null;
+        _currentTreeInventory = null;
         _currentProjectDisplayName = null;
         _currentRepositoryUrl = null;
         _filterExpansionSnapshot = null;
@@ -8133,27 +7850,8 @@ public partial class MainWindow : Window
         UpdateWorkspaceLayoutForCurrentMode();
         UpdateBranchMenu();
 
-        UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
+        _metrics.UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
         UpdateTitle();
-    }
-
-
-    private static bool TryParseTrailingPercent(string status, out double percent)
-    {
-        percent = 0;
-        if (string.IsNullOrWhiteSpace(status))
-            return false;
-
-        var trimmed = status.Trim();
-        if (!trimmed.EndsWith('%'))
-            return false;
-
-        var lastSpace = trimmed.LastIndexOf(' ');
-        var token = lastSpace >= 0 ? trimmed[(lastSpace + 1)..] : trimmed;
-        token = token.TrimEnd('%');
-
-        return double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out percent) ||
-               double.TryParse(token, NumberStyles.Float, CultureInfo.CurrentCulture, out percent);
     }
 
     private async Task SetClipboardTextAsync(string content)
@@ -8197,7 +7895,7 @@ public partial class MainWindow : Window
         return selected;
     }
 
-    private List<string> BuildOrderedUniqueFilePaths(IReadOnlySet<string> selectedPaths)
+    private IReadOnlyList<string> BuildOrderedUniqueFilePaths(IReadOnlySet<string> selectedPaths)
     {
         if (selectedPaths.Count > 0)
         {
@@ -8209,8 +7907,14 @@ public partial class MainWindow : Window
 
         return _currentTree is null
             ? []
-            : GetOrBuildAllOrderedFilePaths(_currentTree.Root).ToList();
+            : _currentTree.OrderedFilePaths ?? _metrics.GetOrBuildAllOrderedFilePaths(_currentTree.Root);
     }
+
+    private static List<string> BuildOrderedSelectedFilePaths(
+        TreeNodeDescriptor treeRoot,
+        IReadOnlySet<string> selectedPaths,
+        bool ensureExists = true) =>
+        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
 
     private HashSet<string> CaptureExpandedNodes()
     {
@@ -8346,841 +8050,22 @@ public partial class MainWindow : Window
 
     #region Real-time Status Metrics
 
-    /// <summary>
-    /// Cached file metrics for efficient real-time updates.
-    /// </summary>
-    private readonly record struct FileMetricsData(
-        long Size,
-        int LineCount,
-        int CharCount,
-        bool IsEmpty,
-        bool IsWhitespaceOnly,
-        bool IsEstimated,
-        int CrLfPairCount,
-        int TrailingNewlineChars,
-        int TrailingNewlineLineBreaks);
+    private bool IsBackgroundMetricsActive() => _metrics.IsBackgroundActive;
 
-    /// <summary>
-    /// Subscribe to checkbox change events for real-time metrics updates.
-    /// </summary>
     private void SubscribeToMetricsUpdates()
     {
         TreeNodeViewModel.GlobalCheckedChanged += OnTreeNodeCheckedChanged;
     }
 
-    /// <summary>
-    /// Unsubscribe from checkbox change events.
-    /// </summary>
     private void UnsubscribeFromMetricsUpdates()
     {
         TreeNodeViewModel.GlobalCheckedChanged -= OnTreeNodeCheckedChanged;
     }
 
-    /// <summary>
-    /// Handle checkbox change with debouncing to avoid excessive recalculations.
-    /// </summary>
     private void OnTreeNodeCheckedChanged(object? sender, EventArgs e)
     {
-        // Debounce rapid checkbox changes (e.g., when selecting parent node)
-        // Reuse existing timer to prevent memory leaks from accumulating timer instances
-        if (_metricsDebounceTimer is null)
-        {
-            _metricsDebounceTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(50)
-            };
-            _metricsDebounceTimer.Tick += OnMetricsDebounceTimerTick;
-        }
-
-        _metricsDebounceTimer.Stop();
-        _metricsDebounceTimer.Start();
-
+        _metrics.ScheduleRecalculate();
         SchedulePreviewRefresh();
-    }
-
-    /// <summary>
-    /// Handler for metrics debounce timer tick. Separated to avoid lambda capture leaks.
-    /// </summary>
-    private void OnMetricsDebounceTimerTick(object? sender, EventArgs e)
-    {
-        _metricsDebounceTimer?.Stop();
-        RecalculateMetricsAsync();
-    }
-
-    /// <summary>
-    /// Initialize file metrics cache after tree is built.
-    /// Scans all files in parallel using IFileContentAnalyzer as single source of truth.
-    /// Binary files are skipped via extension check (fast) or null-byte detection.
-    /// </summary>
-    private async Task InitializeFileMetricsCacheAsync(TreeNodeDescriptor treeRoot, CancellationToken cancellationToken)
-    {
-        using var _ = PerformanceMetrics.Measure("InitializeFileMetricsCacheAsync");
-
-        // Cancel any previous calculation
-        var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, metricsCts.Token);
-
-        _metricsCancellationRequestedByUser = false;
-        _hasCompleteMetricsBaseline = false;
-        _isBackgroundMetricsActive = true;
-        var statusOperationId = BeginStatusOperation(
-            _viewModel.StatusOperationCalculatingData,
-            indeterminate: false,
-            operationType: StatusOperationType.MetricsCalculation,
-            cancelAction: CancelBackgroundMetricsCalculation);
-        var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
-        var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
-        try
-        {
-            if (IsStatusOperationActive(statusOperationId))
-                _viewModel.StatusProgressValue = 0;
-
-            IReadOnlyList<string> filePaths;
-            using (PerformanceMetrics.Measure("CollectMetricsWarmupFilePaths"))
-            {
-                // Warmup must read from the descriptor tree instead of TreeNodeViewModel instances.
-                // That keeps the UI tree out of the hot path and reuses the ordered-file cache
-                // shared with preview/export metrics.
-                filePaths = await Task.Run(
-                    () => GetOrBuildAllOrderedFilePaths(treeRoot),
-                    linkedCts.Token);
-            }
-
-            // Clear cache before scanning
-            ClearFileMetricsCache(trimCapacity: true);
-
-            var totalFiles = filePaths.Count;
-            if (totalFiles == 0)
-            {
-                _isBackgroundMetricsActive = false;
-                _hasCompleteMetricsBaseline = true;
-                RecalculateMetricsAsync();
-                _viewModel.StatusMetricsVisible = true;
-                CompleteStatusOperation(statusOperationId);
-                return;
-            }
-
-            // Skip warmup scan for obvious binary-only datasets (e.g. screenshot folders).
-            if (AreAllFilesDefinitelyBinaryForMetricsWarmup(filePaths))
-            {
-                _isBackgroundMetricsActive = false;
-                _hasCompleteMetricsBaseline = true;
-                if (IsStatusOperationActive(statusOperationId))
-                    _viewModel.StatusProgressValue = 100;
-                RecalculateMetricsAsync();
-                _viewModel.StatusMetricsVisible = true;
-                CompleteStatusOperation(statusOperationId);
-                return;
-            }
-
-            await ScanFileMetricsAsync(
-                filePaths,
-                stagedMetrics,
-                stagedInspectedPaths,
-                linkedCts.Token,
-                statusOperationId,
-                MetricsCalculationPolicy.GetBaselineWarmupParallelism(Environment.ProcessorCount));
-
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
-
-            // Calculation completed successfully
-            _isBackgroundMetricsActive = false;
-            _hasCompleteMetricsBaseline = true;
-            if (IsStatusOperationActive(statusOperationId))
-                _viewModel.StatusProgressValue = 100;
-            RecalculateMetricsAsync();
-            _viewModel.StatusMetricsVisible = true;
-            CompleteStatusOperation(statusOperationId);
-        }
-        catch (OperationCanceledException)
-        {
-            // Show explicit fallback for user-initiated cancellation.
-            _isBackgroundMetricsActive = false;
-            _hasCompleteMetricsBaseline = false;
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
-            var hasCachedMetrics = false;
-            lock (_metricsLock)
-                hasCachedMetrics = _fileMetricsCache.Count > 0;
-            if (_metricsCancellationRequestedByUser)
-            {
-                _metricsCancellationRequestedByUser = false;
-                UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-                _viewModel.StatusMetricsVisible = true;
-            }
-            else if (hasCachedMetrics)
-            {
-                RecalculateMetricsAsync();
-                _viewModel.StatusMetricsVisible = true;
-            }
-            CompleteStatusOperation(statusOperationId);
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _metricsCalculationCts, metricsCts);
-        }
-    }
-
-    private static bool AreAllFilesDefinitelyBinaryForMetricsWarmup(IReadOnlyList<string> filePaths)
-    {
-        for (var index = 0; index < filePaths.Count; index++)
-        {
-            if (!IsDefinitelyBinaryByExtensionForMetricsWarmup(filePaths[index]))
-                return false;
-        }
-
-        return true;
-    }
-
-    private void MergeStagedMetricsIntoCache(ConcurrentDictionary<string, FileMetricsData> stagedMetrics)
-    {
-        if (stagedMetrics.IsEmpty)
-            return;
-
-        lock (_metricsLock)
-        {
-            foreach (var pair in stagedMetrics)
-                _fileMetricsCache[pair.Key] = pair.Value;
-        }
-
-        stagedMetrics.Clear();
-    }
-
-    private void MergeInspectedMetricsPaths(ConcurrentDictionary<string, byte> inspectedPaths)
-    {
-        if (inspectedPaths.IsEmpty)
-            return;
-
-        lock (_metricsLock)
-        {
-            foreach (var pair in inspectedPaths)
-                _inspectedFileMetricsPaths.Add(pair.Key);
-        }
-
-        inspectedPaths.Clear();
-    }
-
-    private async Task ScanFileMetricsAsync(
-        IReadOnlyList<string> filePaths,
-        ConcurrentDictionary<string, FileMetricsData> stagedMetrics,
-        ConcurrentDictionary<string, byte> stagedInspectedPaths,
-        CancellationToken cancellationToken,
-        long statusOperationId,
-        int maxDegreeOfParallelism)
-    {
-        if (filePaths.Count == 0)
-            return;
-
-        var processedCount = 0;
-        var lastProgressPercent = 0;
-        var parallelOptions = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = maxDegreeOfParallelism,
-            CancellationToken = cancellationToken
-        };
-
-        await Parallel.ForEachAsync(filePaths, parallelOptions, async (filePath, ct) =>
-        {
-            try
-            {
-                var metrics = await _fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
-                    .ConfigureAwait(false);
-
-                if (metrics is not null)
-                {
-                    stagedMetrics[filePath] = new FileMetricsData(
-                        metrics.SizeBytes,
-                        metrics.LineCount,
-                        metrics.CharCount,
-                        metrics.IsEmpty,
-                        metrics.IsWhitespaceOnly,
-                        metrics.IsEstimated,
-                        metrics.CrLfPairCount,
-                        metrics.TrailingNewlineChars,
-                        metrics.TrailingNewlineLineBreaks);
-                }
-
-                // Null means "not exportable as text", not "still missing". Remembering the
-                // completed probe prevents binary files from keeping selected content metrics
-                // stuck behind a permanent "missing metrics" gate.
-                stagedInspectedPaths[filePath] = 0;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                // Skip files that cannot be read. Export/preview logic already treats them as unavailable.
-                stagedInspectedPaths[filePath] = 0;
-            }
-            finally
-            {
-                var current = Interlocked.Increment(ref processedCount);
-                var progressPercent = (int)(current * 100.0 / filePaths.Count);
-                var observed = Volatile.Read(ref lastProgressPercent);
-                if (progressPercent >= observed + 5 &&
-                    Interlocked.CompareExchange(ref lastProgressPercent, progressPercent, observed) == observed)
-                {
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        if (_isBackgroundMetricsActive && IsStatusOperationActive(statusOperationId))
-                            _viewModel.StatusProgressValue = progressPercent;
-                    });
-                }
-            }
-        });
-    }
-
-    /// <summary>
-    /// Recalculate both tree and content metrics based on current selection.
-    /// Calculations run in parallel on background threads for better performance.
-    /// Cancels any previous calculation to avoid stale updates and wasted CPU.
-    /// </summary>
-    private void RecalculateMetricsAsync()
-    {
-        if (!_viewModel.IsProjectLoaded || _viewModel.TreeNodes.Count == 0)
-        {
-            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-            return;
-        }
-
-        // Cancel previous calculation to avoid wasted CPU and stale updates
-        var recalcCts = ReplaceCancellationSource(ref _recalculateMetricsCts);
-        var token = recalcCts.Token;
-
-        var recalcVersion = Interlocked.Increment(ref _metricsRecalcVersion);
-        var treeRoot = _viewModel.TreeNodes.FirstOrDefault();
-        if (treeRoot == null)
-        {
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-            return;
-        }
-
-        // Capture state for background calculation
-        var selectedPaths = GetCheckedPaths();
-        var hasAnyChecked = selectedPaths.Count > 0;
-        var hasCompleteMetricsBaseline = _hasCompleteMetricsBaseline;
-        var treeFormat = GetCurrentTreeTextFormat();
-        var currentTree = _currentTree;
-        var currentPath = _currentPath;
-
-        if (!hasCompleteMetricsBaseline)
-        {
-            _ = RecalculateIncompleteBaselineMetricsAsync(
-                recalcCts,
-                token,
-                recalcVersion,
-                hasAnyChecked,
-                selectedPaths,
-                treeFormat,
-                currentTree,
-                currentPath);
-            return;
-        }
-
-        if (!MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(hasAnyChecked, hasCompleteMetricsBaseline))
-        {
-            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-            return;
-        }
-
-        _ = RecalculateMetricsCoreAsync(
-            recalcCts,
-            token,
-            recalcVersion,
-            hasAnyChecked,
-            selectedPaths,
-            treeFormat,
-            currentTree,
-            currentPath);
-    }
-
-    /// <summary>
-    /// Recalculates metrics while the global baseline is still incomplete.
-    /// A non-empty selection computes subtree metrics, while an empty selection
-    /// falls back to whole-project metrics instead of incorrectly zeroing the status bar.
-    /// </summary>
-    private async Task RecalculateIncompleteBaselineMetricsAsync(
-        CancellationTokenSource recalcCts,
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult? currentTree,
-        string? currentPath)
-    {
-        try
-        {
-            if (token.IsCancellationRequested)
-                return;
-
-            if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
-            {
-                await Dispatcher.UIThread.InvokeAsync(() => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
-                return;
-            }
-
-            var targetFilePaths = await Task.Run(
-                () => hasAnyChecked
-                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
-                    : GetOrBuildAllOrderedFilePaths(currentTree.Root),
-                token);
-
-            if (targetFilePaths.Count == 0)
-            {
-                await PublishTreeMetricsWhileContentPendingAsync(
-                    token,
-                    recalcVersion,
-                    hasAnyChecked,
-                    selectedPaths,
-                    treeFormat,
-                    currentTree,
-                    currentPath);
-                return;
-            }
-
-            var missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(targetFilePaths), token);
-            if (missingPaths.Count > 0)
-            {
-                if (_isBackgroundMetricsActive)
-                {
-                    _metricsCalculationCts?.Cancel();
-                    await WaitForBackgroundMetricsIdleAsync(token);
-                    if (token.IsCancellationRequested)
-                        return;
-
-                    missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(targetFilePaths), token);
-                }
-
-                if (missingPaths.Count > 0)
-                {
-                    await PublishTreeMetricsWhileContentPendingAsync(
-                        token,
-                        recalcVersion,
-                        hasAnyChecked,
-                        selectedPaths,
-                        treeFormat,
-                        currentTree,
-                        currentPath);
-
-                    await EnsureSelectedFileMetricsAsync(missingPaths, token);
-                }
-            }
-
-            await PublishMetricsAsync(
-                token,
-                recalcVersion,
-                hasAnyChecked,
-                selectedPaths,
-                treeFormat,
-                currentTree,
-                currentPath);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when a newer selection supersedes the current one.
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-        }
-    }
-
-    private async Task WaitForBackgroundMetricsIdleAsync(CancellationToken cancellationToken)
-    {
-        while (_isBackgroundMetricsActive)
-            await Task.Delay(10, cancellationToken);
-    }
-
-    private async Task PublishTreeMetricsWhileContentPendingAsync(
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult currentTree,
-        string currentPath)
-    {
-        if (token.IsCancellationRequested)
-            return;
-
-        // Tree metrics do not depend on file-content warmup, so we can publish them
-        // immediately while the content side is still scanning missing files.
-        var treeMetrics = await Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-
-        if (token.IsCancellationRequested)
-            return;
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
-                return;
-
-            if (!string.Equals(_currentPath, currentPath, StringComparison.Ordinal) || !ReferenceEquals(_currentTree, currentTree))
-                return;
-
-            UpdateStatusBarMetrics(treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens, 0, 0, 0);
-            _viewModel.StatusMetricsVisible = true;
-        });
-    }
-
-    private async Task RecalculateMetricsCoreAsync(
-        CancellationTokenSource recalcCts,
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult? currentTree,
-        string? currentPath)
-    {
-        try
-        {
-            await PublishMetricsAsync(
-                token,
-                recalcVersion,
-                hasAnyChecked,
-                selectedPaths,
-                treeFormat,
-                currentTree,
-                currentPath);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when a newer recalculation supersedes the current one.
-        }
-        finally
-        {
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-        }
-    }
-
-    private async Task PublishMetricsAsync(
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult? currentTree,
-        string? currentPath)
-    {
-        if (token.IsCancellationRequested)
-            return;
-
-        if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
-        {
-            await Dispatcher.UIThread.InvokeAsync(
-                () => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
-            return;
-        }
-
-        var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-        var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
-
-        await Task.WhenAll(treeMetricsTask, contentMetricsTask).ConfigureAwait(false);
-
-        if (token.IsCancellationRequested)
-            return;
-
-        var treeMetrics = treeMetricsTask.Result;
-        var contentMetrics = contentMetricsTask.Result;
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            if (token.IsCancellationRequested || recalcVersion != Volatile.Read(ref _metricsRecalcVersion))
-                return;
-
-            UpdateStatusBarMetrics(
-                treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
-                contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
-        });
-    }
-
-    private void ClearFileMetricsCache(bool trimCapacity)
-    {
-        lock (_metricsLock)
-        {
-            _fileMetricsCache.Clear();
-            _inspectedFileMetricsPaths.Clear();
-            if (trimCapacity)
-            {
-                _fileMetricsCache.TrimExcess();
-                _inspectedFileMetricsPaths.TrimExcess();
-            }
-        }
-
-        InvalidateComputedMetricsCaches();
-    }
-
-    private List<string> CollectMissingMetricsFilePaths(IReadOnlyList<string> orderedPaths)
-    {
-        var missingPaths = new List<string>();
-        lock (_metricsLock)
-        {
-            for (var index = 0; index < orderedPaths.Count; index++)
-            {
-                var path = orderedPaths[index];
-                if (!_inspectedFileMetricsPaths.Contains(path))
-                    missingPaths.Add(path);
-            }
-        }
-
-        return missingPaths;
-    }
-
-    private async Task EnsureSelectedFileMetricsAsync(
-        IReadOnlyList<string> missingPaths,
-        CancellationToken cancellationToken)
-    {
-        if (missingPaths.Count == 0)
-            return;
-
-        var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, metricsCts.Token);
-
-        _metricsCancellationRequestedByUser = false;
-        _isBackgroundMetricsActive = true;
-        var statusOperationId = BeginStatusOperation(
-            _viewModel.StatusOperationCalculatingData,
-            indeterminate: false,
-            operationType: StatusOperationType.MetricsCalculation,
-            cancelAction: CancelBackgroundMetricsCalculation);
-        var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
-        var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
-
-        try
-        {
-            if (IsStatusOperationActive(statusOperationId))
-                _viewModel.StatusProgressValue = 0;
-
-            await ScanFileMetricsAsync(
-                missingPaths,
-                stagedMetrics,
-                stagedInspectedPaths,
-                linkedCts.Token,
-                statusOperationId,
-                MetricsCalculationPolicy.GetSelectionRecoveryParallelism(Environment.ProcessorCount));
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
-
-            if (IsStatusOperationActive(statusOperationId))
-                _viewModel.StatusProgressValue = 100;
-        }
-        catch (OperationCanceledException)
-        {
-            // Preserve already completed probes so rapid selection changes do not keep
-            // re-scanning the same text/binary files from scratch.
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
-            throw;
-        }
-        finally
-        {
-            _isBackgroundMetricsActive = false;
-            CompleteStatusOperation(statusOperationId);
-            DisposeIfCurrent(ref _metricsCalculationCts, metricsCts);
-        }
-    }
-
-    /// <summary>
-    /// Full metrics require a completed baseline calculation.
-    /// Selected metrics can be calculated independently.
-    /// </summary>
-    private static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
-        MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(hasAnyCheckedNodes, hasCompleteMetricsBaseline);
-
-    private static bool IsFullTreeSelection(TreeNodeDescriptor treeRoot, IReadOnlySet<string> selectedPaths) =>
-        selectedPaths.Contains(treeRoot.FullPath);
-
-    /// <summary>
-    /// Calculates tree metrics from actual tree export output in the currently selected format.
-    /// This keeps status metrics aligned with copy/export output.
-    /// </summary>
-    private ExportOutputMetrics CalculateTreeMetrics(
-        bool hasSelection,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat format)
-    {
-        if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
-            return ExportOutputMetrics.Empty;
-
-        var isFullTreeSelection = hasSelection && IsFullTreeSelection(_currentTree.Root, selectedPaths);
-        var effectiveHasSelection = hasSelection && !isFullTreeSelection;
-        var pathPresentation = CreateExportPathPresentation();
-        var pathPresentationIdentity = pathPresentation is null
-            ? 0
-            : HashCode.Combine(pathPresentation.DisplayRootPath, pathPresentation.DisplayRootName);
-        var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
-        var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
-        var cacheKey = new TreeMetricsCacheKey(
-            TreeIdentity: RuntimeHelpers.GetHashCode(_currentTree.Root),
-            Format: format,
-            SelectedCount: selectedCount,
-            SelectedHash: selectedHash,
-            PathPresentationIdentity: pathPresentationIdentity);
-
-        lock (_metricsComputationCacheLock)
-        {
-            if (_hasTreeMetricsCache && _treeMetricsCacheKey == cacheKey)
-                return _treeMetricsCacheValue;
-        }
-
-        // Tree status metrics are requested frequently while the user tweaks selection.
-        // Rebuilding a 100k+ line ASCII tree string only to count chars/lines is wasteful,
-        // so the export service provides a direct metrics path that preserves the same contract.
-        var metrics = effectiveHasSelection
-            ? _treeExport.CalculateSelectedTreeMetrics(
-                _currentPath,
-                _currentTree.Root,
-                selectedPaths,
-                format,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName)
-            : _treeExport.CalculateFullTreeMetrics(
-                _currentPath,
-                _currentTree.Root,
-                format,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName);
-
-        lock (_metricsComputationCacheLock)
-        {
-            _hasTreeMetricsCache = true;
-            _treeMetricsCacheKey = cacheKey;
-            _treeMetricsCacheValue = metrics;
-        }
-
-        return metrics;
-    }
-
-    /// <summary>
-    /// Calculates content metrics using the same text shaping rules as content export.
-    /// File I/O is avoided by using cached metrics prepared in background.
-    /// </summary>
-    private ExportOutputMetrics CalculateContentMetrics(bool hasSelection, IReadOnlySet<string> selectedPaths)
-    {
-        if (_currentTree is null)
-            return ExportOutputMetrics.Empty;
-
-        var pathMapper = CreateExportPathPresentation()?.MapFilePath;
-        var isFullTreeSelection = hasSelection && IsFullTreeSelection(_currentTree.Root, selectedPaths);
-        var effectiveHasSelection = hasSelection && !isFullTreeSelection;
-        var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
-        var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
-        var cacheKey = new ContentMetricsCacheKey(
-            TreeIdentity: RuntimeHelpers.GetHashCode(_currentTree.Root),
-            SelectedCount: selectedCount,
-            SelectedHash: selectedHash,
-            PathMapperIdentity: pathMapper is null ? 0 : RuntimeHelpers.GetHashCode(pathMapper));
-
-        lock (_metricsComputationCacheLock)
-        {
-            if (_hasContentMetricsCache && _contentMetricsCacheKey == cacheKey)
-                return _contentMetricsCacheValue;
-        }
-
-        var orderedPaths = effectiveHasSelection
-            ? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths, ensureExists: false)
-            : GetOrBuildAllOrderedFilePaths(_currentTree.Root);
-
-        if (orderedPaths.Count == 0)
-            return ExportOutputMetrics.Empty;
-
-        var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-        lock (_metricsLock)
-        {
-            foreach (var path in orderedPaths)
-            {
-                if (!_fileMetricsCache.TryGetValue(path, out var metrics))
-                    continue;
-
-                var displayPath = MapExportDisplayPath(path, pathMapper);
-                accumulator.AppendFile(new ContentFileMetrics(
-                    Path: displayPath,
-                    SizeBytes: metrics.Size,
-                    LineCount: metrics.LineCount,
-                    CharCount: metrics.CharCount,
-                    IsEmpty: metrics.IsEmpty,
-                    IsWhitespaceOnly: metrics.IsWhitespaceOnly,
-                    IsEstimated: metrics.IsEstimated,
-                    CrLfPairCount: metrics.CrLfPairCount,
-                    TrailingNewlineChars: metrics.TrailingNewlineChars,
-                    TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
-            }
-        }
-
-        var computed = accumulator.ToMetrics();
-        lock (_metricsComputationCacheLock)
-        {
-            _hasContentMetricsCache = true;
-            _contentMetricsCacheKey = cacheKey;
-            _contentMetricsCacheValue = computed;
-        }
-
-        return computed;
-    }
-
-    private IReadOnlyList<string> GetOrBuildAllOrderedFilePaths(TreeNodeDescriptor treeRoot)
-    {
-        var treeIdentity = RuntimeHelpers.GetHashCode(treeRoot);
-        lock (_metricsComputationCacheLock)
-        {
-            if (_allOrderedFilePathsCache is not null &&
-                _allOrderedFilePathsTreeIdentity == treeIdentity)
-            {
-                return _allOrderedFilePathsCache;
-            }
-        }
-
-        var orderedPaths = PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(treeRoot);
-
-        lock (_metricsComputationCacheLock)
-        {
-            _allOrderedFilePathsTreeIdentity = treeIdentity;
-            _allOrderedFilePathsCache = orderedPaths;
-            return _allOrderedFilePathsCache;
-        }
-    }
-
-    private static List<string> BuildOrderedSelectedFilePaths(
-        TreeNodeDescriptor treeRoot,
-        IReadOnlySet<string> selectedPaths,
-        bool ensureExists = true) =>
-        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
-
-    /// <summary>
-    /// Update status bar with calculated metrics.
-    /// </summary>
-    private void UpdateStatusBarMetrics(
-        int treeLines, int treeChars, int treeTokens,
-        int contentLines, int contentChars, int contentTokens)
-    {
-        _lastStatusTreeLines = treeLines;
-        _lastStatusTreeChars = treeChars;
-        _lastStatusTreeTokens = treeTokens;
-        _lastStatusContentLines = contentLines;
-        _lastStatusContentChars = contentChars;
-        _lastStatusContentTokens = contentTokens;
-        _hasStatusMetricsSnapshot = true;
-        RenderStatusBarMetrics();
-    }
-
-    private void RenderStatusBarMetrics()
-    {
-        var labels = BuildStatusMetricLabels();
-        var useCompactMode = ShouldUseCompactStatusMetrics();
-        _viewModel.StatusTreeStatsText = PreviewSelectionMetricsPolicy.FormatStatusMetricsText(
-            new ExportOutputMetrics(_lastStatusTreeLines, _lastStatusTreeChars, _lastStatusTreeTokens),
-            labels,
-            useCompactMode);
-        _viewModel.StatusContentStatsText = PreviewSelectionMetricsPolicy.FormatStatusMetricsText(
-            new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens),
-            labels,
-            useCompactMode);
     }
 
     private void RenderPreviewSelectionMetrics()
@@ -9211,9 +8096,6 @@ public partial class MainWindow : Window
             tokensLabel.Replace("{0}", string.Empty).Trim());
     }
 
-    private bool ShouldUseCompactStatusMetrics() =>
-        Bounds.Width > 0 && Bounds.Width <= CompactStatusMetricsThresholdWidth;
-
     private void SchedulePreviewSelectionMetricsUpdate(bool immediate = false)
     {
         if (!_viewModel.IsAnyPreviewVisible || _previewTextControl is null)
@@ -9237,7 +8119,7 @@ public partial class MainWindow : Window
 
         if (_previewSelectionMetricsDebounceTimer is null)
         {
-            _previewSelectionMetricsDebounceTimer = new DispatcherTimer
+            _previewSelectionMetricsDebounceTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
             {
                 Interval = PreviewSelectionMetricsDebounceInterval
             };
@@ -9354,13 +8236,10 @@ public partial class MainWindow : Window
         PreviewSelectionMetricsSnapshot snapshot,
         out ExportOutputMetrics metrics)
     {
-        return PreviewSelectionMetricsPolicy.TryGetCachedMetrics(
-            _hasStatusMetricsSnapshot,
+        return _metrics.TryGetCachedPreviewSelectionMetrics(
             _viewModel.SelectedPreviewContentMode,
             snapshot.Document,
             snapshot.SelectionRange,
-            new ExportOutputMetrics(_lastStatusTreeLines, _lastStatusTreeChars, _lastStatusTreeTokens),
-            new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens),
             out metrics);
     }
 
@@ -9378,15 +8257,9 @@ public partial class MainWindow : Window
         _viewModel.StatusPreviewSelectionStatsText = string.Empty;
     }
 
-    private static bool IsDefinitelyBinaryByExtensionForMetricsWarmup(string path)
-    {
-        var extension = Path.GetExtension(path);
-        return !string.IsNullOrWhiteSpace(extension) && MetricsWarmupBinaryExtensions.Contains(extension);
-    }
-
     private void OnStatusOperationCancelRequested(object? sender, RoutedEventArgs e)
     {
-        var activeOperation = GetActiveStatusOperationSnapshot();
+        var activeOperation = _statusOperations.GetActiveSnapshot();
         var activeOperationId = activeOperation.OperationId;
         var activeOperationType = activeOperation.OperationType;
 
@@ -9404,16 +8277,18 @@ public partial class MainWindow : Window
         switch (activeOperationType)
         {
             case StatusOperationType.LoadProject:
+                _projectLoadPipeline.CancelActiveLoad();
+                break;
             case StatusOperationType.RefreshProject:
                 _projectOperationCts?.Cancel();
-                _refreshCts?.Cancel();
+                _refreshPipeline.CancelActiveRefresh();
                 break;
             case StatusOperationType.GitPullUpdates:
             case StatusOperationType.GitSwitchBranch:
                 _gitOperationCts?.Cancel();
                 break;
             case StatusOperationType.PreviewBuild:
-                _previewBuildCts?.Cancel();
+                _previewPipeline.CancelActiveBuild();
                 break;
             case StatusOperationType.MetricsCalculation:
                 // Metrics cancellation is handled below by dedicated fallback logic.
@@ -9425,11 +8300,7 @@ public partial class MainWindow : Window
 
         if (activeOperationType == StatusOperationType.MetricsCalculation)
         {
-            _metricsCancellationRequestedByUser = true;
-            _hasCompleteMetricsBaseline = false;
-            CancelBackgroundMetricsCalculation();
-            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-            _viewModel.StatusMetricsVisible = _viewModel.IsProjectLoaded;
+            _metrics.CancelByUser();
             _toastService.Show(_localization["Toast.Operation.MetricsCanceled"]);
         }
 
@@ -9442,12 +8313,12 @@ public partial class MainWindow : Window
         // Cancel preview build if in progress
         if (_viewModel.IsPreviewLoading || activeOperationType == StatusOperationType.PreviewBuild)
         {
-            _previewBuildCts?.Cancel();
+            _previewPipeline.CancelActiveBuild();
             _viewModel.IsPreviewLoading = false;
             _toastService.Show(_viewModel.ToastPreviewCanceled);
         }
 
-        CompleteStatusOperation(activeOperationId);
+        _statusOperations.Complete(activeOperationId);
     }
 
     #endregion

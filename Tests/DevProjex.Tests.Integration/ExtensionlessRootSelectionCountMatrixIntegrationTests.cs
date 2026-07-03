@@ -19,7 +19,7 @@ public sealed class ExtensionlessRootSelectionCountMatrixIntegrationTests
 		var rules = CreateRules(ignoreExtensionlessFiles);
 		var selectedRoots = BuildSelectedRoots(rootMode);
 
-		var result = useCase.GetExtensionsForRootFolders(temp.Path, selectedRoots, rules);
+		var result = useCase.GetExtensionsForRootFolders(temp.Path, selectedRoots, rules, cancellationToken: TestContext.Current.CancellationToken);
 		var extensionlessCount = CountExtensionlessTokens(result.Value);
 
 		Assert.Equal(expectedExtensionlessCount, extensionlessCount);

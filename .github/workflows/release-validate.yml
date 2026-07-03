@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate release metadata
+      - name: Validate release metadata and Store alias contract
         shell: pwsh
         run: ./Scripts/release-all.ps1 -ValidateConfigOnly
 
@@ -44,29 +44,15 @@ jobs:
         id: set-matrix
         shell: pwsh
         run: |
-          # PRs keep a representative smoke matrix to control latency while still
-          # covering all three OS families. Full RID coverage remains on master pushes
-          # and manual runs, where release confidence matters more than turnaround time.
-          if ('${{ github.event_name }}' -eq 'pull_request') {
-            $matrix = @{
-              include = @(
-                @{ runner = 'windows-latest'; rid = 'win-x64' },
-                @{ runner = 'ubuntu-latest'; rid = 'linux-x64' },
-                @{ runner = 'macos-latest'; rid = 'osx-arm64' }
-              )
-            }
-          }
-          else {
-            $matrix = @{
-              include = @(
-                @{ runner = 'windows-latest'; rid = 'win-x64' },
-                @{ runner = 'windows-latest'; rid = 'win-arm64' },
-                @{ runner = 'ubuntu-latest'; rid = 'linux-x64' },
-                @{ runner = 'ubuntu-latest'; rid = 'linux-arm64' },
-                @{ runner = 'macos-latest'; rid = 'osx-x64' },
-                @{ runner = 'macos-latest'; rid = 'osx-arm64' }
-              )
-            }
+          $matrix = @{
+            include = @(
+              @{ runner = 'windows-latest'; rid = 'win-x64'; binary = 'DevProjex.exe' },
+              @{ runner = 'windows-11-arm'; rid = 'win-arm64'; binary = 'DevProjex.exe' },
+              @{ runner = 'ubuntu-latest'; rid = 'linux-x64'; binary = 'DevProjex' },
+              @{ runner = 'ubuntu-24.04-arm'; rid = 'linux-arm64'; binary = 'DevProjex' },
+              @{ runner = 'macos-15-intel'; rid = 'osx-x64'; binary = 'DevProjex' },
+              @{ runner = 'macos-latest'; rid = 'osx-arm64'; binary = 'DevProjex' }
+            )
           }
 
           "matrix=$($matrix | ConvertTo-Json -Compress -Depth 4)" >> $env:GITHUB_OUTPUT
@@ -86,7 +72,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.104
+          dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -102,6 +88,7 @@ jobs:
 
       - name: Publish
         shell: pwsh
+        # ReadyToRun validates the same startup-oriented publish shape as release artifacts.
         run: >
           dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj
           -c Release
@@ -109,16 +96,17 @@ jobs:
           --self-contained true
           /p:PublishSingleFile=true
           /p:IncludeNativeLibrariesForSelfExtract=true
+          /p:PublishReadyToRun=true
           /p:PublishTrimmed=false
           /p:DebugType=None
           /p:DebugSymbols=false
           -o artifacts/publish/${{ matrix.rid }}
 
-      - name: Startup Smoke (Windows x64)
-        if: ${{ matrix.rid == 'win-x64' }}
+      - name: Startup Smoke (Windows)
+        if: ${{ startsWith(matrix.rid, 'win-') }}
         shell: pwsh
         run: |
-          $exePath = Resolve-Path "artifacts/publish/${{ matrix.rid }}/DevProjex.exe"
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
           $workingDirectory = Split-Path -Path $exePath -Parent
 
           $process = Start-Process -FilePath $exePath -WorkingDirectory $workingDirectory -PassThru
@@ -138,3 +126,422 @@ jobs:
               $process.WaitForExit(5000) | Out-Null
             }
           }
+
+      - name: Command-line Smoke (Native Published Artifact)
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $helpArguments = @("--help", "-h", "/?")
+          $buildProps = [xml](Get-Content -Raw -Path "Directory.Build.props")
+          $expectedVersionNode = $buildProps.SelectSingleNode("/Project/PropertyGroup/DevProjexVersion")
+          if ($null -eq $expectedVersionNode -or [string]::IsNullOrWhiteSpace($expectedVersionNode.InnerText)) {
+            throw "DevProjexVersion was not found in Directory.Build.props."
+          }
+
+          $expectedVersion = $expectedVersionNode.InnerText.Trim()
+
+          if ($env:RUNNER_OS -ne "Windows") {
+            chmod +x $exePath
+          }
+
+          foreach ($helpArgument in $helpArguments) {
+            $safeName = $helpArgument -replace "[^A-Za-z0-9]+", "_"
+            $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-help-$safeName-stdout.txt"
+            $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-help-$safeName-stderr.txt"
+
+            Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+
+            if ($env:RUNNER_OS -eq "Windows") {
+              $process = Start-Process `
+                -FilePath $exePath `
+                -ArgumentList @($helpArgument) `
+                -RedirectStandardOutput $stdoutPath `
+                -RedirectStandardError $stderrPath `
+                -NoNewWindow `
+                -Wait `
+                -PassThru
+              $exitCode = $process.ExitCode
+            }
+            else {
+              & $exePath $helpArgument > $stdoutPath 2> $stderrPath
+              $exitCode = $LASTEXITCODE
+            }
+
+            $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+            $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+            if ($exitCode -ne 0) {
+              throw "Published $helpArgument smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$stderr"
+            }
+
+            if ($stdout -notmatch "Usage:") {
+              throw "Published $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
+            }
+          }
+
+          $versionStdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-version-stdout.txt"
+          $versionStderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-version-stderr.txt"
+          Remove-Item -LiteralPath $versionStdoutPath, $versionStderrPath -ErrorAction SilentlyContinue
+
+          if ($env:RUNNER_OS -eq "Windows") {
+            $process = Start-Process `
+              -FilePath $exePath `
+              -ArgumentList @("--version") `
+              -RedirectStandardOutput $versionStdoutPath `
+              -RedirectStandardError $versionStderrPath `
+              -NoNewWindow `
+              -Wait `
+              -PassThru
+            $exitCode = $process.ExitCode
+          }
+          else {
+            & $exePath "--version" > $versionStdoutPath 2> $versionStderrPath
+            $exitCode = $LASTEXITCODE
+          }
+
+          $versionStdout = Get-Content -Raw -Path $versionStdoutPath -ErrorAction SilentlyContinue
+          $versionStderr = Get-Content -Raw -Path $versionStderrPath -ErrorAction SilentlyContinue
+          $actualVersion = if ($null -eq $versionStdout) { "" } else { $versionStdout.Trim() }
+
+          if ($exitCode -ne 0) {
+            throw "Published --version smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$versionStderr"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($versionStderr)) {
+            throw "Published --version smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$versionStderr"
+          }
+
+          if ($actualVersion -ne $expectedVersion) {
+            throw "Published --version printed '$actualVersion' for ${{ matrix.rid }}, expected '$expectedVersion'."
+          }
+
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-export-project-${{ matrix.rid }}"
+          $sourceDirectory = Join-Path $projectDirectory "src"
+          New-Item -ItemType Directory -Force -Path $sourceDirectory | Out-Null
+          "class App {}" | Set-Content -LiteralPath (Join-Path $sourceDirectory "App.cs") -Encoding utf8NoBOM
+
+          $exportStdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stdout.txt"
+          $exportStderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stderr.txt"
+          Remove-Item -LiteralPath $exportStdoutPath, $exportStderrPath -ErrorAction SilentlyContinue
+          $exportArguments = @(
+            "--path", $projectDirectory,
+            "--export", "tree",
+            "--include-root", "src",
+            "--include-extension", "cs",
+            "--ignore", "none")
+
+          if ($env:RUNNER_OS -eq "Windows") {
+            $process = Start-Process `
+              -FilePath $exePath `
+              -ArgumentList $exportArguments `
+              -RedirectStandardOutput $exportStdoutPath `
+              -RedirectStandardError $exportStderrPath `
+              -NoNewWindow `
+              -Wait `
+              -PassThru
+            $exitCode = $process.ExitCode
+          }
+          else {
+            & $exePath @exportArguments > $exportStdoutPath 2> $exportStderrPath
+            $exitCode = $LASTEXITCODE
+          }
+
+          $exportStdout = Get-Content -Raw -Path $exportStdoutPath -ErrorAction SilentlyContinue
+          $exportStderr = Get-Content -Raw -Path $exportStderrPath -ErrorAction SilentlyContinue
+
+          if ($exitCode -ne 0) {
+            throw "Published export smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$exportStderr"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($exportStderr)) {
+            throw "Published export smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$exportStderr"
+          }
+
+          if ($exportStdout -notmatch "App\.cs") {
+            throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
+          }
+
+          Write-Host "Command-line smoke passed for ${{ matrix.rid }}."
+
+      - name: PATH Wrapper Smoke (Unix)
+        if: ${{ startsWith(matrix.rid, 'win-') == false }}
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $buildProps = [xml](Get-Content -Raw -Path "Directory.Build.props")
+          $expectedVersionNode = $buildProps.SelectSingleNode("/Project/PropertyGroup/DevProjexVersion")
+          if ($null -eq $expectedVersionNode -or [string]::IsNullOrWhiteSpace($expectedVersionNode.InnerText)) {
+            throw "DevProjexVersion was not found in Directory.Build.props."
+          }
+
+          $expectedVersion = $expectedVersionNode.InnerText.Trim()
+          chmod +x $exePath
+
+          $binDirectory = Join-Path $env:RUNNER_TEMP "devprojex-path-bin-${{ matrix.rid }}"
+          $workDirectory = Join-Path $env:RUNNER_TEMP "devprojex-path-work-${{ matrix.rid }}"
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-path-project-${{ matrix.rid }}"
+          $sourceDirectory = Join-Path $projectDirectory "src"
+          New-Item -ItemType Directory -Force -Path $binDirectory, $workDirectory, $sourceDirectory | Out-Null
+
+          $wrapperPath = Join-Path $binDirectory "devprojex"
+
+          function ConvertTo-PosixSingleQuoted {
+            param([Parameter(Mandatory = $true)][string] $Value)
+            # POSIX sh escapes a single quote by closing the quoted string, emitting "'", and reopening it.
+            $escapedSingleQuote = '''"''"'''
+            return "'" + $Value.Replace("'", $escapedSingleQuote) + "'"
+          }
+
+          @(
+            "#!/bin/sh",
+            "# DevProjex terminal command wrapper",
+            "# target: $exePath",
+            ("exec " + (ConvertTo-PosixSingleQuoted $exePath) + " " + '"$@"')
+          ) | Set-Content -LiteralPath $wrapperPath -Encoding utf8NoBOM
+          chmod +x $wrapperPath
+
+          "class App {}" | Set-Content -LiteralPath (Join-Path $sourceDirectory "App.cs") -Encoding utf8NoBOM
+
+          function Invoke-DevProjexPathCommand {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string] $Name,
+              [Parameter(Mandatory = $true)]
+              [string[]] $Arguments
+            )
+
+            $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-path-$Name-stdout.txt"
+            $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-path-$Name-stderr.txt"
+            Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+
+            Push-Location $workDirectory
+            try {
+              & devprojex @Arguments > $stdoutPath 2> $stderrPath
+              $exitCode = $LASTEXITCODE
+            }
+            finally {
+              Pop-Location
+            }
+
+            $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+            $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+            if ($exitCode -ne 0) {
+              throw "PATH wrapper command '$Name' failed for ${{ matrix.rid }}. ExitCode=$exitCode. Args=$($Arguments -join ' '). StdErr=$stderr"
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+              throw "PATH wrapper command '$Name' wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
+            }
+
+            if ($null -eq $stdout) {
+              return ""
+            }
+
+            return $stdout
+          }
+
+          $previousPath = $env:PATH
+          $env:PATH = "$binDirectory$([IO.Path]::PathSeparator)$previousPath"
+          try {
+            $resolvedCommand = (Get-Command "devprojex" -CommandType Application).Source
+            if ((Resolve-Path $resolvedCommand).Path -ne (Resolve-Path $wrapperPath).Path) {
+              throw "PATH did not resolve devprojex to the generated wrapper. Resolved=$resolvedCommand Expected=$wrapperPath"
+            }
+
+            foreach ($helpArgument in @("--help", "-h", "/?")) {
+              $stdout = Invoke-DevProjexPathCommand -Name "help-$($helpArgument -replace '[^A-Za-z0-9]+', '_')" -Arguments @($helpArgument)
+              if ($stdout -notmatch "Usage:") {
+                throw "PATH wrapper $helpArgument did not print usage text for ${{ matrix.rid }}. StdOut=$stdout"
+              }
+            }
+
+            $versionOutput = Invoke-DevProjexPathCommand -Name "version" -Arguments @("--version")
+            $actualPathVersion = $versionOutput.Trim()
+            if ($actualPathVersion -ne $expectedVersion) {
+              throw "PATH wrapper --version printed '$actualPathVersion' for ${{ matrix.rid }}, expected '$expectedVersion'."
+            }
+
+            $reportOutput = Invoke-DevProjexPathCommand -Name "silent-report-stdout" -Arguments @(
+              "--silent",
+              "--path", $projectDirectory,
+              "--report", "-",
+              "--include-root", "src",
+              "--include-extension", "cs",
+              "--ignore", "none")
+
+            if ($reportOutput -notmatch '"schemaVersion"' -or $reportOutput -notmatch '"rootPath"') {
+              throw "PATH wrapper headless report did not print the expected JSON contract for ${{ matrix.rid }}. StdOut=$reportOutput"
+            }
+
+            $exportTreeOutput = Invoke-DevProjexPathCommand -Name "export-tree-stdout" -Arguments @(
+              "--path", $projectDirectory,
+              "--export", "tree",
+              "--format", "json",
+              "--roots", "src",
+              "--ext", "cs",
+              "--ignore", "none")
+
+            if ($exportTreeOutput -notmatch '"rootPath"' -or $exportTreeOutput -notmatch "App\.cs") {
+              throw "PATH wrapper export JSON tree did not print the expected payload for ${{ matrix.rid }}. StdOut=$exportTreeOutput"
+            }
+
+            $exportFilePath = Join-Path $workDirectory "context.txt"
+            $exportFileOutput = Invoke-DevProjexPathCommand -Name "export-tree-content-file" -Arguments @(
+              $projectDirectory,
+              "--export", "tree-content",
+              "-o", $exportFilePath,
+              "--roots", "src",
+              "--ext", "cs",
+              "--ignore", "none")
+
+            $expectedPathExportPath = (Resolve-Path $exportFilePath).Path
+            $actualPathExportPath = $exportFileOutput.Trim()
+            if ($actualPathExportPath -ne $expectedPathExportPath) {
+              throw "PATH wrapper export file did not print the expected output path for ${{ matrix.rid }}. StdOut=$actualPathExportPath Expected=$expectedPathExportPath"
+            }
+
+            $exportFileContent = Get-Content -Raw -Path $exportFilePath -ErrorAction SilentlyContinue
+            if ($exportFileContent -notmatch "App\.cs" -or $exportFileContent -notmatch "class App") {
+              throw "PATH wrapper export file did not contain the expected tree-content payload for ${{ matrix.rid }}. Content=$exportFileContent"
+            }
+          }
+          finally {
+            $env:PATH = $previousPath
+          }
+
+          Write-Host "PATH wrapper smoke passed for ${{ matrix.rid }}."
+
+      - name: Portable Launcher Smoke (Windows)
+        if: ${{ startsWith(matrix.rid, 'win-') }}
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $buildProps = [xml](Get-Content -Raw -Path "Directory.Build.props")
+          $expectedVersionNode = $buildProps.SelectSingleNode("/Project/PropertyGroup/DevProjexVersion")
+          if ($null -eq $expectedVersionNode -or [string]::IsNullOrWhiteSpace($expectedVersionNode.InnerText)) {
+            throw "DevProjexVersion was not found in Directory.Build.props."
+          }
+
+          $expectedVersion = $expectedVersionNode.InnerText.Trim()
+          $launcherPath = Join-Path $env:RUNNER_TEMP "devprojex.cmd"
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-help-stdout.txt"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-help-stderr.txt"
+          $dllPath = [System.IO.Path]::ChangeExtension([string]$exePath, ".dll")
+
+          @(
+            "@echo off",
+            "rem DevProjex terminal command wrapper",
+            "rem target: $exePath",
+            "set `"DEVPROJEX_EXE=$exePath`"",
+            "set `"DEVPROJEX_DLL=$dllPath`"",
+            "if `"%~1`"==`"`" (",
+            "  start `"`" `"%DEVPROJEX_EXE%`"",
+            "  exit /b 0",
+            ")",
+            "if exist `"%DEVPROJEX_DLL%`" (",
+            "  dotnet `"%DEVPROJEX_DLL%`" %*",
+            "  exit /b %ERRORLEVEL%",
+            ")",
+            "`"%DEVPROJEX_EXE%`" %*",
+            "exit /b %ERRORLEVEL%"
+          ) | Set-Content -LiteralPath $launcherPath -Encoding ASCII
+
+          foreach ($helpArgument in @("--help", "-h", "/?")) {
+            Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+            $cmdArguments = @("/d", "/c", "`"$launcherPath`"", $helpArgument)
+            $process = Start-Process `
+              -FilePath "cmd.exe" `
+              -ArgumentList $cmdArguments `
+              -RedirectStandardOutput $stdoutPath `
+              -RedirectStandardError $stderrPath `
+              -NoNewWindow `
+              -Wait `
+              -PassThru
+
+            $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+            $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+            if ($process.ExitCode -ne 0) {
+              throw "Portable launcher $helpArgument smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
+            }
+
+            if ($stdout -notmatch "Usage:") {
+              throw "Portable launcher $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
+            }
+          }
+
+          Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+          $versionArguments = @("/d", "/c", "`"$launcherPath`"", "--version")
+          $process = Start-Process `
+            -FilePath "cmd.exe" `
+            -ArgumentList $versionArguments `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
+          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+          if ($process.ExitCode -ne 0) {
+            throw "Portable launcher --version smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            throw "Portable launcher --version smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
+          }
+
+          $actualVersion = if ($null -eq $stdout) { "" } else { $stdout.Trim() }
+          if ($actualVersion -ne $expectedVersion) {
+            throw "Portable launcher --version printed '$actualVersion' for ${{ matrix.rid }}, expected '$expectedVersion'. StdErr=$stderr"
+          }
+
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-launcher-export-project-${{ matrix.rid }}"
+          $sourceDirectory = Join-Path $projectDirectory "src"
+          New-Item -ItemType Directory -Force -Path $sourceDirectory | Out-Null
+          "class App {}" | Set-Content -LiteralPath (Join-Path $sourceDirectory "App.cs") -Encoding utf8NoBOM
+
+          $exportPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-context.txt"
+          Remove-Item -LiteralPath $stdoutPath, $stderrPath, $exportPath -ErrorAction SilentlyContinue
+          $cmdArguments = @(
+            "/d", "/c", "`"$launcherPath`"",
+            $projectDirectory,
+            "--export", "tree-content",
+            "-o", $exportPath,
+            "--roots", "src",
+            "--ext", "cs",
+            "--ignore", "none")
+          $process = Start-Process `
+            -FilePath "cmd.exe" `
+            -ArgumentList $cmdArguments `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
+          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+
+          if ($process.ExitCode -ne 0) {
+            throw "Portable launcher export smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            throw "Portable launcher export smoke wrote unexpected stderr for ${{ matrix.rid }}. StdErr=$stderr"
+          }
+
+          $expectedExportPath = (Resolve-Path $exportPath).Path
+          $actualExportPath = if ($null -eq $stdout) { "" } else { $stdout.Trim() }
+          if ($actualExportPath -ne $expectedExportPath) {
+            throw "Portable launcher export smoke did not print the expected output path for ${{ matrix.rid }}. StdOut=$actualExportPath Expected=$expectedExportPath"
+          }
+
+          $exportContent = Get-Content -Raw -Path $exportPath -ErrorAction SilentlyContinue
+          if ($exportContent -notmatch "App\.cs" -or $exportContent -notmatch "class App") {
+            throw "Portable launcher export smoke did not write the expected tree-content payload for ${{ matrix.rid }}. Content=$exportContent"
+          }
+
+          Write-Host "Portable launcher smoke passed for ${{ matrix.rid }}."

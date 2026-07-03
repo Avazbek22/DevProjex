@@ -12,7 +12,7 @@ public sealed class ExtensionlessIgnoreCountsIntegrationTests
 		var result = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			["src", "tests"],
-			CreateRules(ignoreExtensionlessFiles: false));
+			CreateRules(ignoreExtensionlessFiles: false), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(4, result.Value.IgnoreOptionCounts.ExtensionlessFiles);
 		Assert.Equal(2, CountExtensionlessTokens(result.Value.Extensions));
@@ -30,7 +30,7 @@ public sealed class ExtensionlessIgnoreCountsIntegrationTests
 		var result = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			["src", "tests"],
-			CreateRules(ignoreExtensionlessFiles: true));
+			CreateRules(ignoreExtensionlessFiles: true), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(4, result.Value.IgnoreOptionCounts.ExtensionlessFiles);
 		Assert.DoesNotContain("Dockerfile", result.Value.Extensions);
@@ -50,7 +50,7 @@ public sealed class ExtensionlessIgnoreCountsIntegrationTests
 		var result = useCase.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			[],
-			CreateRules(ignoreExtensionlessFiles: false));
+			CreateRules(ignoreExtensionlessFiles: false), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(2, result.Value.IgnoreOptionCounts.ExtensionlessFiles);
 		Assert.Equal(2, CountExtensionlessTokens(result.Value.Extensions));

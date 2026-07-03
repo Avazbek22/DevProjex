@@ -3,6 +3,7 @@
         xmlns:vm="using:DevProjex.Avalonia.ViewModels"
         x:Class="DevProjex.Avalonia.Views.GitCloneWindow"
         x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
         Title="{Binding GitCloneTitle}"
         Width="420"
         MinWidth="360"
@@ -11,7 +12,7 @@
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
         Background="Transparent"
-        SystemDecorations="None"
+        WindowDecorations="None"
         TransparencyLevelHint="AcrylicBlur, Blur, None"
         Icon="avares://DevProjex/AppIcon/icon-256.png">
   <Window.Styles>
@@ -44,6 +45,19 @@
       <Setter Property="CornerRadius" Value="8" />
     </Style>
 
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup#PART_Popup">
+      <Setter Property="ShouldUseOverlayLayer" Value="False" />
+      <Setter Property="WindowManagerAddShadowHint" Value="False" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Border#PopupBorder">
+      <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="Padding" Value="4" />
+    </Style>
 
     <Style Selector="ComboBox.recent-repositories-combo ComboBoxItem">
       <Setter Property="Margin" Value="0,2" />
@@ -81,7 +95,7 @@
       <TextBox Grid.Row="2"
                Name="UrlTextBox"
                Text="{Binding GitCloneUrl, Mode=TwoWay}"
-               Watermark="{Binding GitCloneUrlPlaceholder}"
+               PlaceholderText="{Binding GitCloneUrlPlaceholder}"
                Margin="0,0,0,16"
                IsVisible="{Binding !GitCloneInProgress}"
                KeyDown="OnUrlKeyDown" />
@@ -137,7 +151,7 @@
                 HorizontalContentAlignment="Center"
                 Click="OnStartClone"
                 IsVisible="{Binding !GitCloneInProgress}"
-                IsEnabled="{Binding GitCloneUrl.Length}" />
+                IsEnabled="{Binding CanStartGitClone}" />
         <Button Content="{Binding DialogCancel}"
                 Click="OnCancel" />
       </StackPanel>

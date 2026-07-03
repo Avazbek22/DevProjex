@@ -80,7 +80,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreOptionMatrixTests
 
 	[Theory]
 	[MemberData(nameof(DynamicOptionIds))]
-	public void DynamicIgnoreOptionMatrix_AllIgnoreIntent_AppliesToOptionsThatAppearLater(
+	public void DynamicIgnoreOptionMatrix_NewlyVisibleOptionRespectsAllOffIntent(
 		IgnoreOptionId dynamicOptionId)
 	{
 		var viewModel = CreateViewModel();
@@ -154,7 +154,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreOptionMatrixTests
 
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)
 	{
-		return Assert.Single(viewModel.IgnoreOptions.Where(option => option.Id == id));
+		return Assert.Single(viewModel.IgnoreOptions, option => option.Id == id);
 	}
 
 	private static IgnoreOptionCounts BuildCounts(
@@ -199,7 +199,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreOptionMatrixTests
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, true]);
+		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, true]);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(MainWindowViewModel viewModel)

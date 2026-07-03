@@ -12,6 +12,7 @@ namespace DevProjex.Tests.Integration;
 /// - Special characters and internationalization
 /// - Large repositories and timeouts
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitEdgeCasesTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _service;
@@ -31,17 +32,17 @@ public class GitEdgeCasesTests : IAsyncLifetime
         _tempDir = new TemporaryDirectory();
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         if (_gitAvailable)
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _tempDir.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     #region Repository State Edge Cases
@@ -54,11 +55,11 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("single-branch");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Try to switch to definitely nonexistent branch
-        var success = await _service.SwitchBranchAsync(repoPath, "nonexistent-branch-xyz-123");
+        var success = await _service.SwitchBranchAsync(repoPath, "nonexistent-branch-xyz-123", cancellationToken: TestContext.Current.CancellationToken);
         Assert.False(success, "Should fail for nonexistent branch");
     }
 
@@ -70,13 +71,13 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("current-branch-accuracy");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
-        var initialBranch = await _service.GetCurrentBranchAsync(repoPath);
+        var initialBranch = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(initialBranch);
 
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         if (branches.Count < 2)
             return;
 
@@ -86,8 +87,8 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         // Switch and verify
-        await _service.SwitchBranchAsync(repoPath, targetBranch);
-        var currentBranch = await _service.GetCurrentBranchAsync(repoPath);
+        await _service.SwitchBranchAsync(repoPath, targetBranch, cancellationToken: TestContext.Current.CancellationToken);
+        var currentBranch = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(targetBranch, currentBranch);
     }
 
@@ -99,11 +100,11 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("fresh-pull");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Pull on fresh clone should succeed (even though nothing to pull)
-        var pullSuccess = await _service.PullUpdatesAsync(repoPath);
+        var pullSuccess = await _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(pullSuccess, "Pull on fresh clone should succeed");
     }
 
@@ -115,13 +116,13 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("multi-pull");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Pull multiple times
         for (int i = 0; i < 3; i++)
         {
-            var success = await _service.PullUpdatesAsync(repoPath);
+            var success = await _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(success, $"Pull #{i + 1} should succeed");
         }
     }
@@ -138,12 +139,12 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("concurrent-pull");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Start multiple pulls concurrently
-        var task1 = _service.PullUpdatesAsync(repoPath);
-        var task2 = _service.PullUpdatesAsync(repoPath);
+        var task1 = _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
+        var task2 = _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
 
         var results = await Task.WhenAll(task1, task2);
 
@@ -159,10 +160,10 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("overlapping-ops");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         if (branches.Count < 2)
             return;
 
@@ -170,13 +171,13 @@ public class GitEdgeCasesTests : IAsyncLifetime
         var branch2 = branches[1].Name;
 
         // Start pull and switch concurrently
-        var pullTask = _service.PullUpdatesAsync(repoPath);
-        var switchTask = _service.SwitchBranchAsync(repoPath, branch2);
+        var pullTask = _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
+        var switchTask = _service.SwitchBranchAsync(repoPath, branch2, cancellationToken: TestContext.Current.CancellationToken);
 
         await Task.WhenAll(pullTask, switchTask);
 
         // Repository should still be functional
-        var currentBranch = await _service.GetCurrentBranchAsync(repoPath);
+        var currentBranch = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(currentBranch);
     }
 
@@ -246,7 +247,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
 
         try
         {
-            var result = await _service.CloneAsync(TestRepoUrl, targetDir);
+            var result = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(result.Success);
 
             // Verify it's in cache
@@ -287,7 +288,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
         {
             var source = sources[index];
             var targetDir = _tempDir.CreateDirectory($"url-format-{index}");
-            var result = await _service.CloneAsync(source, targetDir);
+            var result = await _service.CloneAsync(source, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.True(result.Success, $"Clone should succeed for supported local repository source: {source}");
         }
@@ -301,17 +302,17 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("active-branch");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEmpty(branches);
 
         var activeBranches = branches.Where(b => b.IsActive).ToList();
         Assert.Single(activeBranches); // Exactly one active branch
 
         // Active branch should match GetCurrentBranch
-        var currentBranch = await _service.GetCurrentBranchAsync(repoPath);
+        var currentBranch = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(currentBranch, activeBranches[0].Name);
     }
 
@@ -327,18 +328,18 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("failed-switch-recovery");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Try to switch to nonexistent branch
-        var failedSwitch = await _service.SwitchBranchAsync(repoPath, "nonexistent-xyz");
+        var failedSwitch = await _service.SwitchBranchAsync(repoPath, "nonexistent-xyz", cancellationToken: TestContext.Current.CancellationToken);
         Assert.False(failedSwitch);
 
         // Repository should still work
-        var currentBranch = await _service.GetCurrentBranchAsync(repoPath);
+        var currentBranch = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(currentBranch);
 
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEmpty(branches);
 
         // Should be able to switch to valid branch after failed attempt
@@ -347,7 +348,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
             var validBranch = branches.FirstOrDefault(b => !b.IsActive)?.Name;
             if (validBranch != null)
             {
-                var successSwitch = await _service.SwitchBranchAsync(repoPath, validBranch);
+                var successSwitch = await _service.SwitchBranchAsync(repoPath, validBranch, cancellationToken: TestContext.Current.CancellationToken);
                 Assert.True(successSwitch, "Should recover from failed switch");
             }
         }
@@ -395,17 +396,17 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("branch-slashes");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Try to switch to branch with slashes (if exists)
         // This is just to verify our code handles slashes correctly
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
 
         var branchWithSlash = branches.FirstOrDefault(b => b.Name.Contains('/'));
         if (branchWithSlash != null)
         {
-            var success = await _service.SwitchBranchAsync(repoPath, branchWithSlash.Name);
+            var success = await _service.SwitchBranchAsync(repoPath, branchWithSlash.Name, cancellationToken: TestContext.Current.CancellationToken);
             // Should either succeed or fail gracefully
             Assert.True(success || !success); // Always true, just verify no crash
         }
@@ -419,10 +420,10 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("head-filter");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
 
         // No branch should contain "->" (HEAD pointer)
         foreach (var branch in branches)
@@ -444,14 +445,13 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var targetDir = _tempDir.CreateDirectory("progress-test");
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
-        var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress);
+        var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.Success);
 
         // Progress callback should not cause errors (number of reports may vary)
-        Assert.NotNull(progressReports);
+        Assert.NotNull(progress.Reports);
     }
 
     [Fact]
@@ -462,10 +462,10 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("switch-progress");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         if (branches.Count < 2)
             return;
 
@@ -473,13 +473,12 @@ public class GitEdgeCasesTests : IAsyncLifetime
         if (targetBranch == null)
             return;
 
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
-        var exception = await Record.ExceptionAsync(() => _service.SwitchBranchAsync(repoPath, targetBranch, progress));
+        var exception = await Record.ExceptionAsync(() => _service.SwitchBranchAsync(repoPath, targetBranch, progress, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Null(exception);
-        Assert.All(progressReports, report => Assert.False(string.IsNullOrWhiteSpace(report)));
+        Assert.All(progress.Reports, report => Assert.False(string.IsNullOrWhiteSpace(report)));
     }
 
     #endregion
@@ -494,7 +493,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var targetDir = _tempDir.CreateDirectory("repo-name");
-        var result = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var result = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal("Hello-World", result.RepositoryName);
@@ -509,7 +508,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
 
         var url = TestRepoUrl;
         var targetDir = _tempDir.CreateDirectory("url-storage");
-        var result = await _service.CloneAsync(url, targetDir);
+        var result = await _service.CloneAsync(url, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(url, result.RepositoryUrl);
@@ -523,7 +522,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
             return;
 
         var targetDir = _tempDir.CreateDirectory("source-type");
-        var result = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var result = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(ProjectSourceType.GitClone, result.SourceType);

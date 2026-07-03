@@ -4,6 +4,7 @@ namespace DevProjex.Tests.Integration;
 /// Integration tests for concurrent Git operations.
 /// Tests thread safety, parallel execution, and resource locking.
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitConcurrencyTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _service;
@@ -22,17 +23,17 @@ public class GitConcurrencyTests : IAsyncLifetime
         _tempDir = new TemporaryDirectory();
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         if (_gitAvailable)
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _tempDir.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
@@ -45,9 +46,9 @@ public class GitConcurrencyTests : IAsyncLifetime
         var dir2 = _tempDir.CreateDirectory("parallel-clone-2");
         var dir3 = _tempDir.CreateDirectory("parallel-clone-3");
 
-        var task1 = _service.CloneAsync(TestRepoUrl, dir1);
-        var task2 = _service.CloneAsync(TestRepoUrl, dir2);
-        var task3 = _service.CloneAsync(TestRepoUrl, dir3);
+        var task1 = _service.CloneAsync(TestRepoUrl, dir1, cancellationToken: TestContext.Current.CancellationToken);
+        var task2 = _service.CloneAsync(TestRepoUrl, dir2, cancellationToken: TestContext.Current.CancellationToken);
+        var task3 = _service.CloneAsync(TestRepoUrl, dir3, cancellationToken: TestContext.Current.CancellationToken);
 
         var results = await Task.WhenAll(task1, task2, task3);
 
@@ -61,7 +62,7 @@ public class GitConcurrencyTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("parallel-branches");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Start 5 parallel GetBranches operations
@@ -84,13 +85,13 @@ public class GitConcurrencyTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("parallel-pull");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Start 3 parallel pull operations
-        var task1 = _service.PullUpdatesAsync(repoPath);
-        var task2 = _service.PullUpdatesAsync(repoPath);
-        var task3 = _service.PullUpdatesAsync(repoPath);
+        var task1 = _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
+        var task2 = _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
+        var task3 = _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
 
         var results = await Task.WhenAll(task1, task2, task3);
 
@@ -98,7 +99,7 @@ public class GitConcurrencyTests : IAsyncLifetime
         Assert.Contains(results, r => r);
 
         // Repository should still be valid
-        var currentBranch = await _service.GetCurrentBranchAsync(repoPath);
+        var currentBranch = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(currentBranch);
     }
 
@@ -109,10 +110,10 @@ public class GitConcurrencyTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("concurrent-switch");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         if (branches.Count < 2)
             return;
 
@@ -120,8 +121,8 @@ public class GitConcurrencyTests : IAsyncLifetime
         var branch2 = branches[1].Name;
 
         // Try switching to different branches concurrently
-        var task1 = _service.SwitchBranchAsync(repoPath, branch1);
-        var task2 = _service.SwitchBranchAsync(repoPath, branch2);
+        var task1 = _service.SwitchBranchAsync(repoPath, branch1, cancellationToken: TestContext.Current.CancellationToken);
+        var task2 = _service.SwitchBranchAsync(repoPath, branch2, cancellationToken: TestContext.Current.CancellationToken);
 
         var results = await Task.WhenAll(task1, task2);
 
@@ -129,7 +130,7 @@ public class GitConcurrencyTests : IAsyncLifetime
         Assert.Contains(results, r => r);
 
         // Repository should be in valid state
-        var currentBranch = await _service.GetCurrentBranchAsync(repoPath);
+        var currentBranch = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(currentBranch);
         Assert.True(currentBranch == branch1 || currentBranch == branch2);
     }
@@ -155,22 +156,22 @@ public class GitConcurrencyTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("mixed-ops");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         // Mix different operations in parallel
-        var getBranchesTask = _service.GetBranchesAsync(repoPath);
-        var getCurrentBranchTask = _service.GetCurrentBranchAsync(repoPath);
-        var pullTask = _service.PullUpdatesAsync(repoPath);
+        var getBranchesTask = _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
+        var getCurrentBranchTask = _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
+        var pullTask = _service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
 
         await Task.WhenAll(
-            getBranchesTask.ContinueWith(_ => { }),
-            getCurrentBranchTask.ContinueWith(_ => { }),
-            pullTask.ContinueWith(_ => { })
+            getBranchesTask.ContinueWith(_ => { }, cancellationToken: TestContext.Current.CancellationToken),
+            getCurrentBranchTask.ContinueWith(_ => { }, cancellationToken: TestContext.Current.CancellationToken),
+            pullTask.ContinueWith(_ => { }, cancellationToken: TestContext.Current.CancellationToken)
         );
 
         // Repository should still be accessible
-        var finalBranches = await _service.GetBranchesAsync(repoPath);
+        var finalBranches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEmpty(finalBranches);
     }
 
@@ -207,10 +208,10 @@ public class GitConcurrencyTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("rapid-switch");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
-        var branches = await _service.GetBranchesAsync(repoPath);
+        var branches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         if (branches.Count < 2)
             return;
 
@@ -221,12 +222,12 @@ public class GitConcurrencyTests : IAsyncLifetime
         for (int i = 0; i < 10; i++)
         {
             var targetBranch = i % 2 == 0 ? branch1 : branch2;
-            var success = await _service.SwitchBranchAsync(repoPath, targetBranch);
+            var success = await _service.SwitchBranchAsync(repoPath, targetBranch, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(success, $"Switch {i} to {targetBranch} failed");
         }
 
         // Final state should be consistent
-        var currentBranch = await _service.GetCurrentBranchAsync(repoPath);
+        var currentBranch = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(currentBranch);
     }
 
@@ -238,9 +239,9 @@ public class GitConcurrencyTests : IAsyncLifetime
         File.WriteAllText(Path.Combine(dir, "test.txt"), "test");
 
         // Try deleting same directory from multiple threads
-        var task1 = Task.Run(() => _cacheService.DeleteRepositoryDirectory(dir));
-        var task2 = Task.Run(() => _cacheService.DeleteRepositoryDirectory(dir));
-        var task3 = Task.Run(() => _cacheService.DeleteRepositoryDirectory(dir));
+        var task1 = Task.Run(() => _cacheService.DeleteRepositoryDirectory(dir), cancellationToken: TestContext.Current.CancellationToken);
+        var task2 = Task.Run(() => _cacheService.DeleteRepositoryDirectory(dir), cancellationToken: TestContext.Current.CancellationToken);
+        var task3 = Task.Run(() => _cacheService.DeleteRepositoryDirectory(dir), cancellationToken: TestContext.Current.CancellationToken);
 
         // Should not throw
         var exception = await Record.ExceptionAsync(() => Task.WhenAll(task1, task2, task3));
@@ -255,7 +256,7 @@ public class GitConcurrencyTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("parallel-current");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         var tasks = Enumerable.Range(0, 5)
@@ -276,7 +277,7 @@ public class GitConcurrencyTests : IAsyncLifetime
             return;
 
         var repoPath = _tempDir.CreateDirectory("stress-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(cloneResult.Success);
 
         var tasks = new List<Task>();
@@ -285,21 +286,21 @@ public class GitConcurrencyTests : IAsyncLifetime
         for (int i = 0; i < 20; i++)
         {
             if (i % 3 == 0)
-                tasks.Add(_service.GetBranchesAsync(repoPath).ContinueWith(_ => { }));
+                tasks.Add(_service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken).ContinueWith(_ => { }, TestContext.Current.CancellationToken));
             else if (i % 3 == 1)
-                tasks.Add(_service.GetCurrentBranchAsync(repoPath).ContinueWith(_ => { }));
+                tasks.Add(_service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken).ContinueWith(_ => { }, TestContext.Current.CancellationToken));
             else
-                tasks.Add(_service.PullUpdatesAsync(repoPath).ContinueWith(_ => { }));
+                tasks.Add(_service.PullUpdatesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken).ContinueWith(_ => { }, TestContext.Current.CancellationToken));
         }
 
         // Wait for all to complete
         await Task.WhenAll(tasks);
 
         // Repository should still be functional
-        var finalBranches = await _service.GetBranchesAsync(repoPath);
+        var finalBranches = await _service.GetBranchesAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEmpty(finalBranches);
 
-        var finalCurrent = await _service.GetCurrentBranchAsync(repoPath);
+        var finalCurrent = await _service.GetCurrentBranchAsync(repoPath, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(finalCurrent);
     }
 }

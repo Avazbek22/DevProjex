@@ -4,40 +4,38 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Java/Kotlin/Gradle build output folders.
 /// Activates when Maven/Gradle markers are present in the scope root.
 /// </summary>
-public sealed class JvmArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class JvmArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
-	private static readonly string[] MarkerFiles =
-	[
+	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
 		"pom.xml",
 		"build.gradle",
 		"build.gradle.kts",
 		"settings.gradle",
-		"settings.gradle.kts"
-	];
+		"settings.gradle.kts");
 
-	private static readonly string[] FolderNames =
-	[
+	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
 		"target",
 		".gradle",
 		"build",
-		"out"
-	];
+		"out");
+
+	private static readonly SmartIgnoreResult MatchResult =
+		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } =
+		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{
 		if (!Directory.Exists(rootPath))
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			return SmartIgnoreResult.Empty;
 
-		bool hasMarker = MarkerFiles.Any(marker => File.Exists(Path.Combine(rootPath, marker)));
-		if (!hasMarker)
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		foreach (var marker in MarkerFiles)
+		{
+			if (File.Exists(Path.Combine(rootPath, marker)))
+				return MatchResult;
+		}
 
-		return new SmartIgnoreResult(
-			new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
-			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		return SmartIgnoreResult.Empty;
 	}
 }

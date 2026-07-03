@@ -14,11 +14,13 @@ namespace DevProjex.Tests.UI;
 internal static class UiTestDriver
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
+    private static readonly ConcurrentDictionary<Window, byte> TrackedWindows = new();
     private static readonly ConcurrentDictionary<MainWindow, string> WindowAppDataPaths = new();
     private static readonly bool FastTimingsEnabled =
         string.Equals(Environment.GetEnvironmentVariable("DEVPROJEX_FAST_UI_TESTS"), "1", StringComparison.Ordinal);
     private static readonly TimeSpan PollDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(15);
     private static readonly TimeSpan FrameDelay = FastTimingsEnabled ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(6);
+    private const double FastSettledFrameScale = 0.25;
 
     public static async Task<MainWindow> CreateLoadedMainWindowAsync(
         UiTestProject project,
@@ -39,6 +41,7 @@ internal static class UiTestDriver
             Width = 1500,
             Height = 920
         };
+        TrackTopLevelWindow(window);
         WindowAppDataPaths[window] = appDataPath;
 
         window.Show();
@@ -85,17 +88,130 @@ internal static class UiTestDriver
         return window;
     }
 
-    public static async Task CloseWindowAsync(MainWindow window)
+    public static async Task CloseWindowAsync(MainWindow window, bool cleanupAppData = true)
     {
         if (!window.IsVisible)
         {
-            CleanupWindowAppData(window);
+            UntrackTopLevelWindow(window);
+            if (cleanupAppData)
+                CleanupWindowAppData(window);
+            else
+                WindowAppDataPaths.TryRemove(window, out _);
             return;
         }
 
+        // Closing immediately after section mutations can leave coalesced refresh tasks
+        // queued on the dispatcher. Drain the public idle contract first so headless test
+        // teardown does not race app work that would still be running for a real user.
+        await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
+        await WaitForSettledFramesAsync(frameCount: 10);
+        UntrackTopLevelWindow(window);
+        if (cleanupAppData)
+            CleanupWindowAppData(window);
+        else
+            WindowAppDataPaths.TryRemove(window, out _);
+    }
+
+    public static async Task CloseTopLevelWindowAsync(Window window)
+    {
+        if (window.IsVisible)
+            window.Close();
+
         await WaitForSettledFramesAsync(frameCount: 6);
-        CleanupWindowAppData(window);
+        UntrackTopLevelWindow(window);
+    }
+
+    public static void TrackTopLevelWindow(Window window)
+    {
+        if (TrackedWindows.TryAdd(window, 0))
+            window.Closed += OnTrackedWindowClosed;
+    }
+
+    public static void CleanupHeadlessState()
+    {
+        try
+        {
+            var dispatcher = Dispatcher.UIThread;
+            if (dispatcher.CheckAccess())
+                CleanupHeadlessStateOnUiThread();
+            else
+                dispatcher.InvokeAsync(CleanupHeadlessStateOnUiThread, DispatcherPriority.Send).GetAwaiter().GetResult();
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("idle test context", StringComparison.OrdinalIgnoreCase))
+        {
+            // Avalonia may already be tearing down the current headless context.
+            // In that case there is no UI state left for our safety cleanup to own.
+        }
+        finally
+        {
+            CleanupTrackedAppData();
+            TrackedWindows.Clear();
+        }
+    }
+
+    public static int TrackedWindowCount => TrackedWindows.Count;
+
+    private static void CleanupHeadlessStateOnUiThread()
+    {
+        foreach (var window in TrackedWindows.Keys.ToArray())
+        {
+            if (window.IsVisible)
+                window.Close();
+
+            UntrackTopLevelWindow(window);
+        }
+
+        for (var frame = 0; frame < 4; frame++)
+            PumpHeadlessFrame(Dispatcher.UIThread);
+    }
+
+    private static void OnTrackedWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is not Window window)
+            return;
+
+        UntrackTopLevelWindow(window);
+    }
+
+    private static void UntrackTopLevelWindow(Window window)
+    {
+        if (TrackedWindows.TryRemove(window, out _))
+            window.Closed -= OnTrackedWindowClosed;
+    }
+
+    public static async Task OpenFolderAsync(
+        MainWindow window,
+        string path,
+        bool fromDialog = true,
+        bool recordRecentFolder = true)
+    {
+        var method = typeof(MainWindow).GetMethod("TryOpenFolderAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var task = await window.Dispatcher.InvokeAsync<Task>(() =>
+        {
+            var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder]);
+            return Assert.IsAssignableFrom<Task>(result);
+        }, DispatcherPriority.Normal);
+        await task;
+        await WaitForSelectionRefreshIdleAsync(window);
+    }
+
+    public static async Task RefreshProjectAsync(MainWindow window)
+    {
+        var method = typeof(MainWindow).GetMethod("OnRefresh", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        await window.Dispatcher.InvokeAsync(() =>
+        {
+            method!.Invoke(window, [window, new RoutedEventArgs()]);
+        }, DispatcherPriority.Normal);
+
+        // OnRefresh is an async-void UI event handler. Waiting through the same public
+        // idle contract used by real interactions makes the test exercise the full refresh
+        // pipeline without relying on implementation-specific task handles.
+        await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(40));
     }
 
     public static MainWindowViewModel GetViewModel(MainWindow window)
@@ -142,20 +258,26 @@ internal static class UiTestDriver
 
     public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
     {
-        var checkBox = await WaitForRootFolderCheckBoxAsync(window, rootFolderName);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindRootFolderCheckBox(window, rootFolderName),
+            $"root folder checkbox '{rootFolderName}'");
     }
 
     public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
     {
-        var checkBox = await WaitForExtensionCheckBoxAsync(window, extensionName);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindExtensionCheckBox(window, extensionName),
+            $"extension checkbox '{extensionName}'");
     }
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
-        var checkBox = await WaitForIgnoreOptionCheckBoxAsync(window, optionId);
-        await ClickAsync(window, checkBox);
+        await ClickResolvedControlAsync(
+            window,
+            () => FindIgnoreOptionCheckBox(window, optionId),
+            $"ignore checkbox '{optionId}'");
     }
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
@@ -180,6 +302,7 @@ internal static class UiTestDriver
         {
             DataContext = GetViewModel(window)
         };
+        TrackTopLevelWindow(cloneWindow);
 
         cloneWindow.Show(window);
 
@@ -215,6 +338,14 @@ internal static class UiTestDriver
     }
 
     public static async Task ClickAsync(MainWindow window, Control control)
+    {
+        await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, control);
+
+        await ClickReadyControlAsync(window, control);
+    }
+
+    private static async Task ClickReadyControlAsync(MainWindow window, Control control)
     {
         var clickPoint = GetControlCenter(control, window);
         window.MouseMove(clickPoint, RawInputModifiers.None);
@@ -615,7 +746,7 @@ internal static class UiTestDriver
     {
         var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
         Assert.NotNull(clipboard);
-        return await global::Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard);
+        return await ClipboardExtensions.TryGetTextAsync(clipboard);
     }
 
     public static async Task WaitForClipboardTextAsync(
@@ -639,7 +770,7 @@ internal static class UiTestDriver
             await WaitForSettledFramesAsync(frameCount: 2);
         }
 
-        throw new Xunit.Sdk.XunitException(
+        throw new XunitException(
             $"Timed out waiting for clipboard text to match the expected preview copy payload. Expected length={expectedText.Length}, actual length={lastClipboardText?.Length ?? 0}.");
     }
 
@@ -946,7 +1077,7 @@ internal static class UiTestDriver
     {
         var origin = control.TranslatePoint(default, topLevel);
         if (!origin.HasValue)
-            throw new XunitException($"Unable to translate control '{control.Name}' into top-level coordinates.");
+            throw new XunitException($"Unable to translate control '{GetControlDebugName(control)}' into top-level coordinates.");
 
         return new Rect(origin.Value, control.Bounds.Size);
     }
@@ -956,6 +1087,108 @@ internal static class UiTestDriver
         var bounds = GetBoundsInWindow(control, topLevel);
         return bounds.Center;
     }
+
+    private static async Task EnsureControlVisibleAsync(MainWindow window, Control control)
+    {
+        var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
+        if (scrollViewer is null)
+            return;
+
+        var scrolled = false;
+        await window.Dispatcher.InvokeAsync(() =>
+        {
+            var origin = control.TranslatePoint(default, scrollViewer);
+            if (!origin.HasValue)
+                return;
+
+            var viewport = scrollViewer.Viewport;
+            if (viewport.Width <= 0 || viewport.Height <= 0)
+                return;
+
+            const double Padding = 4;
+            var bounds = new Rect(origin.Value, control.Bounds.Size);
+            var offset = scrollViewer.Offset;
+            var maxX = Math.Max(0, scrollViewer.Extent.Width - viewport.Width);
+            var maxY = Math.Max(0, scrollViewer.Extent.Height - viewport.Height);
+
+            var targetX = offset.X;
+            if (bounds.Left < Padding)
+                targetX = Math.Max(0, offset.X + bounds.Left - Padding);
+            else if (bounds.Right > viewport.Width - Padding)
+                targetX = Math.Min(maxX, offset.X + bounds.Right - viewport.Width + Padding);
+
+            var targetY = offset.Y;
+            if (bounds.Top < Padding)
+                targetY = Math.Max(0, offset.Y + bounds.Top - Padding);
+            else if (bounds.Bottom > viewport.Height - Padding)
+                targetY = Math.Min(maxY, offset.Y + bounds.Bottom - viewport.Height + Padding);
+
+            if (Math.Abs(targetX - offset.X) < 0.5 && Math.Abs(targetY - offset.Y) < 0.5)
+                return;
+
+            scrollViewer.Offset = new Vector(targetX, targetY);
+            scrolled = true;
+        });
+
+        if (scrolled)
+            await WaitForSettledFramesAsync(frameCount: 6);
+    }
+
+    private static async Task WaitForControlReadyForPointerAsync(MainWindow window, Control control)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => IsControlReadyForPointer(control, window),
+            $"control '{GetControlDebugName(control)}' to be ready for pointer input");
+    }
+
+    private static async Task ClickResolvedControlAsync(
+        MainWindow window,
+        Func<Control?> resolveControl,
+        string description)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        Exception? lastFailure = null;
+
+        while (stopwatch.Elapsed < DefaultTimeout)
+        {
+            var control = resolveControl();
+            if (control is null || !IsControlReadyForPointer(control, window))
+            {
+                await WaitForSettledFramesAsync(frameCount: 2);
+                await Task.Delay(PollDelay);
+                continue;
+            }
+
+            try
+            {
+                await EnsureControlVisibleAsync(window, control);
+                if (!IsControlReadyForPointer(control, window))
+                    continue;
+
+                await ClickReadyControlAsync(window, control);
+                return;
+            }
+            catch (XunitException exception)
+            {
+                lastFailure = exception;
+                await WaitForSettledFramesAsync(frameCount: 2);
+            }
+        }
+
+        var lastFailureText = lastFailure is null ? string.Empty : $" Last failure: {lastFailure.Message}";
+        throw new XunitException(
+            $"Timed out waiting for {description} to stay ready for pointer input.{lastFailureText} Current state: {DescribeState(window)}");
+    }
+
+    private static bool IsControlReadyForPointer(Control control, MainWindow window)
+        => control.IsVisible
+           && control.Bounds.Width > 0.5
+           && control.Bounds.Height > 0.5
+           && control.TranslatePoint(default, window).HasValue;
+
+    private static string GetControlDebugName(Control control)
+        => string.IsNullOrWhiteSpace(control.Name) ? control.GetType().Name : control.Name!;
 
     public static async Task WaitForConditionAsync(
         MainWindow window,
@@ -981,18 +1214,29 @@ internal static class UiTestDriver
     public static async Task WaitForSettledFramesAsync(int frameCount)
     {
         var effectiveFrameCount = FastTimingsEnabled
-            ? Math.Max(1, (int)Math.Ceiling(frameCount * 0.35))
+            ? Math.Max(1, (int)Math.Ceiling(frameCount * FastSettledFrameScale))
             : frameCount;
+        var dispatcher = Dispatcher.UIThread;
 
         for (var index = 0; index < effectiveFrameCount; index++)
         {
-            // Drive both dispatcher queues and the headless render timer so tests observe
-            // the same visual state users would see after an animation or layout pass.
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            if (dispatcher.CheckAccess())
+                PumpHeadlessFrame(dispatcher);
+            else
+                await dispatcher.InvokeAsync(static () => PumpHeadlessFrame(Dispatcher.UIThread), DispatcherPriority.Background);
+
             await Task.Delay(FrameDelay);
         }
+    }
+
+    private static void PumpHeadlessFrame(Dispatcher dispatcher)
+    {
+        // RunJobs drains Avalonia's queued dispatcher work immediately. Pairing it with
+        // the headless render timer keeps layout/animation assertions deterministic
+        // without adding real-time sleeps to every UI test frame.
+        dispatcher.RunJobs(DispatcherPriority.Background);
+        AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+        dispatcher.RunJobs(DispatcherPriority.Background);
     }
 
     private static string DescribeState(MainWindow window)
@@ -1106,10 +1350,10 @@ internal static class UiTestDriver
         return Assert.IsType<CheckBox>(FindTreeNodeCheckBox(window, displayName));
     }
 
-    private static DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator GetSelectionCoordinator(MainWindow window)
+    private static Avalonia.Coordinators.SelectionSyncCoordinator GetSelectionCoordinator(MainWindow window)
     {
         var field = typeof(MainWindow).GetField("_selectionCoordinator", BindingFlags.Instance | BindingFlags.NonPublic);
-        return Assert.IsType<DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
+        return Assert.IsType<Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
     }
 
     private static bool IsPreviewPipelineIdle(MainWindow window)
@@ -1117,9 +1361,13 @@ internal static class UiTestDriver
         // Preview mode switching is a two-step pipeline: the selected mode changes first,
         // then the actual preview refresh is scheduled and can temporarily clear the document.
         // UI tests must wait for both steps to settle before reading the live preview payload.
-        return !GetRequiredPrivateField<bool>(window, "_previewModeSwitchInProgress") &&
-               !GetRequiredPrivateField<bool>(window, "_previewRefreshRequested") &&
-               !GetRequiredPrivateField<bool>(window, "_clearPreviewBeforeNextRefresh");
+        return GetPreviewPipeline(window).IsIdle;
+    }
+
+    private static Avalonia.Coordinators.PreviewWorkspacePipeline GetPreviewPipeline(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField("_previewPipeline", BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<Avalonia.Coordinators.PreviewWorkspacePipeline>(field?.GetValue(window));
     }
 
     private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)
@@ -1181,6 +1429,20 @@ internal static class UiTestDriver
         if (!WindowAppDataPaths.TryRemove(window, out var appDataPath))
             return;
 
+        DeleteAppDataDirectory(appDataPath);
+    }
+
+    private static void CleanupTrackedAppData()
+    {
+        foreach (var window in WindowAppDataPaths.Keys.ToArray())
+        {
+            if (WindowAppDataPaths.TryRemove(window, out var appDataPath))
+                DeleteAppDataDirectory(appDataPath);
+        }
+    }
+
+    private static void DeleteAppDataDirectory(string appDataPath)
+    {
         try
         {
             if (Directory.Exists(appDataPath))

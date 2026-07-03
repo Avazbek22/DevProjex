@@ -45,7 +45,7 @@ public sealed class CancellationPatternTests
 		try
 		{
 			await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-				Task.Run(() => Task.WaitAll([task1, task2], cts.Token)));
+				Task.Run(() => Task.WaitAll([task1, task2], cts.Token), cancellationToken: TestContext.Current.CancellationToken));
 		}
 		finally
 		{
@@ -74,7 +74,7 @@ public sealed class CancellationPatternTests
 				firstCalculationCompleted = true;
 		}, token1);
 
-		await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+		await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken: TestContext.Current.CancellationToken);
 
 		currentCts.Cancel();
 		currentCts.Dispose();
@@ -122,7 +122,7 @@ public sealed class CancellationPatternTests
 				return;
 
 			uiUpdated = true;
-		});
+		}, TestContext.Current.CancellationToken);
 
 		await task;
 
@@ -226,7 +226,7 @@ public sealed class CancellationPatternTests
 			}
 
 			Assert.Fail("Should have caught OperationCanceledException");
-		});
+		}, TestContext.Current.CancellationToken);
 
 		await task;
 
@@ -291,17 +291,20 @@ public sealed class CancellationPatternTests
 			}
 		}, cts.Token);
 
-		await innerTasksStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+		await innerTasksStarted.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken: TestContext.Current.CancellationToken);
 		cts.Cancel();
-		releaseGate.TrySetResult(true);
 
 		try
 		{
-			await outerTask;
+			await outerTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
 			exitedGracefully = true;
+		}
+		finally
+		{
+			releaseGate.TrySetResult(true);
 		}
 
 		Assert.True(exitedGracefully || outerTask.IsCanceled);

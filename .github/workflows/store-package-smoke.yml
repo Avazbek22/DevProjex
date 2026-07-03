@@ -28,7 +28,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.104
+          dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -38,6 +38,6 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Build Store package smoke
+      - name: Build Store package and validate execution alias
         shell: pwsh
         run: ./Scripts/release-all.ps1 -SmokeStoreBuildOnly

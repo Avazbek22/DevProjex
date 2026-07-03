@@ -154,8 +154,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 			}
 			finally
 			{
-				cloneWindow.Close();
-				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+				await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
 			}
 		}
 		finally
@@ -193,8 +192,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 			}
 			finally
 			{
-				cloneWindow.Close();
-				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+				await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
 			}
 		}
 		finally
@@ -236,8 +234,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 				}
 				finally
 				{
-					cloneWindow.Close();
-					await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+					await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
 				}
 			}
 		}

@@ -13,6 +13,7 @@ namespace DevProjex.Tests.Integration;
 /// IMPORTANT: These tests use real git operations and network access.
 /// Some tests will be skipped if git is not available.
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitRepositoryServiceTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _service = new();
@@ -23,7 +24,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     private string TestRepoUrl => _testRepository!.RepositoryUrl;
     private string TestRepoName => _testRepository!.RepositoryName;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         _tempDir = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitTests", Guid.NewGuid().ToString("N"));
@@ -32,7 +33,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         // Cleanup with retry for locked git files
         if (_tempDir != null && Directory.Exists(_tempDir))
@@ -93,7 +94,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     private void SkipIfNoGit()
     {
         if (!_gitAvailable)
-            Assert.Fail("SKIP: Git is not available on this system");
+            Assert.Skip("Git is not available on this system.");
     }
 
     /// <summary>
@@ -102,7 +103,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     private static void SkipIf(bool condition, string reason)
     {
         if (condition)
-            Assert.Fail($"SKIP: {reason}");
+            Assert.Skip(reason);
     }
 
     #region Git Availability Tests
@@ -111,7 +112,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     public async Task IsGitAvailableAsync_DoesNotThrow()
     {
         // This test verifies that git detection works without throwing
-        var result = await _service.IsGitAvailableAsync();
+        var result = await _service.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         // Result depends on environment, but method should not throw
         Assert.True(result || !result);
@@ -121,8 +122,8 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     public async Task IsGitAvailableAsync_ReturnsConsistentResults()
     {
         // Multiple calls should return the same result
-        var result1 = await _service.IsGitAvailableAsync();
-        var result2 = await _service.IsGitAvailableAsync();
+        var result1 = await _service.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var result2 = await _service.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(result1, result2);
     }
@@ -143,7 +144,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         var result = await _service.CloneAsync(
             new Uri(nonRepositoryPath).AbsoluteUri,
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -159,7 +160,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         var result = await _service.CloneAsync(
             missingRemote,
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -172,7 +173,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         var targetDir = Path.Combine(_tempDir!, "clone-test");
 
-        var result = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var result = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, $"Clone failed: {result.ErrorMessage}");
         Assert.Equal(targetDir, result.LocalPath);
@@ -189,10 +190,9 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "progress-test");
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
-        var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress);
+        var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, $"Clone failed: {result.ErrorMessage}");
         // Git may or may not report progress depending on output - just verify operation succeeded
@@ -224,7 +224,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         var result = await _service.CloneAsync(
             missingRemote,
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -237,7 +237,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         var targetDir = Path.Combine(_tempDir!, "name-test");
 
-        var result = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var result = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, $"Clone failed: {result.ErrorMessage}");
         Assert.Equal(TestRepoName, result.RepositoryName);
@@ -249,7 +249,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "shallow-test");
-        var result = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var result = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, $"Clone failed: {result.ErrorMessage}");
 
@@ -268,10 +268,10 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "branches-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var branches = await _service.GetBranchesAsync(targetDir);
+        var branches = await _service.GetBranchesAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(branches);
         // At least one branch should be active (current branch)
@@ -284,10 +284,10 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "active-first-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var branches = await _service.GetBranchesAsync(targetDir);
+        var branches = await _service.GetBranchesAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(branches);
         // First branch should be active (sorting places active first)
@@ -300,10 +300,10 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "current-branch-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var currentBranch = await _service.GetCurrentBranchAsync(targetDir);
+        var currentBranch = await _service.GetCurrentBranchAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(currentBranch);
         Assert.NotEmpty(currentBranch);
@@ -315,11 +315,11 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "switch-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
         // Get list of branches
-        var branches = await _service.GetBranchesAsync(targetDir);
+        var branches = await _service.GetBranchesAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(branches.Count < 2, "Repository has only one branch, cannot test switching");
 
         // Find a branch that is not currently active
@@ -327,12 +327,12 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIf(otherBranch is null, "No other branch available for switching");
 
         // Switch to the other branch
-        var success = await _service.SwitchBranchAsync(targetDir, otherBranch!.Name);
+        var success = await _service.SwitchBranchAsync(targetDir, otherBranch!.Name, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(success, "Branch switch should succeed");
 
         // Verify current branch changed
-        var newCurrentBranch = await _service.GetCurrentBranchAsync(targetDir);
+        var newCurrentBranch = await _service.GetCurrentBranchAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(otherBranch.Name, newCurrentBranch);
     }
 
@@ -342,10 +342,10 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "nonexistent-branch-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var success = await _service.SwitchBranchAsync(targetDir, "nonexistent-branch-xyz123");
+        var success = await _service.SwitchBranchAsync(targetDir, "nonexistent-branch-xyz123", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(success, "Switching to nonexistent branch should fail");
     }
@@ -356,17 +356,16 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "switch-progress-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var branches = await _service.GetBranchesAsync(targetDir);
+        var branches = await _service.GetBranchesAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
         var otherBranch = branches.FirstOrDefault(b => !b.IsActive);
         SkipIf(otherBranch is null, "No other branch available");
 
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
-        var success = await _service.SwitchBranchAsync(targetDir, otherBranch!.Name, progress);
+        var success = await _service.SwitchBranchAsync(targetDir, otherBranch!.Name, progress, cancellationToken: TestContext.Current.CancellationToken);
 
         // Verify operation succeeded - progress reports are optional
         Assert.True(success, "Branch switch should succeed");
@@ -378,23 +377,23 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "switch-back-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var originalBranch = await _service.GetCurrentBranchAsync(targetDir);
-        var branches = await _service.GetBranchesAsync(targetDir);
+        var originalBranch = await _service.GetCurrentBranchAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
+        var branches = await _service.GetBranchesAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
         var otherBranch = branches.FirstOrDefault(b => !b.IsActive);
         SkipIf(otherBranch is null, "No other branch available");
 
         // Switch to other branch
-        var switchResult1 = await _service.SwitchBranchAsync(targetDir, otherBranch!.Name);
+        var switchResult1 = await _service.SwitchBranchAsync(targetDir, otherBranch!.Name, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(switchResult1, "First switch should succeed");
 
         // Switch back to original
-        var switchResult2 = await _service.SwitchBranchAsync(targetDir, originalBranch!);
+        var switchResult2 = await _service.SwitchBranchAsync(targetDir, originalBranch!, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(switchResult2, "Switch back should succeed");
 
-        var finalBranch = await _service.GetCurrentBranchAsync(targetDir);
+        var finalBranch = await _service.GetCurrentBranchAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(originalBranch, finalBranch);
     }
 
@@ -408,10 +407,10 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "pull-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var success = await _service.PullUpdatesAsync(targetDir);
+        var success = await _service.PullUpdatesAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(success, "Pull updates should succeed on clean repository");
     }
@@ -422,13 +421,12 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "pull-progress-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
-        var success = await _service.PullUpdatesAsync(targetDir, progress);
+        var success = await _service.PullUpdatesAsync(targetDir, progress, cancellationToken: TestContext.Current.CancellationToken);
 
         // Verify operation succeeded - progress reports are optional
         Assert.True(success, "Pull updates should succeed on clean repository");
@@ -440,21 +438,21 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         SkipIfNoGit();
 
         var targetDir = Path.Combine(_tempDir!, "pull-after-switch-test");
-        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir);
+        var cloneResult = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
         SkipIf(!cloneResult.Success, $"Clone failed: {cloneResult.ErrorMessage}");
 
         // Get branches and switch if possible
-        var branches = await _service.GetBranchesAsync(targetDir);
+        var branches = await _service.GetBranchesAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
         var otherBranch = branches.FirstOrDefault(b => !b.IsActive);
 
         if (otherBranch is not null)
         {
-            var switchResult = await _service.SwitchBranchAsync(targetDir, otherBranch.Name);
+            var switchResult = await _service.SwitchBranchAsync(targetDir, otherBranch.Name, cancellationToken: TestContext.Current.CancellationToken);
             SkipIf(!switchResult, "Branch switch failed");
         }
 
         // Pull should still work after switch
-        var pullSuccess = await _service.PullUpdatesAsync(targetDir);
+        var pullSuccess = await _service.PullUpdatesAsync(targetDir, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(pullSuccess, "Pull updates should work after branch switch");
     }
 
@@ -467,7 +465,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     {
         var invalidPath = Path.Combine(_tempDir!, "nonexistent-repo-xyz");
 
-        var branches = await _service.GetBranchesAsync(invalidPath);
+        var branches = await _service.GetBranchesAsync(invalidPath, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(branches);
     }
@@ -477,7 +475,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     {
         var invalidPath = Path.Combine(_tempDir!, "nonexistent-repo-xyz");
 
-        var branch = await _service.GetCurrentBranchAsync(invalidPath);
+        var branch = await _service.GetCurrentBranchAsync(invalidPath, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(branch);
     }
@@ -487,7 +485,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     {
         var invalidPath = Path.Combine(_tempDir!, "nonexistent-repo-xyz");
 
-        var success = await _service.SwitchBranchAsync(invalidPath, "main");
+        var success = await _service.SwitchBranchAsync(invalidPath, "main", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(success);
     }
@@ -497,7 +495,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     {
         var invalidPath = Path.Combine(_tempDir!, "nonexistent-repo-xyz");
 
-        var success = await _service.PullUpdatesAsync(invalidPath);
+        var success = await _service.PullUpdatesAsync(invalidPath, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(success);
     }
@@ -510,7 +508,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         Directory.CreateDirectory(nonGitDir);
         File.WriteAllText(Path.Combine(nonGitDir, "file.txt"), "content");
 
-        var branches = await _service.GetBranchesAsync(nonGitDir);
+        var branches = await _service.GetBranchesAsync(nonGitDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(branches);
     }
@@ -542,8 +540,8 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         var targetDir1 = Path.Combine(_tempDir!, "parallel-1");
         var targetDir2 = Path.Combine(_tempDir!, "parallel-2");
 
-        var task1 = _service.CloneAsync(TestRepoUrl, targetDir1);
-        var task2 = _service.CloneAsync(TestRepoUrl, targetDir2);
+        var task1 = _service.CloneAsync(TestRepoUrl, targetDir1, cancellationToken: TestContext.Current.CancellationToken);
+        var task2 = _service.CloneAsync(TestRepoUrl, targetDir2, cancellationToken: TestContext.Current.CancellationToken);
 
         var results = await Task.WhenAll(task1, task2);
 

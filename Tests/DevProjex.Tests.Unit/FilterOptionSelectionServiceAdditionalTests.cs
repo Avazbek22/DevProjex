@@ -67,6 +67,37 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 		Assert.Equal(new[] { ".A", ".aa", ".b", ".c" }, ordered);
 	}
 
+	[Fact]
+	public void BuildExtensionOptions_EmptyStateCacheDefaultsDiscoveredExtensionsChecked()
+	{
+		var service = new FilterOptionSelectionService();
+		var options = service.BuildExtensionOptions(
+			[".cs", ".json"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase));
+
+		Assert.All(options, option => Assert.True(option.IsChecked));
+	}
+
+	[Fact]
+	public void BuildExtensionOptions_StateCachePreservesKnownUncheckedAndChecksNewExtensions()
+	{
+		var service = new FilterOptionSelectionService();
+
+		var options = service.BuildExtensionOptions(
+			[".cs", ".csv", ".log"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+			new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = true,
+				[".csv"] = false
+			});
+
+		Assert.True(options.Single(option => option.Name == ".cs").IsChecked);
+		Assert.False(options.Single(option => option.Name == ".csv").IsChecked);
+		Assert.True(options.Single(option => option.Name == ".log").IsChecked);
+	}
+
 	[Theory]
 	// Verifies ignored folders are unchecked when no previous selections exist.
 	[InlineData("bin", true)]
@@ -87,7 +118,10 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: true,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules", ".idea", ".vscode" },
-			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(
 			["bin", "obj", ".git", "node_modules", "src", "docs", "build", "Assets", ".idea", ".vscode"],
@@ -117,7 +151,10 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 			IgnoreDotFolders: true,
 			IgnoreDotFiles: true,
 			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
-			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
 
 		var options = service.BuildRootFolderOptions(
 			["bin", "obj", ".git", "node_modules", "src", "docs"],
@@ -129,6 +166,119 @@ public sealed class FilterOptionSelectionServiceAdditionalTests
 		var target = options.Single(option => option.Name.Equals(folderName, StringComparison.OrdinalIgnoreCase));
 
 		Assert.Equal(expectedChecked, target.IsChecked);
+	}
+
+	[Fact]
+	public void BuildRootFolderOptions_EmptyStateCacheDefaultsDiscoveredRootsChecked()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+		var options = service.BuildRootFolderOptions(
+			["src", "docs"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			rules,
+			hasPreviousSelections: true,
+			previousStateCache: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase));
+
+		Assert.All(options, option => Assert.True(option.IsChecked));
+	}
+
+	[Fact]
+	public void BuildRootFolderOptions_StateCachePreservesKnownUncheckedAndChecksNewVisibleRoots()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: true,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
+
+		var options = service.BuildRootFolderOptions(
+			["src", "docs", "generated", "node_modules", ".idea"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "src" },
+			rules,
+			hasPreviousSelections: true,
+			previousStateCache: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				["src"] = true,
+				["docs"] = false
+			});
+
+		Assert.True(options.Single(option => option.Name == "src").IsChecked);
+		Assert.False(options.Single(option => option.Name == "docs").IsChecked);
+		Assert.True(options.Single(option => option.Name == "generated").IsChecked);
+		Assert.False(options.Single(option => option.Name == "node_modules").IsChecked);
+		Assert.False(options.Single(option => option.Name == ".idea").IsChecked);
+	}
+
+	[Fact]
+	public void BuildRootFolderOptions_StateCacheKeepsSelectedLegacyIgnoredRootWhenItHasNoStateEntry()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
+
+		var options = service.BuildRootFolderOptions(
+			["src", "docs", "generated", "node_modules"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "src", "node_modules" },
+			rules,
+			hasPreviousSelections: true,
+			previousStateCache: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				["docs"] = false
+			});
+
+		Assert.True(options.Single(option => option.Name == "src").IsChecked);
+		Assert.False(options.Single(option => option.Name == "docs").IsChecked);
+		Assert.True(options.Single(option => option.Name == "generated").IsChecked);
+		Assert.True(options.Single(option => option.Name == "node_modules").IsChecked);
+	}
+
+	[Fact]
+	public void BuildRootFolderOptions_EmptyStateCacheKeepsIgnoredNewRootsUnchecked()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: true,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vendor" },
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true
+		};
+
+		var options = service.BuildRootFolderOptions(
+			["src", ".idea", "vendor"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			rules,
+			hasPreviousSelections: true,
+			previousStateCache: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase));
+
+		Assert.True(options.Single(option => option.Name == "src").IsChecked);
+		Assert.False(options.Single(option => option.Name == ".idea").IsChecked);
+		Assert.False(options.Single(option => option.Name == "vendor").IsChecked);
 	}
 }
 

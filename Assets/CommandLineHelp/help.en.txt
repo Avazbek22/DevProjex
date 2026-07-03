@@ -1,0 +1,59 @@
+DevProjex
+
+Usage:
+  DevProjex --path <folder> [options]
+  DevProjex.exe --path <folder> [options]
+  devprojex --path <folder> [options]
+  devprojex.exe --path <folder> [options]
+  DevProjex <folder> [options]
+
+Value syntax:
+  --path <folder> and --path=<folder> are both supported.
+
+Options:
+  --path <folder>                 Open a project folder.
+  --lang <code>                   UI language: en, ru, uz, tg, kk, fr, de, it.
+  --report [file]                 Write a JSON analysis report.
+                                  Use --report - to write JSON to stdout.
+  --report-path <file>            Write a JSON analysis report to a specific file.
+  --report-format json            Report format. JSON is the v1 format.
+  --export <mode>                 Export project text: tree, content, tree-content.
+                                  Defaults to stdout when --output is omitted.
+  --output, -o <file|->           Write export text to a file or stdout with -.
+  --export-format, --format ascii|json
+                                  Tree format for tree and tree-content exports.
+  --include-root, --roots <name>  Include one root folder. Can be repeated.
+  --include-extension, --ext <ext>
+                                  Include one extension. Can be repeated.
+  --ignore <name|none>            Use exact ignore options for automation. Can be repeated.
+  --strict                        Return a failure exit code when the report has diagnostics.
+  --no-ui, --silent               Run analysis without showing the window.
+                                  Writes a JSON report to stdout when no report or export is specified.
+  --version                       Print application version.
+  --help, -h, /?                  Show help.
+
+Ignore option names:
+  smart-ignore, git-ignore, hidden-folders, hidden-files,
+  dot-folders, dot-files, empty-folders, empty-files,
+  extensionless-files, none
+
+Examples:
+  DevProjex "C:\Projects\App"
+  DevProjex.exe --path "C:\Projects\App"
+  devprojex.exe --path "C:\Projects\App" --report
+  devprojex "/home/me/projects/app"
+  DevProjex "/home/me/projects/app"
+  DevProjex --path "C:\Projects\App" --report
+  DevProjex --path "/home/me/projects/app" --no-ui
+  devprojex --no-ui --path "/home/me/projects/app" --report -
+  devprojex --path "/home/me/projects/app" --export tree -o -
+  devprojex --path "/home/me/projects/app" --export tree-content -o context.txt
+  devprojex --no-ui --path "/home/me/projects/app" --report --strict
+  DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json"
+  DevProjex --path "C:\Projects\App" --roots src --ext cs --ignore none --report
+
+Notes:
+  Windows Store command devprojex.exe starts the packaged DevProjex UI app.
+  Windows portable builds can enable the devprojex command from Help -> Launch from terminal.
+  --no-ui is a mode of the same app, not a separate CLI binary.
+  Use Help -> Launch from terminal in the UI to inspect platform-specific command setup.

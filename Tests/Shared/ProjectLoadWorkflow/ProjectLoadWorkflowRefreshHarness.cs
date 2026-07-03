@@ -2,7 +2,6 @@ using System.Text.RegularExpressions;
 using DevProjex.Application.Services;
 using DevProjex.Application.Models;
 using DevProjex.Application.UseCases;
-using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Shared.ProjectLoadWorkflow;
@@ -53,12 +52,14 @@ internal static class ProjectLoadWorkflowRefreshHarness
     {
         var baselineSelectedIgnoreOptions = CollectCheckedIgnoreOptionIds(baselineSnapshot);
         var selectedIgnoreOptions = BuildRequestedIgnoreOptions(baselineSelectedIgnoreOptions, ignoreScenario);
+        var requestedRootNames = BuildRequestedRootNames(rootScenario);
+        var requestedExtensionNames = BuildRequestedExtensionNames(extensionScenario);
 
         return new SelectionRefreshScenario(
             RootScenario: rootScenario,
-            RequestedRootNames: BuildRequestedRootNames(rootScenario),
+            RequestedRootNames: requestedRootNames,
             ExtensionScenario: extensionScenario,
-            RequestedExtensionNames: BuildRequestedExtensionNames(extensionScenario),
+            RequestedExtensionNames: requestedExtensionNames,
             IgnoreScenario: ignoreScenario,
             IgnoreSelectionInitialized: ignoreScenario != WorkflowIgnoreScenario.Defaults,
             RequestedIgnoreOptions: ignoreScenario == WorkflowIgnoreScenario.Defaults
@@ -67,7 +68,9 @@ internal static class ProjectLoadWorkflowRefreshHarness
             ExplicitlyDisabledIgnoreOptions: ignoreScenario == WorkflowIgnoreScenario.Defaults
                 ? new HashSet<IgnoreOptionId>()
                 : baselineSelectedIgnoreOptions.Except(selectedIgnoreOptions).ToHashSet(),
-            IgnoreAllPreference: ignoreScenario == WorkflowIgnoreScenario.AllOff ? false : null);
+            IgnoreAllPreference: ignoreScenario == WorkflowIgnoreScenario.AllOff ? false : null,
+            RootOptionStates: BuildRootOptionStateCache(baselineSnapshot, rootScenario, requestedRootNames),
+            ExtensionOptionStates: BuildExtensionOptionStateCache(baselineSnapshot, extensionScenario, requestedExtensionNames));
     }
 
     public static SelectionRefreshContext CreateScenarioContext(
@@ -89,7 +92,12 @@ internal static class ProjectLoadWorkflowRefreshHarness
                 scenario.RequestedIgnoreOptions,
                 scenario.ExplicitlyDisabledIgnoreOptions),
             IgnoreAllPreference: scenario.IgnoreAllPreference,
-            CurrentSnapshotState: EmptySnapshotState);
+            CurrentSnapshotState: EmptySnapshotState,
+            RootOptionStateCache: new Dictionary<string, bool>(scenario.RootOptionStates, PathComparer.Default),
+            ExtensionOptionStateCache: new Dictionary<string, bool>(
+                scenario.ExtensionOptionStates,
+                StringComparer.OrdinalIgnoreCase),
+            IgnoreOptionStateCacheIsComplete: true);
     }
 
     public static SelectionRefreshContext BuildConvergedContext(
@@ -106,8 +114,9 @@ internal static class ProjectLoadWorkflowRefreshHarness
         return new SelectionRefreshContext(
             Path: rootPath,
             PreparedSelectionMode: PreparedSelectionMode.Defaults,
-            AllRootFoldersChecked: snapshot.RootOptions is { Count: > 0 } rootOptions &&
-                                   rootOptions.All(option => option.IsChecked),
+            AllRootFoldersChecked: snapshot.RootOptions is null ||
+                                   snapshot.RootOptions.Count == 0 ||
+                                   snapshot.RootOptions.All(option => option.IsChecked),
             AllExtensionsChecked: snapshot.ExtensionOptions.Count > 0 &&
                                   snapshot.ExtensionOptions.All(option => option.IsChecked),
             RootSelectionInitialized: true,
@@ -121,8 +130,12 @@ internal static class ProjectLoadWorkflowRefreshHarness
             CurrentSnapshotState: new IgnoreSectionSnapshotState(
                 snapshot.HasIgnoreOptionCounts,
                 snapshot.IgnoreOptionCounts,
+                snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
-                snapshot.ExtensionlessEntriesCount));
+                snapshot.ExtensionlessEntriesCount),
+            RootOptionStateCache: BuildRootOptionStateCache(snapshot),
+            ExtensionOptionStateCache: BuildExtensionOptionStateCache(snapshot),
+            IgnoreOptionStateCacheIsComplete: true);
     }
 
     public static SelectionRefreshContext ApplyScenarioStep(
@@ -139,13 +152,15 @@ internal static class ProjectLoadWorkflowRefreshHarness
             {
                 AllRootFoldersChecked = targetScenario.RootScenario == WorkflowRootScenario.AllVisible,
                 RootSelectionInitialized = targetScenario.RootScenario != WorkflowRootScenario.AllVisible,
-                RootSelectionCache = new HashSet<string>(targetScenario.RequestedRootNames, PathComparer.Default)
+                RootSelectionCache = new HashSet<string>(targetScenario.RequestedRootNames, PathComparer.Default),
+                RootOptionStateCache = BuildRootOptionStateCache(snapshot, targetScenario)
             },
             WorkflowMutationStep.Extensions => context with
             {
                 AllExtensionsChecked = targetScenario.ExtensionScenario == WorkflowExtensionScenario.AllVisible,
                 ExtensionsSelectionInitialized = targetScenario.ExtensionScenario != WorkflowExtensionScenario.AllVisible,
-                ExtensionsSelectionCache = new HashSet<string>(targetScenario.RequestedExtensionNames, StringComparer.OrdinalIgnoreCase)
+                ExtensionsSelectionCache = new HashSet<string>(targetScenario.RequestedExtensionNames, StringComparer.OrdinalIgnoreCase),
+                ExtensionOptionStateCache = BuildExtensionOptionStateCache(snapshot, targetScenario)
             },
             WorkflowMutationStep.Ignore => context with
             {
@@ -154,7 +169,8 @@ internal static class ProjectLoadWorkflowRefreshHarness
                 IgnoreOptionStateCache = BuildIgnoreStateCache(
                     targetScenario.RequestedIgnoreOptions,
                     targetScenario.ExplicitlyDisabledIgnoreOptions),
-                IgnoreAllPreference = targetScenario.IgnoreAllPreference
+                IgnoreAllPreference = targetScenario.IgnoreAllPreference,
+                IgnoreOptionStateCacheIsComplete = true
             },
             _ => throw new ArgumentOutOfRangeException(nameof(step), step, null)
         };
@@ -207,6 +223,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
         Assert.Equal(expected.ExtensionlessEntriesCount, actual.ExtensionlessEntriesCount);
         Assert.Equal(expected.HasIgnoreOptionCounts, actual.HasIgnoreOptionCounts);
         Assert.Equal(expected.IgnoreOptionCounts, actual.IgnoreOptionCounts);
+        Assert.Equal(expected.ControllerImpactCounts, actual.ControllerImpactCounts);
         Assert.Equal(expected.IgnoreOptionStateCache.Count, actual.IgnoreOptionStateCache.Count);
         foreach (var pair in expected.IgnoreOptionStateCache.OrderBy(pair => pair.Key))
         {
@@ -227,6 +244,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
         Assert.Equal(expected.ExtensionlessEntriesCount, actual.ExtensionlessEntriesCount);
         Assert.Equal(expected.HasIgnoreOptionCounts, actual.HasIgnoreOptionCounts);
         Assert.Equal(expected.IgnoreOptionCounts, actual.IgnoreOptionCounts);
+        Assert.Equal(expected.ControllerImpactCounts, actual.ControllerImpactCounts);
         Assert.Equal(expected.RootAccessDenied, actual.RootAccessDenied);
         Assert.Equal(expected.HadAccessDenied, actual.HadAccessDenied);
     }
@@ -245,7 +263,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
 
     public static HashSet<IgnoreOptionId> CollectCheckedIgnoreOptionIds(SelectionRefreshSnapshot snapshot) =>
         new(
-            snapshot.IgnoreOptionStateCache.Where(pair => pair.Value).Select(pair => pair.Key));
+            snapshot.IgnoreOptions.Where(option => option.IsChecked).Select(option => option.Id));
 
     private static IReadOnlySet<string> BuildRequestedRootNames(WorkflowRootScenario scenario)
     {
@@ -319,7 +337,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
         }
     }
 
-    private static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(
+    public static Dictionary<IgnoreOptionId, bool> BuildIgnoreStateCache(
         IEnumerable<IgnoreOptionId> selectedIgnoreOptions,
         IEnumerable<IgnoreOptionId>? explicitlyDisabledIgnoreOptions = null)
     {
@@ -332,6 +350,76 @@ internal static class ProjectLoadWorkflowRefreshHarness
             foreach (var optionId in explicitlyDisabledIgnoreOptions)
                 cache[optionId] = false;
         }
+
+        return cache;
+    }
+
+    public static Dictionary<string, bool> BuildRootOptionStateCache(SelectionRefreshSnapshot snapshot)
+    {
+        var cache = new Dictionary<string, bool>(PathComparer.Default);
+        if (snapshot.RootOptions is null)
+            return cache;
+
+        foreach (var option in snapshot.RootOptions)
+            cache[option.Name] = option.IsChecked;
+
+        return cache;
+    }
+
+    private static Dictionary<string, bool> BuildRootOptionStateCache(
+        SelectionRefreshSnapshot snapshot,
+        SelectionRefreshScenario scenario)
+    {
+        return BuildRootOptionStateCache(
+            snapshot,
+            scenario.RootScenario,
+            scenario.RequestedRootNames);
+    }
+
+    private static Dictionary<string, bool> BuildRootOptionStateCache(
+        SelectionRefreshSnapshot snapshot,
+        WorkflowRootScenario rootScenario,
+        IReadOnlySet<string> requestedRootNames)
+    {
+        var cache = new Dictionary<string, bool>(PathComparer.Default);
+        if (snapshot.RootOptions is null)
+            return cache;
+
+        var allVisible = rootScenario == WorkflowRootScenario.AllVisible;
+        foreach (var option in snapshot.RootOptions)
+            cache[option.Name] = allVisible || requestedRootNames.Contains(option.Name);
+
+        return cache;
+    }
+
+    public static Dictionary<string, bool> BuildExtensionOptionStateCache(SelectionRefreshSnapshot snapshot)
+    {
+        var cache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in snapshot.ExtensionOptions)
+            cache[option.Name] = option.IsChecked;
+
+        return cache;
+    }
+
+    private static Dictionary<string, bool> BuildExtensionOptionStateCache(
+        SelectionRefreshSnapshot snapshot,
+        SelectionRefreshScenario scenario)
+    {
+        return BuildExtensionOptionStateCache(
+            snapshot,
+            scenario.ExtensionScenario,
+            scenario.RequestedExtensionNames);
+    }
+
+    private static Dictionary<string, bool> BuildExtensionOptionStateCache(
+        SelectionRefreshSnapshot snapshot,
+        WorkflowExtensionScenario extensionScenario,
+        IReadOnlySet<string> requestedExtensionNames)
+    {
+        var cache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var allVisible = extensionScenario == WorkflowExtensionScenario.AllVisible;
+        foreach (var option in snapshot.ExtensionOptions)
+            cache[option.Name] = allVisible || requestedExtensionNames.Contains(option.Name);
 
         return cache;
     }
@@ -359,9 +447,19 @@ internal static class ProjectLoadWorkflowRefreshHarness
             .Where(visibleNames.Contains)
             .ToHashSet(PathComparer.Default);
 
-        Assert.Equal(expectedChecked.Count, actualChecked.Count);
         foreach (var name in expectedChecked)
             Assert.Contains(name, actualChecked);
+
+        foreach (var (name, expectedCheckedState) in scenario.RootOptionStates)
+        {
+            if (expectedCheckedState)
+                continue;
+
+            var visibleOption = snapshot.RootOptions.FirstOrDefault(option =>
+                string.Equals(option.Name, name, StringComparison.Ordinal));
+            if (visibleOption is not null)
+                Assert.False(visibleOption.IsChecked, $"Explicitly unchecked root '{name}' must stay unchecked.");
+        }
     }
 
     private static void AssertExtensionSelectionContract(
@@ -384,9 +482,19 @@ internal static class ProjectLoadWorkflowRefreshHarness
             .Where(visibleNames.Contains)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        Assert.Equal(expectedChecked.Count, actualChecked.Count);
         foreach (var name in expectedChecked)
             Assert.Contains(name, actualChecked);
+
+        foreach (var (name, expectedCheckedState) in scenario.ExtensionOptionStates)
+        {
+            if (expectedCheckedState)
+                continue;
+
+            var visibleOption = snapshot.ExtensionOptions.FirstOrDefault(option =>
+                string.Equals(option.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (visibleOption is not null)
+                Assert.False(visibleOption.IsChecked, $"Explicitly unchecked extension '{name}' must stay unchecked.");
+        }
     }
 
     private static void AssertIgnoreSelectionContract(
@@ -426,10 +534,15 @@ internal static class ProjectLoadWorkflowRefreshHarness
             return;
         }
 
-        Assert.Equal(expected.Count, actual.Count);
+        Assert.True(
+            expected.Count == actual.Count,
+            $"Selection option count changed. Expected: {DescribeSelectionOptions(expected)}. Actual: {DescribeSelectionOptions(actual)}.");
         for (var index = 0; index < expected.Count; index++)
             Assert.Equal(expected[index], actual[index]);
     }
+
+    private static string DescribeSelectionOptions(IReadOnlyList<SelectionOption> options) =>
+        string.Join(", ", options.Select(option => $"{option.Name}:{option.IsChecked}"));
 
     private static int GetIgnoreCount(IgnoreOptionCounts counts, IgnoreOptionId optionId)
     {
@@ -460,7 +573,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
     }
 
     internal static readonly IgnoreSectionSnapshotState EmptySnapshotState =
-        new(false, IgnoreOptionCounts.Empty, false, 0);
+        new(false, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty, false, 0);
 
     internal enum WorkflowRootScenario
     {
@@ -509,7 +622,9 @@ internal static class ProjectLoadWorkflowRefreshHarness
         bool IgnoreSelectionInitialized,
         IReadOnlySet<IgnoreOptionId> RequestedIgnoreOptions,
         IReadOnlySet<IgnoreOptionId> ExplicitlyDisabledIgnoreOptions,
-        bool? IgnoreAllPreference);
+        bool? IgnoreAllPreference,
+        IReadOnlyDictionary<string, bool> RootOptionStates,
+        IReadOnlyDictionary<string, bool> ExtensionOptionStates);
 
     internal sealed record WorkflowServices(
         SelectionRefreshEngine Engine,

@@ -175,7 +175,7 @@ public sealed class SelectionSyncCoordinatorIgnoreAvailabilityFallbackMatrixTest
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [options, extensionlessCount, IgnoreOptionCounts.Empty, false]);
+		method!.Invoke(coordinator, [options, extensionlessCount, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty, false]);
 	}
 
 	private static void AssertBaseOnlyOptions(

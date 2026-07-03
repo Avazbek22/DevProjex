@@ -67,6 +67,7 @@ dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj \
     -r osx-x64 \
     --self-contained true \
     /p:PublishSingleFile=true \
+    /p:PublishReadyToRun=true \
     /p:PublishTrimmed=false \
     -o ./publish/macos
 
@@ -110,6 +111,25 @@ cat > "DevProjex.app/Contents/Info.plist" << 'EOF'
 </plist>
 EOF
 ```
+
+## Optional Terminal Alias
+
+For terminal automation, use **Help -> Terminal command** in the app. DevProjex creates a user-level wrapper named `devprojex` in `~/.local/bin` and can repair it if the app bundle moves.
+
+Manual equivalent:
+
+```bash
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/devprojex <<'EOF'
+#!/bin/sh
+# DevProjex terminal command wrapper
+# target: /Applications/DevProjex.app/Contents/MacOS/DevProjex
+exec '/Applications/DevProjex.app/Contents/MacOS/DevProjex' "$@"
+EOF
+chmod +x ~/.local/bin/devprojex
+```
+
+Make sure `~/.local/bin` is in `PATH`. The app bundle itself does not modify shell profiles or global environment variables.
 
 ## Code Signing and Notarization
 

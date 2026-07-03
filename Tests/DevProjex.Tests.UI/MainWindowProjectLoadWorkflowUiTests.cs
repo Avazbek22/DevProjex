@@ -1,5 +1,4 @@
 using System.Text.RegularExpressions;
-using DevProjex.Avalonia.Services;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
@@ -678,6 +677,44 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
     }
 
     [AvaloniaFact]
+    public async Task BurstMixedMutations_QueuedRefreshesConvergeBeforeApply()
+    {
+        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            var baseline = await ComputeExpectedAppliedMetricsAsync(window);
+            await UiTestDriver.WaitForStatusMetricsAsync(window, baseline.TreeMetrics, baseline.ContentMetrics);
+
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
+                await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
+                await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
+                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "samples");
+                await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".json");
+                await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.ExtensionlessFiles);
+            }
+
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
+
+            var pendingExpected = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
+            AssertMetricsChanged(baseline, pendingExpected, "burst mixed root/extension/ignore changes");
+
+            var appliedExpected = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
+            Assert.Equal(pendingExpected.TreeMetrics, appliedExpected.TreeMetrics);
+            Assert.Equal(pendingExpected.ContentMetrics, appliedExpected.ContentMetrics);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task LiveSectionRefresh_NeverShowsAdvancedIgnoreOptionWithoutPositiveCount()
     {
         using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
@@ -871,6 +908,10 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
             var checkedRoots = UiTestDriver.GetViewModel(window).RootFolders
                 .Where(option => option.IsChecked)
+                // Some checked root folders can be neutralized by active ignore/file filters.
+                // The round-trip metric assertion targets roots that contain applied content
+                // in the seeded workflow workspace.
+                .Where(option => option.Name is "docs" or "samples" or "src" or "stealth-root")
                 .Select(option => option.Name)
                 .ToArray();
             Assert.NotEmpty(checkedRoots);
@@ -1002,6 +1043,9 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
                 await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
                 await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
 
+                var selectedAfterToggle = UiTestDriver.GetSelectedIgnoreOptionIds(window);
+                Assert.DoesNotContain(optionId, selectedAfterToggle);
+
                 var expectedWithoutOption = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
                 AssertMetricsChanged(baseline, expectedWithoutOption, $"ignore option '{optionId}'");
 
@@ -1077,7 +1121,7 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         {
             current.IsExpanded = true;
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
-            current = Assert.Single(current.Children.Where(child => string.Equals(child.DisplayName, segment, StringComparison.Ordinal)));
+            current = Assert.Single(current.Children, child => string.Equals(child.DisplayName, segment, StringComparison.Ordinal));
         }
 
         current.IsExpanded = true;

@@ -19,7 +19,7 @@ public sealed class ScanOptionsUseCaseEffectiveEmptyFolderAggregationMatrixTests
 			temp.Path,
 			selectedRoots,
 			CreateAllowedExtensions(),
-			CreateRules());
+			CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(perFolderCount * folderCount, result.Value);
 		Assert.Equal(folderRootDenied, result.RootAccessDenied);
@@ -39,7 +39,7 @@ public sealed class ScanOptionsUseCaseEffectiveEmptyFolderAggregationMatrixTests
 			temp.Path,
 			selectedRoots,
 			CreateAllowedExtensions(),
-			CreateRules());
+			CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(12, result.Value);
 		Assert.True(result.RootAccessDenied);
@@ -58,7 +58,7 @@ public sealed class ScanOptionsUseCaseEffectiveEmptyFolderAggregationMatrixTests
 			temp.Path,
 			[],
 			CreateAllowedExtensions(),
-			CreateRules());
+			CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, result.Value);
 		Assert.False(result.RootAccessDenied);
@@ -77,7 +77,7 @@ public sealed class ScanOptionsUseCaseEffectiveEmptyFolderAggregationMatrixTests
 			missingRootPath,
 			["src"],
 			CreateAllowedExtensions(),
-			CreateRules());
+			CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, result.Value);
 		Assert.False(result.RootAccessDenied);
@@ -156,7 +156,7 @@ public sealed class ScanOptionsUseCaseEffectiveEmptyFolderAggregationMatrixTests
 			temp.Path,
 			selectedRoots,
 			allowedExtensions,
-			CreateRules());
+			CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(
 			scanner.LastAllowedExtensions

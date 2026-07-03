@@ -27,7 +27,7 @@ public sealed class ScanOptionsUseCaseIgnoreSectionSnapshotBatchingTests
 			selectedRoots,
 			CreateDiscoveryRules(),
 			CreateEffectiveRules(),
-			CreateAllowedExtensions());
+			CreateAllowedExtensions(), cancellationToken: TestContext.Current.CancellationToken);
 
 		var expectedFolderRawCounts = Enumerable.Range(1, folderCount)
 			.Select(IgnoreSectionSnapshotBatchScanner.BuildFolderRawCounts)
@@ -65,7 +65,7 @@ public sealed class ScanOptionsUseCaseIgnoreSectionSnapshotBatchingTests
 			selectedRoots,
 			CreateDiscoveryRules(),
 			CreateEffectiveRules(),
-			effectiveAllowedExtensions: null);
+			effectiveAllowedExtensions: null, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Single(scanner.RootFileAllowedExtensionKeys);
 		Assert.All(scanner.RootFileAllowedExtensionKeys, key => Assert.Equal("<null>", key));
@@ -92,7 +92,7 @@ public sealed class ScanOptionsUseCaseIgnoreSectionSnapshotBatchingTests
 			selectedRoots,
 			CreateDiscoveryRules(),
 			CreateEffectiveRules(),
-			allowedExtensions);
+			allowedExtensions, cancellationToken: TestContext.Current.CancellationToken);
 
 		var expectedKey = SerializeAllowedExtensions(allowedExtensions);
 		Assert.Single(scanner.RootFileAllowedExtensionKeys);
@@ -116,7 +116,7 @@ public sealed class ScanOptionsUseCaseIgnoreSectionSnapshotBatchingTests
 				CreateDiscoveryRules(),
 				CreateEffectiveRules(),
 				CreateAllowedExtensions(),
-				cts.Token));
+				cancellationToken: cts.Token));
 	}
 
 	[Fact]
@@ -134,7 +134,7 @@ public sealed class ScanOptionsUseCaseIgnoreSectionSnapshotBatchingTests
 				CreateDiscoveryRules(),
 				CreateEffectiveRules(),
 				CreateAllowedExtensions(),
-				cts.Token));
+				cancellationToken: cts.Token));
 	}
 
 	public static IEnumerable<object[]> AggregationCases()

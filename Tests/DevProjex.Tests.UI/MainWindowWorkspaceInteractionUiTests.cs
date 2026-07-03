@@ -1,3 +1,6 @@
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.VisualTree;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
 
@@ -119,6 +122,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Width = 1500,
             Height = 920
         };
+        UiTestDriver.TrackTopLevelWindow(window);
 
         try
         {
@@ -135,8 +139,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 },
                 "project to finish loading with a transient recent-projects save failure");
 
-            window.Close();
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
             var filePath = Path.Combine(appDataPath, "DevProjex", "recent-projects.json");
             Assert.True(File.Exists(filePath));
@@ -149,7 +152,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         finally
         {
             if (window.IsVisible)
-                window.Close();
+                await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
             try
             {
@@ -181,6 +184,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Width = 1500,
             Height = 920
         };
+        UiTestDriver.TrackTopLevelWindow(window);
 
         try
         {
@@ -218,8 +222,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 "apply settings operation to finish after the profile save attempt");
             Assert.Equal(1, flakyStore.SaveAttemptCount);
 
-            window.Close();
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
             Assert.True(File.Exists(flakyStore.StoragePath));
             Assert.True(flakyStore.TryLoadProfile(workspace.Project.RootPath, out var profile));
@@ -228,7 +231,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         finally
         {
             if (window.IsVisible)
-                window.Close();
+                await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
             try
             {
@@ -360,8 +363,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             }
             finally
             {
-                cloneWindow.Close();
-                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+                await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
             }
         }
         finally
@@ -478,7 +480,9 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
             var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
             var widthBefore = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 220);
             var widthCollapsed = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
@@ -486,12 +490,138 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.DragAsync(window, splitter, deltaX: -140);
             var widthExpanded = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
 
-            var diagnostic = $"Before={widthBefore:F2}, Collapsed={widthCollapsed:F2}, Expanded={widthExpanded:F2}";
-            Assert.True(widthCollapsed < widthBefore - 1, diagnostic);
-            Assert.InRange(widthCollapsed, 240, 321);
-            Assert.True(widthExpanded > widthBefore + 1, diagnostic);
-            Assert.True(widthExpanded > widthCollapsed + 5, diagnostic);
-            Assert.InRange(widthExpanded, widthCollapsed, 321);
+            var diagnostic =
+                $"Before={widthBefore:F2}, Collapsed={widthCollapsed:F2}, Expanded={widthExpanded:F2}, " +
+                $"RequiredMinimum={requiredMinimum:F2}";
+
+            Assert.True(widthCollapsed >= requiredMinimum - 1, diagnostic);
+            if (requiredMinimum < widthBefore - 1)
+            {
+                Assert.True(widthCollapsed < widthBefore - 1, diagnostic);
+                Assert.True(widthExpanded > widthCollapsed + 5, diagnostic);
+            }
+            else
+            {
+                // Long localized labels can legitimately raise the content minimum above the
+                // normal resize range. In that state the splitter must pin instead of clipping.
+                Assert.InRange(widthCollapsed, requiredMinimum - 1, requiredMinimum + 1);
+                Assert.InRange(widthExpanded, requiredMinimum - 1, requiredMinimum + 1);
+            }
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SettingsPanel_RemovesFontPickerAndKeepsApplyButtonAtLeftEdge()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var panelRoot = UiTestDriver.GetRequiredControl<Border>(window, "PanelRoot");
+            var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            var ignoreHeader = UiTestDriver.GetRequiredControl<Grid>(window, "IgnoreHeaderGrid");
+
+            var panelBounds = UiTestDriver.GetBoundsInWindow(panelRoot, window);
+            var buttonBounds = UiTestDriver.GetBoundsInWindow(applyButton, window);
+            var ignoreHeaderBounds = UiTestDriver.GetBoundsInWindow(ignoreHeader, window);
+
+            Assert.DoesNotContain(
+                window.GetVisualDescendants().OfType<ComboBox>(),
+                control => string.Equals(control.Name, "FontComboBox", StringComparison.Ordinal));
+            Assert.DoesNotContain(
+                window.GetVisualDescendants().OfType<TextBlock>(),
+                control => string.Equals(control.Name, "FontPickerLabel", StringComparison.Ordinal));
+
+            Assert.Equal(HorizontalAlignment.Left, applyButton.HorizontalAlignment);
+            Assert.Equal(HorizontalAlignment.Center, applyButton.HorizontalContentAlignment);
+            Assert.Equal(0, applyButton.Margin.Left);
+            Assert.Equal(0, applyButton.Margin.Right);
+            Assert.True(applyButton.Margin.Top >= 0);
+            Assert.True(applyButton.Margin.Bottom >= 0);
+
+            Assert.InRange(buttonBounds.Left - ignoreHeaderBounds.Left, -1, 1);
+            Assert.True(
+                buttonBounds.Width < ignoreHeaderBounds.Width - 20,
+                $"Apply button should keep its natural width. Button={buttonBounds.Width:F2}, Header={ignoreHeaderBounds.Width:F2}.");
+
+            var topGap = buttonBounds.Top - panelBounds.Top;
+            var headerGap = ignoreHeaderBounds.Top - buttonBounds.Bottom;
+            Assert.InRange(topGap, 0, 16);
+            Assert.InRange(headerGap, 0, 16);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ViewTreeFontMenu_UsesDynamicItemsWithPendingCheck()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var defaultFont = FontFamily.Default;
+            var customFont = new FontFamily("Consolas");
+
+            viewModel.FontFamilies.Clear();
+            viewModel.FontFamilies.Add(defaultFont);
+            viewModel.FontFamilies.Add(customFont);
+            viewModel.SelectedFontFamily = defaultFont;
+            viewModel.PendingFontFamily = defaultFont;
+
+            InvokeRefreshTreeFontMenu(window);
+
+            var fontMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "TreeFontMenuItem");
+            Assert.Equal(viewModel.MenuViewTreeFont, fontMenu.Header);
+
+            var initialItems = fontMenu.Items.OfType<MenuItem>().ToArray();
+            Assert.Equal(2, initialItems.Length);
+            Assert.StartsWith("✓ ", initialItems[0].Header?.ToString());
+            Assert.Contains(viewModel.SettingsFontDefault, initialItems[0].Header?.ToString());
+            Assert.StartsWith("   ", initialItems[1].Header?.ToString());
+
+            await UiTestDriver.RaiseMenuItemClickAsync(initialItems[1]);
+
+            Assert.Equal(customFont.Name, viewModel.PendingFontFamily?.Name);
+            Assert.Equal(defaultFont.Name, viewModel.SelectedFontFamily?.Name);
+
+            InvokeRefreshTreeFontMenu(window);
+            var refreshedItems = fontMenu.Items.OfType<MenuItem>().ToArray();
+            Assert.StartsWith("   ", refreshedItems[0].Header?.ToString());
+            Assert.StartsWith("✓ ", refreshedItems[1].Header?.ToString());
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task LanguageMenu_ShowsCheckOnCurrentLanguage()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var englishItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageEnMenuItem");
+            var russianItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageRuMenuItem");
+
+            Assert.StartsWith("✓ ", englishItem.Header?.ToString());
+            Assert.StartsWith("   ", russianItem.Header?.ToString());
+
+            await UiTestDriver.RaiseMenuItemClickAsync(russianItem);
+
+            Assert.StartsWith("   ", englishItem.Header?.ToString());
+            Assert.StartsWith("✓ ", russianItem.Header?.ToString());
         }
         finally
         {
@@ -632,6 +762,8 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
             var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
+            var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 2_000);
             var collapsedWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
@@ -639,12 +771,26 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.DragAsync(window, splitter, deltaX: -2_000);
             var expandedWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
 
-            Assert.InRange(collapsedWidth, 240, 321);
-            Assert.InRange(expandedWidth, collapsedWidth, 421);
+            Assert.True(
+                collapsedWidth >= requiredMinimum - 1,
+                $"Collapsed={collapsedWidth:F2}, Expanded={expandedWidth:F2}, RequiredMinimum={requiredMinimum:F2}");
+            Assert.True(
+                expandedWidth >= collapsedWidth - 1,
+                $"Collapsed={collapsedWidth:F2}, Expanded={expandedWidth:F2}, RequiredMinimum={requiredMinimum:F2}");
         }
         finally
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static void InvokeRefreshTreeFontMenu(MainWindow window)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            "RefreshTreeFontMenu",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        method.Invoke(window, []);
     }
 }

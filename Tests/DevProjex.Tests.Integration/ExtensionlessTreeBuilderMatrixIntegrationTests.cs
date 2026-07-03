@@ -45,7 +45,7 @@ public sealed class ExtensionlessTreeBuilderMatrixIntegrationTests
 			NameFilter: ToNameFilter(filterMode));
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 		var fileNames = EnumerateFileNames(result.Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 		Assert.Equal(expectDockerfile, fileNames.Contains("Dockerfile"));

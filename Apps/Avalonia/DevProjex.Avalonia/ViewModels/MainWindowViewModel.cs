@@ -27,7 +27,7 @@ public enum PreviewWorkspaceMode
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    public const string TitleVersion = "4.8.5";
+    public const string TitleVersion = "4.9";
     public const string BaseTitle = "DevProjex v" + TitleVersion;
     public const string BaseTitleWithAuthor = "DevProjex by Olimoff v" + TitleVersion;
     public const double DefaultTreeFontSize = 15;
@@ -68,7 +68,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isDarkTheme = true;
     private bool _isCompactMode;
     private bool _isTreeAnimationEnabled;
-    private bool _isAdvancedIgnoreCountsEnabled;
     private bool _filterVisible;
     private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
     private PreviewContentMode _selectedPreviewContentMode = PreviewContentMode.Tree;
@@ -469,17 +468,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool IsAdvancedIgnoreCountsEnabled
-    {
-        get => _isAdvancedIgnoreCountsEnabled;
-        set
-        {
-            if (_isAdvancedIgnoreCountsEnabled == value) return;
-            _isAdvancedIgnoreCountsEnabled = value;
-            RaisePropertyChanged();
-        }
-    }
-
     public bool FilterVisible
     {
         get => _filterVisible;
@@ -688,7 +676,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(TreeItemSpacing));
         RaisePropertyChanged(nameof(TreeItemPadding));
         RaisePropertyChanged(nameof(TreeTextMargin));
-        RaisePropertyChanged(nameof(SettingsListSpacing));
     }
 
     // Methods for toggle behavior (click on active = disable)
@@ -812,6 +799,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_gitCloneUrl == value) return;
             _gitCloneUrl = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanStartGitClone));
         }
     }
 
@@ -834,6 +822,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_gitCloneInProgress == value) return;
             _gitCloneInProgress = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanStartGitClone));
             RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
         }
     }
@@ -971,7 +960,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Selected in ComboBox (same as WinForms _pendingFontName)
+    // Staged tree font selection; Apply commits it to SelectedFontFamily.
     public FontFamily? PendingFontFamily
     {
         get => _pendingFontFamily;
@@ -1025,9 +1014,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Compact rows should stay dense without using negative padding, because
     // virtualized trees rely on stable item measurement for correct scroll extents.
     public Thickness TreeItemPadding => IsCompactModeEffective ? new Thickness(0) : new Thickness(4, 1);
-
-    // Settings lists use an ItemsPanel with explicit Spacing (can go negative to tighten).
-    public double SettingsListSpacing => IsCompactModeEffective ? -5 : -3;
 
     public void UpdateSearchMatchSummary(int currentIndex, int totalMatches)
     {
@@ -1115,6 +1101,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // exposing stale selections during the active git operation.
     public bool GitCloneRecentRepositoriesVisible => !GitCloneInProgress && HasRecentRepositories;
 
+    public bool CanStartGitClone => !GitCloneInProgress && !string.IsNullOrWhiteSpace(GitCloneUrl);
+
     public bool AllIgnoreChecked
     {
         get => _allIgnoreChecked;
@@ -1178,6 +1166,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuViewZoomIn { get; private set; } = string.Empty;
     public string MenuViewZoomOut { get; private set; } = string.Empty;
     public string MenuViewZoomReset { get; private set; } = string.Empty;
+    public string MenuViewTreeFont { get; private set; } = string.Empty;
     public string MenuViewThemeTitle { get; private set; } = string.Empty;
     public string MenuViewLightTheme { get; private set; } = string.Empty;
     public string MenuViewDarkTheme { get; private set; } = string.Empty;
@@ -1185,12 +1174,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuViewAcrylic { get; private set; } = string.Empty;
     public string MenuViewCompactMode { get; private set; } = string.Empty;
     public string MenuViewTreeAnimation { get; private set; } = string.Empty;
-    public string MenuViewAdditionalCounts { get; private set; } = string.Empty;
     public string MenuOptions { get; private set; } = string.Empty;
     public string MenuOptionsTreeSettings { get; private set; } = string.Empty;
     public string MenuLanguage { get; private set; } = string.Empty;
     public string MenuHelp { get; private set; } = string.Empty;
     public string MenuHelpHelp { get; private set; } = string.Empty;
+    public string MenuHelpTerminalCommand { get; private set; } = string.Empty;
     public string MenuHelpAbout { get; private set; } = string.Empty;
     public string MenuHelpResetSettings { get; private set; } = string.Empty;
     public string MenuHelpResetData { get; private set; } = string.Empty;
@@ -1331,6 +1320,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuViewZoomIn = _localization["Menu.View.ZoomIn"];
         MenuViewZoomOut = _localization["Menu.View.ZoomOut"];
         MenuViewZoomReset = _localization["Menu.View.ZoomReset"];
+        MenuViewTreeFont = _localization["Menu.View.TreeFont"];
         MenuViewThemeTitle = _localization["Menu.View.Theme"];
         MenuViewLightTheme = _localization["Menu.View.LightTheme"];
         MenuViewDarkTheme = _localization["Menu.View.DarkTheme"];
@@ -1338,12 +1328,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuViewAcrylic = _localization["Menu.View.Acrylic"];
         MenuViewCompactMode = _localization["Menu.View.CompactMode"];
         MenuViewTreeAnimation = _localization["Menu.View.TreeAnimation"];
-        MenuViewAdditionalCounts = _localization["Menu.View.AdditionalCounts"];
         MenuOptions = _localization["Menu.Options"];
         MenuOptionsTreeSettings = _localization["Menu.Options.TreeSettings"];
         MenuLanguage = _localization["Menu.Language"];
         MenuHelp = _localization["Menu.Help"];
         MenuHelpHelp = _localization["Menu.Help.Help"];
+        MenuHelpTerminalCommand = _localization["Menu.Help.TerminalCommand"];
         MenuHelpAbout = _localization["Menu.Help.About"];
         MenuHelpResetSettings = _localization["Menu.Help.ResetSettings"];
         MenuHelpResetData = _localization["Menu.Help.ResetData"];
@@ -1467,6 +1457,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuViewZoomIn));
         RaisePropertyChanged(nameof(MenuViewZoomOut));
         RaisePropertyChanged(nameof(MenuViewZoomReset));
+        RaisePropertyChanged(nameof(MenuViewTreeFont));
         RaisePropertyChanged(nameof(MenuViewThemeTitle));
         RaisePropertyChanged(nameof(MenuViewLightTheme));
         RaisePropertyChanged(nameof(MenuViewDarkTheme));
@@ -1474,12 +1465,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuViewAcrylic));
         RaisePropertyChanged(nameof(MenuViewCompactMode));
         RaisePropertyChanged(nameof(MenuViewTreeAnimation));
-        RaisePropertyChanged(nameof(MenuViewAdditionalCounts));
         RaisePropertyChanged(nameof(MenuOptions));
         RaisePropertyChanged(nameof(MenuOptionsTreeSettings));
         RaisePropertyChanged(nameof(MenuLanguage));
         RaisePropertyChanged(nameof(MenuHelp));
         RaisePropertyChanged(nameof(MenuHelpHelp));
+        RaisePropertyChanged(nameof(MenuHelpTerminalCommand));
         RaisePropertyChanged(nameof(MenuHelpAbout));
         RaisePropertyChanged(nameof(MenuHelpResetSettings));
         RaisePropertyChanged(nameof(MenuHelpResetData));

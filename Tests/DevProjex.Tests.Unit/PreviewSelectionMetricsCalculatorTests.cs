@@ -11,7 +11,7 @@ public sealed class PreviewSelectionMetricsCalculatorTests
 
         var metrics = PreviewSelectionMetricsCalculator.Calculate(
             document,
-            new PreviewSelectionRange(1, 1, 1, 4));
+            new PreviewSelectionRange(1, 1, 1, 4), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(new ExportOutputMetrics(1, 3, 1), metrics);
     }
@@ -23,7 +23,7 @@ public sealed class PreviewSelectionMetricsCalculatorTests
 
         var metrics = PreviewSelectionMetricsCalculator.Calculate(
             document,
-            new PreviewSelectionRange(1, 2, 2, 2));
+            new PreviewSelectionRange(1, 2, 2, 2), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(new ExportOutputMetrics(2, 6, 2), metrics);
     }
@@ -35,7 +35,7 @@ public sealed class PreviewSelectionMetricsCalculatorTests
 
         var metrics = PreviewSelectionMetricsCalculator.Calculate(
             document,
-            new PreviewSelectionRange(1, 5, 2, 0));
+            new PreviewSelectionRange(1, 5, 2, 0), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(new ExportOutputMetrics(2, 1, 1), metrics);
     }
@@ -47,7 +47,7 @@ public sealed class PreviewSelectionMetricsCalculatorTests
 
         var metrics = PreviewSelectionMetricsCalculator.Calculate(
             document,
-            new PreviewSelectionRange(3, 2, 1, 3));
+            new PreviewSelectionRange(3, 2, 1, 3), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(new ExportOutputMetrics(3, 10, 3), metrics);
     }
@@ -59,7 +59,7 @@ public sealed class PreviewSelectionMetricsCalculatorTests
 
         var metrics = PreviewSelectionMetricsCalculator.Calculate(
             document,
-            new PreviewSelectionRange(1, 2, 1, 2));
+            new PreviewSelectionRange(1, 2, 1, 2), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(ExportOutputMetrics.Empty, metrics);
     }

@@ -11,6 +11,7 @@ namespace DevProjex.Tests.Integration;
 /// - Comparison with Git clone results
 /// - Large file handling
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class ZipDownloadAdvancedTests : IAsyncLifetime
 {
     private readonly ZipDownloadService _zipService;
@@ -29,14 +30,14 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         _tempDir = new TemporaryDirectory();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _zipService.Dispose();
         // _gitService.Dispose();
         _tempDir.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     #region Platform-Specific Tests
@@ -103,7 +104,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Verify that extracted files have correct structure
         var targetDir = _tempDir.CreateDirectory("structure-test");
-        var result = await _zipService.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _zipService.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         if (!result.Success)
         {
@@ -135,7 +136,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         var targetDir = _tempDir.CreateDirectory("metadata-test");
         var url = "https://github.com/octocat/Hello-World";
 
-        var result = await _zipService.DownloadAndExtractAsync(url, targetDir);
+        var result = await _zipService.DownloadAndExtractAsync(url, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         if (!result.Success)
             return;
@@ -152,25 +153,17 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Test that progress callback receives updates
         var targetDir = _tempDir.CreateDirectory("progress-zip");
-        var progressReports = new List<string>();
-        var progress = new Progress<string>(msg => progressReports.Add(msg));
+        var progress = new ProgressRecorder();
 
         var result = await _zipService.DownloadAndExtractAsync(
             TestRepoUrl,
             targetDir,
-            progress);
+            progress, cancellationToken: TestContext.Current.CancellationToken);
 
         if (!result.Success)
             return;
 
-        // Should have received progress updates
-        Assert.NotEmpty(progressReports);
-
-        // Should have percentages during download
-        Assert.Contains(progressReports, r => r.EndsWith("%"));
-
-        // Should have extraction marker
-        Assert.Contains(progressReports, r => r == "::EXTRACTING::");
+        ProgressAssertions.AssertCompletedZipDownload(progress.Reports);
     }
 
     [Fact]
@@ -178,7 +171,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Verify that all files from ZIP are extracted
         var targetDir = _tempDir.CreateDirectory("all-files");
-        var result = await _zipService.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _zipService.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         if (!result.Success)
             return;
@@ -201,14 +194,14 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     public async Task ZipDownload_ProducesSameFilesAsGitClone()
     {
         // Compare ZIP download with Git clone results
-        if (!await _gitService.IsGitAvailableAsync())
+        if (!await _gitService.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken))
             return;
 
         var zipDir = _tempDir.CreateDirectory("zip-compare");
         var gitDir = _tempDir.CreateDirectory("git-compare");
 
-        var zipResult = await _zipService.DownloadAndExtractAsync(TestRepoUrl, zipDir);
-        var gitResult = await _gitService.CloneAsync(TestRepoUrl, gitDir);
+        var zipResult = await _zipService.DownloadAndExtractAsync(TestRepoUrl, zipDir, cancellationToken: TestContext.Current.CancellationToken);
+        var gitResult = await _gitService.CloneAsync(TestRepoUrl, gitDir, cancellationToken: TestContext.Current.CancellationToken);
 
         if (!zipResult.Success || !gitResult.Success)
             return;
@@ -239,7 +232,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Verify source type distinction
         var targetDir = _tempDir.CreateDirectory("source-type-zip");
-        var result = await _zipService.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _zipService.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         if (!result.Success)
             return;
@@ -260,7 +253,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         var targetDir = _tempDir.CreateDirectory("invalid-repo");
         var result = await _zipService.DownloadAndExtractAsync(
             "https://github.com/nonexistent-user-xyz/nonexistent-repo-abc",
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -273,7 +266,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         var targetDir = _tempDir.CreateDirectory("network-error");
         var result = await _zipService.DownloadAndExtractAsync(
             "https://definitely-not-a-real-domain-xyz123.com/user/repo",
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -286,7 +279,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         var targetDir = _tempDir.CreateDirectory("cleanup-test");
         var result = await _zipService.DownloadAndExtractAsync(
             "https://github.com/invalid/invalid",
-            targetDir);
+            targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
 
@@ -328,16 +321,27 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         // This avoids flaky timing windows on fast CI runners.
         var targetDir = _tempDir.CreateDirectory("cancel-download");
         using var cts = new CancellationTokenSource();
-        var progress = new ImmediateProgress(_ => cts.Cancel());
+        var progress = new ProgressRecorder(_ => cts.Cancel());
 
-        var downloadTask = _zipService.DownloadAndExtractAsync(
-            TestRepoUrl,
-            targetDir,
-            progress,
-            cancellationToken: cts.Token);
+        try
+        {
+            var result = await _zipService.DownloadAndExtractAsync(
+                TestRepoUrl,
+                targetDir,
+                progress,
+                cancellationToken: cts.Token);
 
-        // Should throw OperationCanceledException or its subtype
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => downloadTask);
+            // CI can fail before the first progress callback has a chance to request
+            // cancellation. In that case this test cannot validate cancellation behavior.
+            if (!cts.IsCancellationRequested && !result.Success)
+                return;
+
+            Assert.Fail("Expected cancellation after download progress was reported.");
+        }
+        catch (OperationCanceledException)
+        {
+            Assert.True(cts.IsCancellationRequested);
+        }
     }
 
     [Fact]
@@ -347,7 +351,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         // Time-based CancelAfter(...) is flaky on fast runners.
         var targetDir = _tempDir.CreateDirectory("cancel-cleanup");
         using var cts = new CancellationTokenSource();
-        var progress = new ImmediateProgress(_ =>
+        var progress = new ProgressRecorder(_ =>
         {
             if (!cts.IsCancellationRequested)
                 cts.Cancel();
@@ -399,7 +403,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Verify that result contains detected default branch
         var targetDir = _tempDir.CreateDirectory("default-branch");
-        var result = await _zipService.DownloadAndExtractAsync(TestRepoUrl, targetDir);
+        var result = await _zipService.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
         if (!result.Success)
             return;
@@ -472,8 +476,8 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         var dir1 = _tempDir.CreateDirectory("parallel-1");
         var dir2 = _tempDir.CreateDirectory("parallel-2");
 
-        var task1 = _zipService.DownloadAndExtractAsync(TestRepoUrl, dir1);
-        var task2 = _zipService.DownloadAndExtractAsync(TestRepoUrl, dir2);
+        var task1 = _zipService.DownloadAndExtractAsync(TestRepoUrl, dir1, cancellationToken: TestContext.Current.CancellationToken);
+        var task2 = _zipService.DownloadAndExtractAsync(TestRepoUrl, dir2, cancellationToken: TestContext.Current.CancellationToken);
 
         var results = await Task.WhenAll(task1, task2);
 
@@ -509,7 +513,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
         foreach (var (url, expectedName) in testCases)
         {
             var targetDir = _tempDir.CreateDirectory($"name-{testCases.ToList().IndexOf((url, expectedName))}");
-            var result = await _zipService.DownloadAndExtractAsync(url, targetDir);
+            var result = await _zipService.DownloadAndExtractAsync(url, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
             if (result.Success)
             {
@@ -521,8 +525,4 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
 
     #endregion
 
-    private sealed class ImmediateProgress(Action<string> onReport) : IProgress<string>
-    {
-        public void Report(string value) => onReport(value);
-    }
 }

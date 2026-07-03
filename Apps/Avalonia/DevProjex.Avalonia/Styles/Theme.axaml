@@ -20,6 +20,14 @@
     <Color x:Key="MenuHoverColor">#E6E6E6</Color>
     <Color x:Key="MenuPressedColor">#D9D9D9</Color>
     <Color x:Key="ToastSurfaceColor">#F3F3F3</Color>
+    <Color x:Key="TreeIslandCloseBlurTintColor">#F8FBFF</Color>
+    <Color x:Key="TreeIslandCloseBlurFallbackColor">#F3F3F3</Color>
+    <Color x:Key="TreeIslandCloseSurfaceColor">#EAF3F3F3</Color>
+    <Color x:Key="TreeIslandCloseHoverColor">#F2E6E6E6</Color>
+    <Color x:Key="TreeIslandClosePressedColor">#F2D9D9D9</Color>
+    <x:Double x:Key="TreeIslandCloseBlurTintOpacity">0.32</x:Double>
+    <x:Double x:Key="TreeIslandCloseBlurMaterialOpacity">0.42</x:Double>
+    <x:Double x:Key="TreeIslandCloseBlurCompensationLevel">0.0</x:Double>
     <Color x:Key="PreviewSectionDividerColor">#A8ACB3</Color>
 
     <!-- Drop Zone Colors - Light Theme -->
@@ -55,6 +63,9 @@
     <SolidColorBrush x:Key="MenuChildHoverBrush" Color="{StaticResource MenuHoverColor}"/>
     <SolidColorBrush x:Key="MenuChildPressedBrush" Color="{StaticResource MenuPressedColor}"/>
     <SolidColorBrush x:Key="ToastSurfaceBrush" Color="{StaticResource ToastSurfaceColor}" />
+    <SolidColorBrush x:Key="TreeIslandCloseSurfaceBrush" Color="{StaticResource TreeIslandCloseSurfaceColor}" />
+    <SolidColorBrush x:Key="TreeIslandCloseHoverBrush" Color="{StaticResource TreeIslandCloseHoverColor}" />
+    <SolidColorBrush x:Key="TreeIslandClosePressedBrush" Color="{StaticResource TreeIslandClosePressedColor}" />
     <SolidColorBrush x:Key="PreviewSectionDividerBrush" Color="{StaticResource PreviewSectionDividerColor}" />
 
     <!-- Drop Zone Brushes - Light Theme -->
@@ -85,6 +96,14 @@
     <Color x:Key="MenuHoverColor">#3A3D44</Color>
     <Color x:Key="MenuPressedColor">#4A4D54</Color>
     <Color x:Key="ToastSurfaceColor">#1B1D22</Color>
+    <Color x:Key="TreeIslandCloseBlurTintColor">#000000</Color>
+    <Color x:Key="TreeIslandCloseBlurFallbackColor">#17171A</Color>
+    <Color x:Key="TreeIslandCloseSurfaceColor">#E617171A</Color>
+    <Color x:Key="TreeIslandCloseHoverColor">#F03A3D44</Color>
+    <Color x:Key="TreeIslandClosePressedColor">#F04A4D54</Color>
+    <x:Double x:Key="TreeIslandCloseBlurTintOpacity">0.0</x:Double>
+    <x:Double x:Key="TreeIslandCloseBlurMaterialOpacity">0.55</x:Double>
+    <x:Double x:Key="TreeIslandCloseBlurCompensationLevel">0.0</x:Double>
     <Color x:Key="PreviewSectionDividerColor">#4A5566</Color>
 
     <!-- Drop Zone Colors - Dark Theme -->
@@ -120,6 +139,9 @@
     <SolidColorBrush x:Key="MenuChildHoverBrush" Color="{StaticResource MenuHoverColor}"/>
     <SolidColorBrush x:Key="MenuChildPressedBrush" Color="{StaticResource MenuPressedColor}"/>
     <SolidColorBrush x:Key="ToastSurfaceBrush" Color="{StaticResource ToastSurfaceColor}" />
+    <SolidColorBrush x:Key="TreeIslandCloseSurfaceBrush" Color="{StaticResource TreeIslandCloseSurfaceColor}" />
+    <SolidColorBrush x:Key="TreeIslandCloseHoverBrush" Color="{StaticResource TreeIslandCloseHoverColor}" />
+    <SolidColorBrush x:Key="TreeIslandClosePressedBrush" Color="{StaticResource TreeIslandClosePressedColor}" />
     <SolidColorBrush x:Key="PreviewSectionDividerBrush" Color="{StaticResource PreviewSectionDividerColor}" />
 
     <!-- Drop Zone Brushes - Dark Theme -->
@@ -723,13 +745,13 @@
 
     <!-- Ensure list-item labels track the CheckBox FontSize in compact mode. -->
     <Style Selector="Window.compact-mode CheckBox.list-item TextBlock">
-        <Setter Property="FontSize" Value="{Binding $parent[CheckBox].FontSize}" />
+        <Setter Property="FontSize" Value="{ReflectionBinding $parent[CheckBox].FontSize}" />
         <Setter Property="TextWrapping" Value="NoWrap" />
     </Style>
 
     <!-- Fluent CheckBox template may render string content through AccessText. -->
     <Style Selector="Window.compact-mode CheckBox.list-item AccessText">
-        <Setter Property="FontSize" Value="{Binding $parent[CheckBox].FontSize}" />
+        <Setter Property="FontSize" Value="{ReflectionBinding $parent[CheckBox].FontSize}" />
         <Setter Property="TextWrapping" Value="NoWrap" />
     </Style>
 
@@ -737,7 +759,7 @@
     <Style Selector="Window.compact-mode CheckBox.list-item /template/ ContentPresenter">
         <Setter Property="Margin" Value="4,0,0,0" />
         <!-- Fluent template can override FontSize on the presenter; force it here. -->
-        <Setter Property="FontSize" Value="{Binding $parent[CheckBox].FontSize}" />
+        <Setter Property="FontSize" Value="{ReflectionBinding $parent[CheckBox].FontSize}" />
     </Style>
 
     <Style Selector="Window.compact-mode Border.ignore-option-separator">
@@ -781,6 +803,16 @@
         <Setter Property="Cursor" Value="Arrow" />
     </Style>
 
+    <!-- Fluent ScrollViewer reserves the bottom-right separator cell for the horizontal scrollbar corner.
+         Preview keeps horizontal scrolling for long lines, but the reserved cell visually cuts the vertical rail short. -->
+    <Style Selector="ScrollViewer.preview-scroll /template/ ScrollBar#PART_VerticalScrollBar">
+        <Setter Property="Grid.RowSpan" Value="2" />
+    </Style>
+
+    <Style Selector="ScrollViewer.preview-scroll /template/ Panel#PART_ScrollBarsSeparator">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+
     <Style Selector="ScrollViewer.preview-scroll RepeatButton">
         <Setter Property="Cursor" Value="Arrow" />
     </Style>
@@ -791,8 +823,8 @@
 
     <!-- Fix font inheritance for TextBlock in TreeView -->
     <Style Selector="TreeView TextBlock">
-        <Setter Property="FontFamily" Value="{Binding $parent[TreeView].FontFamily}" />
-        <Setter Property="FontSize" Value="{Binding $parent[TreeView].FontSize}" />
+        <Setter Property="FontFamily" Value="{ReflectionBinding $parent[TreeView].FontFamily}" />
+        <Setter Property="FontSize" Value="{ReflectionBinding $parent[TreeView].FontSize}" />
     </Style>
 
     <!-- Theme Popover Styles (Win11 Settings-like card) -->
@@ -801,7 +833,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="BoxShadow" Value="0 4 16 0 #40000000" />
+        <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="RenderTransformOrigin" Value="50%,0%" />
         <Setter Property="Transitions">
             <Transitions>
@@ -917,6 +949,8 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="WindowManagerAddShadowHint" Value="False" />
+        <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Padding" Value="4" />
         <Setter Property="RenderTransformOrigin" Value="50%,0%" />
         <Setter Property="Transitions">
@@ -932,6 +966,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Padding" Value="4" />
         <Setter Property="RenderTransformOrigin" Value="50%,0%" />
         <Setter Property="Transitions">
@@ -942,13 +977,17 @@
         </Setter>
     </Style>
 
+    <Style Selector="MenuItem /template/ Popup">
+        <Setter Property="WindowManagerAddShadowHint" Value="False" />
+    </Style>
+
     <!-- Menu popup backgrounds -->
     <Style Selector="MenuItem /template/ Popup > Border">
         <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="BoxShadow" Value="0 8 24 0 #2A000000" />
+        <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Padding" Value="4" />
     </Style>
 
@@ -959,8 +998,55 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="BoxShadow" Value="0 8 24 0 #2A000000" />
+        <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Padding" Value="4" />
+    </Style>
+
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup > Border">
+        <!-- 15 branch rows: (32px row + 2px vertical margin) * 15, plus popup padding. -->
+        <Setter Property="MaxHeight" Value="518" />
+    </Style>
+
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup ScrollViewer">
+        <!-- Keep real MenuItem containers for correct hover/selection while the popup scrolls. -->
+        <Setter Property="MaxHeight" Value="510" />
+        <Setter Property="AllowAutoHide" Value="False" />
+        <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="VerticalScrollBarVisibility" Value="Visible" />
+    </Style>
+
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup ScrollBar:vertical">
+        <Setter Property="AllowAutoHide" Value="False" />
+        <Setter Property="MinWidth" Value="12" />
+    </Style>
+
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup ScrollBar:vertical /template/ Thumb">
+        <Setter Property="Background" Value="{DynamicResource AppMutedTextBrush}" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="RenderTransform" Value="none" />
+    </Style>
+
+    <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup ScrollBar:vertical /template/ Thumb:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <Style Selector="Grid.git-branch-external-scrollbar">
+        <Setter Property="Width" Value="12" />
+        <Setter Property="MinWidth" Value="12" />
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Border.git-branch-scroll-indicator-track">
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="Border.git-branch-scroll-indicator-thumb">
+        <Setter Property="Background" Value="{DynamicResource AppMutedTextBrush}" />
+        <Setter Property="MinHeight" Value="32" />
+    </Style>
+
+    <Style Selector="Grid.git-branch-external-scrollbar:pointerover Border.git-branch-scroll-indicator-thumb">
+        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
     <!-- Submenu item backgrounds -->
@@ -1182,16 +1268,38 @@
     </Style>
 
     <Style Selector="Button.tree-island-close-button">
-        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
     </Style>
 
     <Style Selector="Button.tree-island-close-button:pointerover">
-        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Button.tree-island-close-button:pressed">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- The visible surface is inside the Button content, so hover/pressed states must target it directly. -->
+    <Style Selector="Button.tree-island-close-button Border.tree-island-close-surface">
+        <Setter Property="Background" Value="{DynamicResource TreeIslandCloseSurfaceBrush}" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="Button.tree-island-close-button:pointerover Border.tree-island-close-surface">
+        <Setter Property="Background" Value="{DynamicResource TreeIslandCloseHoverBrush}" />
+    </Style>
+
+    <Style Selector="Button.tree-island-close-button:pressed Border.tree-island-close-surface">
+        <Setter Property="Background" Value="{DynamicResource TreeIslandClosePressedBrush}" />
     </Style>
 
     <Style Selector="Border.preview-panel.preview-toolbar-compact Grid#PreviewBarLayoutGrid">

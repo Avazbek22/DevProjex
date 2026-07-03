@@ -34,7 +34,7 @@ public sealed class SelectionSyncCoordinatorFileIgnoreAvailabilityScanTests
 		coordinator.ApplyProjectProfileSelections(projectPath, profile);
 
 		await Assert.ThrowsAsync<OperationCanceledException>(() =>
-			coordinator.PopulateExtensionsForRootSelectionAsync(projectPath, selectedRoots));
+			coordinator.PopulateExtensionsForRootSelectionAsync(projectPath, selectedRoots, cancellationToken: TestContext.Current.CancellationToken));
 
 		Assert.NotEmpty(observedRules);
 		Assert.All(observedRules, rules =>

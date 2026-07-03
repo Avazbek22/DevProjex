@@ -24,7 +24,7 @@ public sealed class EmptyFoldersEffectiveDeltaMatrixIntegrationTests
 			temp.Path,
 			selectedRoots,
 			allowedExtensions,
-			rulesWithoutEmptyFolders)
+			rulesWithoutEmptyFolders, cancellationToken: TestContext.Current.CancellationToken)
 			.Value;
 
 		var expected = GetExpectedEffectiveCount(selectedRootsCase, allowedExtensionsMode, filterProfile);

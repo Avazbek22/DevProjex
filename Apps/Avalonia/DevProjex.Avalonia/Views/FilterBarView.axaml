@@ -2,7 +2,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
              x:Class="DevProjex.Avalonia.Views.FilterBarView"
-             x:DataType="vm:MainWindowViewModel">
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
   <Border Classes="filter-panel"
           IsEnabled="{Binding IsProjectLoaded}"
           UseLayoutRounding="True"
@@ -10,7 +11,7 @@
     <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8" Margin="12,6">
       <TextBox Name="FilterBox"
                Grid.Column="0"
-               Watermark="{Binding FilterByNamePlaceholder}"
+               PlaceholderText="{Binding FilterByNamePlaceholder}"
                Text="{Binding NameFilter, Mode=TwoWay}"
                Width="260"
                FocusAdorner="{x:Null}"

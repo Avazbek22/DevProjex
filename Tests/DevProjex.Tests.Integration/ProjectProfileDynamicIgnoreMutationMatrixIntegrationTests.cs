@@ -84,16 +84,38 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 		switch (mutationMode)
 		{
 			case ProfileMutationMode.SelectedDynamicOnly:
-				store.SaveProfile(savePath, CreateProfile([dynamicOptionId]));
+				store.SaveProfile(savePath, CreateProfile(
+					[dynamicOptionId],
+					new Dictionary<IgnoreOptionId, bool> { [dynamicOptionId] = true }));
 				break;
 			case ProfileMutationMode.EmptySelection:
-				store.SaveProfile(savePath, CreateProfile([]));
+				store.SaveProfile(savePath, CreateProfile(
+					[],
+					new Dictionary<IgnoreOptionId, bool>
+					{
+						[dynamicOptionId] = false,
+						[IgnoreOptionId.HiddenFolders] = false
+					}));
 				break;
 			case ProfileMutationMode.UnavailableOnly:
-				store.SaveProfile(savePath, CreateProfile([IgnoreOptionId.UseGitIgnore]));
+				store.SaveProfile(savePath, CreateProfile(
+					[IgnoreOptionId.UseGitIgnore],
+					new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.UseGitIgnore] = true,
+						[dynamicOptionId] = false,
+						[IgnoreOptionId.HiddenFolders] = false
+					}));
 				break;
 			case ProfileMutationMode.MixedVisibleSelection:
-				store.SaveProfile(savePath, CreateProfile([dynamicOptionId, IgnoreOptionId.HiddenFiles]));
+				store.SaveProfile(savePath, CreateProfile(
+					[dynamicOptionId, IgnoreOptionId.HiddenFiles],
+					new Dictionary<IgnoreOptionId, bool>
+					{
+						[dynamicOptionId] = true,
+						[IgnoreOptionId.HiddenFolders] = false,
+						[IgnoreOptionId.HiddenFiles] = true
+					}));
 				break;
 			case ProfileMutationMode.ClearedAfterSave:
 				store.SaveProfile(savePath, CreateProfile([dynamicOptionId]));
@@ -136,7 +158,8 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 				Assert.False(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 				Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
 				Assert.False(viewModel.AllIgnoreChecked);
-				AssertIgnoreSetEqual(selectedIds, [IgnoreOptionId.UseGitIgnore]);
+				Assert.Empty(selectedIds);
+				AssertPersistentState(coordinator, IgnoreOptionId.UseGitIgnore, expectedChecked: true);
 				break;
 
 			case ProfileMutationMode.ClearedAfterSave:
@@ -162,7 +185,7 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)
 	{
-		return Assert.Single(viewModel.IgnoreOptions.Where(option => option.Id == id));
+		return Assert.Single(viewModel.IgnoreOptions, option => option.Id == id);
 	}
 
 	private static void AssertIgnoreSetEqual(
@@ -174,6 +197,17 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 		Assert.Equal(expectedSet.Count, actualSet.Count);
 		foreach (var optionId in expectedSet)
 			Assert.Contains(optionId, actualSet);
+	}
+
+	private static void AssertPersistentState(
+		SelectionSyncCoordinator coordinator,
+		IgnoreOptionId optionId,
+		bool expectedChecked)
+	{
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.NotNull(states);
+		Assert.True(states!.TryGetValue(optionId, out var actualChecked));
+		Assert.Equal(expectedChecked, actualChecked);
 	}
 
 	private static IgnoreOptionCounts BuildCounts(
@@ -232,15 +266,18 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, true]);
+		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, true]);
 	}
 
-	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions)
+	private static ProjectSelectionProfile CreateProfile(
+		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
+		IReadOnlyDictionary<IgnoreOptionId, bool>? ignoreOptionStates = null)
 	{
 		return new ProjectSelectionProfile(
 			SelectedRootFolders: [],
 			SelectedExtensions: [],
-			SelectedIgnoreOptions: selectedIgnoreOptions);
+			SelectedIgnoreOptions: selectedIgnoreOptions,
+			IgnoreOptionStates: ignoreOptionStates);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(

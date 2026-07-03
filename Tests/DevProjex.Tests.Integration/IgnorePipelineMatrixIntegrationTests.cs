@@ -72,7 +72,7 @@ public sealed class IgnorePipelineMatrixIntegrationTests
 		var treeResult = treeBuilder.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: allowedExtensions,
 			AllowedRootFolders: new HashSet<string>(selectedRootFolders, StringComparer.OrdinalIgnoreCase),
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var rootNames = treeResult.Root.Children.Select(child => child.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var includesGitProject = selectedRootFolders.Contains("proj-git", StringComparer.OrdinalIgnoreCase);
@@ -99,7 +99,7 @@ public sealed class IgnorePipelineMatrixIntegrationTests
 		}
 
 		var scanUseCase = new ScanOptionsUseCase(new FileSystemScanner());
-		var extensionScan = scanUseCase.GetExtensionsForRootFolders(temp.Path, selectedRootFolders, rules);
+		var extensionScan = scanUseCase.GetExtensionsForRootFolders(temp.Path, selectedRootFolders, rules, cancellationToken: TestContext.Current.CancellationToken);
 		var extensions = extensionScan.Value;
 
 		var expectedCs = includesGitProject;

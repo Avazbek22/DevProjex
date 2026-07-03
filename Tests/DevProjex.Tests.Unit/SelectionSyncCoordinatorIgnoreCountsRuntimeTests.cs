@@ -174,7 +174,7 @@ public sealed class SelectionSyncCoordinatorIgnoreCountsRuntimeTests
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [options, extensionlessCount, ignoreCounts, hasIgnoreCounts]);
+		method!.Invoke(coordinator, [options, extensionlessCount, ignoreCounts, IgnoreControllerImpactCounts.Empty, hasIgnoreCounts]);
 	}
 
 	private static int CountExtensionless(IEnumerable<string> extensions)

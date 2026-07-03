@@ -27,7 +27,7 @@ public sealed class TreeBuilderEntryEnumerationMetadataIntegrationTests
 				{
 					IgnoreExtensionlessFiles = true,
 					IgnoreEmptyFiles = true
-				}));
+				}), cancellationToken: TestContext.Current.CancellationToken);
 
 		var src = Assert.Single(result.Root.Children);
 		Assert.Equal("src", src.Name);
@@ -59,7 +59,7 @@ public sealed class TreeBuilderEntryEnumerationMetadataIntegrationTests
 					IgnoreDotFolders: false,
 					IgnoreDotFiles: false,
 					SmartIgnoredFolders: new HashSet<string>(),
-					SmartIgnoredFiles: new HashSet<string>())));
+					SmartIgnoredFiles: new HashSet<string>())), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result.Root.Children.Select(child => child.Name).SequenceEqual(["visible"]));
 	}

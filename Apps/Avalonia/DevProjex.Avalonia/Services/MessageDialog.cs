@@ -4,37 +4,15 @@ public static class MessageDialog
 {
     public static async Task ShowAsync(Window owner, string title, string message)
     {
-        var themeVariant = owner?.ActualThemeVariant
-            ?? global::Avalonia.Application.Current?.ActualThemeVariant
-            ?? ThemeVariant.Default;
-        var app = global::Avalonia.Application.Current;
-        var appBackground = TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush");
-        var appPanel = TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
-        var appBorder = TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
-
-        var baseBackground = TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor") ?? appBackground;
-        var basePanel = TryGetThemeColorBrush(app, themeVariant, "AppPanelColor") ?? appPanel;
-        var baseBorder = TryGetThemeColorBrush(app, themeVariant, "AppBorderColor") ?? appBorder;
-
-        var dialog = new Window
-        {
-            Title = title,
-            Width = 420,
-            Height = 200,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = false,
-            RequestedThemeVariant = themeVariant,
-            TransparencyLevelHint = [WindowTransparencyLevel.None],
-            Background = baseBackground,
-            Content = BuildContent(message)
-        };
-
-        if (baseBackground is not null)
-            dialog.Resources["AppBackgroundBrush"] = baseBackground;
-        if (basePanel is not null)
-            dialog.Resources["AppPanelBrush"] = basePanel;
-        if (baseBorder is not null)
-            dialog.Resources["AppBorderBrush"] = baseBorder;
+        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
+        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
+        var dialog = DialogSurfaceFactory.CreateWindow(
+            title,
+            themeVariant,
+            brushes,
+            BuildContent(message),
+            width: 420,
+            height: 200);
 
         if (owner is not null)
             await dialog.ShowDialog(owner);
@@ -49,39 +27,16 @@ public static class MessageDialog
         string confirmButtonText = "Да",
         string cancelButtonText = "Отмена")
     {
-        var themeVariant = owner?.ActualThemeVariant
-            ?? global::Avalonia.Application.Current?.ActualThemeVariant
-            ?? ThemeVariant.Default;
-        var app = global::Avalonia.Application.Current;
-        var appBackground = TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush");
-        var appPanel = TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
-        var appBorder = TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
-
-        var baseBackground = TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor") ?? appBackground;
-        var basePanel = TryGetThemeColorBrush(app, themeVariant, "AppPanelColor") ?? appPanel;
-        var baseBorder = TryGetThemeColorBrush(app, themeVariant, "AppBorderColor") ?? appBorder;
-
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        var dialog = new Window
-        {
-            Title = title,
-            Width = 520,
-            Height = 260,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = false,
-            RequestedThemeVariant = themeVariant,
-            TransparencyLevelHint = [WindowTransparencyLevel.None],
-            Background = baseBackground,
-            Content = BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion)
-        };
-
-        if (baseBackground is not null)
-            dialog.Resources["AppBackgroundBrush"] = baseBackground;
-        if (basePanel is not null)
-            dialog.Resources["AppPanelBrush"] = basePanel;
-        if (baseBorder is not null)
-            dialog.Resources["AppBorderBrush"] = baseBorder;
+        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
+        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
+        var dialog = DialogSurfaceFactory.CreateWindow(
+            title,
+            themeVariant,
+            brushes,
+            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
+            width: 520,
+            height: 260);
 
         dialog.Closed += (_, _) => completion.TrySetResult(false);
 
@@ -118,7 +73,7 @@ public static class MessageDialog
         panel.Children.Add(text);
 
         button.Click += (_, _) =>
-            (panel.GetVisualRoot() as Window)?.Close();
+            (TopLevel.GetTopLevel(panel) as Window)?.Close();
 
         return panel;
     }
@@ -175,29 +130,15 @@ public static class MessageDialog
         confirmButton.Click += (_, _) =>
         {
             completion.TrySetResult(true);
-            (panel.GetVisualRoot() as Window)?.Close();
+            (TopLevel.GetTopLevel(panel) as Window)?.Close();
         };
 
         cancelButton.Click += (_, _) =>
         {
             completion.TrySetResult(false);
-            (panel.GetVisualRoot() as Window)?.Close();
+            (TopLevel.GetTopLevel(panel) as Window)?.Close();
         };
 
         return panel;
-    }
-
-    private static IBrush? TryGetThemeBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)
-    {
-        return app?.TryFindResource(key, themeVariant, out var resource) == true
-            ? resource as IBrush
-            : null;
-    }
-
-    private static IBrush? TryGetThemeColorBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)
-    {
-        if (app?.TryFindResource(key, themeVariant, out var resource) == true && resource is Color color)
-            return new SolidColorBrush(color);
-        return null;
     }
 }

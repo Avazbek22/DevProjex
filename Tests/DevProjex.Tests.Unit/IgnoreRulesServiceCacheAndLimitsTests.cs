@@ -54,6 +54,29 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 	}
 
 	[Fact]
+	public void GetIgnoreOptionsAvailability_PythonProjectWithOnlyIdeaGitIgnore_DoesNotExposeGitIgnore()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("requirements.txt", "pytest\n");
+		temp.CreateFile("main.py", "print('ok')\n");
+		temp.CreateFile("__pycache__/main.pyc", "binary");
+		temp.CreateFile(".idea/.gitignore", "# JetBrains internal ignore file\n");
+		temp.CreateFile(".idea/workspace.xml", "<project />\n");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([new PythonArtifactsIgnoreRule()]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
+		var rules = service.Build(
+			temp.Path,
+			[IgnoreOptionId.SmartIgnore, IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: []);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+		Assert.False(rules.UseGitIgnore);
+		Assert.True(rules.UseSmartIgnore);
+	}
+
+	[Fact]
 	public void GetIgnoreOptionsAvailability_UsesScopeCacheWithinTtl_ThenRefreshes()
 	{
 		using var temp = new TemporaryDirectory();
@@ -70,7 +93,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		var withinTtl = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-no-git"]);
 		Assert.False(withinTtl.IncludeGitIgnore);
 
-		ExpireScopeCacheEntry(temp.Path, ["proj-no-git"]);
+		ExpireScopeCacheEntry(service, temp.Path, ["proj-no-git"]);
 
 		var afterTtl = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-no-git"]);
 
@@ -148,6 +171,61 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		Assert.True(availability.IncludeSmartIgnore);
 	}
 
+	[Fact]
+	public void Build_AfterAvailabilityProbe_ReusesCachedSmartIgnoreResultForSameScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/node_modules/lib/index.js", "x");
+
+		var rule = new CountingSmartIgnoreRule(["node_modules"]);
+		var service = new IgnoreRulesService(new SmartIgnoreService([rule]));
+
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["workspace"]);
+
+		Assert.True(availability.IncludeSmartIgnore);
+		Assert.True(rules.UseSmartIgnore);
+		Assert.True(rules.IsSmartIgnoredDirectory(
+			Path.Combine(temp.Path, "workspace", "node_modules"),
+			"node_modules"));
+		Assert.Equal(1, rule.EvaluateCallCount);
+	}
+
+	[Fact]
+	public void Build_IgnoresReparsePointRootCandidatesDuringScopeDiscovery()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("real/package.json", "{}");
+		temp.CreateFile("real/node_modules/lib/index.js", "x");
+
+		if (!TryCreateDirectorySymlink(Path.Combine(temp.Path, "linked"), Path.Combine(temp.Path, "real")))
+			return;
+
+		var service = CreateServiceWithSmartIgnore(["node_modules"]);
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["linked"]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["linked"]);
+
+		Assert.False(availability.IncludeSmartIgnore);
+		Assert.False(rules.UseSmartIgnore);
+	}
+
+	[Fact]
+	public void Build_MissingExplicitRootCandidates_DoNotFallbackToWholeWorkspaceScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("deleted/package.json", "{}");
+		Directory.Delete(Path.Combine(temp.Path, "deleted"), recursive: true);
+		temp.CreateFile("sibling/node_modules/lib/index.js", "x");
+
+		var service = CreateServiceWithSmartIgnore(["node_modules"]);
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["deleted"]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["deleted"]);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.False(availability.IncludeSmartIgnore);
+		Assert.False(rules.UseSmartIgnore);
+	}
+
 	private static void SeedMixedWorkspace(TemporaryDirectory temp)
 	{
 		temp.CreateFile("proj-git/.gitignore", "bin/");
@@ -179,9 +257,50 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		}
 	}
 
-	private static void ExpireScopeCacheEntry(string rootPath, IReadOnlyCollection<string> selectedRootFolders)
+	private sealed class CountingSmartIgnoreRule(IReadOnlyCollection<string> folders) : ISmartIgnoreRule
 	{
-		var buildScopeCacheKey = typeof(IgnoreRulesService).GetMethod(
+		private int _evaluateCallCount;
+
+		public int EvaluateCallCount => Volatile.Read(ref _evaluateCallCount);
+
+		public SmartIgnoreResult Evaluate(string rootPath)
+		{
+			Interlocked.Increment(ref _evaluateCallCount);
+			return new SmartIgnoreResult(
+				new HashSet<string>(folders, StringComparer.OrdinalIgnoreCase),
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		}
+	}
+
+	private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+	{
+		try
+		{
+			Directory.CreateSymbolicLink(linkPath, targetPath);
+			return Directory.Exists(linkPath) &&
+			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private static void ExpireScopeCacheEntry(
+		IgnoreRulesService service,
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders)
+	{
+		var discoveryField = typeof(IgnoreRulesService).GetField(
+			"_projectScopeDiscovery",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(discoveryField);
+
+		var discovery = discoveryField.GetValue(service);
+		Assert.NotNull(discovery);
+
+		var discoveryType = discovery.GetType();
+		var buildScopeCacheKey = discoveryType.GetMethod(
 			"BuildScopeCacheKey",
 			BindingFlags.Static | BindingFlags.NonPublic);
 		Assert.NotNull(buildScopeCacheKey);
@@ -194,12 +313,12 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 			]);
 		Assert.False(string.IsNullOrWhiteSpace(cacheKey));
 
-		var scopeCacheField = typeof(IgnoreRulesService).GetField(
-			"ScopeCache",
-			BindingFlags.Static | BindingFlags.NonPublic);
+		var scopeCacheField = discoveryType.GetField(
+			"_scopeCache",
+			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(scopeCacheField);
 
-		var scopeCache = scopeCacheField.GetValue(null);
+		var scopeCache = scopeCacheField.GetValue(discovery);
 		Assert.NotNull(scopeCache);
 
 		var dictionaryType = scopeCache.GetType();

@@ -13,10 +13,10 @@ public sealed class IgnoreSectionRefreshPlanBuilderMatrixTests
         bool expectRootRefresh)
     {
         var beforeSnapshot = availabilityChanged
-            ? new IgnoreSectionSnapshotState(true, IgnoreOptionCounts.Empty, false, 0)
-            : new IgnoreSectionSnapshotState(true, new IgnoreOptionCounts(EmptyFiles: 1), false, 0);
+            ? new IgnoreSectionSnapshotState(true, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty, false, 0)
+            : new IgnoreSectionSnapshotState(true, new IgnoreOptionCounts(EmptyFiles: 1), IgnoreControllerImpactCounts.Empty, false, 0);
         var afterSnapshot = availabilityChanged
-            ? new IgnoreSectionSnapshotState(true, new IgnoreOptionCounts(EmptyFiles: 1), false, 0)
+            ? new IgnoreSectionSnapshotState(true, new IgnoreOptionCounts(EmptyFiles: 1), IgnoreControllerImpactCounts.Empty, false, 0)
             : beforeSnapshot;
 
         var beforeSelection = beforeSelectionIds.ToHashSet();
@@ -28,7 +28,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderMatrixTests
             beforeSelection,
             afterSelection);
 
-        if (!availabilityChanged)
+        if (!availabilityChanged && expectedImpactValue == (int)IgnoreOptionRefreshImpact.None)
         {
             Assert.Equal(IgnoreSectionRefreshPlan.None, plan);
             return;

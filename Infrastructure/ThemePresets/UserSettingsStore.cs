@@ -12,6 +12,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
+        TypeInfoResolver = InfrastructureJsonSerializerContext.Default,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
@@ -20,6 +21,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         IsCompactMode = false,
         IsTreeAnimationEnabled = false,
         IsAdvancedIgnoreCountsEnabled = true,
+        IsTerminalCommandPromptDismissed = false,
         PreferredLanguage = null
     };
     private readonly Func<string> _appDataPathProvider =
@@ -117,6 +119,12 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         db.SchemaVersion = CurrentSchemaVersion;
         db.Presets ??= new Dictionary<string, ThemePreset>();
         db.ViewSettings ??= DefaultViewSettings;
+        db.ViewSettings = db.ViewSettings with
+        {
+            // The UI toggle was removed, but older settings files can still contain false.
+            // Keep the current behavior deterministic until a raw JSON migration removes the field.
+            IsAdvancedIgnoreCountsEnabled = true
+        };
 
         foreach (var preset in CreateDefaultPresets())
         {

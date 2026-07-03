@@ -61,7 +61,7 @@ public sealed class NestedMultiStackScopeIsolationMatrixIntegrationTests
 				".rs", ".ts", ".tsx", ".json", ".toml", ".cs", ".py", ".tmp", ".cache", ".txt", ".dll", ".pyc"
 			},
 			AllowedRootFolders: new HashSet<string>(selectedRootFolders, StringComparer.OrdinalIgnoreCase),
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		// Use effective runtime flags because availability can hide options for some selections.
 		var hideStandardArtifacts = rules.UseGitIgnore || rules.UseSmartIgnore;

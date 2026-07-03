@@ -113,6 +113,40 @@ public sealed class GitIgnoreMatcherTests
 		Assert.False(matcher.IsIgnored("/repo/packages/dist", true, "dist"));
 	}
 
+	[Fact]
+	public void IsIgnored_LiteralDirectoryPattern_MatchesDirectoryAndDescendantsAnywhere()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", ["logs/"]);
+
+		Assert.True(matcher.IsIgnored("/repo/logs", true, "logs"));
+		Assert.True(matcher.IsIgnored("/repo/src/logs", true, "logs"));
+		Assert.True(matcher.IsIgnored("/repo/src/logs/app.log", false, "app.log"));
+		Assert.False(matcher.IsIgnored("/repo/logs", false, "logs"));
+		Assert.False(matcher.IsIgnored("/repo/catalogs/app.log", false, "app.log"));
+	}
+
+	[Fact]
+	public void IsIgnored_AnchoredLiteralDirectoryPattern_MatchesRootDirectoryAndDescendantsOnly()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", ["/target/"]);
+
+		Assert.True(matcher.IsIgnored("/repo/target", true, "target"));
+		Assert.True(matcher.IsIgnored("/repo/target/debug/app.dll", false, "app.dll"));
+		Assert.False(matcher.IsIgnored("/repo/crates/app/target", true, "target"));
+		Assert.False(matcher.IsIgnored("/repo/crates/app/target/debug/app.dll", false, "app.dll"));
+	}
+
+	[Fact]
+	public void IsIgnored_UnanchoredLiteralPathPattern_MatchesSamePathAtAnyDepth()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", ["src/generated.txt"]);
+
+		Assert.True(matcher.IsIgnored("/repo/src/generated.txt", false, "generated.txt"));
+		Assert.True(matcher.IsIgnored("/repo/packages/app/src/generated.txt", false, "generated.txt"));
+		Assert.False(matcher.IsIgnored("/repo/generated.txt", false, "generated.txt"));
+		Assert.False(matcher.IsIgnored("/repo/src/generated.txt.bak", false, "generated.txt.bak"));
+	}
+
 	#endregion
 
 	#region Character Classes
@@ -386,6 +420,24 @@ public sealed class GitIgnoreMatcherTests
 
 		Assert.False(matcher.IsIgnored("/other/debug.log", false, "debug.log"));
 		Assert.False(matcher.IsIgnored("/different/repo/file.log", false, "file.log"));
+	}
+
+	[Fact]
+	public void IsIgnored_PathWithSameRootPrefixButOutsideRoot_ReturnsFalse()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", ["*.log"]);
+
+		Assert.False(matcher.IsIgnored("/repo2/debug.log", false, "debug.log"));
+	}
+
+	[Fact]
+	public void EvaluateRelative_MatchesSameRulesWithoutFullPathNormalization()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", ["/src/generated/", "*.tmp"]);
+
+		Assert.True(matcher.EvaluateRelative("src/generated/app.cs", isDirectory: false, "app.cs").IsIgnored);
+		Assert.True(matcher.EvaluateRelative(@"src\debug.tmp", isDirectory: false, "debug.tmp").IsIgnored);
+		Assert.False(matcher.EvaluateRelative("lib/generated/app.cs", isDirectory: false, "app.cs").IsIgnored);
 	}
 
 	#endregion
@@ -810,6 +862,29 @@ public sealed class GitIgnoreMatcherTests
 
 		Assert.True(matcher.IsIgnored("/repo/logs", true, "logs"));
 		Assert.False(matcher.IsIgnored("/repo/logs/keep.log", false, "keep.log"));
+	}
+
+	[Fact]
+	public void IsIgnored_LiteralDirectoryAndLiteralNegation_PreserveLastMatchWins()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", [
+			"logs/",
+			"!logs/keep.log",
+			"logs/keep.log"
+		]);
+
+		Assert.True(matcher.IsIgnored("/repo/logs", true, "logs"));
+		Assert.True(matcher.IsIgnored("/repo/logs/debug.log", false, "debug.log"));
+		Assert.True(matcher.IsIgnored("/repo/logs/keep.log", false, "keep.log"));
+	}
+
+	[Fact]
+	public void ShouldTraverseIgnoredDirectory_LiteralPathNegationTargetsDescendant()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", ["logs/", "!logs/keep.log"]);
+
+		Assert.True(matcher.ShouldTraverseIgnoredDirectory("/repo/logs", "logs"));
+		Assert.False(matcher.ShouldTraverseIgnoredDirectory("/repo/cache", "cache"));
 	}
 
 	[Fact]

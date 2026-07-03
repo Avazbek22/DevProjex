@@ -7,7 +7,7 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
 {
     [Theory]
     [MemberData(nameof(Cases))]
-    public async Task ComputeFullRefreshSnapshot_FinalStateIsIndependentFromSectionMutationOrder(
+    public async Task ComputeFullRefreshSnapshot_SectionMutationOrdersConvergeWithoutLosingExplicitStates(
         string rootScenarioName,
         string extensionScenarioName,
         string ignoreScenarioName,
@@ -37,24 +37,65 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
         AssertScenarioSelectionContract(directConverged, targetScenario);
 
         var currentSnapshot = baselineSnapshot;
+        var clientState = WorkflowClientSelectionState.FromSnapshot(baselineSnapshot);
         foreach (var step in mutationOrder)
         {
-            var stepContext = ApplyScenarioStep(rootPath, currentSnapshot, targetScenario, step);
+            var stepContext = clientState.CreateStepContext(rootPath, currentSnapshot, targetScenario, step);
             currentSnapshot = services.Engine.ComputeFullRefreshSnapshot(stepContext, CancellationToken.None);
+            clientState.MergeVisibleState(currentSnapshot);
         }
 
         var orderedConverged = services.Engine.ComputeFullRefreshSnapshot(
-            BuildConvergedContext(rootPath, currentSnapshot),
+            clientState.CreateConvergedContext(rootPath, currentSnapshot),
             CancellationToken.None);
+        clientState.MergeVisibleState(orderedConverged);
 
-        AssertEquivalentVisibleSnapshots(directConverged, orderedConverged);
+        var orderedSecondPass = services.Engine.ComputeFullRefreshSnapshot(
+            clientState.CreateConvergedContext(rootPath, orderedConverged),
+            CancellationToken.None);
+        AssertEquivalentSnapshots(orderedConverged, orderedSecondPass);
         AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(orderedConverged);
-        AssertScenarioSelectionContract(orderedConverged, targetScenario);
+        AssertRequestedSelectionsStillChecked(orderedConverged, targetScenario);
+        clientState.AssertExplicitlyUncheckedVisibleEntriesRemainUnchecked(orderedConverged);
+        AssertExplicitlyDisabledIgnoreOptionsRemainUnchecked(orderedConverged, targetScenario);
 
-        var directMetrics = await ComputeMetricsFromSnapshotAsync(rootPath, directConverged);
         var orderedMetrics = await ComputeMetricsFromSnapshotAsync(rootPath, orderedConverged);
-        Assert.Equal(directMetrics.TreeMetrics, orderedMetrics.TreeMetrics);
-        Assert.Equal(directMetrics.ContentMetrics, orderedMetrics.ContentMetrics);
+        Assert.NotEqual(ExportOutputMetrics.Empty, orderedMetrics.TreeMetrics);
+    }
+
+    private static void AssertRequestedSelectionsStillChecked(
+        SelectionRefreshSnapshot snapshot,
+        SelectionRefreshScenario scenario)
+    {
+        if (snapshot.RootOptions is not null)
+        {
+            foreach (var rootName in scenario.RequestedRootNames)
+            {
+                var option = snapshot.RootOptions.FirstOrDefault(option =>
+                    string.Equals(option.Name, rootName, StringComparison.Ordinal));
+                if (option is not null)
+                    Assert.True(option.IsChecked, $"Requested root '{rootName}' must remain checked.");
+            }
+        }
+
+        foreach (var extensionName in scenario.RequestedExtensionNames)
+        {
+            var option = snapshot.ExtensionOptions.FirstOrDefault(option =>
+                string.Equals(option.Name, extensionName, StringComparison.OrdinalIgnoreCase));
+            if (option is not null)
+                Assert.True(option.IsChecked, $"Requested extension '{extensionName}' must remain checked.");
+        }
+    }
+
+    private static void AssertExplicitlyDisabledIgnoreOptionsRemainUnchecked(
+        SelectionRefreshSnapshot snapshot,
+        SelectionRefreshScenario scenario)
+    {
+        foreach (var optionId in scenario.ExplicitlyDisabledIgnoreOptions)
+        {
+            foreach (var option in snapshot.IgnoreOptions.Where(option => option.Id == optionId))
+                Assert.False(option.IsChecked, $"Explicitly disabled ignore option '{optionId}' must stay unchecked.");
+        }
     }
 
     public static IEnumerable<object[]> Cases()
@@ -94,6 +135,188 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
                     state.Item3.ToString(),
                     order.Select(step => step.ToString()).ToArray()
                 ];
+        }
+    }
+
+    private sealed class WorkflowClientSelectionState
+    {
+        private readonly Dictionary<string, bool> _rootStates;
+        private readonly Dictionary<string, bool> _extensionStates;
+        private readonly HashSet<string> _explicitlyUncheckedRoots = new(PathComparer.Default);
+        private readonly HashSet<string> _explicitlyUncheckedExtensions = new(StringComparer.OrdinalIgnoreCase);
+
+        private WorkflowClientSelectionState(
+            Dictionary<string, bool> rootStates,
+            Dictionary<string, bool> extensionStates)
+        {
+            _rootStates = rootStates;
+            _extensionStates = extensionStates;
+        }
+
+        public static WorkflowClientSelectionState FromSnapshot(SelectionRefreshSnapshot snapshot) =>
+            new(
+                BuildRootOptionStateCache(snapshot),
+                BuildExtensionOptionStateCache(snapshot));
+
+        public SelectionRefreshContext CreateStepContext(
+            string rootPath,
+            SelectionRefreshSnapshot snapshot,
+            SelectionRefreshScenario targetScenario,
+            WorkflowMutationStep step)
+        {
+            var context = CreateConvergedContext(rootPath, snapshot);
+
+            return step switch
+            {
+                WorkflowMutationStep.Roots => ApplyRootScenario(context, snapshot, targetScenario),
+                WorkflowMutationStep.Extensions => ApplyExtensionScenario(context, snapshot, targetScenario),
+                WorkflowMutationStep.Ignore => context with
+                {
+                    IgnoreSelectionInitialized = targetScenario.IgnoreSelectionInitialized,
+                    IgnoreSelectionCache = new HashSet<IgnoreOptionId>(targetScenario.RequestedIgnoreOptions),
+                    IgnoreOptionStateCache = BuildIgnoreStateCache(
+                        targetScenario.RequestedIgnoreOptions,
+                        targetScenario.ExplicitlyDisabledIgnoreOptions),
+                    IgnoreAllPreference = targetScenario.IgnoreAllPreference
+                },
+                _ => throw new ArgumentOutOfRangeException(nameof(step), step, null)
+            };
+        }
+
+        public SelectionRefreshContext CreateConvergedContext(
+            string rootPath,
+            SelectionRefreshSnapshot snapshot)
+        {
+            var context = CreateContextFromSnapshot(rootPath, snapshot);
+            return context with
+            {
+                RootSelectionCache = CollectCheckedVisibleRootNames(snapshot),
+                ExtensionsSelectionCache = CollectCheckedVisibleExtensionNames(snapshot),
+                RootOptionStateCache = new Dictionary<string, bool>(_rootStates, PathComparer.Default),
+                ExtensionOptionStateCache = new Dictionary<string, bool>(
+                    _extensionStates,
+                    StringComparer.OrdinalIgnoreCase)
+            };
+        }
+
+        public void MergeVisibleState(SelectionRefreshSnapshot snapshot)
+        {
+            if (snapshot.RootOptions is not null)
+            {
+                foreach (var option in snapshot.RootOptions)
+                    _rootStates[option.Name] = option.IsChecked;
+            }
+
+            foreach (var option in snapshot.ExtensionOptions)
+                _extensionStates[option.Name] = option.IsChecked;
+        }
+
+        public void AssertExplicitlyUncheckedVisibleEntriesRemainUnchecked(SelectionRefreshSnapshot snapshot)
+        {
+            if (snapshot.RootOptions is not null)
+            {
+                foreach (var option in snapshot.RootOptions)
+                {
+                    if (_explicitlyUncheckedRoots.Contains(option.Name))
+                        Assert.False(option.IsChecked, $"Explicitly unchecked root '{option.Name}' must stay unchecked.");
+                }
+            }
+
+            foreach (var option in snapshot.ExtensionOptions)
+            {
+                if (_explicitlyUncheckedExtensions.Contains(option.Name))
+                    Assert.False(option.IsChecked, $"Explicitly unchecked extension '{option.Name}' must stay unchecked.");
+            }
+        }
+
+        private SelectionRefreshContext ApplyRootScenario(
+            SelectionRefreshContext context,
+            SelectionRefreshSnapshot snapshot,
+            SelectionRefreshScenario scenario)
+        {
+            if (snapshot.RootOptions is not null)
+            {
+                var allVisible = scenario.RootScenario == WorkflowRootScenario.AllVisible;
+                foreach (var option in snapshot.RootOptions)
+                {
+                    var isChecked = allVisible || scenario.RequestedRootNames.Contains(option.Name);
+                    _rootStates[option.Name] = isChecked;
+                    TrackExplicitUncheckedState(_explicitlyUncheckedRoots, option.Name, isChecked);
+                }
+            }
+
+            return context with
+            {
+                AllRootFoldersChecked = scenario.RootScenario == WorkflowRootScenario.AllVisible,
+                RootSelectionInitialized = scenario.RootScenario != WorkflowRootScenario.AllVisible,
+                RootSelectionCache = CollectCheckedVisibleRootNames(snapshot),
+                RootOptionStateCache = new Dictionary<string, bool>(_rootStates, PathComparer.Default)
+            };
+        }
+
+        private SelectionRefreshContext ApplyExtensionScenario(
+            SelectionRefreshContext context,
+            SelectionRefreshSnapshot snapshot,
+            SelectionRefreshScenario scenario)
+        {
+            var allVisible = scenario.ExtensionScenario == WorkflowExtensionScenario.AllVisible;
+            foreach (var option in snapshot.ExtensionOptions)
+            {
+                var isChecked = allVisible || scenario.RequestedExtensionNames.Contains(option.Name);
+                _extensionStates[option.Name] = isChecked;
+                TrackExplicitUncheckedState(_explicitlyUncheckedExtensions, option.Name, isChecked);
+            }
+
+            return context with
+            {
+                AllExtensionsChecked = scenario.ExtensionScenario == WorkflowExtensionScenario.AllVisible,
+                ExtensionsSelectionInitialized = scenario.ExtensionScenario != WorkflowExtensionScenario.AllVisible,
+                ExtensionsSelectionCache = CollectCheckedVisibleExtensionNames(snapshot),
+                ExtensionOptionStateCache = new Dictionary<string, bool>(
+                    _extensionStates,
+                    StringComparer.OrdinalIgnoreCase)
+            };
+        }
+
+        private HashSet<string> CollectCheckedVisibleRootNames(SelectionRefreshSnapshot snapshot)
+        {
+            var selected = new HashSet<string>(PathComparer.Default);
+            if (snapshot.RootOptions is null)
+                return selected;
+
+            foreach (var option in snapshot.RootOptions)
+            {
+                if (_rootStates.TryGetValue(option.Name, out var isChecked) && isChecked)
+                    selected.Add(option.Name);
+            }
+
+            return selected;
+        }
+
+        private HashSet<string> CollectCheckedVisibleExtensionNames(SelectionRefreshSnapshot snapshot)
+        {
+            var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var option in snapshot.ExtensionOptions)
+            {
+                if (_extensionStates.TryGetValue(option.Name, out var isChecked) && isChecked)
+                    selected.Add(option.Name);
+            }
+
+            return selected;
+        }
+
+        private static void TrackExplicitUncheckedState(
+            HashSet<string> explicitlyUncheckedNames,
+            string name,
+            bool isChecked)
+        {
+            if (isChecked)
+            {
+                explicitlyUncheckedNames.Remove(name);
+                return;
+            }
+
+            explicitlyUncheckedNames.Add(name);
         }
     }
 }

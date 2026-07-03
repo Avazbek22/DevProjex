@@ -1,9 +1,8 @@
 namespace DevProjex.Infrastructure.SmartIgnore;
 
-public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
-	private static readonly string[] MarkerFiles =
-	[
+	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
 		"package.json",
 		"package-lock.json",
 		"pnpm-lock.yaml",
@@ -11,11 +10,9 @@ public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
 		"bun.lockb",
 		"bun.lock",
 		"pnpm-workspace.yaml",
-		"npm-shrinkwrap.json"
-	];
+		"npm-shrinkwrap.json");
 
-	private static readonly string[] FolderNames =
-	[
+	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
 		"node_modules",
 		"dist",
 		"build",
@@ -31,24 +28,25 @@ public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule
 		".output",
 		".astro",
 		"storybook-static",
-		"out"
-	];
+		"out");
+
+	private static readonly SmartIgnoreResult MatchResult =
+		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } =
+		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{
 		if (!Directory.Exists(rootPath))
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			return SmartIgnoreResult.Empty;
 
-		bool hasMarker = MarkerFiles.Any(marker => File.Exists(Path.Combine(rootPath, marker)));
-		if (!hasMarker)
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		foreach (var marker in MarkerFiles)
+		{
+			if (File.Exists(Path.Combine(rootPath, marker)))
+				return MatchResult;
+		}
 
-		return new SmartIgnoreResult(
-			new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
-			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		return SmartIgnoreResult.Empty;
 	}
 }

@@ -13,9 +13,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "tree.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, treeText);
+			await fileExport.WriteAsync(stream, treeText, cancellationToken: TestContext.Current.CancellationToken);
 
-		var bytes = await File.ReadAllBytesAsync(exportPath);
+		var bytes = await File.ReadAllBytesAsync(exportPath, cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(StartsWithUtf8Bom(bytes));
 		Assert.Equal(treeText, Encoding.UTF8.GetString(bytes));
 		Assert.Contains(Environment.NewLine, treeText);
@@ -32,9 +32,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "tree.json");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, json);
+			await fileExport.WriteAsync(stream, json, cancellationToken: TestContext.Current.CancellationToken);
 
-		var bytes = await File.ReadAllBytesAsync(exportPath);
+		var bytes = await File.ReadAllBytesAsync(exportPath, cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(StartsWithUtf8Bom(bytes));
 
 		using var doc = JsonDocument.Parse(bytes);
@@ -69,9 +69,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "tree_content.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, payload);
+			await fileExport.WriteAsync(stream, payload, cancellationToken: TestContext.Current.CancellationToken);
 
-		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8);
+		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken);
 
 		// JSON tree + separator (NBSP lines) + text content
 		// Find separator (NBSP = \u00A0)
@@ -101,9 +101,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "tree_content.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, payload);
+			await fileExport.WriteAsync(stream, payload, cancellationToken: TestContext.Current.CancellationToken);
 
-		var written = await File.ReadAllTextAsync(exportPath, Encoding.UTF8);
+		var written = await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Equal(payload, written);
 		Assert.Contains(Environment.NewLine, written);
 	}
@@ -164,13 +164,13 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 	{
 		using var temp = new TemporaryDirectory();
 		var exportPath = Path.Combine(temp.Path, "output.txt");
-		await File.WriteAllTextAsync(exportPath, "old content that should disappear", Encoding.UTF8);
+		await File.WriteAllTextAsync(exportPath, "old content that should disappear", Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken);
 
 		var fileExport = new TextFileExportService();
 		await using (var stream = new FileStream(exportPath, FileMode.Open, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, "new");
+			await fileExport.WriteAsync(stream, "new", cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal("new", await File.ReadAllTextAsync(exportPath, Encoding.UTF8));
+		Assert.Equal("new", await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact]
@@ -182,9 +182,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 
 		var fileExport = new TextFileExportService();
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, content);
+			await fileExport.WriteAsync(stream, content, cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal(content, await File.ReadAllTextAsync(exportPath, Encoding.UTF8));
+		Assert.Equal(content, await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	private static IEnumerable<string> EnumerateTreePaths(JsonElement node)
@@ -287,9 +287,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "deep_export.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, payload);
+			await fileExport.WriteAsync(stream, payload, cancellationToken: TestContext.Current.CancellationToken);
 
-		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8);
+		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken);
 		var separatorIndex = content.IndexOf("\u00A0", StringComparison.Ordinal);
 		var jsonPart = content[..separatorIndex].TrimEnd('\r', '\n');
 
@@ -365,9 +365,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "markers_export.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, payload);
+			await fileExport.WriteAsync(stream, payload, cancellationToken: TestContext.Current.CancellationToken);
 
-		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8);
+		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("[No Content, 0 bytes]", content);
 		Assert.Contains("[Whitespace,", content);
@@ -396,9 +396,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "large_export.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, payload);
+			await fileExport.WriteAsync(stream, payload, cancellationToken: TestContext.Current.CancellationToken);
 
-		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8);
+		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("Line 1:", content);
 		Assert.Contains("Line 5000:", content);
@@ -480,9 +480,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "unicode_export.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, payload);
+			await fileExport.WriteAsync(stream, payload, cancellationToken: TestContext.Current.CancellationToken);
 
-		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8);
+		var content = await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken);
 
 		var separatorIndex = content.IndexOf("\u00A0", StringComparison.Ordinal);
 		var jsonPart = content[..separatorIndex].TrimEnd('\r', '\n');
@@ -577,11 +577,11 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var exportPath = Path.Combine(temp.Path, "snapshot.txt");
 
 		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-			await fileExport.WriteAsync(stream, payload);
+			await fileExport.WriteAsync(stream, payload, cancellationToken: TestContext.Current.CancellationToken);
 
-		await File.WriteAllTextAsync(file, "Modified content");
+		await File.WriteAllTextAsync(file, "Modified content", cancellationToken: TestContext.Current.CancellationToken);
 
-		var exported = await File.ReadAllTextAsync(exportPath, Encoding.UTF8);
+		var exported = await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Original content", exported);
 		Assert.DoesNotContain("Modified content", exported);
 	}
@@ -592,7 +592,7 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		using var temp = new TemporaryDirectory();
 		var textFile = temp.CreateFile("readme.txt", "Hello World");
 		var binaryPath = Path.Combine(temp.Path, "image.png");
-		await File.WriteAllBytesAsync(binaryPath, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00]);
+		await File.WriteAllBytesAsync(binaryPath, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00], cancellationToken: TestContext.Current.CancellationToken);
 
 		var root = new TreeNodeDescriptor(
 			"Root", temp.Path, true, false, "folder",

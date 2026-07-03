@@ -46,7 +46,8 @@ public sealed class ProjectProfileDynamicIgnoreNegativeMutationIntegrationTests
 			case NegativeMutationMode.UnavailableOnly:
 				Assert.False(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 				Assert.False(viewModel.AllIgnoreChecked);
-				Assert.Contains(IgnoreOptionId.UseGitIgnore, coordinator.GetSelectedIgnoreOptionIds());
+				Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, coordinator.GetSelectedIgnoreOptionIds());
+				AssertPersistentState(coordinator, IgnoreOptionId.UseGitIgnore, expectedChecked: true);
 				break;
 
 			case NegativeMutationMode.ManualFileRemoval:
@@ -83,10 +84,18 @@ public sealed class ProjectProfileDynamicIgnoreNegativeMutationIntegrationTests
 		switch (mutationMode)
 		{
 			case NegativeMutationMode.EmptySelection:
-				store.SaveProfile(canonicalPath, CreateProfile([]));
+				store.SaveProfile(canonicalPath, CreateProfile(
+					[],
+					new Dictionary<IgnoreOptionId, bool> { [dynamicOptionId] = false }));
 				break;
 			case NegativeMutationMode.UnavailableOnly:
-				store.SaveProfile(canonicalPath, CreateProfile([IgnoreOptionId.UseGitIgnore]));
+				store.SaveProfile(canonicalPath, CreateProfile(
+					[IgnoreOptionId.UseGitIgnore],
+					new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.UseGitIgnore] = true,
+						[dynamicOptionId] = false
+					}));
 				break;
 			case NegativeMutationMode.ManualFileRemoval:
 				store.SaveProfile(canonicalPath, CreateProfile([dynamicOptionId]));
@@ -103,7 +112,7 @@ public sealed class ProjectProfileDynamicIgnoreNegativeMutationIntegrationTests
 
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)
 	{
-		return Assert.Single(viewModel.IgnoreOptions.Where(option => option.Id == id));
+		return Assert.Single(viewModel.IgnoreOptions, option => option.Id == id);
 	}
 
 	private static IgnoreOptionCounts BuildCounts(IgnoreOptionId dynamicOptionId, bool dynamicVisible)
@@ -126,15 +135,29 @@ public sealed class ProjectProfileDynamicIgnoreNegativeMutationIntegrationTests
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, true]);
+		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, true]);
 	}
 
-	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions)
+	private static ProjectSelectionProfile CreateProfile(
+		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
+		IReadOnlyDictionary<IgnoreOptionId, bool>? ignoreOptionStates = null)
 	{
 		return new ProjectSelectionProfile(
 			SelectedRootFolders: [],
 			SelectedExtensions: [],
-			SelectedIgnoreOptions: selectedIgnoreOptions);
+			SelectedIgnoreOptions: selectedIgnoreOptions,
+			IgnoreOptionStates: ignoreOptionStates);
+	}
+
+	private static void AssertPersistentState(
+		SelectionSyncCoordinator coordinator,
+		IgnoreOptionId optionId,
+		bool expectedChecked)
+	{
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.NotNull(states);
+		Assert.True(states!.TryGetValue(optionId, out var actualChecked));
+		Assert.Equal(expectedChecked, actualChecked);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(

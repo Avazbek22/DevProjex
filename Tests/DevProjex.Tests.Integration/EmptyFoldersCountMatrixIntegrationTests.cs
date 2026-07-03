@@ -17,7 +17,7 @@ public sealed class EmptyFoldersCountMatrixIntegrationTests
 		var scanner = new FileSystemScanner();
 		var result = scanner.GetExtensionsWithIgnoreOptionCounts(
 			temp.Path,
-			CreateRules(ignoreDotFiles, ignoreDotFolders, ignoreExtensionlessFiles));
+			CreateRules(ignoreDotFiles, ignoreDotFolders, ignoreExtensionlessFiles), cancellationToken: TestContext.Current.CancellationToken);
 
 		var expected = GetExpectedEmptyFolderCount(scenario, ignoreDotFiles, ignoreDotFolders, ignoreExtensionlessFiles);
 		Assert.Equal(expected, result.Value.IgnoreOptionCounts.EmptyFolders);

@@ -23,7 +23,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.GetRootFolders(CreateRootPath(), CreateRules());
+		var result = useCase.GetRootFolders(CreateRootPath(), CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
 		var expected = returnedFolders.ToList();
 		expected.Sort(PathComparer.Default);
@@ -35,6 +35,58 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 	public void GetExtensionsForRootFolders_PassesOriginalFolderPathsToScanner()
 	{
 		var rootPath = CreateRootPath();
+		var folderCalls = new System.Collections.Concurrent.ConcurrentBag<string>();
+		var scanner = new StubFileSystemScanner
+		{
+			GetRootFileExtensionsHandler = (_, _) => new ScanResult<HashSet<string>>(
+				[],
+				RootAccessDenied: false,
+				HadAccessDenied: false),
+			GetExtensionsHandler = (path, _) =>
+			{
+				folderCalls.Add(path);
+				return new ScanResult<HashSet<string>>(
+					[],
+					RootAccessDenied: false,
+					HadAccessDenied: false);
+			}
+		};
+
+		var useCase = new ScanOptionsUseCase(scanner);
+		_ = useCase.GetExtensionsForRootFolders(rootPath, ["Src", "docs"], CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertSamePathsIgnoringParallelOrder(
+			[
+				Path.Combine(rootPath, "Src"),
+				Path.Combine(rootPath, "docs")
+			],
+			folderCalls);
+	}
+
+	[Fact]
+	public void GetExtensionsAndIgnoreCountsForRootFolders_AdvancedScanner_PassesOriginalFolderPathsToScanner()
+	{
+		var rootPath = CreateRootPath();
+		var scanner = new RecordingAdvancedScanner();
+		var useCase = new ScanOptionsUseCase(scanner);
+
+		_ = useCase.GetExtensionsAndIgnoreCountsForRootFolders(rootPath, ["Src", "docs"], CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(rootPath, scanner.RootFilePath);
+		AssertSamePathsIgnoringParallelOrder(
+			[
+				Path.Combine(rootPath, "Src"),
+				Path.Combine(rootPath, "docs")
+			],
+			scanner.FolderPaths);
+	}
+
+	[Fact]
+	public void GetExtensionsForRootFolders_WhenRootExists_SkipsMissingRootedAndEscapingSelections()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFolder("src");
+		var rootedSelection = Path.Combine(temp.Path, "absolute");
 		var folderCalls = new List<string>();
 		var scanner = new StubFileSystemScanner
 		{
@@ -53,42 +105,30 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		};
 
 		var useCase = new ScanOptionsUseCase(scanner);
-		_ = useCase.GetExtensionsForRootFolders(rootPath, ["Src", "docs"], CreateRules());
+		_ = useCase.GetExtensionsForRootFolders(
+			temp.Path,
+			["src", "missing", ".", "..", rootedSelection],
+			CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal(
-			[
-				Path.Combine(rootPath, "Src"),
-				Path.Combine(rootPath, "docs")
-			],
-			folderCalls);
+		Assert.Equal([Path.Combine(temp.Path, "src")], folderCalls);
 	}
 
-	[Fact]
-	public void GetExtensionsAndIgnoreCountsForRootFolders_AdvancedScanner_PassesOriginalFolderPathsToScanner()
+	private static void AssertSamePathsIgnoringParallelOrder(
+		IEnumerable<string> expected,
+		IEnumerable<string> actual)
 	{
-		var rootPath = CreateRootPath();
-		var scanner = new RecordingAdvancedScanner();
-		var useCase = new ScanOptionsUseCase(scanner);
-
-		_ = useCase.GetExtensionsAndIgnoreCountsForRootFolders(rootPath, ["Src", "docs"], CreateRules());
-
-		Assert.Equal(rootPath, scanner.RootFilePath);
+		// Folder scans run in parallel, so call order is intentionally not part of this contract.
 		Assert.Equal(
-			[
-				Path.Combine(rootPath, "Src"),
-				Path.Combine(rootPath, "docs")
-			],
-			scanner.FolderPaths);
+			expected.OrderBy(static path => path, PathComparer.Default),
+			actual.OrderBy(static path => path, PathComparer.Default));
 	}
 
-	private static string CreateRootPath() => OperatingSystem.IsWindows()
-		? @"C:\Workspace\ProjectA"
-		: "/workspace/projectA";
+	private static string CreateRootPath() => SyntheticTestPaths.CreateMissingRoot();
 
 	private sealed class RecordingAdvancedScanner : IFileSystemScanner, IFileSystemScannerAdvanced
 	{
 		public string? RootFilePath { get; private set; }
-		public List<string> FolderPaths { get; } = [];
+		public System.Collections.Concurrent.ConcurrentBag<string> FolderPaths { get; } = [];
 
 		public bool CanReadRoot(string rootPath) => true;
 

@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Input;
 using DevProjex.Avalonia.Services;
 

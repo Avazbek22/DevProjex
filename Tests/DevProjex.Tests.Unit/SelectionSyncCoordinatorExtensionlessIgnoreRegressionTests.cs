@@ -35,7 +35,7 @@ public sealed class SelectionSyncCoordinatorExtensionlessIgnoreRegressionTests
 		coordinator.ApplyProjectProfileSelections(projectPath, profile);
 
 		await Assert.ThrowsAsync<OperationCanceledException>(() =>
-			coordinator.PopulateExtensionsForRootSelectionAsync(projectPath, selectedRoots));
+			coordinator.PopulateExtensionsForRootSelectionAsync(projectPath, selectedRoots, cancellationToken: TestContext.Current.CancellationToken));
 
 		Assert.NotEmpty(observedIgnoreExtensionlessValues);
 		Assert.All(observedIgnoreExtensionlessValues, value => Assert.False(value));

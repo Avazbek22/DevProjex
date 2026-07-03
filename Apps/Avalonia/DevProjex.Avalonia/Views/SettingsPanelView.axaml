@@ -1,12 +1,18 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
-             xmlns:converters="using:DevProjex.Avalonia.Converters"
              x:Class="DevProjex.Avalonia.Views.SettingsPanelView"
-             x:DataType="vm:MainWindowViewModel">
-  <UserControl.Resources>
-    <converters:FontFamilyDisplayNameConverter x:Key="FontFamilyDisplayNameConverter" />
-  </UserControl.Resources>
+             Name="SettingsPanelViewRoot"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+  <UserControl.Styles>
+    <Style Selector="StackPanel.settings-list-panel">
+      <Setter Property="Spacing" Value="-3" />
+    </Style>
+    <Style Selector="Window.compact-mode StackPanel.settings-list-panel">
+      <Setter Property="Spacing" Value="-5" />
+    </Style>
+  </UserControl.Styles>
   <Border Name="PanelRoot"
           MinWidth="240"
           HorizontalAlignment="Stretch"
@@ -15,50 +21,37 @@
           BorderThickness="0"
           IsEnabled="{Binding IsProjectLoaded}">
     <Grid RowDefinitions="Auto,*,*,*">
-      <!-- Font section - Auto height -->
-      <StackPanel Grid.Row="0" Spacing="6">
-        <TextBlock Classes="section-title" Text="{Binding SettingsFont}" FontSize="15"/>
-        <ComboBox Name="FontComboBox" ItemsSource="{Binding FontFamilies}" SelectedItem="{Binding PendingFontFamily, Mode=TwoWay}"
-                  Tag="{Binding SettingsFontDefault}">
-          <ComboBox.ItemTemplate>
-            <DataTemplate>
-              <TextBlock>
-                <TextBlock.Text>
-                  <MultiBinding Converter="{StaticResource FontFamilyDisplayNameConverter}">
-                    <Binding />
-                    <Binding Path="Tag" ElementName="FontComboBox" />
-                  </MultiBinding>
-                </TextBlock.Text>
-              </TextBlock>
-            </DataTemplate>
-          </ComboBox.ItemTemplate>
-        </ComboBox>
-
-        <Button Content="{Binding SettingsApply}" Click="OnApplySettings" Margin="0,10,0,0"
-                Classes="primary-action" CornerRadius="3"/>
-      </StackPanel>
+      <!-- Apply stays at the top because filter options remain intentionally staged. -->
+      <Button Name="ApplySettingsButton"
+              Grid.Row="0"
+              Content="{Binding SettingsApply}"
+              Click="OnApplySettings"
+              Margin="0,5,0,1"
+              HorizontalAlignment="Left"
+              HorizontalContentAlignment="Center"
+              Classes="primary-action"
+              CornerRadius="3"/>
 
       <!-- Ignore section - equal star height -->
-      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,2,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="IgnoreHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="IgnoreHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
           <CheckBox Name="IgnoreAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"
                     IsChecked="{Binding AllIgnoreChecked, Mode=TwoWay}"
-                    Checked="OnIgnoreAllChanged" Unchecked="OnIgnoreAllChanged" />
+                    IsCheckedChanged="OnIgnoreAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"
                         VerticalScrollBarVisibility="Auto"
                         HorizontalScrollBarVisibility="Disabled">
-            <!-- Compact spacing is handled by a custom ItemsPanel in the settings lists. -->
             <ItemsControl ItemsSource="{Binding IgnoreOptions}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Classes="settings-list-panel" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="vm:IgnoreOptionViewModel">
                   <Border Classes="ignore-option-item">
                     <Grid RowDefinitions="Auto,Auto">
                       <CheckBox Grid.Row="0"
@@ -83,21 +76,20 @@
           <TextBlock Name="ExtensionsHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsExtensions}" Margin="0" FontSize="15"/>
           <CheckBox Name="ExtensionsAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllExtensions}"
                     IsChecked="{Binding AllExtensionsChecked, Mode=TwoWay}"
-                    Checked="OnExtensionsAllChanged" Unchecked="OnExtensionsAllChanged" />
+                    IsCheckedChanged="OnExtensionsAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"
                         VerticalScrollBarVisibility="Auto"
                         HorizontalScrollBarVisibility="Disabled">
-            <!-- Keep list spacing centralized so compact mode does not rely on control templates. -->
             <ItemsControl ItemsSource="{Binding Extensions}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Classes="settings-list-panel" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="vm:SelectionOptionViewModel">
                   <CheckBox Classes="list-item" Content="{Binding Name}"
                             IsChecked="{Binding IsChecked, Mode=TwoWay}" />
                 </DataTemplate>
@@ -114,21 +106,20 @@
           <CheckBox Name="RootFoldersAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"
                     IsChecked="{Binding AllRootFoldersChecked, Mode=TwoWay}"
                     IsEnabled="{Binding HasRootFolderOptions}"
-                    Checked="OnRootAllChanged" Unchecked="OnRootAllChanged" />
+                    IsCheckedChanged="OnRootAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
           <ScrollViewer IsScrollInertiaEnabled="True"
                         VerticalScrollBarVisibility="Auto"
                         HorizontalScrollBarVisibility="Disabled">
-            <!-- Root folders share the same spacing logic as other settings lists. -->
             <ItemsControl ItemsSource="{Binding RootFolders}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Spacing="{ReflectionBinding DataContext.SettingsListSpacing, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                  <StackPanel Classes="settings-list-panel" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="vm:SelectionOptionViewModel">
                   <CheckBox Classes="list-item" Content="{Binding Name}"
                             IsChecked="{Binding IsChecked, Mode=TwoWay}" />
                 </DataTemplate>

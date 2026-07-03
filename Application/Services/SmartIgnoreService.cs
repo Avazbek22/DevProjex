@@ -1,8 +1,21 @@
+using System.Collections.Frozen;
+
 namespace DevProjex.Application.Services;
 
-public sealed class SmartIgnoreService(IEnumerable<ISmartIgnoreRule> rules)
+public sealed class SmartIgnoreService
 {
-	private readonly IReadOnlyList<ISmartIgnoreRule> _rules = rules.ToList();
+	private readonly IReadOnlyList<ISmartIgnoreRule> _rules;
+	private readonly IReadOnlyList<SmartIgnoreRuleDescriptor> _descriptors;
+
+	public SmartIgnoreService(IEnumerable<ISmartIgnoreRule> rules)
+	{
+		var ruleList = rules.ToList();
+		_rules = ruleList;
+		_descriptors = ruleList
+			.OfType<ISmartIgnoreRuleDescriptorProvider>()
+			.Select(provider => provider.Descriptor)
+			.ToArray();
+	}
 
 	public SmartIgnoreResult Build(string rootPath)
 	{
@@ -29,6 +42,81 @@ public sealed class SmartIgnoreService(IEnumerable<ISmartIgnoreRule> rules)
 				files.Add(file);
 		}
 
-		return new SmartIgnoreResult(folders, files);
+		if (folders.Count == 0 && files.Count == 0)
+			return SmartIgnoreResult.Empty;
+
+		return new SmartIgnoreResult(
+			FreezeOrEmpty(folders, SmartIgnoreResult.Empty.FolderNames),
+			FreezeOrEmpty(files, SmartIgnoreResult.Empty.FileNames));
 	}
+
+	public bool HasKnownProjectMarker(string rootPath)
+	{
+		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+			return false;
+
+		try
+		{
+			foreach (var filePath in Directory.EnumerateFiles(rootPath, "*", SearchOption.TopDirectoryOnly))
+			{
+				var fileName = Path.GetFileName(filePath);
+				if (IsKnownProjectMarker(fileName, Path.GetExtension(fileName)))
+					return true;
+			}
+		}
+		catch
+		{
+			return HasKnownProjectMarkerByTargetedProbe(rootPath);
+		}
+
+		return false;
+	}
+
+	public bool IsKnownProjectMarker(string fileName, string? extension)
+	{
+		if (string.IsNullOrWhiteSpace(fileName))
+			return false;
+
+		foreach (var descriptor in _descriptors)
+		{
+			if (descriptor.MarkerFiles.Contains(fileName))
+				return true;
+
+			if (!string.IsNullOrWhiteSpace(extension) &&
+			    descriptor.MarkerExtensions.Contains(extension))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private bool HasKnownProjectMarkerByTargetedProbe(string rootPath)
+	{
+		foreach (var descriptor in _descriptors)
+		{
+			foreach (var markerFile in descriptor.MarkerFiles)
+			{
+				try
+				{
+					if (File.Exists(Path.Combine(rootPath, markerFile)))
+						return true;
+				}
+				catch
+				{
+					// Marker probing is best-effort and must never break loading.
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private static IReadOnlySet<string> FreezeOrEmpty(
+		HashSet<string> values,
+		IReadOnlySet<string> emptySet) =>
+		values.Count == 0
+			? emptySet
+			: values.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 }

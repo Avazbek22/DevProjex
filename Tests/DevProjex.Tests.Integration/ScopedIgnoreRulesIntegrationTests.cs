@@ -26,7 +26,7 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 		var result = treeBuilder.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".csproj" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "src", "bin" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(useGitIgnore, rules.UseGitIgnore);
 		Assert.Equal(useGitIgnore, rules.UseSmartIgnore);
@@ -67,7 +67,7 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 		var result = treeBuilder.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj", ".sln" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Visual Studio 2019" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var vsFolder = result.Root.Children.Single(child => child.Name == "Visual Studio 2019");
 		var americaContainer = vsFolder.Children.Single(child => child.Name == "America");
@@ -109,7 +109,7 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 		var result = treeBuilder.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj", ".sln" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Documents" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var documents = result.Root.Children.Single(child => child.Name == "Documents");
 		var vsFolder = documents.Children.Single(child => child.Name == "Visual Studio 2019");
@@ -151,7 +151,7 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 		var result = treeBuilder.Build(openedRootPath, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj", ".sln" },
 			AllowedRootFolders: new HashSet<string>(selectedRootFolders, StringComparer.OrdinalIgnoreCase),
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var projectFolder = WalkChain(result.Root, pathChain);
 		Assert.Equal(!useSmartIgnore, projectFolder.Children.Any(child => child.Name == "bin"));
@@ -185,7 +185,7 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 		var result = treeBuilder.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Documents" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var documents = result.Root.Children.Single(child => child.Name == "Documents");
 		var vsFolder = documents.Children.Single(child => child.Name == "Visual Studio 2019");
@@ -226,7 +226,7 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 		var result = treeBuilder.Build(openedRootPath, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt", ".exe", ".csproj", ".sln" },
 			AllowedRootFolders: new HashSet<string>(selectedRootFolders, StringComparer.OrdinalIgnoreCase),
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var projectFolder = WalkChain(result.Root, pathChain);
 		Assert.DoesNotContain(projectFolder.Children, child => child.Name == "bin");
@@ -266,7 +266,7 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 		var result = treeBuilder.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".txt", ".json", ".csproj" },
 			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "proj-git", "proj-no-git" },
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		var projGit = result.Root.Children.Single(child => child.Name == "proj-git");
 		var projNoGit = result.Root.Children.Single(child => child.Name == "proj-no-git");

@@ -1,129 +1,180 @@
 namespace DevProjex.Infrastructure.FileSystem;
 
-public sealed class TreeBuilder : ITreeBuilder
+public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 {
-	// Pre-allocated comparer instance to avoid allocation per sort
-	private static readonly FileSystemTreeEntryComparer EntryComparer = new();
-	private static readonly int RootBuildParallelism =
-		Math.Clamp(Environment.ProcessorCount, min: 2, max: 16);
+	private const int RootProjectionParallelThreshold = 24;
 
 	public TreeBuildResult Build(string rootPath, TreeFilterOptions options, CancellationToken cancellationToken = default)
 	{
-		var state = new BuildState();
-
-		var rootInfo = new DirectoryInfo(rootPath);
-		var root = new FileSystemNode(
-			name: rootInfo.Name,
-			fullPath: rootPath,
-			isDirectory: true,
-			isAccessDenied: false,
-			children: new List<FileSystemNode>());
-
-		BuildChildren(
-			parent: root,
-			path: rootPath,
-			options: options,
-			isRoot: true,
-			state: state,
-			cancellationToken: cancellationToken);
-
-		return new TreeBuildResult(root, state.RootAccessDenied, state.HadAccessDenied);
+		var inventory = ReadInventory(rootPath, options, cancellationToken);
+		return Build(inventory, options, cancellationToken);
 	}
 
-	private static void BuildChildren(
-		FileSystemNode parent,
-		string path,
+	public ProjectTreeInventorySnapshot ReadInventory(
+		string rootPath,
 		TreeFilterOptions options,
-		bool isRoot,
-		BuildState state,
+		CancellationToken cancellationToken = default)
+	{
+		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootPath);
+		return ProjectTreeInventoryScanner.Read(
+			rootPath,
+			(entry, isProjectRootChild) => ShouldTraverseDirectoryInInventory(
+				entry,
+				isProjectRootChild,
+				options,
+				gitIgnoreContext),
+			cancellationToken);
+	}
+
+	public TreeBuildResult Build(
+		ProjectTreeInventorySnapshot inventory,
+		TreeFilterOptions options,
+		CancellationToken cancellationToken = default)
+	{
+		var allowedExtensions = new AllowedExtensionLookup(options.AllowedExtensions);
+		ref readonly var rootEntry = ref inventory.GetEntryRef(0);
+		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootEntry.FullPath);
+		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
+		var root = new FileSystemNode(
+			name: rootEntry.Name,
+			fullPath: rootEntry.FullPath,
+			isDirectory: true,
+			isAccessDenied: rootEntry.IsAccessDenied,
+			children: new List<FileSystemNode>(rootEntry.ChildCount));
+
+		ProjectChildren(
+			inventory,
+			parentNode: root,
+			parentIndex: 0,
+			options,
+			allowedExtensions,
+			gitIgnoreContext,
+			hasNameFilter,
+			cancellationToken);
+
+		return new TreeBuildResult(root, inventory.RootAccessDenied, inventory.HadAccessDenied);
+	}
+
+	private static bool ShouldTraverseDirectoryInInventory(
+		FileSystemTreeEntry entry,
+		bool isProjectRootChild,
+		TreeFilterOptions options,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
+	{
+		if (isProjectRootChild && !options.AllowedRootFolders.Contains(entry.Name))
+			return false;
+
+		var ignore = options.IgnoreRules;
+		var directoryGitIgnore = ignore.UseGitIgnore
+			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, entry.Name)
+			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+
+		return !ShouldSkipDirectory(entry, ignore, directoryGitIgnore);
+	}
+
+	private static void ProjectChildren(
+		ProjectTreeInventorySnapshot inventory,
+		FileSystemNode parentNode,
+		int parentIndex,
+		TreeFilterOptions options,
+		AllowedExtensionLookup allowedExtensions,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		bool hasNameFilter,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		var entries = new List<FileSystemTreeEntry>(capacity: 32);
-		try
-		{
-			// Tree building is on the project-load hot path, so avoid FileSystemInfo materialization.
-			// The lightweight entry snapshots already carry the metadata we need for sorting/filtering.
-			foreach (var entry in FileSystemEntryEnumerator.EnumerateEntries(path))
-				entries.Add(entry);
-			entries.Sort(EntryComparer);
-		}
-		catch (UnauthorizedAccessException)
-		{
-			if (isRoot)
-				state.MarkRootAccessDenied();
-			else
-				state.MarkAccessDenied();
-			parent.IsAccessDenied = true;
+		var children = (List<FileSystemNode>)parentNode.Children;
+		ref readonly var parentEntry = ref inventory.GetEntryRef(parentIndex);
+		if (parentEntry.IsAccessDenied)
 			return;
-		}
-		catch
-		{
+
+		var childEntries = inventory.GetChildren(parentIndex);
+		if (childEntries.Length == 0)
 			return;
-		}
 
-		var children = (List<FileSystemNode>)parent.Children;
-		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
-		var shouldApplySmartIgnoreForFiles = options.IgnoreRules.ShouldApplySmartIgnore(path, isDirectory: true);
-
-		if (isRoot && entries.Count > 1)
+		if (parentIndex == 0)
 		{
-			BuildRootChildrenInParallel(
-				entries,
+			ProjectRootChildrenInParallel(
+				inventory,
+				childEntries,
 				children,
 				options,
+				allowedExtensions,
+				gitIgnoreContext,
 				hasNameFilter,
-				shouldApplySmartIgnoreForFiles,
-				state,
 				cancellationToken);
 			return;
 		}
 
-		foreach (var entry in entries)
+		for (var offset = 0; offset < childEntries.Length; offset++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-
-			var node = BuildNodeForEntry(
-				entry,
+			var childIndex = parentEntry.FirstChildIndex + offset;
+			var node = ProjectNode(
+				inventory,
+				childIndex,
 				options,
-				isRoot,
+				allowedExtensions,
+				gitIgnoreContext,
 				hasNameFilter,
-				shouldApplySmartIgnoreForFiles,
-				state,
 				cancellationToken);
 			if (node is not null)
 				children.Add(node);
 		}
 	}
 
-	private static void BuildRootChildrenInParallel(
-		IReadOnlyList<FileSystemTreeEntry> entries,
+	private static void ProjectRootChildrenInParallel(
+		ProjectTreeInventorySnapshot inventory,
+		ReadOnlySpan<ProjectTreeInventoryEntry> childEntries,
 		List<FileSystemNode> children,
 		TreeFilterOptions options,
+		AllowedExtensionLookup allowedExtensions,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool hasNameFilter,
-		bool shouldApplySmartIgnoreForFiles,
-		BuildState state,
 		CancellationToken cancellationToken)
 	{
-		var nodes = new FileSystemNode?[entries.Count];
-		var maxDegree = Math.Min(RootBuildParallelism, entries.Count);
-		var parallelOptions = new ParallelOptions
+		var firstChildIndex = inventory.GetEntry(0).FirstChildIndex;
+		if (childEntries.Length < RootProjectionParallelThreshold)
 		{
-			MaxDegreeOfParallelism = maxDegree,
-			CancellationToken = cancellationToken
-		};
+			for (var offset = 0; offset < childEntries.Length; offset++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var childIndex = firstChildIndex + offset;
+				if (!IsAllowedRootChild(inventory, childIndex, options))
+					continue;
 
-		Parallel.For(0, entries.Count, parallelOptions, i =>
+				var node = ProjectNode(
+					inventory,
+					childIndex,
+					options,
+					allowedExtensions,
+					gitIgnoreContext,
+					hasNameFilter,
+					cancellationToken);
+				if (node is not null)
+					children.Add(node);
+			}
+
+			return;
+		}
+
+		var nodes = new FileSystemNode?[childEntries.Length];
+		var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+
+		Parallel.For(0, childEntries.Length, parallelOptions, offset =>
 		{
-			var entry = entries[i];
-			nodes[i] = BuildNodeForEntry(
-				entry,
+			var childIndex = firstChildIndex + offset;
+			if (!IsAllowedRootChild(inventory, childIndex, options))
+				return;
+
+			nodes[offset] = ProjectNode(
+				inventory,
+				childIndex,
 				options,
-				isRoot: true,
+				allowedExtensions,
+				gitIgnoreContext,
 				hasNameFilter,
-				shouldApplySmartIgnoreForFiles,
-				state,
 				parallelOptions.CancellationToken);
 		});
 
@@ -135,94 +186,147 @@ public sealed class TreeBuilder : ITreeBuilder
 		}
 	}
 
-	private static FileSystemNode? BuildNodeForEntry(
-		FileSystemTreeEntry entry,
+	private static bool IsAllowedRootChild(
+		ProjectTreeInventorySnapshot inventory,
+		int entryIndex,
+		TreeFilterOptions options)
+	{
+		ref readonly var entry = ref inventory.GetEntryRef(entryIndex);
+		return !entry.IsDirectory || options.AllowedRootFolders.Contains(entry.Name);
+	}
+
+	private static FileSystemNode? ProjectNode(
+		ProjectTreeInventorySnapshot inventory,
+		int entryIndex,
 		TreeFilterOptions options,
-		bool isRoot,
+		AllowedExtensionLookup allowedExtensions,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool hasNameFilter,
-		bool shouldApplySmartIgnoreForFiles,
-		BuildState state,
 		CancellationToken cancellationToken)
 	{
-		var name = entry.Name;
-		bool isDir = entry.IsDirectory;
+		cancellationToken.ThrowIfCancellationRequested();
 
-		if (isDir && isRoot && !options.AllowedRootFolders.Contains(name))
+		ref readonly var entry = ref inventory.GetEntryRef(entryIndex);
+		if (entry.IsDirectory)
+			return ProjectDirectory(
+				inventory,
+				entryIndex,
+				in entry,
+				options,
+				allowedExtensions,
+				gitIgnoreContext,
+				hasNameFilter,
+				cancellationToken);
+
+		return ProjectFile(
+			inventory,
+			in entry,
+			options,
+			allowedExtensions,
+			gitIgnoreContext,
+			hasNameFilter);
+	}
+
+	private static FileSystemNode? ProjectDirectory(
+		ProjectTreeInventorySnapshot inventory,
+		int entryIndex,
+		in ProjectTreeInventoryEntry entry,
+		TreeFilterOptions options,
+		AllowedExtensionLookup allowedExtensions,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		bool hasNameFilter,
+		CancellationToken cancellationToken)
+	{
+		var directoryGitIgnore = options.IgnoreRules.UseGitIgnore
+			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, entry.Name)
+			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+		if (ShouldSkipDirectory(in entry, options.IgnoreRules, directoryGitIgnore))
 			return null;
 
-		var ignore = options.IgnoreRules;
-		if (isDir)
+		var children = entry.ChildCount == 0
+			? FileSystemNode.EmptyChildren
+			: new List<FileSystemNode>(entry.ChildCount);
+		var dirNode = new FileSystemNode(
+			name: entry.Name,
+			fullPath: entry.FullPath,
+			isDirectory: true,
+			isAccessDenied: entry.IsAccessDenied,
+			children: children);
+
+		if (entry.ChildCount > 0)
 		{
-			var directoryGitIgnore = ignore.UseGitIgnore
-				? ignore.EvaluateGitIgnore(entry.FullPath, isDirectory: true, name)
-				: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
-			if (ShouldSkipDirectory(entry, ignore, directoryGitIgnore))
-				return null;
-
-			var dirNode = new FileSystemNode(
-				name: name,
-				fullPath: entry.FullPath,
-				isDirectory: true,
-				isAccessDenied: false,
-				children: new List<FileSystemNode>());
-
-			BuildChildren(dirNode, entry.FullPath, options, isRoot: false, state, cancellationToken);
-
-			if (ignore.IgnoreEmptyFolders &&
-			    dirNode.Children.Count == 0 &&
-			    !dirNode.IsAccessDenied)
-			{
-				return null;
-			}
-
-			// Keep full directory context when extension/ignore filters remove all files.
-			// Name filter remains strict to preserve intentional narrowing behavior.
-			if (hasNameFilter)
-			{
-				bool hasMatchingChildren = dirNode.Children.Count > 0;
-				bool matchesName = name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase);
-				return (hasMatchingChildren || matchesName) ? dirNode : null;
-			}
-
-			// Keep ignored directories out of UI when traversal found no visible descendants.
-			// Parents that only became empty after descendant filtering remain visible until
-			// IgnoreEmptyFolders explicitly removes them.
-			if (directoryGitIgnore.IsIgnored &&
-			    directoryGitIgnore.ShouldTraverseIgnoredDirectory &&
-			    dirNode.Children.Count == 0 &&
-			    !dirNode.IsAccessDenied)
-			{
-				return null;
-			}
-
-			return dirNode;
+			ProjectChildren(
+				inventory,
+				dirNode,
+				entryIndex,
+				options,
+				allowedExtensions,
+				gitIgnoreContext,
+				hasNameFilter,
+				cancellationToken);
 		}
 
+		if (options.IgnoreRules.IgnoreEmptyFolders &&
+		    dirNode.Children.Count == 0 &&
+		    !dirNode.IsAccessDenied)
+		{
+			return null;
+		}
+
+		if (hasNameFilter)
+		{
+			var hasMatchingChildren = dirNode.Children.Count > 0;
+			var matchesName = entry.Name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase);
+			return hasMatchingChildren || matchesName ? dirNode : null;
+		}
+
+		if (directoryGitIgnore.IsIgnored &&
+		    directoryGitIgnore.ShouldTraverseIgnoredDirectory &&
+		    dirNode.Children.Count == 0 &&
+		    !dirNode.IsAccessDenied)
+		{
+			return null;
+		}
+
+		return dirNode;
+	}
+
+	private static FileSystemNode? ProjectFile(
+		ProjectTreeInventorySnapshot inventory,
+		in ProjectTreeInventoryEntry entry,
+		TreeFilterOptions options,
+		AllowedExtensionLookup allowedExtensions,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		bool hasNameFilter)
+	{
+		var ignore = options.IgnoreRules;
 		var fileGitIgnore = ignore.UseGitIgnore
-			? ignore.EvaluateGitIgnore(entry.FullPath, isDirectory: false, name)
+			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: false, entry.Name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+		ref readonly var parentEntry = ref inventory.GetEntryRef(entry.ParentIndex);
+		var shouldApplySmartIgnoreForFiles = ignore.ShouldApplySmartIgnore(parentEntry.FullPath, isDirectory: true);
+
 		if (ShouldSkipFile(entry, ignore, shouldApplySmartIgnoreForFiles, fileGitIgnore))
 			return null;
 
-		if (IsExtensionlessFileName(name))
+		if (IsExtensionlessFileName(entry.Name))
 		{
-			// Extensionless files are intentionally controlled only by ignore options.
+			// Extensionless files are controlled only by ignore options.
 		}
 		else
 		{
-			if (options.AllowedExtensions.Count == 0)
+			if (allowedExtensions.IsEmpty)
 				return null;
 
-			var ext = Path.GetExtension(name);
-			if (!options.AllowedExtensions.Contains(ext))
+			if (!allowedExtensions.AllowsFileName(entry.Name))
 				return null;
 		}
 
-		if (hasNameFilter && !name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase))
+		if (hasNameFilter && !entry.Name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase))
 			return null;
 
 		return new FileSystemNode(
-			name: name,
+			name: entry.Name,
 			fullPath: entry.FullPath,
 			isDirectory: false,
 			isAccessDenied: false,
@@ -234,96 +338,70 @@ public sealed class TreeBuilder : ITreeBuilder
 		IgnoreRules rules,
 		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
 	{
-		if (gitIgnoreEvaluation.IsIgnored)
-		{
-			if (!gitIgnoreEvaluation.ShouldTraverseIgnoredDirectory)
-				return true;
-		}
+		return ShouldSkipDirectoryCore(entry.FullPath, entry.Name, entry.IsHidden, rules, gitIgnoreEvaluation);
+	}
 
-		if (rules.ShouldApplySmartIgnore(entry.FullPath, isDirectory: true) && rules.SmartIgnoredFolders.Contains(entry.Name))
-			return true;
+	private static bool ShouldSkipDirectory(
+		in ProjectTreeInventoryEntry entry,
+		IgnoreRules rules,
+		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
+	{
+		return ShouldSkipDirectoryCore(entry.FullPath, entry.Name, entry.IsHidden, rules, gitIgnoreEvaluation);
+	}
 
-		if (rules.IgnoreDotFolders && entry.Name.StartsWith(".", StringComparison.Ordinal))
-			return true;
-
-		if (rules.IgnoreHiddenFolders && entry.IsHidden)
-			return true;
-
-		return false;
+	private static bool ShouldSkipDirectoryCore(
+		string fullPath,
+		string name,
+		bool isHidden,
+		IgnoreRules rules,
+		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
+	{
+		return IgnoreDecisionEngine
+			.EvaluateDirectory(fullPath, name, isHidden, rules, gitIgnoreEvaluation)
+			.IsIgnored;
 	}
 
 	private static bool ShouldSkipFile(
-		FileSystemTreeEntry entry,
+		in ProjectTreeInventoryEntry entry,
 		IgnoreRules rules,
-		bool shouldApplySmartIgnoreForFiles,
+		bool shouldApplySmartIgnore,
 		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
 	{
-		if (gitIgnoreEvaluation.IsIgnored)
-			return true;
-
-		if (shouldApplySmartIgnoreForFiles && rules.SmartIgnoredFiles.Contains(entry.Name))
-			return true;
-
-		if (rules.IgnoreDotFiles && entry.Name.StartsWith(".", StringComparison.Ordinal))
-			return true;
-
-		if (rules.IgnoreExtensionlessFiles && IsExtensionlessFileName(entry.Name))
-			return true;
-
-		if (rules.IgnoreEmptyFiles && entry.Length == 0)
-			return true;
-
-		if (rules.IgnoreHiddenFiles && entry.IsHidden)
-			return true;
-
-		return false;
+		return IgnoreDecisionEngine
+			.EvaluateFile(
+				entry.FullPath,
+				entry.Name,
+				entry.IsHidden,
+				entry.Length,
+				rules,
+				shouldApplySmartIgnore,
+				gitIgnoreEvaluation)
+			.IsIgnored;
 	}
 
-	private static bool IsExtensionlessFileName(string fileName)
+	private static bool IsExtensionlessFileName(string fileName) =>
+		IgnoreRuleSemantics.IsExtensionlessFileName(fileName);
+
+	private readonly struct AllowedExtensionLookup(IReadOnlySet<string> allowedExtensions)
 	{
-		if (string.IsNullOrWhiteSpace(fileName))
-			return false;
+		private readonly HashSet<string>? _hashSet = allowedExtensions as HashSet<string>;
 
-		var extension = Path.GetExtension(fileName);
-		return string.IsNullOrEmpty(extension) || extension == ".";
-	}
-
-	private sealed class BuildState
-	{
-		private int _rootAccessDenied;
-		private int _hadAccessDenied;
-
-		public bool RootAccessDenied => Volatile.Read(ref _rootAccessDenied) == 1;
-		public bool HadAccessDenied => Volatile.Read(ref _hadAccessDenied) == 1;
+		public bool IsEmpty => allowedExtensions.Count == 0;
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void MarkRootAccessDenied()
+		public bool AllowsFileName(string fileName)
 		{
-			Interlocked.Exchange(ref _rootAccessDenied, 1);
-			Interlocked.Exchange(ref _hadAccessDenied, 1);
-		}
+			var extension = Path.GetExtension(fileName.AsSpan());
+			if (extension.IsWhiteSpace())
+				return false;
 
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void MarkAccessDenied()
-		{
-			Interlocked.Exchange(ref _hadAccessDenied, 1);
-		}
-	}
+			if (_hashSet is not null &&
+			    _hashSet.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup))
+			{
+				return lookup.Contains(extension);
+			}
 
-	/// <summary>
-	/// Sorts lightweight tree entries without allocating FileSystemInfo wrappers.
-	/// The tree keeps directories first to match the long-standing UI contract.
-	/// </summary>
-	private sealed class FileSystemTreeEntryComparer : IComparer<FileSystemTreeEntry>
-	{
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public int Compare(FileSystemTreeEntry x, FileSystemTreeEntry y)
-		{
-			if (x.IsDirectory != y.IsDirectory)
-				return x.IsDirectory ? -1 : 1;
-
-			// Then by name, case-insensitive ordinal (fastest string comparison)
-			return string.Compare(x.Name, y.Name, StringComparison.OrdinalIgnoreCase);
+			return allowedExtensions.Contains(extension.ToString());
 		}
 	}
 }

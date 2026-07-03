@@ -4,6 +4,7 @@ namespace DevProjex.Tests.Integration;
 /// Advanced integration tests for Git operations covering edge cases and complex scenarios.
 /// Tests repository state management, branch validation, and cache cleanup.
 /// </summary>
+[Collection(GitNetworkTestCollection.Name)]
 public class GitAdvancedScenariosTests : IAsyncLifetime
 {
     private readonly GitRepositoryService _gitService;
@@ -22,14 +23,14 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
         _tempDir = new TemporaryDirectory();
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _gitAvailable = await SharedGitRepositories.IsGitAvailableAsync();
         if (_gitAvailable)
             _testRepository = await SharedGitRepositories.GetDefaultRepositoryAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _tempDir.Dispose();
         try
@@ -40,7 +41,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
         {
             // Best effort cleanup
         }
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
@@ -55,8 +56,8 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
         try
         {
             // Act
-            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, cacheDir);
-            var currentBranch = await _gitService.GetCurrentBranchAsync(cacheDir);
+            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
+            var currentBranch = await _gitService.GetCurrentBranchAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert
             Assert.True(cloneResult.Success);
@@ -81,15 +82,15 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
 
         try
         {
-            await _gitService.CloneAsync(TestRepoUrl, cacheDir);
+            await _gitService.CloneAsync(TestRepoUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Act
-            var branches = await _gitService.GetBranchesAsync(cacheDir);
+            var branches = await _gitService.GetBranchesAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert
             Assert.NotEmpty(branches);
             Assert.Contains(branches, b => b.Name.Equals("master", StringComparison.OrdinalIgnoreCase));
-            Assert.Single(branches.Where(b => b.IsActive));
+            Assert.Single(branches, b => b.IsActive);
 
             var activeBranch = branches.First(b => b.IsActive);
             Assert.Equal("master", activeBranch.Name, StringComparer.OrdinalIgnoreCase);
@@ -111,8 +112,8 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
 
         try
         {
-            await _gitService.CloneAsync(TestRepoUrl, cacheDir);
-            var branches = await _gitService.GetBranchesAsync(cacheDir);
+            await _gitService.CloneAsync(TestRepoUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
+            var branches = await _gitService.GetBranchesAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Find a non-active branch
             var targetBranch = branches.FirstOrDefault(b => !b.IsActive);
@@ -120,8 +121,8 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
                 return; // Skip if only one branch exists
 
             // Act
-            var switchResult = await _gitService.SwitchBranchAsync(cacheDir, targetBranch.Name);
-            var currentBranch = await _gitService.GetCurrentBranchAsync(cacheDir);
+            var switchResult = await _gitService.SwitchBranchAsync(cacheDir, targetBranch.Name, cancellationToken: TestContext.Current.CancellationToken);
+            var currentBranch = await _gitService.GetCurrentBranchAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert
             Assert.True(switchResult);
@@ -144,19 +145,19 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
 
         try
         {
-            await _gitService.CloneAsync(TestRepoUrl, cacheDir);
-            var initialBranches = await _gitService.GetBranchesAsync(cacheDir);
+            await _gitService.CloneAsync(TestRepoUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
+            var initialBranches = await _gitService.GetBranchesAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             var targetBranch = initialBranches.FirstOrDefault(b => !b.IsActive);
             if (targetBranch is null)
                 return;
 
             // Act
-            await _gitService.SwitchBranchAsync(cacheDir, targetBranch.Name);
-            var updatedBranches = await _gitService.GetBranchesAsync(cacheDir);
+            await _gitService.SwitchBranchAsync(cacheDir, targetBranch.Name, cancellationToken: TestContext.Current.CancellationToken);
+            var updatedBranches = await _gitService.GetBranchesAsync(cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert
-            Assert.Single(updatedBranches.Where(b => b.IsActive));
+            Assert.Single(updatedBranches, b => b.IsActive);
 
             var activeBranch = updatedBranches.First(b => b.IsActive);
             Assert.Equal(targetBranch.Name, activeBranch.Name, StringComparer.OrdinalIgnoreCase);
@@ -179,7 +180,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
         try
         {
             // Act
-            var result = await _gitService.CloneAsync(TestRepoUrl, cacheDir);
+            var result = await _gitService.CloneAsync(TestRepoUrl, cacheDir, cancellationToken: TestContext.Current.CancellationToken);
 
             // Assert
             Assert.True(result.Success);
@@ -269,8 +270,8 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
     public async Task IsGitAvailable_ReturnsConsistentResult()
     {
         // Act
-        var result1 = await _gitService.IsGitAvailableAsync();
-        var result2 = await _gitService.IsGitAvailableAsync();
+        var result1 = await _gitService.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var result2 = await _gitService.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(result1, result2);
@@ -307,7 +308,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
         var invalidPath = _tempDir.CreateFile("existing-target.txt", "occupied");
 
         // Act
-        var result = await _gitService.CloneAsync(TestRepoUrl, invalidPath);
+        var result = await _gitService.CloneAsync(TestRepoUrl, invalidPath, cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
         Assert.False(result.Success);
@@ -321,7 +322,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
         var nonGitDir = _tempDir.CreateDirectory("not-a-git-repo");
 
         // Act
-        var branches = await _gitService.GetBranchesAsync(nonGitDir);
+        var branches = await _gitService.GetBranchesAsync(nonGitDir, cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Empty(branches);
@@ -334,7 +335,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
         var nonGitDir = _tempDir.CreateDirectory("not-a-git-repo");
 
         // Act
-        var branch = await _gitService.GetCurrentBranchAsync(nonGitDir);
+        var branch = await _gitService.GetCurrentBranchAsync(nonGitDir, cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Null(branch);

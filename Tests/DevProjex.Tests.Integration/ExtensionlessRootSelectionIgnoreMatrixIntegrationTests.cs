@@ -19,7 +19,7 @@ public sealed class ExtensionlessRootSelectionIgnoreMatrixIntegrationTests
 		var rules = CreateRules(ignoreExtensionlessFiles, ignoreDotFiles);
 		var selectedRoots = BuildSelectedRoots(rootMode);
 
-		var result = useCase.GetExtensionsForRootFolders(temp.Path, selectedRoots, rules);
+		var result = useCase.GetExtensionsForRootFolders(temp.Path, selectedRoots, rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		var expected = BuildExpectedTokensForSelectedRoots(
 			rootMode,

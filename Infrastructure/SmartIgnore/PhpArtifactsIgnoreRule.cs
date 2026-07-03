@@ -4,27 +4,28 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Composer dependency folders.
 /// Activates when composer.json exists in the scope root.
 /// </summary>
-public sealed class PhpArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class PhpArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
-	private static readonly string[] FolderNames =
-	[
-		"vendor"
-	];
+	private const string MarkerFile = "composer.json";
+
+	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(MarkerFile);
+
+	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create("vendor");
+
+	private static readonly SmartIgnoreResult MatchResult =
+		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } =
+		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{
 		if (!Directory.Exists(rootPath))
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			return SmartIgnoreResult.Empty;
 
-		if (!File.Exists(Path.Combine(rootPath, "composer.json")))
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		if (!File.Exists(Path.Combine(rootPath, MarkerFile)))
+			return SmartIgnoreResult.Empty;
 
-		return new SmartIgnoreResult(
-			new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
-			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		return MatchResult;
 	}
 }

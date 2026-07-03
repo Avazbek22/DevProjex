@@ -33,6 +33,18 @@ public sealed class StoreListingValidationScriptIntegrationTests
     }
 
     [Fact]
+    public void ReleaseAll_ValidatesStoreExecutionAliasInSourceConfigAndBuiltArtifacts()
+    {
+        var scriptPath = Path.Combine(RepoRoot.Value, "Scripts", "release-all.ps1");
+        var script = File.ReadAllText(scriptPath);
+
+        Assert.Contains("Assert-StoreExecutionAliasManifestContract -manifestPath $manifestPath", script, StringComparison.Ordinal);
+        Assert.Contains("Assert-StoreArtifactsContainExecutionAlias", script, StringComparison.Ordinal);
+        Assert.Contains(CommandLineExecutableAliases.WindowsStoreAlias, script, StringComparison.Ordinal);
+        Assert.Contains(CommandLineExecutableAliases.WindowsStoreUiPackageExecutable, script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ValidateStoreListingScript_Fails_WhenKeywordBudgetIsExceeded()
     {
         using var fixture = CreateStoreListingFixture();

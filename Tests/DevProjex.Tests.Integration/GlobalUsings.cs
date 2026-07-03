@@ -1,6 +1,6 @@
 global using Xunit;
-global using Xunit.Abstractions;
 global using DevProjex.Application.Services;
+global using DevProjex.Application.Selection;
 global using DevProjex.Application.UseCases;
 global using DevProjex.Infrastructure.Elevation;
 global using DevProjex.Infrastructure.FileSystem;

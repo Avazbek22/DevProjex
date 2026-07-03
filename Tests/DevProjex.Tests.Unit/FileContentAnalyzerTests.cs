@@ -15,7 +15,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("text.txt", "Hello World");
 
-		var result = await _analyzer.IsTextFileAsync(file);
+		var result = await _analyzer.IsTextFileAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result);
 	}
@@ -26,7 +26,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("empty.txt", string.Empty);
 
-		var result = await _analyzer.IsTextFileAsync(file);
+		var result = await _analyzer.IsTextFileAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result);
 	}
@@ -37,7 +37,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateBinaryFile("binary.bin", [0x00, 0x01, 0x02]);
 
-		var result = await _analyzer.IsTextFileAsync(file);
+		var result = await _analyzer.IsTextFileAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.False(result);
 	}
@@ -48,7 +48,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateBinaryFile("mixed.bin", [0x48, 0x65, 0x00, 0x6C, 0x6C, 0x6F]); // "He\0llo"
 
-		var result = await _analyzer.IsTextFileAsync(file);
+		var result = await _analyzer.IsTextFileAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.False(result);
 	}
@@ -56,7 +56,7 @@ public sealed class FileContentAnalyzerTests
 	[Fact]
 	public async Task IsTextFileAsync_MissingFile_ReturnsFalse()
 	{
-		var result = await _analyzer.IsTextFileAsync("/nonexistent/file.txt");
+		var result = await _analyzer.IsTextFileAsync("/nonexistent/file.txt", cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.False(result);
 	}
@@ -67,7 +67,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("whitespace.txt", "   \n\t  ");
 
-		var result = await _analyzer.IsTextFileAsync(file);
+		var result = await _analyzer.IsTextFileAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result);
 	}
@@ -78,7 +78,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("unicode.txt", "Привет мир! 你好世界");
 
-		var result = await _analyzer.IsTextFileAsync(file);
+		var result = await _analyzer.IsTextFileAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(result);
 	}
@@ -107,7 +107,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "Hello World\nLine 2";
 		var file = temp.CreateFile("text.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(content, result.Content);
@@ -123,7 +123,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "Line 1\nLine 2\nLine 3";
 		var file = temp.CreateFile("text.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(3, result.LineCount);
@@ -135,7 +135,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("single.txt", "Single line");
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(1, result.LineCount);
@@ -147,7 +147,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("empty.txt", string.Empty);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.True(result.IsEmpty);
@@ -164,7 +164,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "   \n\t  ";
 		var file = temp.CreateFile("whitespace.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.True(result.IsWhitespaceOnly);
@@ -177,7 +177,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateBinaryFile("binary.bin", [0x00, 0x01, 0x02]);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
 	}
@@ -199,7 +199,7 @@ public sealed class FileContentAnalyzerTests
 
 		var file = temp.CreateBinaryFile("hidden_binary.txt", withNull);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
 	}
@@ -207,7 +207,7 @@ public sealed class FileContentAnalyzerTests
 	[Fact]
 	public async Task TryReadAsTextAsync_MissingFile_ReturnsNull()
 	{
-		var result = await _analyzer.TryReadAsTextAsync("/nonexistent/file.txt");
+		var result = await _analyzer.TryReadAsTextAsync("/nonexistent/file.txt", cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
 	}
@@ -221,7 +221,7 @@ public sealed class FileContentAnalyzerTests
 		var file = temp.CreateFile("large.txt", content);
 
 		// Use very small maxSizeForFullRead to trigger estimation
-		var result = await _analyzer.TryReadAsTextAsync(file, maxSizeForFullRead: 10);
+		var result = await _analyzer.TryReadAsTextAsync(file, maxSizeForFullRead: 10, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.True(result.IsEstimated);
@@ -235,7 +235,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "Hello";
 		var file = temp.CreateFile("text.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(5, result.CharCount);
@@ -248,7 +248,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "Hello";
 		var file = temp.CreateFile("text.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(5, result.SizeBytes);
@@ -261,7 +261,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "Привет"; // 6 characters, 12 bytes in UTF-8
 		var file = temp.CreateFile("unicode.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(6, result.CharCount);
@@ -302,7 +302,7 @@ public sealed class FileContentAnalyzerTests
 		// File doesn't need to exist - extension check happens first
 		var fakePath = $"/nonexistent/file{extension}";
 
-		var result = await _analyzer.IsTextFileAsync(fakePath);
+		var result = await _analyzer.IsTextFileAsync(fakePath, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.False(result);
 	}
@@ -319,7 +319,7 @@ public sealed class FileContentAnalyzerTests
 		// File doesn't need to exist - extension check happens first
 		var fakePath = $"/nonexistent/file{extension}";
 
-		var result = await _analyzer.TryReadAsTextAsync(fakePath);
+		var result = await _analyzer.TryReadAsTextAsync(fakePath, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
 	}
@@ -332,7 +332,7 @@ public sealed class FileContentAnalyzerTests
 	{
 		var fakePath = $"/nonexistent/file{extension}";
 
-		var result = await _analyzer.IsTextFileAsync(fakePath);
+		var result = await _analyzer.IsTextFileAsync(fakePath, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.False(result);
 	}
@@ -351,7 +351,7 @@ public sealed class FileContentAnalyzerTests
 		};
 		var file = temp.CreateBinaryFile("image.png", pngBytes);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
 	}
@@ -364,7 +364,7 @@ public sealed class FileContentAnalyzerTests
 		var jpgHeader = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46 };
 		var file = temp.CreateBinaryFile("image.jpg", jpgHeader);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
 	}
@@ -382,7 +382,7 @@ public sealed class FileContentAnalyzerTests
 		using var temp = new TemporaryDirectory();
 		var file = temp.CreateFile("newlines.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.True(result.IsWhitespaceOnly);
@@ -402,7 +402,7 @@ public sealed class FileContentAnalyzerTests
 
 		var file = temp.CreateBinaryFile("bom.txt", withBom);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(content, result.Content);
@@ -415,7 +415,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "Line 1\nLine 2\n";
 		var file = temp.CreateFile("trailing.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(3, result.LineCount); // "Line 1", "Line 2", and empty line after
@@ -428,7 +428,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "Line 1\r\nLine 2\r\nLine 3";
 		var file = temp.CreateFile("windows.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		Assert.Equal(3, result.LineCount);
@@ -441,7 +441,7 @@ public sealed class FileContentAnalyzerTests
 		var content = "Line 1\nLine 2\r\nLine 3\rLine 4";
 		var file = temp.CreateFile("mixed.txt", content);
 
-		var result = await _analyzer.TryReadAsTextAsync(file);
+		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
 		// Counts \n only: after "Line 1", after "Line 2\r", and none more

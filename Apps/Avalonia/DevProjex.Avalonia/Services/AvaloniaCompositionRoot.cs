@@ -6,6 +6,8 @@ using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.AppInstances;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Infrastructure.Reports;
+using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -43,11 +45,23 @@ public static class AvaloniaCompositionRoot
         var smartIgnoreService = new SmartIgnoreService(smartIgnoreRules);
         var ignoreOptionsService = new IgnoreOptionsService(localization);
         var ignoreRulesService = new IgnoreRulesService(smartIgnoreService);
+        var ignoreOwnershipAuditService = new IgnoreOwnershipAuditService();
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();
         var fileContentAnalyzer = new FileContentAnalyzer();
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
+        var projectExportService = new ProjectExportService(treeExportService, contentExportService, treeAndContentExportService);
+        var projectAnalysisService = new ProjectAnalysisService(
+            scanOptionsUseCase,
+            buildTreeUseCase,
+            ignoreOptionsService,
+            ignoreRulesService,
+            treeExportService,
+            fileContentAnalyzer);
+        var reportPathResolver = new ReportPathResolver();
+        var projectAnalysisReportWriter = new ProjectAnalysisReportWriter();
+        var terminalCommandSetupService = new TerminalCommandSetupService();
         var previewDocumentBuilder = new PreviewDocumentBuilder(fileContentAnalyzer);
         var repositoryWebPathPresentationService = new RepositoryWebPathPresentationService();
         var textFileExportService = new TextFileExportService();
@@ -63,6 +77,9 @@ public static class AvaloniaCompositionRoot
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();
+        ITaskbarProgressService taskbarProgressService = OperatingSystem.IsWindows()
+            ? new WindowsTaskbarProgressService()
+            : new NoopTaskbarProgressService();
 
         return new AvaloniaAppServices(
             Localization: localization,
@@ -76,10 +93,12 @@ public static class AvaloniaCompositionRoot
             BuildTreeUseCase: buildTreeUseCase,
             IgnoreOptionsService: ignoreOptionsService,
             IgnoreRulesService: ignoreRulesService,
+            IgnoreOwnershipAuditService: ignoreOwnershipAuditService,
             FilterOptionSelectionService: filterSelectionService,
             TreeExportService: treeExportService,
             ContentExportService: contentExportService,
             TreeAndContentExportService: treeAndContentExportService,
+            ProjectExportService: projectExportService,
             PreviewDocumentBuilder: previewDocumentBuilder,
             RepositoryWebPathPresentationService: repositoryWebPathPresentationService,
             TextFileExportService: textFileExportService,
@@ -88,6 +107,11 @@ public static class AvaloniaCompositionRoot
             GitRepositoryService: gitRepositoryService,
             RepoCacheService: repoCacheService,
             ZipDownloadService: zipDownloadService,
-            FileContentAnalyzer: fileContentAnalyzer);
+            FileContentAnalyzer: fileContentAnalyzer,
+            ProjectAnalysisService: projectAnalysisService,
+            ReportPathResolver: reportPathResolver,
+            ProjectAnalysisReportWriter: projectAnalysisReportWriter,
+            TerminalCommandSetupService: terminalCommandSetupService,
+            TaskbarProgressService: taskbarProgressService);
     }
 }

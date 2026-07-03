@@ -1,15 +1,22 @@
 <Project>
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
-    <DevProjexVersion Condition="'$(DevProjexVersion)'==''">4.8</DevProjexVersion>
-    <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">4.8.0.0</DevProjexAssemblyVersion>
+    <DevProjexVersion Condition="'$(DevProjexVersion)'==''">4.9</DevProjexVersion>
+    <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">4.9.0.0</DevProjexAssemblyVersion>
     <DevProjexFileVersion Condition="'$(DevProjexFileVersion)'==''">$(DevProjexAssemblyVersion)</DevProjexFileVersion>
     <DevProjexInformationalVersion Condition="'$(DevProjexInformationalVersion)'==''">$(DevProjexVersion)</DevProjexInformationalVersion>
-    <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">4.8.0.0</DevProjexStorePackageVersion>
+    <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">4.9.0.0</DevProjexStorePackageVersion>
     <Version>$(DevProjexVersion)</Version>
     <AssemblyVersion>$(DevProjexAssemblyVersion)</AssemblyVersion>
     <FileVersion>$(DevProjexFileVersion)</FileVersion>
     <InformationalVersion>$(DevProjexInformationalVersion)</InformationalVersion>
+    <!-- Keep user-facing version output stable; CI/build commit hashes belong in artifacts, not terminal output. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <TestTfmsInParallel>false</TestTfmsInParallel>
+    <!-- GitHub macOS runners have intermittently produced unreadable obj/ref assemblies for project references.
+         CI can safely compile against implementation assemblies instead; local builds keep the faster default path. -->
+    <ProduceReferenceAssembly Condition="'$(CI)'=='true'">false</ProduceReferenceAssembly>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='ReleaseStore'">

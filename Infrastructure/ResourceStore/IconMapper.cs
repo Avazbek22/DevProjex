@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class IconMapper : IIconMapper
@@ -40,15 +42,17 @@ public sealed class IconMapper : IIconMapper
 		}) ?? throw new InvalidOperationException("Icon mapping is empty.");
 
 		return new IconMapping(
-			new HashSet<string>(mapping.GrayFolderNames ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase),
-			new Dictionary<string, string>(mapping.ExtensionIcons ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
-			new Dictionary<string, string>(mapping.FileNameIcons ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase));
+			(mapping.GrayFolderNames ?? []).ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+			(mapping.ExtensionIcons ?? [])
+			.ToFrozenDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase),
+			(mapping.FileNameIcons ?? [])
+			.ToFrozenDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase));
 	}
 
 	private sealed record IconMapping(
-		HashSet<string> GrayFolderNames,
-		Dictionary<string, string> ExtensionToIconKey,
-		Dictionary<string, string> FileNameToIconKey);
+		FrozenSet<string> GrayFolderNames,
+		FrozenDictionary<string, string> ExtensionToIconKey,
+		FrozenDictionary<string, string> FileNameToIconKey);
 
 	private sealed record IconMappingDefinition(
 		List<string>? GrayFolderNames,

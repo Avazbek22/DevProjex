@@ -21,13 +21,13 @@ public sealed class EffectiveIgnoreOptionCountsContractIntegrationTests
 		var rawScan = scanOptions.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			[],
-			enabledRules);
+			enabledRules, cancellationToken: TestContext.Current.CancellationToken);
 		var effectiveScan = scanOptions.GetEffectiveIgnoreOptionCountsForRootFolders(
 			temp.Path,
 			[],
 			allowedExtensions,
 			enabledRules,
-			rawScan.Value.IgnoreOptionCounts);
+			rawScan.Value.IgnoreOptionCounts, cancellationToken: TestContext.Current.CancellationToken);
 		var disabledRules = enabledRules with
 		{
 			IgnoreDotFiles = false,

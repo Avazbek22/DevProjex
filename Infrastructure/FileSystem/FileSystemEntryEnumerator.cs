@@ -14,43 +14,87 @@ internal static class FileSystemEntryEnumerator
 
 	public static IEnumerable<FileSystemDirectoryEntry> EnumerateDirectories(string path)
 	{
+		return EnumerateDirectories(path, relativeDirectory: string.Empty);
+	}
+
+	public static IEnumerable<FileSystemDirectoryEntry> EnumerateDirectories(string path, string relativeDirectory)
+	{
 		var enumerable = new FileSystemEnumerable<FileSystemDirectoryEntry>(
 			path,
-			static (ref FileSystemEntry entry) => new FileSystemDirectoryEntry(
-				entry.FileName.ToString(),
-				entry.ToSpecifiedFullPath(),
-				entry.IsHidden),
+			(ref FileSystemEntry entry) =>
+			{
+				var name = entry.FileName.ToString();
+				return new FileSystemDirectoryEntry(
+					name,
+					entry.ToSpecifiedFullPath(),
+					CombineRelativePath(relativeDirectory, name),
+					entry.IsHidden);
+			},
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => entry.IsDirectory;
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+			entry.IsDirectory && !IsReparsePoint(ref entry);
 		return enumerable;
 	}
 
 	public static IEnumerable<FileSystemFileEntry> EnumerateFiles(string path)
 	{
+		return EnumerateFiles(path, relativeDirectory: string.Empty);
+	}
+
+	public static IEnumerable<FileSystemFileEntry> EnumerateFiles(string path, string relativeDirectory)
+	{
 		var enumerable = new FileSystemEnumerable<FileSystemFileEntry>(
 			path,
-			static (ref FileSystemEntry entry) => new FileSystemFileEntry(
-				entry.FileName.ToString(),
-				entry.ToSpecifiedFullPath(),
-				entry.IsHidden,
-				entry.Length),
+			(ref FileSystemEntry entry) =>
+			{
+				var name = entry.FileName.ToString();
+				return new FileSystemFileEntry(
+					name,
+					entry.ToSpecifiedFullPath(),
+					CombineRelativePath(relativeDirectory, name),
+					entry.IsHidden,
+					entry.Length);
+			},
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => !entry.IsDirectory;
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+			!entry.IsDirectory && !IsReparsePoint(ref entry);
 		return enumerable;
 	}
 
 	public static IEnumerable<FileSystemTreeEntry> EnumerateEntries(string path)
 	{
+		return EnumerateEntries(path, relativeDirectory: string.Empty);
+	}
+
+	public static IEnumerable<FileSystemTreeEntry> EnumerateEntries(string path, string relativeDirectory)
+	{
 		var enumerable = new FileSystemEnumerable<FileSystemTreeEntry>(
 			path,
-			static (ref FileSystemEntry entry) => new FileSystemTreeEntry(
-				entry.FileName.ToString(),
-				entry.ToSpecifiedFullPath(),
-				entry.IsDirectory,
-				entry.IsHidden,
-				entry.IsDirectory ? 0 : entry.Length),
+			(ref FileSystemEntry entry) =>
+			{
+				var name = entry.FileName.ToString();
+				return new FileSystemTreeEntry(
+					name,
+					entry.ToSpecifiedFullPath(),
+					CombineRelativePath(relativeDirectory, name),
+					entry.IsDirectory,
+					entry.IsHidden,
+					entry.IsDirectory ? 0 : entry.Length);
+			},
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry _) => true;
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => !IsReparsePoint(ref entry);
 		return enumerable;
+	}
+
+	private static string CombineRelativePath(string relativeDirectory, string name)
+	{
+		return string.IsNullOrEmpty(relativeDirectory)
+			? name
+			: $"{relativeDirectory}/{name}";
+	}
+
+	private static bool IsReparsePoint(ref FileSystemEntry entry)
+	{
+		return (entry.Attributes & FileAttributes.ReparsePoint) != 0;
 	}
 }

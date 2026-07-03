@@ -5,22 +5,24 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// IDE folders (.vs, .idea, .vscode) and VCS folders (.git, .svn, .hg) are now
 /// controlled via DotFolders filter for predictable behavior.
 /// </summary>
-public sealed class CommonSmartIgnoreRule : ISmartIgnoreRule
+public sealed class CommonSmartIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
 	// System-generated files that should always be filtered
-	private static readonly string[] FileNames =
-	[
+	private static readonly IReadOnlySet<string> FileNames = SmartIgnoreRuleSet.Create(
 		".ds_store",
 		"thumbs.db",
-		"desktop.ini"
-	];
+		"desktop.ini");
+
+	private static readonly SmartIgnoreResult RuleResult =
+		SmartIgnoreRuleSet.Result(fileNames: FileNames);
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } =
+		SmartIgnoreRuleSet.Descriptor(fileNames: FileNames);
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{
 		// No folders in CommonSmartIgnore - all folders (.git, .vs, .idea, etc.)
 		// are now controlled via DotFolders filter for predictable user control
-		var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var files = new HashSet<string>(FileNames, StringComparer.OrdinalIgnoreCase);
-		return new SmartIgnoreResult(folders, files);
+		return RuleResult;
 	}
 }

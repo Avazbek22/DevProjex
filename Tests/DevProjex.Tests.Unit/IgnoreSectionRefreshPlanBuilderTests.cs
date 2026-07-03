@@ -8,6 +8,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 		var snapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: true,
 			new IgnoreOptionCounts(EmptyFiles: 2),
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: true,
 			ExtensionlessEntriesCount: 1);
 
@@ -26,11 +27,13 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 		var beforeSnapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: false,
 			IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: false,
 			ExtensionlessEntriesCount: 0);
 		var afterSnapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: true,
 			new IgnoreOptionCounts(EmptyFiles: 1),
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: false,
 			ExtensionlessEntriesCount: 0);
 
@@ -52,11 +55,13 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 		var beforeSnapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: false,
 			IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: false,
 			ExtensionlessEntriesCount: 0);
 		var afterSnapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: true,
 			new IgnoreOptionCounts(EmptyFiles: 1),
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: false,
 			ExtensionlessEntriesCount: 0);
 
@@ -78,11 +83,13 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 		var beforeSnapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: false,
 			IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: false,
 			ExtensionlessEntriesCount: 0);
 		var afterSnapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: true,
 			new IgnoreOptionCounts(DotFolders: 1),
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: false,
 			ExtensionlessEntriesCount: 0);
 
@@ -104,11 +111,13 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 		var beforeSnapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: true,
 			new IgnoreOptionCounts(EmptyFiles: 1),
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: false,
 			ExtensionlessEntriesCount: 0);
 		var afterSnapshot = new IgnoreSectionSnapshotState(
 			HasIgnoreOptionCounts: true,
 			new IgnoreOptionCounts(EmptyFiles: 1, DotFolders: 1),
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
 			HasExtensionlessEntries: false,
 			ExtensionlessEntriesCount: 0);
 

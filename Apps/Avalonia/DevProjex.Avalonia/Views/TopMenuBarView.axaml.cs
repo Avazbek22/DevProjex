@@ -1,13 +1,9 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Avalonia.Views;
 
 public partial class TopMenuBarView : UserControl
 {
-    private TopLevel? _helpPopupTopLevel;
-    private bool _helpPopupHandlersAttached;
-    private bool _helpPopupBoundsHandlerAttached;
-    private TopLevel? _helpDocsPopupTopLevel;
-    private bool _helpDocsPopupHandlersAttached;
-    private bool _helpDocsPopupBoundsHandlerAttached;
     private bool _ownedControlHandlersAttached;
 
     public event EventHandler<RoutedEventArgs>? OpenFolderRequested;
@@ -27,7 +23,6 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? ZoomResetRequested;
     public event EventHandler<RoutedEventArgs>? ToggleCompactModeRequested;
     public event EventHandler<RoutedEventArgs>? ToggleTreeAnimationRequested;
-    public event EventHandler<RoutedEventArgs>? ToggleAdvancedCountsRequested;
     public event EventHandler<RoutedEventArgs>? ToggleSearchRequested;
     public event EventHandler<RoutedEventArgs>? ToggleSettingsRequested;
     public event EventHandler<RoutedEventArgs>? TogglePreviewRequested;
@@ -42,6 +37,7 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? LanguageDeRequested;
     public event EventHandler<RoutedEventArgs>? LanguageItRequested;
     public event EventHandler<RoutedEventArgs>? HelpRequested;
+    public event EventHandler<RoutedEventArgs>? TerminalCommandSetupRequested;
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutRequested;
     public event EventHandler<RoutedEventArgs>? AboutCloseRequested;
@@ -69,6 +65,15 @@ public partial class TopMenuBarView : UserControl
 
     public Menu? MainMenuControl => MainMenu;
     public MenuItem? RecentMenuItemControl => RecentMenuItem;
+    public MenuItem? TreeFontMenuItemControl => TreeFontMenuItem;
+    public MenuItem? LanguageRuMenuItemControl => LanguageRuMenuItem;
+    public MenuItem? LanguageEnMenuItemControl => LanguageEnMenuItem;
+    public MenuItem? LanguageUzMenuItemControl => LanguageUzMenuItem;
+    public MenuItem? LanguageTgMenuItemControl => LanguageTgMenuItem;
+    public MenuItem? LanguageKkMenuItemControl => LanguageKkMenuItem;
+    public MenuItem? LanguageFrMenuItemControl => LanguageFrMenuItem;
+    public MenuItem? LanguageDeMenuItemControl => LanguageDeMenuItem;
+    public MenuItem? LanguageItMenuItemControl => LanguageItMenuItem;
 
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => OpenFolderRequested?.Invoke(sender, e);
 
@@ -107,9 +112,6 @@ public partial class TopMenuBarView : UserControl
 
     private void OnToggleTreeAnimation(object? sender, RoutedEventArgs e)
         => ToggleTreeAnimationRequested?.Invoke(sender, e);
-
-    private void OnToggleAdvancedCounts(object? sender, RoutedEventArgs e)
-        => ToggleAdvancedCountsRequested?.Invoke(sender, e);
 
     private void OnToggleSettings(object? sender, RoutedEventArgs e) => ToggleSettingsRequested?.Invoke(sender, e);
 
@@ -164,6 +166,9 @@ public partial class TopMenuBarView : UserControl
 
     private void OnHelp(object? sender, RoutedEventArgs e) => HelpRequested?.Invoke(sender, e);
 
+    private void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
+        => TerminalCommandSetupRequested?.Invoke(sender, e);
+
     private void OnAbout(object? sender, RoutedEventArgs e) => AboutRequested?.Invoke(sender, e);
 
     private void OnResetSettings(object? sender, RoutedEventArgs e) => ResetSettingsRequested?.Invoke(sender, e);
@@ -208,19 +213,13 @@ public partial class TopMenuBarView : UserControl
             ThemePopup.Opened += OnThemePopupOpened;
 
         if (HelpPopup is not null)
-        {
             HelpPopup.Opened += OnHelpPopupOpened;
-            HelpPopup.Closed += OnHelpPopupClosed;
-        }
 
         if (HelpDocsPopover is not null)
             HelpDocsPopover.CloseRequested += OnHelpDocsPopoverCloseRequested;
 
         if (HelpDocsPopup is not null)
-        {
             HelpDocsPopup.Opened += OnHelpDocsPopupOpened;
-            HelpDocsPopup.Closed += OnHelpDocsPopupClosed;
-        }
 
         _ownedControlHandlersAttached = true;
     }
@@ -250,19 +249,13 @@ public partial class TopMenuBarView : UserControl
             ThemePopup.Opened -= OnThemePopupOpened;
 
         if (HelpPopup is not null)
-        {
             HelpPopup.Opened -= OnHelpPopupOpened;
-            HelpPopup.Closed -= OnHelpPopupClosed;
-        }
 
         if (HelpDocsPopover is not null)
             HelpDocsPopover.CloseRequested -= OnHelpDocsPopoverCloseRequested;
 
         if (HelpDocsPopup is not null)
-        {
             HelpDocsPopup.Opened -= OnHelpDocsPopupOpened;
-            HelpDocsPopup.Closed -= OnHelpDocsPopupClosed;
-        }
 
         _ownedControlHandlersAttached = false;
     }
@@ -304,149 +297,12 @@ public partial class TopMenuBarView : UserControl
     {
         HelpPopover?.Focus();
         ApplyPopupBackdrop(HelpPopup);
-
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null)
-            return;
-
-        if (_helpPopupHandlersAttached && _helpPopupTopLevel == topLevel)
-            return;
-
-        DetachHelpPopupHandlers();
-        _helpPopupTopLevel = topLevel;
-        topLevel.AddHandler(GotFocusEvent, OnTopLevelGotFocus, RoutingStrategies.Tunnel);
-        topLevel.AddHandler(PointerPressedEvent, OnTopLevelPointerPressed, RoutingStrategies.Tunnel);
-        _helpPopupHandlersAttached = true;
-        topLevel.PropertyChanged += OnHelpPopupTopLevelPropertyChanged;
-        _helpPopupBoundsHandlerAttached = true;
-
-        SchedulePopupClamp(HelpPopup, HelpPopover);
-    }
-
-    private void OnHelpPopupClosed(object? sender, EventArgs e)
-    {
-        DetachHelpPopupHandlers();
-    }
-
-    private void OnTopLevelGotFocus(object? sender, GotFocusEventArgs e)
-    {
-        if (HelpPopup?.IsOpen != true)
-            return;
-
-        if (!IsInsidePopup(HelpPopup, e.Source as Visual))
-            HelpPopup.IsOpen = false;
-    }
-
-    private void OnTopLevelPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (HelpPopup?.IsOpen != true)
-            return;
-
-        if (!IsInsidePopup(HelpPopup, e.Source as Visual))
-            HelpPopup.IsOpen = false;
-    }
-
-    private bool IsInsidePopup(Popup? popup, Visual? source)
-    {
-        var popupRoot = popup?.Child as Visual;
-        if (popupRoot is null || source is null)
-            return false;
-
-        return popupRoot == source || popupRoot.IsVisualAncestorOf(source);
-    }
-
-    private void DetachHelpPopupHandlers()
-    {
-        if (!_helpPopupHandlersAttached || _helpPopupTopLevel is null)
-            return;
-
-        _helpPopupTopLevel.RemoveHandler(GotFocusEvent, OnTopLevelGotFocus);
-        _helpPopupTopLevel.RemoveHandler(PointerPressedEvent, OnTopLevelPointerPressed);
-        if (_helpPopupBoundsHandlerAttached)
-        {
-            _helpPopupTopLevel.PropertyChanged -= OnHelpPopupTopLevelPropertyChanged;
-            _helpPopupBoundsHandlerAttached = false;
-        }
-        _helpPopupTopLevel = null;
-        _helpPopupHandlersAttached = false;
     }
 
     private void OnHelpDocsPopupOpened(object? sender, EventArgs e)
     {
         HelpDocsPopover?.Focus();
         ApplyPopupBackdrop(HelpDocsPopup);
-
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null)
-            return;
-
-        if (_helpDocsPopupHandlersAttached && _helpDocsPopupTopLevel == topLevel)
-            return;
-
-        DetachHelpDocsPopupHandlers();
-        _helpDocsPopupTopLevel = topLevel;
-        topLevel.AddHandler(GotFocusEvent, OnTopLevelHelpDocsGotFocus, RoutingStrategies.Tunnel);
-        topLevel.AddHandler(PointerPressedEvent, OnTopLevelHelpDocsPointerPressed, RoutingStrategies.Tunnel);
-        _helpDocsPopupHandlersAttached = true;
-        topLevel.PropertyChanged += OnHelpDocsPopupTopLevelPropertyChanged;
-        _helpDocsPopupBoundsHandlerAttached = true;
-
-        SchedulePopupClamp(HelpDocsPopup, HelpDocsPopover);
-    }
-
-    private void OnHelpDocsPopupClosed(object? sender, EventArgs e)
-    {
-        DetachHelpDocsPopupHandlers();
-    }
-
-    private void OnTopLevelHelpDocsGotFocus(object? sender, GotFocusEventArgs e)
-    {
-        if (HelpDocsPopup?.IsOpen != true)
-            return;
-
-        if (!IsInsidePopup(HelpDocsPopup, e.Source as Visual))
-            HelpDocsPopup.IsOpen = false;
-    }
-
-    private void OnTopLevelHelpDocsPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (HelpDocsPopup?.IsOpen != true)
-            return;
-
-        if (!IsInsidePopup(HelpDocsPopup, e.Source as Visual))
-            HelpDocsPopup.IsOpen = false;
-    }
-
-    private void DetachHelpDocsPopupHandlers()
-    {
-        if (!_helpDocsPopupHandlersAttached || _helpDocsPopupTopLevel is null)
-            return;
-
-        _helpDocsPopupTopLevel.RemoveHandler(GotFocusEvent, OnTopLevelHelpDocsGotFocus);
-        _helpDocsPopupTopLevel.RemoveHandler(PointerPressedEvent, OnTopLevelHelpDocsPointerPressed);
-        if (_helpDocsPopupBoundsHandlerAttached)
-        {
-            _helpDocsPopupTopLevel.PropertyChanged -= OnHelpDocsPopupTopLevelPropertyChanged;
-            _helpDocsPopupBoundsHandlerAttached = false;
-        }
-        _helpDocsPopupTopLevel = null;
-        _helpDocsPopupHandlersAttached = false;
-    }
-
-    private void OnHelpPopupTopLevelPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (e.Property != BoundsProperty)
-            return;
-        if (HelpPopup?.IsOpen == true)
-            SchedulePopupClamp(HelpPopup, HelpPopover);
-    }
-
-    private void OnHelpDocsPopupTopLevelPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (e.Property != BoundsProperty)
-            return;
-        if (HelpDocsPopup?.IsOpen == true)
-            SchedulePopupClamp(HelpDocsPopup, HelpDocsPopover);
     }
 
     private void OnToolTipLoaded(object? sender, RoutedEventArgs e)
@@ -457,185 +313,32 @@ public partial class TopMenuBarView : UserControl
         ApplyToolTipBackdrop(toolTip);
     }
 
-    private void SchedulePopupClamp(Popup? popup, Control? popover)
-    {
-        if (popup is null || popover is null)
-            return;
-
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null)
-            return;
-
-        const double margin = 8;
-        var bounds = topLevel.Bounds;
-        var availableWidth = Math.Max(0, bounds.Width - margin * 2);
-        var availableHeight = Math.Max(0, bounds.Height - margin * 2);
-
-        if (availableWidth <= 0 || availableHeight <= 0)
-            return;
-
-        popover.Measure(new Size(availableWidth, availableHeight));
-        var desired = popover.DesiredSize;
-
-        if (desired.Width > availableWidth + 0.5)
-            popover.Width = availableWidth;
-        else if (!double.IsNaN(popover.Width))
-            popover.Width = double.NaN;
-
-        if (desired.Height > availableHeight + 0.5)
-            popover.Height = availableHeight;
-        else if (!double.IsNaN(popover.Height))
-            popover.Height = double.NaN;
-
-        Dispatcher.UIThread.Post(
-            () => ApplyPopupOffsets(popup, topLevel, margin),
-            DispatcherPriority.Render);
-    }
-
-    private static void ApplyPopupOffsets(Popup popup, TopLevel topLevel, double margin)
-    {
-        if (popup.Child is not Visual popupRoot)
-            return;
-
-        var origin = popupRoot.TranslatePoint(new Point(0, 0), topLevel);
-        if (origin is null)
-            return;
-
-        var bounds = topLevel.Bounds;
-        var size = popupRoot.Bounds.Size;
-        var left = origin.Value.X;
-        var top = origin.Value.Y;
-        var right = left + size.Width;
-        var bottom = top + size.Height;
-
-        var offsetX = 0.0;
-        var offsetY = 0.0;
-
-        if (left < margin)
-            offsetX = margin - left;
-        else if (right > bounds.Width - margin)
-            offsetX = bounds.Width - margin - right;
-
-        if (top < margin)
-            offsetY = margin - top;
-        else if (bottom > bounds.Height - margin)
-            offsetY = bounds.Height - margin - bottom;
-
-        var fitsHorizontally = size.Width <= bounds.Width - margin * 2;
-        if (fitsHorizontally)
-        {
-            var candidateLeft = left + offsetX;
-            var desiredLeft = (bounds.Width - size.Width) / 2;
-            var nudge = (desiredLeft - candidateLeft) * 0.25;
-            offsetX += nudge;
-        }
-
-        var finalLeft = left + offsetX;
-        var finalRight = finalLeft + size.Width;
-        if (finalLeft < margin)
-            offsetX += margin - finalLeft;
-        else if (finalRight > bounds.Width - margin)
-            offsetX += bounds.Width - margin - finalRight;
-
-        if (Math.Abs(offsetX) > 0.1)
-            popup.HorizontalOffset += offsetX;
-        if (Math.Abs(offsetY) > 0.1)
-            popup.VerticalOffset += offsetY;
-    }
-
     private void ApplyPopupBackdrop(Popup? popup)
     {
-        if (popup?.Child is null)
+        if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        if (popup.Child.GetVisualRoot() is null)
-            return;
-
-        if (TopLevel.GetTopLevel(popup.Child) is not TopLevel popupLevel)
-            return;
-
-        var host = TopLevel.GetTopLevel(this);
-        if (host is not null && ReferenceEquals(popupLevel, host))
-            return;
-
-        var viewModel = DataContext as MainWindowViewModel;
-        if (viewModel is null)
-            return;
-
-        try
-        {
-            if (viewModel.HasAnyEffect)
-            {
-                popupLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.None
-                ];
-
-                popupLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                popupLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: popup could have closed.
-        }
+        PopupBackdropConfigurator.TryApply(
+            popup?.Child,
+            TopLevel.GetTopLevel(this),
+            viewModel.HasAnyEffect,
+            PopupBackdropTransparencyFallback.None);
     }
 
     private void ApplyToolTipBackdrop(ToolTip toolTip)
     {
-        if (toolTip.GetVisualRoot() is null)
-            return;
-
-        if (TopLevel.GetTopLevel(toolTip) is not TopLevel tooltipLevel)
-            return;
-
-        var host = TopLevel.GetTopLevel(this);
-        if (host is not null && ReferenceEquals(tooltipLevel, host))
-            return;
-
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        try
-        {
-            if (viewModel.HasAnyEffect)
-            {
-                tooltipLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.AcrylicBlur,
-                    WindowTransparencyLevel.Blur,
-                    WindowTransparencyLevel.Transparent,
-                    WindowTransparencyLevel.None
-                ];
-
-                tooltipLevel.Background = Brushes.Transparent;
-            }
-            else
-            {
-                tooltipLevel.TransparencyLevelHint =
-                [
-                    WindowTransparencyLevel.None
-                ];
-            }
-        }
-        catch
-        {
-            // Ignore: tooltip could have closed.
-        }
+        PopupBackdropConfigurator.TryApply(
+            toolTip,
+            TopLevel.GetTopLevel(this),
+            viewModel.HasAnyEffect,
+            PopupBackdropTransparencyFallback.Transparent);
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        DetachHelpPopupHandlers();
-        DetachHelpDocsPopupHandlers();
         DetachOwnedControlHandlers();
     }
 }

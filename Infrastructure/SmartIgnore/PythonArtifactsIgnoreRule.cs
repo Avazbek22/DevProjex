@@ -4,10 +4,9 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Python cache and virtual environment folders.
 /// Activates only when Python project markers are detected in the scope root.
 /// </summary>
-public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule
+public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
 {
-	private static readonly string[] MarkerFiles =
-	[
+	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
 		"pyproject.toml",
 		"requirements.txt",
 		"requirements-dev.txt",
@@ -15,11 +14,9 @@ public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule
 		"setup.cfg",
 		"Pipfile",
 		"poetry.lock",
-		"environment.yml"
-	];
+		"environment.yml");
 
-	private static readonly string[] FolderNames =
-	[
+	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
 		"__pycache__",
 		".pytest_cache",
 		".mypy_cache",
@@ -31,24 +28,25 @@ public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule
 		"env",
 		".hypothesis",
 		".ipynb_checkpoints",
-		".pyre"
-	];
+		".pyre");
+
+	private static readonly SmartIgnoreResult MatchResult =
+		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
+
+	public SmartIgnoreRuleDescriptor Descriptor { get; } =
+		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{
 		if (!Directory.Exists(rootPath))
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+			return SmartIgnoreResult.Empty;
 
-		bool hasMarker = MarkerFiles.Any(marker => File.Exists(Path.Combine(rootPath, marker)));
-		if (!hasMarker)
-			return new SmartIgnoreResult(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		foreach (var marker in MarkerFiles)
+		{
+			if (File.Exists(Path.Combine(rootPath, marker)))
+				return MatchResult;
+		}
 
-		return new SmartIgnoreResult(
-			new HashSet<string>(FolderNames, StringComparer.OrdinalIgnoreCase),
-			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+		return SmartIgnoreResult.Empty;
 	}
 }

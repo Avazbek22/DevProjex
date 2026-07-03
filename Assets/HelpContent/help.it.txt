@@ -55,7 +55,32 @@ Regole:
 
 Per ogni elemento viene mostrato il nome breve della cartella; il percorso completo è disponibile in un tooltip.
 
-## 4) Git
+## 4) Avvio dal terminale
+DevProjex può essere avviato dal terminale.
+
+Se il comando è già configurato, apri un terminale ed esegui:
+`devprojex --help`
+
+Così vedrai tutti i comandi, le opzioni e gli esempi disponibili.
+
+Esempi:
+* `devprojex .` — aprire la cartella corrente.
+* `devprojex "C:\Projects\App"` — aprire la cartella indicata.
+* `devprojex . --export tree` — stampare l’albero del progetto nel terminale.
+* `devprojex . --export content` — stampare il contenuto dei file nel terminale.
+* `devprojex . --export tree-content` — stampare albero e contenuti nel terminale.
+* `devprojex . --export tree-content -o context.txt` — salvare il risultato in un file.
+
+Note:
+* `.` indica la cartella corrente del terminale;
+* i percorsi con spazi devono essere racchiusi tra virgolette;
+* se non viene indicato un file di output, il risultato viene stampato direttamente nel terminale;
+* il comando non modifica i file del progetto — DevProjex lavora in sola lettura.
+
+Se il comando `devprojex` non funziona, apri in DevProjex:
+“Aiuto → Avvio dal terminale”.
+
+## 5) Git
 Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Clone). L'app non tocca i tuoi file — lavora solo con la cache.
 
 La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
@@ -78,7 +103,7 @@ Regole:
 Se selezioni un elemento dall’elenco, l’URL viene inserito automaticamente nel campo di input.
 Durante una clonazione attiva l’elenco viene nascosto temporaneamente.
 
-## 5) Copia
+## 6) Copia
 ### Selettore formato albero (ASCII/JSON)
 Il selettore definisce il formato di rappresentazione dell’albero per le operazioni in cui l’albero partecipa al risultato.
 
@@ -131,7 +156,7 @@ Albero + contenuto:
 * il blocco contenuto resta testuale;
 * esportazione in `.txt`.
 
-## 6) Modalità anteprima
+## 7) Modalità anteprima
 Si apre con il pulsante con icona a forma di occhio nella barra superiore o con Ctrl+B.
 
 Mostra il risultato finale in un’area di lavoro separata accanto all’albero. Questa modalità non copia nulla negli appunti e non esporta nulla su file: serve solo per la visualizzazione.
@@ -170,7 +195,7 @@ Pulsanti:
 Ricerca e filtro restano disponibili finché nell’anteprima è visibile il pannello dell’albero.
 Se l’albero è nascosto, ricerca e filtro diventano temporaneamente non disponibili fino all’uscita dalla modalità solo anteprima.
 
-## 7) Visualizza
+## 8) Visualizza
 ### Zoom
 * Ctrl++ / Ctrl+= — aumenta
 * Ctrl+- — riduci
@@ -192,12 +217,12 @@ Quando l’area di lavoro di anteprima è attiva, la modalità compatta viene ab
 ### Animazione albero
 Attiva un'animazione di scorrimento fluido quando si passa il mouse sulle righe dell'albero.
 
-### Contatori aggiuntivi
-Mostra/nasconde le quantità tra parentesi nelle opzioni del blocco « Ignora ».
-Attivi per impostazione predefinita.
-Non modifica le regole di filtro.
+### Font albero
+Il font dell’albero si sceglie da « Visualizza → Font albero ».
+« Predefinito » ripristina il font standard dell’albero.
+Il font scelto viene applicato dopo aver premuto « Applica » nel pannello impostazioni.
 
-## 8) Ricerca nell'albero
+## 9) Ricerca nell'albero
 Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 * Ctrl+F — mostra/nascondi
 * Enter — risultato successivo
@@ -213,7 +238,7 @@ Limitazioni:
 * la ricerca è disponibile in anteprima finché il pannello dell’albero è visibile;
 * se l’albero è nascosto, la ricerca è temporaneamente non disponibile.
 
-## 9) Filtra per nome
+## 10) Filtra per nome
 Mostra solo i nodi che corrispondono al filtro e i loro genitori. Aggiornamento con debounce.
 * Ctrl+Shift+N — mostra/nascondi filtro
 * Esc — chiudi filtro
@@ -223,12 +248,14 @@ Limitazioni:
 * il filtro è disponibile in anteprima finché il pannello dell’albero è visibile;
 * se l’albero è nascosto, il filtro è temporaneamente non disponibile.
 
-## 10) Opzioni
-Liste a destra:
-* Font albero — applica con Applica
+## 11) Opzioni
+A destra sono disponibili:
+* Applica
 * Ignora
 * Tipi di file
 * Cartelle di primo livello
+
+Le modifiche in « Ignora », « Tipi di file » e « Cartelle di primo livello » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
 
 Ogni lista ha il toggle Tutti.
 
@@ -238,7 +265,7 @@ Nota su « Tipi di file »:
 
 Ctrl+P — mostra/nascondi pannello.
 
-### 10.1 Profili dei parametri dei progetti locali
+### 11.1 Profili dei parametri dei progetti locali
 Per le cartelle locali, DevProjex memorizza gli ultimi parametri di progetto applicati:
 * cartelle di primo livello selezionate;
 * tipi di file selezionati;
@@ -251,8 +278,10 @@ Importante:
 * i profili vengono salvati solo per i progetti locali;
 * per i progetti aperti tramite Git Clone, i profili non vengono salvati;
 * se alcune opzioni salvate non sono più disponibili nel progetto corrente, vengono ignorate e gli altri parametri vengono applicati.
+* se l’aggiornamento o la riapertura mostra una nuova cartella di primo livello, un nuovo tipo di file o una nuova opzione in « Ignora », quel punto viene attivato per impostazione predefinita;
+* i punti già noti mantengono la scelta esplicita dell’utente: nuovi file di un tipo disattivato non riattivano quel tipo.
 
-## 11) Ignora
+## 12) Ignora
 L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
 
 Ordine delle opzioni:
@@ -267,29 +296,31 @@ Ordine delle opzioni:
 * File senza estensione
 
 Le opzioni delle regole base (nascosti, con punto, vuoti, senza estensione) vengono mostrate solo se esistono elementi corrispondenti.
+Quando un’opzione in « Ignora » diventa disponibile per la prima volta, viene attivata per impostazione predefinita. Un’opzione disattivata esplicitamente in precedenza mantiene quello stato quando torna disponibile.
 
 La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
 
-### 11.1 Ambito delle regole
+### 12.1 Ambito delle regole
 L’app costruisce ambiti di progetto (scope) in cui applicare le regole di ignore:
 * radice (se la radice contiene `.gitignore` o un marker di progetto)
 * cartelle di primo livello
 * sottocartelle di progetto annidate
 
 La profondità di ricerca degli ambiti annidati è fissa: 2 livelli.
+Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e Smart Ignore. Una volta trovato un ambito, le regole vengono applicate al suo contenuto tramite la normale scansione dell’albero.
 
-### 11.2 « Usa .gitignore »
+### 12.2 « Usa .gitignore »
 * Attivo: le regole `.gitignore` sono applicate negli ambiti rilevati.
 * Disattivo: le regole `.gitignore` sono completamente disattivate.
 
 Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
 
-### 11.3 « Smart ignore »
+### 12.3 « Smart ignore »
 * Viene mostrato solo quando è pertinente.
 * Attivo: nasconde anche i tipici artefatti di build e strumenti.
 * Disattivo: le regole smart non vengono applicate.
 
-### 11.4 Regole base
+### 12.4 Regole base
 Opzioni:
 * Cartelle nascoste
 * File nascosti
@@ -302,7 +333,7 @@ Opzioni:
 Quando un’opzione è attiva, nasconde gli elementi corrispondenti nell’albero e nei risultati di copia/esportazione.
 Le regole di base vengono attivate separatamente da `.gitignore` e Smart Ignore, ma il risultato finale viene sempre calcolato sull’albero corrente dopo l’applicazione di tutti i filtri attivi.
 
-### 11.5 Comportamento interno: casi tipici
+### 12.5 Comportamento interno: casi tipici
 1. Progetto singolo con `.gitignore`.
 Di norma viene mostrato solo « Usa .gitignore ».
 Quando è attivo, `.gitignore` e Smart Ignore lavorano insieme.
@@ -325,21 +356,21 @@ Viene mostrato « Usa .gitignore ».
 Se non viene trovato `.gitignore` e Smart Ignore non è pertinente, queste opzioni non vengono mostrate.
 Restano solo le regole base di visibilità.
 
-### 11.6 Cartelle vuote
+### 12.6 Cartelle vuote
 Nasconde le cartelle logicamente vuote dall’albero e dai risultati di copia/esportazione.
 Una cartella logicamente vuota è una cartella nella quale non restano discendenti visibili dopo l’applicazione delle regole di visibilità correnti, di `.gitignore`, di Smart Ignore e dei tipi di file selezionati.
 Se la cartella stessa non è nascosta da altre regole, la sua rimozione dall’albero è controllata proprio da questa opzione.
 
-### 11.7 File vuoti
+### 12.7 File vuoti
 Nasconde i file vuoti di dimensione 0 byte dall’albero e dai risultati di copia/esportazione.
 
-### 11.8 File senza estensione
+### 12.8 File senza estensione
 Nasconde i file senza estensione (ad esempio: `Dockerfile`, `Makefile`, `README`) dall’albero e dai risultati di copia/esportazione.
 
-### 11.9 Contatori nel blocco « Ignora »
-Quando « Visualizza → Contatori aggiuntivi » è attivo, vicino alle opzioni disponibili viene mostrato il numero nel formato `(N)`.
+### 12.9 Contatori nel blocco « Ignora »
+Vicino alle opzioni disponibili viene mostrato il numero nel formato `(N)`.
 Per le regole di base, questo numero mostra quanti elementi vengono nascosti proprio da quella regola nella configurazione corrente dell’albero.
-## 12) Come vengono calcolati albero e metriche
+## 13) Come vengono calcolati albero e metriche
 Il risultato dipende da:
 * cartelle di primo livello selezionate
 * tipi di file selezionati
@@ -349,7 +380,7 @@ Il risultato dipende da:
 
 Se l’accesso è negato, il nodo è marcato Accesso negato.
 
-### 12.1 Cosa mostrano i contatori nella barra di stato
+### 13.1 Cosa mostrano i contatori nella barra di stato
 La barra di stato contiene due blocchi:
 * Albero — metriche dell’output testuale dell’albero;
 * Contenuto — metriche dell’output contenuti file.
@@ -365,7 +396,7 @@ Importante:
 * « Righe » nel blocco « Albero » indica il numero di righe della rappresentazione finale dell’albero, non il numero di file su disco;
 * in questo valore rientrano cartelle, file ed elementi di servizio dell’albero (ad esempio nodi con accesso negato).
 
-### 12.2 Come vengono calcolate le metriche
+### 13.2 Come vengono calcolate le metriche
 Metriche albero:
 * sono calcolate dall’output reale dell’albero generato dalla stessa pipeline di export;
 * rispettano il formato ASCII/JSON corrente.
@@ -375,7 +406,7 @@ Metriche contenuto:
 * i file binari sono esclusi;
 * file vuoti e solo spazi sono conteggiati tramite marker di servizio (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
-### 12.3 Quando i contatori vengono aggiornati
+### 13.3 Quando i contatori vengono aggiornati
 Il ricalcolo avviene:
 * dopo apertura/aggiornamento progetto;
 * dopo applicazione impostazioni (ignore, tipi file, cartelle root);
@@ -383,14 +414,14 @@ Il ricalcolo avviene:
 * quando si passa ASCII/JSON (per operazioni che usano l’albero).
 * quando il calcolo in background viene annullato, i contatori vengono impostati a 0 fino al successivo ricalcolo completato.
 
-## 13) Icone
+## 14) Icone
 Ordine di scelta:
 1) tipo nodo (cartella/file)
 2) nome esatto (se esiste una regola)
 3) estensione
 4) altrimenti — sconosciuto
 
-## 14) Tema ed effetti
+## 15) Tema ed effetti
 Il popover del tema permette di scegliere:
 * tema chiaro/scuro
 * Trasparente / Mica / Acrylic
@@ -398,13 +429,13 @@ Il popover del tema permette di scegliere:
 
 Gli elementi [Beta] possono cambiare tra versioni.
 
-## 15) Aiuto
+## 16) Aiuto
 
-### 15.1 Ripristina impostazioni
-Ripristina impostazioni (Aiuto → Ripristina impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero, contatori aggiuntivi) e non modifica i dati del progetto. Dopo il ripristino, i contatori aggiuntivi sono attivi per impostazione predefinita.
+### 16.1 Ripristina impostazioni
+Ripristina impostazioni (Aiuto → Ripristina impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
 Questa azione azzera anche la lingua dell’interfaccia salvata.
 
-### 15.2 Ripristina dati
+### 16.2 Ripristina dati
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
 * cartelle di primo livello selezionate;
 * tipi di file selezionati;
@@ -415,10 +446,11 @@ Importante:
 * la cronologia dei «Repository recenti» nella finestra Git Clone non viene cancellata;
 * file e cartelle dei progetti sul disco non vengono modificati né eliminati.
 
-## 16) Lingue
+## 17) Lingue
 La lingua si seleziona dal menu Lingua.
+La lingua scelta viene salvata tra gli avvii dell’app. « Aiuto → Ripristina impostazioni » cancella la lingua salvata e riporta l’interfaccia alla lingua predefinita.
 
-## 17) Barra di avanzamento e annullamento
+## 18) Barra di avanzamento e annullamento
 Nella parte centrale della barra di stato vengono mostrati operazione attiva e progresso.
 
 Modalità progresso:
@@ -435,6 +467,6 @@ Pulsante X (annulla) nella barra di stato:
 * interrompe il calcolo dati in background;
 * per operazioni senza supporto annullamento, ferma l’indicazione nella barra di stato, mentre l’operazione può comunque terminare in background.
 
-## 18) Note
+## 19) Note
 * Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.

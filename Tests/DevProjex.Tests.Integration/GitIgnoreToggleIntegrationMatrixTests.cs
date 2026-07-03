@@ -35,7 +35,7 @@ public sealed class GitIgnoreToggleIntegrationMatrixTests
 			IgnoreRules: BuildIgnoreRules(temp.Path, useGitIgnore, ignoreDotFolders));
 
 		var builder = new TreeBuilder();
-		var result = builder.Build(temp.Path, options);
+		var result = builder.Build(temp.Path, options, cancellationToken: TestContext.Current.CancellationToken);
 		var rootChildren = result.Root.Children.Select(child => child.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 		var artifactVisible = rootChildren.Contains(artifactFolder);
@@ -58,7 +58,7 @@ public sealed class GitIgnoreToggleIntegrationMatrixTests
 		temp.CreateFile("visible.txt", "visible");
 
 		var scanner = new FileSystemScanner();
-		var result = scanner.GetRootFolderNames(temp.Path, BuildIgnoreRules(temp.Path, useGitIgnore, ignoreDotFolders));
+		var result = scanner.GetRootFolderNames(temp.Path, BuildIgnoreRules(temp.Path, useGitIgnore, ignoreDotFolders), cancellationToken: TestContext.Current.CancellationToken);
 		var names = result.Value.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 		Assert.Equal(!useGitIgnore, names.Contains(artifactFolder));

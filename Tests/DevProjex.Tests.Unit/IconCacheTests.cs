@@ -1,4 +1,3 @@
-using DevProjex.Tests.Unit.Avalonia;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit;
@@ -6,76 +5,64 @@ namespace DevProjex.Tests.Unit;
 [Collection("AvaloniaUI")]
 public sealed class IconCacheTests
 {
-	[Fact]
+	[AvaloniaFact]
 	public void GetIcon_WhitespaceKey_ReturnsNullAndDoesNotReadStore()
 	{
-		AvaloniaUiTestFixture.RunOnUiThread(() =>
-		{
-			var store = new CountingIconStore();
-			using var cache = new IconCache(store);
+		var store = new CountingIconStore();
+		using var cache = new IconCache(store);
 
-			Assert.Null(cache.GetIcon(null!));
-			Assert.Null(cache.GetIcon(string.Empty));
-			Assert.Null(cache.GetIcon("   "));
-			Assert.Equal(0, store.TotalRequests);
-		});
+		Assert.Null(cache.GetIcon(null!));
+		Assert.Null(cache.GetIcon(string.Empty));
+		Assert.Null(cache.GetIcon("   "));
+		Assert.Equal(0, store.TotalRequests);
 	}
 
-	[Fact]
+	[AvaloniaFact]
 	public void GetIcon_SameKeyWithDifferentCase_ReturnsSameCachedInstance()
 	{
-		AvaloniaUiTestFixture.RunOnUiThread(() =>
-		{
-			var store = new CountingIconStore();
-			using var cache = new IconCache(store);
+		var store = new CountingIconStore();
+		using var cache = new IconCache(store);
 
-			var first = cache.GetIcon("csharp");
-			var second = cache.GetIcon("CSHARP");
+		var first = cache.GetIcon("csharp");
+		var second = cache.GetIcon("CSHARP");
 
-			Assert.NotNull(first);
-			Assert.Same(first, second);
-			Assert.Equal(1, store.TotalRequests);
-			Assert.Equal(1, store.GetRequestCount("csharp"));
-		});
+		Assert.NotNull(first);
+		Assert.Same(first, second);
+		Assert.Equal(1, store.TotalRequests);
+		Assert.Equal(1, store.GetRequestCount("csharp"));
 	}
 
-	[Fact]
+	[AvaloniaFact]
 	public void Clear_RemovesCachedEntries_AndForcesReload()
 	{
-		AvaloniaUiTestFixture.RunOnUiThread(() =>
-		{
-			var store = new CountingIconStore();
-			using var cache = new IconCache(store);
+		var store = new CountingIconStore();
+		using var cache = new IconCache(store);
 
-			var first = cache.GetIcon("json");
-			cache.Clear();
-			var second = cache.GetIcon("json");
+		var first = cache.GetIcon("json");
+		cache.Clear();
+		var second = cache.GetIcon("json");
 
-			Assert.NotNull(first);
-			Assert.NotNull(second);
-			Assert.NotSame(first, second);
-			Assert.Equal(2, store.GetRequestCount("json"));
-		});
+		Assert.NotNull(first);
+		Assert.NotNull(second);
+		Assert.NotSame(first, second);
+		Assert.Equal(2, store.GetRequestCount("json"));
 	}
 
-	[Fact]
+	[AvaloniaFact]
 	public void GetIcon_WhenCapacityExceeded_EvictsLeastRecentlyUsedEntries()
 	{
-		AvaloniaUiTestFixture.RunOnUiThread(() =>
+		var store = new CountingIconStore();
+		using var cache = new IconCache(store);
+
+		for (var i = 0; i < 257; i++)
 		{
-			var store = new CountingIconStore();
-			using var cache = new IconCache(store);
+			var key = $"k{i}";
+			Assert.NotNull(cache.GetIcon(key));
+		}
 
-			for (var i = 0; i < 257; i++)
-			{
-				var key = $"k{i}";
-				Assert.NotNull(cache.GetIcon(key));
-			}
+		Assert.NotNull(cache.GetIcon("k0"));
 
-			Assert.NotNull(cache.GetIcon("k0"));
-
-			Assert.Equal(2, store.GetRequestCount("k0"));
-		});
+		Assert.Equal(2, store.GetRequestCount("k0"));
 	}
 
 	private sealed class CountingIconStore : IIconStore

@@ -1,0 +1,20 @@
+namespace DevProjex.Application.Selection;
+
+public readonly record struct IgnoreSectionSnapshotState(
+    bool HasIgnoreOptionCounts,
+    IgnoreOptionCounts IgnoreOptionCounts,
+    IgnoreControllerImpactCounts ControllerImpactCounts,
+    bool HasExtensionlessEntries,
+    int ExtensionlessEntriesCount)
+{
+    // Ignore-option visibility is driven by both aggregated counts and the special
+    // extensionless marker path, so orchestration decisions must compare both.
+    public bool HasAvailabilityDifference(in IgnoreSectionSnapshotState other)
+    {
+        return HasIgnoreOptionCounts != other.HasIgnoreOptionCounts ||
+               IgnoreOptionCounts != other.IgnoreOptionCounts ||
+               ControllerImpactCounts != other.ControllerImpactCounts ||
+               HasExtensionlessEntries != other.HasExtensionlessEntries ||
+               ExtensionlessEntriesCount != other.ExtensionlessEntriesCount;
+    }
+}

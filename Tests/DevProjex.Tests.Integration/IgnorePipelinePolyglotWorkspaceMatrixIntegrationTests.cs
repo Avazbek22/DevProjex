@@ -56,7 +56,7 @@ public sealed class IgnorePipelinePolyglotWorkspaceMatrixIntegrationTests
 		var treeResult = tree.Build(temp.Path, new TreeFilterOptions(
 			AllowedExtensions: AllowedExtensions,
 			AllowedRootFolders: new HashSet<string>(selectedRoots, StringComparer.OrdinalIgnoreCase),
-			IgnoreRules: rules));
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(includesMono, ContainsRootFolder(treeResult, "mono"));
 		Assert.Equal(includesWeb, ContainsRootFolder(treeResult, "web"));
@@ -81,7 +81,7 @@ public sealed class IgnorePipelinePolyglotWorkspaceMatrixIntegrationTests
 		var scan = scanUseCase.GetExtensionsAndIgnoreCountsForRootFolders(
 			temp.Path,
 			selectedRoots,
-			rules);
+			rules, cancellationToken: TestContext.Current.CancellationToken);
 
 		var extensions = scan.Value.Extensions;
 		Assert.Equal(includesMono, extensions.Contains(".rs"));
