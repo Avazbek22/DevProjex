@@ -17,6 +17,49 @@ public sealed class MainWindowLifecycleUiTests
 	];
 
 	[AvaloniaFact]
+	public async Task StartupRevealGate_RestoresWindowOpacityAfterInitialRenderFrames()
+	{
+		var appDataPath = Path.Combine(Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+
+		var options = CommandLineOptions.Empty;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		var window = new MainWindow(options, services)
+		{
+			Width = 900,
+			Height = 620
+		};
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			var expectedInitialOpacity = MainWindow.ShouldUseStartupRevealGate() ? 0.0 : 1.0;
+			Assert.Equal(expectedInitialOpacity, window.Opacity);
+
+			window.Show();
+
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.Opacity >= 0.99,
+				"startup reveal gate to restore the window opacity");
+		}
+		finally
+		{
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+
+			try
+			{
+				Directory.Delete(appDataPath, recursive: true);
+			}
+			catch
+			{
+				// Best effort test cleanup only.
+			}
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ClosingWindow_CancelsAndClearsOwnedOperationsAndStopsDebounceTimer()
 	{
 		using var project = UiTestProject.CreateDefault();

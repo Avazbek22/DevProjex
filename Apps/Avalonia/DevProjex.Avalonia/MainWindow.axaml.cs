@@ -301,7 +301,12 @@ public partial class MainWindow : Window
     private const double PreviewToolbarCompactThreshold = 320.0;
     private const double ToastHostBottomMargin = 38.0;
     private const double ToastHostHorizontalInset = 12.0;
+    private const double StartupRevealHiddenOpacity = 0.0;
+    private const double StartupRevealVisibleOpacity = 1.0;
+    private static readonly TimeSpan StartupBackdropWarmupDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(90));
     private PreviewToolbarLayoutMode _previewToolbarLayoutMode = PreviewToolbarLayoutMode.Wide;
+    private bool _startupRevealGateActive;
+    private bool _startupRevealCompleted;
 
     // Preview generation
     private bool _previewScrollSyncActive;
@@ -344,6 +349,8 @@ public partial class MainWindow : Window
         AvaloniaAppServices services,
         IReadOnlyList<CommandLineParseError>? startupCommandLineErrors = null)
     {
+        PrepareStartupRevealGate();
+
         _startupOptions = startupOptions;
         _startupCommandLineErrors = startupCommandLineErrors ?? [];
         _localization = services.Localization;
@@ -567,6 +574,10 @@ public partial class MainWindow : Window
             () => !string.IsNullOrWhiteSpace(_viewModel.NameFilter),
             _viewModel.SetFilterInProgress);
         _themeBrushCoordinator = new ThemeBrushCoordinator(this, _viewModel, () => _topMenuBar?.MainMenuControl);
+        // Publish builds can reach the first native frame much faster than local debug runs.
+        // Prime the saved material/backdrop before the startup reveal gate waits for the
+        // first render frames, otherwise the gate would only hide the default XAML surface.
+        ApplyStartupThemePreset();
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
@@ -898,6 +909,74 @@ public partial class MainWindow : Window
         await YieldUiAsync(DispatcherPriority.Render);
     }
 
+    private void PrepareStartupRevealGate()
+    {
+        if (!ShouldUseStartupRevealGate())
+            return;
+
+        // Published single-file Windows builds can show the first HWND frame before
+        // DWM/WinUI composition has attached Acrylic/Mica. Keep the top-level invisible
+        // until the first render cycles have completed; the final opacity is restored in
+        // OnOpened before any user-visible startup dialogs or project-load work begin.
+        Opacity = StartupRevealHiddenOpacity;
+        _startupRevealGateActive = true;
+    }
+
+    internal static bool ShouldUseStartupRevealGate()
+        => OperatingSystem.IsWindows();
+
+    private async Task RevealStartupWindowAfterCompositionWarmupAsync()
+    {
+        if (!_startupRevealGateActive || _startupRevealCompleted)
+            return;
+
+        try
+        {
+            await YieldUiAsync(DispatcherPriority.Render);
+            await WaitForNextAnimationFrameAsync();
+            await WaitForNextAnimationFrameAsync();
+            await YieldUiAsync(DispatcherPriority.Loaded);
+
+            // The Avalonia frame is ready at this point, but the native Windows backdrop
+            // may still attach one beat later in published builds. This tiny pause hides
+            // that platform-level transparent/square intermediate frame without changing
+            // the steady-state UI.
+            await Task.Delay(StartupBackdropWarmupDelay);
+        }
+        finally
+        {
+            CompleteStartupRevealGate();
+        }
+    }
+
+    private async Task WaitForNextAnimationFrameAsync()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            RequestAnimationFrame(_ => completion.TrySetResult(true));
+        }
+        catch
+        {
+            // If a platform denies RAF during startup, never keep the main window hidden.
+            return;
+        }
+
+        await Task.WhenAny(
+            completion.Task,
+            Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250))));
+    }
+
+    private void CompleteStartupRevealGate()
+    {
+        if (_startupRevealCompleted)
+            return;
+
+        _startupRevealCompleted = true;
+        _startupRevealGateActive = false;
+        Opacity = StartupRevealVisibleOpacity;
+    }
+
     private async void OnOpened(object? sender, EventArgs e)
     {
         try
@@ -905,7 +984,8 @@ public partial class MainWindow : Window
             _taskbarProgress.Attach(this);
 
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
-            ApplyStartupThemePreset();
+
+            await RevealStartupWindowAfterCompositionWarmupAsync();
 
             if (_startupCommandLineErrors.Count > 0)
             {
