@@ -42,12 +42,9 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 
 ---
 
-## App Screenshots 🖼️
+## App Demo 🖼️
 
-> <img width="1723" height="1183" src="https://github.com/user-attachments/assets/a6752e4d-2616-42d4-85fd-cd541506f0cf" />
-> <img width="1696" height="1188" src="https://github.com/user-attachments/assets/f09737e7-56ac-43d5-8fa7-95e3a36f76ab" />
-> <img width="1692" height="1175" src="https://github.com/user-attachments/assets/99e7de19-8a23-4171-90ec-6f0441130e98" />
-> <img width="1715" height="1171" src="https://github.com/user-attachments/assets/6812e8c5-bcaa-45d9-acfa-8a21d3084a03" />
+<img src="Docs/Media/readme-demo/devprojex-demo-04-readme.gif" alt="DevProjex desktop app demo" width="100%" />
 
 ---
 
