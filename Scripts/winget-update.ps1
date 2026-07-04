@@ -6,7 +6,7 @@
   This script automates the common winget update flow:
     1) asks release version (supports 1-4 numeric segments)
     2) normalizes PackageVersion to 4 segments for winget
-    3) builds GitHub installer URL for the selected architecture
+    3) builds GitHub installer URLs for the selected architecture set
     4) runs wingetcreate update into a temp folder
     5) updates License field in locale manifests
     6) validates manifest locally
@@ -24,8 +24,8 @@ param(
     [string]$Version = "",
     [string]$PackageIdentifier = "OlimoffDev.DevProjex",
     [string]$Repository = "Avazbek22/DevProjex",
-    [ValidateSet("x64", "arm64")]
-    [string]$Architecture = "x64",
+    [ValidateSet("x64", "arm64", "all")]
+    [string]$Architecture = "all",
     [string]$LicenseValue = "GPL-3.0-only"
 )
 
@@ -110,6 +110,17 @@ function Test-RemoteFileAvailable([string]$url) {
     catch {
         return $false
     }
+}
+
+function Resolve-InstallerTargets([string]$architecture) {
+    if ($architecture -eq "all") {
+        # The published winget manifest contains both architectures. wingetcreate
+        # requires the update command to keep the installer URL count identical,
+        # so the default release flow must update x64 and arm64 together.
+        return @("x64", "arm64")
+    }
+
+    return @($architecture)
 }
 
 function Resolve-ManifestRoot([string]$outDirectory, [string]$packageIdentifier, [string]$packageVersion) {
@@ -220,7 +231,7 @@ function Try-PostPrComment(
     [string]$prNumber,
     [string]$packageIdentifier,
     [string]$packageVersion,
-    [string]$installerUrl,
+    [string[]]$installerUrls,
     [bool]$installTestExecuted
 ) {
     if ([string]::IsNullOrWhiteSpace($prNumber)) {
@@ -233,11 +244,12 @@ function Try-PostPrComment(
     }
 
     $testedLine = if ($installTestExecuted) { "- Local install test: PASS (`winget install --manifest`)"} else { "- Local install test: SKIPPED" }
+    $installerLines = ($installerUrls | ForEach-Object { "- Installer: $_" }) -join [Environment]::NewLine
     $comment = @"
 Automated update summary:
 - Package: $packageIdentifier
 - Version: $packageVersion
-- Installer: $installerUrl
+$installerLines
 - Local validation: PASS (`winget validate --manifest`)
 $testedLine
 - Manifest schema: 1.10
@@ -266,19 +278,37 @@ $versionInfo = Parse-VersionInfo -rawVersion $resolvedVersionInput
 $displayVersion = [string]$versionInfo.DisplayVersion
 $packageVersion = [string]$versionInfo.PackageVersion
 $releaseTag = "v$displayVersion"
-$defaultInstallerName = "DevProjex.v$displayVersion.win-$Architecture.exe"
-$installerName = Read-Required -prompt "Installer file name in GitHub release" -defaultValue $defaultInstallerName
-$installerUrl = "https://github.com/$Repository/releases/download/$releaseTag/$installerName"
+$installerTargets = @(Resolve-InstallerTargets -architecture $Architecture)
+$installerEntries = @(
+    foreach ($installerArchitecture in $installerTargets) {
+        $defaultInstallerName = "DevProjex.v$displayVersion.win-$installerArchitecture.exe"
+        $installerName = if ($installerTargets.Count -eq 1) {
+            Read-Required -prompt "Installer file name in GitHub release" -defaultValue $defaultInstallerName
+        }
+        else {
+            $defaultInstallerName
+        }
+
+        [pscustomobject]@{
+            Architecture = $installerArchitecture
+            Url = "https://github.com/$Repository/releases/download/$releaseTag/$installerName"
+        }
+    }
+)
 
 Write-Step "Winget update plan"
 Write-Host "PackageIdentifier: $PackageIdentifier"
 Write-Host "DisplayVersion   : $displayVersion"
 Write-Host "PackageVersion   : $packageVersion"
 Write-Host "Architecture     : $Architecture"
-Write-Host "Installer URL    : $installerUrl"
+foreach ($installerEntry in $installerEntries) {
+    Write-Host ("Installer URL    : {0} -> {1}" -f $installerEntry.Architecture, $installerEntry.Url)
+}
 
-if (-not (Test-RemoteFileAvailable -url $installerUrl)) {
-    throw "Installer URL is not reachable: $installerUrl"
+foreach ($installerEntry in $installerEntries) {
+    if (-not (Test-RemoteFileAvailable -url $installerEntry.Url)) {
+        throw "Installer URL is not reachable: $($installerEntry.Url)"
+    }
 }
 
 $tempOut = Join-Path $env:TEMP ("winget-update-" + ($PackageIdentifier -replace '[^a-zA-Z0-9\.-]', '_') + "-" + $packageVersion)
@@ -287,13 +317,17 @@ if (Test-Path $tempOut) {
 }
 
 Write-Step "Generating updated manifest"
-Invoke-ExternalCommand -filePath "wingetcreate" -arguments @(
+$wingetUrlArguments = @($installerEntries | ForEach-Object { "$($_.Url)|$($_.Architecture)" })
+$wingetUpdateArguments = @(
     "update",
-    "--urls", "$installerUrl|$Architecture",
+    "--urls"
+) + $wingetUrlArguments + @(
     "--version", $packageVersion,
     "--out", $tempOut,
     $PackageIdentifier
-) -failureMessage "wingetcreate update failed"
+)
+
+Invoke-ExternalCommand -filePath "wingetcreate" -arguments $wingetUpdateArguments -failureMessage "wingetcreate update failed"
 
 $manifestRoot = Resolve-ManifestRoot -outDirectory $tempOut -packageIdentifier $PackageIdentifier -packageVersion $packageVersion
 Update-LicenseInLocaleManifests -manifestRoot $manifestRoot -licenseValue $LicenseValue
@@ -334,7 +368,7 @@ $prNumber = Try-GetPrNumberFromUrl -prUrl $prUrl
 
 if (-not [string]::IsNullOrWhiteSpace($prNumber)) {
     Try-UpdatePrChecklist -prNumber $prNumber -installTestExecuted $installTestExecuted
-    Try-PostPrComment -prNumber $prNumber -packageIdentifier $PackageIdentifier -packageVersion $packageVersion -installerUrl $installerUrl -installTestExecuted $installTestExecuted
+    Try-PostPrComment -prNumber $prNumber -packageIdentifier $PackageIdentifier -packageVersion $packageVersion -installerUrls @($installerEntries.Url) -installTestExecuted $installTestExecuted
 }
 
 Write-Step "Completed"
