@@ -8,7 +8,7 @@
         x:DataType="vm:MainWindowViewModel"
         x:CompileBindings="True"
         Title="{Binding Title}"
-        Icon="avares://DevProjex/AppIcon/icon-256.png"
+        Icon="avares://DevProjex/AppIcon/app.ico"
         Width="1200" Height="800"
         MinWidth="850" MinHeight="600"
         TransparencyLevelHint="Mica, AcrylicBlur, Blur"

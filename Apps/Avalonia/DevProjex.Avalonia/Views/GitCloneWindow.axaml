@@ -14,7 +14,7 @@
         Background="Transparent"
         WindowDecorations="None"
         TransparencyLevelHint="AcrylicBlur, Blur, None"
-        Icon="avares://DevProjex/AppIcon/icon-256.png">
+        Icon="avares://DevProjex/AppIcon/app.ico">
   <Window.Styles>
     <Style Selector="Border.clone-window-card">
       <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />

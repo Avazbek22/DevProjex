@@ -96,18 +96,19 @@ public sealed class AppIconValidationTests
     [Fact]
     public void WindowsStandardSizes_AreCorrect()
     {
-        var windowsSizes = new[] { 16, 24, 32, 48, 64, 128, 256 };
+        var windowsSizes = new[] { 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 128, 256 };
 
-        // All sizes should be powers of 2 (except 24 and 48)
-        var powersOfTwo = windowsSizes.Where(s => s != 24 && s != 48);
+        // Windows asks for these exact non-power-of-two sizes at common DPI scale factors.
+        var dpiSpecificSizes = new HashSet<int> { 20, 24, 30, 36, 40, 48, 60, 72, 80, 96 };
+        var powersOfTwo = windowsSizes.Where(s => !dpiSpecificSizes.Contains(s));
         foreach (var size in powersOfTwo)
         {
             Assert.True(IsPowerOfTwo(size), $"{size} should be power of 2");
         }
 
-        // Should include taskbar sizes
-        Assert.Contains(32, windowsSizes);
-        Assert.Contains(48, windowsSizes);
+        Assert.Contains(30, windowsSizes); // Taskbar at 125 percent scale.
+        Assert.Contains(36, windowsSizes); // Taskbar at 150 percent scale.
+        Assert.Contains(40, windowsSizes); // Titlebar at 250 percent scale.
 
         // Should include high-DPI size
         Assert.Contains(256, windowsSizes);
@@ -166,6 +167,7 @@ public sealed class AppIconValidationTests
     [InlineData(new[] { 16, 32 }, false)]                // No large size
     [InlineData(new[] { 16, 32, 256 }, true)]            // Minimum viable
     [InlineData(new[] { 16, 24, 32, 48, 64, 128, 256 }, true)] // Complete
+    [InlineData(new[] { 256, 128, 96, 80, 72, 64, 60, 48, 44, 40, 36, 32, 30, 24, 20, 16 }, true)] // DPI-complete
     public void IcoSizeSet_ValidatesCompleteness(int[] sizes, bool expectedComplete)
     {
         var isComplete = ValidateIcoSizeSet(sizes);
