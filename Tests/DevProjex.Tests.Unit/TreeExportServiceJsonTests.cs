@@ -295,6 +295,36 @@ public sealed class TreeExportServiceJsonTests
 	}
 
 	[Fact]
+	public void BuildFullTree_JsonTree_UsesSameCaseInsensitiveOrderingOnEveryPlatform()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonPlatformOrderingFixture");
+		var root = new TreeNodeDescriptor(
+			"Root",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[
+				new("README.md", Path.Combine(rootPath, "README.md"), false, false, "markdown", []),
+				new("global.json", Path.Combine(rootPath, "global.json"), false, false, "json", []),
+				new("Api", Path.Combine(rootPath, "Api"), true, false, "folder", []),
+				new("app", Path.Combine(rootPath, "app"), true, false, "folder", []),
+				new("README.local.md", Path.Combine(rootPath, "README.local.md"), false, false, "markdown", [])
+			]);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
+
+		using var document = JsonDocument.Parse(result);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(["Api", "app", "/"], tree.EnumerateObject().Select(static property => property.Name).ToArray());
+		Assert.Equal(["global.json", "README.local.md", "README.md"], tree.GetProperty("/")
+			.EnumerateArray()
+			.Select(static item => item.GetString()!)
+			.ToArray());
+	}
+
+	[Fact]
 	public void BuildFullTree_JsonTree_EmptyRootWritesEmptyTree()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonEmptyRootFixture");

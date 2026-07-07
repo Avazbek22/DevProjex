@@ -4,6 +4,8 @@ namespace DevProjex.Application.Services;
 
 public sealed class TreeExportService
 {
+	private static readonly StringComparer JsonTreeNameComparer = StringComparer.OrdinalIgnoreCase;
+
 	private static readonly JsonWriterOptions JsonWriterOptions = new()
 	{
 		Indented = true
@@ -342,7 +344,7 @@ public sealed class TreeExportService
 		if (left.IsDirectory != right.IsDirectory)
 			return left.IsDirectory ? -1 : 1;
 
-		var comparison = PathComparer.Default.Compare(left.DisplayName, right.DisplayName);
+		var comparison = JsonTreeNameComparer.Compare(left.DisplayName, right.DisplayName);
 		return comparison != 0
 			? comparison
 			: StringComparer.Ordinal.Compare(left.DisplayName, right.DisplayName);
