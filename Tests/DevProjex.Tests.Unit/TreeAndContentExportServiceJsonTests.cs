@@ -1,9 +1,9 @@
 namespace DevProjex.Tests.Unit;
 
-public sealed class TreeAndContentExportServiceJsonCompactTests
+public sealed class TreeAndContentExportServiceJsonTests
 {
 	[Fact]
-	public void Build_WithJsonFormat_UsesCompactTreeShapeAndPlainTextContent()
+	public void Build_WithJsonFormat_UsesJsonTreeShapeAndPlainTextContent()
 	{
 		using var temp = new TemporaryDirectory();
 		var first = temp.CreateFile("a.txt", "A");

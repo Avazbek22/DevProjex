@@ -57,7 +57,7 @@ public sealed class TreeAndContentExportPathPresentationTests
 	}
 
 	[Fact]
-	public async Task BuildAsync_WithJsonFormat_UsesCompactTreeAndRelativeContentHeaders()
+	public async Task BuildAsync_WithJsonFormat_UsesJsonTreeAndRelativeContentHeaders()
 	{
 		using var temp = new TemporaryDirectory();
 		var filePath = temp.CreateFile("src/main.cs", "class Program {}");

@@ -142,12 +142,12 @@ Combine arborescence et contenu :
 Raccourci : Ctrl+Shift+V.
 
 ### Représentation JSON
-Le mode JSON utilise une structure compacte de l’arborescence.
+Le mode JSON utilise une représentation structurée de l’arborescence.
 
 Arborescence (Copier l’arborescence / Exporter l’arborescence) :
 * `rootPath` — chemin racine absolu normalisé avec `/`.
 * `tree` — contenu du dossier racine.
-* L’export JSON utilise un format d’arborescence compact : les tableaux contiennent les fichiers, les objets contiennent les sous-dossiers, `/` contient les fichiers du dossier courant, et `[]` représente un dossier vide.
+* L’export JSON utilise ce format d’arborescence : les tableaux contiennent les fichiers, les objets contiennent les sous-dossiers, `/` contient les fichiers du dossier courant, et `[]` représente un dossier vide.
 
 Arborescence + contenu :
 * JSON s’applique au bloc arborescence ;

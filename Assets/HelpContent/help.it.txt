@@ -142,12 +142,12 @@ Combina albero e contenuto:
 Scorciatoia: Ctrl+Shift+V.
 
 ### Rappresentazione JSON
-In modalità JSON viene usata una struttura compatta dell’albero.
+In modalità JSON viene usata una rappresentazione strutturata dell’albero.
 
 Albero (Copia albero / Esporta albero):
 * `rootPath` — percorso radice assoluto normalizzato con `/`.
 * `tree` — contenuto della cartella radice.
-* L’export JSON usa un formato albero compatto: gli array contengono i file, gli oggetti contengono le sottocartelle, `/` contiene i file della cartella corrente e `[]` rappresenta una cartella vuota.
+* L’export JSON usa questo formato albero: gli array contengono i file, gli oggetti contengono le sottocartelle, `/` contiene i file della cartella corrente e `[]` rappresenta una cartella vuota.
 
 Albero + contenuto:
 * JSON si applica al blocco albero;

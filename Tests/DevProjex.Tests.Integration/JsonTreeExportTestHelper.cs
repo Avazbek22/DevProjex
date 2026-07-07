@@ -39,7 +39,7 @@ internal static class JsonTreeExportTestHelper
 		Assert.Equal(["rootPath", "tree"], propertyNames);
 	}
 
-	public static void AssertFableTreeStructure(JsonElement tree) => AssertFableObject(tree);
+	public static void AssertJsonTreeStructure(JsonElement tree) => AssertJsonTreeObject(tree);
 
 	public static string NormalizeJsonPath(string path)
 		=> Path.GetFullPath(path).Replace('\\', '/');
@@ -103,7 +103,7 @@ internal static class JsonTreeExportTestHelper
 		}
 	}
 
-	private static void AssertFableObject(JsonElement node)
+	private static void AssertJsonTreeObject(JsonElement node)
 	{
 		Assert.Equal(JsonValueKind.Object, node.ValueKind);
 		foreach (var property in node.EnumerateObject())
@@ -122,7 +122,7 @@ internal static class JsonTreeExportTestHelper
 			}
 
 			Assert.Equal(JsonValueKind.Object, property.Value.ValueKind);
-			AssertFableObject(property.Value);
+			AssertJsonTreeObject(property.Value);
 		}
 	}
 

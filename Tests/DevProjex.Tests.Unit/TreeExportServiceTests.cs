@@ -307,7 +307,7 @@ public sealed class TreeExportServiceTests
 		Assert.True(TreeExportService.HasSelectedDescendantOrSelf(node, selected));
 	}
 
-	// Verifies JSON export writes the compact Fable-style tree contract.
+	// Verifies JSON export writes the JSON tree contract.
 	[Fact]
 	public void BuildFullTree_JsonFormat_ReturnsValidJson()
 	{

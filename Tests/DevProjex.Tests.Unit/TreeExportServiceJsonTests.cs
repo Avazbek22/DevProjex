@@ -1,9 +1,9 @@
 namespace DevProjex.Tests.Unit;
 
-public sealed class TreeExportServiceJsonCompactTests
+public sealed class TreeExportServiceJsonTests
 {
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_WritesOnlyRootPathAndTree()
+	public void BuildFullTree_JsonTree_WritesOnlyRootPathAndTree()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -17,7 +17,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_SerializesFolderWithOnlyFilesAsArray()
+	public void BuildFullTree_JsonTree_SerializesFolderWithOnlyFilesAsArray()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -32,7 +32,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_RepresentsEmptyFolderAsEmptyArray()
+	public void BuildFullTree_JsonTree_RepresentsEmptyFolderAsEmptyArray()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -47,7 +47,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_WritesRootLevelFilesInsideTree()
+	public void BuildFullTree_JsonTree_WritesRootLevelFilesInsideTree()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -62,7 +62,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_FolderWithOnlySubfoldersUsesObjectWithoutSlash()
+	public void BuildFullTree_JsonTree_FolderWithOnlySubfoldersUsesObjectWithoutSlash()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -77,7 +77,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_FolderWithFilesAndSubfoldersUsesSlashForCurrentFolderFiles()
+	public void BuildFullTree_JsonTree_FolderWithFilesAndSubfoldersUsesSlashForCurrentFolderFiles()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonMixedFolderFixture");
 		var root = new TreeNodeDescriptor(
@@ -119,7 +119,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_RootWithOnlyFilesUsesSlashArrayInsideTreeObject()
+	public void BuildFullTree_JsonTree_RootWithOnlyFilesUsesSlashArrayInsideTreeObject()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonRootFilesFixture");
 		var root = new TreeNodeDescriptor(
@@ -143,7 +143,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_PreservesMixedAndDeepHierarchy()
+	public void BuildFullTree_JsonTree_PreservesMixedAndDeepHierarchy()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -163,7 +163,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_DoesNotWriteLegacyContractFields()
+	public void BuildFullTree_JsonTree_DoesNotWriteLegacyContractFields()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -172,11 +172,11 @@ public sealed class TreeExportServiceJsonCompactTests
 
 		using var document = JsonDocument.Parse(result);
 		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
-		JsonTreeExportTestHelper.AssertFableTreeStructure(JsonTreeExportTestHelper.GetTree(document));
+		JsonTreeExportTestHelper.AssertJsonTreeStructure(JsonTreeExportTestHelper.GetTree(document));
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_NormalizesWindowsRootPathToForwardSlashes()
+	public void BuildFullTree_JsonTree_NormalizesWindowsRootPathToForwardSlashes()
 	{
 		var rootPath = @"C:\Users\name\Project";
 		var root = new TreeNodeDescriptor(
@@ -199,7 +199,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_PreservesUnicodeAndSpecialJsonCharacters()
+	public void BuildFullTree_JsonTree_PreservesUnicodeAndSpecialJsonCharacters()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonSpecialFixture");
 		var root = new TreeNodeDescriptor(
@@ -235,7 +235,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_PreservesCaseDistinctFileNames()
+	public void BuildFullTree_JsonTree_PreservesCaseDistinctFileNames()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonCaseFixture");
 		var root = new TreeNodeDescriptor(
@@ -260,7 +260,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_UsesDeterministicFoldersFirstOrdering()
+	public void BuildFullTree_JsonTree_UsesDeterministicFoldersFirstOrdering()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonOrderingFixture");
 		var root = new TreeNodeDescriptor(
@@ -295,7 +295,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_EmptyRootWritesEmptyTree()
+	public void BuildFullTree_JsonTree_EmptyRootWritesEmptyTree()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonEmptyRootFixture");
 		var root = new TreeNodeDescriptor("Root", rootPath, true, false, "folder", []);
@@ -309,7 +309,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildFullTree_JsonCompactTree_LargeTreeSmokeProducesValidFableStructure()
+	public void BuildFullTree_JsonTree_LargeTreeSmokeProducesValidStructure()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonLargeFixture");
 		var bigFolderChildren = new List<TreeNodeDescriptor>();
@@ -356,13 +356,13 @@ public sealed class TreeExportServiceJsonCompactTests
 
 		using var document = JsonDocument.Parse(result);
 		var tree = JsonTreeExportTestHelper.GetTree(document);
-		JsonTreeExportTestHelper.AssertFableTreeStructure(tree);
+		JsonTreeExportTestHelper.AssertJsonTreeStructure(tree);
 		Assert.Equal(301, JsonTreeExportTestHelper.CountFiles(tree));
 		Assert.True(JsonTreeExportTestHelper.ContainsFilePath(tree, "deep/nested/leaf.txt"));
 	}
 
 	[Fact]
-	public void BuildSelectedTree_JsonCompactTree_FileSelectionKeepsAncestorsOnly()
+	public void BuildSelectedTree_JsonTree_FileSelectionKeepsAncestorsOnly()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -376,7 +376,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_JsonCompactTree_EmptyFolderSelectionWritesEmptyArray()
+	public void BuildSelectedTree_JsonTree_EmptyFolderSelectionWritesEmptyArray()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -392,7 +392,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_JsonCompactTree_RootSelectionReturnsFullTreeContents()
+	public void BuildSelectedTree_JsonTree_RootSelectionReturnsFullTreeContents()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -407,7 +407,7 @@ public sealed class TreeExportServiceJsonCompactTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_JsonCompactTree_NoSelectionReturnsEmptyString()
+	public void BuildSelectedTree_JsonTree_NoSelectionReturnsEmptyString()
 	{
 		var fixture = CreateFixture();
 		var service = new TreeExportService();
@@ -428,7 +428,7 @@ public sealed class TreeExportServiceJsonCompactTests
 		string EmptyFolderPath
 	) CreateFixture()
 	{
-		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonCompactFixture");
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonFixture");
 		var folderPath = Path.Combine(rootPath, "Folder");
 		var srcPath = Path.Combine(rootPath, "src");
 		var featuresPath = Path.Combine(srcPath, "features");

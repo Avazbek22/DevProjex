@@ -42,10 +42,10 @@ internal static class JsonTreeExportTestHelper
 			Assert.False(root.TryGetProperty(forbidden, out _), $"Unexpected top-level JSON tree property '{forbidden}'.");
 
 		AssertNoLegacyNodeShape(root);
-		AssertFableTreeStructure(GetTreeFromRoot(root));
+		AssertJsonTreeStructure(GetTreeFromRoot(root));
 	}
 
-	public static void AssertFableTreeStructure(JsonElement tree) => AssertFableObject(tree);
+	public static void AssertJsonTreeStructure(JsonElement tree) => AssertJsonTreeObject(tree);
 
 	public static string NormalizeJsonPath(string path)
 		=> Path.GetFullPath(path).Replace('\\', '/');
@@ -109,7 +109,7 @@ internal static class JsonTreeExportTestHelper
 		}
 	}
 
-	private static void AssertFableObject(JsonElement node)
+	private static void AssertJsonTreeObject(JsonElement node)
 	{
 		Assert.Equal(JsonValueKind.Object, node.ValueKind);
 		foreach (var property in node.EnumerateObject())
@@ -128,7 +128,7 @@ internal static class JsonTreeExportTestHelper
 			}
 
 			Assert.Equal(JsonValueKind.Object, property.Value.ValueKind);
-			AssertFableObject(property.Value);
+			AssertJsonTreeObject(property.Value);
 		}
 	}
 
@@ -142,7 +142,7 @@ internal static class JsonTreeExportTestHelper
 	private static void AssertNoLegacyNodeShape(JsonElement element)
 	{
 		if (element.ValueKind == JsonValueKind.Null)
-			throw new Xunit.Sdk.XunitException("Fable-style JSON tree must not contain null values.");
+			throw new Xunit.Sdk.XunitException("JSON tree must not contain null values.");
 
 		if (element.ValueKind != JsonValueKind.Object)
 			return;
