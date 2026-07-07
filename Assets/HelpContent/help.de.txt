@@ -145,15 +145,14 @@ Tastenkürzel: Ctrl+Shift+V.
 Im JSON-Modus wird eine kompakte Baumstruktur verwendet.
 
 Baum (Baum kopieren / Baum exportieren):
-* `rootPath` — Wurzelpfad im aktuellen Ausgabeformat:
-  * für einen lokalen Ordner — absoluter lokaler Pfad;
-  * für ein Git-Projekt — Repository-URL.
-* `root` — Wurzelknoten.
-* Knotenfelder: `name`, `path`, `dirs`, `files`, `accessDenied` (bei Bedarf).
+* `rootPath` — absoluter Wurzelpfad, mit `/` normalisiert.
+* `tree` — Inhalt des Wurzelordners.
+* Der JSON-Export verwendet ein kompaktes Baumformat: Arrays enthalten Dateien, Objekte enthalten Unterordner, `/` enthält Dateien des aktuellen Ordners, und `[]` steht für einen leeren Ordner.
 
 Baum + Inhalt:
 * JSON gilt für den Baumblock;
 * der Inhaltsblock bleibt Text;
+* Dateiüberschriften im Inhaltsblock verwenden relative Pfade mit `/`;
 * Export erfolgt als `.txt`.
 
 ## 7) Vorschaumodus

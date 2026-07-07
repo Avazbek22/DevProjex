@@ -3,7 +3,7 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeAndContentExportServiceJsonCompactTests
 {
 	[Fact]
-	public void Build_WithJsonFormat_UsesCompactTreeShape()
+	public void Build_WithJsonFormat_UsesCompactTreeShapeAndPlainTextContent()
 	{
 		using var temp = new TemporaryDirectory();
 		var first = temp.CreateFile("a.txt", "A");
@@ -15,31 +15,24 @@ public sealed class TreeAndContentExportServiceJsonCompactTests
 			true,
 			false,
 			"folder",
-			new List<TreeNodeDescriptor>
-			{
-				new("a.txt", first, false, false, "text", new List<TreeNodeDescriptor>()),
-				new("b.txt", second, false, false, "text", new List<TreeNodeDescriptor>())
-			});
+			[
+				new("a.txt", first, false, false, "text", []),
+				new("b.txt", second, false, false, "text", [])
+			]);
 
-		var service = new TreeAndContentExportService(
-			new TreeExportService(),
-			new SelectedContentExportService(new FileContentAnalyzer()));
+		var service = CreateService();
 
 		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
 
-		// JSON tree + separator + text content
 		var (jsonPart, contentPart) = SplitJsonAndContent(result);
+		using var document = JsonDocument.Parse(jsonPart);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
 
-		using var doc = JsonDocument.Parse(jsonPart);
-		var tree = doc.RootElement.GetProperty("root");
-		Assert.Equal("root", tree.GetProperty("name").GetString());
-		Assert.Equal(".", tree.GetProperty("path").GetString());
-		Assert.True(tree.TryGetProperty("files", out _));
-		Assert.False(tree.TryGetProperty("fullPath", out _));
-		Assert.False(tree.TryGetProperty("children", out _));
-
-		// Content is plain text
-		Assert.Contains("a.txt", contentPart);
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(document.RootElement);
+		Assert.Equal(["a.txt", "b.txt"], tree.GetProperty("/").EnumerateArray().Select(static item => item.GetString()!).ToArray());
+		Assert.False(document.RootElement.TryGetProperty("root", out _));
+		Assert.Contains("a.txt:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("A", contentPart, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -55,29 +48,25 @@ public sealed class TreeAndContentExportServiceJsonCompactTests
 			true,
 			false,
 			"folder",
-			new List<TreeNodeDescriptor>
-			{
-				new("first.txt", first, false, false, "text", new List<TreeNodeDescriptor>()),
-				new("second.txt", second, false, false, "text", new List<TreeNodeDescriptor>())
-			});
+			[
+				new("first.txt", first, false, false, "text", []),
+				new("second.txt", second, false, false, "text", [])
+			]);
 
-		var service = new TreeAndContentExportService(
-			new TreeExportService(),
-			new SelectedContentExportService(new FileContentAnalyzer()));
-		var selected = new HashSet<string> { first };
+		var service = CreateService();
+		var selected = new HashSet<string>(PathComparer.Default) { first };
 
 		var result = service.Build(temp.Path, root, selected, TreeTextFormat.Json);
 
-		// JSON tree + separator + text content
 		var (jsonPart, contentPart) = SplitJsonAndContent(result);
+		using var document = JsonDocument.Parse(jsonPart);
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(document));
 
-		using var doc = JsonDocument.Parse(jsonPart);
-		var files = doc.RootElement.GetProperty("root").GetProperty("files");
-
-		Assert.Equal(1, files.GetArrayLength());
-		Assert.Equal("first.txt", files[0].GetString());
-		Assert.Contains(first, contentPart);
-		Assert.DoesNotContain(second, contentPart);
+		Assert.Equal(["first.txt"], paths);
+		Assert.Contains("first.txt:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("first", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("second.txt:", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("second", contentPart, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -92,21 +81,55 @@ public sealed class TreeAndContentExportServiceJsonCompactTests
 			true,
 			false,
 			"folder",
-			new List<TreeNodeDescriptor>
-			{
-				new("image.bin", binary, false, false, "binary", new List<TreeNodeDescriptor>())
-			});
+			[
+				new("image.bin", binary, false, false, "binary", [])
+			]);
 
-		var service = new TreeAndContentExportService(
-			new TreeExportService(),
-			new SelectedContentExportService(new FileContentAnalyzer()));
+		var service = CreateService();
 
 		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
 
-		// Only JSON tree, no content (binary file)
-		using var doc = JsonDocument.Parse(result);
-		Assert.True(doc.RootElement.TryGetProperty("root", out _));
+		using var document = JsonDocument.Parse(result);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(["image.bin"], tree.GetProperty("/").EnumerateArray().Select(static item => item.GetString()!).ToArray());
 	}
+
+	[Fact]
+	public void Build_WithJsonFormat_ContentHeadersUseRelativeForwardSlashPaths()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}");
+		var root = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[
+				new(
+					"src",
+					Path.Combine(temp.Path, "src"),
+					true,
+					false,
+					"folder",
+					[
+						new("App.cs", file, false, false, "csharp", [])
+					])
+			]);
+
+		var service = CreateService();
+
+		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
+
+		var (_, contentPart) = SplitJsonAndContent(result);
+		Assert.Contains("src/App.cs:", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain(temp.Path.Replace('\\', '/'), contentPart.Replace('\\', '/'), StringComparison.Ordinal);
+	}
+
+	private static TreeAndContentExportService CreateService()
+		=> new(
+			new TreeExportService(),
+			new SelectedContentExportService(new FileContentAnalyzer()));
 
 	private static (string JsonPart, string ContentPart) SplitJsonAndContent(string export)
 	{

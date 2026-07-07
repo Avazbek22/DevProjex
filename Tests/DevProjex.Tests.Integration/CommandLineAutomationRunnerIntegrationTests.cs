@@ -593,8 +593,10 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		Assert.Equal(string.Empty, error.ToString());
 		using var document = JsonDocument.Parse(output.ToString());
 		var root = document.RootElement;
-		Assert.Equal(Path.GetFullPath(temp.Path), root.GetProperty("rootPath").GetString());
-		Assert.Equal("App.cs", root.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), root.GetProperty("rootPath").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.DoesNotContain("class App", output.ToString(), StringComparison.Ordinal);
 	}
 
@@ -623,7 +625,9 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Equal(string.Empty, error.ToString());
 		using var document = JsonDocument.Parse(output.ToString());
-		Assert.Equal("App.cs", document.RootElement.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.DoesNotContain("class App", output.ToString(), StringComparison.Ordinal);
 	}
 
@@ -719,14 +723,14 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		using var reportDocument = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
 		using var exportDocument = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath, TestContext.Current.CancellationToken));
 		var reportRoot = reportDocument.RootElement;
-		var exportRoot = exportDocument.RootElement.GetProperty("root");
+		var exportTree = JsonTreeExportTestHelper.GetTree(exportDocument);
 
 		Assert.Equal(["smartIgnore", "useGitIgnore"], ReadStringArray(reportRoot.GetProperty("selection").GetProperty("selectedIgnoreOptions")));
-		Assert.Equal(ReadTreeFileCount(reportRoot), CountJsonTreeFiles(exportRoot));
-		Assert.True(JsonTreeContainsFile(exportRoot, "GitApp.cs"));
-		Assert.True(JsonTreeContainsFile(exportRoot, "WebApp.cs"));
-		Assert.False(JsonTreeContainsFile(exportRoot, "git-generated.txt"));
-		Assert.False(JsonTreeContainsFile(exportRoot, "bundle.js"));
+		Assert.Equal(ReadTreeFileCount(reportRoot), JsonTreeExportTestHelper.CountFiles(exportTree));
+		Assert.True(JsonTreeExportTestHelper.ContainsFileName(exportTree, "GitApp.cs"));
+		Assert.True(JsonTreeExportTestHelper.ContainsFileName(exportTree, "WebApp.cs"));
+		Assert.False(JsonTreeExportTestHelper.ContainsFileName(exportTree, "git-generated.txt"));
+		Assert.False(JsonTreeExportTestHelper.ContainsFileName(exportTree, "bundle.js"));
 	}
 
 	[Fact]
@@ -935,7 +939,9 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		var separatorIndex = payload.IndexOf("\u00A0", StringComparison.Ordinal);
 		Assert.True(separatorIndex > 0, "Expected tree-content JSON export to separate JSON tree from plain text content.");
 		using var document = JsonDocument.Parse(payload[..separatorIndex].TrimEnd('\r', '\n'));
-		Assert.Equal("App.cs", document.RootElement.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.Contains("class App", payload[separatorIndex..], StringComparison.Ordinal);
 	}
 
@@ -1056,35 +1062,6 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 
 	private static int ReadTreeFileCount(JsonElement root) =>
 		root.GetProperty("inventory").GetProperty("tree").GetProperty("fileCount").GetInt32();
-
-	private static int CountJsonTreeFiles(JsonElement node)
-	{
-		var count = 0;
-		if (node.TryGetProperty("files", out var files))
-			count += files.GetArrayLength();
-
-		if (node.TryGetProperty("dirs", out var directories))
-		{
-			foreach (var directory in directories.EnumerateArray())
-				count += CountJsonTreeFiles(directory);
-		}
-
-		return count;
-	}
-
-	private static bool JsonTreeContainsFile(JsonElement node, string fileName)
-	{
-		if (node.TryGetProperty("files", out var files) &&
-		    files.EnumerateArray().Any(file => string.Equals(file.GetString(), fileName, StringComparison.Ordinal)))
-		{
-			return true;
-		}
-
-		if (!node.TryGetProperty("dirs", out var directories))
-			return false;
-
-		return directories.EnumerateArray().Any(directory => JsonTreeContainsFile(directory, fileName));
-	}
 
 	private static CommandLineAutomationContext CreateContext(
 		TextWriter output,

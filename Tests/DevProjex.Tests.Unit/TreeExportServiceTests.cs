@@ -307,7 +307,7 @@ public sealed class TreeExportServiceTests
 		Assert.True(TreeExportService.HasSelectedDescendantOrSelf(node, selected));
 	}
 
-	// Verifies JSON export includes root metadata and nested children.
+	// Verifies JSON export writes the compact Fable-style tree contract.
 	[Fact]
 	public void BuildFullTree_JsonFormat_ReturnsValidJson()
 	{
@@ -329,15 +329,10 @@ public sealed class TreeExportServiceTests
 		var result = service.BuildFullTree("/root", root, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(result);
-		Assert.Equal(Path.GetFullPath("/root"), doc.RootElement.GetProperty("rootPath").GetString());
-		var jsonRoot = doc.RootElement.GetProperty("root");
-		Assert.Equal("root", jsonRoot.GetProperty("name").GetString());
-		Assert.Equal(".", jsonRoot.GetProperty("path").GetString());
-		var dirs = jsonRoot.GetProperty("dirs");
-		Assert.Equal(1, dirs.GetArrayLength());
-		Assert.Equal("src", dirs[0].GetProperty("name").GetString());
-		Assert.Equal("src", dirs[0].GetProperty("path").GetString());
-		Assert.Equal("main.cs", dirs[0].GetProperty("files")[0].GetString());
+		Assert.Equal(Path.GetFullPath("/root").Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/main.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 	}
 
 	// Verifies JSON selected export keeps only selected branch with ancestors.
@@ -361,8 +356,7 @@ public sealed class TreeExportServiceTests
 		var result = service.BuildSelectedTree("/root", root, selected, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(result);
-		var files = doc.RootElement.GetProperty("root").GetProperty("files");
-		Assert.Equal(1, files.GetArrayLength());
-		Assert.Equal("keep.txt", files[0].GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(["keep.txt"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 	}
 }

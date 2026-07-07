@@ -49,8 +49,9 @@ public sealed class TreeAndContentExportService(
 		var files = hasSelection
 			? GetSelectedFiles(selectedPaths)
 			: GetAllFilePaths(root);
+		var contentPathMapper = ResolveContentPathMapper(rootPath, format, pathPresentation);
 
-		var content = await contentExport.BuildAsync(files, cancellationToken, pathPresentation?.MapFilePath).ConfigureAwait(false);
+		var content = await contentExport.BuildAsync(files, cancellationToken, contentPathMapper).ConfigureAwait(false);
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
 
@@ -84,6 +85,39 @@ public sealed class TreeAndContentExportService(
 			foreach (var path in GetAllFilePaths(child))
 				yield return path;
 		}
+	}
+
+	private static Func<string, string>? ResolveContentPathMapper(
+		string rootPath,
+		TreeTextFormat format,
+		ExportPathPresentation? pathPresentation)
+	{
+		return format == TreeTextFormat.Json
+			? filePath => MapJsonContentPath(rootPath, filePath)
+			: pathPresentation?.MapFilePath;
+	}
+
+	private static string MapJsonContentPath(string rootPath, string filePath)
+	{
+		try
+		{
+			var relativePath = Path.GetRelativePath(Path.GetFullPath(rootPath), filePath);
+			if (!string.IsNullOrWhiteSpace(relativePath) &&
+			    relativePath != "." &&
+			    !relativePath.StartsWith("..", StringComparison.Ordinal) &&
+			    !Path.IsPathRooted(relativePath))
+			{
+				return relativePath.Replace('\\', '/');
+			}
+		}
+		catch
+		{
+			// Fall back to a stable leaf name; JSON tree-content headers should not repeat
+			// the absolute root path that is already present in the JSON block.
+		}
+
+		var fileName = Path.GetFileName(filePath);
+		return string.IsNullOrWhiteSpace(fileName) ? filePath.Replace('\\', '/') : fileName;
 	}
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);

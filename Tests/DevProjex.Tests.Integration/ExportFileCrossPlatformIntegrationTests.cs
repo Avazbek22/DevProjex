@@ -38,8 +38,12 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		Assert.False(StartsWithUtf8Bom(bytes));
 
 		using var doc = JsonDocument.Parse(bytes);
-		Assert.Equal(Path.GetFullPath(temp.Path), doc.RootElement.GetProperty("rootPath").GetString());
-		Assert.Equal(".", doc.RootElement.GetProperty("root").GetProperty("path").GetString());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(tree);
+		Assert.Contains("src/main.cs", paths);
+		Assert.Contains("README.md", paths);
 	}
 
 	[Fact]
@@ -51,8 +55,7 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var json = treeExport.BuildFullTree(temp.Path, fixture.Root, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(json);
-		var root = doc.RootElement.GetProperty("root");
-		foreach (var path in EnumerateTreePaths(root))
+		foreach (var path in JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(doc)))
 			Assert.DoesNotContain("\\", path);
 	}
 
@@ -82,9 +85,12 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var textPart = content[separatorIndex..];
 
 		using var doc = JsonDocument.Parse(jsonPart);
-		Assert.Equal(Path.GetFullPath(temp.Path), doc.RootElement.GetProperty("rootPath").GetString());
-		Assert.True(doc.RootElement.TryGetProperty("root", out var tree));
-		Assert.Equal("Root", tree.GetProperty("name").GetString());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(tree);
+		Assert.Contains("src/main.cs", paths);
+		Assert.Contains("README.md", paths);
 		Assert.Contains("main.cs", textPart);
 	}
 
@@ -118,11 +124,8 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var json = treeExport.BuildSelectedTree(temp.Path, fixture.Root, selected, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(json);
-		var root = doc.RootElement.GetProperty("root");
-		var srcDir = root.GetProperty("dirs")[0];
-		var files = srcDir.GetProperty("files").EnumerateArray().Select(x => x.GetString()).ToArray();
-		Assert.Single(files);
-		Assert.Equal("main.cs", files[0]);
+		var files = JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(doc));
+		Assert.Equal(["src/main.cs"], files);
 	}
 
 	[Fact]
@@ -151,12 +154,10 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		Assert.Contains("README.md", ascii);
 
 		using var doc = JsonDocument.Parse(json);
-		var root = doc.RootElement.GetProperty("root");
-		var rootFiles = root.GetProperty("files").EnumerateArray().Select(x => x.GetString()).ToArray();
-		var srcFiles = root.GetProperty("dirs")[0].GetProperty("files").EnumerateArray().Select(x => x.GetString()).ToArray();
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(doc));
 
-		Assert.Contains("README.md", rootFiles);
-		Assert.Contains("main.cs", srcFiles);
+		Assert.Contains("README.md", paths);
+		Assert.Contains("src/main.cs", paths);
 	}
 
 	[Fact]
@@ -185,25 +186,6 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 			await fileExport.WriteAsync(stream, content, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(content, await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken: TestContext.Current.CancellationToken));
-	}
-
-	private static IEnumerable<string> EnumerateTreePaths(JsonElement node)
-	{
-		if (node.TryGetProperty("path", out var pathElement) && pathElement.ValueKind == JsonValueKind.String)
-		{
-			var value = pathElement.GetString();
-			if (!string.IsNullOrWhiteSpace(value))
-				yield return value;
-		}
-
-		if (!node.TryGetProperty("dirs", out var dirsElement) || dirsElement.ValueKind != JsonValueKind.Array)
-			yield break;
-
-		foreach (var childDir in dirsElement.EnumerateArray())
-		{
-			foreach (var childPath in EnumerateTreePaths(childDir))
-				yield return childPath;
-		}
 	}
 
 	private static bool StartsWithUtf8Bom(byte[] bytes)
@@ -294,13 +276,13 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var jsonPart = content[..separatorIndex].TrimEnd('\r', '\n');
 
 		using var doc = JsonDocument.Parse(jsonPart);
-		var srcDir = doc.RootElement.GetProperty("root").GetProperty("dirs")[0];
-		var featuresDir = srcDir.GetProperty("dirs")[0];
-		var authDir = featuresDir.GetProperty("dirs")[0];
-		var hooksDir = authDir.GetProperty("dirs")[0];
-
-		Assert.Equal("src/features/auth/hooks", hooksDir.GetProperty("path").GetString());
-		Assert.Equal("useAuth.ts", hooksDir.GetProperty("files")[0].GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree
+			.GetProperty("src")
+			.GetProperty("features")
+			.GetProperty("auth")
+			.GetProperty("hooks").ValueKind);
+		Assert.Equal(["src/features/auth/hooks/useAuth.ts"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 	}
 
 	[Fact]
@@ -440,18 +422,8 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var json = treeExport.BuildSelectedTree(temp.Path, root, selected, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(json);
-		var rootNode = doc.RootElement.GetProperty("root");
-		var dirs = rootNode.GetProperty("dirs").EnumerateArray().ToList();
-
-		var srcNode = dirs.First(d => d.GetProperty("name").GetString() == "src");
-		var srcFiles = srcNode.GetProperty("files").EnumerateArray().Select(f => f.GetString()).ToList();
-		Assert.Single(srcFiles);
-		Assert.Equal("app.ts", srcFiles[0]);
-
-		var testsNode = dirs.First(d => d.GetProperty("name").GetString() == "tests");
-		var testFiles = testsNode.GetProperty("files").EnumerateArray().Select(f => f.GetString()).ToList();
-		Assert.Single(testFiles);
-		Assert.Equal("utils.test.ts", testFiles[0]);
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(doc));
+		Assert.Equal(["src/app.ts", "tests/utils.test.ts"], paths);
 	}
 
 	[Fact]
@@ -488,9 +460,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var jsonPart = content[..separatorIndex].TrimEnd('\r', '\n');
 
 		using var doc = JsonDocument.Parse(jsonPart);
-		var projectDir = doc.RootElement.GetProperty("root").GetProperty("dirs")[0];
-		Assert.Equal("проект", projectDir.GetProperty("name").GetString());
-		Assert.Equal("файл.txt", projectDir.GetProperty("files")[0].GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("проект").ValueKind);
+		Assert.Equal(["проект/файл.txt"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 
 		Assert.Contains("Содержимое на русском языке", content);
 		Assert.Contains("中文", content);
@@ -517,8 +489,7 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		stopwatch.Stop();
 
 		using var doc = JsonDocument.Parse(json);
-		var files = doc.RootElement.GetProperty("root").GetProperty("files");
-		Assert.Equal(500, files.GetArrayLength());
+		Assert.Equal(500, JsonTreeExportTestHelper.CountFiles(JsonTreeExportTestHelper.GetTree(doc)));
 		Assert.True(stopwatch.ElapsedMilliseconds < 5000, $"Export took too long: {stopwatch.ElapsedMilliseconds}ms");
 	}
 
@@ -551,9 +522,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		Assert.Contains("src", ascii);
 
 		using var doc = JsonDocument.Parse(json);
-		var rootNode = doc.RootElement.GetProperty("root");
-		Assert.Equal("README.md", rootNode.GetProperty("files")[0].GetString());
-		Assert.Equal("main.cs", rootNode.GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(doc));
+		Assert.Contains("README.md", paths);
+		Assert.Contains("src/main.cs", paths);
 	}
 
 	[Fact]
@@ -613,10 +584,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var contentPart = payload[separatorIndex..];
 
 		using var doc = JsonDocument.Parse(jsonPart);
-		var files = doc.RootElement.GetProperty("root").GetProperty("files");
-		var fileNames = files.EnumerateArray().Select(f => f.GetString()).ToList();
-		Assert.Contains("readme.txt", fileNames);
-		Assert.Contains("image.png", fileNames);
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(doc));
+		Assert.Contains("readme.txt", paths);
+		Assert.Contains("image.png", paths);
 
 		Assert.Contains("Hello World", contentPart);
 		Assert.DoesNotContain("image.png:", contentPart);

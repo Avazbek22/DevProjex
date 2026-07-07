@@ -231,10 +231,11 @@ public sealed class TreeAndContentExportServiceTests
 		var contentPart = result[separatorIndex..];
 
 		using var doc = JsonDocument.Parse(jsonPart);
-		Assert.Equal(temp.Path, doc.RootElement.GetProperty("rootPath").GetString());
-		Assert.True(doc.RootElement.TryGetProperty("root", out var treeElement));
-		Assert.Equal("root", treeElement.GetProperty("name").GetString());
-		Assert.Equal(".", treeElement.GetProperty("path").GetString());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("/").ValueKind);
+		Assert.Equal(["note.txt"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.False(doc.RootElement.TryGetProperty("root", out _));
 		Assert.Contains("note.txt", contentPart);
 	}
 }

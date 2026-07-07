@@ -132,7 +132,9 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		using var document = JsonDocument.Parse(jsonPart);
 		var root = document.RootElement;
 		Assert.Equal(GetComparablePath(projectPath), GetComparablePath(root.GetProperty("rootPath").GetString()!));
-		Assert.Equal("App.cs", root.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.Contains("App.cs:", contentPart, StringComparison.Ordinal);
 		Assert.Contains("public static class App", contentPart, StringComparison.Ordinal);
 		Assert.DoesNotContain("Readme.txt", result.Stdout, StringComparison.Ordinal);
@@ -910,7 +912,10 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
 		using var document = JsonDocument.Parse(result.Stdout);
-		Assert.Equal(Path.GetFullPath(temp.Path), document.RootElement.GetProperty("rootPath").GetString());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), document.RootElement.GetProperty("rootPath").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.DoesNotContain("class App", result.Stdout, StringComparison.Ordinal);
 	}
 
@@ -931,7 +936,9 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
 		using var document = JsonDocument.Parse(result.Stdout);
-		Assert.Equal("App.cs", document.RootElement.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.DoesNotContain("class App", result.Stdout, StringComparison.Ordinal);
 	}
 
