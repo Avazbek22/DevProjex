@@ -37,23 +37,23 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
         {
             await UiTestDriver.OpenPreviewAsync(window);
 
-            var treeIsland = UiTestDriver.GetRequiredControl<Border>(window, "TreeIsland");
+            var treePaneContainer = UiTestDriver.GetRequiredControl<Border>(window, "TreePaneContainer");
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "TreePreviewSplitter");
-            var initialWidth = UiTestDriver.GetBoundsInWindow(treeIsland, window).Width;
+            var initialWidth = UiTestDriver.GetBoundsInWindow(treePaneContainer, window).Width;
             Assert.InRange(initialWidth, 417, 419);
 
             window.Width += 240;
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
-            var widthAfterWindowExpansion = UiTestDriver.GetBoundsInWindow(treeIsland, window).Width;
+            var widthAfterWindowExpansion = UiTestDriver.GetBoundsInWindow(treePaneContainer, window).Width;
             Assert.InRange(Math.Abs(widthAfterWindowExpansion - initialWidth), 0, 1.5);
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 100);
-            var manuallyExpandedWidth = UiTestDriver.GetBoundsInWindow(treeIsland, window).Width;
+            var manuallyExpandedWidth = UiTestDriver.GetBoundsInWindow(treePaneContainer, window).Width;
             Assert.True(manuallyExpandedWidth > initialWidth + 20);
 
             await UiTestDriver.ClosePreviewAsync(window);
             await UiTestDriver.OpenPreviewAsync(window);
-            var reopenedWidth = UiTestDriver.GetBoundsInWindow(treeIsland, window).Width;
+            var reopenedWidth = UiTestDriver.GetBoundsInWindow(treePaneContainer, window).Width;
             Assert.InRange(reopenedWidth, 417, 419);
         }
         finally
