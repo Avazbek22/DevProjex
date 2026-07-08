@@ -36,7 +36,7 @@ public sealed class TreeExportServicePathPresentationTests
 	}
 
 	[Fact]
-	public void BuildFullTree_Json_IgnoresDisplayRootPathAndUsesLocalRootPath()
+	public void BuildFullTree_Json_UsesDisplayRootPathWhenProvided()
 	{
 		var service = new TreeExportService();
 		var root = CreateSimpleRoot();
@@ -48,7 +48,8 @@ public sealed class TreeExportServicePathPresentationTests
 			displayRootPath: "https://github.com/user/repo");
 
 		using var doc = JsonDocument.Parse(result);
-		Assert.EndsWith("C:/repo", doc.RootElement.GetProperty("rootPath").GetString(), StringComparison.Ordinal);
+		Assert.Equal("https://github.com/user/repo", doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -73,7 +74,7 @@ public sealed class TreeExportServicePathPresentationTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_Json_IgnoresDisplayRootPathAndUsesLocalRootPath()
+	public void BuildSelectedTree_Json_UsesDisplayRootPathWhenProvided()
 	{
 		var service = new TreeExportService();
 		var root = CreateSimpleRoot();
@@ -90,7 +91,8 @@ public sealed class TreeExportServicePathPresentationTests
 			displayRootPath: "https://github.com/user/repo");
 
 		using var doc = JsonDocument.Parse(result);
-		Assert.EndsWith("C:/repo", doc.RootElement.GetProperty("rootPath").GetString(), StringComparison.Ordinal);
+		Assert.Equal("https://github.com/user/repo", doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
 	}
 
 	[Fact]

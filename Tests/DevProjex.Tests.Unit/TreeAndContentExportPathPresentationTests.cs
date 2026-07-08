@@ -108,7 +108,8 @@ public sealed class TreeAndContentExportPathPresentationTests
 		Assert.True(separatorIndex > 0);
 		var jsonPart = result[..separatorIndex].TrimEnd('\r', '\n');
 		using var doc = JsonDocument.Parse(jsonPart);
-		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.Equal("https://github.com/user/repo", doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.DoesNotContain(Path.GetFullPath(temp.Path).Replace('\\', '/'), jsonPart, StringComparison.Ordinal);
 		var tree = JsonTreeExportTestHelper.GetTree(doc);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
 		Assert.Equal(["src/main.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));

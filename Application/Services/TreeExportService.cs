@@ -31,7 +31,7 @@ public sealed class TreeExportService
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 
 		if (format == TreeTextFormat.Json)
-			return BuildFullTreeJson(rootPath, root);
+			return BuildFullTreeJson(outputRootPath, root);
 
 		var sb = new StringBuilder();
 		sb.Append(outputRootPath).AppendLine(":");
@@ -79,7 +79,7 @@ public sealed class TreeExportService
 
 		if (format == TreeTextFormat.Json)
 			return BuildSelectedTreeJson(
-				rootPath,
+				outputRootPath,
 				root,
 				includedPaths);
 
@@ -533,6 +533,9 @@ public sealed class TreeExportService
 
 	private static string ResolveJsonRootPath(string localRootPath)
 	{
+		if (IsAbsoluteDisplayUri(localRootPath))
+			return NormalizeJsonPath(localRootPath.TrimEnd('/'));
+
 		try
 		{
 			return NormalizeJsonPath(Path.GetFullPath(localRootPath));
@@ -542,6 +545,9 @@ public sealed class TreeExportService
 			return NormalizeJsonPath(localRootPath);
 		}
 	}
+
+	private static bool IsAbsoluteDisplayUri(string value)
+		=> Uri.TryCreate(value, UriKind.Absolute, out var uri) && !uri.IsFile;
 
 	private static string NormalizeJsonPath(string path) => path.Replace('\\', '/');
 }
