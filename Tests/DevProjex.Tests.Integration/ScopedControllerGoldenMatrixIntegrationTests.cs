@@ -1121,9 +1121,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			Children: node.Children.Select(ToDescriptor).ToArray());
 
 	private static string NormalizeExportFragment(string fragment) =>
-		fragment.Contains('/', StringComparison.Ordinal)
-			? string.Join(Path.DirectorySeparatorChar, fragment.Split('/'))
-			: fragment;
+		fragment.Replace('\\', '/');
 
 	private static void AssertSetEquals(
 		IReadOnlySet<string> expected,
