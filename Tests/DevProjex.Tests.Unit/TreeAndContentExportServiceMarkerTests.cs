@@ -15,12 +15,15 @@ public sealed class TreeAndContentExportServiceMarkerTests
 
 		var output = service.Build(temp.Path, root, new HashSet<string>());
 
-		Assert.Contains($"{empty}:", output);
+		Assert.Contains("empty.txt:", output, StringComparison.Ordinal);
 		Assert.Contains("[No Content, 0 bytes]", output);
-		Assert.Contains($"{whitespace}:", output);
+		Assert.Contains("space.txt:", output, StringComparison.Ordinal);
 		Assert.Contains("[Whitespace, 3 bytes]", output);
-		Assert.Contains($"{text}:", output);
+		Assert.Contains("note.txt:", output, StringComparison.Ordinal);
 		Assert.Contains("Note", output);
+		Assert.DoesNotContain($"{empty}:", output, StringComparison.Ordinal);
+		Assert.DoesNotContain($"{whitespace}:", output, StringComparison.Ordinal);
+		Assert.DoesNotContain($"{text}:", output, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -36,10 +39,11 @@ public sealed class TreeAndContentExportServiceMarkerTests
 
 		var output = service.Build(temp.Path, root, selected);
 
-		Assert.Contains($"{empty}:", output);
+		Assert.Contains("empty.txt:", output, StringComparison.Ordinal);
 		Assert.Contains("[No Content, 0 bytes]", output);
-		Assert.DoesNotContain($"{text}:", output);
+		Assert.DoesNotContain("note.txt:", output, StringComparison.Ordinal);
 		Assert.DoesNotContain("Note", output);
+		Assert.DoesNotContain($"{empty}:", output, StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -435,7 +435,7 @@ public sealed class FileContentAnalyzerTests
 	}
 
 	[Fact]
-	public async Task TryReadAsTextAsync_MixedLineEndings_CountsNewlinesOnly()
+	public async Task TryReadAsTextAsync_MixedLineEndings_CountsLogicalLineBreaks()
 	{
 		using var temp = new TemporaryDirectory();
 		var content = "Line 1\nLine 2\r\nLine 3\rLine 4";
@@ -444,9 +444,26 @@ public sealed class FileContentAnalyzerTests
 		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
-		// Counts \n only: after "Line 1", after "Line 2\r", and none more
-		// So: "Line 1\n" (1), "Line 2\r\n" (1), "Line 3\rLine 4" (0) = 3 lines total (1 + newline count)
-		Assert.Equal(3, result.LineCount);
+		Assert.Equal(4, result.LineCount);
+	}
+
+	[Fact]
+	public async Task GetTextFileMetricsAsync_CrLfAcrossStreamingBufferBoundary_CountsSingleLineBreak()
+	{
+		using var temp = new TemporaryDirectory();
+		var content = new string('a', 8191) + "\r\nb";
+		var file = temp.CreateFile("buffer-boundary.txt", content);
+
+		var result = await _analyzer.GetTextFileMetricsAsync(
+			file,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(result);
+		Assert.Equal(2, result.LineCount);
+		Assert.Equal(content.Length, result.CharCount);
+		Assert.Equal(1, result.CrLfPairCount);
+		Assert.Equal(0, result.TrailingNewlineChars);
+		Assert.Equal(0, result.TrailingNewlineLineBreaks);
 	}
 
 	#endregion

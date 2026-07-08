@@ -282,6 +282,43 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public void MetricsPipeline_StatusRendering_UsesCombinedRelativeMetricsOnlyWhileCombinedPreviewIsVisible()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+        using var pipeline = CreateMetricsPipeline(viewModel, boundsWidth: 1400);
+        using var document = new InMemoryPreviewTextDocument("tree\ncontent");
+        var relativeContentMetrics = new ExportOutputMetrics(4, 300, 75);
+
+        pipeline.UpdateStatusBarMetrics(
+            treeLines: 1,
+            treeChars: 20,
+            treeTokens: 5,
+            contentLines: 4,
+            contentChars: 500,
+            contentTokens: 125,
+            relativeContentMetrics);
+
+        Assert.Contains("chars 300", viewModel.StatusContentStatsText, StringComparison.Ordinal);
+        Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
+            PreviewContentMode.TreeAndContent,
+            document,
+            new PreviewSelectionRange(1, 0, 2, 7),
+            out var combinedMetrics));
+        Assert.Equal(new ExportOutputMetrics(5, 320, 80), combinedMetrics);
+
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+        pipeline.RenderStatusBarMetrics();
+        Assert.Contains("chars 500", viewModel.StatusContentStatsText, StringComparison.Ordinal);
+
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.Off;
+        pipeline.RenderStatusBarMetrics();
+        Assert.Contains("chars 500", viewModel.StatusContentStatsText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PreviewWorkspacePipeline_CacheHitReappliesDocumentWithoutRebuilding()
     {
         var viewModel = CreateViewModel();

@@ -3,6 +3,31 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeAndContentExportServiceCrossPlatformTests
 {
 	[Fact]
+	public void MapRelativeContentHeaderPath_DotPrefixedDirectoryRemainsInsideRoot()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = Path.Combine(temp.Path, "..cache", "nested", "file.txt");
+
+		var mapped = TreeAndContentExportService.MapRelativeContentHeaderPath(temp.Path, file);
+
+		Assert.Equal("..cache/nested/file.txt", mapped);
+		Assert.DoesNotContain('\\', mapped);
+	}
+
+	[Fact]
+	public void MapRelativeContentHeaderPath_PathOutsideRootFallsBackToFileName()
+	{
+		using var temp = new TemporaryDirectory();
+		var parent = Directory.GetParent(temp.Path)!.FullName;
+		var outsideFile = Path.Combine(parent, "outside", "secret.txt");
+
+		var mapped = TreeAndContentExportService.MapRelativeContentHeaderPath(temp.Path, outsideFile);
+
+		Assert.Equal("secret.txt", mapped);
+		Assert.DoesNotContain(parent.Replace('\\', '/'), mapped, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void Build_Ascii_IncludesTreeAndContentSeparator()
 	{
 		using var temp = new TemporaryDirectory();

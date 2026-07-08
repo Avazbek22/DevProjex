@@ -6,8 +6,8 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
     public async Task BuildFullDocumentPayload_ContentPreview_MatchesSelectedContentExport()
     {
         using var temp = new TemporaryDirectory();
-        var alphaPath = temp.CreateFile("src\\alpha.txt", "alpha\nbeta\n");
-        var betaPath = temp.CreateFile("docs\\beta.txt", "gamma");
+        var alphaPath = temp.CreateFile(Path.Combine("src", "alpha.txt"), "alpha\nbeta\n");
+        var betaPath = temp.CreateFile(Path.Combine("docs", "beta.txt"), "gamma");
 
         var analyzer = new FileContentAnalyzer();
         var previewBuilder = new PreviewDocumentBuilder(analyzer);
@@ -37,7 +37,7 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
     public void BuildFullDocumentPayload_TreePreview_MatchesTreeExport()
     {
         using var temp = new TemporaryDirectory();
-        var alphaPath = temp.CreateFile("src\\alpha.txt", "alpha");
+        var alphaPath = temp.CreateFile(Path.Combine("src", "alpha.txt"), "alpha");
         var treeRoot = CreateSampleTree(temp.Path, alphaPath);
         var treeExport = new TreeExportService();
         var previewBuilder = new PreviewDocumentBuilder(new FileContentAnalyzer());
@@ -55,8 +55,8 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
     public async Task BuildFullDocumentPayload_TreeAndContentPreview_MatchesCombinedExport()
     {
         using var temp = new TemporaryDirectory();
-        var alphaPath = temp.CreateFile("src\\alpha.txt", "alpha\nbeta\n");
-        var betaPath = temp.CreateFile("docs\\beta.txt", "gamma");
+        var alphaPath = temp.CreateFile(Path.Combine("src", "alpha.txt"), "alpha\nbeta\n");
+        var betaPath = temp.CreateFile(Path.Combine("docs", "beta.txt"), "gamma");
         var treeRoot = CreateSampleTree(temp.Path, alphaPath, betaPath);
 
         var analyzer = new FileContentAnalyzer();

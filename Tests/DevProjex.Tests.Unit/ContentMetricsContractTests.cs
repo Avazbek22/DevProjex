@@ -2,6 +2,18 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ContentMetricsContractTests
 {
+	public static IEnumerable<object[]> PortableContentCases()
+	{
+		yield return ["plain", "alpha"];
+		yield return ["lf", "alpha\nbeta\n"];
+		yield return ["crlf", "alpha\r\nbeta\r\n"];
+		yield return ["cr", "alpha\rbeta\r"];
+		yield return ["mixed", "alpha\r\nbeta\rgamma\ndelta\r\n"];
+		yield return ["empty", string.Empty];
+		yield return ["whitespace", " \r\n\t\r "];
+		yield return ["unicode", "Привет\rмир\n你好"];
+	}
+
 	[Fact]
 	public async Task ContentMetricsPipeline_EqualsRenderedExportMetrics_WithCrLfAndMappedPaths()
 	{
@@ -76,6 +88,52 @@ public sealed class ContentMetricsContractTests
 		Assert.Equal(expected.Lines, actual.Lines);
 		Assert.Equal(expected.Chars, actual.Chars);
 		Assert.Equal(expected.Tokens, actual.Tokens);
+	}
+
+	[Theory]
+	[MemberData(nameof(PortableContentCases))]
+	public async Task RelativeContentMetrics_MatchRenderedExport_AcrossLineEndingsAndUnicode(
+		string caseId,
+		string content)
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile(Path.Combine("..cache", "Проект с пробелом", "notes.txt"), content);
+		var analyzer = new FileContentAnalyzer();
+		var exportService = new SelectedContentExportService(analyzer);
+		var mapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(temp.Path);
+
+		var inputs = await BuildMetricsInputsAsync([file], analyzer, mapper);
+		var exportText = await exportService.BuildAsync([file], CancellationToken.None, mapper);
+
+		var expected = ExportOutputMetricsCalculator.FromText(exportText);
+		var actual = ExportOutputMetricsCalculator.FromContentFiles(inputs);
+		Assert.Equal(expected, actual);
+		Assert.Contains("..cache/Проект с пробелом/notes.txt:", exportText, StringComparison.Ordinal);
+		Assert.DoesNotContain($"{file}:", exportText, StringComparison.Ordinal);
+		Assert.False(string.IsNullOrWhiteSpace(caseId));
+	}
+
+	[Fact]
+	public async Task RelativeHeaders_ReduceOnlyPathCharacters_AndPreserveLineCount()
+	{
+		using var temp = new TemporaryDirectory();
+		var alpha = temp.CreateFile(Path.Combine("src", "alpha.txt"), "alpha\nbeta");
+		var beta = temp.CreateFile(Path.Combine("docs", "beta.txt"), "gamma");
+		var analyzer = new FileContentAnalyzer();
+		var relativeMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(temp.Path);
+
+		var absoluteInputs = await BuildMetricsInputsAsync([alpha, beta], analyzer, mapFilePath: null);
+		var relativeInputs = await BuildMetricsInputsAsync([alpha, beta], analyzer, relativeMapper);
+		var absolute = ExportOutputMetricsCalculator.FromContentFiles(absoluteInputs);
+		var relative = ExportOutputMetricsCalculator.FromContentFiles(relativeInputs);
+		var expectedSavedChars =
+			alpha.Length - "src/alpha.txt".Length +
+			beta.Length - "docs/beta.txt".Length;
+
+		Assert.Equal(absolute.Lines, relative.Lines);
+		Assert.Equal(expectedSavedChars, absolute.Chars - relative.Chars);
+		Assert.Equal((relative.Chars + 3) / 4, relative.Tokens);
+		Assert.True(relative.Tokens <= absolute.Tokens);
 	}
 
 	private static async Task<IReadOnlyList<ContentFileMetrics>> BuildMetricsInputsAsync(

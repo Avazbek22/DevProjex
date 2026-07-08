@@ -150,6 +150,22 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             var rootPath = workspace.Project.RootPath.Replace('\\', '/');
             Assert.DoesNotContain(rootPath, contentBody.Replace('\\', '/'), StringComparison.Ordinal);
 
+            foreach (var format in new[] { ExportFormat.Json, ExportFormat.Xml, ExportFormat.Markdown })
+            {
+                viewModel.SelectedExportFormat = format;
+                await UiTestDriver.WaitForConditionAsync(
+                    window,
+                    () => IsExpectedTreeFormat(UiTestDriver.ComputeCurrentPreviewCopyPayload(window), format),
+                    $"{format} tree and content preview payload to be rendered");
+                await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+
+                var formatPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+                var formatContentBody = ExtractContentBodyFromTreeAndContentPayload(formatPayload);
+                Assert.Equal(contentBody, formatContentBody);
+                Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var formatContentMetrics));
+                Assert.Equal(actualTreeAndContentMetrics, formatContentMetrics);
+            }
+
             await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
             await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
             var contentOnlyPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
@@ -888,5 +904,19 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
         Assert.True(UiTestDriver.TryParseStatusMetrics(rendered, out var parsed));
         return parsed;
+    }
+
+    private static bool IsExpectedTreeFormat(string payload, ExportFormat format)
+    {
+        if (!payload.Contains("\u00A0", StringComparison.Ordinal))
+            return false;
+
+        return format switch
+        {
+            ExportFormat.Json => payload.TrimStart().StartsWith("{", StringComparison.Ordinal),
+            ExportFormat.Xml => payload.StartsWith("<t ", StringComparison.Ordinal),
+            ExportFormat.Markdown => payload.StartsWith("Root: ", StringComparison.Ordinal),
+            _ => payload.Contains("\n├── ", StringComparison.Ordinal)
+        };
     }
 }

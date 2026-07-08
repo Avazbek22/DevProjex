@@ -1042,7 +1042,10 @@ internal sealed class MetricsPipeline(
     {
         return pathPresentation is null
             ? 0
-            : HashCode.Combine(pathPresentation.DisplayRootPath, pathPresentation.DisplayRootName);
+            : HashCode.Combine(
+                pathPresentation.DisplayRootPath,
+                pathPresentation.DisplayRootName,
+                RuntimeHelpers.GetHashCode(pathPresentation.MapFilePath));
     }
 
     private static int BuildRootPathIdentity(string rootPath)
