@@ -1201,6 +1201,20 @@
         <Setter Property="Opacity" Value="0.5" />
     </Style>
 
+    <Style Selector="Border.format-segmented-control Grid.format-segment-divider-layer">
+        <Setter Property="Width" Value="192" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+
+    <Style Selector="Border.format-segmented-control Border.format-segment-divider">
+        <Setter Property="Width" Value="1" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="CornerRadius" Value="0.5" />
+        <Setter Property="Opacity" Value="0.58" />
+    </Style>
+
     <Style Selector="Border.preview-segmented-control">
         <Setter Property="Padding" Value="2" />
         <Setter Property="HorizontalAlignment" Value="Stretch" />

@@ -94,7 +94,7 @@
 
     <!-- Format Switcher: Segmented Control (ASCII/JSON/XML/MD) with sliding thumb -->
     <Border Grid.Column="1"
-            Classes="segmented-control"
+            Classes="segmented-control format-segmented-control"
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
             Margin="0,0,7,0"
@@ -106,6 +106,17 @@
         </ToolTip>
       </ToolTip.Tip>
       <Panel>
+        <!-- Decorative segment dividers live below the selected thumb so the active pill stays clean. -->
+        <Grid Classes="format-segment-divider-layer"
+              IsHitTestVisible="False">
+          <Border Classes="format-segment-divider"
+                  Margin="47,4,0,4" />
+          <Border Classes="format-segment-divider"
+                  Margin="95,4,0,4" />
+          <Border Classes="format-segment-divider"
+                  Margin="143,4,0,4" />
+        </Grid>
+
         <!-- Sliding thumb indicator - single element that moves -->
         <Border Name="SegmentThumb"
                 Classes="segment-thumb"
