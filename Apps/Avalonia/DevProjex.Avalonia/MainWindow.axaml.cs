@@ -1569,13 +1569,12 @@ public partial class MainWindow : Window
         return ResolvePreviewTreePaneProjectedWidth();
     }
 
-    private double ResolveDesiredPreviewPaneWidth()
+    private double ResolveDesiredPreviewPaneWidth(double desiredTreeWidth)
     {
         var availableSplitWidth = GetAvailableSplitWorkspaceWidth();
         if (availableSplitWidth <= 0.5)
             return SplitPreviewPaneMinWidth;
 
-        var desiredTreeWidth = ResolveDesiredPreviewTreePaneWidth();
         return Math.Max(SplitPreviewPaneMinWidth, availableSplitWidth - desiredTreeWidth);
     }
 
@@ -3619,8 +3618,11 @@ public partial class MainWindow : Window
         _viewModel.SetPreviewCompactModeActive(false);
 
         var initialTreeWidth = Math.Max(SplitTreePaneMinWidth, ResolvePreviewTreePaneVisibleWidth());
-        var targetTreeWidth = GetClampedPreviewTreePaneWidth(ResolveDesiredPreviewTreePaneWidth());
-        var targetPreviewWidth = Math.Max(SplitPreviewPaneMinWidth, ResolveDesiredPreviewPaneWidth());
+        // A newly opened preview starts from the smallest useful tree width. Once open,
+        // splitter drags still update this value and window resizes preserve that manual choice.
+        var targetTreeWidth = GetClampedPreviewTreePaneWidth(SplitTreePaneMinWidth);
+        var targetPreviewWidth = ResolveDesiredPreviewPaneWidth(targetTreeWidth);
+        _currentPreviewTreePaneWidth = targetTreeWidth;
 
         _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
         PreparePreviewPaneOpenLayout(initialTreeWidth);
