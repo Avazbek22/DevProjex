@@ -314,8 +314,14 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             var segmentedBounds = UiTestDriver.GetBoundsInWindow(segmentedControl, window);
             var closeBounds = UiTestDriver.GetBoundsInWindow(closeButton, window);
 
-            Assert.True(copyBounds.Left < segmentedBounds.Left);
-            Assert.InRange(segmentedBounds.Left - copyBounds.Right, 0, 12);
+            Assert.True(
+                copyBounds.Right <= segmentedBounds.Left,
+                $"Expected preview copy button before mode selector without overlap. " +
+                $"Copy={copyBounds}, Selector={segmentedBounds}");
+            Assert.True(
+                segmentedBounds.Right <= closeBounds.Left,
+                $"Expected preview mode selector before close button without overlap. " +
+                $"Selector={segmentedBounds}, Close={closeBounds}");
             Assert.InRange(Math.Abs(copyBounds.Width - closeBounds.Width), 0, 1.5);
             Assert.InRange(Math.Abs(copyBounds.Height - closeBounds.Height), 0, 1.5);
             Assert.Equal(0, copyButton.Padding.Left);
