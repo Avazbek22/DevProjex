@@ -640,6 +640,13 @@ public partial class MainWindow : Window
             {
                 if (!_previewModeSwitchInProgress)
                     UpdatePreviewSegmentThumbPosition(animate: false);
+                if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+                    _metrics.RenderStatusBarMetrics();
+            }
+            else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
+            {
+                if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+                    _metrics.RenderStatusBarMetrics();
             }
             else if (args.PropertyName is nameof(MainWindowViewModel.PreviewFontSize)
                      or nameof(MainWindowViewModel.SelectedFontFamily))
@@ -2952,7 +2959,7 @@ public partial class MainWindow : Window
                 var contentText = _contentExport.BuildAsync(
                     files,
                     cancellationToken,
-                    TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath!)).GetAwaiter().GetResult();
+                    pathPresentation?.MapFilePath).GetAwaiter().GetResult();
 
                 if (string.IsNullOrWhiteSpace(contentText))
                     contentText = noTextContentText;
@@ -3004,7 +3011,7 @@ public partial class MainWindow : Window
                 var contentText = _contentExport.BuildAsync(
                     files,
                     cancellationToken,
-                    pathPresentation?.MapFilePath).GetAwaiter().GetResult();
+                    TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath)).GetAwaiter().GetResult();
 
                 if (string.IsNullOrWhiteSpace(contentText))
                 {

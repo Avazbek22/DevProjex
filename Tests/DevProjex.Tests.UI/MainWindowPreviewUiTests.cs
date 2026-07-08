@@ -1,4 +1,5 @@
 using Avalonia.Layout;
+using DevProjex.Application.Services;
 using System.Xml.Linq;
 
 namespace DevProjex.Tests.UI;
@@ -115,6 +116,59 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.DoesNotContain("<t ", markdownTreePart, StringComparison.Ordinal);
             Assert.Contains(":", markdownContentPart, StringComparison.Ordinal);
             Assert.DoesNotContain(workspace.Project.RootPath.Replace('\\', '/'), markdownContentPart.Replace('\\', '/'), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TreeAndContentPreview_StatusContentMetricsMatchRelativeContentHeaders()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            var viewModel = UiTestDriver.GetViewModel(window);
+            viewModel.SelectedExportFormat = ExportFormat.Ascii;
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains("\u00A0", StringComparison.Ordinal),
+                "tree and content preview payload to be rendered");
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+
+            var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            var contentBody = ExtractContentBodyFromTreeAndContentPayload(payload);
+            var expectedTreeAndContentMetrics = ExportOutputMetricsCalculator.FromText(contentBody);
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var actualTreeAndContentMetrics));
+            Assert.Equal(ToRenderedStatusMetrics(expectedTreeAndContentMetrics), actualTreeAndContentMetrics);
+
+            var rootPath = workspace.Project.RootPath.Replace('\\', '/');
+            Assert.DoesNotContain(rootPath, contentBody.Replace('\\', '/'), StringComparison.Ordinal);
+
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+            var contentOnlyPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            var expectedContentOnlyMetrics = ExportOutputMetricsCalculator.FromText(contentOnlyPayload);
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var actualContentOnlyMetrics));
+            Assert.Equal(ToRenderedStatusMetrics(expectedContentOnlyMetrics), actualContentOnlyMetrics);
+            Assert.True(
+                actualTreeAndContentMetrics.Chars < actualContentOnlyMetrics.Chars,
+                "Tree + Content content metrics should benefit from shorter relative headers while Content-only keeps full display paths.");
+
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var reopenedTreeAndContentMetrics));
+            Assert.Equal(actualTreeAndContentMetrics, reopenedTreeAndContentMetrics);
+
+            await UiTestDriver.ClosePreviewAsync(window);
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var closedPreviewContentMetrics));
+            Assert.Equal(actualContentOnlyMetrics, closedPreviewContentMetrics);
         }
         finally
         {
@@ -817,5 +871,22 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
         var separatorIndex = payload.IndexOf('\u00A0');
         Assert.True(separatorIndex > 0, "Tree and content preview payload must contain the NBSP separator.");
         return (payload[..separatorIndex].TrimEnd('\r', '\n'), payload[separatorIndex..]);
+    }
+
+    private static string ExtractContentBodyFromTreeAndContentPayload(string payload)
+    {
+        var (_, contentPart) = SplitTreeAndContentPayload(payload);
+        return contentPart.TrimStart('\u00A0', '\r', '\n');
+    }
+
+    private static ExportOutputMetrics ToRenderedStatusMetrics(ExportOutputMetrics metrics)
+    {
+        var rendered = PreviewSelectionMetricsPolicy.FormatStatusMetricsText(
+            metrics,
+            new StatusMetricLabels("Lines", "Chars", "Tokens"),
+            useCompactMode: false);
+
+        Assert.True(UiTestDriver.TryParseStatusMetrics(rendered, out var parsed));
+        return parsed;
     }
 }
