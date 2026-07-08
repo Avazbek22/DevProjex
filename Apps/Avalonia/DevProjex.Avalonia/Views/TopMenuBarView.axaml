@@ -7,7 +7,7 @@
              x:CompileBindings="True">
   <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
     <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
-    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,206,0">
+    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,210,0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Name="OpenNewWindowMenuItem"
@@ -94,10 +94,11 @@
 
     <!-- Format Switcher: Segmented Control (ASCII/JSON/XML/MD) with sliding thumb -->
     <Border Grid.Column="1"
+            Name="FormatSegmentedControl"
             Classes="segmented-control format-segmented-control"
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
-            Margin="0,0,7,0"
+            Margin="0,0,11,0"
             ToolTip.ShowDelay="700"
             ToolTip.Placement="Bottom">
       <ToolTip.Tip>

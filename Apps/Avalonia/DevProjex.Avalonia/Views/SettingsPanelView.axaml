@@ -14,7 +14,7 @@
     </Style>
   </UserControl.Styles>
   <Border Name="PanelRoot"
-          MinWidth="240"
+          MinWidth="285"
           HorizontalAlignment="Stretch"
           Classes="panel"
           Background="Transparent"

@@ -4,6 +4,31 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 {
     [AvaloniaFact]
+    public async Task LoadedProject_SettingsIslandLeftEdgeAlignsWithFormatSwitcher()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var formatSwitcher = UiTestDriver.GetRequiredTopMenuControl<Border>(window, "FormatSegmentedControl");
+
+            var settingsBounds = UiTestDriver.GetBoundsInWindow(settingsContainer, window);
+            var formatBounds = UiTestDriver.GetBoundsInWindow(formatSwitcher, window);
+
+            var delta = Math.Abs(settingsBounds.Left - formatBounds.Left);
+            Assert.True(
+                delta <= 2.5,
+                $"SettingsLeft={settingsBounds.Left:F2}, SettingsWidth={settingsBounds.Width:F2}, " +
+                $"FormatLeft={formatBounds.Left:F2}, FormatWidth={formatBounds.Width:F2}, Delta={delta:F2}");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PreviewOnlyClose_RestoresActiveFilterAfterToolbarCycle()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

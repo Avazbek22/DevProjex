@@ -484,29 +484,22 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             var widthBefore = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
             var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
-            await UiTestDriver.DragAsync(window, splitter, deltaX: 220);
-            var widthCollapsed = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            await UiTestDriver.DragAsync(window, splitter, deltaX: -220);
+            var widthAfterExpansionDrag = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
 
-            await UiTestDriver.DragAsync(window, splitter, deltaX: -140);
-            var widthExpanded = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            await UiTestDriver.DragAsync(window, splitter, deltaX: 220);
+            var widthAfterCollapseDrag = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
 
             var diagnostic =
-                $"Before={widthBefore:F2}, Collapsed={widthCollapsed:F2}, Expanded={widthExpanded:F2}, " +
+                $"Before={widthBefore:F2}, Expanded={widthAfterExpansionDrag:F2}, Collapsed={widthAfterCollapseDrag:F2}, " +
                 $"RequiredMinimum={requiredMinimum:F2}";
 
-            Assert.True(widthCollapsed >= requiredMinimum - 1, diagnostic);
-            if (requiredMinimum < widthBefore - 1)
-            {
-                Assert.True(widthCollapsed < widthBefore - 1, diagnostic);
-                Assert.True(widthExpanded > widthCollapsed + 5, diagnostic);
-            }
-            else
-            {
-                // Long localized labels can legitimately raise the content minimum above the
-                // normal resize range. In that state the splitter must pin instead of clipping.
-                Assert.InRange(widthCollapsed, requiredMinimum - 1, requiredMinimum + 1);
-                Assert.InRange(widthExpanded, requiredMinimum - 1, requiredMinimum + 1);
-            }
+            // The default settings island width is intentionally pinned to the visual minimum
+            // so it aligns with the top tree-format switcher, while manual resize can still expand it.
+            Assert.InRange(widthBefore, requiredMinimum - 1, requiredMinimum + 1);
+            Assert.True(widthAfterExpansionDrag > widthBefore + 5, diagnostic);
+            Assert.True(widthAfterCollapseDrag <= widthAfterExpansionDrag - 5, diagnostic);
+            Assert.InRange(widthAfterCollapseDrag, requiredMinimum - 1, requiredMinimum + 1);
         }
         finally
         {

@@ -230,8 +230,10 @@ public partial class MainWindow : Window
     private bool _settingsAnimating;
     private const double SearchToolbarMinWidth = 418.0;
     private const double FilterToolbarMinWidth = 338.0;
-    private const double SettingsPanelWidth = 328.0;
-    private const double SettingsPanelMinWidth = 248.0;
+    // Minimum/default aligns the settings island edge with the top tree-format switcher.
+    // Manual splitter resize can still expand up to SettingsPanelMaxWidth.
+    private const double SettingsPanelWidth = 285.0;
+    private const double SettingsPanelMinWidth = SettingsPanelWidth;
     private const double SettingsPanelMaxWidth = 320.0;
     private static readonly TimeSpan SettingsPanelAnimationDuration = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(300));
     private const double SplitTreePaneMinWidth = SearchToolbarMinWidth;
@@ -3604,7 +3606,7 @@ public partial class MainWindow : Window
         // Compact mode is applied only after the animation so the tree does not rescale mid-flight.
         PreparePreviewPane();
         CaptureNonSplitSettingsPanelWidth();
-        _currentSettingsPanelWidth = _effectiveSettingsPanelMinWidth;
+        _currentSettingsPanelWidth = GetClampedSettingsPanelWidth(SettingsPanelWidth);
         ResetPreviewTreePaneVisualState();
         CollapsePreviewPaneVisualState();
         _viewModel.SetPreviewCompactModeActive(false);
