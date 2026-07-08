@@ -62,6 +62,29 @@ public sealed class TreeExportServiceJsonTests
 	}
 
 	[Fact]
+	public void BuildFullTree_JsonTree_FileRootWritesSlashArrayInsideTreeObject()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonFileRootFixture");
+		var filePath = Path.Combine(rootPath, "single.root.cs");
+		var root = new TreeNodeDescriptor(
+			"single.root.cs",
+			filePath,
+			false,
+			false,
+			"csharp",
+			[]);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
+
+		using var document = JsonDocument.Parse(result);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(["/"], tree.EnumerateObject().Select(static property => property.Name).ToArray());
+		Assert.Equal(["single.root.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		JsonTreeExportTestHelper.AssertJsonTreeStructure(tree);
+	}
+
+	[Fact]
 	public void BuildFullTree_JsonTree_FolderWithOnlySubfoldersUsesObjectWithoutSlash()
 	{
 		var fixture = CreateFixture();
@@ -260,6 +283,40 @@ public sealed class TreeExportServiceJsonTests
 	}
 
 	[Fact]
+	public void BuildFullTree_JsonTree_PreservesCaseDistinctFolderKeys()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonCaseFolderFixture");
+		var root = new TreeNodeDescriptor(
+			"Root",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[
+				new("Src", Path.Combine(rootPath, "Src"), true, false, "folder",
+				[
+					new("Upper.cs", Path.Combine(rootPath, "Src", "Upper.cs"), false, false, "csharp", [])
+				]),
+				new("src", Path.Combine(rootPath, "src"), true, false, "folder",
+				[
+					new("lower.cs", Path.Combine(rootPath, "src", "lower.cs"), false, false, "csharp", [])
+				])
+			]);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
+
+		using var document = JsonDocument.Parse(result);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.True(tree.TryGetProperty("Src", out var upperFolder));
+		Assert.True(tree.TryGetProperty("src", out var lowerFolder));
+		Assert.Equal(JsonValueKind.Array, upperFolder.ValueKind);
+		Assert.Equal(JsonValueKind.Array, lowerFolder.ValueKind);
+		Assert.Equal(["Src", "src"], tree.EnumerateObject().Select(static property => property.Name).ToArray());
+		Assert.Equal(["Src/Upper.cs", "src/lower.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+	}
+
+	[Fact]
 	public void BuildFullTree_JsonTree_UsesDeterministicFoldersFirstOrdering()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonOrderingFixture");
@@ -403,6 +460,30 @@ public sealed class TreeExportServiceJsonTests
 		using var document = JsonDocument.Parse(result);
 		var paths = JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(document));
 		Assert.Equal(["src/features/auth/Login.cs"], paths);
+	}
+
+	[Fact]
+	public void BuildSelectedTree_JsonTree_FileRootSelectionWritesSlashArrayInsideTreeObject()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonSelectedFileRootFixture");
+		var filePath = Path.Combine(rootPath, "selected.root.cs");
+		var root = new TreeNodeDescriptor(
+			"selected.root.cs",
+			filePath,
+			false,
+			false,
+			"csharp",
+			[]);
+		var service = new TreeExportService();
+		var selected = new HashSet<string>(PathComparer.Default) { filePath };
+
+		var result = service.BuildSelectedTree(rootPath, root, selected, TreeTextFormat.Json);
+
+		using var document = JsonDocument.Parse(result);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(["/"], tree.EnumerateObject().Select(static property => property.Name).ToArray());
+		Assert.Equal(["selected.root.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		JsonTreeExportTestHelper.AssertJsonTreeStructure(tree);
 	}
 
 	[Fact]

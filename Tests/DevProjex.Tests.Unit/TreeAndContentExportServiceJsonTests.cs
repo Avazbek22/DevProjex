@@ -126,6 +126,43 @@ public sealed class TreeAndContentExportServiceJsonTests
 		Assert.DoesNotContain(temp.Path.Replace('\\', '/'), contentPart.Replace('\\', '/'), StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void Build_WithJsonFormat_ContentThatLooksLikeJsonStaysOutsideJsonTree()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("payload.json", """
+			{
+			  "rootPath": "fake",
+			  "tree": {
+			    "Injected.cs": null
+			  }
+			}
+			""");
+		var root = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[
+				new("payload.json", file, false, false, "json", [])
+			]);
+		var service = CreateService();
+
+		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
+
+		var (jsonPart, contentPart) = SplitJsonAndContent(result);
+		using var document = JsonDocument.Parse(jsonPart);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(document.RootElement);
+		JsonTreeExportTestHelper.AssertJsonTreeStructure(tree);
+		Assert.Equal(["payload.json"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.DoesNotContain("fake", jsonPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("Injected.cs", jsonPart, StringComparison.Ordinal);
+		Assert.Contains("\"rootPath\": \"fake\"", contentPart, StringComparison.Ordinal);
+		Assert.Contains("Injected.cs", contentPart, StringComparison.Ordinal);
+	}
+
 	private static TreeAndContentExportService CreateService()
 		=> new(
 			new TreeExportService(),

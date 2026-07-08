@@ -39,6 +39,15 @@ internal static class JsonTreeExportTestHelper
 		Assert.Equal(["rootPath", "tree"], propertyNames);
 	}
 
+	public static void AssertNoLegacyTreeContract(JsonElement root)
+	{
+		foreach (var forbidden in new[] { "root", "schemaVersion", "version", "format", "selection", "counts", "warnings", "diagnostics" })
+			Assert.False(root.TryGetProperty(forbidden, out _), $"Unexpected top-level JSON tree property '{forbidden}'.");
+
+		AssertNoLegacyNodeShape(root);
+		AssertJsonTreeStructure(GetTreeFromRoot(root));
+	}
+
 	public static void AssertJsonTreeStructure(JsonElement tree) => AssertJsonTreeObject(tree);
 
 	public static string NormalizeJsonPath(string path)
@@ -132,6 +141,30 @@ internal static class JsonTreeExportTestHelper
 		foreach (var item in array.EnumerateArray())
 			Assert.Equal(JsonValueKind.String, item.ValueKind);
 	}
+
+	private static void AssertNoLegacyNodeShape(JsonElement element)
+	{
+		if (element.ValueKind == JsonValueKind.Null)
+			throw new Xunit.Sdk.XunitException("JSON tree must not contain null values.");
+
+		if (element.ValueKind != JsonValueKind.Object)
+			return;
+
+		if (element.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String &&
+		    element.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String)
+		{
+			throw new Xunit.Sdk.XunitException("Unexpected legacy name/path JSON tree node.");
+		}
+
+		if (element.TryGetProperty("accessDenied", out _))
+			throw new Xunit.Sdk.XunitException("Unexpected accessDenied scanner metadata in JSON tree export.");
+
+		foreach (var property in element.EnumerateObject())
+			AssertNoLegacyNodeShape(property.Value);
+	}
+
+	private static JsonElement GetTreeFromRoot(JsonElement root)
+		=> root.GetProperty("tree");
 
 	private static string Combine(string prefix, string name)
 		=> string.IsNullOrEmpty(prefix) ? name : $"{prefix}/{name}";
