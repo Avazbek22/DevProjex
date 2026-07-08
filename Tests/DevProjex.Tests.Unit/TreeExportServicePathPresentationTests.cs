@@ -122,6 +122,42 @@ public sealed class TreeExportServicePathPresentationTests
 		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildSelectedTree_StructuredFormat_UsesDisplayRootPathWhenProvided(TreeTextFormat format)
+	{
+		var service = new TreeExportService();
+		var root = CreateSimpleRoot();
+		var selected = new HashSet<string>(PathComparer.Default)
+		{
+			@"C:\repo\src\main.cs"
+		};
+
+		var result = service.BuildSelectedTree(
+			@"C:\repo",
+			root,
+			selected,
+			format,
+			displayRootPath: "https://github.com/user/repo",
+			displayRootName: "repo-clean");
+
+		if (format == TreeTextFormat.Xml)
+		{
+			var document = XmlTreeExportTestHelper.Parse(result);
+			Assert.Equal("https://github.com/user/repo", document.Root!.Attribute("r")?.Value);
+			Assert.Equal(["src/main.cs"], XmlTreeExportTestHelper.ExtractFilePaths(document));
+		}
+		else
+		{
+			Assert.StartsWith("Root: https://github.com/user/repo", result, StringComparison.Ordinal);
+			Assert.Equal(["src/main.cs"], MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		}
+
+		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("repo-clean", result, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public void BuildSelectedTree_Ascii_UsesDisplayRootNameWhenProvided()
 	{

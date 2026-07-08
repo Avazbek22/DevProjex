@@ -68,28 +68,19 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
             treeText,
             [alphaPath, betaPath],
             CancellationToken.None,
-            displayPathMapper: null);
+            TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(temp.Path));
 
-        var expectedContent = string.Join(
-            Environment.NewLine,
-            betaPath + ":",
-            "\u00A0",
-            "gamma",
-            "\u00A0",
-            "\u00A0",
-            alphaPath + ":",
-            "\u00A0",
-            "alpha",
-            "beta");
-        var expected = string.Join(
-            Environment.NewLine,
-            NormalizeForClipboard(treeText).TrimEnd('\r', '\n'),
-            "\u00A0",
-            "\u00A0",
-            expectedContent);
+        var expected = new TreeAndContentExportService(
+                treeExport,
+                new SelectedContentExportService(analyzer))
+            .Build(temp.Path, treeRoot, new HashSet<string>(), TreeTextFormat.Ascii);
         var actual = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
 
-        Assert.Equal(expected, actual);
+        Assert.Equal(NormalizeForClipboard(expected), actual);
+        Assert.Contains("docs/beta.txt:", actual, StringComparison.Ordinal);
+        Assert.Contains("src/alpha.txt:", actual, StringComparison.Ordinal);
+        Assert.DoesNotContain(alphaPath.Replace('\\', '/'), actual.Replace('\\', '/'), StringComparison.Ordinal);
+        Assert.DoesNotContain(betaPath.Replace('\\', '/'), actual.Replace('\\', '/'), StringComparison.Ordinal);
     }
 
     private static TreeNodeDescriptor CreateSampleTree(string rootPath, params string[] filePaths)

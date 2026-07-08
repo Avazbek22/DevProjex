@@ -5,6 +5,38 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeExportServiceXmlTests
 {
 	[Fact]
+	public void BuildFullTree_XmlFormat_EmptyRootWritesRootElementOnly()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexXmlEmptyRoot");
+		var root = DirectoryNode("Project", rootPath, []);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Xml);
+
+		var document = XmlTreeExportTestHelper.Parse(result);
+		XmlTreeExportTestHelper.AssertRootPath(document, JsonTreeExportTestHelper.NormalizeJsonPath(rootPath));
+		XmlTreeExportTestHelper.AssertXmlTreeContract(document);
+		Assert.Empty(document.Root!.Elements());
+		Assert.Empty(XmlTreeExportTestHelper.ExtractFilePaths(document));
+		Assert.Empty(XmlTreeExportTestHelper.ExtractEmptyFolderPaths(document));
+	}
+
+	[Fact]
+	public void BuildFullTree_XmlFormat_RootFileWritesFileInsideRootElement()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexXmlRootFile", "README.md");
+		var root = FileNode("README.md", rootPath);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Xml);
+
+		var document = XmlTreeExportTestHelper.Parse(result);
+		XmlTreeExportTestHelper.AssertXmlTreeContract(document);
+		Assert.Equal(["README.md"], XmlTreeExportTestHelper.ExtractFilePaths(document));
+		Assert.Equal("f", Assert.Single(document.Root!.Elements()).Name.LocalName);
+	}
+
+	[Fact]
 	public void BuildFullTree_XmlFormat_WritesContractAndRoundTripsMixedTree()
 	{
 		var fixture = CreateFixture();
@@ -27,6 +59,78 @@ public sealed class TreeExportServiceXmlTests
 			]),
 			SortPaths(XmlTreeExportTestHelper.ExtractFilePaths(document)
 				.Concat(XmlTreeExportTestHelper.ExtractEmptyFolderPaths(document))));
+	}
+
+	[Fact]
+	public void BuildFullTree_XmlFormat_WritesFolderShapesAndDeterministicOrder()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexXmlShapes");
+		var root = DirectoryNode("Project", rootPath,
+		[
+			FileNode("zeta.txt", Path.Combine(rootPath, "zeta.txt")),
+			DirectoryNode("OnlySubfolders", Path.Combine(rootPath, "OnlySubfolders"),
+			[
+				DirectoryNode("Services", Path.Combine(rootPath, "OnlySubfolders", "Services"),
+				[
+					FileNode("UserService.cs", Path.Combine(rootPath, "OnlySubfolders", "Services", "UserService.cs"))
+				]),
+				DirectoryNode("Models", Path.Combine(rootPath, "OnlySubfolders", "Models"),
+				[
+					FileNode("User.cs", Path.Combine(rootPath, "OnlySubfolders", "Models", "User.cs"))
+				])
+			]),
+			DirectoryNode("OnlyFiles", Path.Combine(rootPath, "OnlyFiles"),
+			[
+				FileNode("beta.txt", Path.Combine(rootPath, "OnlyFiles", "beta.txt")),
+				FileNode("Alpha.txt", Path.Combine(rootPath, "OnlyFiles", "Alpha.txt"))
+			]),
+			FileNode("Alpha.md", Path.Combine(rootPath, "Alpha.md")),
+			DirectoryNode("Mixed", Path.Combine(rootPath, "Mixed"),
+			[
+				FileNode("README.md", Path.Combine(rootPath, "Mixed", "README.md")),
+				DirectoryNode("Services", Path.Combine(rootPath, "Mixed", "Services"),
+				[
+					FileNode("UserService.cs", Path.Combine(rootPath, "Mixed", "Services", "UserService.cs"))
+				]),
+				FileNode("Program.cs", Path.Combine(rootPath, "Mixed", "Program.cs"))
+			]),
+			DirectoryNode("EmptyFolder", Path.Combine(rootPath, "EmptyFolder"), [])
+		]);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Xml);
+
+		var document = XmlTreeExportTestHelper.Parse(result);
+		XmlTreeExportTestHelper.AssertXmlTreeContract(document);
+		Assert.Equal(
+			[
+				"d:EmptyFolder",
+				"d:Mixed",
+				"d:OnlyFiles",
+				"d:OnlySubfolders",
+				"f:Alpha.md",
+				"f:zeta.txt"
+			],
+			DescribeChildren(document.Root!));
+
+		Assert.Empty(GetDirectory(document, "EmptyFolder").Elements());
+		Assert.Equal(["f:Alpha.txt", "f:beta.txt"], DescribeChildren(GetDirectory(document, "OnlyFiles")));
+		Assert.Equal(["d:Models", "d:Services"], DescribeChildren(GetDirectory(document, "OnlySubfolders")));
+		Assert.Equal(["d:Services", "f:Program.cs", "f:README.md"], DescribeChildren(GetDirectory(document, "Mixed")));
+		Assert.Equal(
+			SortPaths(
+			[
+				"Alpha.md",
+				"zeta.txt",
+				"OnlyFiles/Alpha.txt",
+				"OnlyFiles/beta.txt",
+				"OnlySubfolders/Models/User.cs",
+				"OnlySubfolders/Services/UserService.cs",
+				"Mixed/Program.cs",
+				"Mixed/README.md",
+				"Mixed/Services/UserService.cs"
+			]),
+			SortPaths(XmlTreeExportTestHelper.ExtractFilePaths(document)));
 	}
 
 	[Fact]
@@ -79,6 +183,39 @@ public sealed class TreeExportServiceXmlTests
 				.Concat(XmlTreeExportTestHelper.ExtractFilePaths(document))));
 		Assert.DoesNotContain("Program.cs", result, StringComparison.Ordinal);
 		Assert.DoesNotContain("README.md", result, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void BuildSelectedTree_XmlFormat_RootSelectionReturnsFullTreeAndNoSelectionReturnsEmpty()
+	{
+		var fixture = CreateFixture();
+		var service = new TreeExportService();
+
+		var selectedRootResult = service.BuildSelectedTree(
+			fixture.RootPath,
+			fixture.Root,
+			new HashSet<string>(PathComparer.Default) { fixture.RootPath },
+			TreeTextFormat.Xml);
+		var noSelectionResult = service.BuildSelectedTree(
+			fixture.RootPath,
+			fixture.Root,
+			new HashSet<string>(PathComparer.Default),
+			TreeTextFormat.Xml);
+
+		var document = XmlTreeExportTestHelper.Parse(selectedRootResult);
+		Assert.Equal(
+			SortPaths(
+			[
+				"EmptyFolder",
+				"Folder/File.cs",
+				"src/Services/UserService.cs",
+				"src/Program.cs",
+				"global.json",
+				"README.md"
+			]),
+			SortPaths(XmlTreeExportTestHelper.ExtractFilePaths(document)
+				.Concat(XmlTreeExportTestHelper.ExtractEmptyFolderPaths(document))));
+		Assert.Equal(string.Empty, noSelectionResult);
 	}
 
 	[Fact]
@@ -166,6 +303,16 @@ public sealed class TreeExportServiceXmlTests
 
 	private static string[] SortPaths(IEnumerable<string> paths)
 		=> paths.OrderBy(static path => path, StringComparer.Ordinal).ToArray();
+
+	private static XElement GetDirectory(XDocument document, string name)
+		=> Assert.Single(document.Root!.Elements("d"), element => element.Attribute("n")?.Value == name);
+
+	private static string[] DescribeChildren(XElement element)
+		=> element.Elements()
+			.Select(static child => child.Name.LocalName == "d"
+				? $"d:{child.Attribute("n")?.Value}"
+				: $"f:{child.Value}")
+			.ToArray();
 
 	private sealed record ExportFixture(string RootPath, TreeNodeDescriptor Root);
 }

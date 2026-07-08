@@ -3,6 +3,39 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeExportServiceMarkdownTests
 {
 	[Fact]
+	public void BuildFullTree_MarkdownFormat_EmptyRootWritesOnlyHeader()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexMarkdownEmptyRoot");
+		var root = DirectoryNode("Project", rootPath, []);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Markdown);
+
+		MarkdownTreeExportTestHelper.AssertMarkdownTreeContract(
+			result,
+			JsonTreeExportTestHelper.NormalizeJsonPath(rootPath));
+		Assert.Empty(MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		Assert.Empty(MarkdownTreeExportTestHelper.ExtractEmptyFolderPaths(result));
+		Assert.All(GetTreeLines(result), static line => Assert.Equal(string.Empty, line));
+	}
+
+	[Fact]
+	public void BuildFullTree_MarkdownFormat_RootFileWritesSingleRootLevelFile()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexMarkdownRootFile", "README.md");
+		var root = FileNode("README.md", rootPath);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Markdown);
+
+		MarkdownTreeExportTestHelper.AssertMarkdownTreeContract(
+			result,
+			JsonTreeExportTestHelper.NormalizeJsonPath(rootPath));
+		Assert.Equal(["README.md"], MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		Assert.Equal(["- README.md"], GetTreeLines(result).Where(static line => line.Length > 0).ToArray());
+	}
+
+	[Fact]
 	public void BuildFullTree_MarkdownFormat_WritesContractAndRoundTripsMixedTree()
 	{
 		var fixture = CreateFixture();
@@ -30,6 +63,86 @@ public sealed class TreeExportServiceMarkdownTests
 	}
 
 	[Fact]
+	public void BuildFullTree_MarkdownFormat_WritesFolderShapesAndDeterministicOrder()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexMarkdownShapes");
+		var root = DirectoryNode("Project", rootPath,
+		[
+			FileNode("zeta.txt", Path.Combine(rootPath, "zeta.txt")),
+			DirectoryNode("OnlySubfolders", Path.Combine(rootPath, "OnlySubfolders"),
+			[
+				DirectoryNode("Services", Path.Combine(rootPath, "OnlySubfolders", "Services"),
+				[
+					FileNode("UserService.cs", Path.Combine(rootPath, "OnlySubfolders", "Services", "UserService.cs"))
+				]),
+				DirectoryNode("Models", Path.Combine(rootPath, "OnlySubfolders", "Models"),
+				[
+					FileNode("User.cs", Path.Combine(rootPath, "OnlySubfolders", "Models", "User.cs"))
+				])
+			]),
+			DirectoryNode("OnlyFiles", Path.Combine(rootPath, "OnlyFiles"),
+			[
+				FileNode("beta.txt", Path.Combine(rootPath, "OnlyFiles", "beta.txt")),
+				FileNode("Alpha.txt", Path.Combine(rootPath, "OnlyFiles", "Alpha.txt"))
+			]),
+			FileNode("Alpha.md", Path.Combine(rootPath, "Alpha.md")),
+			DirectoryNode("Mixed", Path.Combine(rootPath, "Mixed"),
+			[
+				FileNode("README.md", Path.Combine(rootPath, "Mixed", "README.md")),
+				DirectoryNode("Services", Path.Combine(rootPath, "Mixed", "Services"),
+				[
+					FileNode("UserService.cs", Path.Combine(rootPath, "Mixed", "Services", "UserService.cs"))
+				]),
+				FileNode("Program.cs", Path.Combine(rootPath, "Mixed", "Program.cs"))
+			]),
+			DirectoryNode("EmptyFolder", Path.Combine(rootPath, "EmptyFolder"), [])
+		]);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Markdown);
+
+		MarkdownTreeExportTestHelper.AssertMarkdownTreeContract(
+			result,
+			JsonTreeExportTestHelper.NormalizeJsonPath(rootPath));
+		Assert.Equal(
+			[
+				"- EmptyFolder/",
+				"- Mixed/",
+				"  - Services/",
+				"    - UserService.cs",
+				"  - Program.cs",
+				"  - README.md",
+				"- OnlyFiles/",
+				"  - Alpha.txt",
+				"  - beta.txt",
+				"- OnlySubfolders/",
+				"  - Models/",
+				"    - User.cs",
+				"  - Services/",
+				"    - UserService.cs",
+				"- Alpha.md",
+				"- zeta.txt",
+				string.Empty
+			],
+			GetTreeLines(result));
+		Assert.Equal(
+			SortPaths(
+			[
+				"Alpha.md",
+				"zeta.txt",
+				"OnlyFiles/Alpha.txt",
+				"OnlyFiles/beta.txt",
+				"OnlySubfolders/Models/User.cs",
+				"OnlySubfolders/Services/UserService.cs",
+				"Mixed/Program.cs",
+				"Mixed/README.md",
+				"Mixed/Services/UserService.cs"
+			]),
+			SortPaths(MarkdownTreeExportTestHelper.ExtractFilePaths(result)));
+		Assert.Equal(["EmptyFolder"], MarkdownTreeExportTestHelper.ExtractEmptyFolderPaths(result));
+	}
+
+	[Fact]
 	public void BuildFullTree_MarkdownFormat_EscapesLeadingListMarkersWithoutLosingNames()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexMarkdownSpecialNames");
@@ -38,6 +151,11 @@ public sealed class TreeExportServiceMarkdownTests
 			DirectoryNode("-scripts", Path.Combine(rootPath, "-scripts"),
 			[
 				FileNode("-build.ps1", Path.Combine(rootPath, "-scripts", "-build.ps1")),
+				FileNode("*glob.md", Path.Combine(rootPath, "-scripts", "*glob.md")),
+				FileNode("+plus.md", Path.Combine(rootPath, "-scripts", "+plus.md")),
+				FileNode("[draft].md", Path.Combine(rootPath, "-scripts", "[draft].md")),
+				FileNode("tab\tfile.txt", Path.Combine(rootPath, "-scripts", "tab-file.txt")),
+				FileNode("line\nbreak.txt", Path.Combine(rootPath, "-scripts", "line-break.txt")),
 				FileNode("Dockerfile", Path.Combine(rootPath, "-scripts", "Dockerfile")),
 				FileNode("file.name.with.dots.cs", Path.Combine(rootPath, "-scripts", "file.name.with.dots.cs"))
 			]),
@@ -55,8 +173,18 @@ public sealed class TreeExportServiceMarkdownTests
 			result,
 			JsonTreeExportTestHelper.NormalizeJsonPath(rootPath));
 		Assert.Contains("- \\-scripts/", result, StringComparison.Ordinal);
+		Assert.Contains("  - \\*glob.md", result, StringComparison.Ordinal);
+		Assert.Contains("  - \\+plus.md", result, StringComparison.Ordinal);
+		Assert.Contains("  - \\[draft].md", result, StringComparison.Ordinal);
 		Assert.Contains("  - \\-build.ps1", result, StringComparison.Ordinal);
+		Assert.Contains("  - tab\\tfile.txt", result, StringComparison.Ordinal);
+		Assert.Contains("  - line\\nbreak.txt", result, StringComparison.Ordinal);
 		Assert.Contains("-scripts/-build.ps1", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		Assert.Contains("-scripts/*glob.md", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		Assert.Contains("-scripts/+plus.md", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		Assert.Contains("-scripts/[draft].md", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		Assert.Contains("-scripts/tab\tfile.txt", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		Assert.Contains("-scripts/line\nbreak.txt", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
 		Assert.Contains("Документы/Файл.cs", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
 	}
 
@@ -79,6 +207,38 @@ public sealed class TreeExportServiceMarkdownTests
 				.Concat(MarkdownTreeExportTestHelper.ExtractFilePaths(result))));
 		Assert.DoesNotContain("Program.cs", result, StringComparison.Ordinal);
 		Assert.DoesNotContain("README.md", result, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void BuildSelectedTree_MarkdownFormat_RootSelectionReturnsFullTreeAndNoSelectionReturnsEmpty()
+	{
+		var fixture = CreateFixture();
+		var service = new TreeExportService();
+
+		var selectedRootResult = service.BuildSelectedTree(
+			fixture.RootPath,
+			fixture.Root,
+			new HashSet<string>(PathComparer.Default) { fixture.RootPath },
+			TreeTextFormat.Markdown);
+		var noSelectionResult = service.BuildSelectedTree(
+			fixture.RootPath,
+			fixture.Root,
+			new HashSet<string>(PathComparer.Default),
+			TreeTextFormat.Markdown);
+
+		Assert.Equal(
+			SortPaths(
+			[
+				"EmptyFolder",
+				"Folder/File.cs",
+				"src/Services/UserService.cs",
+				"src/Program.cs",
+				"global.json",
+				"README.md"
+			]),
+			SortPaths(MarkdownTreeExportTestHelper.ExtractFilePaths(selectedRootResult)
+				.Concat(MarkdownTreeExportTestHelper.ExtractEmptyFolderPaths(selectedRootResult))));
+		Assert.Equal(string.Empty, noSelectionResult);
 	}
 
 	[Fact]
@@ -167,6 +327,9 @@ public sealed class TreeExportServiceMarkdownTests
 
 	private static string[] SortPaths(IEnumerable<string> paths)
 		=> paths.OrderBy(static path => path, StringComparer.Ordinal).ToArray();
+
+	private static string[] GetTreeLines(string markdown)
+		=> markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Skip(2).ToArray();
 
 	private sealed record ExportFixture(string RootPath, TreeNodeDescriptor Root);
 }

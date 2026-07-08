@@ -51,6 +51,78 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task TreeAndContentPreview_UsesSelectedTreeFormatWithRelativeContentHeaders()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            var viewModel = UiTestDriver.GetViewModel(window);
+
+            viewModel.SelectedExportFormat = ExportFormat.Ascii;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+                    return payload.Contains("\u00A0", StringComparison.Ordinal) &&
+                           payload.Contains("\n├── ", StringComparison.Ordinal);
+                },
+                "ASCII tree and content preview to be rendered");
+
+            var asciiPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            var (_, asciiContentPart) = SplitTreeAndContentPayload(asciiPayload);
+            Assert.Contains(":", asciiContentPart, StringComparison.Ordinal);
+            Assert.DoesNotContain(workspace.Project.RootPath.Replace('\\', '/'), asciiContentPart.Replace('\\', '/'), StringComparison.Ordinal);
+
+            viewModel.SelectedExportFormat = ExportFormat.Xml;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+                    return payload.StartsWith("<t ", StringComparison.Ordinal) &&
+                           payload.Contains("\u00A0", StringComparison.Ordinal);
+                },
+                "XML tree and content preview to be rendered");
+
+            var xmlPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            var (xmlTreePart, xmlContentPart) = SplitTreeAndContentPayload(xmlPayload);
+            var xmlDocument = XDocument.Parse(xmlTreePart);
+            Assert.Equal("t", xmlDocument.Root!.Name.LocalName);
+            Assert.NotEmpty(xmlDocument.Descendants("f"));
+            Assert.Contains(":", xmlContentPart, StringComparison.Ordinal);
+            Assert.DoesNotContain(workspace.Project.RootPath.Replace('\\', '/'), xmlContentPart.Replace('\\', '/'), StringComparison.Ordinal);
+
+            viewModel.SelectedExportFormat = ExportFormat.Markdown;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+                    return payload.StartsWith("Root: ", StringComparison.Ordinal) &&
+                           payload.Contains("\n- ", StringComparison.Ordinal) &&
+                           payload.Contains("\u00A0", StringComparison.Ordinal);
+                },
+                "Markdown tree and content preview to be rendered");
+
+            var markdownPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            var (markdownTreePart, markdownContentPart) = SplitTreeAndContentPayload(markdownPayload);
+            Assert.StartsWith("Root: ", markdownTreePart, StringComparison.Ordinal);
+            Assert.Contains("\n- ", markdownTreePart, StringComparison.Ordinal);
+            Assert.DoesNotContain("<t ", markdownTreePart, StringComparison.Ordinal);
+            Assert.Contains(":", markdownContentPart, StringComparison.Ordinal);
+            Assert.DoesNotContain(workspace.Project.RootPath.Replace('\\', '/'), markdownContentPart.Replace('\\', '/'), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task LoadedProject_ShowsTreeAndSettingsBeforePreviewOpens()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -738,5 +810,12 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static (string TreePart, string ContentPart) SplitTreeAndContentPayload(string payload)
+    {
+        var separatorIndex = payload.IndexOf('\u00A0');
+        Assert.True(separatorIndex > 0, "Tree and content preview payload must contain the NBSP separator.");
+        return (payload[..separatorIndex].TrimEnd('\r', '\n'), payload[separatorIndex..]);
     }
 }

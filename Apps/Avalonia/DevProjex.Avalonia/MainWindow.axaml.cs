@@ -2952,7 +2952,7 @@ public partial class MainWindow : Window
                 var contentText = _contentExport.BuildAsync(
                     files,
                     cancellationToken,
-                    pathPresentation?.MapFilePath).GetAwaiter().GetResult();
+                    TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath!)).GetAwaiter().GetResult();
 
                 if (string.IsNullOrWhiteSpace(contentText))
                     contentText = noTextContentText;
@@ -3192,7 +3192,7 @@ public partial class MainWindow : Window
             treeText,
             files,
             cancellationToken,
-            pathPresentation?.MapFilePath).GetAwaiter().GetResult();
+            TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath)).GetAwaiter().GetResult();
 
         return new PreviewBuildResult(document);
     }

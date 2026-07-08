@@ -49,6 +49,44 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		Assert.Contains("README.md", paths);
 	}
 
+	[Theory]
+	[InlineData(TreeTextFormat.Xml, "tree.xml")]
+	[InlineData(TreeTextFormat.Markdown, "tree.md")]
+	public async Task ExportStructuredTreeToFile_WritesUtf8WithoutBomAndRoundTrips(TreeTextFormat format, string fileName)
+	{
+		using var temp = new TemporaryDirectory();
+		var fixture = CreateSampleFixture(temp);
+		var treeExport = new TreeExportService();
+		var fileExport = new TextFileExportService();
+		var treeText = treeExport.BuildFullTree(temp.Path, fixture.Root, format);
+		var exportPath = Path.Combine(temp.Path, fileName);
+
+		await using (var stream = new FileStream(exportPath, FileMode.Create, FileAccess.Write, FileShare.Read))
+			await fileExport.WriteAsync(stream, treeText, cancellationToken: TestContext.Current.CancellationToken);
+
+		var bytes = await File.ReadAllBytesAsync(exportPath, cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(StartsWithUtf8Bom(bytes));
+
+		var written = Encoding.UTF8.GetString(bytes);
+		Assert.Equal(treeText, written);
+		if (format == TreeTextFormat.Xml)
+		{
+			var document = System.Xml.Linq.XDocument.Parse(written);
+			Assert.Equal("t", document.Root!.Name.LocalName);
+			Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), document.Root.Attribute("r")?.Value);
+			Assert.Contains(document.Descendants("f"), element => element.Value == "main.cs");
+			Assert.Contains(document.Descendants("f"), element => element.Value == "README.md");
+		}
+		else
+		{
+			Assert.StartsWith($"Root: {Path.GetFullPath(temp.Path).Replace('\\', '/')}", written, StringComparison.Ordinal);
+			Assert.Contains("- src/", written, StringComparison.Ordinal);
+			Assert.Contains("  - main.cs", written, StringComparison.Ordinal);
+			Assert.Contains("- README.md", written, StringComparison.Ordinal);
+			Assert.DoesNotContain("\t", written, StringComparison.Ordinal);
+		}
+	}
+
 	[Fact]
 	public void ExportJsonTree_UsesForwardSlashInAllTreePaths()
 	{

@@ -49,7 +49,7 @@ public sealed class TreeAndContentExportService(
 		var files = hasSelection
 			? GetSelectedFiles(selectedPaths)
 			: GetAllFilePaths(root);
-		var contentPathMapper = ResolveContentPathMapper(rootPath, format, pathPresentation);
+		var contentPathMapper = CreateRelativeContentHeaderPathMapper(rootPath);
 
 		var content = await contentExport.BuildAsync(files, cancellationToken, contentPathMapper).ConfigureAwait(false);
 		if (string.IsNullOrWhiteSpace(content))
@@ -58,6 +58,7 @@ public sealed class TreeAndContentExportService(
 		// The selected format applies only to the tree block; file content stays plain text.
 		var sb = new StringBuilder();
 		sb.Append(tree.TrimEnd('\r', '\n'));
+		sb.AppendLine();
 		AppendClipboardBlankLine(sb);
 		AppendClipboardBlankLine(sb);
 		sb.Append(content);
@@ -86,20 +87,10 @@ public sealed class TreeAndContentExportService(
 		}
 	}
 
-	private static Func<string, string>? ResolveContentPathMapper(
-		string rootPath,
-		TreeTextFormat format,
-		ExportPathPresentation? pathPresentation)
-	{
-		return UsesRelativeContentHeaders(format)
-			? filePath => MapStructuredContentPath(rootPath, filePath)
-			: pathPresentation?.MapFilePath;
-	}
+	public static Func<string, string> CreateRelativeContentHeaderPathMapper(string rootPath)
+		=> filePath => MapRelativeContentHeaderPath(rootPath, filePath);
 
-	private static bool UsesRelativeContentHeaders(TreeTextFormat format)
-		=> format is TreeTextFormat.Json or TreeTextFormat.Xml or TreeTextFormat.Markdown;
-
-	private static string MapStructuredContentPath(string rootPath, string filePath)
+	public static string MapRelativeContentHeaderPath(string rootPath, string filePath)
 	{
 		try
 		{
@@ -114,8 +105,8 @@ public sealed class TreeAndContentExportService(
 		}
 		catch
 		{
-			// Structured tree formats already carry rootPath, so content headers should stay
-			// short and portable even when relative path calculation fails.
+			// Tree + Content already carries the root path in the tree block, so file
+			// sections should stay short and portable even when relative path calculation fails.
 		}
 
 		var fileName = Path.GetFileName(filePath);

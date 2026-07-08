@@ -48,6 +48,67 @@ public sealed class TreeAndContentExportServiceStructuredFormatTests
 	}
 
 	[Theory]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void Build_WithStructuredTreeFormat_UsesRelativeForwardSlashHeadersAndPlainTextContent(TreeTextFormat format)
+	{
+		using var temp = new TemporaryDirectory();
+		var appFile = temp.CreateFile(
+			Path.Combine("src", "features", "App.cs"),
+			"<component>{\"enabled\":true}</component>\n# Markdown-looking content");
+		var notesFile = temp.CreateFile(
+			Path.Combine("docs", "release notes.md"),
+			"Привет & <release>");
+		var root = new TreeNodeDescriptor(
+			"Project",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[
+				new("src", Path.Combine(temp.Path, "src"), true, false, "folder",
+				[
+					new("features", Path.Combine(temp.Path, "src", "features"), true, false, "folder",
+					[
+						new("App.cs", appFile, false, false, "csharp", [])
+					])
+				]),
+				new("docs", Path.Combine(temp.Path, "docs"), true, false, "folder",
+				[
+					new("release notes.md", notesFile, false, false, "markdown", [])
+				])
+			]);
+		var service = CreateService();
+
+		var result = service.Build(temp.Path, root, new HashSet<string>(), format);
+
+		var (treePart, contentPart) = SplitTreeAndContent(result);
+		if (format == TreeTextFormat.Xml)
+		{
+			var document = XmlTreeExportTestHelper.Parse(treePart);
+			Assert.Equal(
+				["docs/release notes.md", "src/features/App.cs"],
+				XmlTreeExportTestHelper.ExtractFilePaths(document).OrderBy(static path => path, StringComparer.Ordinal).ToArray());
+		}
+		else
+		{
+			Assert.Equal(
+				["docs/release notes.md", "src/features/App.cs"],
+				MarkdownTreeExportTestHelper.ExtractFilePaths(treePart).OrderBy(static path => path, StringComparer.Ordinal).ToArray());
+		}
+
+		Assert.DoesNotContain("<component>", treePart, StringComparison.Ordinal);
+		Assert.DoesNotContain("# Markdown-looking content", treePart, StringComparison.Ordinal);
+		Assert.Contains("src/features/App.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("docs/release notes.md:", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("src\\features\\App.cs:", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain(temp.Path.Replace('\\', '/'), contentPart.Replace('\\', '/'), StringComparison.Ordinal);
+		Assert.Contains("<component>{\"enabled\":true}</component>", contentPart, StringComparison.Ordinal);
+		Assert.Contains("# Markdown-looking content", contentPart, StringComparison.Ordinal);
+		Assert.Contains("Привет & <release>", contentPart, StringComparison.Ordinal);
+	}
+
+	[Theory]
 	[InlineData(TreeTextFormat.Xml, "<t ")]
 	[InlineData(TreeTextFormat.Markdown, "Root: ")]
 	public void Build_WithStructuredTreeFormat_NoTextContentReturnsTreeOnly(TreeTextFormat format, string expectedStart)
