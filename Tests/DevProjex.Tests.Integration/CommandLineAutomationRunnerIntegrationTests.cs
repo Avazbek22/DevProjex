@@ -594,7 +594,10 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		using var document = JsonDocument.Parse(output.ToString());
 		var root = document.RootElement;
 		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), root.GetProperty("rootPath").GetString());
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(root);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(root);
 		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
 		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.DoesNotContain("class App", output.ToString(), StringComparison.Ordinal);
@@ -625,7 +628,10 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Equal(string.Empty, error.ToString());
 		using var document = JsonDocument.Parse(output.ToString());
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(document.RootElement);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
 		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
 		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.DoesNotContain("class App", output.ToString(), StringComparison.Ordinal);
@@ -723,7 +729,10 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		using var reportDocument = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
 		using var exportDocument = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath, TestContext.Current.CancellationToken));
 		var reportRoot = reportDocument.RootElement;
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(exportDocument.RootElement);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(exportDocument.RootElement);
 		var exportTree = JsonTreeExportTestHelper.GetTree(exportDocument);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(exportTree);
 
 		Assert.Equal(["smartIgnore", "useGitIgnore"], ReadStringArray(reportRoot.GetProperty("selection").GetProperty("selectedIgnoreOptions")));
 		Assert.Equal(ReadTreeFileCount(reportRoot), JsonTreeExportTestHelper.CountFiles(exportTree));
@@ -939,7 +948,10 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		var separatorIndex = payload.IndexOf("\u00A0", StringComparison.Ordinal);
 		Assert.True(separatorIndex > 0, "Expected tree-content JSON export to separate JSON tree from plain text content.");
 		using var document = JsonDocument.Parse(payload[..separatorIndex].TrimEnd('\r', '\n'));
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(document.RootElement);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
 		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
 		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.Contains("class App", payload[separatorIndex..], StringComparison.Ordinal);

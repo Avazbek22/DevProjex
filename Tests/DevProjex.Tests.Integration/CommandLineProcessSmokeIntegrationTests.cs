@@ -135,6 +135,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(root);
 		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(root);
 		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
 		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.Contains("App.cs:", contentPart, StringComparison.Ordinal);
@@ -942,6 +943,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
 
 		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
 		var paths = JsonTreeExportTestHelper.ExtractFilePaths(tree);
 		var expectedPaths = new[]
 		{

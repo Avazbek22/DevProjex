@@ -50,6 +50,12 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "Tanlangan til ilova qayta ishga tushirilganda saqlanadi" }
     };
 
+    public static TheoryData<string, string> JsonTreeFormatContracts => new()
+    {
+        { "help.ru.txt", "JSON-экспорт использует такой формат дерева: массивы содержат файлы, объекты содержат подпапки, `/` содержит файлы текущей папки, а `[]` обозначает пустую папку." },
+        { "help.en.txt", "JSON export uses this tree format: arrays contain files, objects contain subfolders, `/` contains files in the current folder, and `[]` represents an empty folder." }
+    };
+
     [Theory]
     [MemberData(nameof(TreeFontAndSettingsContracts))]
     public void HelpContent_TreeFontAndSettingsPanel_DescribeCurrentUi(
@@ -91,6 +97,19 @@ public sealed class HelpContentDocumentationContractTests
 
         Assert.Contains(expectedPersistenceText, languageSection, StringComparison.Ordinal);
         Assert.Contains(FindResetSettingsLabel(fileName), languageSection, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(JsonTreeFormatContracts))]
+    public void HelpContent_JsonTreeFormat_DescribesCurrentContract(string fileName, string expectedText)
+    {
+        var content = ReadHelpFile(fileName);
+
+        Assert.Contains(expectedText, content, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"dirs\"", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"files\"", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"name\"", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"path\"", content, StringComparison.Ordinal);
     }
 
     [Theory]

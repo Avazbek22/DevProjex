@@ -39,7 +39,10 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 
 		using var doc = JsonDocument.Parse(bytes);
 		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(doc.RootElement);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(doc.RootElement);
 		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
 		var paths = JsonTreeExportTestHelper.ExtractFilePaths(tree);
 		Assert.Contains("src/main.cs", paths);
@@ -86,7 +89,10 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 
 		using var doc = JsonDocument.Parse(jsonPart);
 		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(doc.RootElement);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(doc.RootElement);
 		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
 		var paths = JsonTreeExportTestHelper.ExtractFilePaths(tree);
 		Assert.Contains("src/main.cs", paths);

@@ -123,6 +123,7 @@ public sealed class TreeAndContentExportServiceJsonTests
 
 		var (_, contentPart) = SplitJsonAndContent(result);
 		Assert.Contains("src/App.cs:", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain(@"src\App.cs:", contentPart, StringComparison.Ordinal);
 		Assert.DoesNotContain(temp.Path.Replace('\\', '/'), contentPart.Replace('\\', '/'), StringComparison.Ordinal);
 	}
 
@@ -161,6 +162,90 @@ public sealed class TreeAndContentExportServiceJsonTests
 		Assert.DoesNotContain("Injected.cs", jsonPart, StringComparison.Ordinal);
 		Assert.Contains("\"rootPath\": \"fake\"", contentPart, StringComparison.Ordinal);
 		Assert.Contains("Injected.cs", contentPart, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Build_WithJsonFormat_SpecialContentRemainsPlainTextAfterJsonBlock()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile(Path.Combine("src", "Program.cs"), """
+			var json = "{ \"rootPath\": \"fake\", \"tree\": { \"Injected.cs\": null } }";
+			Console.WriteLine("Привет / hello { } [ ]");
+			""");
+		var root = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[
+				new(
+					"src",
+					Path.Combine(temp.Path, "src"),
+					true,
+					false,
+					"folder",
+					[
+						new("Program.cs", file, false, false, "csharp", [])
+					])
+			]);
+		var service = CreateService();
+
+		var result = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
+
+		var (jsonPart, contentPart) = SplitJsonAndContent(result);
+		using var document = JsonDocument.Parse(jsonPart);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
+		Assert.Equal(["src/Program.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.DoesNotContain("Injected.cs", jsonPart, StringComparison.Ordinal);
+		Assert.Contains("src/Program.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("""var json = "{ \"rootPath\": \"fake\", \"tree\": { \"Injected.cs\": null } }";""", contentPart, StringComparison.Ordinal);
+		Assert.Contains("Привет / hello { } [ ]", contentPart, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Build_WithJsonFormat_RepeatedExportKeepsStableJsonAndContentOrder()
+	{
+		using var temp = new TemporaryDirectory();
+		var srcPath = temp.CreateFolder("src");
+		var first = temp.CreateFile(Path.Combine("src", "Alpha.cs"), "class Alpha {}");
+		var second = temp.CreateFile(Path.Combine("src", "beta.cs"), "class Beta {}");
+		var rootReadme = temp.CreateFile("README.md", "# readme");
+		var root = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[
+				new(
+					"src",
+					srcPath,
+					true,
+					false,
+					"folder",
+					[
+						new("beta.cs", second, false, false, "csharp", []),
+						new("Alpha.cs", first, false, false, "csharp", [])
+					]),
+				new("README.md", rootReadme, false, false, "markdown", [])
+			]);
+		var service = CreateService();
+
+		var firstExport = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
+		var secondExport = service.Build(temp.Path, root, new HashSet<string>(), TreeTextFormat.Json);
+
+		Assert.Equal(firstExport, secondExport);
+		var (jsonPart, contentPart) = SplitJsonAndContent(firstExport);
+		using var document = JsonDocument.Parse(jsonPart);
+		Assert.Equal(["src/Alpha.cs", "src/beta.cs", "README.md"], JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(document)));
+		Assert.True(
+			contentPart.IndexOf("README.md:", StringComparison.Ordinal) <
+			contentPart.IndexOf("src/Alpha.cs:", StringComparison.Ordinal));
+		Assert.True(
+			contentPart.IndexOf("src/Alpha.cs:", StringComparison.Ordinal) <
+			contentPart.IndexOf("src/beta.cs:", StringComparison.Ordinal));
 	}
 
 	private static TreeAndContentExportService CreateService()

@@ -37,11 +37,13 @@ internal static class JsonTreeExportTestHelper
 	{
 		var propertyNames = root.EnumerateObject().Select(static property => property.Name).ToArray();
 		Assert.Equal(["rootPath", "tree"], propertyNames);
+		Assert.Equal(JsonValueKind.String, root.GetProperty("rootPath").ValueKind);
+		Assert.Equal(JsonValueKind.Object, root.GetProperty("tree").ValueKind);
 	}
 
 	public static void AssertNoLegacyTreeContract(JsonElement root)
 	{
-		foreach (var forbidden in new[] { "root", "schemaVersion", "version", "format", "selection", "counts", "warnings", "diagnostics" })
+		foreach (var forbidden in new[] { "root", "schemaVersion", "version", "format", "selection", "counts", "accessDenied", "symlinks", "truncated", "skipped", "warnings", "diagnostics" })
 			Assert.False(root.TryGetProperty(forbidden, out _), $"Unexpected top-level JSON tree property '{forbidden}'.");
 
 		AssertNoLegacyNodeShape(root);
@@ -49,6 +51,12 @@ internal static class JsonTreeExportTestHelper
 	}
 
 	public static void AssertJsonTreeStructure(JsonElement tree) => AssertJsonTreeObject(tree);
+
+	public static void AssertRelativePathsUseForwardSlashes(JsonElement tree)
+	{
+		foreach (var path in ExtractFilePaths(tree).Concat(ExtractEmptyFolderPaths(tree)))
+			Assert.DoesNotContain("\\", path, StringComparison.Ordinal);
+	}
 
 	public static string NormalizeJsonPath(string path)
 		=> Path.GetFullPath(path).Replace('\\', '/');
@@ -117,6 +125,9 @@ internal static class JsonTreeExportTestHelper
 		Assert.Equal(JsonValueKind.Object, node.ValueKind);
 		foreach (var property in node.EnumerateObject())
 		{
+			if (property.Name == ".")
+				throw new Xunit.Sdk.XunitException("JSON tree must not use '.' as a service key.");
+
 			if (property.Name == "/")
 			{
 				AssertStringArray(property.Value);
@@ -130,7 +141,12 @@ internal static class JsonTreeExportTestHelper
 				continue;
 			}
 
-			Assert.Equal(JsonValueKind.Object, property.Value.ValueKind);
+			if (property.Value.ValueKind != JsonValueKind.Object)
+			{
+				throw new Xunit.Sdk.XunitException(
+					$"JSON tree property '{property.Name}' must be either an object folder node or a string array.");
+			}
+
 			AssertJsonTreeObject(property.Value);
 		}
 	}
@@ -150,10 +166,9 @@ internal static class JsonTreeExportTestHelper
 		if (element.ValueKind != JsonValueKind.Object)
 			return;
 
-		if (element.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String &&
-		    element.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String)
+		if (LooksLikeLegacyVerboseNode(element))
 		{
-			throw new Xunit.Sdk.XunitException("Unexpected legacy name/path JSON tree node.");
+			throw new Xunit.Sdk.XunitException("Unexpected legacy verbose JSON tree node.");
 		}
 
 		if (element.TryGetProperty("accessDenied", out _))
@@ -165,6 +180,16 @@ internal static class JsonTreeExportTestHelper
 
 	private static JsonElement GetTreeFromRoot(JsonElement root)
 		=> root.GetProperty("tree");
+
+	private static bool LooksLikeLegacyVerboseNode(JsonElement element)
+	{
+		var hasName = element.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String;
+		var hasPath = element.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String;
+		var hasDirs = element.TryGetProperty("dirs", out var dirs) && dirs.ValueKind == JsonValueKind.Array;
+		var hasFiles = element.TryGetProperty("files", out var files) && files.ValueKind == JsonValueKind.Array;
+		var hasFolders = element.TryGetProperty("folders", out var folders) && folders.ValueKind == JsonValueKind.Array;
+		return (hasName && hasPath) || (hasName && (hasDirs || hasFiles || hasFolders));
+	}
 
 	private static string Combine(string prefix, string name)
 		=> string.IsNullOrEmpty(prefix) ? name : $"{prefix}/{name}";

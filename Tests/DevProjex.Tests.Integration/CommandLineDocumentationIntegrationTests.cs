@@ -43,9 +43,29 @@ public sealed class CommandLineDocumentationIntegrationTests
 		Assert.Contains($"`{CommandLineExitCodes.RuntimeError}`", docs, StringComparison.Ordinal);
 		Assert.Contains($"`{CommandLineExitCodes.UsageError}`", docs, StringComparison.Ordinal);
 		Assert.Contains($"`{CommandLineExitCodes.Canceled}`", docs, StringComparison.Ordinal);
+		Assert.Contains("arrays contain files, objects contain subfolders", docs, StringComparison.Ordinal);
+		Assert.Contains("`/` contains files in the current folder", docs, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"dirs\"", docs, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"files\"", docs, StringComparison.Ordinal);
+
+		using var jsonExample = JsonDocument.Parse(ExtractFirstJsonFence(docs));
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(jsonExample.RootElement);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(jsonExample.RootElement);
 
 		var readme = File.ReadAllText(readmePath);
 		Assert.Contains("Docs/CommandLine.md", readme, StringComparison.Ordinal);
+	}
+
+	private static string ExtractFirstJsonFence(string markdown)
+	{
+		const string fenceStart = "```json";
+		const string fenceEnd = "```";
+		var start = markdown.IndexOf(fenceStart, StringComparison.Ordinal);
+		Assert.True(start >= 0, "Expected command-line docs to contain a JSON export example.");
+		start += fenceStart.Length;
+		var end = markdown.IndexOf(fenceEnd, start, StringComparison.Ordinal);
+		Assert.True(end > start, "Expected command-line docs JSON example fence to be closed.");
+		return markdown[start..end].Trim();
 	}
 
 	private static string FindRepositoryRoot()

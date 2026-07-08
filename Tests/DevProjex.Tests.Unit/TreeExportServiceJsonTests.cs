@@ -13,6 +13,7 @@ public sealed class TreeExportServiceJsonTests
 		using var document = JsonDocument.Parse(result);
 		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(document.RootElement);
 		Assert.Equal(JsonTreeExportTestHelper.NormalizeJsonPath(fixture.RootPath), document.RootElement.GetProperty("rootPath").GetString());
+		Assert.True(Path.IsPathFullyQualified(document.RootElement.GetProperty("rootPath").GetString()!));
 		Assert.DoesNotContain("\\", document.RootElement.GetProperty("rootPath").GetString(), StringComparison.Ordinal);
 	}
 
@@ -186,6 +187,25 @@ public sealed class TreeExportServiceJsonTests
 	}
 
 	[Fact]
+	public void BuildFullTree_JsonTree_RoundTripsMixedTreeExactly()
+	{
+		var fixture = CreateFixture();
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(fixture.RootPath, fixture.Root, TreeTextFormat.Json);
+
+		using var document = JsonDocument.Parse(result);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
+		Assert.Equal(
+			["Folder/File.cs", "src/features/auth/Login.cs", "README.md"],
+			JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.Equal(["EmptyFolder"], JsonTreeExportTestHelper.ExtractEmptyFolderPaths(tree));
+		AssertTreeDoesNotContainValue(tree, JsonTreeExportTestHelper.NormalizeJsonPath(fixture.RootPath));
+	}
+
+	[Fact]
 	public void BuildFullTree_JsonTree_DoesNotWriteLegacyContractFields()
 	{
 		var fixture = CreateFixture();
@@ -255,6 +275,60 @@ public sealed class TreeExportServiceJsonTests
 		Assert.Contains("файл \"quote\".cs", files);
 		Assert.Contains("literal\\backslash.txt", files);
 		Assert.Contains("README", files);
+	}
+
+	[Fact]
+	public void BuildFullTree_JsonTree_PreservesSpecialNameMatrix()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonNameMatrixFixture");
+		var folderPath = Path.Combine(rootPath, "My Folder");
+		var root = new TreeNodeDescriptor(
+			"Root",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[
+				new(
+					"My Folder",
+					folderPath,
+					true,
+					false,
+					"folder",
+					[
+						new("My File.cs", Path.Combine(folderPath, "My File.cs"), false, false, "csharp", []),
+						new("quote \"file\".cs", Path.Combine(folderPath, "quote file.cs"), false, false, "csharp", []),
+						new("literal\\backslash.txt", Path.Combine(folderPath, "literal-backslash.txt"), false, false, "text", []),
+						new("file.name.with.dots.cs", Path.Combine(folderPath, "file.name.with.dots.cs"), false, false, "csharp", []),
+						new("[test].cs", Path.Combine(folderPath, "[test].cs"), false, false, "csharp", []),
+						new("(draft).md", Path.Combine(folderPath, "(draft).md"), false, false, "markdown", []),
+						new("Dockerfile", Path.Combine(folderPath, "Dockerfile"), false, false, "docker", []),
+						new("LICENSE", Path.Combine(folderPath, "LICENSE"), false, false, "text", []),
+						new("Makefile", Path.Combine(folderPath, "Makefile"), false, false, "make", []),
+						new("Файл.cs", Path.Combine(folderPath, "Файл.cs"), false, false, "csharp", [])
+					])
+			]);
+		var service = new TreeExportService();
+
+		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
+
+		using var document = JsonDocument.Parse(result);
+		var files = JsonTreeExportTestHelper.GetTree(document)
+			.GetProperty("My Folder")
+			.EnumerateArray()
+			.Select(static item => item.GetString()!)
+			.ToArray();
+		Assert.Contains("My File.cs", files);
+		Assert.Contains("quote \"file\".cs", files);
+		Assert.Contains("literal\\backslash.txt", files);
+		Assert.Contains("file.name.with.dots.cs", files);
+		Assert.Contains("[test].cs", files);
+		Assert.Contains("(draft).md", files);
+		Assert.Contains("Dockerfile", files);
+		Assert.Contains("LICENSE", files);
+		Assert.Contains("Makefile", files);
+		Assert.Contains("Файл.cs", files);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
 	}
 
 	[Fact]
@@ -449,6 +523,48 @@ public sealed class TreeExportServiceJsonTests
 	}
 
 	[Fact]
+	public void BuildFullTree_JsonTree_WideAndDeepSyntheticTreeRoundTrips()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonWideDeepFixture");
+		var wideFolders = new List<TreeNodeDescriptor>();
+		for (var folderIndex = 0; folderIndex < 100; folderIndex++)
+		{
+			var folderPath = Path.Combine(rootPath, $"feature{folderIndex:D3}");
+			var files = new List<TreeNodeDescriptor>();
+			for (var fileIndex = 0; fileIndex < 10; fileIndex++)
+			{
+				files.Add(new TreeNodeDescriptor(
+					$"File{fileIndex:D2}.cs",
+					Path.Combine(folderPath, $"File{fileIndex:D2}.cs"),
+					false,
+					false,
+					"csharp",
+					[]));
+			}
+
+			wideFolders.Add(new TreeNodeDescriptor($"feature{folderIndex:D3}", folderPath, true, false, "folder", files));
+		}
+
+		var deepLeafPath = CombinePath(
+			rootPath,
+			Enumerable.Range(0, 50).Select(static index => $"level{index:D2}").Append("leaf.txt").ToArray());
+		wideFolders.Add(CreateDeepFolder(rootPath, depth: 50, deepLeafPath));
+		var root = new TreeNodeDescriptor("Root", rootPath, true, false, "folder", wideFolders);
+		var service = new TreeExportService();
+
+		var first = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
+		var second = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
+
+		Assert.Equal(first, second);
+		using var document = JsonDocument.Parse(first);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
+		Assert.Equal(1001, JsonTreeExportTestHelper.CountFiles(tree));
+		Assert.True(JsonTreeExportTestHelper.ContainsFilePath(tree, string.Join('/', Enumerable.Range(0, 50).Select(static index => $"level{index:D2}")) + "/leaf.txt"));
+	}
+
+	[Fact]
 	public void BuildSelectedTree_JsonTree_FileSelectionKeepsAncestorsOnly()
 	{
 		var fixture = CreateFixture();
@@ -593,5 +709,56 @@ public sealed class TreeExportServiceJsonTests
 			]);
 
 		return (rootPath, root, loginPath, emptyFolderPath);
+	}
+
+	private static TreeNodeDescriptor CreateDeepFolder(string rootPath, int depth, string leafPath)
+	{
+		TreeNodeDescriptor current = new($"level{depth - 1:D2}", CombinePath(rootPath, Enumerable.Range(0, depth).Select(static level => $"level{level:D2}").ToArray()), true, false, "folder",
+		[
+			new("leaf.txt", leafPath, false, false, "text", [])
+		]);
+
+		for (var index = depth - 2; index >= 0; index--)
+		{
+			var relativeParts = Enumerable.Range(0, index + 1).Select(static level => $"level{level:D2}").ToArray();
+			var folderPath = CombinePath(rootPath, relativeParts);
+			current = new TreeNodeDescriptor($"level{index:D2}", folderPath, true, false, "folder", [current]);
+		}
+
+		return current;
+	}
+
+	private static string CombinePath(string rootPath, IReadOnlyList<string> relativeParts)
+	{
+		var path = rootPath;
+		foreach (var part in relativeParts)
+			path = Path.Combine(path, part);
+
+		return path;
+	}
+
+	private static void AssertTreeDoesNotContainValue(JsonElement element, string value)
+	{
+		if (element.ValueKind == JsonValueKind.String)
+		{
+			Assert.NotEqual(value, element.GetString());
+			return;
+		}
+
+		if (element.ValueKind == JsonValueKind.Array)
+		{
+			foreach (var item in element.EnumerateArray())
+				AssertTreeDoesNotContainValue(item, value);
+			return;
+		}
+
+		if (element.ValueKind != JsonValueKind.Object)
+			return;
+
+		foreach (var property in element.EnumerateObject())
+		{
+			Assert.NotEqual(value, property.Name);
+			AssertTreeDoesNotContainValue(property.Value, value);
+		}
 	}
 }
