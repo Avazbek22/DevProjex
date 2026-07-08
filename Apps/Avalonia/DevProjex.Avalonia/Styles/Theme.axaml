@@ -1094,7 +1094,20 @@
         </Setter>
     </Style>
 
-    <!-- Thumb moved to right position (JSON selected) -->
+    <!-- Thumb positions for the top tree-format switcher. -->
+    <Style Selector="Border.segment-thumb.segment-thumb-json">
+        <Setter Property="RenderTransform" Value="translate(48px, 0px)" />
+    </Style>
+
+    <Style Selector="Border.segment-thumb.segment-thumb-xml">
+        <Setter Property="RenderTransform" Value="translate(96px, 0px)" />
+    </Style>
+
+    <Style Selector="Border.segment-thumb.segment-thumb-md">
+        <Setter Property="RenderTransform" Value="translate(144px, 0px)" />
+    </Style>
+
+    <!-- Kept for older callers that still use the previous two-segment class name. -->
     <Style Selector="Border.segment-thumb.segment-thumb-right">
         <Setter Property="RenderTransform" Value="translate(48px, 0px)" />
     </Style>

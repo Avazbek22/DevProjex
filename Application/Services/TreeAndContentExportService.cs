@@ -55,8 +55,7 @@ public sealed class TreeAndContentExportService(
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
 
-		// For both ASCII and JSON: tree + separator + content
-		// JSON format applies only to tree structure, content remains plain text
+		// The selected format applies only to the tree block; file content stays plain text.
 		var sb = new StringBuilder();
 		sb.Append(tree.TrimEnd('\r', '\n'));
 		AppendClipboardBlankLine(sb);
@@ -92,12 +91,15 @@ public sealed class TreeAndContentExportService(
 		TreeTextFormat format,
 		ExportPathPresentation? pathPresentation)
 	{
-		return format == TreeTextFormat.Json
-			? filePath => MapJsonContentPath(rootPath, filePath)
+		return UsesRelativeContentHeaders(format)
+			? filePath => MapStructuredContentPath(rootPath, filePath)
 			: pathPresentation?.MapFilePath;
 	}
 
-	private static string MapJsonContentPath(string rootPath, string filePath)
+	private static bool UsesRelativeContentHeaders(TreeTextFormat format)
+		=> format is TreeTextFormat.Json or TreeTextFormat.Xml or TreeTextFormat.Markdown;
+
+	private static string MapStructuredContentPath(string rootPath, string filePath)
 	{
 		try
 		{
@@ -112,8 +114,8 @@ public sealed class TreeAndContentExportService(
 		}
 		catch
 		{
-			// Fall back to a stable leaf name; JSON tree-content headers should not repeat
-			// the absolute root path that is already present in the JSON block.
+			// Structured tree formats already carry rootPath, so content headers should stay
+			// short and portable even when relative path calculation fails.
 		}
 
 		var fileName = Path.GetFileName(filePath);

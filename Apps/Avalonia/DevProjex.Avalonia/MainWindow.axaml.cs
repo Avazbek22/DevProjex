@@ -630,7 +630,7 @@ public partial class MainWindow : Window
                 _taskbarProgress.SyncWithStatusBar();
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
             {
-                _metrics.Recalculate(); // Update tree metrics when format changes (ASCII vs JSON)
+                _metrics.Recalculate(); // Update tree metrics when the selected tree format changes.
                 InvalidatePreviewCache();
                 SchedulePreviewRefresh();
             }
@@ -2418,14 +2418,13 @@ public partial class MainWindow : Window
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
             var content = BuildTreeTextForSelection(selected, format);
-            var saveAsJson = format == TreeTextFormat.Json;
 
             var saved = await TryExportTextToFileAsync(
                 content,
-                BuildSuggestedExportFileName("tree", saveAsJson),
+                BuildSuggestedExportFileName("tree", GetTreeExportFileExtension(format)),
                 _viewModel.MenuFileExportTree,
-                useJsonDefaultExtension: saveAsJson,
-                allowBothExtensions: saveAsJson);
+                defaultExtension: GetTreeExportFileExtension(format),
+                fileTypeChoices: CreateTreeExportFileTypeChoices());
 
             if (saved)
                 _toastService.Show(_localization["Toast.Export.Tree"]);
@@ -2472,10 +2471,10 @@ public partial class MainWindow : Window
 
             var saved = await TryExportTextToFileAsync(
                 content,
-                BuildSuggestedExportFileName("content", saveAsJson: false),
+                BuildSuggestedExportFileName("content", "txt"),
                 _viewModel.MenuFileExportContent,
-                useJsonDefaultExtension: false,
-                allowBothExtensions: false);
+                defaultExtension: "txt",
+                fileTypeChoices: [CreateTextFileType()]);
 
             _statusOperations.Complete(statusOperationId);
             if (saved)
@@ -2499,7 +2498,6 @@ public partial class MainWindow : Window
 
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
-            var saveAsJson = false;
             var pathPresentation = CreateExportPathPresentation();
 
             statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
@@ -2514,10 +2512,10 @@ public partial class MainWindow : Window
 
             var saved = await TryExportTextToFileAsync(
                 content,
-                BuildSuggestedExportFileName("tree_content", saveAsJson),
+                BuildSuggestedExportFileName("tree_content", "txt"),
                 _viewModel.MenuFileExportTreeAndContent,
-                useJsonDefaultExtension: false,
-                allowBothExtensions: false);
+                defaultExtension: "txt",
+                fileTypeChoices: [CreateTextFileType()]);
 
             _statusOperations.Complete(statusOperationId);
             if (saved)
@@ -2531,9 +2529,13 @@ public partial class MainWindow : Window
     }
 
     private TreeTextFormat GetCurrentTreeTextFormat()
-        => _viewModel.SelectedExportFormat == ExportFormat.Json
-            ? TreeTextFormat.Json
-            : TreeTextFormat.Ascii;
+        => _viewModel.SelectedExportFormat switch
+        {
+            ExportFormat.Json => TreeTextFormat.Json,
+            ExportFormat.Xml => TreeTextFormat.Xml,
+            ExportFormat.Markdown => TreeTextFormat.Markdown,
+            _ => TreeTextFormat.Ascii
+        };
 
     private string BuildTreeTextForSelection(IReadOnlySet<string> selectedPaths, TreeTextFormat format)
     {
@@ -3246,37 +3248,19 @@ public partial class MainWindow : Window
         string content,
         string suggestedFileName,
         string dialogTitle,
-        bool useJsonDefaultExtension,
-        bool allowBothExtensions)
+        string defaultExtension,
+        IReadOnlyList<FilePickerFileType> fileTypeChoices)
     {
         if (StorageProvider is null || string.IsNullOrWhiteSpace(content))
             return false;
-
-        var jsonFileType = new FilePickerFileType("JSON")
-        {
-            Patterns = ["*.json"],
-            MimeTypes = ["application/json"]
-        };
-
-        var textFileType = new FilePickerFileType("Text")
-        {
-            Patterns = ["*.txt"],
-            MimeTypes = ["text/plain"]
-        };
 
         var options = new FilePickerSaveOptions
         {
             Title = dialogTitle,
             SuggestedFileName = suggestedFileName,
             ShowOverwritePrompt = true,
-            // Tree export allows choosing both .json and .txt.
-            // Other export modes stay text-only for predictable output format.
-            DefaultExtension = useJsonDefaultExtension ? "json" : "txt",
-            FileTypeChoices = allowBothExtensions
-                ? [jsonFileType, textFileType]
-                : useJsonDefaultExtension
-                    ? new[] { jsonFileType }
-                    : new[] { textFileType }
+            DefaultExtension = defaultExtension,
+            FileTypeChoices = fileTypeChoices
         };
 
         var file = await StorageProvider.SaveFilePickerAsync(options);
@@ -3289,7 +3273,47 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private string BuildSuggestedExportFileName(string suffix, bool saveAsJson)
+    private static IReadOnlyList<FilePickerFileType> CreateTreeExportFileTypeChoices()
+        => [CreateTextFileType(), CreateJsonFileType(), CreateXmlFileType(), CreateMarkdownFileType()];
+
+    private static FilePickerFileType CreateTextFileType()
+        => new("Text")
+        {
+            Patterns = ["*.txt"],
+            MimeTypes = ["text/plain"]
+        };
+
+    private static FilePickerFileType CreateJsonFileType()
+        => new("JSON")
+        {
+            Patterns = ["*.json"],
+            MimeTypes = ["application/json"]
+        };
+
+    private static FilePickerFileType CreateXmlFileType()
+        => new("XML")
+        {
+            Patterns = ["*.xml"],
+            MimeTypes = ["application/xml", "text/xml"]
+        };
+
+    private static FilePickerFileType CreateMarkdownFileType()
+        => new("Markdown")
+        {
+            Patterns = ["*.md"],
+            MimeTypes = ["text/markdown", "text/plain"]
+        };
+
+    private static string GetTreeExportFileExtension(TreeTextFormat format)
+        => format switch
+        {
+            TreeTextFormat.Json => "json",
+            TreeTextFormat.Xml => "xml",
+            TreeTextFormat.Markdown => "md",
+            _ => "txt"
+        };
+
+    private string BuildSuggestedExportFileName(string suffix, string extension)
     {
         var baseName = _currentProjectDisplayName;
         if (string.IsNullOrWhiteSpace(baseName) && !string.IsNullOrWhiteSpace(_currentPath))
@@ -3303,7 +3327,6 @@ public partial class MainWindow : Window
         foreach (var ch in baseName)
             sanitized.Append(invalidChars.Contains(ch) ? '_' : ch);
 
-        var extension = saveAsJson ? "json" : "txt";
         return $"{sanitized}_{suffix}.{extension}";
     }
 

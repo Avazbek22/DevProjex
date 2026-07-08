@@ -3,12 +3,14 @@ using DevProjex.Avalonia.Collections;
 namespace DevProjex.Avalonia.ViewModels;
 
 /// <summary>
-/// Specifies the export format for copying content.
+/// Specifies the tree format used by desktop preview, copy, and export actions.
 /// </summary>
 public enum ExportFormat
 {
     Ascii,
-    Json
+    Json,
+    Xml,
+    Markdown
 }
 
 public enum PreviewContentMode
@@ -490,6 +492,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(IsAsciiFormatSelected));
             RaisePropertyChanged(nameof(IsJsonFormatSelected));
+            RaisePropertyChanged(nameof(IsXmlFormatSelected));
+            RaisePropertyChanged(nameof(IsMarkdownFormatSelected));
         }
     }
 
@@ -508,6 +512,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (value) SelectedExportFormat = ExportFormat.Json;
+        }
+    }
+
+    public bool IsXmlFormatSelected
+    {
+        get => _selectedExportFormat == ExportFormat.Xml;
+        set
+        {
+            if (value) SelectedExportFormat = ExportFormat.Xml;
+        }
+    }
+
+    public bool IsMarkdownFormatSelected
+    {
+        get => _selectedExportFormat == ExportFormat.Markdown;
+        set
+        {
+            if (value) SelectedExportFormat = ExportFormat.Markdown;
         }
     }
 

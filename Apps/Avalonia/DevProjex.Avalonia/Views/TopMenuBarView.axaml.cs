@@ -145,6 +145,18 @@ public partial class TopMenuBarView : UserControl
             vm.SelectedExportFormat = ExportFormat.Json;
     }
 
+    private void OnXmlFormatClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.SelectedExportFormat = ExportFormat.Xml;
+    }
+
+    private void OnMarkdownFormatClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.SelectedExportFormat = ExportFormat.Markdown;
+    }
+
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
         => ThemeMenuClickRequested?.Invoke(sender, e);
 

@@ -52,6 +52,33 @@ public sealed class TreeExportServicePathPresentationTests
 		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildFullTree_StructuredFormat_UsesDisplayRootPathWhenProvided(TreeTextFormat format)
+	{
+		var service = new TreeExportService();
+		var root = CreateSimpleRoot();
+
+		var result = service.BuildFullTree(
+			@"C:\repo",
+			root,
+			format,
+			displayRootPath: "https://github.com/user/repo");
+
+		if (format == TreeTextFormat.Xml)
+		{
+			var document = XmlTreeExportTestHelper.Parse(result);
+			Assert.Equal("https://github.com/user/repo", document.Root!.Attribute("r")?.Value);
+		}
+		else
+		{
+			Assert.StartsWith("Root: https://github.com/user/repo", result, StringComparison.Ordinal);
+		}
+
+		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public void BuildFullTree_Json_DoesNotWriteRootDisplayNameMetadata()
 	{

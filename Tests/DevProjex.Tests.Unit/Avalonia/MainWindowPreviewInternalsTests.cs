@@ -5,6 +5,21 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class MainWindowPreviewInternalsTests
 {
     [Theory]
+    [InlineData(TreeTextFormat.Ascii, "txt")]
+    [InlineData(TreeTextFormat.Json, "json")]
+    [InlineData(TreeTextFormat.Xml, "xml")]
+    [InlineData(TreeTextFormat.Markdown, "md")]
+    public void GetTreeExportFileExtension_ReturnsExpectedDesktopExtension(TreeTextFormat format, string expected)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            "GetTreeExportFileExtension",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        Assert.Equal(expected, method!.Invoke(null, [format]));
+    }
+
+    [Theory]
     [InlineData("", 1)]
     [InlineData("one", 1)]
     [InlineData("one\ntwo", 2)]

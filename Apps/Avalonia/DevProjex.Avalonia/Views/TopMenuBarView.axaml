@@ -7,7 +7,7 @@
              x:CompileBindings="True">
   <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
     <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
-    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,110,0">
+    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,206,0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Name="OpenNewWindowMenuItem"
@@ -92,7 +92,7 @@
       </MenuItem>
     </Menu>
 
-    <!-- Format Switcher: Segmented Control (ASCII/JSON) with sliding thumb -->
+    <!-- Format Switcher: Segmented Control (ASCII/JSON/XML/MD) with sliding thumb -->
     <Border Grid.Column="1"
             Classes="segmented-control"
             IsEnabled="{Binding IsProjectLoaded}"
@@ -112,7 +112,9 @@
                 Width="48"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Stretch"
-                Classes.segment-thumb-right="{Binding IsJsonFormatSelected}" />
+                Classes.segment-thumb-json="{Binding IsJsonFormatSelected}"
+                Classes.segment-thumb-xml="{Binding IsXmlFormatSelected}"
+                Classes.segment-thumb-md="{Binding IsMarkdownFormatSelected}" />
 
         <!-- Buttons container -->
         <StackPanel Orientation="Horizontal">
@@ -127,6 +129,18 @@
                   Classes.segment-selected="{Binding IsJsonFormatSelected}"
                   Content="JSON"
                   Click="OnJsonFormatClick" />
+
+          <!-- XML button -->
+          <Button Classes="segment-text-button"
+                  Classes.segment-selected="{Binding IsXmlFormatSelected}"
+                  Content="XML"
+                  Click="OnXmlFormatClick" />
+
+          <!-- Markdown button -->
+          <Button Classes="segment-text-button"
+                  Classes.segment-selected="{Binding IsMarkdownFormatSelected}"
+                  Content="MD"
+                  Click="OnMarkdownFormatClick" />
         </StackPanel>
       </Panel>
     </Border>

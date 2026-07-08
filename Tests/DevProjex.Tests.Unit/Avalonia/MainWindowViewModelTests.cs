@@ -36,6 +36,48 @@ public sealed class MainWindowViewModelTests
         Assert.True(viewModel.ShowBlurSlider);
     }
 
+    [Theory]
+    [InlineData(ExportFormat.Ascii, true, false, false, false)]
+    [InlineData(ExportFormat.Json, false, true, false, false)]
+    [InlineData(ExportFormat.Xml, false, false, true, false)]
+    [InlineData(ExportFormat.Markdown, false, false, false, true)]
+    public void SelectedExportFormat_UpdatesAllFormatFlags(
+        ExportFormat format,
+        bool asciiSelected,
+        bool jsonSelected,
+        bool xmlSelected,
+        bool markdownSelected)
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.SelectedExportFormat = format;
+
+        Assert.Equal(asciiSelected, viewModel.IsAsciiFormatSelected);
+        Assert.Equal(jsonSelected, viewModel.IsJsonFormatSelected);
+        Assert.Equal(xmlSelected, viewModel.IsXmlFormatSelected);
+        Assert.Equal(markdownSelected, viewModel.IsMarkdownFormatSelected);
+    }
+
+    [Fact]
+    public void SelectedExportFormat_RaisesFormatFlagChangesForAllSegments()
+    {
+        var viewModel = CreateViewModel();
+        var raised = new HashSet<string>();
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is not null)
+                raised.Add(e.PropertyName);
+        };
+
+        viewModel.SelectedExportFormat = ExportFormat.Markdown;
+
+        Assert.Contains(nameof(MainWindowViewModel.SelectedExportFormat), raised);
+        Assert.Contains(nameof(MainWindowViewModel.IsAsciiFormatSelected), raised);
+        Assert.Contains(nameof(MainWindowViewModel.IsJsonFormatSelected), raised);
+        Assert.Contains(nameof(MainWindowViewModel.IsXmlFormatSelected), raised);
+        Assert.Contains(nameof(MainWindowViewModel.IsMarkdownFormatSelected), raised);
+    }
+
     [Fact]
     public void RecentCollections_TrackHasRecentFlags()
     {

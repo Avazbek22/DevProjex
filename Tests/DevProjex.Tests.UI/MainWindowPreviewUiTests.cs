@@ -1,10 +1,55 @@
 using Avalonia.Layout;
+using System.Xml.Linq;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
+    [AvaloniaFact]
+    public async Task TreePreview_UsesSelectedXmlAndMarkdownFormats()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Tree);
+            var viewModel = UiTestDriver.GetViewModel(window);
+
+            viewModel.SelectedExportFormat = ExportFormat.Xml;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).StartsWith("<t ", StringComparison.Ordinal),
+                "XML tree preview to be rendered");
+
+            var xmlPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            var xmlDocument = XDocument.Parse(xmlPayload);
+            Assert.Equal("t", xmlDocument.Root!.Name.LocalName);
+            Assert.NotEmpty(xmlDocument.Descendants("f"));
+
+            viewModel.SelectedExportFormat = ExportFormat.Markdown;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+                    return payload.StartsWith("Root: ", StringComparison.Ordinal) &&
+                           payload.Contains("\n- ", StringComparison.Ordinal);
+                },
+                "Markdown tree preview to be rendered");
+
+            var markdownPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.StartsWith("Root: ", markdownPayload, StringComparison.Ordinal);
+            Assert.Contains("\n- ", markdownPayload, StringComparison.Ordinal);
+            Assert.DoesNotContain("<t ", markdownPayload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task LoadedProject_ShowsTreeAndSettingsBeforePreviewOpens()
     {
