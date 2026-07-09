@@ -52,6 +52,59 @@ public sealed class AppInstanceStartInfoFactoryTests
     }
 
     [Fact]
+    public void CreateCandidates_PackagedWindowsDotnetHostContext_PrefersAppsFolderAndKeepsDotnetFallback()
+    {
+        var context = new AppInstanceLaunchContext(
+            IsWindows: true,
+            ProcessPath: @"C:\Program Files\dotnet\dotnet.exe",
+            EntryAssemblyPath: @"C:\Program Files\WindowsApps\DevProjex\DevProjex.dll",
+            WorkingDirectory: @"C:\Program Files\WindowsApps\DevProjex",
+            WindowsPackageFamilyName: "StarkIndustriesDev.DevProjex_84v5br12cncq6");
+
+        var candidates = AppInstanceStartInfoFactory.CreateCandidates(context);
+
+        Assert.Equal(2, candidates.Count);
+        Assert.Equal("explorer.exe", candidates[0].FileName);
+        Assert.Equal(@"shell:AppsFolder\StarkIndustriesDev.DevProjex_84v5br12cncq6!App", candidates[0].Arguments);
+        Assert.True(candidates[0].UseShellExecute);
+        Assert.Equal(context.ProcessPath, candidates[1].FileName);
+        Assert.False(candidates[1].UseShellExecute);
+        Assert.Equal(context.EntryAssemblyPath, Assert.Single(candidates[1].ArgumentList));
+    }
+
+    [Fact]
+    public void CreateCandidates_DotnetHostWithoutEntryAssembly_DoesNotLaunchBareDotnet()
+    {
+        var context = new AppInstanceLaunchContext(
+            IsWindows: false,
+            ProcessPath: "/usr/share/dotnet/dotnet",
+            EntryAssemblyPath: null,
+            WorkingDirectory: "/opt/devprojex",
+            WindowsPackageFamilyName: null);
+
+        var candidates = AppInstanceStartInfoFactory.CreateCandidates(context);
+
+        Assert.Empty(candidates);
+    }
+
+    [Fact]
+    public void CreateCandidates_PackagedWindowsDotnetHostWithoutEntryAssembly_UsesOnlyAppsFolderActivation()
+    {
+        var context = new AppInstanceLaunchContext(
+            IsWindows: true,
+            ProcessPath: @"C:\Program Files\dotnet\dotnet.exe",
+            EntryAssemblyPath: null,
+            WorkingDirectory: @"C:\Program Files\WindowsApps\DevProjex",
+            WindowsPackageFamilyName: "StarkIndustriesDev.DevProjex_84v5br12cncq6");
+
+        var candidate = Assert.Single(AppInstanceStartInfoFactory.CreateCandidates(context));
+
+        Assert.Equal("explorer.exe", candidate.FileName);
+        Assert.Equal(@"shell:AppsFolder\StarkIndustriesDev.DevProjex_84v5br12cncq6!App", candidate.Arguments);
+        Assert.True(candidate.UseShellExecute);
+    }
+
+    [Fact]
     public void CreateCandidates_AppHostContext_UsesCurrentProcessPathWithoutArguments()
     {
         var context = new AppInstanceLaunchContext(

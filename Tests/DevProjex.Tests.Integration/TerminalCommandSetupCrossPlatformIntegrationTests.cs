@@ -47,6 +47,40 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 	}
 
 	[Fact]
+	public void InstallOrRepair_UnixRuntime_PathProviderFailureStillCreatesExecutableWrapperInSandbox()
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("DevProjex", "fake executable");
+		var userBin = Path.Combine(temp.Path, ".local", "bin");
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = OperatingSystem.IsMacOS()
+				? TerminalCommandHostPlatform.MacOS
+				: TerminalCommandHostPlatform.Linux,
+			HomeDirectoryProvider = () => temp.Path,
+			PathVariableProvider = () => throw new IOException("PATH unavailable in test runner"),
+			ExecutablePathProvider = () => target
+		});
+
+		var result = service.InstallOrRepair();
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+
+		Assert.True(result.Success);
+		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
+		Assert.False(result.Snapshot.UserBinDirectoryIsInPath);
+		Assert.Contains(".local/bin", result.Snapshot.ShellProfileHint, StringComparison.Ordinal);
+		Assert.True(File.Exists(commandPath));
+		Assert.Contains(target, File.ReadAllText(commandPath), StringComparison.Ordinal);
+#pragma warning disable CA1416
+		var mode = File.GetUnixFileMode(commandPath);
+#pragma warning restore CA1416
+		Assert.True((mode & UnixFileMode.UserExecute) == UnixFileMode.UserExecute);
+	}
+
+	[Fact]
 	public void InstallOrRepair_WindowsPortableSimulation_CreatesLauncherAndRepairsThroughPublicApi()
 	{
 		using var temp = new TemporaryDirectory();

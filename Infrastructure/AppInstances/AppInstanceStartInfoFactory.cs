@@ -30,8 +30,11 @@ internal static class AppInstanceStartInfoFactory
         if (string.IsNullOrWhiteSpace(context.ProcessPath))
             return candidates;
 
-        if (IsDotnetHost(context.ProcessPath) && !string.IsNullOrWhiteSpace(context.EntryAssemblyPath))
+        if (IsDotnetHost(context.ProcessPath))
         {
+            if (string.IsNullOrWhiteSpace(context.EntryAssemblyPath))
+                return candidates;
+
             // Development runs can execute under the dotnet host instead of an apphost executable.
             // Launching another independent process must replay the entry assembly explicitly there.
             var dotnetHostStartInfo = new ProcessStartInfo

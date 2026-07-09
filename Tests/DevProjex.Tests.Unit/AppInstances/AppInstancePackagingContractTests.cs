@@ -110,6 +110,36 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
+    public void AvaloniaProject_KeepsTmdsDbusProtocolReferenceForLinuxDesktopRuntime()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var avaloniaProjectPath = Path.Combine(
+            repositoryRoot,
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "DevProjex.Avalonia.csproj");
+        var centralPackagesPath = Path.Combine(repositoryRoot, "Directory.Packages.props");
+
+        var avaloniaProject = XDocument.Load(avaloniaProjectPath);
+        var centralPackages = XDocument.Load(centralPackagesPath);
+
+        var avaloniaPackageReferences = avaloniaProject
+            .Descendants("PackageReference")
+            .Select(element => element.Attribute("Include")?.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+        var dbusVersion = centralPackages
+            .Descendants("PackageVersion")
+            .SingleOrDefault(element => element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
+            ?.Attribute("Version")
+            ?.Value;
+
+        Assert.Contains("Tmds.DBus.Protocol", avaloniaPackageReferences);
+        Assert.False(string.IsNullOrWhiteSpace(dbusVersion));
+    }
+
+    [Fact]
     public void WindowsStoreManifest_TargetsWindowsVersionSupportingExecutionAliases()
     {
         var manifestPath = ResolveStoreManifestPath();
