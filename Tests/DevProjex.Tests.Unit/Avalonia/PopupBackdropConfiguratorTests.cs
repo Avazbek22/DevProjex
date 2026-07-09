@@ -4,6 +4,7 @@ using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class PopupBackdropConfiguratorTests
 {
     [AvaloniaFact]

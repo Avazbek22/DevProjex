@@ -142,18 +142,17 @@ Daraxt va mazmunni birlashtiradi:
 Tugma: Ctrl+Shift+V.
 
 ### JSON ko‘rinishi
-JSON rejimida daraxtning ixcham tuzilmasi ishlatiladi.
+JSON rejimida daraxtning strukturali ko‘rinishi ishlatiladi.
 
 Daraxt (Daraxtni nusxalash / Daraxtni eksport qilish):
-* `rootPath` — joriy chiqish formatidagi ildiz yo‘li:
-  * lokal papka uchun — absolyut lokal yo‘l;
-  * Git loyihasi uchun — repository URL.
-* `root` — ildiz tugun.
-* tugun maydonlari: `name`, `path`, `dirs`, `files`, `accessDenied` (zarurat bo‘lsa).
+* `rootPath` — `/` orqali normallashtirilgan absolyut ildiz yo‘li.
+* `tree` — ildiz papkaning mazmuni.
+* JSON eksport shu daraxt formatidan foydalanadi: massivlar fayllarni, obyektlar ichki papkalarni, `/` joriy papkadagi fayllarni saqlaydi, `[]` esa bo‘sh papkani bildiradi.
 
 Daraxt + mazmun:
 * JSON daraxt blokiga qo‘llanadi;
 * mazmun bloki matn bo‘lib qoladi;
+* mazmun blokidagi fayl sarlavhalari `/` orqali relative yo‘llardan foydalanadi;
 * eksport `.txt` formatida saqlanadi.
 
 ## 7) Preview rejimi

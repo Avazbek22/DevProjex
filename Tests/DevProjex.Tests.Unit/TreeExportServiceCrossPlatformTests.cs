@@ -13,11 +13,11 @@ public sealed class TreeExportServiceCrossPlatformTests
 		var json = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(json);
-		Assert.Equal(fullRootPath, doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.Equal(fullRootPath.Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
 	}
 
 	[Fact]
-	public void BuildFullTree_Json_NormalizesChildPathsToForwardSlash()
+	public void BuildFullTree_Json_UsesForwardSlashRelativeKeys()
 	{
 		var service = new TreeExportService();
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjex", "TreeExportCross");
@@ -28,12 +28,12 @@ public sealed class TreeExportServiceCrossPlatformTests
 		var json = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(json);
-		var src = doc.RootElement.GetProperty("root").GetProperty("dirs")[0];
-		Assert.Equal("src", src.GetProperty("path").GetString());
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(doc));
+		Assert.Equal(["src/main.cs"], paths);
 	}
 
 	[Fact]
-	public void BuildFullTree_Json_OmitsAccessDeniedWhenFalse()
+	public void BuildFullTree_Json_DoesNotExposeScannerMetadata()
 	{
 		var service = new TreeExportService();
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjex", "TreeExportCrossDenied");
@@ -42,8 +42,7 @@ public sealed class TreeExportServiceCrossPlatformTests
 		var json = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(json);
-		var rootElement = doc.RootElement.GetProperty("root");
-		Assert.False(rootElement.TryGetProperty("accessDenied", out _));
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(doc.RootElement);
 	}
 
 	[Fact]
@@ -89,7 +88,7 @@ public sealed class TreeExportServiceCrossPlatformTests
 	}
 
 	[Fact]
-	public void BuildFullTree_Json_RootNodePathIsDot()
+	public void BuildFullTree_Json_TreeContainsRootContentsOnly()
 	{
 		var service = new TreeExportService();
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjex", "TreeExportRootDot");
@@ -98,7 +97,8 @@ public sealed class TreeExportServiceCrossPlatformTests
 		var json = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(json);
-		Assert.Equal(".", doc.RootElement.GetProperty("root").GetProperty("path").GetString());
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(doc.RootElement);
+		Assert.Empty(JsonTreeExportTestHelper.GetTree(doc).EnumerateObject());
 	}
 
 	[Fact]
@@ -114,10 +114,9 @@ public sealed class TreeExportServiceCrossPlatformTests
 		var json = service.BuildSelectedTree(rootPath, root, selected, TreeTextFormat.Json);
 
 		using var doc = JsonDocument.Parse(json);
-		var rootElement = doc.RootElement.GetProperty("root");
-		Assert.Equal(".", rootElement.GetProperty("path").GetString());
-		Assert.True(rootElement.TryGetProperty("dirs", out var dirs));
-		Assert.Equal(1, dirs.GetArrayLength());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/main.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 	}
 
 	private static TreeNodeDescriptor CreateRoot(string rootPath, string? srcPath = null, string? filePath = null)

@@ -307,23 +307,32 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 					charCount++;
 
-					if (c == '\n')
+					if (c == '\r')
 					{
 						lineCount++;
-						if (previousWasCarriageReturn)
-							crLfPairCount++;
+						trailingNewlineChars++;
+						trailingNewlineLineBreaks++;
+						previousWasCarriageReturn = true;
 					}
-
-					previousWasCarriageReturn = c == '\r';
-
-					if (c is '\r' or '\n')
+					else if (c == '\n')
 					{
 						trailingNewlineChars++;
-						if (c == '\n')
+						if (previousWasCarriageReturn)
+						{
+							// CRLF is one logical line break even when the pair crosses a read-buffer boundary.
+							crLfPairCount++;
+						}
+						else
+						{
+							lineCount++;
 							trailingNewlineLineBreaks++;
+						}
+
+						previousWasCarriageReturn = false;
 					}
 					else
 					{
+						previousWasCarriageReturn = false;
 						trailingNewlineChars = 0;
 						trailingNewlineLineBreaks = 0;
 					}
@@ -384,7 +393,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				return null;
 
 			bool isWhitespaceOnly = string.IsNullOrWhiteSpace(content);
-			int lineCount = content.Length == 0 ? 0 : 1 + CountNewlines(content);
+			int lineCount = content.Length == 0 ? 0 : 1 + CountNormalizedLineBreaks(content);
 			var trailingInfo = GetTrailingNewlineInfo(content);
 
 			return new TextFileContent(
@@ -409,35 +418,36 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	}
 
 	/// <summary>
-	/// Counts newline characters efficiently.
+	/// Counts logical line breaks while treating CRLF as a single break.
 	/// </summary>
-	private static int CountNewlines(string content)
+	private static int CountNormalizedLineBreaks(ReadOnlySpan<char> content)
 	{
 		int count = 0;
-		foreach (char c in content.AsSpan())
+		for (var index = 0; index < content.Length; index++)
 		{
-			if (c == '\n')
+			var c = content[index];
+			if (c == '\r')
+			{
 				count++;
+				if (index + 1 < content.Length && content[index + 1] == '\n')
+					index++;
+			}
+			else if (c == '\n')
+			{
+				count++;
+			}
 		}
+
 		return count;
 	}
 
 	private static (int Chars, int LineBreaks) GetTrailingNewlineInfo(string content)
 	{
-		int chars = 0;
-		int lineBreaks = 0;
+		var start = content.Length;
+		while (start > 0 && content[start - 1] is '\r' or '\n')
+			start--;
 
-		for (int i = content.Length - 1; i >= 0; i--)
-		{
-			char c = content[i];
-			if (c is not ('\r' or '\n'))
-				break;
-
-			chars++;
-			if (c == '\n')
-				lineBreaks++;
-		}
-
-		return (chars, lineBreaks);
+		var trailing = content.AsSpan(start);
+		return (trailing.Length, CountNormalizedLineBreaks(trailing));
 	}
 }

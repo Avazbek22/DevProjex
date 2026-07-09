@@ -5,6 +5,8 @@ public sealed class TreeExportServiceMetricsTests
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
 	public void CalculateFullTreeMetrics_MatchesRenderedOutput_ForNestedTree(TreeTextFormat format)
 	{
 		var service = new TreeExportService();
@@ -21,6 +23,8 @@ public sealed class TreeExportServiceMetricsTests
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
 	public void CalculateFullTreeMetrics_MatchesRenderedOutput_WithPathPresentation(TreeTextFormat format)
 	{
 		var service = new TreeExportService();
@@ -48,6 +52,8 @@ public sealed class TreeExportServiceMetricsTests
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
 	public void CalculateSelectedTreeMetrics_MatchesRenderedOutput_ForDescendantSelection(TreeTextFormat format)
 	{
 		var service = new TreeExportService();
@@ -68,6 +74,8 @@ public sealed class TreeExportServiceMetricsTests
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
 	public void CalculateSelectedTreeMetrics_MatchesRenderedOutput_ForDirectorySelection(TreeTextFormat format)
 	{
 		var service = new TreeExportService();
@@ -87,6 +95,8 @@ public sealed class TreeExportServiceMetricsTests
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
 	public void CalculateSelectedTreeMetrics_MatchesRenderedOutput_ForRootSelection(TreeTextFormat format)
 	{
 		var service = new TreeExportService();
@@ -106,6 +116,8 @@ public sealed class TreeExportServiceMetricsTests
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
 	public void CalculateSelectedTreeMetrics_MatchesRenderedOutput_ForEmptyDirectorySelection(TreeTextFormat format)
 	{
 		var service = new TreeExportService();

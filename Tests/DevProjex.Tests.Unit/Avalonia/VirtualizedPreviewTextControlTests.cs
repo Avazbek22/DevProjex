@@ -179,6 +179,21 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.True(fullLineWidth > beforeTrailingSpaces);
     }
 
+    [AvaloniaFact]
+    public void ClearingLargeStringPreview_ReleasesOversizedLineMetadataBuffer()
+    {
+        var control = new VirtualizedPreviewTextControl
+        {
+            Text = string.Join('\n', Enumerable.Repeat("line", 10_000))
+        };
+
+        Assert.True(GetLineStartsCapacity(control) >= 10_000);
+
+        control.Text = string.Empty;
+
+        Assert.InRange(GetLineStartsCapacity(control), 1, 4096);
+    }
+
     private static double InvokeResolveLineHeight(VirtualizedPreviewTextControl control)
     {
         var method = typeof(VirtualizedPreviewTextControl).GetMethod(
@@ -188,6 +203,17 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.NotNull(method);
 
         return (double)method!.Invoke(control, [])!;
+    }
+
+    private static int GetLineStartsCapacity(VirtualizedPreviewTextControl control)
+    {
+        var field = typeof(VirtualizedPreviewTextControl).GetField(
+            "_lineStarts",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(field);
+        var lineStarts = Assert.IsType<List<int>>(field!.GetValue(control));
+        return lineStarts.Capacity;
     }
 
     private static double InvokeResolveDistanceFromColumn(

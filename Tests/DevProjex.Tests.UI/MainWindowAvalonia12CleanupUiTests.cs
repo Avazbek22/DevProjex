@@ -8,15 +8,24 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture workspace)
 {
     [AvaloniaFact]
-    public async Task DropZone_KeepsAnimationClassStatic_WhenProjectIsLoaded()
+    public async Task DropZone_AnimationRunsOnlyWhileDropZoneIsVisible()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
 
         try
         {
             var dropZone = UiTestDriver.GetRequiredControl<Border>(window, "DropZoneContainer");
+            var viewModel = UiTestDriver.GetViewModel(window);
 
+            // This is an idle-performance contract: a hidden drop zone must not retain
+            // the selector that owns its infinite animations.
             Assert.False(dropZone.IsVisible);
+            Assert.DoesNotContain("drop-zone-animating", dropZone.Classes);
+
+            viewModel.IsProjectLoaded = false;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            Assert.True(dropZone.IsVisible);
             Assert.Contains("drop-zone-animating", dropZone.Classes);
         }
         finally

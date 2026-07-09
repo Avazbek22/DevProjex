@@ -4,6 +4,7 @@ using Avalonia.Styling;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class ThemeBrushCoordinatorTests
 {
 	[AvaloniaFact]

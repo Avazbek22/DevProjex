@@ -49,15 +49,16 @@ public sealed class TreeAndContentExportService(
 		var files = hasSelection
 			? GetSelectedFiles(selectedPaths)
 			: GetAllFilePaths(root);
+		var contentPathMapper = CreateRelativeContentHeaderPathMapper(rootPath);
 
-		var content = await contentExport.BuildAsync(files, cancellationToken, pathPresentation?.MapFilePath).ConfigureAwait(false);
+		var content = await contentExport.BuildAsync(files, cancellationToken, contentPathMapper).ConfigureAwait(false);
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
 
-		// For both ASCII and JSON: tree + separator + content
-		// JSON format applies only to tree structure, content remains plain text
+		// The selected format applies only to the tree block; file content stays plain text.
 		var sb = new StringBuilder();
 		sb.Append(tree.TrimEnd('\r', '\n'));
+		sb.AppendLine();
 		AppendClipboardBlankLine(sb);
 		AppendClipboardBlankLine(sb);
 		sb.Append(content);
@@ -85,6 +86,37 @@ public sealed class TreeAndContentExportService(
 				yield return path;
 		}
 	}
+
+	public static Func<string, string> CreateRelativeContentHeaderPathMapper(string rootPath)
+		=> filePath => MapRelativeContentHeaderPath(rootPath, filePath);
+
+	public static string MapRelativeContentHeaderPath(string rootPath, string filePath)
+	{
+		try
+		{
+			var relativePath = Path.GetRelativePath(Path.GetFullPath(rootPath), filePath);
+			if (!string.IsNullOrWhiteSpace(relativePath) &&
+			    relativePath != "." &&
+			    !IsOutsideRoot(relativePath) &&
+			    !Path.IsPathRooted(relativePath))
+			{
+				return relativePath.Replace('\\', '/');
+			}
+		}
+		catch
+		{
+			// Tree + Content already carries the root path in the tree block, so file
+			// sections should stay short and portable even when relative path calculation fails.
+		}
+
+		var fileName = Path.GetFileName(filePath);
+		return string.IsNullOrWhiteSpace(fileName) ? filePath.Replace('\\', '/') : fileName;
+	}
+
+	private static bool IsOutsideRoot(string relativePath) =>
+		relativePath.Equals("..", StringComparison.Ordinal) ||
+		relativePath.StartsWith("../", StringComparison.Ordinal) ||
+		relativePath.StartsWith(@"..\", StringComparison.Ordinal);
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
 }

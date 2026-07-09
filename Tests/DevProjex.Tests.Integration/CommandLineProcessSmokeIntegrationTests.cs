@@ -132,7 +132,12 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		using var document = JsonDocument.Parse(jsonPart);
 		var root = document.RootElement;
 		Assert.Equal(GetComparablePath(projectPath), GetComparablePath(root.GetProperty("rootPath").GetString()!));
-		Assert.Equal("App.cs", root.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(root);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(root);
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.Contains("App.cs:", contentPart, StringComparison.Ordinal);
 		Assert.Contains("public static class App", contentPart, StringComparison.Ordinal);
 		Assert.DoesNotContain("Readme.txt", result.Stdout, StringComparison.Ordinal);
@@ -910,8 +915,67 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
 		using var document = JsonDocument.Parse(result.Stdout);
-		Assert.Equal(Path.GetFullPath(temp.Path), document.RootElement.GetProperty("rootPath").GetString());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), document.RootElement.GetProperty("rootPath").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.DoesNotContain("class App", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportJsonTreeForRepoLikeWorkspace_WritesParseableJsonTreeContract()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("repo like project");
+		SeedRepoLikeJsonProject(projectPath);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		Assert.Equal(Path.GetFullPath(projectPath).Replace('\\', '/'), document.RootElement.GetProperty("rootPath").GetString());
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(document.RootElement);
+		JsonTreeExportTestHelper.AssertNoLegacyTreeContract(document.RootElement);
+
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
+		var paths = JsonTreeExportTestHelper.ExtractFilePaths(tree);
+		var expectedPaths = new[]
+		{
+			".git/config",
+			".git/HEAD",
+			".git/refs/heads/main",
+			".editorconfig",
+			".gitignore",
+			"docs/Guide.md",
+			"docs/файл.txt",
+			"global.json",
+			"README.md",
+			"scripts/build.ps1",
+			"space dir/file with spaces.txt",
+			"src/Models/Пользователь.cs",
+			"src/Program.cs",
+			"src/Services/UserService.cs"
+		};
+		Assert.Equal(
+			expectedPaths.OrderBy(static path => path, StringComparer.Ordinal).ToArray(),
+			paths.OrderBy(static path => path, StringComparer.Ordinal).ToArray());
+
+		var rootFiles = tree.GetProperty("/").EnumerateArray().Select(static item => item.GetString()!).ToArray();
+		Assert.Contains(".editorconfig", rootFiles);
+		Assert.Contains(".gitignore", rootFiles);
+		Assert.Contains("global.json", rootFiles);
+		Assert.Contains("README.md", rootFiles);
+		Assert.Equal(["Models", "Services", "/"], tree.GetProperty("src").EnumerateObject().Select(static property => property.Name).ToArray());
+		Assert.Equal(["refs", "/"], tree.GetProperty(".git").EnumerateObject().Select(static property => property.Name).ToArray());
+		Assert.Contains("empty-folder", JsonTreeExportTestHelper.ExtractEmptyFolderPaths(tree));
+		Assert.DoesNotContain("namespace RepoLike", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("guide content", result.Stdout, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -931,7 +995,9 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
 		using var document = JsonDocument.Parse(result.Stdout);
-		Assert.Equal("App.cs", document.RootElement.GetProperty("root").GetProperty("dirs")[0].GetProperty("files")[0].GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(document);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.DoesNotContain("class App", result.Stdout, StringComparison.Ordinal);
 	}
 
@@ -1299,6 +1365,25 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		WriteProjectFile(projectPath, Path.Combine("obj", "cache.tmp"), "obj placeholder\n");
 		WriteProjectFile(projectPath, Path.Combine(".cache", "Cached.cs"), "class Cached { }\n");
 		WriteProjectFile(projectPath, "LICENSE", "license text\n");
+	}
+
+	private static void SeedRepoLikeJsonProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, ".editorconfig", "root = true\n");
+		WriteProjectFile(projectPath, ".gitignore", "bin/\nobj/\n");
+		WriteProjectFile(projectPath, Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
+		WriteProjectFile(projectPath, Path.Combine(".git", "config"), "[core]\n\trepositoryformatversion = 0\n");
+		WriteProjectFile(projectPath, Path.Combine(".git", "refs", "heads", "main"), "0000000000000000000000000000000000000000\n");
+		WriteProjectFile(projectPath, "global.json", "{\"sdk\":{\"version\":\"10.0.300\"}}\n");
+		WriteProjectFile(projectPath, "README.md", "# Repo Like\n");
+		WriteProjectFile(projectPath, Path.Combine("docs", "Guide.md"), "guide content\n");
+		WriteProjectFile(projectPath, Path.Combine("docs", "файл.txt"), "unicode file\n");
+		WriteProjectFile(projectPath, Path.Combine("scripts", "build.ps1"), "dotnet build\n");
+		WriteProjectFile(projectPath, Path.Combine("space dir", "file with spaces.txt"), "spaces\n");
+		WriteProjectFile(projectPath, Path.Combine("src", "Program.cs"), "namespace RepoLike;\npublic static class Program { }\n");
+		WriteProjectFile(projectPath, Path.Combine("src", "Models", "Пользователь.cs"), "namespace RepoLike.Models;\n");
+		WriteProjectFile(projectPath, Path.Combine("src", "Services", "UserService.cs"), "namespace RepoLike.Services;\n");
+		Directory.CreateDirectory(Path.Combine(projectPath, "empty-folder"));
 	}
 
 	private static void WriteProjectFile(string rootPath, string relativePath, string content)

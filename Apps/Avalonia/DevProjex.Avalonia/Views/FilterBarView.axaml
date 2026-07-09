@@ -8,7 +8,7 @@
           IsEnabled="{Binding IsProjectLoaded}"
           UseLayoutRounding="True"
           MinWidth="328">
-    <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8" Margin="12,6">
+    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="12,6">
       <TextBox Name="FilterBox"
                Grid.Column="0"
                PlaceholderText="{Binding FilterByNamePlaceholder}"
@@ -16,8 +16,7 @@
                Width="260"
                FocusAdorner="{x:Null}"
                KeyDown="OnFilterKeyDown" />
-      <Button Grid.Column="1" Content="✕" Width="32" Click="OnFilterClose" />
-      <TextBlock Grid.Column="2"
+      <TextBlock Grid.Column="1"
                  Text="{Binding FilterMatchSummaryText}"
                  IsVisible="{Binding FilterMatchSummaryVisible}"
                  FontSize="16"
@@ -25,6 +24,11 @@
                  VerticalAlignment="Center"
                  HorizontalAlignment="Right"
                  Margin="12,0,4,0" />
+      <Button Name="FilterCloseButton"
+              Grid.Column="2"
+              Content="✕"
+              Width="32"
+              Click="OnFilterClose" />
     </Grid>
   </Border>
 </UserControl>

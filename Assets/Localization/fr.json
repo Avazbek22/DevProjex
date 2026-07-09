@@ -206,6 +206,7 @@
   "Status.Operation.SwitchingBranch": "Changement de branche {0}",
   "Status.Operation.CalculatingData": "Calcul des donnees",
   "Status.Operation.PreparingPreview": "Préparation de l'aperçu",
+  "Status.Operation.PreparingOutput": "Préparation du résultat",
   "Toast.Operation.PreviewCanceled": "Préparation de l'aperçu annulée",
   "Status.Metric.Lines": "Lignes: {0}",
   "Status.Metric.Chars": "Caracteres: {0}",

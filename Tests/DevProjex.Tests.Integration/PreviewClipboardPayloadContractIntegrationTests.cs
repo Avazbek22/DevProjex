@@ -6,8 +6,8 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
     public async Task BuildFullDocumentPayload_ContentPreview_MatchesSelectedContentExport()
     {
         using var temp = new TemporaryDirectory();
-        var alphaPath = temp.CreateFile("src\\alpha.txt", "alpha\nbeta\n");
-        var betaPath = temp.CreateFile("docs\\beta.txt", "gamma");
+        var alphaPath = temp.CreateFile(Path.Combine("src", "alpha.txt"), "alpha\nbeta\n");
+        var betaPath = temp.CreateFile(Path.Combine("docs", "beta.txt"), "gamma");
 
         var analyzer = new FileContentAnalyzer();
         var previewBuilder = new PreviewDocumentBuilder(analyzer);
@@ -37,7 +37,7 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
     public void BuildFullDocumentPayload_TreePreview_MatchesTreeExport()
     {
         using var temp = new TemporaryDirectory();
-        var alphaPath = temp.CreateFile("src\\alpha.txt", "alpha");
+        var alphaPath = temp.CreateFile(Path.Combine("src", "alpha.txt"), "alpha");
         var treeRoot = CreateSampleTree(temp.Path, alphaPath);
         var treeExport = new TreeExportService();
         var previewBuilder = new PreviewDocumentBuilder(new FileContentAnalyzer());
@@ -55,8 +55,8 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
     public async Task BuildFullDocumentPayload_TreeAndContentPreview_MatchesCombinedExport()
     {
         using var temp = new TemporaryDirectory();
-        var alphaPath = temp.CreateFile("src\\alpha.txt", "alpha\nbeta\n");
-        var betaPath = temp.CreateFile("docs\\beta.txt", "gamma");
+        var alphaPath = temp.CreateFile(Path.Combine("src", "alpha.txt"), "alpha\nbeta\n");
+        var betaPath = temp.CreateFile(Path.Combine("docs", "beta.txt"), "gamma");
         var treeRoot = CreateSampleTree(temp.Path, alphaPath, betaPath);
 
         var analyzer = new FileContentAnalyzer();
@@ -68,28 +68,19 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
             treeText,
             [alphaPath, betaPath],
             CancellationToken.None,
-            displayPathMapper: null);
+            TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(temp.Path));
 
-        var expectedContent = string.Join(
-            Environment.NewLine,
-            betaPath + ":",
-            "\u00A0",
-            "gamma",
-            "\u00A0",
-            "\u00A0",
-            alphaPath + ":",
-            "\u00A0",
-            "alpha",
-            "beta");
-        var expected = string.Join(
-            Environment.NewLine,
-            NormalizeForClipboard(treeText).TrimEnd('\r', '\n'),
-            "\u00A0",
-            "\u00A0",
-            expectedContent);
+        var expected = new TreeAndContentExportService(
+                treeExport,
+                new SelectedContentExportService(analyzer))
+            .Build(temp.Path, treeRoot, new HashSet<string>(), TreeTextFormat.Ascii);
         var actual = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
 
-        Assert.Equal(expected, actual);
+        Assert.Equal(NormalizeForClipboard(expected), actual);
+        Assert.Contains("docs/beta.txt:", actual, StringComparison.Ordinal);
+        Assert.Contains("src/alpha.txt:", actual, StringComparison.Ordinal);
+        Assert.DoesNotContain(alphaPath.Replace('\\', '/'), actual.Replace('\\', '/'), StringComparison.Ordinal);
+        Assert.DoesNotContain(betaPath.Replace('\\', '/'), actual.Replace('\\', '/'), StringComparison.Ordinal);
     }
 
     private static TreeNodeDescriptor CreateSampleTree(string rootPath, params string[] filePaths)

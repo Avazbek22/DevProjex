@@ -142,18 +142,17 @@ Combines tree and content:
 Hotkey: Ctrl+Shift+V.
 
 ### JSON representation
-JSON mode uses a compact tree structure.
+JSON mode uses a structured tree representation.
 
 Tree (Copy tree / Export tree):
-* `rootPath` — root path in the current output format:
-  * for a local folder — absolute local path;
-  * for a Git project — repository URL.
-* `root` — root node.
-* node fields: `name`, `path`, `dirs`, `files`, `accessDenied` (when needed).
+* `rootPath` — absolute root path normalized with `/`.
+* `tree` — contents of the root folder.
+* JSON export uses this tree format: arrays contain files, objects contain subfolders, `/` contains files in the current folder, and `[]` represents an empty folder.
 
 Tree + content:
 * JSON applies to the tree block;
 * content block remains text;
+* file headers in the content block use relative paths with `/`;
 * exported as `.txt`.
 
 ## 7) Preview mode

@@ -230,8 +230,10 @@ public partial class MainWindow : Window
     private bool _settingsAnimating;
     private const double SearchToolbarMinWidth = 418.0;
     private const double FilterToolbarMinWidth = 338.0;
-    private const double SettingsPanelWidth = 328.0;
-    private const double SettingsPanelMinWidth = 248.0;
+    // Minimum/default aligns the settings island edge with the top tree-format switcher.
+    // Manual splitter resize can still expand up to SettingsPanelMaxWidth.
+    private const double SettingsPanelWidth = 285.0;
+    private const double SettingsPanelMinWidth = SettingsPanelWidth;
     private const double SettingsPanelMaxWidth = 320.0;
     private static readonly TimeSpan SettingsPanelAnimationDuration = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(300));
     private const double SplitTreePaneMinWidth = SearchToolbarMinWidth;
@@ -434,6 +436,7 @@ public partial class MainWindow : Window
             _dropZoneContainer.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
             _dropZoneContainer.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
             _dropZoneContainer.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
+            UpdateDropZoneAnimationState();
         }
 
         InitializeUserSettings();
@@ -624,13 +627,15 @@ public partial class MainWindow : Window
                 _themeBrushCoordinator.UpdateTransparencyEffect();
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
+            else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
+                UpdateDropZoneAnimationState();
             else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
                      or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
                      or nameof(MainWindowViewModel.StatusProgressValue))
                 _taskbarProgress.SyncWithStatusBar();
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedExportFormat))
             {
-                _metrics.Recalculate(); // Update tree metrics when format changes (ASCII vs JSON)
+                _metrics.Recalculate(); // Update tree metrics when the selected tree format changes.
                 InvalidatePreviewCache();
                 SchedulePreviewRefresh();
             }
@@ -638,6 +643,13 @@ public partial class MainWindow : Window
             {
                 if (!_previewModeSwitchInProgress)
                     UpdatePreviewSegmentThumbPosition(animate: false);
+                if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+                    _metrics.RenderStatusBarMetrics();
+            }
+            else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
+            {
+                if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+                    _metrics.RenderStatusBarMetrics();
             }
             else if (args.PropertyName is nameof(MainWindowViewModel.PreviewFontSize)
                      or nameof(MainWindowViewModel.SelectedFontFamily))
@@ -663,6 +675,7 @@ public partial class MainWindow : Window
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
 
         Opened += OnOpened;
+        ScalingChanged += OnWindowScalingChanged;
 
         // Hook menu item submenu opening to apply brushes directly
         AddHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened, RoutingStrategies.Bubble);
@@ -691,6 +704,7 @@ public partial class MainWindow : Window
 
         // Unsubscribe from window events
         PropertyChanged -= OnWindowPropertyChanged;
+        ScalingChanged -= OnWindowScalingChanged;
 
         // Unsubscribe from localization service
         if (_languageChangedHandler is not null)
@@ -789,6 +803,29 @@ public partial class MainWindow : Window
             disposable.Dispose();
     }
 
+    private void UpdateDropZoneAnimationState()
+    {
+        if (_dropZoneContainer is null)
+            return;
+
+        // This is a render-lifecycle boundary, not merely a visual class toggle.
+        // In v4.9 the class was made permanent in XAML and the method was removed.
+        // The hidden drop zone then kept DefaultRenderLoop, Skia, and ANGLE active while
+        // the tree or preview workspace was idle. IsVisible alone did not prevent that
+        // regression on the affected Windows/Avalonia rendering path.
+        //
+        // Keep the explicit remove/add symmetry: removal guarantees true project idle,
+        // while re-adding preserves the original animation after reset back to drop zone.
+        // PlaybackBehavior=OnlyIfVisible in XAML remains an additional safety boundary.
+        // Do not bind this state to Window.IsActive. During an external drag the source
+        // application can retain activation while this window receives DragEnter/Drop,
+        // which would freeze the drop-zone feedback exactly when the user needs it.
+        if (_viewModel.IsProjectLoaded)
+            _dropZoneContainer.Classes.Remove("drop-zone-animating");
+        else
+            _dropZoneContainer.Classes.Add("drop-zone-animating");
+    }
+
     private void OnThemeChanged(object? sender, EventArgs e)
     {
         // Defer update to let theme resources settle first
@@ -871,8 +908,9 @@ public partial class MainWindow : Window
         if (_awaitingSystemDialogActivation)
             return;
 
-        // App lost focus — ideal time to compact the heap and return pages to the OS.
-        // Runs on a background thread so the deactivation handler returns instantly.
+        // Deactivation is a good cleanup opportunity only after a genuinely large session.
+        // MemoryCleanupPolicy keeps routine Alt-Tab transitions below that threshold free of
+        // Gen2 compaction and working-set churn.
         ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.WindowDeactivated);
     }
 
@@ -1251,7 +1289,23 @@ public partial class MainWindow : Window
     private void UpdateWindowMinimumWidth()
     {
         var computedMinWidth = Math.Max(DefaultWindowMinWidth, GetRequiredWindowWorkspaceWidth() + WindowMinimumWidthSafetyPadding);
-        MinWidth = Math.Ceiling(computedMinWidth);
+        MinWidth = AlignWindowConstraintToPhysicalPixels(computedMinWidth, RenderScaling);
+    }
+
+    internal static double AlignWindowConstraintToPhysicalPixels(double constraint, double renderScaling)
+    {
+        var effectiveScaling = double.IsFinite(renderScaling) && renderScaling > 0
+            ? renderScaling
+            : 1.0;
+
+        // Win32 tracks window constraints in physical pixels. Keeping the DIP value aligned
+        // prevents Avalonia and WM_GETMINMAXINFO from rounding it in opposite directions.
+        return Math.Ceiling(constraint * effectiveScaling) / effectiveScaling;
+    }
+
+    private void OnWindowScalingChanged(object? sender, EventArgs e)
+    {
+        UpdateWindowMinimumWidth();
     }
 
     private double GetRequiredWindowWorkspaceWidth()
@@ -1560,13 +1614,12 @@ public partial class MainWindow : Window
         return ResolvePreviewTreePaneProjectedWidth();
     }
 
-    private double ResolveDesiredPreviewPaneWidth()
+    private double ResolveDesiredPreviewPaneWidth(double desiredTreeWidth)
     {
         var availableSplitWidth = GetAvailableSplitWorkspaceWidth();
         if (availableSplitWidth <= 0.5)
             return SplitPreviewPaneMinWidth;
 
-        var desiredTreeWidth = ResolveDesiredPreviewTreePaneWidth();
         return Math.Max(SplitPreviewPaneMinWidth, availableSplitWidth - desiredTreeWidth);
     }
 
@@ -2351,7 +2404,9 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
-            statusOperationId = _statusOperations.Begin("Preparing content...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin(
+                _localization["Status.Operation.PreparingOutput"],
+                indeterminate: true);
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2359,18 +2414,18 @@ public partial class MainWindow : Window
                 pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
-                _statusOperations.Complete(statusOperationId);
+                CompleteStatusOperation(ref statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
             await SetClipboardTextAsync(content);
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2389,7 +2444,9 @@ public partial class MainWindow : Window
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
             // Run file reading off UI thread
-            statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin(
+                _localization["Status.Operation.PreparingOutput"],
+                indeterminate: true);
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2399,12 +2456,12 @@ public partial class MainWindow : Window
                     CancellationToken.None,
                     pathPresentation));
             await SetClipboardTextAsync(content);
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2418,14 +2475,13 @@ public partial class MainWindow : Window
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
             var content = BuildTreeTextForSelection(selected, format);
-            var saveAsJson = format == TreeTextFormat.Json;
 
             var saved = await TryExportTextToFileAsync(
                 content,
-                BuildSuggestedExportFileName("tree", saveAsJson),
+                BuildSuggestedExportFileName("tree", GetTreeExportFileExtension(format)),
                 _viewModel.MenuFileExportTree,
-                useJsonDefaultExtension: saveAsJson,
-                allowBothExtensions: saveAsJson);
+                defaultExtension: GetTreeExportFileExtension(format),
+                fileTypeChoices: CreateTreeExportFileTypeChoices(format));
 
             if (saved)
                 _toastService.Show(_localization["Toast.Export.Tree"]);
@@ -2457,7 +2513,9 @@ public partial class MainWindow : Window
                 return;
             }
 
-            statusOperationId = _statusOperations.Begin("Preparing content...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin(
+                _localization["Status.Operation.PreparingOutput"],
+                indeterminate: true);
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2465,25 +2523,27 @@ public partial class MainWindow : Window
                 pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
-                _statusOperations.Complete(statusOperationId);
+                CompleteStatusOperation(ref statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
+            // File preparation is complete. The native picker can remain open indefinitely
+            // while the user chooses a name, so it must never keep the app status busy.
+            CompleteStatusOperation(ref statusOperationId);
             var saved = await TryExportTextToFileAsync(
                 content,
-                BuildSuggestedExportFileName("content", saveAsJson: false),
+                BuildSuggestedExportFileName("content", "txt"),
                 _viewModel.MenuFileExportContent,
-                useJsonDefaultExtension: false,
-                allowBothExtensions: false);
+                defaultExtension: "txt",
+                fileTypeChoices: [CreateTextFileType()]);
 
-            _statusOperations.Complete(statusOperationId);
             if (saved)
                 _toastService.Show(_localization["Toast.Export.Content"]);
         }
         catch (Exception ex)
         {
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2499,10 +2559,11 @@ public partial class MainWindow : Window
 
             var selected = GetCheckedPaths();
             var format = GetCurrentTreeTextFormat();
-            var saveAsJson = false;
             var pathPresentation = CreateExportPathPresentation();
 
-            statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin(
+                _localization["Status.Operation.PreparingOutput"],
+                indeterminate: true);
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2512,28 +2573,34 @@ public partial class MainWindow : Window
                     CancellationToken.None,
                     pathPresentation));
 
+            // A combined payload is plain text even when its leading tree is JSON/XML/MD.
+            // Finish the operation before opening the picker and keep the .txt contract.
+            CompleteStatusOperation(ref statusOperationId);
             var saved = await TryExportTextToFileAsync(
                 content,
-                BuildSuggestedExportFileName("tree_content", saveAsJson),
+                BuildSuggestedExportFileName("tree_content", "txt"),
                 _viewModel.MenuFileExportTreeAndContent,
-                useJsonDefaultExtension: false,
-                allowBothExtensions: false);
+                defaultExtension: "txt",
+                fileTypeChoices: [CreateTextFileType()]);
 
-            _statusOperations.Complete(statusOperationId);
             if (saved)
                 _toastService.Show(_localization["Toast.Export.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
 
     private TreeTextFormat GetCurrentTreeTextFormat()
-        => _viewModel.SelectedExportFormat == ExportFormat.Json
-            ? TreeTextFormat.Json
-            : TreeTextFormat.Ascii;
+        => _viewModel.SelectedExportFormat switch
+        {
+            ExportFormat.Json => TreeTextFormat.Json,
+            ExportFormat.Xml => TreeTextFormat.Xml,
+            ExportFormat.Markdown => TreeTextFormat.Markdown,
+            _ => TreeTextFormat.Ascii
+        };
 
     private string BuildTreeTextForSelection(IReadOnlySet<string> selectedPaths, TreeTextFormat format)
     {
@@ -3000,7 +3067,7 @@ public partial class MainWindow : Window
                 var contentText = _contentExport.BuildAsync(
                     files,
                     cancellationToken,
-                    pathPresentation?.MapFilePath).GetAwaiter().GetResult();
+                    TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath)).GetAwaiter().GetResult();
 
                 if (string.IsNullOrWhiteSpace(contentText))
                 {
@@ -3188,7 +3255,7 @@ public partial class MainWindow : Window
             treeText,
             files,
             cancellationToken,
-            pathPresentation?.MapFilePath).GetAwaiter().GetResult();
+            TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath)).GetAwaiter().GetResult();
 
         return new PreviewBuildResult(document);
     }
@@ -3246,37 +3313,19 @@ public partial class MainWindow : Window
         string content,
         string suggestedFileName,
         string dialogTitle,
-        bool useJsonDefaultExtension,
-        bool allowBothExtensions)
+        string defaultExtension,
+        IReadOnlyList<FilePickerFileType> fileTypeChoices)
     {
         if (StorageProvider is null || string.IsNullOrWhiteSpace(content))
             return false;
-
-        var jsonFileType = new FilePickerFileType("JSON")
-        {
-            Patterns = ["*.json"],
-            MimeTypes = ["application/json"]
-        };
-
-        var textFileType = new FilePickerFileType("Text")
-        {
-            Patterns = ["*.txt"],
-            MimeTypes = ["text/plain"]
-        };
 
         var options = new FilePickerSaveOptions
         {
             Title = dialogTitle,
             SuggestedFileName = suggestedFileName,
             ShowOverwritePrompt = true,
-            // Tree export allows choosing both .json and .txt.
-            // Other export modes stay text-only for predictable output format.
-            DefaultExtension = useJsonDefaultExtension ? "json" : "txt",
-            FileTypeChoices = allowBothExtensions
-                ? [jsonFileType, textFileType]
-                : useJsonDefaultExtension
-                    ? new[] { jsonFileType }
-                    : new[] { textFileType }
+            DefaultExtension = defaultExtension,
+            FileTypeChoices = fileTypeChoices
         };
 
         var file = await StorageProvider.SaveFilePickerAsync(options);
@@ -3289,7 +3338,71 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private string BuildSuggestedExportFileName(string suffix, bool saveAsJson)
+    private static IReadOnlyList<FilePickerFileType> CreateTreeExportFileTypeChoices(TreeTextFormat format)
+    {
+        if (format == TreeTextFormat.Ascii)
+            return [CreateTextFileType()];
+
+        var nativeFileType = format switch
+        {
+            TreeTextFormat.Json => CreateJsonFileType(),
+            TreeTextFormat.Xml => CreateXmlFileType(),
+            TreeTextFormat.Markdown => CreateMarkdownFileType(),
+            _ => CreateTextFileType()
+        };
+
+        // Structured tree text is also useful as a generic text artifact. Keep the native
+        // extension first while offering TXT as an explicit, semantically honest fallback.
+        return [nativeFileType, CreateTextFileType()];
+    }
+
+    private static FilePickerFileType CreateTextFileType()
+        => new("TXT")
+        {
+            Patterns = ["*.txt"],
+            MimeTypes = ["text/plain"]
+        };
+
+    private static FilePickerFileType CreateJsonFileType()
+        => new("JSON")
+        {
+            Patterns = ["*.json"],
+            MimeTypes = ["application/json"]
+        };
+
+    private static FilePickerFileType CreateXmlFileType()
+        => new("XML")
+        {
+            Patterns = ["*.xml"],
+            MimeTypes = ["application/xml", "text/xml"]
+        };
+
+    private static FilePickerFileType CreateMarkdownFileType()
+        => new("Markdown")
+        {
+            Patterns = ["*.md"],
+            MimeTypes = ["text/markdown", "text/plain"]
+        };
+
+    private static string GetTreeExportFileExtension(TreeTextFormat format)
+        => format switch
+        {
+            TreeTextFormat.Json => "json",
+            TreeTextFormat.Xml => "xml",
+            TreeTextFormat.Markdown => "md",
+            _ => "txt"
+        };
+
+    private void CompleteStatusOperation(ref long? operationId)
+    {
+        if (!operationId.HasValue)
+            return;
+
+        _statusOperations.Complete(operationId.Value);
+        operationId = null;
+    }
+
+    private string BuildSuggestedExportFileName(string suffix, string extension)
     {
         var baseName = _currentProjectDisplayName;
         if (string.IsNullOrWhiteSpace(baseName) && !string.IsNullOrWhiteSpace(_currentPath))
@@ -3303,7 +3416,6 @@ public partial class MainWindow : Window
         foreach (var ch in baseName)
             sanitized.Append(invalidChars.Contains(ch) ? '_' : ch);
 
-        var extension = saveAsJson ? "json" : "txt";
         return $"{sanitized}_{suffix}.{extension}";
     }
 
@@ -3581,14 +3693,17 @@ public partial class MainWindow : Window
         // Compact mode is applied only after the animation so the tree does not rescale mid-flight.
         PreparePreviewPane();
         CaptureNonSplitSettingsPanelWidth();
-        _currentSettingsPanelWidth = _effectiveSettingsPanelMinWidth;
+        _currentSettingsPanelWidth = GetClampedSettingsPanelWidth(SettingsPanelWidth);
         ResetPreviewTreePaneVisualState();
         CollapsePreviewPaneVisualState();
         _viewModel.SetPreviewCompactModeActive(false);
 
         var initialTreeWidth = Math.Max(SplitTreePaneMinWidth, ResolvePreviewTreePaneVisibleWidth());
-        var targetTreeWidth = GetClampedPreviewTreePaneWidth(ResolveDesiredPreviewTreePaneWidth());
-        var targetPreviewWidth = Math.Max(SplitPreviewPaneMinWidth, ResolveDesiredPreviewPaneWidth());
+        // A newly opened preview starts from the smallest useful tree width. Once open,
+        // splitter drags still update this value and window resizes preserve that manual choice.
+        var targetTreeWidth = GetClampedPreviewTreePaneWidth(SplitTreePaneMinWidth);
+        var targetPreviewWidth = ResolveDesiredPreviewPaneWidth(targetTreeWidth);
+        _currentPreviewTreePaneWidth = targetTreeWidth;
 
         _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
         PreparePreviewPaneOpenLayout(initialTreeWidth);
@@ -3650,9 +3765,18 @@ public partial class MainWindow : Window
             if (startedFromPreviewOnly)
                 RestoreTreeToolStateAfterPreviewOnly();
 
+            var previewDocument = _viewModel.PreviewDocument;
+            var shouldForceMemoryCleanup =
+                previewDocument is not null &&
+                PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
+                    previewDocument.CharacterCount,
+                    previewDocument.LineCount);
+
             ClearPreviewSelectionMetrics();
             ClearPreviewMemory();
-            SchedulePreviewMemoryCleanup(force: true);
+            // Small documents are reclaimed efficiently by normal generational GC. Preserve
+            // explicit LOH compaction for previews large enough to retain material buffers.
+            SchedulePreviewMemoryCleanup(force: shouldForceMemoryCleanup);
             _treeView?.Focus();
         }
         finally
@@ -3774,6 +3898,14 @@ public partial class MainWindow : Window
             _treePaneContainer.Width = targetTreeWidth;
             _previewPaneContainer.Width = targetPreviewWidth;
             await WaitForPanelAnimationAsync(PreviewPaneAnimationDuration);
+
+            // Waiting for the nominal duration does not guarantee that every compositor
+            // backend has presented the final transition sample. Snap the base values before
+            // CaptureSplitPaneLayout reads them; otherwise a transient width can become the
+            // persisted manual width on slower CI machines (and occasionally in production).
+            ApplyPreviewTreePaneWidth(targetTreeWidth, animate: false);
+            ApplyPreviewPaneWidth(targetPreviewWidth, animate: false);
+            await YieldUiAsync(DispatcherPriority.Render);
         }
         finally
         {
@@ -3803,9 +3935,16 @@ public partial class MainWindow : Window
 
             EnsurePreviewTreePaneTransitions();
             EnsurePreviewPaneTransitions();
-            _treePaneContainer.Width = GetAvailableTreeOnlyWorkspaceWidth();
+            var targetTreeWidth = GetAvailableTreeOnlyWorkspaceWidth();
+            _treePaneContainer.Width = targetTreeWidth;
             _previewPaneContainer.Width = 0.0;
             await WaitForPanelAnimationAsync(PreviewPaneAnimationDuration);
+
+            // Close uses the same explicit final-state boundary as open. ViewModel mode
+            // changes and subsequent reopen calculations must never observe an in-flight width.
+            ApplyPreviewTreePaneWidth(targetTreeWidth, animate: false);
+            ApplyPreviewPaneWidth(0.0, animate: false);
+            await YieldUiAsync(DispatcherPriority.Render);
         }
         finally
         {
@@ -3844,6 +3983,9 @@ public partial class MainWindow : Window
     private void ScheduleBackgroundMemoryCleanup(MemoryCleanupReason reason)
     {
         var cleanupPlan = MemoryCleanupPolicy.CreateDeferredPlan(reason, SettingsPanelAnimationDuration);
+        if (!MemoryCleanupPolicy.ShouldRun(cleanupPlan, GC.GetTotalMemory(forceFullCollection: false)))
+            return;
+
         ScheduleBackgroundMemoryCleanupCore(cleanupPlan);
     }
 
@@ -3863,6 +4005,15 @@ public partial class MainWindow : Window
                     await Task.Delay(scaledDelay, cleanupCts.Token);
 
                 cleanupCts.Token.ThrowIfCancellationRequested();
+                // A normal GC may have reclaimed the transient data during the delay. Recheck
+                // before paying for a compacting Gen2 collection and native working-set trim.
+                if (!MemoryCleanupPolicy.ShouldRun(
+                        cleanupPlan,
+                        GC.GetTotalMemory(forceFullCollection: false)))
+                {
+                    return;
+                }
+
                 ForceMemoryCleanup();
             }
             catch (OperationCanceledException)
@@ -7206,7 +7357,12 @@ public partial class MainWindow : Window
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
 
-        if (forceCompactingGc)
+        // A small project is cheaper to leave to generational GC. Forcing Gen2 here and then
+        // again after the new load used to create two avoidable pauses on routine switches.
+        // Large abandoned trees still cross this threshold and are reclaimed immediately.
+        var shouldRunImmediateCleanup = MemoryCleanupPolicy.ShouldRunRoutineCleanup(
+            GC.GetTotalMemory(forceFullCollection: false));
+        if (forceCompactingGc && shouldRunImmediateCleanup)
         {
             // Full compacting collection — user is switching projects and expects memory
             // from the old tree (view models, icons, metrics cache) to be freed immediately.
@@ -7216,9 +7372,10 @@ public partial class MainWindow : Window
             GC.Collect(1, GCCollectionMode.Forced, blocking: false);
             TrimNativeWorkingSet();
         }
-        else
+        else if (shouldRunImmediateCleanup)
         {
-            // Non-switching state reset (e.g. reload) — still force collection but skip compaction.
+            // A canceled/reset load can also leave a large generation behind, but does not
+            // require LOH compaction unless this was an explicit project switch.
             GC.Collect(2, GCCollectionMode.Forced, blocking: true);
         }
     }

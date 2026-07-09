@@ -30,7 +30,12 @@ internal sealed class MetricsPipeline(
         int TreeIdentity,
         int SelectedCount,
         int SelectedHash,
-        int PathMapperIdentity);
+        int ContentPathPresentationIdentity,
+        int TreeAndContentRootPathIdentity);
+
+    private readonly record struct ContentMetricsPair(
+        ExportOutputMetrics ContentOnly,
+        ExportOutputMetrics TreeAndContentContent);
 
     private readonly record struct FileMetricsData(
         long Size,
@@ -87,13 +92,16 @@ internal sealed class MetricsPipeline(
     private int _lastStatusContentLines;
     private int _lastStatusContentChars;
     private int _lastStatusContentTokens;
+    private int _lastStatusTreeAndContentContentLines;
+    private int _lastStatusTreeAndContentContentChars;
+    private int _lastStatusTreeAndContentContentTokens;
     private bool _hasStatusMetricsSnapshot;
     private bool _hasTreeMetricsCache;
     private TreeMetricsCacheKey _treeMetricsCacheKey;
     private ExportOutputMetrics _treeMetricsCacheValue = ExportOutputMetrics.Empty;
     private bool _hasContentMetricsCache;
     private ContentMetricsCacheKey _contentMetricsCacheKey;
-    private ExportOutputMetrics _contentMetricsCacheValue = ExportOutputMetrics.Empty;
+    private ContentMetricsPair _contentMetricsCacheValue = new(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
     private int _allOrderedFilePathsTreeIdentity;
     private IReadOnlyList<string>? _allOrderedFilePathsCache;
     private bool _metricsCancellationRequestedByUser;
@@ -263,7 +271,7 @@ internal sealed class MetricsPipeline(
             _hasTreeMetricsCache = false;
             _treeMetricsCacheValue = ExportOutputMetrics.Empty;
             _hasContentMetricsCache = false;
-            _contentMetricsCacheValue = ExportOutputMetrics.Empty;
+            _contentMetricsCacheValue = new ContentMetricsPair(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
             _allOrderedFilePathsCache = null;
             _allOrderedFilePathsTreeIdentity = 0;
         }
@@ -271,7 +279,8 @@ internal sealed class MetricsPipeline(
 
     public void UpdateStatusBarMetrics(
         int treeLines, int treeChars, int treeTokens,
-        int contentLines, int contentChars, int contentTokens)
+        int contentLines, int contentChars, int contentTokens,
+        ExportOutputMetrics? treeAndContentContentMetrics = null)
     {
         _lastStatusTreeLines = treeLines;
         _lastStatusTreeChars = treeChars;
@@ -279,6 +288,10 @@ internal sealed class MetricsPipeline(
         _lastStatusContentLines = contentLines;
         _lastStatusContentChars = contentChars;
         _lastStatusContentTokens = contentTokens;
+        var combinedContentMetrics = treeAndContentContentMetrics ?? new ExportOutputMetrics(contentLines, contentChars, contentTokens);
+        _lastStatusTreeAndContentContentLines = combinedContentMetrics.Lines;
+        _lastStatusTreeAndContentContentChars = combinedContentMetrics.Chars;
+        _lastStatusTreeAndContentContentTokens = combinedContentMetrics.Tokens;
         _hasStatusMetricsSnapshot = true;
         RenderStatusBarMetrics();
     }
@@ -291,8 +304,9 @@ internal sealed class MetricsPipeline(
             new ExportOutputMetrics(_lastStatusTreeLines, _lastStatusTreeChars, _lastStatusTreeTokens),
             labels,
             useCompactMode);
+        var contentMetrics = GetRenderedStatusContentMetrics();
         viewModel.StatusContentStatsText = PreviewSelectionMetricsPolicy.FormatStatusMetricsText(
-            new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens),
+            contentMetrics,
             labels,
             useCompactMode);
     }
@@ -303,13 +317,20 @@ internal sealed class MetricsPipeline(
         PreviewSelectionRange selectionRange,
         out ExportOutputMetrics metrics)
     {
+        var contentMetrics = selectedMode == PreviewContentMode.TreeAndContent
+            ? new ExportOutputMetrics(
+                _lastStatusTreeAndContentContentLines,
+                _lastStatusTreeAndContentContentChars,
+                _lastStatusTreeAndContentContentTokens)
+            : new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens);
+
         return PreviewSelectionMetricsPolicy.TryGetCachedMetrics(
             _hasStatusMetricsSnapshot,
             selectedMode,
             document,
             selectionRange,
             new ExportOutputMetrics(_lastStatusTreeLines, _lastStatusTreeChars, _lastStatusTreeTokens),
-            new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens),
+            contentMetrics,
             out metrics);
     }
 
@@ -727,7 +748,7 @@ internal sealed class MetricsPipeline(
         }
 
         var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-        var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths), token);
+        var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths, currentPath), token);
 
         await Task.WhenAll(treeMetricsTask, contentMetricsTask).ConfigureAwait(false);
 
@@ -744,7 +765,8 @@ internal sealed class MetricsPipeline(
 
             UpdateStatusBarMetrics(
                 treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
-                contentMetrics.Lines, contentMetrics.Chars, contentMetrics.Tokens);
+                contentMetrics.ContentOnly.Lines, contentMetrics.ContentOnly.Chars, contentMetrics.ContentOnly.Tokens,
+                contentMetrics.TreeAndContentContent);
         });
     }
 
@@ -872,13 +894,18 @@ internal sealed class MetricsPipeline(
         return metrics;
     }
 
-    private ExportOutputMetrics CalculateContentMetrics(bool hasSelection, IReadOnlySet<string> selectedPaths)
+    private ContentMetricsPair CalculateContentMetrics(
+        bool hasSelection,
+        IReadOnlySet<string> selectedPaths,
+        string currentPath)
     {
         var currentTree = currentTreeProvider();
         if (currentTree is null)
-            return ExportOutputMetrics.Empty;
+            return new ContentMetricsPair(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
 
-        var pathMapper = exportPathPresentationProvider()?.MapFilePath;
+        var pathPresentation = exportPathPresentationProvider();
+        var contentOnlyPathMapper = pathPresentation?.MapFilePath;
+        var treeAndContentPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath);
         var isFullTreeSelection = hasSelection && IsFullTreeSelection(currentTree.Root, selectedPaths);
         var effectiveHasSelection = hasSelection && !isFullTreeSelection;
         var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
@@ -887,7 +914,8 @@ internal sealed class MetricsPipeline(
             TreeIdentity: RuntimeHelpers.GetHashCode(currentTree.Root),
             SelectedCount: selectedCount,
             SelectedHash: selectedHash,
-            PathMapperIdentity: pathMapper is null ? 0 : RuntimeHelpers.GetHashCode(pathMapper));
+            ContentPathPresentationIdentity: BuildPathPresentationIdentity(pathPresentation),
+            TreeAndContentRootPathIdentity: BuildRootPathIdentity(currentPath));
 
         lock (_computationCacheLock)
         {
@@ -900,9 +928,10 @@ internal sealed class MetricsPipeline(
             : GetOrBuildAllOrderedFilePaths(currentTree);
 
         if (orderedPaths.Count == 0)
-            return ExportOutputMetrics.Empty;
+            return new ContentMetricsPair(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
 
-        var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+        var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+        var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
         lock (_metricsLock)
         {
             foreach (var path in orderedPaths)
@@ -910,9 +939,10 @@ internal sealed class MetricsPipeline(
                 if (!_fileMetricsCache.TryGetValue(path, out var metrics))
                     continue;
 
-                var displayPath = MapExportDisplayPath(path, pathMapper);
-                accumulator.AppendFile(new ContentFileMetrics(
-                    Path: displayPath,
+                var contentOnlyPath = MapExportDisplayPath(path, contentOnlyPathMapper);
+                var treeAndContentPath = MapExportDisplayPath(path, treeAndContentPathMapper);
+                var fileMetrics = new ContentFileMetrics(
+                    Path: contentOnlyPath,
                     SizeBytes: metrics.Size,
                     LineCount: metrics.LineCount,
                     CharCount: metrics.CharCount,
@@ -921,11 +951,16 @@ internal sealed class MetricsPipeline(
                     IsEstimated: metrics.IsEstimated,
                     CrLfPairCount: metrics.CrLfPairCount,
                     TrailingNewlineChars: metrics.TrailingNewlineChars,
-                    TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+                    TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks);
+
+                contentOnlyAccumulator.AppendFile(fileMetrics);
+                treeAndContentAccumulator.AppendFile(fileMetrics with { Path = treeAndContentPath });
             }
         }
 
-        var computed = accumulator.ToMetrics();
+        var computed = new ContentMetricsPair(
+            contentOnlyAccumulator.ToMetrics(),
+            treeAndContentAccumulator.ToMetrics());
         lock (_computationCacheLock)
         {
             _hasContentMetricsCache = true;
@@ -934,6 +969,19 @@ internal sealed class MetricsPipeline(
         }
 
         return computed;
+    }
+
+    private ExportOutputMetrics GetRenderedStatusContentMetrics()
+    {
+        if (viewModel.IsAnyPreviewVisible && viewModel.SelectedPreviewContentMode == PreviewContentMode.TreeAndContent)
+        {
+            return new ExportOutputMetrics(
+                _lastStatusTreeAndContentContentLines,
+                _lastStatusTreeAndContentContentChars,
+                _lastStatusTreeAndContentContentTokens);
+        }
+
+        return new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens);
     }
 
     public IReadOnlyList<string> GetOrBuildAllOrderedFilePaths(TreeNodeDescriptor treeRoot)
@@ -989,6 +1037,28 @@ internal sealed class MetricsPipeline(
 
     private static bool IsFullTreeSelection(TreeNodeDescriptor treeRoot, IReadOnlySet<string> selectedPaths) =>
         selectedPaths.Contains(treeRoot.FullPath);
+
+    private static int BuildPathPresentationIdentity(ExportPathPresentation? pathPresentation)
+    {
+        return pathPresentation is null
+            ? 0
+            : HashCode.Combine(
+                pathPresentation.DisplayRootPath,
+                pathPresentation.DisplayRootName,
+                RuntimeHelpers.GetHashCode(pathPresentation.MapFilePath));
+    }
+
+    private static int BuildRootPathIdentity(string rootPath)
+    {
+        try
+        {
+            return StringComparer.Ordinal.GetHashCode(Path.GetFullPath(rootPath));
+        }
+        catch
+        {
+            return StringComparer.Ordinal.GetHashCode(rootPath);
+        }
+    }
 
     private static List<string> BuildOrderedSelectedFilePaths(
         TreeNodeDescriptor treeRoot,

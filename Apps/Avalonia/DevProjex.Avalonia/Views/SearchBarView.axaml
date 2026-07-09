@@ -8,7 +8,7 @@
           IsEnabled="{Binding IsProjectLoaded}"
           UseLayoutRounding="True"
           MinWidth="408">
-    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="8" Margin="12,6">
+    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="12,6">
       <TextBox Name="SearchBox"
                Grid.Column="0"
                PlaceholderText="{Binding MenuSearch}"
@@ -16,10 +16,7 @@
                Width="260"
                FocusAdorner="{x:Null}"
                KeyDown="OnSearchKeyDown" />
-      <Button Grid.Column="1" Content="▲" Width="32" Click="OnSearchPrev" />
-      <Button Grid.Column="2" Content="▼" Width="32" Click="OnSearchNext" />
-      <Button Grid.Column="3" Content="✕" Width="32" Click="OnSearchClose" />
-      <TextBlock Grid.Column="4"
+      <TextBlock Grid.Column="1"
                  Text="{Binding SearchMatchSummaryText}"
                  IsVisible="{Binding SearchMatchSummaryVisible}"
                  FontSize="16"
@@ -27,6 +24,22 @@
                  VerticalAlignment="Center"
                  HorizontalAlignment="Right"
                  Margin="12,0,4,0" />
+      <StackPanel Grid.Column="2"
+                  Orientation="Horizontal"
+                  Spacing="8">
+        <Button Name="SearchPreviousButton"
+                Content="▲"
+                Width="32"
+                Click="OnSearchPrev" />
+        <Button Name="SearchNextButton"
+                Content="▼"
+                Width="32"
+                Click="OnSearchNext" />
+        <Button Name="SearchCloseButton"
+                Content="✕"
+                Width="32"
+                Click="OnSearchClose" />
+      </StackPanel>
     </Grid>
   </Border>
 </UserControl>

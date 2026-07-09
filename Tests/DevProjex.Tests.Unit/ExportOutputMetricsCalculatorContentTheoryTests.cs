@@ -217,8 +217,10 @@ public sealed class ExportOutputMetricsCalculatorContentTheoryTests
 		ContentVariant.FromRaw("lf", "a\nb"),
 		ContentVariant.FromRaw("lf_trailing", "a\nb\n"),
 		ContentVariant.FromRaw("crlf_trailing", "a\r\nb\r\n"),
+		ContentVariant.FromRaw("cr", "a\rb"),
+		ContentVariant.FromRaw("cr_trailing", "a\rb\r"),
 		ContentVariant.FromRaw("newline_only", "\n"),
-		ContentVariant.FromRaw("mixed", "x\r\ny\nz"),
+		ContentVariant.FromRaw("mixed", "x\r\ny\rz\n"),
 		ContentVariant.FromEstimated("estimated_large")
 	];
 
@@ -280,10 +282,18 @@ public sealed class ExportOutputMetricsCalculatorContentTheoryTests
 		private static int CountLineBreaks(string text)
 		{
 			var count = 0;
-			foreach (var c in text.AsSpan())
+			for (var index = 0; index < text.Length; index++)
 			{
-				if (c == '\n')
+				if (text[index] == '\r')
+				{
 					count++;
+					if (index + 1 < text.Length && text[index + 1] == '\n')
+						index++;
+				}
+				else if (text[index] == '\n')
+				{
+					count++;
+				}
 			}
 
 			return count;
@@ -303,20 +313,11 @@ public sealed class ExportOutputMetricsCalculatorContentTheoryTests
 
 		private static (int Chars, int LineBreaks) CountTrailingNewlineInfo(string text)
 		{
-			var chars = 0;
-			var lineBreaks = 0;
-			for (var i = text.Length - 1; i >= 0; i--)
-			{
-				var c = text[i];
-				if (c is not ('\r' or '\n'))
-					break;
+			var start = text.Length;
+			while (start > 0 && text[start - 1] is '\r' or '\n')
+				start--;
 
-				chars++;
-				if (c == '\n')
-					lineBreaks++;
-			}
-
-			return (chars, lineBreaks);
+			return (text.Length - start, CountLineBreaks(text[start..]));
 		}
 	}
 }

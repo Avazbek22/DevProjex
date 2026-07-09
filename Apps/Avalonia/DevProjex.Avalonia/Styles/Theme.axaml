@@ -494,6 +494,8 @@
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Margin" Value="0,14,0,6" />
         <Setter Property="VerticalAlignment" Value="Bottom" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
     </Style>
 
     <Style Selector="TextBlock">
@@ -1094,7 +1096,20 @@
         </Setter>
     </Style>
 
-    <!-- Thumb moved to right position (JSON selected) -->
+    <!-- Thumb positions for the top tree-format switcher. -->
+    <Style Selector="Border.segment-thumb.segment-thumb-json">
+        <Setter Property="RenderTransform" Value="translate(48px, 0px)" />
+    </Style>
+
+    <Style Selector="Border.segment-thumb.segment-thumb-xml">
+        <Setter Property="RenderTransform" Value="translate(96px, 0px)" />
+    </Style>
+
+    <Style Selector="Border.segment-thumb.segment-thumb-md">
+        <Setter Property="RenderTransform" Value="translate(144px, 0px)" />
+    </Style>
+
+    <!-- Kept for older callers that still use the previous two-segment class name. -->
     <Style Selector="Border.segment-thumb.segment-thumb-right">
         <Setter Property="RenderTransform" Value="translate(48px, 0px)" />
     </Style>
@@ -1186,6 +1201,20 @@
     <!-- Segment control: disabled -->
     <Style Selector="Border.segmented-control:disabled">
         <Setter Property="Opacity" Value="0.5" />
+    </Style>
+
+    <Style Selector="Border.format-segmented-control Grid.format-segment-divider-layer">
+        <Setter Property="Width" Value="192" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+
+    <Style Selector="Border.format-segmented-control Border.format-segment-divider">
+        <Setter Property="Width" Value="1" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="CornerRadius" Value="0.5" />
+        <Setter Property="Opacity" Value="0.58" />
     </Style>
 
     <Style Selector="Border.preview-segmented-control">

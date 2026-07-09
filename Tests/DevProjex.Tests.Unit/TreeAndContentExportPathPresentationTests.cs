@@ -3,7 +3,7 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeAndContentExportPathPresentationTests
 {
 	[Fact]
-	public async Task BuildAsync_UsesPathPresentationForTreeAndContentBlocks()
+	public async Task BuildAsync_UsesPathPresentationForTreeBlockAndRelativeContentHeaders()
 	{
 		using var temp = new TemporaryDirectory();
 		var filePath = temp.CreateFile("src/main.cs", "class Program {}");
@@ -52,12 +52,13 @@ public sealed class TreeAndContentExportPathPresentationTests
 
 		Assert.Contains("https://github.com/user/repo:", result, StringComparison.Ordinal);
 		Assert.Contains("├── DevProjex", result, StringComparison.Ordinal);
-		Assert.Contains("https://github.com/user/repo/src/main.cs:", result, StringComparison.Ordinal);
+		Assert.Contains("src/main.cs:", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("https://github.com/user/repo/src/main.cs:", result, StringComparison.Ordinal);
 		Assert.DoesNotContain($"{temp.Path}:", result, StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public async Task BuildAsync_WithJsonFormat_UsesDisplayRootNameInTreeBlock()
+	public async Task BuildAsync_WithJsonFormat_UsesJsonTreeAndRelativeContentHeaders()
 	{
 		using var temp = new TemporaryDirectory();
 		var filePath = temp.CreateFile("src/main.cs", "class Program {}");
@@ -108,8 +109,13 @@ public sealed class TreeAndContentExportPathPresentationTests
 		Assert.True(separatorIndex > 0);
 		var jsonPart = result[..separatorIndex].TrimEnd('\r', '\n');
 		using var doc = JsonDocument.Parse(jsonPart);
-		Assert.Equal("DevProjex", doc.RootElement.GetProperty("root").GetProperty("name").GetString());
-		Assert.Contains("https://github.com/user/repo/src/main.cs:", result, StringComparison.Ordinal);
+		Assert.Equal("https://github.com/user/repo", doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.DoesNotContain(Path.GetFullPath(temp.Path).Replace('\\', '/'), jsonPart, StringComparison.Ordinal);
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/main.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.Contains("src/main.cs:", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("https://github.com/user/repo/src/main.cs:", result, StringComparison.Ordinal);
 	}
 
 	[Fact]

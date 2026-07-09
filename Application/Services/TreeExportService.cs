@@ -1,15 +1,21 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Xml;
 
 namespace DevProjex.Application.Services;
 
 public sealed class TreeExportService
 {
-	private static readonly JsonSerializerOptions JsonOptions = new()
+	private static readonly StringComparer StructuredTreeNameComparer = StringComparer.OrdinalIgnoreCase;
+
+	private static readonly JsonWriterOptions JsonWriterOptions = new()
 	{
-		WriteIndented = true,
-		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+		Indented = true
+	};
+
+	private static readonly XmlWriterSettings XmlWriterSettings = new()
+	{
+		OmitXmlDeclaration = true,
+		Indent = true
 	};
 
 	// Pre-allocated indent segments to avoid string allocation in recursive tree rendering
@@ -31,9 +37,17 @@ public sealed class TreeExportService
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 
-		if (format == TreeTextFormat.Json)
-			return BuildFullTreeJson(rootPath, ResolveJsonRootPath(rootPath, displayRootPath), root, outputRootName);
+		return format switch
+		{
+			TreeTextFormat.Json => BuildFullTreeJson(outputRootPath, root),
+			TreeTextFormat.Xml => BuildFullTreeXml(outputRootPath, root),
+			TreeTextFormat.Markdown => BuildFullTreeMarkdown(outputRootPath, root),
+			_ => BuildFullTreeAscii(outputRootPath, outputRootName, root)
+		};
+	}
 
+	private static string BuildFullTreeAscii(string outputRootPath, string outputRootName, TreeNodeDescriptor root)
+	{
 		var sb = new StringBuilder();
 		sb.Append(outputRootPath).AppendLine(":");
 		sb.AppendLine();
@@ -51,7 +65,7 @@ public sealed class TreeExportService
 		string? displayRootPath = null,
 		string? displayRootName = null)
 	{
-		if (format == TreeTextFormat.Json)
+		if (format != TreeTextFormat.Ascii)
 			return ExportOutputMetricsCalculator.FromText(
 				BuildFullTree(rootPath, root, format, displayRootPath, displayRootName));
 
@@ -78,14 +92,21 @@ public sealed class TreeExportService
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 
-		if (format == TreeTextFormat.Json)
-			return BuildSelectedTreeJson(
-				rootPath,
-				ResolveJsonRootPath(rootPath, displayRootPath),
-				root,
-				includedPaths,
-				outputRootName);
+		return format switch
+		{
+			TreeTextFormat.Json => BuildSelectedTreeJson(outputRootPath, root, includedPaths),
+			TreeTextFormat.Xml => BuildSelectedTreeXml(outputRootPath, root, includedPaths),
+			TreeTextFormat.Markdown => BuildSelectedTreeMarkdown(outputRootPath, root, includedPaths),
+			_ => BuildSelectedTreeAscii(outputRootPath, outputRootName, root, includedPaths)
+		};
+	}
 
+	private static string BuildSelectedTreeAscii(
+		string outputRootPath,
+		string outputRootName,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths)
+	{
 		var sb = new StringBuilder();
 		sb.Append(outputRootPath).AppendLine(":");
 		sb.AppendLine();
@@ -108,7 +129,7 @@ public sealed class TreeExportService
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths))
 			return ExportOutputMetrics.Empty;
 
-		if (format == TreeTextFormat.Json)
+		if (format != TreeTextFormat.Ascii)
 			return ExportOutputMetricsCalculator.FromText(
 				BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath, displayRootName));
 
@@ -191,109 +212,372 @@ public sealed class TreeExportService
 
 	private static string BuildFullTreeJson(
 		string localRootPath,
-		string displayRootPath,
-		TreeNodeDescriptor root,
-		string rootDisplayName)
+		TreeNodeDescriptor root)
 	{
-		var normalizedRootPath = Path.GetFullPath(localRootPath);
-		var payload = new TreeJsonExportDocument(
-			RootPath: displayRootPath,
-			Root: BuildJsonNode(normalizedRootPath, root, rootDisplayName));
-
-		return JsonSerializer.Serialize(payload, JsonOptions);
+		return BuildJsonDocument(localRootPath, root, includedPaths: null);
 	}
 
 	private static string BuildSelectedTreeJson(
 		string localRootPath,
-		string displayRootPath,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> includedPaths,
-		string rootDisplayName)
+		IReadOnlySet<string> includedPaths)
 	{
-		var normalizedRootPath = Path.GetFullPath(localRootPath);
-		var selectedRoot = BuildSelectedJsonNode(normalizedRootPath, root, includedPaths, rootDisplayName);
-		if (selectedRoot is null)
+		if (!includedPaths.Contains(root.FullPath) &&
+		    !HasIncludedChild(root.Children, includedPaths))
+		{
 			return string.Empty;
+		}
 
-		var payload = new TreeJsonExportDocument(
-			RootPath: displayRootPath,
-			Root: selectedRoot);
-
-		return JsonSerializer.Serialize(payload, JsonOptions);
+		return BuildJsonDocument(localRootPath, root, includedPaths);
 	}
 
-	private static string ResolveJsonRootPath(string localRootPath, string? displayRootPath)
+	private static string BuildFullTreeXml(
+		string localRootPath,
+		TreeNodeDescriptor root)
 	{
-		if (!string.IsNullOrWhiteSpace(displayRootPath))
-			return displayRootPath;
+		return BuildXmlDocument(localRootPath, root, includedPaths: null);
+	}
 
-		try
+	private static string BuildSelectedTreeXml(
+		string localRootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths)
+	{
+		if (!includedPaths.Contains(root.FullPath) &&
+		    !HasIncludedChild(root.Children, includedPaths))
 		{
-			return Path.GetFullPath(localRootPath);
+			return string.Empty;
 		}
-		catch
+
+		return BuildXmlDocument(localRootPath, root, includedPaths);
+	}
+
+	private static string BuildFullTreeMarkdown(
+		string localRootPath,
+		TreeNodeDescriptor root)
+	{
+		return BuildMarkdownDocument(localRootPath, root, includedPaths: null);
+	}
+
+	private static string BuildSelectedTreeMarkdown(
+		string localRootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths)
+	{
+		if (!includedPaths.Contains(root.FullPath) &&
+		    !HasIncludedChild(root.Children, includedPaths))
 		{
-			return localRootPath;
+			return string.Empty;
+		}
+
+		return BuildMarkdownDocument(localRootPath, root, includedPaths);
+	}
+
+	private static string BuildJsonDocument(
+		string localRootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string>? includedPaths)
+	{
+		using var stream = new MemoryStream();
+		using (var writer = new Utf8JsonWriter(stream, JsonWriterOptions))
+		{
+			writer.WriteStartObject();
+			writer.WriteString("rootPath", ResolveStructuredRootPath(localRootPath));
+			writer.WritePropertyName("tree");
+			WriteJsonTreeContents(writer, root, includedPaths);
+			writer.WriteEndObject();
+		}
+
+		return Encoding.UTF8.GetString(stream.ToArray());
+	}
+
+	private static string BuildXmlDocument(
+		string localRootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string>? includedPaths)
+	{
+		var sb = new StringBuilder();
+		using (var writer = XmlWriter.Create(sb, XmlWriterSettings))
+		{
+			writer.WriteStartElement("t");
+			writer.WriteAttributeString("r", ResolveStructuredRootPath(localRootPath));
+			WriteXmlTreeContents(writer, root, includedPaths);
+			writer.WriteEndElement();
+		}
+
+		return sb.ToString();
+	}
+
+	private static string BuildMarkdownDocument(
+		string localRootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string>? includedPaths)
+	{
+		var sb = new StringBuilder();
+		sb.Append("Root: ").AppendLine(ResolveStructuredRootPath(localRootPath));
+		sb.AppendLine();
+		WriteMarkdownTreeContents(sb, root, includedPaths);
+		return sb.ToString();
+	}
+
+	private static void WriteJsonTreeContents(
+		Utf8JsonWriter writer,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string>? includedPaths)
+	{
+		writer.WriteStartObject();
+
+		if (root.IsDirectory)
+		{
+			WriteJsonRootContents(writer, root.Children, includedPaths);
+		}
+		else if (includedPaths is null || includedPaths.Contains(root.FullPath))
+		{
+			WriteJsonRootFiles(writer, [root]);
+		}
+
+		writer.WriteEndObject();
+	}
+
+	private static void WriteJsonRootContents(
+		Utf8JsonWriter writer,
+		IReadOnlyList<TreeNodeDescriptor> children,
+		IReadOnlySet<string>? includedPaths)
+	{
+		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
+		WriteJsonDirectoryProperties(writer, orderedChildren, includedPaths);
+		WriteJsonCurrentFolderFilesIfAny(writer, orderedChildren);
+	}
+
+	private static void WriteJsonDirectoryValue(
+		Utf8JsonWriter writer,
+		TreeNodeDescriptor directory,
+		IReadOnlySet<string>? includedPaths)
+	{
+		var orderedChildren = GetOrderedStructuredChildren(directory.Children, includedPaths);
+		var hasDirectories = HasDirectoryChild(orderedChildren);
+		var hasFiles = HasFileChild(orderedChildren);
+
+		if (!hasDirectories)
+		{
+			WriteJsonFileArray(writer, orderedChildren);
+			return;
+		}
+
+		writer.WriteStartObject();
+		WriteJsonDirectoryProperties(writer, orderedChildren, includedPaths);
+		if (hasFiles)
+			WriteJsonCurrentFolderFiles(writer, orderedChildren);
+		writer.WriteEndObject();
+	}
+
+	private static void WriteJsonDirectoryProperties(
+		Utf8JsonWriter writer,
+		IReadOnlyList<TreeNodeDescriptor> orderedChildren,
+		IReadOnlySet<string>? includedPaths)
+	{
+		foreach (var child in orderedChildren)
+		{
+			if (!child.IsDirectory)
+				continue;
+
+			writer.WritePropertyName(child.DisplayName);
+			WriteJsonDirectoryValue(writer, child, includedPaths);
 		}
 	}
 
-	private static TreeJsonNode BuildJsonNode(string rootPath, TreeNodeDescriptor node, string? rootDisplayName = null)
+	private static void WriteJsonCurrentFolderFilesIfAny(
+		Utf8JsonWriter writer,
+		IReadOnlyList<TreeNodeDescriptor> orderedChildren)
 	{
-		var directories = new List<TreeJsonNode>();
-		var files = new List<string>();
-		foreach (var child in node.Children)
+		if (HasFileChild(orderedChildren))
+			WriteJsonCurrentFolderFiles(writer, orderedChildren);
+	}
+
+	private static void WriteJsonCurrentFolderFiles(
+		Utf8JsonWriter writer,
+		IReadOnlyList<TreeNodeDescriptor> orderedChildren)
+	{
+		writer.WritePropertyName("/");
+		WriteJsonFileArray(writer, orderedChildren);
+	}
+
+	private static void WriteJsonRootFiles(Utf8JsonWriter writer, IReadOnlyList<TreeNodeDescriptor> files)
+	{
+		writer.WritePropertyName("/");
+		WriteJsonFileArray(writer, files);
+	}
+
+	private static void WriteJsonFileArray(Utf8JsonWriter writer, IReadOnlyList<TreeNodeDescriptor> orderedChildren)
+	{
+		writer.WriteStartArray();
+		foreach (var child in orderedChildren)
+		{
+			if (!child.IsDirectory)
+				writer.WriteStringValue(child.DisplayName);
+		}
+		writer.WriteEndArray();
+	}
+
+	private static void WriteXmlTreeContents(
+		XmlWriter writer,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string>? includedPaths)
+	{
+		if (root.IsDirectory)
+		{
+			WriteXmlChildren(writer, root.Children, includedPaths);
+			return;
+		}
+
+		if (includedPaths is null || includedPaths.Contains(root.FullPath))
+			WriteXmlFile(writer, root);
+	}
+
+	private static void WriteXmlChildren(
+		XmlWriter writer,
+		IReadOnlyList<TreeNodeDescriptor> children,
+		IReadOnlySet<string>? includedPaths)
+	{
+		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
+		foreach (var child in orderedChildren)
 		{
 			if (child.IsDirectory)
-				directories.Add(BuildJsonNode(rootPath, child));
+				WriteXmlDirectory(writer, child, includedPaths);
 			else
-				files.Add(child.DisplayName);
+				WriteXmlFile(writer, child);
 		}
-
-		return new TreeJsonNode(
-			Name: string.IsNullOrWhiteSpace(rootDisplayName) ? node.DisplayName : rootDisplayName,
-			Path: ToRelativeJsonPath(rootPath, node.FullPath),
-			AccessDenied: node.IsAccessDenied ? true : null,
-			Dirs: directories.Count > 0 ? directories : null,
-			Files: files.Count > 0 ? files : null);
 	}
 
-	private static TreeJsonNode? BuildSelectedJsonNode(
-		string rootPath,
-		TreeNodeDescriptor node,
-		IReadOnlySet<string> includedPaths,
-		string? rootDisplayName = null)
+	private static void WriteXmlDirectory(
+		XmlWriter writer,
+		TreeNodeDescriptor directory,
+		IReadOnlySet<string>? includedPaths)
 	{
-		var includeSelf = includedPaths.Contains(node.FullPath);
-		var selectedDirectories = new List<TreeJsonNode>();
-		var selectedFiles = new List<string>();
+		writer.WriteStartElement("d");
+		writer.WriteAttributeString("n", directory.DisplayName);
+		WriteXmlChildren(writer, directory.Children, includedPaths);
+		writer.WriteEndElement();
+	}
 
-		foreach (var child in node.Children)
+	private static void WriteXmlFile(XmlWriter writer, TreeNodeDescriptor file)
+	{
+		writer.WriteStartElement("f");
+		writer.WriteString(file.DisplayName);
+		writer.WriteEndElement();
+	}
+
+	private static void WriteMarkdownTreeContents(
+		StringBuilder sb,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string>? includedPaths)
+	{
+		if (root.IsDirectory)
+		{
+			AppendMarkdownChildren(sb, root.Children, includedPaths, level: 0);
+			return;
+		}
+
+		if (includedPaths is null || includedPaths.Contains(root.FullPath))
+			AppendMarkdownItem(sb, level: 0, root.DisplayName, isDirectory: false);
+	}
+
+	private static void AppendMarkdownChildren(
+		StringBuilder sb,
+		IReadOnlyList<TreeNodeDescriptor> children,
+		IReadOnlySet<string>? includedPaths,
+		int level)
+	{
+		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
+		foreach (var child in orderedChildren)
+		{
+			AppendMarkdownItem(sb, level, child.DisplayName, child.IsDirectory);
+			if (child.IsDirectory)
+				AppendMarkdownChildren(sb, child.Children, includedPaths, level + 1);
+		}
+	}
+
+	private static void AppendMarkdownItem(StringBuilder sb, int level, string name, bool isDirectory)
+	{
+		sb.Append(' ', level * 2);
+		sb.Append("- ");
+		sb.Append(EscapeMarkdownListText(name));
+		if (isDirectory)
+			sb.Append('/');
+		sb.AppendLine();
+	}
+
+	private static string EscapeMarkdownListText(string name)
+	{
+		if (string.IsNullOrEmpty(name))
+			return name;
+
+		var sanitized = name.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
+		return sanitized[0] is '-' or '*' or '+' or '['
+			? "\\" + sanitized
+			: sanitized;
+	}
+
+	private static List<TreeNodeDescriptor> GetOrderedStructuredChildren(
+		IReadOnlyList<TreeNodeDescriptor> children,
+		IReadOnlySet<string>? includedPaths)
+	{
+		var ordered = new List<TreeNodeDescriptor>(children.Count);
+		foreach (var child in children)
+		{
+			if (includedPaths is null || includedPaths.Contains(child.FullPath))
+				ordered.Add(child);
+		}
+
+		ordered.Sort(CompareStructuredTreeNodes);
+		return ordered;
+	}
+
+	private static int CompareStructuredTreeNodes(TreeNodeDescriptor left, TreeNodeDescriptor right)
+	{
+		if (left.IsDirectory != right.IsDirectory)
+			return left.IsDirectory ? -1 : 1;
+
+		var comparison = StructuredTreeNameComparer.Compare(left.DisplayName, right.DisplayName);
+		return comparison != 0
+			? comparison
+			: StringComparer.Ordinal.Compare(left.DisplayName, right.DisplayName);
+	}
+
+	private static bool HasIncludedChild(
+		IReadOnlyList<TreeNodeDescriptor> children,
+		IReadOnlySet<string> includedPaths)
+	{
+		foreach (var child in children)
+		{
+			if (includedPaths.Contains(child.FullPath))
+				return true;
+		}
+
+		return false;
+	}
+
+	private static bool HasDirectoryChild(IReadOnlyList<TreeNodeDescriptor> children)
+	{
+		foreach (var child in children)
 		{
 			if (child.IsDirectory)
-			{
-				var selectedChild = BuildSelectedJsonNode(rootPath, child, includedPaths);
-				if (selectedChild is not null)
-					selectedDirectories.Add(selectedChild);
-			}
-			else if (includedPaths.Contains(child.FullPath))
-			{
-				selectedFiles.Add(child.DisplayName);
-			}
+				return true;
 		}
 
-		if (!includeSelf && selectedDirectories.Count == 0 && selectedFiles.Count == 0)
-			return null;
-
-		return new TreeJsonNode(
-			Name: string.IsNullOrWhiteSpace(rootDisplayName) ? node.DisplayName : rootDisplayName,
-			Path: ToRelativeJsonPath(rootPath, node.FullPath),
-			AccessDenied: node.IsAccessDenied ? true : null,
-			Dirs: selectedDirectories.Count > 0 ? selectedDirectories : null,
-			Files: selectedFiles.Count > 0 ? selectedFiles : null);
+		return false;
 	}
 
-	private static string ResolveRootDisplayName(TreeNodeDescriptor root, string? displayRootName)
-		=> string.IsNullOrWhiteSpace(displayRootName) ? root.DisplayName : displayRootName;
+	private static bool HasFileChild(IReadOnlyList<TreeNodeDescriptor> children)
+	{
+		foreach (var child in children)
+		{
+			if (!child.IsDirectory)
+				return true;
+		}
+
+		return false;
+	}
 
 	private static bool CollectIncludedPaths(
 		TreeNodeDescriptor node,
@@ -438,28 +722,26 @@ public sealed class TreeExportService
 		return new ExportOutputMetrics(lines, chars, tokens);
 	}
 
-	private static string ToRelativeJsonPath(string rootPath, string fullPath)
+	private static string ResolveRootDisplayName(TreeNodeDescriptor root, string? displayRootName)
+		=> string.IsNullOrWhiteSpace(displayRootName) ? root.DisplayName : displayRootName;
+
+	private static string ResolveStructuredRootPath(string localRootPath)
 	{
+		if (IsAbsoluteDisplayUri(localRootPath))
+			return NormalizeStructuredPath(localRootPath.TrimEnd('/'));
+
 		try
 		{
-			var relativePath = Path.GetRelativePath(rootPath, fullPath);
-			if (string.IsNullOrWhiteSpace(relativePath) || relativePath == ".")
-				return ".";
-
-			return relativePath.Replace('\\', '/');
+			return NormalizeStructuredPath(Path.GetFullPath(localRootPath));
 		}
 		catch
 		{
-			return fullPath.Replace('\\', '/');
+			return NormalizeStructuredPath(localRootPath);
 		}
 	}
 
-	private sealed record TreeJsonExportDocument(string RootPath, TreeJsonNode Root);
+	private static bool IsAbsoluteDisplayUri(string value)
+		=> Uri.TryCreate(value, UriKind.Absolute, out var uri) && !uri.IsFile;
 
-	private sealed record TreeJsonNode(
-		string Name,
-		string Path,
-		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? AccessDenied,
-		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TreeJsonNode>? Dirs,
-		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Files);
+	private static string NormalizeStructuredPath(string path) => path.Replace('\\', '/');
 }

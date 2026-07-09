@@ -133,6 +133,30 @@ devprojex "/home/me/projects/app" --export content --roots src --ext cs -o ./src
 `--format json` changes only the tree part. File contents remain plain text so the result is still easy to paste into tools that expect source context.
 `--format` and `--export-format` are valid for `tree` and `tree-content`; `content` exports are always plain text.
 
+JSON tree exports use this structure:
+
+```json
+{
+  "rootPath": "/home/me/projects/app",
+  "tree": {
+    "src": {
+      "Services": [
+        "ProjectService.cs"
+      ],
+      "/": [
+        "App.cs"
+      ]
+    },
+    "EmptyFolder": [],
+    "/": [
+      "README.md"
+    ]
+  }
+}
+```
+
+JSON export uses this tree format: arrays contain files, objects contain subfolders, `/` contains files in the current folder, and `[]` represents an empty folder. `rootPath` is written once and normalized with `/`; in `tree-content` exports, file content headers use relative `/` paths.
+
 When `--output` is omitted, export writes to stdout. When `--output` points to a file, DevProjex creates parent folders when needed, writes UTF-8 without BOM, prints the absolute output path to stdout, and never modifies the opened project folder unless that folder is explicitly chosen as the output location.
 When report and export are requested together, `--report-path` and `--output` must point to different files.
 

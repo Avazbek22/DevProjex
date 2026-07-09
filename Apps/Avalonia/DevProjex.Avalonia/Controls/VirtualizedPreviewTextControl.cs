@@ -86,6 +86,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     private const int RenderBufferLines = 3;
     private const int MaxFallbackVisibleLines = 120;
     private const int MaxRenderedVisibleLines = 512;
+    private const int MaxRetainedLineMetadataCapacity = 4096;
     private const double AutoScrollEdgeThreshold = 28.0;
     private static readonly TimeSpan AutoScrollTickInterval = TimeSpan.FromMilliseconds(16);
     private readonly List<int> _lineStarts = [0];
@@ -599,9 +600,10 @@ public sealed class VirtualizedPreviewTextControl : Control
     {
         base.OnDetachedFromVisualTree(e);
         _isSelecting = false;
-        StopSelectionAutoScroll();
+        ReleaseSelectionAutoScrollTimer();
         _ownerScrollViewer = null;
         CloseContextMenu();
+        ResetVisibleWindowCache();
     }
 
     private void RebuildTextLayoutMetadata()
@@ -617,6 +619,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         {
             _lineStarts.Clear();
             _lineStarts.Add(0);
+            ReleaseOversizedLineMetadataCapacity();
             _lineCount = Math.Max(1, document.LineCount);
             _maxLineLength = Math.Max(0, document.MaxLineLength);
             InvalidateMeasure();
@@ -637,6 +640,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         var text = Text ?? string.Empty;
         if (text.Length == 0)
         {
+            ReleaseOversizedLineMetadataCapacity();
             InvalidateMeasure();
             InvalidateVisual();
             return;
@@ -1505,6 +1509,25 @@ public sealed class VirtualizedPreviewTextControl : Control
     private void StopSelectionAutoScroll()
     {
         _selectionAutoScrollTimer?.Stop();
+    }
+
+    private void ReleaseSelectionAutoScrollTimer()
+    {
+        var timer = _selectionAutoScrollTimer;
+        if (timer is null)
+            return;
+
+        timer.Stop();
+        timer.Tick -= OnSelectionAutoScrollTick;
+        _selectionAutoScrollTimer = null;
+    }
+
+    private void ReleaseOversizedLineMetadataCapacity()
+    {
+        // String previews need one offset per line, but file-backed documents carry their own
+        // index. Do not retain a large List<int> backing array after switching or clearing.
+        if (_lineStarts.Capacity > MaxRetainedLineMetadataCapacity)
+            _lineStarts.TrimExcess();
     }
 
     private void OnSelectionAutoScrollTick(object? sender, EventArgs e)

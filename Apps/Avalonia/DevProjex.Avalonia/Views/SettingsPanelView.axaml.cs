@@ -88,6 +88,11 @@ public partial class SettingsPanelView : UserControl
 
     private double CalculateRequiredMinimumWidth()
     {
+        // The window owns the visual settings-island width. Header text is allowed to
+        // compress inside that frame so the island can stay aligned with the top toolbar.
+        if (_panelRoot?.MinWidth is > 0)
+            return Math.Ceiling(_panelRoot.MinWidth);
+
         var contentWidth = Math.Max(
             MeasureHeaderWidth(_ignoreHeaderGrid, _ignoreHeaderText, _ignoreAllCheckBox),
             Math.Max(
