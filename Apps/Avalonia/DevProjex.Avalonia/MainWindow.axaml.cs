@@ -436,6 +436,7 @@ public partial class MainWindow : Window
             _dropZoneContainer.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
             _dropZoneContainer.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
             _dropZoneContainer.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
+            UpdateDropZoneAnimationState();
         }
 
         InitializeUserSettings();
@@ -626,6 +627,8 @@ public partial class MainWindow : Window
                 _themeBrushCoordinator.UpdateTransparencyEffect();
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
+            else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
+                UpdateDropZoneAnimationState();
             else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
                      or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
                      or nameof(MainWindowViewModel.StatusProgressValue))
@@ -798,6 +801,26 @@ public partial class MainWindow : Window
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
             disposable.Dispose();
+    }
+
+    private void UpdateDropZoneAnimationState()
+    {
+        if (_dropZoneContainer is null)
+            return;
+
+        // This is a render-lifecycle boundary, not merely a visual class toggle.
+        // In v4.9 the class was made permanent in XAML and the method was removed.
+        // The hidden drop zone then kept DefaultRenderLoop, Skia, and ANGLE active while
+        // the tree or preview workspace was idle. IsVisible alone did not prevent that
+        // regression on the affected Windows/Avalonia rendering path.
+        //
+        // Keep the explicit remove/add symmetry: removal guarantees true project idle,
+        // while re-adding preserves the original animation after reset back to drop zone.
+        // PlaybackBehavior=OnlyIfVisible in XAML remains an additional safety boundary.
+        if (_viewModel.IsProjectLoaded)
+            _dropZoneContainer.Classes.Remove("drop-zone-animating");
+        else
+            _dropZoneContainer.Classes.Add("drop-zone-animating");
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
