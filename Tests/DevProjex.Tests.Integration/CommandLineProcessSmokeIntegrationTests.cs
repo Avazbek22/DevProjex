@@ -1010,6 +1010,90 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_InlineStructuredExportCommandWritesXmlTreeToStdout()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project inline xml");
+		SeedStructuredFormatProject(projectPath);
+
+		var result = await RunAppAsync(
+			$"{CommandLineOptionTokens.Path}={projectPath}",
+			$"{CommandLineOptionTokens.Export}=tree",
+			$"{CommandLineOptionTokens.Format}=xml",
+			$"{CommandLineOptionTokens.Roots}=src",
+			$"{CommandLineOptionTokens.Extensions}=cs",
+			$"{CommandLineOptionTokens.Ignore}={CommandLineOptionTokens.IgnoreNone}");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var document = XDocument.Parse(result.Stdout);
+		Assert.Equal(Path.GetFullPath(projectPath).Replace('\\', '/'), document.Root?.Attribute("r")?.Value);
+		Assert.Equal(["src/Program.cs", "src/Services/UserService.cs"], ExtractXmlFilePaths(document));
+		Assert.DoesNotContain("docs & notes", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("namespace Smoke", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_MarkdownAliasWritesMarkdownTreeToStdout()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project markdown alias");
+		SeedStructuredFormatProject(projectPath);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "markdown",
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.StartsWith($"Root: {Path.GetFullPath(projectPath).Replace('\\', '/')}", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("- src/", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("  - Program.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("    - UserService.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("docs & notes", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("namespace Smoke", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("xml")]
+	[InlineData("md")]
+	public async Task UserLevelTerminalCommand_StructuredTreeFormatsRunThroughInstalledCommand(string format)
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project terminal structured");
+		SeedStructuredFormatProject(projectPath);
+
+		var result = await RunUserLevelTerminalCommandAsync(
+			temp,
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, format,
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.DoesNotContain("namespace Smoke", result.Stdout, StringComparison.Ordinal);
+		if (format == "xml")
+		{
+			var document = XDocument.Parse(result.Stdout);
+			Assert.Equal(["src/Program.cs", "src/Services/UserService.cs"], ExtractXmlFilePaths(document));
+			return;
+		}
+
+		Assert.StartsWith("Root: ", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("- src/", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("  - Program.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("    - UserService.cs", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task Process_ExportXmlTreeToStdoutWritesXmlOnlyAndRoundTripsSpecialNames()
 	{
 		using var temp = new TemporaryDirectory();
@@ -1419,19 +1503,61 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Theory]
+	[InlineData(CommandLineOptionTokens.Preview, null)]
 	[InlineData(CommandLineOptionTokens.TreeFormat, "md")]
 	[InlineData(CommandLineOptionTokens.PreviewMode, "tree-content")]
 	[InlineData(CommandLineOptionTokens.TreeFilter, "Services")]
 	[InlineData(CommandLineOptionTokens.PreviewSearch, "Program")]
 	public async Task Process_DesktopStartupOptionWithoutProjectReturnsUsageErrorInsteadOfLaunchingUi(
 		string option,
-		string value)
+		string? value)
 	{
-		var result = await RunAppAsync(option, value);
+		var result = value is null
+			? await RunAppAsync(option)
+			: await RunAppAsync(option, value);
 
 		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stdout);
 		Assert.Contains("UI startup options require --path", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_DesktopStartupInlineOptionWithoutProjectReturnsUsageErrorInsteadOfLaunchingUi()
+	{
+		var result = await RunAppAsync($"{CommandLineOptionTokens.PreviewSearch}=Program");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("UI startup options require --path", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_LastWithExplicitPathReturnsUsageErrorInsteadOfLaunchingUi()
+	{
+		using var temp = new TemporaryDirectory();
+
+		var result = await RunAppAsync(CommandLineOptionTokens.Last, CommandLineOptionTokens.Path, temp.Path);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("Use either --last or --path", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(CommandLineOptionTokens.PreviewMode, "split", "Unsupported preview mode 'split'.")]
+	[InlineData(CommandLineOptionTokens.TreeFormat, "yaml", "Unsupported tree format 'yaml'.")]
+	public async Task Process_InvalidDesktopStartupValueReturnsUsageErrorBeforeLaunchingUi(
+		string option,
+		string value,
+		string expectedError)
+	{
+		using var temp = new TemporaryDirectory();
+
+		var result = await RunAppAsync(CommandLineOptionTokens.Path, temp.Path, option, value);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains(expectedError, result.Stderr, StringComparison.Ordinal);
 	}
 
 	[Fact]

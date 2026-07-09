@@ -97,6 +97,40 @@ public sealed class MainWindowStartupAutomationUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task StartupUi_LastSkipsMissingRecentFolderAndOpensFirstExistingFolder()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var existingPath = Path.Combine(project.RootPath, "history", "existing");
+		var missingPath = Path.Combine(project.RootPath, "history", "missing");
+		Directory.CreateDirectory(existingPath);
+
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var db = recentStore.Load();
+		db = recentStore.AddFolder(db, existingPath);
+		db = recentStore.AddFolder(db, missingPath);
+
+		var options = ParseValidOptions(CommandLineOptionTokens.Last);
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"first existing recent project to load at startup");
+
+			Assert.Equal(GetComparablePath(existingPath), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task StartupUi_PreviewModeAndTreeFormatOpenPreparedPreview()
 	{
 		using var project = UiTestProject.CreateDefault();
@@ -139,6 +173,43 @@ public sealed class MainWindowStartupAutomationUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task StartupUi_ParsedInlinePreviewModeAndTreeFormatOpenXmlTreeContentPreview()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = ParseValidOptions(
+			$"{CommandLineOptionTokens.Path}={project.RootPath}",
+			$"{CommandLineOptionTokens.PreviewMode}=tree-and-content",
+			$"{CommandLineOptionTokens.TreeFormat}=xml");
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.True(viewModel.IsPreviewMode);
+			Assert.Equal(PreviewContentMode.TreeAndContent, viewModel.SelectedPreviewContentMode);
+			Assert.Equal(ExportFormat.Xml, viewModel.SelectedExportFormat);
+
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+					return payload.StartsWith("<t ", StringComparison.Ordinal) &&
+					       payload.Contains("\u00A0", StringComparison.Ordinal);
+				},
+				"startup XML tree-content preview to render from parsed inline arguments");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task StartupUi_TreeFilterAppliesAfterProjectLoad()
 	{
 		using var project = UiTestProject.CreateDefault();
@@ -155,6 +226,34 @@ public sealed class MainWindowStartupAutomationUiTests
 			await UiTestDriver.WaitForFilterAppliedAsync(window, "Services");
 
 			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.True(viewModel.FilterVisible);
+			Assert.False(viewModel.SearchVisible);
+			Assert.False(viewModel.IsPreviewMode);
+			Assert.True(viewModel.FilterMatchCount > 0);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUi_ParsedInlineTreeFilterKeepsPreviewClosedAndAppliesFilter()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = ParseValidOptions(
+			$"{CommandLineOptionTokens.Path}={project.RootPath}",
+			$"{CommandLineOptionTokens.TreeFilter}=Services");
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForFilterAppliedAsync(window, "Services");
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.False(viewModel.IsPreviewMode);
 			Assert.True(viewModel.FilterVisible);
 			Assert.False(viewModel.SearchVisible);
 			Assert.True(viewModel.FilterMatchCount > 0);
@@ -310,6 +409,13 @@ public sealed class MainWindowStartupAutomationUiTests
 		};
 		UiTestDriver.TrackTopLevelWindow(window);
 		return window;
+	}
+
+	private static CommandLineOptions ParseValidOptions(params string[] args)
+	{
+		var result = CommandLineOptions.Parse(args);
+		Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors.Select(static error => error.Message)));
+		return result.Options;
 	}
 
 	private static string? GetCurrentPath(MainWindow window)

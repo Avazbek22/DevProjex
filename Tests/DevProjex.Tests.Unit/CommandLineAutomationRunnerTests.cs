@@ -196,6 +196,59 @@ public sealed class CommandLineAutomationRunnerTests
 	}
 
 	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_SilentWithPreviewSearchWritesUsageErrorBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created.");
+			});
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Silent,
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.PreviewSearch, "Program"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("UI startup options cannot be combined", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_ParseErrorFromCompetingDesktopSearchToolsWinsBeforeServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.TreeFilter, "src",
+			CommandLineOptionTokens.PreviewSearch, "Program"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("--tree-filter and --preview-search cannot be used together", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RunUtilityOrHeadlessAsync_RejectsCompetingStdoutPayloadsBeforeCreatingServices()
 	{
 		using var output = new StringWriter();

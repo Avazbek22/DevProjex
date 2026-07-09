@@ -366,6 +366,58 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_PreviewFlagWithProjectOpensDefaultPreviewWithoutChangingModeOrSearch()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/root",
+			CommandLineOptionTokens.Preview
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Null(result.Options.Ui.PreviewMode);
+		Assert.Null(result.Options.Ui.TreeFormat);
+		Assert.Null(result.Options.Ui.TreeFilter);
+		Assert.Null(result.Options.Ui.PreviewSearch);
+	}
+
+	[Theory]
+	[InlineData("tree", StartupPreviewMode.Tree)]
+	[InlineData("content", StartupPreviewMode.Content)]
+	[InlineData("tree-content", StartupPreviewMode.TreeContent)]
+	[InlineData("tree-and-content", StartupPreviewMode.TreeContent)]
+	[InlineData("all", StartupPreviewMode.TreeContent)]
+	public void Parse_ReadsEveryDesktopPreviewModeAlias(string value, StartupPreviewMode expectedMode)
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/root",
+			CommandLineOptionTokens.PreviewMode, value
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Equal(expectedMode, result.Options.Ui.PreviewMode);
+	}
+
+	[Theory]
+	[InlineData("ascii", TreeTextFormat.Ascii)]
+	[InlineData("text", TreeTextFormat.Ascii)]
+	[InlineData("json", TreeTextFormat.Json)]
+	[InlineData("xml", TreeTextFormat.Xml)]
+	[InlineData("md", TreeTextFormat.Markdown)]
+	[InlineData("markdown", TreeTextFormat.Markdown)]
+	public void Parse_ReadsEveryDesktopTreeFormatAlias(string value, TreeTextFormat expectedFormat)
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/root",
+			CommandLineOptionTokens.TreeFormat, value
+		]);
+
+		AssertValid(result);
+		Assert.Equal(expectedFormat, result.Options.Ui.TreeFormat);
+	}
+
+	[Fact]
 	public void Parse_DesktopStartupInlineValuesMatchSeparatedValues()
 	{
 		var separated = CommandLineOptions.Parse([
@@ -387,6 +439,20 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_DesktopStartupInlineValuesCanContainSpacesAndEquals()
+	{
+		var result = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.Path}=/tmp/root",
+			$"{CommandLineOptionTokens.TreeFilter}=Project Services=Core",
+			$"{CommandLineOptionTokens.TreeFormat}=markdown"
+		]);
+
+		AssertValid(result);
+		Assert.Equal("Project Services=Core", result.Options.Ui.TreeFilter);
+		Assert.Equal(TreeTextFormat.Markdown, result.Options.Ui.TreeFormat);
+	}
+
+	[Fact]
 	public void Parse_RejectsDesktopStartupOptionsWithoutProjectTarget()
 	{
 		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Preview]);
@@ -400,6 +466,17 @@ public sealed class CommandLineOptionsTests
 		var result = CommandLineOptions.Parse([
 			CommandLineOptionTokens.Last,
 			CommandLineOptionTokens.Path, "/tmp/root"
+		]);
+
+		AssertInvalid(result, "conflicting-startup-target");
+	}
+
+	[Fact]
+	public void Parse_RejectsLastWithPositionalPath()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Last,
+			"/tmp/root"
 		]);
 
 		AssertInvalid(result, "conflicting-startup-target");
@@ -509,6 +586,17 @@ public sealed class CommandLineOptionsTests
 		]);
 
 		AssertInvalid(result, "invalid-tree-format");
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedPreviewMode()
+	{
+		var result = CommandLineOptions.Parse([
+			"/tmp/root",
+			CommandLineOptionTokens.PreviewMode, "split"
+		]);
+
+		AssertInvalid(result, "invalid-preview-mode");
 	}
 
 	[Fact]
@@ -775,6 +863,21 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void ToArguments_PreservesPreviewOnlyForRelaunch()
+	{
+		var options = new CommandLineOptions("/tmp/root", AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with { OpenPreview = true }
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--preview", args);
+		Assert.DoesNotContain("--preview-mode", args);
+		Assert.DoesNotContain("--preview-search", args);
+	}
+
+	[Fact]
 	public void ToArguments_PreservesDesktopStartupOptionsForRelaunch()
 	{
 		var options = new CommandLineOptions("/tmp/root folder", AppLanguage.En, false)
@@ -799,6 +902,29 @@ public sealed class CommandLineOptionsTests
 		Assert.Contains("md", args);
 		Assert.Contains("--tree-filter", args);
 		Assert.Contains("\"App Services\"", args);
+	}
+
+	[Fact]
+	public void ToArguments_CanonicalizesDesktopStartupAliasesForRelaunch()
+	{
+		var options = new CommandLineOptions("/tmp/root", AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with
+			{
+				OpenPreview = true,
+				PreviewMode = StartupPreviewMode.TreeContent,
+				TreeFormat = TreeTextFormat.Markdown
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--preview-mode", args);
+		Assert.Contains("tree-content", args);
+		Assert.Contains("--tree-format", args);
+		Assert.Contains("md", args);
+		Assert.DoesNotContain("tree-and-content", args);
+		Assert.DoesNotContain("markdown", args);
 	}
 
 	[Fact]
