@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using DevProjex.Infrastructure.Reports;
+using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.UI;
 
@@ -54,6 +55,142 @@ public sealed class MainWindowStartupAutomationUiTests
 			if (window is not null)
 				await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 			Environment.CurrentDirectory = originalCurrentDirectory;
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUi_LastOpensMostRecentLocalFolder()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var firstPath = Path.Combine(project.RootPath, "history", "first");
+		var secondPath = Path.Combine(project.RootPath, "history", "second");
+		Directory.CreateDirectory(firstPath);
+		Directory.CreateDirectory(secondPath);
+
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var db = recentStore.Load();
+		db = recentStore.AddFolder(db, firstPath);
+		db = recentStore.AddFolder(db, secondPath);
+
+		var options = CommandLineOptions.Empty with
+		{
+			Ui = StartupUiOptions.Default with { OpenLastProject = true }
+		};
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"last recent project to load at startup");
+
+			Assert.Equal(GetComparablePath(secondPath), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUi_PreviewModeAndTreeFormatOpenPreparedPreview()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with
+			{
+				OpenPreview = true,
+				PreviewMode = StartupPreviewMode.TreeContent,
+				TreeFormat = TreeTextFormat.Markdown
+			}
+		};
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.True(viewModel.IsPreviewMode);
+			Assert.Equal(PreviewContentMode.TreeAndContent, viewModel.SelectedPreviewContentMode);
+			Assert.Equal(ExportFormat.Markdown, viewModel.SelectedExportFormat);
+
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+					return payload.StartsWith("Root: ", StringComparison.Ordinal) &&
+					       payload.Contains("\u00A0", StringComparison.Ordinal);
+				},
+				"startup Markdown tree-content preview to render");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUi_TreeFilterAppliesAfterProjectLoad()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with { TreeFilter = "Services" }
+		};
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForFilterAppliedAsync(window, "Services");
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.True(viewModel.FilterVisible);
+			Assert.False(viewModel.SearchVisible);
+			Assert.True(viewModel.FilterMatchCount > 0);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUi_PreviewSearchOpensPreviewAndSearch()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with { PreviewSearch = "Preview" }
+		};
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			await UiTestDriver.WaitForSearchAppliedAsync(window, "Preview");
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.True(viewModel.IsPreviewMode);
+			Assert.True(viewModel.SearchVisible);
+			Assert.False(viewModel.FilterVisible);
+			Assert.True(viewModel.SearchTotalMatches > 0);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 		}
 	}
 
@@ -160,6 +297,19 @@ public sealed class MainWindowStartupAutomationUiTests
 		{
 			window.Close();
 		}
+	}
+
+	private static MainWindow CreateStartupWindow(CommandLineOptions options, string appDataPath)
+	{
+		Directory.CreateDirectory(appDataPath);
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		var window = new MainWindow(options, services)
+		{
+			Width = 1500,
+			Height = 920
+		};
+		UiTestDriver.TrackTopLevelWindow(window);
+		return window;
 	}
 
 	private static string? GetCurrentPath(MainWindow window)

@@ -13,6 +13,12 @@ public static class CommandLineOptionTokens
 	public const string ShortOutput = "-o";
 	public const string ExportFormat = "--export-format";
 	public const string Format = "--format";
+	public const string Last = "--last";
+	public const string Preview = "--preview";
+	public const string PreviewMode = "--preview-mode";
+	public const string TreeFormat = "--tree-format";
+	public const string TreeFilter = "--tree-filter";
+	public const string PreviewSearch = "--preview-search";
 	public const string IncludeRoot = "--include-root";
 	public const string Roots = "--roots";
 	public const string IncludeExtension = "--include-extension";
@@ -52,6 +58,12 @@ public static class CommandLineOptionTokens
 		ShortOutput,
 		ExportFormat,
 		Format,
+		Last,
+		Preview,
+		PreviewMode,
+		TreeFormat,
+		TreeFilter,
+		PreviewSearch,
 		IncludeRoot,
 		Roots,
 		IncludeExtension,

@@ -14,6 +14,7 @@ public sealed record CommandLineOptions(
 	public bool ShowVersion { get; init; }
 	public StartupReportOptions Report { get; init; } = StartupReportOptions.Disabled;
 	public StartupExportOptions Export { get; init; } = StartupExportOptions.Disabled;
+	public StartupUiOptions Ui { get; init; } = StartupUiOptions.Default;
 	public IReadOnlyList<string> IncludeRootFolders { get; init; } = [];
 	public IReadOnlyList<string> IncludeExtensions { get; init; } = [];
 	public IReadOnlyList<IgnoreOptionId> IgnoreOptions { get; init; } = [];
@@ -38,6 +39,7 @@ public sealed record CommandLineOptions(
 		bool showVersion = false;
 		var report = StartupReportOptions.Disabled;
 		var export = StartupExportOptions.Disabled;
+		var ui = StartupUiOptions.Default;
 		var includeRootFolders = new List<string>();
 		var includeExtensions = new List<string>();
 		var ignoreOptions = new List<IgnoreOptionId>();
@@ -110,6 +112,66 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
+			if (arg.Equals(CommandLineOptionTokens.Last, StringComparison.OrdinalIgnoreCase))
+			{
+				ui = ui with { OpenLastProject = true };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.Preview, StringComparison.OrdinalIgnoreCase))
+			{
+				ui = ui with { OpenPreview = true };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.PreviewMode, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				if (!TryParseStartupPreviewMode(value, out var previewMode))
+				{
+					errors.Add(new CommandLineParseError("invalid-preview-mode", $"Unsupported preview mode '{value}'.", arg));
+					continue;
+				}
+
+				ui = ui with { OpenPreview = true, PreviewMode = previewMode };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.TreeFormat, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				if (!TryParseTreeTextFormat(value, out var format))
+				{
+					errors.Add(new CommandLineParseError("invalid-tree-format", $"Unsupported tree format '{value}'.", arg));
+					continue;
+				}
+
+				ui = ui with { TreeFormat = format };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.TreeFilter, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				ui = ui with { TreeFilter = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.PreviewSearch, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				ui = ui with { OpenPreview = true, PreviewSearch = value };
+				continue;
+			}
+
 			if (arg.Equals(CommandLineOptionTokens.Report, StringComparison.OrdinalIgnoreCase))
 			{
 				report = report with { Enabled = true };
@@ -175,7 +237,7 @@ public sealed record CommandLineOptions(
 				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					continue;
 
-				if (!TryParseExportFormat(value, out var format))
+				if (!TryParseTreeTextFormat(value, out var format))
 				{
 					errors.Add(new CommandLineParseError("invalid-export-format", $"Unsupported export format '{value}'.", arg));
 					continue;
@@ -244,6 +306,8 @@ public sealed record CommandLineOptions(
 			hasPositionalPath = true;
 		}
 
+		ValidateStartupUiOptions(path, ui, errors);
+
 		var options = new CommandLineOptions(path, lang, elevationAttempted)
 		{
 			NoUi = noUi,
@@ -251,6 +315,7 @@ public sealed record CommandLineOptions(
 			ShowVersion = showVersion,
 			Report = report,
 			Export = export,
+			Ui = ui,
 			IncludeRootFolders = includeRootFolders.ToArray(),
 			IncludeExtensions = includeExtensions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
 			IgnoreOptions = ignoreOptions.ToArray(),
@@ -316,7 +381,37 @@ public sealed record CommandLineOptions(
 		if (Export.FormatSpecified || Export.Format != TreeTextFormat.Ascii)
 		{
 			parts.Add(CommandLineOptionTokens.ExportFormat);
-			parts.Add(Export.Format.ToString().ToLowerInvariant());
+			parts.Add(FormatTreeTextFormat(Export.Format));
+		}
+
+		if (Ui.OpenLastProject)
+			parts.Add(CommandLineOptionTokens.Last);
+
+		if (Ui.OpenPreview && Ui.PreviewMode is null && string.IsNullOrWhiteSpace(Ui.PreviewSearch))
+			parts.Add(CommandLineOptionTokens.Preview);
+
+		if (Ui.PreviewMode is { } previewMode)
+		{
+			parts.Add(CommandLineOptionTokens.PreviewMode);
+			parts.Add(FormatStartupPreviewMode(previewMode));
+		}
+
+		if (Ui.TreeFormat is { } treeFormat)
+		{
+			parts.Add(CommandLineOptionTokens.TreeFormat);
+			parts.Add(FormatTreeTextFormat(treeFormat));
+		}
+
+		if (!string.IsNullOrWhiteSpace(Ui.TreeFilter))
+		{
+			parts.Add(CommandLineOptionTokens.TreeFilter);
+			parts.Add(Quote(Ui.TreeFilter!));
+		}
+
+		if (!string.IsNullOrWhiteSpace(Ui.PreviewSearch))
+		{
+			parts.Add(CommandLineOptionTokens.PreviewSearch);
+			parts.Add(Quote(Ui.PreviewSearch!));
 		}
 
 		foreach (var root in IncludeRootFolders)
@@ -530,7 +625,28 @@ public sealed record CommandLineOptions(
 		}
 	}
 
-	private static bool TryParseExportFormat(string value, out TreeTextFormat format)
+	private static bool TryParseStartupPreviewMode(string value, out StartupPreviewMode mode)
+	{
+		switch (NormalizeOptionName(value))
+		{
+			case "tree":
+				mode = StartupPreviewMode.Tree;
+				return true;
+			case "content":
+				mode = StartupPreviewMode.Content;
+				return true;
+			case "tree-content":
+			case "tree-and-content":
+			case "all":
+				mode = StartupPreviewMode.TreeContent;
+				return true;
+			default:
+				mode = default;
+				return false;
+		}
+	}
+
+	private static bool TryParseTreeTextFormat(string value, out TreeTextFormat format)
 	{
 		switch (NormalizeOptionName(value))
 		{
@@ -541,9 +657,47 @@ public sealed record CommandLineOptions(
 			case "json":
 				format = TreeTextFormat.Json;
 				return true;
+			case "xml":
+				format = TreeTextFormat.Xml;
+				return true;
+			case "md":
+			case "markdown":
+				format = TreeTextFormat.Markdown;
+				return true;
 			default:
 				format = TreeTextFormat.Ascii;
 				return false;
+		}
+	}
+
+	private static void ValidateStartupUiOptions(
+		string? path,
+		StartupUiOptions ui,
+		List<CommandLineParseError> errors)
+	{
+		if (ui.OpenLastProject && !string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-startup-target",
+				"Use either --last or --path/positional folder, not both.",
+				CommandLineOptionTokens.Last));
+		}
+
+		if (ui.HasStartupActions && !ui.OpenLastProject && string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"ui-startup-requires-project",
+				"UI startup options require --path, a positional folder, or --last.",
+				null));
+		}
+
+		if (!string.IsNullOrWhiteSpace(ui.TreeFilter) &&
+		    !string.IsNullOrWhiteSpace(ui.PreviewSearch))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-search-and-filter",
+				"--tree-filter and --preview-search cannot be used together because the desktop UI shows only one tree text tool at a time.",
+				CommandLineOptionTokens.PreviewSearch));
 		}
 	}
 
@@ -553,6 +707,23 @@ public sealed record CommandLineOptions(
 		StartupExportMode.Content => "content",
 		StartupExportMode.TreeContent => "tree-content",
 		_ => mode.ToString().ToLowerInvariant()
+	};
+
+	private static string FormatStartupPreviewMode(StartupPreviewMode mode) => mode switch
+	{
+		StartupPreviewMode.Tree => "tree",
+		StartupPreviewMode.Content => "content",
+		StartupPreviewMode.TreeContent => "tree-content",
+		_ => mode.ToString().ToLowerInvariant()
+	};
+
+	private static string FormatTreeTextFormat(TreeTextFormat format) => format switch
+	{
+		TreeTextFormat.Ascii => "ascii",
+		TreeTextFormat.Json => "json",
+		TreeTextFormat.Xml => "xml",
+		TreeTextFormat.Markdown => "md",
+		_ => format.ToString().ToLowerInvariant()
 	};
 
 	private static string NormalizeExtension(string value)
@@ -659,6 +830,38 @@ public sealed record StartupExportOptions(
 }
 
 public enum StartupExportMode
+{
+	Tree,
+	Content,
+	TreeContent
+}
+
+public sealed record StartupUiOptions(
+	bool OpenLastProject,
+	bool OpenPreview,
+	StartupPreviewMode? PreviewMode,
+	TreeTextFormat? TreeFormat,
+	string? TreeFilter,
+	string? PreviewSearch)
+{
+	public static StartupUiOptions Default { get; } = new(
+		OpenLastProject: false,
+		OpenPreview: false,
+		PreviewMode: null,
+		TreeFormat: null,
+		TreeFilter: null,
+		PreviewSearch: null);
+
+	public bool HasStartupActions =>
+		OpenLastProject ||
+		OpenPreview ||
+		PreviewMode is not null ||
+		TreeFormat is not null ||
+		!string.IsNullOrWhiteSpace(TreeFilter) ||
+		!string.IsNullOrWhiteSpace(PreviewSearch);
+}
+
+public enum StartupPreviewMode
 {
 	Tree,
 	Content,

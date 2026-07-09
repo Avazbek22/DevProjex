@@ -267,6 +267,9 @@ public sealed class CommandLineOptionsTests
 	[InlineData("ascii", TreeTextFormat.Ascii)]
 	[InlineData("text", TreeTextFormat.Ascii)]
 	[InlineData("json", TreeTextFormat.Json)]
+	[InlineData("xml", TreeTextFormat.Xml)]
+	[InlineData("md", TreeTextFormat.Markdown)]
+	[InlineData("markdown", TreeTextFormat.Markdown)]
 	public void Parse_ReadsExportFormat(string value, TreeTextFormat expectedFormat)
 	{
 		var result = CommandLineOptions.Parse([
@@ -327,6 +330,91 @@ public sealed class CommandLineOptionsTests
 		Assert.True(result.Options.Export.FormatSpecified);
 		Assert.Equal(["src", "tests"], result.Options.IncludeRootFolders);
 		Assert.Equal([".cs", ".json"], result.Options.IncludeExtensions);
+	}
+
+	[Fact]
+	public void Parse_ReadsDesktopStartupOptions()
+	{
+		var result = CommandLineOptions.Parse([
+			"/tmp/root",
+			CommandLineOptionTokens.PreviewMode, "tree-content",
+			CommandLineOptionTokens.TreeFormat, "md",
+			CommandLineOptionTokens.TreeFilter, "Services"
+		]);
+
+		AssertValid(result);
+		Assert.Equal("/tmp/root", result.Options.Path);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Equal(StartupPreviewMode.TreeContent, result.Options.Ui.PreviewMode);
+		Assert.Equal(TreeTextFormat.Markdown, result.Options.Ui.TreeFormat);
+		Assert.Equal("Services", result.Options.Ui.TreeFilter);
+		Assert.Null(result.Options.Ui.PreviewSearch);
+	}
+
+	[Fact]
+	public void Parse_ReadsLastAndPreviewSearchAsDesktopStartupOptions()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Last,
+			CommandLineOptionTokens.PreviewSearch, "ProjectAnalysisService"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Ui.OpenLastProject);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Equal("ProjectAnalysisService", result.Options.Ui.PreviewSearch);
+	}
+
+	[Fact]
+	public void Parse_DesktopStartupInlineValuesMatchSeparatedValues()
+	{
+		var separated = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/root",
+			CommandLineOptionTokens.PreviewMode, "tree-content",
+			CommandLineOptionTokens.TreeFormat, "md",
+			CommandLineOptionTokens.TreeFilter, "Services"
+		]);
+		var inline = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.Path}=/tmp/root",
+			$"{CommandLineOptionTokens.PreviewMode}=tree-content",
+			$"{CommandLineOptionTokens.TreeFormat}=md",
+			$"{CommandLineOptionTokens.TreeFilter}=Services"
+		]);
+
+		AssertValid(separated);
+		AssertValid(inline);
+		AssertEquivalentOptions(separated.Options, inline.Options);
+	}
+
+	[Fact]
+	public void Parse_RejectsDesktopStartupOptionsWithoutProjectTarget()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Preview]);
+
+		AssertInvalid(result, "ui-startup-requires-project");
+	}
+
+	[Fact]
+	public void Parse_RejectsLastWithExplicitPath()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Last,
+			CommandLineOptionTokens.Path, "/tmp/root"
+		]);
+
+		AssertInvalid(result, "conflicting-startup-target");
+	}
+
+	[Fact]
+	public void Parse_RejectsTreeFilterAndPreviewSearchTogether()
+	{
+		var result = CommandLineOptions.Parse([
+			"/tmp/root",
+			CommandLineOptionTokens.TreeFilter, "Services",
+			CommandLineOptionTokens.PreviewSearch, "Program"
+		]);
+
+		AssertInvalid(result, "conflicting-search-and-filter");
 	}
 
 	[Fact]
@@ -405,11 +493,22 @@ public sealed class CommandLineOptionsTests
 	{
 		var result = CommandLineOptions.Parse([
 			CommandLineOptionTokens.Export, "tree",
-			CommandLineOptionTokens.ExportFormat, "xml"
+			CommandLineOptionTokens.ExportFormat, "yaml"
 		]);
 
 		AssertInvalid(result, "invalid-export-format");
 		Assert.True(result.Options.Export.Enabled);
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedTreeFormat()
+	{
+		var result = CommandLineOptions.Parse([
+			"/tmp/root",
+			CommandLineOptionTokens.TreeFormat, "yaml"
+		]);
+
+		AssertInvalid(result, "invalid-tree-format");
 	}
 
 	[Fact]
@@ -676,6 +775,52 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void ToArguments_PreservesDesktopStartupOptionsForRelaunch()
+	{
+		var options = new CommandLineOptions("/tmp/root folder", AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with
+			{
+				OpenLastProject = false,
+				OpenPreview = true,
+				PreviewMode = StartupPreviewMode.TreeContent,
+				TreeFormat = TreeTextFormat.Markdown,
+				TreeFilter = "App Services"
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--path", args);
+		Assert.Contains("\"/tmp/root folder\"", args);
+		Assert.Contains("--preview-mode", args);
+		Assert.Contains("tree-content", args);
+		Assert.Contains("--tree-format", args);
+		Assert.Contains("md", args);
+		Assert.Contains("--tree-filter", args);
+		Assert.Contains("\"App Services\"", args);
+	}
+
+	[Fact]
+	public void ToArguments_PreservesLastAndPreviewSearchForRelaunch()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			Ui = StartupUiOptions.Default with
+			{
+				OpenLastProject = true,
+				PreviewSearch = "Project Analysis"
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--last", args);
+		Assert.Contains("--preview-search", args);
+		Assert.Contains("\"Project Analysis\"", args);
+	}
+
+	[Fact]
 	public void ToArguments_PreservesExplicitIgnoreNone()
 	{
 		var options = CommandLineOptions.Empty with
@@ -790,6 +935,7 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(expected.Report, actual.Report);
 		Assert.Equal(expected.Export, actual.Export);
 		Assert.Equal(expected.Export.FormatSpecified, actual.Export.FormatSpecified);
+		Assert.Equal(expected.Ui, actual.Ui);
 		Assert.Equal(expected.IncludeRootFolders, actual.IncludeRootFolders);
 		Assert.Equal(expected.IncludeExtensions, actual.IncludeExtensions);
 		Assert.Equal(expected.IgnoreOptions, actual.IgnoreOptions);
@@ -840,6 +986,10 @@ public sealed class CommandLineOptionsTests
 		CommandLineOptionTokens.ShortOutput,
 		CommandLineOptionTokens.ExportFormat,
 		CommandLineOptionTokens.Format,
+		CommandLineOptionTokens.PreviewMode,
+		CommandLineOptionTokens.TreeFormat,
+		CommandLineOptionTokens.TreeFilter,
+		CommandLineOptionTokens.PreviewSearch,
 		CommandLineOptionTokens.IncludeRoot,
 		CommandLineOptionTokens.Roots,
 		CommandLineOptionTokens.IncludeExtension,

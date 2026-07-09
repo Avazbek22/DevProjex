@@ -95,6 +95,8 @@ DevProjex works with any language, repository, or project structure.
 DevProjex is not only a desktop context builder. The same app can run from the terminal for repeatable, script-friendly project analysis and AI-context export.
 
 ```bash
+devprojex "/path/to/project" --preview-mode tree-content --tree-format md
+devprojex --last --preview
 devprojex "/path/to/project" --export tree-content -o ./context.txt --roots src --ext cs
 devprojex --path "/path/to/project" --no-ui --report -
 devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
@@ -102,6 +104,7 @@ devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --s
 
 Use it to:
 
+* open the desktop app directly in preview/filter/search states;
 * generate clean AI-ready context without opening the UI;
 * export selected tree/content payloads directly to files or stdout;
 * produce machine-readable JSON analysis reports;
@@ -126,7 +129,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
   * tree + content (selection-aware, falls back to full)
 * Exports:
 
-  * tree (`.txt` in ASCII mode, `.json`/`.txt` in JSON mode)
+  * tree (`.txt` in ASCII mode, `.json`/`.txt` in JSON mode, `.xml`/`.txt` in XML mode, `.md`/`.txt` in MD mode)
   * content (`.txt`)
   * tree + content (`.txt`, with selected tree format)
 * Shows preview output before copy/export

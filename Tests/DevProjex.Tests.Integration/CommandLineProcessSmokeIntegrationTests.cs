@@ -1275,11 +1275,11 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			CommandLineOptionTokens.Path, temp.Path,
 			CommandLineOptionTokens.Export, "tree",
 			CommandLineOptionTokens.Output, outputPath,
-			CommandLineOptionTokens.ExportFormat, "xml");
+			CommandLineOptionTokens.ExportFormat, "yaml");
 
 		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stdout);
-		Assert.Contains("Unsupported export format 'xml'.", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains("Unsupported export format 'yaml'.", result.Stderr, StringComparison.Ordinal);
 		Assert.False(File.Exists(outputPath));
 	}
 
