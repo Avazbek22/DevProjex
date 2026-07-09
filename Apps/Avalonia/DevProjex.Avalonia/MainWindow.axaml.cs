@@ -817,6 +817,9 @@ public partial class MainWindow : Window
         // Keep the explicit remove/add symmetry: removal guarantees true project idle,
         // while re-adding preserves the original animation after reset back to drop zone.
         // PlaybackBehavior=OnlyIfVisible in XAML remains an additional safety boundary.
+        // Do not bind this state to Window.IsActive. During an external drag the source
+        // application can retain activation while this window receives DragEnter/Drop,
+        // which would freeze the drop-zone feedback exactly when the user needs it.
         if (_viewModel.IsProjectLoaded)
             _dropZoneContainer.Classes.Remove("drop-zone-animating");
         else
@@ -905,8 +908,9 @@ public partial class MainWindow : Window
         if (_awaitingSystemDialogActivation)
             return;
 
-        // App lost focus — ideal time to compact the heap and return pages to the OS.
-        // Runs on a background thread so the deactivation handler returns instantly.
+        // Deactivation is a good cleanup opportunity only after a genuinely large session.
+        // MemoryCleanupPolicy keeps routine Alt-Tab transitions below that threshold free of
+        // Gen2 compaction and working-set churn.
         ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.WindowDeactivated);
     }
 
@@ -3725,9 +3729,18 @@ public partial class MainWindow : Window
             if (startedFromPreviewOnly)
                 RestoreTreeToolStateAfterPreviewOnly();
 
+            var previewDocument = _viewModel.PreviewDocument;
+            var shouldForceMemoryCleanup =
+                previewDocument is not null &&
+                PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
+                    previewDocument.CharacterCount,
+                    previewDocument.LineCount);
+
             ClearPreviewSelectionMetrics();
             ClearPreviewMemory();
-            SchedulePreviewMemoryCleanup(force: true);
+            // Small documents are reclaimed efficiently by normal generational GC. Preserve
+            // explicit LOH compaction for previews large enough to retain material buffers.
+            SchedulePreviewMemoryCleanup(force: shouldForceMemoryCleanup);
             _treeView?.Focus();
         }
         finally
@@ -3919,6 +3932,9 @@ public partial class MainWindow : Window
     private void ScheduleBackgroundMemoryCleanup(MemoryCleanupReason reason)
     {
         var cleanupPlan = MemoryCleanupPolicy.CreateDeferredPlan(reason, SettingsPanelAnimationDuration);
+        if (!MemoryCleanupPolicy.ShouldRun(cleanupPlan, GC.GetTotalMemory(forceFullCollection: false)))
+            return;
+
         ScheduleBackgroundMemoryCleanupCore(cleanupPlan);
     }
 
@@ -3938,6 +3954,15 @@ public partial class MainWindow : Window
                     await Task.Delay(scaledDelay, cleanupCts.Token);
 
                 cleanupCts.Token.ThrowIfCancellationRequested();
+                // A normal GC may have reclaimed the transient data during the delay. Recheck
+                // before paying for a compacting Gen2 collection and native working-set trim.
+                if (!MemoryCleanupPolicy.ShouldRun(
+                        cleanupPlan,
+                        GC.GetTotalMemory(forceFullCollection: false)))
+                {
+                    return;
+                }
+
                 ForceMemoryCleanup();
             }
             catch (OperationCanceledException)
@@ -7281,7 +7306,12 @@ public partial class MainWindow : Window
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
 
-        if (forceCompactingGc)
+        // A small project is cheaper to leave to generational GC. Forcing Gen2 here and then
+        // again after the new load used to create two avoidable pauses on routine switches.
+        // Large abandoned trees still cross this threshold and are reclaimed immediately.
+        var shouldRunImmediateCleanup = MemoryCleanupPolicy.ShouldRunRoutineCleanup(
+            GC.GetTotalMemory(forceFullCollection: false));
+        if (forceCompactingGc && shouldRunImmediateCleanup)
         {
             // Full compacting collection — user is switching projects and expects memory
             // from the old tree (view models, icons, metrics cache) to be freed immediately.
@@ -7291,9 +7321,10 @@ public partial class MainWindow : Window
             GC.Collect(1, GCCollectionMode.Forced, blocking: false);
             TrimNativeWorkingSet();
         }
-        else
+        else if (shouldRunImmediateCleanup)
         {
-            // Non-switching state reset (e.g. reload) — still force collection but skip compaction.
+            // A canceled/reset load can also leave a large generation behind, but does not
+            // require LOH compaction unless this was an explicit project switch.
             GC.Collect(2, GCCollectionMode.Forced, blocking: true);
         }
     }

@@ -37,6 +37,8 @@
       never make that class permanent in XAML. A permanent class previously kept the
       Avalonia render loop and Skia/ANGLE GPU work active after a project was loaded.
       OnlyIfVisible is defense in depth, not a replacement for detaching the selector.
+      Do not gate the class on window activation: native drag sources may retain focus
+      while this window is the active drop target.
     -->
     <Style Selector="Rectangle.drop-zone-border">
       <Setter Property="Opacity" Value="1" />
