@@ -110,6 +110,39 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
+    public void Repository_DoesNotDirectlyOverrideTmdsDbusProtocolAnywhere()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var packageFiles = Directory
+            .EnumerateFiles(repositoryRoot, "*.*", SearchOption.AllDirectories)
+            .Where(static path =>
+                path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".props", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase))
+            .Where(static path =>
+                !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) &&
+                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        var directOverrides = packageFiles
+            .SelectMany(packageFile =>
+            {
+                var document = XDocument.Load(packageFile);
+                return document
+                    .Descendants()
+                    .Where(static element =>
+                        element.Name.LocalName is "PackageReference" or "PackageVersion" &&
+                        element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
+                    .Select(_ => Path.GetRelativePath(repositoryRoot, packageFile));
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.Empty(directOverrides);
+    }
+
+    [Fact]
     public void AvaloniaProject_DoesNotOverrideAvaloniaFreeDesktopTmdsDbusProtocolVersion()
     {
         var repositoryRoot = ResolveRepositoryRoot();
@@ -167,6 +200,42 @@ public sealed class AppInstancePackagingContractTests
         Assert.True(
             Version.Parse(resolvedVersion) < new Version(0, 93, 0),
             $"Linux/X11 startup requires Tmds.DBus.Protocol < 0.93 while Avalonia.FreeDesktop still references the old Connection API. Resolved: {resolvedVersion}");
+    }
+
+    [Fact]
+    public void ReleaseValidationWorkflow_CatchesLinuxX11DbusStartupRegressions()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var workflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "release-validate.yml");
+        var workflow = File.ReadAllText(workflowPath);
+
+        Assert.Contains("linux-x64", workflow, StringComparison.Ordinal);
+        Assert.Contains("linux-arm64", workflow, StringComparison.Ordinal);
+        Assert.Contains("Validate Linux DBus Dependency Graph", workflow, StringComparison.Ordinal);
+        Assert.Contains("Tmds.DBus.Protocol/*", workflow, StringComparison.Ordinal);
+        Assert.Contains("[Version]\"0.93.0\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Startup Smoke (Linux X11)", workflow, StringComparison.Ordinal);
+        Assert.Contains("xvfb-run -a", workflow, StringComparison.Ordinal);
+        Assert.Contains("/p:PublishSingleFile=true", workflow, StringComparison.Ordinal);
+        Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", workflow, StringComparison.Ordinal);
+        Assert.Contains("/p:PublishTrimmed=false", workflow, StringComparison.Ordinal);
+        Assert.Contains("Directory.Packages.props", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReleaseScript_PublishesLinuxArtifactsWithAvaloniaSafeSingleFileSettings()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var releaseScriptPath = Path.Combine(repositoryRoot, "Scripts", "release-all.ps1");
+        var releaseScript = File.ReadAllText(releaseScriptPath);
+
+        Assert.Contains("Rid = \"linux-x64\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Rid = \"linux-arm64\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/p:PublishSingleFile=true\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/p:IncludeNativeLibrariesForSelfExtract=true\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/p:PublishReadyToRun=true\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/p:PublishTrimmed=false\"", releaseScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"/p:PublishTrimmed=true\"", releaseScript, StringComparison.Ordinal);
     }
 
     [Fact]
