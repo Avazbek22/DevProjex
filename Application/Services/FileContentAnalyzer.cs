@@ -63,8 +63,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		try
 		{
 			// Fast path: known binary extensions - no file I/O needed
-			var ext = Path.GetExtension(path);
-			if (KnownBinaryExtensions.Contains(ext))
+			if (HasKnownBinaryExtension(path))
 				return false;
 
 			var fileInfo = new FileInfo(path);
@@ -101,8 +100,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		try
 		{
 			// Fast path: known binary extensions - no file I/O needed
-			var ext = Path.GetExtension(path);
-			if (KnownBinaryExtensions.Contains(ext))
+			if (HasKnownBinaryExtension(path))
 				return null;
 
 			var fileInfo = new FileInfo(path);
@@ -173,8 +171,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		try
 		{
 			// Fast path: known binary extensions - no file I/O needed
-			var ext = Path.GetExtension(path);
-			if (KnownBinaryExtensions.Contains(ext))
+			if (HasKnownBinaryExtension(path))
 				return null;
 
 			var fileInfo = new FileInfo(path);
@@ -248,14 +245,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			Span<byte> buffer = stackalloc byte[toRead];
 			int bytesRead = fs.Read(buffer);
 
-			// Check for null bytes - any null byte means binary
-			for (int i = 0; i < bytesRead; i++)
-			{
-				if (buffer[i] == 0)
-					return false;
-			}
-
-			return true;
+			// Span.Contains uses the runtime's vectorized search without changing the
+			// established null-byte binary detection contract.
+			return !buffer[..bytesRead].Contains((byte)0);
 		}
 		catch (OperationCanceledException)
 		{
@@ -265,6 +257,20 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		{
 			return false;
 		}
+	}
+
+	private static bool HasKnownBinaryExtension(string path)
+	{
+		var extension = Path.GetExtension(path.AsSpan());
+		if (extension.IsEmpty)
+			return false;
+
+		if (KnownBinaryExtensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup))
+			return lookup.Contains(extension);
+
+		// The ordinal-ignore-case frozen set supports span lookup on current runtimes.
+		// Keep a compatibility fallback so an implementation detail cannot change behavior.
+		return KnownBinaryExtensions.Contains(extension.ToString());
 	}
 
 	/// <summary>

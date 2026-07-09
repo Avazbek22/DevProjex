@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 using System.Xml;
 
@@ -89,6 +90,23 @@ public sealed class TreeExportService
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths))
 			return string.Empty;
 
+		return BuildSelectedTreeFromIncludedPaths(
+			rootPath,
+			root,
+			includedPaths,
+			format,
+			displayRootPath,
+			displayRootName);
+	}
+
+	private static string BuildSelectedTreeFromIncludedPaths(
+		string rootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths,
+		TreeTextFormat format,
+		string? displayRootPath,
+		string? displayRootName)
+	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 
@@ -131,7 +149,13 @@ public sealed class TreeExportService
 
 		if (format != TreeTextFormat.Ascii)
 			return ExportOutputMetricsCalculator.FromText(
-				BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath, displayRootName));
+				BuildSelectedTreeFromIncludedPaths(
+					rootPath,
+					root,
+					includedPaths,
+					format,
+					displayRootPath,
+					displayRootName));
 
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
@@ -278,17 +302,18 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		IReadOnlySet<string>? includedPaths)
 	{
-		using var stream = new MemoryStream();
-		using (var writer = new Utf8JsonWriter(stream, JsonWriterOptions))
+		var buffer = new ArrayBufferWriter<byte>();
+		using (var writer = new Utf8JsonWriter(buffer, JsonWriterOptions))
 		{
 			writer.WriteStartObject();
 			writer.WriteString("rootPath", ResolveStructuredRootPath(localRootPath));
 			writer.WritePropertyName("tree");
 			WriteJsonTreeContents(writer, root, includedPaths);
 			writer.WriteEndObject();
+			writer.Flush();
 		}
 
-		return Encoding.UTF8.GetString(stream.ToArray());
+		return Encoding.UTF8.GetString(buffer.WrittenSpan);
 	}
 
 	private static string BuildXmlDocument(

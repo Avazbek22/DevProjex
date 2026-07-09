@@ -88,13 +88,47 @@ public sealed class TreeAndContentExportService(
 	}
 
 	public static Func<string, string> CreateRelativeContentHeaderPathMapper(string rootPath)
-		=> filePath => MapRelativeContentHeaderPath(rootPath, filePath);
+	{
+		string? normalizedRootPath;
+		try
+		{
+			// The mapper runs once per exported file. Resolve the invariant root once instead
+			// of repeating Path.GetFullPath throughout large preview and metrics traversals.
+			normalizedRootPath = Path.GetFullPath(rootPath);
+		}
+		catch
+		{
+			normalizedRootPath = null;
+		}
+
+		return filePath => MapRelativeContentHeaderPathFromNormalizedRoot(normalizedRootPath, filePath);
+	}
 
 	public static string MapRelativeContentHeaderPath(string rootPath, string filePath)
 	{
+		string? normalizedRootPath;
 		try
 		{
-			var relativePath = Path.GetRelativePath(Path.GetFullPath(rootPath), filePath);
+			normalizedRootPath = Path.GetFullPath(rootPath);
+		}
+		catch
+		{
+			normalizedRootPath = null;
+		}
+
+		return MapRelativeContentHeaderPathFromNormalizedRoot(normalizedRootPath, filePath);
+	}
+
+	private static string MapRelativeContentHeaderPathFromNormalizedRoot(
+		string? normalizedRootPath,
+		string filePath)
+	{
+		try
+		{
+			if (normalizedRootPath is null)
+				return GetFallbackContentHeaderPath(filePath);
+
+			var relativePath = Path.GetRelativePath(normalizedRootPath, filePath);
 			if (!string.IsNullOrWhiteSpace(relativePath) &&
 			    relativePath != "." &&
 			    !IsOutsideRoot(relativePath) &&
@@ -109,6 +143,11 @@ public sealed class TreeAndContentExportService(
 			// sections should stay short and portable even when relative path calculation fails.
 		}
 
+		return GetFallbackContentHeaderPath(filePath);
+	}
+
+	private static string GetFallbackContentHeaderPath(string filePath)
+	{
 		var fileName = Path.GetFileName(filePath);
 		return string.IsNullOrWhiteSpace(fileName) ? filePath.Replace('\\', '/') : fileName;
 	}
