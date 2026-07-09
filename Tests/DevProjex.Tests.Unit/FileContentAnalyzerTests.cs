@@ -497,5 +497,46 @@ public sealed class FileContentAnalyzerTests
 		Assert.Equal(fullContent.TrailingNewlineLineBreaks, metrics.TrailingNewlineLineBreaks);
 	}
 
+	[Fact]
+	public async Task GetTextFileMetricsAsync_FileOpenForConcurrentReads_RemainsReadable()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("shared.txt", "line 1\nline 2");
+		await using var otherReader = new FileStream(
+			file,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+
+		var metrics = await _analyzer.GetTextFileMetricsAsync(
+			file,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(metrics);
+		Assert.Equal(2, metrics.LineCount);
+		Assert.Equal(13, metrics.CharCount);
+	}
+
+	[Fact]
+	public async Task GetTextFileMetricsAsync_ConcurrentFiles_PreservesEveryResult()
+	{
+		using var temp = new TemporaryDirectory();
+		var files = Enumerable.Range(0, 32)
+			.Select(index => temp.CreateFile($"file-{index:D2}.txt", $"value-{index}\nnext"))
+			.ToArray();
+
+		var tasks = files.Select(path => Task.Run(
+			() => _analyzer.GetTextFileMetricsAsync(path, TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken));
+		var results = await Task.WhenAll(tasks);
+
+		Assert.All(results, result =>
+		{
+			Assert.NotNull(result);
+			Assert.Equal(2, result.LineCount);
+			Assert.False(result.IsEstimated);
+		});
+	}
+
 	#endregion
 }

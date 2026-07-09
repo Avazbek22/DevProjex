@@ -543,10 +543,19 @@ public sealed class TreeExportService
 			: sanitized;
 	}
 
-	private static List<TreeNodeDescriptor> GetOrderedStructuredChildren(
+	private static IReadOnlyList<TreeNodeDescriptor> GetOrderedStructuredChildren(
 		IReadOnlyList<TreeNodeDescriptor> children,
 		IReadOnlySet<string>? includedPaths)
 	{
+		if (includedPaths is null && IsStructuredTreeOrder(children))
+		{
+			// Inventory projection already establishes this order for normal trees. Reusing
+			// the immutable child view avoids one list allocation and one sort per directory
+			// for every JSON, XML, and Markdown render while retaining a defensive fallback
+			// for synthetic/custom descriptors.
+			return children;
+		}
+
 		var ordered = new List<TreeNodeDescriptor>(children.Count);
 		foreach (var child in children)
 		{
@@ -554,8 +563,21 @@ public sealed class TreeExportService
 				ordered.Add(child);
 		}
 
-		ordered.Sort(CompareStructuredTreeNodes);
+		if (!IsStructuredTreeOrder(ordered))
+			ordered.Sort(CompareStructuredTreeNodes);
+
 		return ordered;
+	}
+
+	private static bool IsStructuredTreeOrder(IReadOnlyList<TreeNodeDescriptor> children)
+	{
+		for (var index = 1; index < children.Count; index++)
+		{
+			if (CompareStructuredTreeNodes(children[index - 1], children[index]) > 0)
+				return false;
+		}
+
+		return true;
 	}
 
 	private static int CompareStructuredTreeNodes(TreeNodeDescriptor left, TreeNodeDescriptor right)

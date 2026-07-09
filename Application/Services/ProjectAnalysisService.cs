@@ -171,7 +171,7 @@ public sealed class ProjectAnalysisService(
 		if (orderedFilePaths is null || orderedFilePaths.Count == 0)
 			return ExportOutputMetrics.Empty;
 
-		var metricsInputs = new List<ContentFileMetrics>(orderedFilePaths.Count);
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 		foreach (var path in orderedFilePaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -180,7 +180,7 @@ public sealed class ProjectAnalysisService(
 			if (metrics is null)
 				continue;
 
-			metricsInputs.Add(new ContentFileMetrics(
+			accumulator.AppendFile(new ContentFileMetrics(
 				Path: path,
 				SizeBytes: metrics.SizeBytes,
 				LineCount: metrics.LineCount,
@@ -193,7 +193,7 @@ public sealed class ProjectAnalysisService(
 				TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
 		}
 
-		return ExportOutputMetricsCalculator.FromOrderedContentFiles(metricsInputs);
+		return accumulator.ToMetrics();
 	}
 
 	private static ProjectTreeSummaryReport CountTree(TreeNodeDescriptor root)

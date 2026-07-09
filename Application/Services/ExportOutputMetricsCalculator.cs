@@ -99,13 +99,17 @@ public static class ExportOutputMetricsCalculator
 
 			_anyWritten = true;
 
-			AppendLiteralLine(
-				$"{file.Path}:",
-				NormalizedNewLineChars,
-				ref _chars,
-				ref _lineBreaks,
-				ref _trailingLineBreakChars,
-				ref _trailingLineBreaks);
+			// Metrics need the rendered header length, not a materialized "<path>:"
+			// string. Avoiding that allocation matters when thousands of files are
+			// recalculated after a selection or format change.
+			AppendRenderedLine(
+				renderedChars: file.Path.Length + 1,
+				internalLineBreaks: 0,
+				newLineChars: NormalizedNewLineChars,
+				chars: ref _chars,
+				lineBreaks: ref _lineBreaks,
+				trailingLineBreakChars: ref _trailingLineBreakChars,
+				trailingLineBreaks: ref _trailingLineBreaks);
 			AppendLiteralLine(
 				ClipboardBlankLine,
 				NormalizedNewLineChars,

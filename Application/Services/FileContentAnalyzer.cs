@@ -6,15 +6,9 @@ namespace DevProjex.Application.Services;
 /// <summary>
 /// Analyzes file content to determine if it's text or binary.
 ///
-/// Detection method: Null-byte detection in first 512 bytes.
-/// This is the universal, reliable method that works for ANY binary format:
-/// - Images (PNG, JPG, GIF, etc.) - contain null bytes in header/data
-/// - Video (MP4, AVI, MKV, etc.) - contain null bytes
-/// - Audio (MP3, WAV, FLAC, etc.) - contain null bytes
-/// - Archives (ZIP, RAR, 7z, etc.) - contain null bytes
-/// - Executables (EXE, DLL, etc.) - contain null bytes
-///
-/// No extension-based filtering - that would be unreliable and incomplete.
+/// Known binary extensions are rejected without I/O. Other files use a null-byte
+/// probe and, when metrics or content are requested, validation continues through
+/// the complete decoded stream so a binary marker after the probe is not missed.
 /// </summary>
 public sealed class FileContentAnalyzer : IFileContentAnalyzer
 {
@@ -66,16 +60,14 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			if (HasKnownBinaryExtension(path))
 				return false;
 
-			var fileInfo = new FileInfo(path);
-			if (!fileInfo.Exists)
-				return false;
+			using var stream = OpenSequentialRead(path, BinaryCheckBufferSize, FileShare.ReadWrite);
 
 			// Empty files are considered text
-			if (fileInfo.Length == 0)
+			if (stream.Length == 0)
 				return true;
 
 			// Check for null bytes in first 512 bytes
-			return CheckForNullBytes(path, cancellationToken);
+			return CheckForNullBytes(stream, cancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
@@ -103,11 +95,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			if (HasKnownBinaryExtension(path))
 				return null;
 
-			var fileInfo = new FileInfo(path);
-			if (!fileInfo.Exists)
-				return null;
-
-			var sizeBytes = fileInfo.Length;
+			using var stream = OpenSequentialRead(path, StreamingBufferSize, FileShare.Read);
+			var sizeBytes = stream.Length;
 
 			// Empty file
 			if (sizeBytes == 0)
@@ -124,7 +113,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			// Small/medium files use a single streaming pass that also detects null bytes.
 			if (sizeBytes > DefaultMaxSizeForFullRead)
 			{
-				if (!CheckForNullBytes(path, cancellationToken))
+				if (!CheckForNullBytes(stream, cancellationToken))
 					return null;
 
 				return new TextFileMetrics(
@@ -141,7 +130,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 			// Stream through file counting metrics without loading content into memory.
 			// Null byte detection is performed during the same pass.
-			return CountMetricsStreaming(path, sizeBytes, cancellationToken);
+			return CountMetricsStreaming(stream, sizeBytes, cancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
@@ -174,11 +163,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			if (HasKnownBinaryExtension(path))
 				return null;
 
-			var fileInfo = new FileInfo(path);
-			if (!fileInfo.Exists)
-				return null;
-
-			var sizeBytes = fileInfo.Length;
+			using var stream = OpenSequentialRead(path, StreamingBufferSize, FileShare.Read);
+			var sizeBytes = stream.Length;
 
 			// Empty file
 			if (sizeBytes == 0)
@@ -192,7 +178,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 					IsEstimated: false);
 
 			// Check if binary (fast - only 512 bytes)
-			if (!CheckForNullBytes(path, cancellationToken))
+			if (!CheckForNullBytes(stream, cancellationToken))
 				return null;
 
 			// For large files, return estimated metrics without full content
@@ -211,7 +197,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			}
 
 			// Read full content for export
-			return ReadFullContent(path, sizeBytes, cancellationToken);
+			return ReadFullContent(stream, sizeBytes, cancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
@@ -227,23 +213,16 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	/// Checks first 512 bytes for null bytes to detect binary content.
 	/// Returns true if no null bytes found (text file), false otherwise (binary).
 	/// </summary>
-	private static bool CheckForNullBytes(string path, CancellationToken cancellationToken)
+	private static bool CheckForNullBytes(FileStream stream, CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
 		try
 		{
-			using var fs = new FileStream(
-				path,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.ReadWrite,
-				BinaryCheckBufferSize,
-				FileOptions.SequentialScan);
-
-			int toRead = (int)Math.Min(BinaryCheckBufferSize, fs.Length);
+			stream.Position = 0;
+			int toRead = (int)Math.Min(BinaryCheckBufferSize, stream.Length);
 			Span<byte> buffer = stackalloc byte[toRead];
-			int bytesRead = fs.Read(buffer);
+			int bytesRead = stream.Read(buffer);
 
 			// Span.Contains uses the runtime's vectorized search without changing the
 			// established null-byte binary detection contract.
@@ -257,6 +236,19 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		{
 			return false;
 		}
+	}
+
+	private static FileStream OpenSequentialRead(string path, int bufferSize, FileShare fileShare)
+	{
+		// Callers keep this handle for length, probing, and decoding. Besides saving an
+		// extra open/stat cycle, one handle gives each operation a more coherent file view.
+		return new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			fileShare,
+			bufferSize,
+			FileOptions.SequentialScan);
 	}
 
 	private static bool HasKnownBinaryExtension(string path)
@@ -277,7 +269,10 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	/// Counts lines and characters by streaming through file.
 	/// Does NOT load full content into memory - uses ArrayPool for zero-allocation streaming.
 	/// </summary>
-	private static TextFileMetrics? CountMetricsStreaming(string path, long sizeBytes, CancellationToken cancellationToken)
+	private static TextFileMetrics? CountMetricsStreaming(
+		FileStream stream,
+		long sizeBytes,
+		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -293,7 +288,13 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			int trailingNewlineLineBreaks = 0;
 			bool previousWasCarriageReturn = false;
 
-			using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: StreamingBufferSize);
+			stream.Position = 0;
+			using var reader = new StreamReader(
+				stream,
+				Encoding.UTF8,
+				detectEncodingFromByteOrderMarks: true,
+				bufferSize: StreamingBufferSize,
+				leaveOpen: true);
 
 			int charsRead;
 
@@ -382,14 +383,23 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	/// Reads full file content for export operations.
 	/// Content is loaded into memory - use only when content is needed.
 	/// </summary>
-	private static TextFileContent? ReadFullContent(string path, long sizeBytes, CancellationToken cancellationToken)
+	private static TextFileContent? ReadFullContent(
+		FileStream stream,
+		long sizeBytes,
+		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
 		try
 		{
+			stream.Position = 0;
 			string content;
-			using (var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+			using (var reader = new StreamReader(
+				       stream,
+				       Encoding.UTF8,
+				       detectEncodingFromByteOrderMarks: true,
+				       bufferSize: StreamingBufferSize,
+				       leaveOpen: true))
 			{
 				content = reader.ReadToEnd();
 			}
