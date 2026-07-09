@@ -1,6 +1,7 @@
 using DevProjex.Avalonia;
 using DevProjex.Avalonia.ViewModels;
 using DevProjex.Infrastructure.TerminalCommands;
+using System.Xml.Linq;
 
 namespace DevProjex.Tests.Integration;
 
@@ -537,6 +538,13 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		foreach (var commandName in CommandLineExecutableAliases.DocumentedCommandNames)
 			Assert.Contains(commandName, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.Last, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.Preview, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.PreviewMode, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.TreeFormat, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.TreeFilter, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.PreviewSearch, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("ascii|json|xml|md", result.Stdout, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -1002,6 +1010,118 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_ExportXmlTreeToStdoutWritesXmlOnlyAndRoundTripsSpecialNames()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project & unicode");
+		SeedStructuredFormatProject(projectPath);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "xml",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.StartsWith("<t ", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("<?xml", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("namespace Smoke", result.Stdout, StringComparison.Ordinal);
+
+		var document = XDocument.Parse(result.Stdout);
+		Assert.Equal("t", document.Root?.Name.LocalName);
+		Assert.Equal(Path.GetFullPath(projectPath).Replace('\\', '/'), document.Root?.Attribute("r")?.Value);
+		Assert.Equal(
+			[
+				"-scripts/-build.ps1",
+				"docs & notes/release [draft].md",
+				"src/Program.cs",
+				"src/Services/UserService.cs",
+				"Документы/Файл.cs"
+			],
+			ExtractXmlFilePaths(document));
+		Assert.Contains("EmptyFolder", ExtractXmlEmptyFolderPaths(document));
+		Assert.All(document.Root!.DescendantsAndSelf(), static element => Assert.Contains(element.Name.LocalName, new[] { "t", "d", "f" }));
+		Assert.Contains("&amp;", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportMarkdownTreeToStdoutWritesMarkdownOnlyAndEscapesListMarkers()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with markdown");
+		SeedStructuredFormatProject(projectPath);
+
+		var result = await RunAppAsync(
+			projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "md",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.StartsWith($"Root: {Path.GetFullPath(projectPath).Replace('\\', '/')}", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("namespace Smoke", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("\t", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("- -scripts/", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("- \\-scripts/", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("  - \\-build.ps1", result.Stdout, StringComparison.Ordinal);
+
+		var treeLines = result.Stdout.Split('\n').Skip(2).Select(static line => line.TrimEnd('\r')).ToArray();
+		Assert.All(treeLines, static line => Assert.False(line.EndsWith(' '), $"Markdown tree line has trailing spaces: '{line}'."));
+		Assert.Contains("- EmptyFolder/", treeLines);
+		Assert.Contains("- src/", treeLines);
+		Assert.Contains("  - Services/", treeLines);
+		Assert.Contains("    - UserService.cs", treeLines);
+		Assert.Contains("  - release [draft].md", treeLines);
+	}
+
+	[Theory]
+	[InlineData("xml", "<t ")]
+	[InlineData("md", "Root: ")]
+	public async Task Process_TreeContentStructuredFormatsKeepTreeBlockAndRelativePlainTextHeaders(
+		string format,
+		string expectedTreeStart)
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project with spaces");
+		SeedStructuredFormatProject(projectPath);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.Format, format,
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var (treePart, contentPart) = SplitTreeAndContentStdout(result.Stdout);
+		Assert.StartsWith(expectedTreeStart, treePart, StringComparison.Ordinal);
+		Assert.DoesNotContain("namespace Smoke", treePart, StringComparison.Ordinal);
+		Assert.Contains("src/Program.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("src/Services/UserService.cs:", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain(Path.GetFullPath(projectPath).Replace('\\', '/'), contentPart.Replace('\\', '/'), StringComparison.Ordinal);
+		Assert.DoesNotContain("src\\Program.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("namespace Smoke", contentPart, StringComparison.Ordinal);
+
+		if (format == "xml")
+		{
+			var document = XDocument.Parse(treePart);
+			Assert.Equal(["src/Program.cs", "src/Services/UserService.cs"], ExtractXmlFilePaths(document));
+		}
+		else
+		{
+			Assert.Contains("- src/", treePart, StringComparison.Ordinal);
+			Assert.Contains("  - Program.cs", treePart, StringComparison.Ordinal);
+			Assert.Contains("  - Services/", treePart, StringComparison.Ordinal);
+			Assert.Contains("    - UserService.cs", treePart, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public async Task Process_ReportDashWritesJsonToStdout()
 	{
 		using var temp = new TemporaryDirectory();
@@ -1298,6 +1418,72 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Contains("--output and --export-format require --export", result.Stderr, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData(CommandLineOptionTokens.TreeFormat, "md")]
+	[InlineData(CommandLineOptionTokens.PreviewMode, "tree-content")]
+	[InlineData(CommandLineOptionTokens.TreeFilter, "Services")]
+	[InlineData(CommandLineOptionTokens.PreviewSearch, "Program")]
+	public async Task Process_DesktopStartupOptionWithoutProjectReturnsUsageErrorInsteadOfLaunchingUi(
+		string option,
+		string value)
+	{
+		var result = await RunAppAsync(option, value);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("UI startup options require --path", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_DesktopStartupOptionsWithNoUiReturnUsageErrorInsteadOfRunningHeadless()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.PreviewMode, "tree-content",
+			CommandLineOptionTokens.TreeFormat, "md");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("UI startup options cannot be combined", result.Stderr, StringComparison.Ordinal);
+		Assert.DoesNotContain("class App", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_DesktopStartupOptionsWithExportReturnUsageErrorInsteadOfMixingContracts()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.TreeFormat, "xml");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("UI startup options cannot be combined", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_TreeFilterAndPreviewSearchTogetherReturnUsageErrorBeforeLaunchingUi()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.TreeFilter, "src",
+			CommandLineOptionTokens.PreviewSearch, "App");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains("--tree-filter and --preview-search cannot be used together", result.Stderr, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task Process_ReportPathPointingToExistingDirectoryReturnsRuntimeError()
 	{
@@ -1384,6 +1570,16 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		WriteProjectFile(projectPath, Path.Combine("src", "Models", "Пользователь.cs"), "namespace RepoLike.Models;\n");
 		WriteProjectFile(projectPath, Path.Combine("src", "Services", "UserService.cs"), "namespace RepoLike.Services;\n");
 		Directory.CreateDirectory(Path.Combine(projectPath, "empty-folder"));
+	}
+
+	private static void SeedStructuredFormatProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, Path.Combine("src", "Program.cs"), "namespace Smoke;\npublic static class Program { }\n");
+		WriteProjectFile(projectPath, Path.Combine("src", "Services", "UserService.cs"), "namespace Smoke.Services;\npublic sealed class UserService { }\n");
+		WriteProjectFile(projectPath, Path.Combine("-scripts", "-build.ps1"), "dotnet build\n");
+		WriteProjectFile(projectPath, Path.Combine("docs & notes", "release [draft].md"), "# Release\n");
+		WriteProjectFile(projectPath, Path.Combine("Документы", "Файл.cs"), "namespace Smoke.Документы;\n");
+		Directory.CreateDirectory(Path.Combine(projectPath, "EmptyFolder"));
 	}
 
 	private static void WriteProjectFile(string rootPath, string relativePath, string content)
@@ -1812,6 +2008,63 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		var contentPart = stdout[jsonEndIndex..];
 		Assert.False(string.IsNullOrWhiteSpace(contentPart), "Expected tree-content stdout to include plain text content after the JSON tree.");
 		return (stdout[..jsonEndIndex], contentPart);
+	}
+
+	private static (string TreePart, string ContentPart) SplitTreeAndContentStdout(string stdout)
+	{
+		var separatorIndex = stdout.IndexOf("\u00A0", StringComparison.Ordinal);
+		Assert.True(separatorIndex > 0, "Expected tree-content stdout to contain the NBSP separator before plain text content.");
+		var treePart = stdout[..separatorIndex].TrimEnd('\r', '\n');
+		var contentPart = stdout[separatorIndex..];
+		Assert.False(string.IsNullOrWhiteSpace(contentPart), "Expected tree-content stdout to include plain text content.");
+		return (treePart, contentPart);
+	}
+
+	private static string[] ExtractXmlFilePaths(XDocument document)
+	{
+		Assert.NotNull(document.Root);
+		var paths = new List<string>();
+		CollectXmlFilePaths(document.Root!, prefix: string.Empty, paths);
+		return paths.OrderBy(static path => path, StringComparer.Ordinal).ToArray();
+	}
+
+	private static string[] ExtractXmlEmptyFolderPaths(XDocument document)
+	{
+		Assert.NotNull(document.Root);
+		var paths = new List<string>();
+		CollectXmlEmptyFolderPaths(document.Root!, prefix: string.Empty, paths);
+		return paths.OrderBy(static path => path, StringComparer.Ordinal).ToArray();
+	}
+
+	private static void CollectXmlFilePaths(XElement node, string prefix, List<string> paths)
+	{
+		foreach (var child in node.Elements())
+		{
+			if (child.Name.LocalName == "f")
+			{
+				paths.Add(prefix + child.Value);
+				continue;
+			}
+
+			if (child.Name.LocalName != "d")
+				continue;
+
+			var folderName = child.Attribute("n")?.Value ?? string.Empty;
+			CollectXmlFilePaths(child, prefix + folderName + "/", paths);
+		}
+	}
+
+	private static void CollectXmlEmptyFolderPaths(XElement node, string prefix, List<string> paths)
+	{
+		foreach (var child in node.Elements("d"))
+		{
+			var folderName = child.Attribute("n")?.Value ?? string.Empty;
+			var path = prefix + folderName;
+			if (!child.Elements().Any())
+				paths.Add(path);
+
+			CollectXmlEmptyFolderPaths(child, path + "/", paths);
+		}
 	}
 
 	private static int FindTopLevelJsonObjectEnd(string value)
