@@ -672,6 +672,7 @@ public partial class MainWindow : Window
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
 
         Opened += OnOpened;
+        ScalingChanged += OnWindowScalingChanged;
 
         // Hook menu item submenu opening to apply brushes directly
         AddHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened, RoutingStrategies.Bubble);
@@ -700,6 +701,7 @@ public partial class MainWindow : Window
 
         // Unsubscribe from window events
         PropertyChanged -= OnWindowPropertyChanged;
+        ScalingChanged -= OnWindowScalingChanged;
 
         // Unsubscribe from localization service
         if (_languageChangedHandler is not null)
@@ -1260,7 +1262,23 @@ public partial class MainWindow : Window
     private void UpdateWindowMinimumWidth()
     {
         var computedMinWidth = Math.Max(DefaultWindowMinWidth, GetRequiredWindowWorkspaceWidth() + WindowMinimumWidthSafetyPadding);
-        MinWidth = Math.Ceiling(computedMinWidth);
+        MinWidth = AlignWindowConstraintToPhysicalPixels(computedMinWidth, RenderScaling);
+    }
+
+    internal static double AlignWindowConstraintToPhysicalPixels(double constraint, double renderScaling)
+    {
+        var effectiveScaling = double.IsFinite(renderScaling) && renderScaling > 0
+            ? renderScaling
+            : 1.0;
+
+        // Win32 tracks window constraints in physical pixels. Keeping the DIP value aligned
+        // prevents Avalonia and WM_GETMINMAXINFO from rounding it in opposite directions.
+        return Math.Ceiling(constraint * effectiveScaling) / effectiveScaling;
+    }
+
+    private void OnWindowScalingChanged(object? sender, EventArgs e)
+    {
+        UpdateWindowMinimumWidth();
     }
 
     private double GetRequiredWindowWorkspaceWidth()
