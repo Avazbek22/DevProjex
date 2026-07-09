@@ -1,3 +1,4 @@
+using Avalonia.Platform.Storage;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -17,6 +18,39 @@ public sealed class MainWindowPreviewInternalsTests
 
         Assert.NotNull(method);
         Assert.Equal(expected, method!.Invoke(null, [format]));
+    }
+
+    [Theory]
+    [InlineData(TreeTextFormat.Ascii, "TXT", "*.txt")]
+    [InlineData(TreeTextFormat.Json, "JSON", "*.json")]
+    [InlineData(TreeTextFormat.Xml, "XML", "*.xml")]
+    [InlineData(TreeTextFormat.Markdown, "Markdown", "*.md")]
+    public void CreateTreeExportFileTypeChoices_OffersNativeFormatAndTextFallback(
+        TreeTextFormat format,
+        string expectedName,
+        string expectedPattern)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            "CreateTreeExportFileTypeChoices",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        var choices = Assert.IsAssignableFrom<IReadOnlyList<FilePickerFileType>>(
+            method!.Invoke(null, [format]));
+        var nativeChoice = choices[0];
+
+        Assert.Equal(expectedName, nativeChoice.Name);
+        Assert.Equal([expectedPattern], nativeChoice.Patterns);
+
+        if (format == TreeTextFormat.Ascii)
+        {
+            Assert.Single(choices);
+            return;
+        }
+
+        Assert.Equal(2, choices.Count);
+        Assert.Equal("TXT", choices[1].Name);
+        Assert.Equal(["*.txt"], choices[1].Patterns);
     }
 
     [Theory]

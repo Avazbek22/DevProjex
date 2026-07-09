@@ -2404,7 +2404,9 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
-            statusOperationId = _statusOperations.Begin("Preparing content...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin(
+                _localization["Status.Operation.PreparingOutput"],
+                indeterminate: true);
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2412,18 +2414,18 @@ public partial class MainWindow : Window
                 pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
-                _statusOperations.Complete(statusOperationId);
+                CompleteStatusOperation(ref statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
             await SetClipboardTextAsync(content);
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
         catch (Exception ex)
         {
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2442,7 +2444,9 @@ public partial class MainWindow : Window
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
             // Run file reading off UI thread
-            statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin(
+                _localization["Status.Operation.PreparingOutput"],
+                indeterminate: true);
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2452,12 +2456,12 @@ public partial class MainWindow : Window
                     CancellationToken.None,
                     pathPresentation));
             await SetClipboardTextAsync(content);
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2477,7 +2481,7 @@ public partial class MainWindow : Window
                 BuildSuggestedExportFileName("tree", GetTreeExportFileExtension(format)),
                 _viewModel.MenuFileExportTree,
                 defaultExtension: GetTreeExportFileExtension(format),
-                fileTypeChoices: CreateTreeExportFileTypeChoices());
+                fileTypeChoices: CreateTreeExportFileTypeChoices(format));
 
             if (saved)
                 _toastService.Show(_localization["Toast.Export.Tree"]);
@@ -2509,7 +2513,9 @@ public partial class MainWindow : Window
                 return;
             }
 
-            statusOperationId = _statusOperations.Begin("Preparing content...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin(
+                _localization["Status.Operation.PreparingOutput"],
+                indeterminate: true);
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2517,11 +2523,14 @@ public partial class MainWindow : Window
                 pathPresentation?.MapFilePath));
             if (string.IsNullOrWhiteSpace(content))
             {
-                _statusOperations.Complete(statusOperationId);
+                CompleteStatusOperation(ref statusOperationId);
                 await ShowInfoAsync(_localization["Msg.NoTextContent"]);
                 return;
             }
 
+            // File preparation is complete. The native picker can remain open indefinitely
+            // while the user chooses a name, so it must never keep the app status busy.
+            CompleteStatusOperation(ref statusOperationId);
             var saved = await TryExportTextToFileAsync(
                 content,
                 BuildSuggestedExportFileName("content", "txt"),
@@ -2529,13 +2538,12 @@ public partial class MainWindow : Window
                 defaultExtension: "txt",
                 fileTypeChoices: [CreateTextFileType()]);
 
-            _statusOperations.Complete(statusOperationId);
             if (saved)
                 _toastService.Show(_localization["Toast.Export.Content"]);
         }
         catch (Exception ex)
         {
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -2553,7 +2561,9 @@ public partial class MainWindow : Window
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
 
-            statusOperationId = _statusOperations.Begin("Building export...", indeterminate: true);
+            statusOperationId = _statusOperations.Begin(
+                _localization["Status.Operation.PreparingOutput"],
+                indeterminate: true);
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2563,6 +2573,9 @@ public partial class MainWindow : Window
                     CancellationToken.None,
                     pathPresentation));
 
+            // A combined payload is plain text even when its leading tree is JSON/XML/MD.
+            // Finish the operation before opening the picker and keep the .txt contract.
+            CompleteStatusOperation(ref statusOperationId);
             var saved = await TryExportTextToFileAsync(
                 content,
                 BuildSuggestedExportFileName("tree_content", "txt"),
@@ -2570,13 +2583,12 @@ public partial class MainWindow : Window
                 defaultExtension: "txt",
                 fileTypeChoices: [CreateTextFileType()]);
 
-            _statusOperations.Complete(statusOperationId);
             if (saved)
                 _toastService.Show(_localization["Toast.Export.TreeAndContent"]);
         }
         catch (Exception ex)
         {
-            _statusOperations.Complete(statusOperationId);
+            CompleteStatusOperation(ref statusOperationId);
             await ShowErrorAsync(ex.Message);
         }
     }
@@ -3326,11 +3338,26 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private static IReadOnlyList<FilePickerFileType> CreateTreeExportFileTypeChoices()
-        => [CreateTextFileType(), CreateJsonFileType(), CreateXmlFileType(), CreateMarkdownFileType()];
+    private static IReadOnlyList<FilePickerFileType> CreateTreeExportFileTypeChoices(TreeTextFormat format)
+    {
+        if (format == TreeTextFormat.Ascii)
+            return [CreateTextFileType()];
+
+        var nativeFileType = format switch
+        {
+            TreeTextFormat.Json => CreateJsonFileType(),
+            TreeTextFormat.Xml => CreateXmlFileType(),
+            TreeTextFormat.Markdown => CreateMarkdownFileType(),
+            _ => CreateTextFileType()
+        };
+
+        // Structured tree text is also useful as a generic text artifact. Keep the native
+        // extension first while offering TXT as an explicit, semantically honest fallback.
+        return [nativeFileType, CreateTextFileType()];
+    }
 
     private static FilePickerFileType CreateTextFileType()
-        => new("Text")
+        => new("TXT")
         {
             Patterns = ["*.txt"],
             MimeTypes = ["text/plain"]
@@ -3365,6 +3392,15 @@ public partial class MainWindow : Window
             TreeTextFormat.Markdown => "md",
             _ => "txt"
         };
+
+    private void CompleteStatusOperation(ref long? operationId)
+    {
+        if (!operationId.HasValue)
+            return;
+
+        _statusOperations.Complete(operationId.Value);
+        operationId = null;
+    }
 
     private string BuildSuggestedExportFileName(string suffix, string extension)
     {

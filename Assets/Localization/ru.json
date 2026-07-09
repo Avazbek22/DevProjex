@@ -206,6 +206,7 @@
   "Status.Operation.SwitchingBranch": "Переключение ветки {0}",
   "Status.Operation.CalculatingData": "Подсчет данных",
   "Status.Operation.PreparingPreview": "Подготовка превью",
+  "Status.Operation.PreparingOutput": "Подготовка результата",
   "Toast.Operation.PreviewCanceled": "Подготовка превью отменена",
   "Status.Metric.Lines": "Строки: {0}",
   "Status.Metric.Chars": "Символы: {0}",
