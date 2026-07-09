@@ -908,6 +908,7 @@ internal static class UiTestDriver
 
                 return viewModel.IsPreviewMode &&
                        previewIsland.IsVisible &&
+                       !IsPreviewPaneTransitionInProgress(window) &&
                        !viewModel.IsPreviewLoading &&
                        previewDocument is not null &&
                        IsPreviewPipelineIdle(window);
@@ -915,6 +916,10 @@ internal static class UiTestDriver
             "preview workspace to become ready");
         await WaitForSettledFramesAsync(frameCount: 18);
     }
+
+    private static bool IsPreviewPaneTransitionInProgress(MainWindow window) =>
+        GetRequiredPrivateField<bool>(window, "_previewPaneAnimating") ||
+        GetRequiredPrivateField<bool>(window, "_treePaneAnimating");
 
     public static async Task WaitForFilterAppliedAsync(MainWindow window, string query)
     {
@@ -1254,6 +1259,7 @@ internal static class UiTestDriver
                 $"TreeNodes={viewModel.TreeNodes.Count}",
                 $"PreviewMode={viewModel.PreviewWorkspaceMode}",
                 $"PreviewLoading={viewModel.IsPreviewLoading}",
+                $"PreviewTransitioning={IsPreviewPaneTransitionInProgress(window)}",
                 $"SettingsVisible={viewModel.SettingsVisible}",
                 $"SettingsWidth={settingsWidth:F2}",
                 $"SearchVisible={viewModel.SearchVisible}",

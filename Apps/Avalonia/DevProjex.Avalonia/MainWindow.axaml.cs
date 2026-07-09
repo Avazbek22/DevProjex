@@ -3862,6 +3862,14 @@ public partial class MainWindow : Window
             _treePaneContainer.Width = targetTreeWidth;
             _previewPaneContainer.Width = targetPreviewWidth;
             await WaitForPanelAnimationAsync(PreviewPaneAnimationDuration);
+
+            // Waiting for the nominal duration does not guarantee that every compositor
+            // backend has presented the final transition sample. Snap the base values before
+            // CaptureSplitPaneLayout reads them; otherwise a transient width can become the
+            // persisted manual width on slower CI machines (and occasionally in production).
+            ApplyPreviewTreePaneWidth(targetTreeWidth, animate: false);
+            ApplyPreviewPaneWidth(targetPreviewWidth, animate: false);
+            await YieldUiAsync(DispatcherPriority.Render);
         }
         finally
         {
@@ -3891,9 +3899,16 @@ public partial class MainWindow : Window
 
             EnsurePreviewTreePaneTransitions();
             EnsurePreviewPaneTransitions();
-            _treePaneContainer.Width = GetAvailableTreeOnlyWorkspaceWidth();
+            var targetTreeWidth = GetAvailableTreeOnlyWorkspaceWidth();
+            _treePaneContainer.Width = targetTreeWidth;
             _previewPaneContainer.Width = 0.0;
             await WaitForPanelAnimationAsync(PreviewPaneAnimationDuration);
+
+            // Close uses the same explicit final-state boundary as open. ViewModel mode
+            // changes and subsequent reopen calculations must never observe an in-flight width.
+            ApplyPreviewTreePaneWidth(targetTreeWidth, animate: false);
+            ApplyPreviewPaneWidth(0.0, animate: false);
+            await YieldUiAsync(DispatcherPriority.Render);
         }
         finally
         {
