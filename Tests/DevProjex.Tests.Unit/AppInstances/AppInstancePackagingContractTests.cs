@@ -110,7 +110,7 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
-    public void AvaloniaProject_KeepsTmdsDbusProtocolReferenceForLinuxDesktopRuntime()
+    public void AvaloniaProject_DoesNotOverrideAvaloniaFreeDesktopTmdsDbusProtocolVersion()
     {
         var repositoryRoot = ResolveRepositoryRoot();
         var avaloniaProjectPath = Path.Combine(
@@ -124,19 +124,49 @@ public sealed class AppInstancePackagingContractTests
         var avaloniaProject = XDocument.Load(avaloniaProjectPath);
         var centralPackages = XDocument.Load(centralPackagesPath);
 
-        var avaloniaPackageReferences = avaloniaProject
+        var directTmdsReferences = avaloniaProject
             .Descendants("PackageReference")
-            .Select(element => element.Attribute("Include")?.Value)
-            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Where(element => element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
             .ToArray();
-        var dbusVersion = centralPackages
+        var centralTmdsVersions = centralPackages
             .Descendants("PackageVersion")
-            .SingleOrDefault(element => element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
-            ?.Attribute("Version")
-            ?.Value;
+            .Where(element => element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
+            .ToArray();
 
-        Assert.Contains("Tmds.DBus.Protocol", avaloniaPackageReferences);
-        Assert.False(string.IsNullOrWhiteSpace(dbusVersion));
+        // Avalonia.FreeDesktop 12 currently uses the old Tmds.DBus.Protocol.Connection API.
+        // Tmds.DBus.Protocol 0.93+ removed that type, so a direct package override breaks Linux/X11 startup.
+        Assert.Empty(directTmdsReferences);
+        Assert.Empty(centralTmdsVersions);
+    }
+
+    [Fact]
+    public void AvaloniaRestoreGraph_UsesTmdsDbusProtocolCompatibleWithAvaloniaFreeDesktop()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var assetsPath = Path.Combine(
+            repositoryRoot,
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "obj",
+            "project.assets.json");
+
+        Assert.True(
+            File.Exists(assetsPath),
+            $"Project assets were not found. Run dotnet restore before this packaging contract test: {assetsPath}");
+
+        using var document = JsonDocument.Parse(File.ReadAllText(assetsPath));
+        var libraries = document.RootElement.GetProperty("libraries");
+        var resolvedTmdsVersions = libraries
+            .EnumerateObject()
+            .Where(static property => property.Name.StartsWith("Tmds.DBus.Protocol/", StringComparison.Ordinal))
+            .Select(static property => property.Name["Tmds.DBus.Protocol/".Length..])
+            .ToArray();
+
+        var resolvedVersion = Assert.Single(resolvedTmdsVersions);
+        Assert.True(
+            Version.Parse(resolvedVersion) < new Version(0, 93, 0),
+            $"Linux/X11 startup requires Tmds.DBus.Protocol < 0.93 while Avalonia.FreeDesktop still references the old Connection API. Resolved: {resolvedVersion}");
     }
 
     [Fact]

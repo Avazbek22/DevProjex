@@ -74,17 +74,52 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Install Linux UI smoke dependencies
+        if: ${{ startsWith(matrix.rid, 'linux-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xvfb-run >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb
+          fi
+
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
       - name: Restore
         shell: pwsh
         run: dotnet restore DevProjex.sln
+
+      - name: Validate Linux DBus Dependency Graph
+        if: ${{ startsWith(matrix.rid, 'linux-') }}
+        shell: pwsh
+        run: |
+          $assetsPath = "Apps/Avalonia/DevProjex.Avalonia/obj/project.assets.json"
+          if (-not (Test-Path -LiteralPath $assetsPath)) {
+            throw "Project assets file was not produced by restore: $assetsPath"
+          }
+
+          $assets = Get-Content -Raw -Path $assetsPath | ConvertFrom-Json
+          $dbusLibraries = @(
+            $assets.libraries.PSObject.Properties.Name |
+              Where-Object { $_ -like "Tmds.DBus.Protocol/*" }
+          )
+
+          if ($dbusLibraries.Count -ne 1) {
+            throw "Expected exactly one Tmds.DBus.Protocol library in the restore graph, found $($dbusLibraries.Count): $($dbusLibraries -join ', ')"
+          }
+
+          $versionText = $dbusLibraries[0].Substring("Tmds.DBus.Protocol/".Length)
+          $version = [Version]$versionText
+          if ($version -ge [Version]"0.93.0") {
+            throw "Avalonia.FreeDesktop still references the legacy Tmds.DBus.Protocol.Connection API. Tmds.DBus.Protocol 0.93+ removes that type and breaks Linux/X11 startup. Resolved: $versionText"
+          }
 
       - name: Publish
         shell: pwsh
@@ -126,6 +161,36 @@ jobs:
               $process.WaitForExit(5000) | Out-Null
             }
           }
+
+      - name: Startup Smoke (Linux X11)
+        if: ${{ startsWith(matrix.rid, 'linux-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe_path="$(realpath "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}")"
+          work_dir="$(dirname "$exe_path")"
+          chmod +x "$exe_path"
+
+          xvfb-run -a bash -c '
+            set -euo pipefail
+            cd "$1"
+            "$2" &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true" EXIT
+            sleep 5
+
+            if ! kill -0 "$pid" 2>/dev/null; then
+              wait "$pid"
+              exit_code=$?
+              echo "Published Linux app exited too early during X11 startup smoke. ExitCode=$exit_code"
+              exit 1
+            fi
+
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          ' _ "$work_dir" "$exe_path"
+
+          echo "Linux X11 startup smoke passed. Process stayed alive for 5 seconds."
 
       - name: Command-line Smoke (Native Published Artifact)
         shell: pwsh
