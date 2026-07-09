@@ -1205,6 +1205,76 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		}
 	}
 
+	[Theory]
+	[InlineData("xml")]
+	[InlineData("md")]
+	public async Task Process_TreeContentStructuredFormatsPreserveUnicodeTreeNamesAndRelativeContentHeaders(string format)
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("project unicode stdout");
+		SeedStructuredFormatProject(projectPath);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.Format, format,
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var (treePart, contentPart) = SplitTreeAndContentStdout(result.Stdout);
+
+		if (format == "xml")
+		{
+			var document = XDocument.Parse(treePart);
+			Assert.Contains("Документы/Файл.cs", ExtractXmlFilePaths(document));
+		}
+		else
+		{
+			Assert.Contains("- Документы/", treePart, StringComparison.Ordinal);
+			Assert.Contains("  - Файл.cs", treePart, StringComparison.Ordinal);
+		}
+
+		Assert.Contains("Документы/Файл.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("namespace Smoke.Документы;", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("?????????/????.cs", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(
+		"<t r=\"C:/Project\"><d n=\"src\"><f>Program.cs</f></d></t>\n?\n?\nsrc/Program.cs:\nclass App {}\n",
+		"<t ",
+		"src/Program.cs:")]
+	[InlineData(
+		"Root: C:/Project\n\n- src/\n  - Program.cs\n?\n?\nsrc/Program.cs:\nclass App {}\n",
+		"Root: ",
+		"src/Program.cs:")]
+	public void SplitTreeAndContentStdout_StructuredFormatsTolerateTranscodedSeparator(
+		string stdout,
+		string expectedTreeStart,
+		string expectedContentHeader)
+	{
+		var (treePart, contentPart) = SplitTreeAndContentStdout(stdout);
+
+		Assert.StartsWith(expectedTreeStart, treePart, StringComparison.Ordinal);
+		Assert.DoesNotContain("\n?", treePart, StringComparison.Ordinal);
+		Assert.StartsWith(expectedContentHeader, contentPart, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SplitTreeAndContentStdout_NormalizesBomAnsiCrLfAndNbspSeparator()
+	{
+		var stdout = "\uFEFF\x1B[32mRoot: C:/Project\x1B[0m\r\n\r\n- src/\r\n  - Program.cs\r\n\u00A0\r\n\u00A0\r\nsrc/Program.cs:\r\nclass App {}\r\n";
+
+		var (treePart, contentPart) = SplitTreeAndContentStdout(stdout);
+
+		Assert.StartsWith("Root: C:/Project", treePart, StringComparison.Ordinal);
+		Assert.Contains("  - Program.cs", treePart, StringComparison.Ordinal);
+		Assert.StartsWith("src/Program.cs:", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b[", treePart, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task Process_ReportDashWritesJsonToStdout()
 	{
@@ -2051,6 +2121,11 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 	private static async Task<CommandLineProcessResult> RunProcessAsync(ProcessStartInfo startInfo)
 	{
+		if (startInfo.RedirectStandardOutput)
+			startInfo.StandardOutputEncoding ??= new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+		if (startInfo.RedirectStandardError)
+			startInfo.StandardErrorEncoding ??= new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
 		using var process = Process.Start(startInfo)
 			?? throw new InvalidOperationException("Failed to start DevProjex command-line smoke process.");
 		var stdoutTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
@@ -2138,12 +2213,118 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 	private static (string TreePart, string ContentPart) SplitTreeAndContentStdout(string stdout)
 	{
-		var separatorIndex = stdout.IndexOf("\u00A0", StringComparison.Ordinal);
-		Assert.True(separatorIndex > 0, "Expected tree-content stdout to contain the NBSP separator before plain text content.");
-		var treePart = stdout[..separatorIndex].TrimEnd('\r', '\n');
-		var contentPart = stdout[separatorIndex..];
+		var normalized = NormalizeCapturedStdout(stdout);
+		var separatorIndex = normalized.IndexOf('\u00A0');
+		if (separatorIndex > 0)
+		{
+			var treePart = normalized[..separatorIndex].TrimEnd('\r', '\n');
+			var contentPart = TrimLeadingTreeContentSeparator(normalized[separatorIndex..]);
+			Assert.False(string.IsNullOrWhiteSpace(contentPart), "Expected tree-content stdout to include plain text content.");
+			return (treePart, contentPart);
+		}
+
+		if (normalized.StartsWith("<t ", StringComparison.Ordinal))
+			return SplitXmlTreeAndContentStdout(normalized);
+
+		if (normalized.StartsWith("Root: ", StringComparison.Ordinal))
+			return SplitMarkdownTreeAndContentStdout(normalized);
+
+		Assert.Fail("Could not detect tree/content boundary in structured tree-content stdout.");
+		return (string.Empty, string.Empty);
+	}
+
+	private static string NormalizeCapturedStdout(string stdout)
+	{
+		var normalized = stdout.Replace("\r\n", "\n", StringComparison.Ordinal);
+		if (normalized.Length > 0 && normalized[0] == '\uFEFF')
+			normalized = normalized[1..];
+
+		return Regex.Replace(normalized, @"\x1B\[[0-9;]*[A-Za-z]", string.Empty);
+	}
+
+	private static (string TreePart, string ContentPart) SplitXmlTreeAndContentStdout(string stdout)
+	{
+		var rootEndIndex = stdout.IndexOf("</t>", StringComparison.Ordinal);
+		Assert.True(rootEndIndex > 0, "Expected XML tree-content stdout to contain a complete <t> tree block.");
+
+		var treeEndIndex = rootEndIndex + "</t>".Length;
+		var treePart = stdout[..treeEndIndex];
+		var contentPart = TrimLeadingTreeContentSeparator(stdout[treeEndIndex..]);
 		Assert.False(string.IsNullOrWhiteSpace(contentPart), "Expected tree-content stdout to include plain text content.");
 		return (treePart, contentPart);
+	}
+
+	private static (string TreePart, string ContentPart) SplitMarkdownTreeAndContentStdout(string stdout)
+	{
+		var contentStartIndex = FindFirstPlainTextContentHeader(stdout);
+		Assert.True(contentStartIndex > 0, "Expected Markdown tree-content stdout to contain a relative file content header.");
+
+		var treePart = TrimTrailingTreeContentSeparator(stdout[..contentStartIndex]);
+		var contentPart = TrimLeadingTreeContentSeparator(stdout[contentStartIndex..]);
+		Assert.False(string.IsNullOrWhiteSpace(contentPart), "Expected tree-content stdout to include plain text content.");
+		return (treePart, contentPart);
+	}
+
+	private static int FindFirstPlainTextContentHeader(string text)
+	{
+		var lineStart = 0;
+		while (lineStart < text.Length)
+		{
+			var lineEnd = text.IndexOf('\n', lineStart);
+			if (lineEnd < 0)
+				lineEnd = text.Length;
+
+			var line = text[lineStart..lineEnd].TrimEnd('\r');
+			if (IsPlainTextContentHeaderLine(line))
+				return lineStart;
+
+			lineStart = lineEnd + 1;
+		}
+
+		return -1;
+	}
+
+	private static bool IsPlainTextContentHeaderLine(string line)
+	{
+		var trimmedStart = line.TrimStart(' ');
+		if (trimmedStart.Length == 0 ||
+		    trimmedStart.StartsWith("- ", StringComparison.Ordinal) ||
+		    line.StartsWith("Root: ", StringComparison.Ordinal))
+			return false;
+
+		return line.EndsWith(':');
+	}
+
+	private static string TrimLeadingTreeContentSeparator(string value)
+	{
+		var start = 0;
+		while (start < value.Length)
+		{
+			var lineEnd = value.IndexOf('\n', start);
+			var nextStart = lineEnd < 0 ? value.Length : lineEnd + 1;
+			var line = value[start..(lineEnd < 0 ? value.Length : lineEnd)].Trim();
+			if (line.Length > 0 && line.Any(static character => character != '\u00A0' && character != '?'))
+				break;
+
+			start = nextStart;
+		}
+
+		return value[start..];
+	}
+
+	private static string TrimTrailingTreeContentSeparator(string value)
+	{
+		var lines = value.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').ToList();
+		while (lines.Count > 0)
+		{
+			var line = lines[^1].Trim();
+			if (line.Length > 0 && line.Any(static character => character != '\u00A0' && character != '?'))
+				break;
+
+			lines.RemoveAt(lines.Count - 1);
+		}
+
+		return string.Join('\n', lines).TrimEnd('\r', '\n');
 	}
 
 	private static string[] ExtractXmlFilePaths(XDocument document)

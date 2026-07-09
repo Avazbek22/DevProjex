@@ -13,6 +13,7 @@ internal static class Program
         var parseResult = CommandLineOptions.Parse(args);
         if (CommandLineAutomationRunner.ShouldRunBeforeAvalonia(parseResult))
         {
+            ConfigureCommandLineEncoding();
             WindowsParentConsole.AttachForCommandLine();
             return CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(parseResult)
                 .GetAwaiter()
@@ -40,6 +41,23 @@ internal static class Program
 #endif
 
         return builder;
+    }
+
+    private static void ConfigureCommandLineEncoding()
+    {
+        try
+        {
+            // Headless export can be piped or redirected on Windows runners whose active
+            // code page is not UTF-8. Pin stdout/stderr to UTF-8 so Unicode paths remain
+            // machine-readable instead of being downgraded to question marks.
+            var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            Console.OutputEncoding = utf8NoBom;
+        }
+        catch
+        {
+            // Some hosts do not allow changing console encoding. Export still continues;
+            // process-level smoke tests cover the normal redirected stdout path.
+        }
     }
 
     private static Win32PlatformOptions CreateWin32PlatformOptions()
