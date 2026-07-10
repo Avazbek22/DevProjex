@@ -8,6 +8,8 @@ public static class CommandLineOptionTokens
 	public const string Report = "--report";
 	public const string ReportPath = "--report-path";
 	public const string ReportFormat = "--report-format";
+	public const string Benchmark = "--benchmark";
+	public const string BenchmarkOutput = "--benchmark-output";
 	public const string Export = "--export";
 	public const string Output = "--output";
 	public const string ShortOutput = "-o";
@@ -53,6 +55,8 @@ public static class CommandLineOptionTokens
 		Report,
 		ReportPath,
 		ReportFormat,
+		Benchmark,
+		BenchmarkOutput,
 		Export,
 		Output,
 		ShortOutput,

@@ -13,6 +13,7 @@ public sealed record CommandLineOptions(
 	public bool ShowHelp { get; init; }
 	public bool ShowVersion { get; init; }
 	public StartupReportOptions Report { get; init; } = StartupReportOptions.Disabled;
+	public StartupBenchmarkOptions Benchmark { get; init; } = StartupBenchmarkOptions.Disabled;
 	public StartupExportOptions Export { get; init; } = StartupExportOptions.Disabled;
 	public StartupUiOptions Ui { get; init; } = StartupUiOptions.Default;
 	public IReadOnlyList<string> IncludeRootFolders { get; init; } = [];
@@ -38,6 +39,7 @@ public sealed record CommandLineOptions(
 		bool showHelp = false;
 		bool showVersion = false;
 		var report = StartupReportOptions.Disabled;
+		var benchmark = StartupBenchmarkOptions.Disabled;
 		var export = StartupExportOptions.Disabled;
 		var ui = StartupUiOptions.Default;
 		var includeRootFolders = new List<string>();
@@ -227,6 +229,24 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
+			if (arg.Equals(CommandLineOptionTokens.Benchmark, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				benchmark = benchmark with { Enabled = true, Path = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.BenchmarkOutput, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				benchmark = benchmark with { OutputPath = value };
+				continue;
+			}
+
 			if (arg.Equals(CommandLineOptionTokens.Export, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
@@ -337,6 +357,7 @@ public sealed record CommandLineOptions(
 		}
 
 		ValidateStartupUiOptions(path, ui, errors);
+		ValidateBenchmarkOptions(path, noUi, strict, report, benchmark, export, ui, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
 
 		var options = new CommandLineOptions(path, lang, elevationAttempted)
 		{
@@ -344,6 +365,7 @@ public sealed record CommandLineOptions(
 			ShowHelp = showHelp,
 			ShowVersion = showVersion,
 			Report = report,
+			Benchmark = benchmark,
 			Export = export,
 			Ui = ui,
 			IncludeRootFolders = includeRootFolders.ToArray(),
@@ -394,6 +416,18 @@ public sealed record CommandLineOptions(
 				parts.Add(CommandLineOptionTokens.ReportFormat);
 				parts.Add(Report.Format.ToString().ToLowerInvariant());
 			}
+		}
+
+		if (Benchmark.Enabled)
+		{
+			parts.Add(CommandLineOptionTokens.Benchmark);
+			parts.Add(Quote(Benchmark.Path!));
+		}
+
+		if (!string.IsNullOrWhiteSpace(Benchmark.OutputPath))
+		{
+			parts.Add(CommandLineOptionTokens.BenchmarkOutput);
+			parts.Add(Quote(Benchmark.OutputPath!));
 		}
 
 		if (Export.Enabled)
@@ -873,6 +907,50 @@ public sealed record CommandLineOptions(
 		}
 	}
 
+	private static void ValidateBenchmarkOptions(
+		string? path,
+		bool noUi,
+		bool strict,
+		StartupReportOptions report,
+		StartupBenchmarkOptions benchmark,
+		StartupExportOptions export,
+		StartupUiOptions ui,
+		IReadOnlyList<string> includeRootFolders,
+		IReadOnlyList<string> includeExtensions,
+		bool ignoreOptionsSpecified,
+		List<CommandLineParseError> errors)
+	{
+		if (!benchmark.Enabled)
+		{
+			if (!string.IsNullOrWhiteSpace(benchmark.OutputPath))
+			{
+				errors.Add(new CommandLineParseError(
+					"benchmark-output-requires-benchmark",
+					"--benchmark-output requires --benchmark.",
+					CommandLineOptionTokens.BenchmarkOutput));
+			}
+
+			return;
+		}
+
+		if (!string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-benchmark-path",
+				"Use --benchmark <folder> without --path or a positional folder.",
+				CommandLineOptionTokens.Benchmark));
+		}
+
+		if (noUi || strict || report.Enabled || export.Enabled || export.HasOutputPath || export.FormatSpecified ||
+		    ui.HasStartupActions || includeRootFolders.Count > 0 || includeExtensions.Count > 0 || ignoreOptionsSpecified)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-benchmark-options",
+				"--benchmark runs the standard project report benchmark and cannot be combined with report, export, UI startup, selection, strict, --no-ui, or --silent options.",
+				CommandLineOptionTokens.Benchmark));
+		}
+	}
+
 	private static string FormatExportMode(StartupExportMode mode) => mode switch
 	{
 		StartupExportMode.Tree => "tree",
@@ -981,6 +1059,14 @@ public sealed record StartupReportOptions(
 public enum StartupReportFormat
 {
 	Json
+}
+
+public sealed record StartupBenchmarkOptions(
+	bool Enabled,
+	string? Path,
+	string? OutputPath)
+{
+	public static StartupBenchmarkOptions Disabled { get; } = new(false, null, null);
 }
 
 public sealed record StartupExportOptions(

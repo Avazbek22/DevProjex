@@ -45,6 +45,7 @@ public sealed class CommandLineOptionsTests
 		Assert.True(result.Options.Report.Enabled);
 		Assert.Equal("/tmp/report.json", result.Options.Report.Path);
 		Assert.Equal(StartupReportFormat.Json, result.Options.Report.Format);
+		Assert.False(result.Options.Benchmark.Enabled);
 		Assert.True(result.Options.Export.Enabled);
 		Assert.Equal(StartupExportMode.TreeContent, result.Options.Export.Mode);
 		Assert.Equal("/tmp/context.txt", result.Options.Export.Path);
@@ -368,6 +369,84 @@ public sealed class CommandLineOptionsTests
 
 		AssertInvalid(result, "invalid-report-format");
 		Assert.True(result.Options.Report.Enabled);
+	}
+
+	[Fact]
+	public void Parse_ReadsBenchmarkPathAndOutput()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Benchmark, "/tmp/root",
+			CommandLineOptionTokens.BenchmarkOutput, "/tmp/result.json"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Benchmark.Enabled);
+		Assert.Equal("/tmp/root", result.Options.Benchmark.Path);
+		Assert.Equal("/tmp/result.json", result.Options.Benchmark.OutputPath);
+	}
+
+	[Fact]
+	public void Parse_ReadsInlineBenchmarkValues()
+	{
+		var result = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.Benchmark}=/tmp/root",
+			$"{CommandLineOptionTokens.BenchmarkOutput}=/tmp/result.json"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Benchmark.Enabled);
+		Assert.Equal("/tmp/root", result.Options.Benchmark.Path);
+		Assert.Equal("/tmp/result.json", result.Options.Benchmark.OutputPath);
+	}
+
+	[Fact]
+	public void Parse_RejectsBenchmarkOutputWithoutBenchmark()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.BenchmarkOutput, "/tmp/result.json"]);
+
+		AssertInvalid(result, "benchmark-output-requires-benchmark");
+	}
+
+	[Theory]
+	[InlineData("--path")]
+	[InlineData("positional")]
+	public void Parse_RejectsBenchmarkWithSeparateProjectTarget(string targetStyle)
+	{
+		var args = targetStyle == "--path"
+			? new[] { CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.Path, "/tmp/other" }
+			: new[] { CommandLineOptionTokens.Benchmark, "/tmp/root", "/tmp/other" };
+
+		var result = CommandLineOptions.Parse(args);
+
+		AssertInvalid(result, "conflicting-benchmark-path");
+	}
+
+	[Theory]
+	[InlineData("--no-ui")]
+	[InlineData("--silent")]
+	[InlineData("--strict")]
+	[InlineData("--report")]
+	[InlineData("--export")]
+	[InlineData("--include-root")]
+	[InlineData("--include-extension")]
+	[InlineData("--ignore")]
+	[InlineData("--preview")]
+	[InlineData("--tree-filter")]
+	public void Parse_RejectsBenchmarkWithNonStandardScenarioOptions(string option)
+	{
+		var args = option switch
+		{
+			"--export" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.Export, "tree"],
+			"--include-root" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.IncludeRoot, "src"],
+			"--include-extension" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.IncludeExtension, "cs"],
+			"--ignore" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone],
+			"--tree-filter" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.TreeFilter, "src"],
+			_ => new[] { CommandLineOptionTokens.Benchmark, "/tmp/root", option }
+		};
+
+		var result = CommandLineOptions.Parse(args);
+
+		AssertInvalid(result, "conflicting-benchmark-options");
 	}
 
 	[Theory]
@@ -968,6 +1047,22 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void ToArguments_PreservesBenchmarkCommand()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			Benchmark = new StartupBenchmarkOptions(true, "/tmp/root folder", "/tmp/result folder/benchmark.json")
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--benchmark", args);
+		Assert.Contains("\"/tmp/root folder\"", args);
+		Assert.Contains("--benchmark-output", args);
+		Assert.Contains("\"/tmp/result folder/benchmark.json\"", args);
+	}
+
+	[Fact]
 	public void ToArguments_PreservesExplicitAsciiExportFormatForRelaunch()
 	{
 		var options = CommandLineOptions.Empty with
@@ -1182,6 +1277,7 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(expected.ShowHelp, actual.ShowHelp);
 		Assert.Equal(expected.ShowVersion, actual.ShowVersion);
 		Assert.Equal(expected.Report, actual.Report);
+		Assert.Equal(expected.Benchmark, actual.Benchmark);
 		Assert.Equal(expected.Export, actual.Export);
 		Assert.Equal(expected.Export.FormatSpecified, actual.Export.FormatSpecified);
 		Assert.Equal(expected.Ui, actual.Ui);
@@ -1212,6 +1308,7 @@ public sealed class CommandLineOptionsTests
 		{ CommandLineOptionTokens.Language, "ru" },
 		{ CommandLineOptionTokens.ReportPath, "/tmp/report.json" },
 		{ CommandLineOptionTokens.ReportFormat, "json" },
+		{ CommandLineOptionTokens.Benchmark, "/tmp/root" },
 		{ CommandLineOptionTokens.Export, "tree-content" },
 		{ CommandLineOptionTokens.Output, "/tmp/context.txt" },
 		{ CommandLineOptionTokens.ShortOutput, "/tmp/context.txt" },
@@ -1230,6 +1327,8 @@ public sealed class CommandLineOptionsTests
 		CommandLineOptionTokens.Language,
 		CommandLineOptionTokens.ReportPath,
 		CommandLineOptionTokens.ReportFormat,
+		CommandLineOptionTokens.Benchmark,
+		CommandLineOptionTokens.BenchmarkOutput,
 		CommandLineOptionTokens.Export,
 		CommandLineOptionTokens.Output,
 		CommandLineOptionTokens.ShortOutput,

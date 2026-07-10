@@ -463,6 +463,128 @@ public sealed class CommandLineAutomationRunnerTests
 	}
 
 	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_BenchmarkWritesSummaryAndDetailedJsonReport()
+	{
+		using var runCountOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_BENCHMARK_RUNS", "2");
+		using var warmupOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_BENCHMARK_WARMUP", "1");
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var reportPath = Path.Combine(temp.Path, "benchmark", "result.json");
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var processRunner = new FakeBenchmarkProcessRunner();
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Benchmark, temp.Path,
+			CommandLineOptionTokens.BenchmarkOutput, reportPath
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(
+				output,
+				error,
+				servicesFactory: AvaloniaCompositionRoot.CreateDefault,
+				benchmarkProcessRunner: processRunner),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(string.Empty, error.ToString());
+		var summary = output.ToString();
+		Assert.Contains("DevProjex benchmark", summary, StringComparison.Ordinal);
+		Assert.Contains("Cold process:", summary, StringComparison.Ordinal);
+		Assert.Contains("Warm pipeline:", summary, StringComparison.Ordinal);
+		Assert.Contains(Path.GetFullPath(reportPath).Replace('\\', '/'), summary, StringComparison.Ordinal);
+		Assert.DoesNotContain("{", summary, StringComparison.Ordinal);
+		Assert.True(File.Exists(reportPath));
+		Assert.Equal(3, processRunner.Requests.Count);
+		Assert.All(processRunner.Requests, request =>
+		{
+			Assert.Contains(CommandLineOptionTokens.NoUi, request.Arguments);
+			Assert.Contains(CommandLineOptionTokens.Path, request.Arguments);
+			Assert.Contains(temp.Path, request.Arguments);
+			Assert.Contains(CommandLineOptionTokens.Report, request.Arguments);
+			Assert.Contains(CommandLineOptionTokens.StandardOutputReportPath, request.Arguments);
+			Assert.DoesNotContain(CommandLineOptionTokens.Benchmark, request.Arguments);
+		});
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
+		var root = document.RootElement;
+		Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), root.GetProperty("targetPath").GetString());
+		Assert.Equal(2, root.GetProperty("configuration").GetProperty("runs").GetInt32());
+		Assert.Equal(1, root.GetProperty("configuration").GetProperty("warmup").GetInt32());
+		Assert.False(root.GetProperty("hasFailures").GetBoolean());
+		Assert.Equal(1, root.GetProperty("coldProcess").GetProperty("warmupRuns").GetArrayLength());
+		Assert.Equal(2, root.GetProperty("coldProcess").GetProperty("runs").GetArrayLength());
+		Assert.Equal(1, root.GetProperty("warmPipeline").GetProperty("warmupRuns").GetArrayLength());
+		Assert.Equal(2, root.GetProperty("warmPipeline").GetProperty("runs").GetArrayLength());
+		Assert.True(root.GetProperty("warmPipeline").GetProperty("runs")[0].GetProperty("stdoutBytes").GetInt32() > 0);
+		Assert.Contains("--report -", root.GetProperty("executable").GetProperty("commandLine").GetString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_BenchmarkMissingTargetWritesRuntimeErrorBeforeCreatingServicesOrChildProcess()
+	{
+		using var temp = new TemporaryDirectory();
+		var missingPath = Path.Combine(temp.Path, "missing");
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var processRunner = new FakeBenchmarkProcessRunner();
+		var parseResult = CommandLineOptions.Parse([CommandLineOptionTokens.Benchmark, missingPath]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(
+				output,
+				error,
+				servicesFactory: _ =>
+				{
+					servicesCreated = true;
+					throw new InvalidOperationException("Services must not be created.");
+				},
+				benchmarkProcessRunner: processRunner),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Empty(processRunner.Requests);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("Benchmark target folder was not found", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_BenchmarkWithoutOutputWritesJsonToDefaultBenchmarksFolder()
+	{
+		using var runCountOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_BENCHMARK_RUNS", "1");
+		using var warmupOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_BENCHMARK_WARMUP", "0");
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var appDataPath = Directory.CreateDirectory(Path.Combine(temp.Path, "Local AppData")).FullName;
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse([CommandLineOptionTokens.Benchmark, temp.Path]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(
+				output,
+				error,
+				servicesFactory: AvaloniaCompositionRoot.CreateDefault,
+				benchmarkProcessRunner: new FakeBenchmarkProcessRunner(),
+				benchmarkLocalAppDataProvider: () => appDataPath),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(string.Empty, error.ToString());
+		var benchmarkDirectory = Path.Combine(appDataPath, "DevProjex", "Benchmarks");
+		var reportPath = Assert.Single(Directory.EnumerateFiles(benchmarkDirectory, "benchmark-*.json"));
+		Assert.Contains(Path.GetFullPath(reportPath).Replace('\\', '/'), output.ToString(), StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), document.RootElement.GetProperty("targetPath").GetString());
+	}
+
+	[Fact]
 	public void ShouldRunBeforeAvalonia_ReturnsTrueOnlyForUtilityOrHeadlessModes()
 	{
 		Assert.False(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([])));
@@ -483,17 +605,72 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "json"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "xml"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "md"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Benchmark, "/tmp/project"])));
 	}
 
 	private static CommandLineAutomationContext CreateContext(
 		TextWriter output,
 		TextWriter error,
 		string version = "test-version",
-		Func<CommandLineOptions, AvaloniaAppServices>? servicesFactory = null) =>
+		Func<CommandLineOptions, AvaloniaAppServices>? servicesFactory = null,
+		ICommandLineBenchmarkProcessRunner? benchmarkProcessRunner = null,
+		Func<string>? benchmarkLocalAppDataProvider = null) =>
 		new(
 			Output: output,
 			Error: error,
 			ServicesFactory: servicesFactory ?? (_ => throw new InvalidOperationException("Services should not be created for this command-line scenario.")),
 			HelpContentProvider: new CommandLineHelpContentProvider(),
-			VersionProvider: () => version);
+			VersionProvider: () => version,
+			BenchmarkProcessRunner: benchmarkProcessRunner,
+			BenchmarkLocalAppDataProvider: benchmarkLocalAppDataProvider);
+
+	private sealed class FakeBenchmarkProcessRunner : ICommandLineBenchmarkProcessRunner
+	{
+		public List<CommandLineBenchmarkProcessRequest> Requests { get; } = [];
+
+		public Task<CommandLineBenchmarkProcessRun> RunAsync(
+			CommandLineBenchmarkProcessRequest request,
+			int index,
+			bool isWarmup,
+			CancellationToken cancellationToken)
+		{
+			Requests.Add(request);
+			const string stdout = """
+			{
+			  "rootPath": "fake"
+			}
+			""";
+			var run = new CommandLineBenchmarkProcessRun(
+				Index: index,
+				IsWarmup: isWarmup,
+				StartedAt: DateTimeOffset.Now,
+				WallMilliseconds: 100 + index,
+				CpuMilliseconds: 50 + index,
+				PeakWorkingSetBytes: 128 * 1024 * 1024,
+				PeakPrivateMemoryBytes: 96 * 1024 * 1024,
+				StdoutCharacters: stdout.Length,
+				StdoutBytes: Encoding.UTF8.GetByteCount(stdout),
+				StderrCharacters: 0,
+				ExitCode: CommandLineExitCodes.Success,
+				Error: null);
+			return Task.FromResult(run);
+		}
+	}
+
+	private sealed class TemporaryEnvironmentVariable : IDisposable
+	{
+		private readonly string _name;
+		private readonly string? _previousValue;
+
+		private TemporaryEnvironmentVariable(string name, string value)
+		{
+			_name = name;
+			_previousValue = Environment.GetEnvironmentVariable(name);
+			Environment.SetEnvironmentVariable(name, value);
+		}
+
+		public static TemporaryEnvironmentVariable Set(string name, string value) => new(name, value);
+
+		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
+	}
 }
