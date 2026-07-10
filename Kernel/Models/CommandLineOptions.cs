@@ -62,12 +62,18 @@ public sealed record CommandLineOptions(
 
 			if (IsHelpToken(arg))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				showHelp = true;
 				continue;
 			}
 
 			if (arg.Equals(CommandLineOptionTokens.Version, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				showVersion = true;
 				continue;
 			}
@@ -95,6 +101,9 @@ public sealed record CommandLineOptions(
 			if (arg.Equals(CommandLineOptionTokens.ElevationAttempted, StringComparison.OrdinalIgnoreCase) ||
 			    arg.Equals(CommandLineOptionTokens.LegacyElevationAttempted, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				elevationAttempted = true;
 				continue;
 			}
@@ -102,24 +111,36 @@ public sealed record CommandLineOptions(
 			if (arg.Equals(CommandLineOptionTokens.NoUi, StringComparison.OrdinalIgnoreCase) ||
 			    arg.Equals(CommandLineOptionTokens.Silent, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				noUi = true;
 				continue;
 			}
 
 			if (arg.Equals(CommandLineOptionTokens.Strict, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				strict = true;
 				continue;
 			}
 
 			if (arg.Equals(CommandLineOptionTokens.Last, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				ui = ui with { OpenLastProject = true };
 				continue;
 			}
 
 			if (arg.Equals(CommandLineOptionTokens.Preview, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				ui = ui with { OpenPreview = true };
 				continue;
 			}
@@ -290,7 +311,7 @@ public sealed record CommandLineOptions(
 
 			if (IsOptionToken(arg))
 			{
-				errors.Add(new CommandLineParseError("unknown-option", $"Unknown option '{arg}'.", arg));
+				errors.Add(new CommandLineParseError("unknown-option", BuildUnknownOptionMessage(arg), arg));
 				if (!hasInlineValue && i + 1 < args.Length && !IsOptionToken(args[i + 1]))
 					i++;
 				continue;
@@ -299,6 +320,15 @@ public sealed record CommandLineOptions(
 			if (hasPositionalPath || !string.IsNullOrWhiteSpace(path))
 			{
 				errors.Add(new CommandLineParseError("unexpected-argument", $"Unexpected positional argument '{arg}'.", arg));
+				continue;
+			}
+
+			if (TryResolveMissingOptionPrefix(arg, out var suggestedOption))
+			{
+				errors.Add(new CommandLineParseError(
+					"missing-option-prefix",
+					$"Unknown command or path-like argument '{arg}'. Did you mean '{suggestedOption}'? Use --path {Quote(arg)} if this is a folder name.",
+					arg));
 				continue;
 			}
 
@@ -577,6 +607,21 @@ public sealed record CommandLineOptions(
 		return false;
 	}
 
+	private static bool TryRejectUnexpectedInlineValue(
+		string optionName,
+		string? inlineValue,
+		List<CommandLineParseError> errors)
+	{
+		if (inlineValue is null)
+			return false;
+
+		errors.Add(new CommandLineParseError(
+			"unexpected-value",
+			$"Option '{optionName}' does not accept a value.",
+			optionName));
+		return true;
+	}
+
 	private static bool IsHelpToken(string value) =>
 		value.Equals(CommandLineOptionTokens.Help, StringComparison.OrdinalIgnoreCase) ||
 		value.Equals(CommandLineOptionTokens.ShortHelp, StringComparison.OrdinalIgnoreCase) ||
@@ -590,6 +635,133 @@ public sealed record CommandLineOptions(
 		return value.StartsWith("--", StringComparison.Ordinal) ||
 		       (value.Length == 2 && value[0] == '-' && char.IsLetter(value[1])) ||
 		       value.Equals(CommandLineOptionTokens.WindowsHelp, StringComparison.Ordinal);
+	}
+
+	private static string BuildUnknownOptionMessage(string option)
+	{
+		if (TrySuggestLongOption(option, allowFuzzy: true, out var suggestion))
+			return $"Unknown option '{option}'. Did you mean '{suggestion}'?";
+
+		return $"Unknown option '{option}'.";
+	}
+
+	private static bool TryResolveMissingOptionPrefix(string value, out string suggestedOption)
+	{
+		suggestedOption = string.Empty;
+		if (string.IsNullOrWhiteSpace(value) ||
+		    value.StartsWith(".", StringComparison.Ordinal) ||
+		    value.StartsWith("~", StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		var looksLikeSlashOption =
+			value.Length > 1 &&
+			value[0] == '/' &&
+			value[1] != '/' &&
+			value.IndexOf('/', 1) < 0 &&
+			value.IndexOf('\\', 1) < 0;
+		if (looksLikeSlashOption &&
+		    TrySuggestLongOption(value, value.Contains('-') || value.Contains('_'), out suggestedOption))
+		{
+			return true;
+		}
+
+		if (global::System.IO.Path.IsPathRooted(value))
+			return false;
+
+		var allowFuzzy = value.Contains('-') || value.Contains('_');
+		return TrySuggestLongOption(value, allowFuzzy, out suggestedOption);
+	}
+
+	private static bool TrySuggestLongOption(string value, bool allowFuzzy, out string suggestedOption)
+	{
+		suggestedOption = string.Empty;
+		var normalizedValue = NormalizeOptionCandidate(value);
+		if (normalizedValue.Length == 0)
+			return false;
+
+		var compactValue = RemoveOptionSeparators(normalizedValue);
+		string? nearestOption = null;
+		var nearestDistance = int.MaxValue;
+
+		foreach (var option in CommandLineOptionTokens.PublicHelpTokens)
+		{
+			if (!option.StartsWith("--", StringComparison.Ordinal))
+				continue;
+
+			var normalizedOption = NormalizeOptionCandidate(option);
+			if (normalizedValue.Equals(normalizedOption, StringComparison.Ordinal) ||
+			    compactValue.Equals(RemoveOptionSeparators(normalizedOption), StringComparison.Ordinal))
+			{
+				suggestedOption = option;
+				return true;
+			}
+
+			if (!allowFuzzy)
+				continue;
+
+			var distance = CalculateBoundedEditDistance(normalizedValue, normalizedOption, maxDistance: 2);
+			if (distance < nearestDistance)
+			{
+				nearestDistance = distance;
+				nearestOption = option;
+			}
+		}
+
+		if (nearestOption is null || nearestDistance > 2)
+			return false;
+
+		suggestedOption = nearestOption;
+		return true;
+	}
+
+	private static string NormalizeOptionCandidate(string value)
+	{
+		var trimmed = value.Trim();
+		while (trimmed.StartsWith("--", StringComparison.Ordinal))
+			trimmed = trimmed[2..];
+		while (trimmed.StartsWith("-", StringComparison.Ordinal))
+			trimmed = trimmed[1..];
+		while (trimmed.StartsWith("/", StringComparison.Ordinal))
+			trimmed = trimmed[1..];
+
+		return NormalizeOptionName(trimmed);
+	}
+
+	private static string RemoveOptionSeparators(string value) =>
+		value.Replace("-", string.Empty, StringComparison.Ordinal);
+
+	private static int CalculateBoundedEditDistance(string left, string right, int maxDistance)
+	{
+		if (Math.Abs(left.Length - right.Length) > maxDistance)
+			return maxDistance + 1;
+
+		var previous = new int[right.Length + 1];
+		var current = new int[right.Length + 1];
+		for (var j = 0; j <= right.Length; j++)
+			previous[j] = j;
+
+		for (var i = 1; i <= left.Length; i++)
+		{
+			current[0] = i;
+			var bestInRow = current[0];
+			for (var j = 1; j <= right.Length; j++)
+			{
+				var substitutionCost = left[i - 1] == right[j - 1] ? 0 : 1;
+				current[j] = Math.Min(
+					Math.Min(current[j - 1] + 1, previous[j] + 1),
+					previous[j - 1] + substitutionCost);
+				bestInRow = Math.Min(bestInRow, current[j]);
+			}
+
+			if (bestInRow > maxDistance)
+				return maxDistance + 1;
+
+			(previous, current) = (current, previous);
+		}
+
+		return previous[right.Length];
 	}
 
 	private static bool TryParseReportFormat(string value, out StartupReportFormat format)

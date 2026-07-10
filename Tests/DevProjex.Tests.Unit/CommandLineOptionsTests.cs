@@ -152,6 +152,91 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_ReadsRootedPositionalPathThatLooksLikeUnixPath()
+	{
+		var result = CommandLineOptions.Parse(["/tmp/no-ui"]);
+
+		AssertValid(result);
+		Assert.Equal("/tmp/no-ui", result.Options.Path);
+	}
+
+	[Theory]
+	[InlineData("no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("no_ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("noui", CommandLineOptionTokens.NoUi)]
+	[InlineData("no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("-no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("-no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("silent", CommandLineOptionTokens.Silent)]
+	[InlineData("help", CommandLineOptionTokens.Help)]
+	[InlineData("version", CommandLineOptionTokens.Version)]
+	[InlineData("export", CommandLineOptionTokens.Export)]
+	[InlineData("report", CommandLineOptionTokens.Report)]
+	[InlineData("tree-format", CommandLineOptionTokens.TreeFormat)]
+	[InlineData("tree-formt", CommandLineOptionTokens.TreeFormat)]
+	[InlineData("preview-search", CommandLineOptionTokens.PreviewSearch)]
+	public void Parse_RejectsKnownLongOptionNamesWithoutPrefix(string value, string expectedSuggestion)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertInvalid(result, "missing-option-prefix");
+		Assert.Null(result.Options.Path);
+		var error = Assert.Single(result.Errors);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", error.Message, StringComparison.Ordinal);
+		Assert.Contains($"Use --path {value}", error.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Parse_CommandStyleExportReportsMissingOptionPrefixInsteadOfLaunchingUi()
+	{
+		var result = CommandLineOptions.Parse(["export", "tree"]);
+
+		AssertInvalid(result, "missing-option-prefix");
+		Assert.Contains(
+			result.Errors,
+			static error => error.Message.Contains("Did you mean '--export'?", StringComparison.Ordinal));
+	}
+
+	[Theory]
+	[InlineData("/no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/no_ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("/help", CommandLineOptionTokens.Help)]
+	[InlineData("/version", CommandLineOptionTokens.Version)]
+	[InlineData("/export", CommandLineOptionTokens.Export)]
+	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	public void Parse_RejectsSlashStyleOptionTyposWithoutTreatingThemAsPaths(string value, string expectedSuggestion)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertInvalid(result, "missing-option-prefix");
+		Assert.Null(result.Options.Path);
+		var error = Assert.Single(result.Errors);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", error.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Parse_AllowsKnownOptionNameAsExplicitPathValue()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Path, "no-ui"]);
+
+		AssertValid(result);
+		Assert.Equal("no-ui", result.Options.Path);
+	}
+
+	[Theory]
+	[InlineData("./no-ui")]
+	[InlineData("../report")]
+	[InlineData(".\\silent")]
+	public void Parse_AllowsPathLikePositionalValuesThatResembleOptionNames(string value)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertValid(result);
+		Assert.Equal(value, result.Options.Path);
+	}
+
+	[Fact]
 	public void Parse_RejectsSecondPositionalPath()
 	{
 		var result = CommandLineOptions.Parse(["/tmp/one", "/tmp/two"]);
@@ -167,6 +252,43 @@ public sealed class CommandLineOptionsTests
 
 		AssertInvalid(result, "unknown-option");
 		Assert.Null(result.Options.Path);
+	}
+
+	[Theory]
+	[InlineData("--help=true")]
+	[InlineData("-h=true")]
+	[InlineData("--version=true")]
+	[InlineData("--no-ui=true")]
+	[InlineData("--silent=false")]
+	[InlineData("--strict=true")]
+	[InlineData("--last=true")]
+	[InlineData("--preview=true")]
+	[InlineData("--elevation-attempted=true")]
+	public void Parse_RejectsInlineValuesForValueLessFlags(string value)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertInvalid(result, "unexpected-value");
+		var error = Assert.Single(result.Errors);
+		Assert.Contains("does not accept a value", error.Message, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("--no_ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("--noui", CommandLineOptionTokens.NoUi)]
+	[InlineData("--silet", CommandLineOptionTokens.Silent)]
+	[InlineData("--prevew", CommandLineOptionTokens.Preview)]
+	[InlineData("--preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	[InlineData("--tree-fomat", CommandLineOptionTokens.TreeFormat)]
+	[InlineData("--export-formt", CommandLineOptionTokens.ExportFormat)]
+	public void Parse_UnknownOptionSuggestsClosestKnownLongOption(string value, string expectedSuggestion)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertInvalid(result, "unknown-option");
+		var error = Assert.Single(result.Errors);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", error.Message, StringComparison.Ordinal);
 	}
 
 	[Fact]

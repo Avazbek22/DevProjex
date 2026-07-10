@@ -59,6 +59,100 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.Contains("DevProjex: Unknown option '--unknown'.", error.ToString(), StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("-no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	[InlineData("--no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("--preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	public async Task RunUtilityOrHeadlessAsync_OptionTyposWriteStderrAndDoNotCreateServices(
+		string value,
+		string expectedSuggestion)
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created for parser errors.");
+			});
+		var parseResult = CommandLineOptions.Parse([value]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("DevProjex: ", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--no-ui=true")]
+	[InlineData("--help=true")]
+	[InlineData("--preview=true")]
+	public async Task RunUtilityOrHeadlessAsync_ValueLessFlagWithInlineValueWritesStderrAndDoesNotCreateServices(string value)
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created for parser errors.");
+			});
+		var parseResult = CommandLineOptions.Parse([value]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("does not accept a value", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_CommandStyleExportWritesStderrAndDoesNotCreateServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created for parser errors.");
+			});
+		var parseResult = CommandLineOptions.Parse(["export", "tree"]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("Did you mean '--export'?", error.ToString(), StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task RunUtilityOrHeadlessAsync_NoUiWithoutPathWritesUsageError()
 	{

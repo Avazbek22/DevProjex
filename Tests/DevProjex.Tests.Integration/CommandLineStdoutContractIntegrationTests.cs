@@ -132,6 +132,80 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		Assert.False(File.Exists(sharedPath));
 	}
 
+	[Theory]
+	[InlineData("no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("-no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("silent", CommandLineOptionTokens.Silent)]
+	[InlineData("help", CommandLineOptionTokens.Help)]
+	[InlineData("version", CommandLineOptionTokens.Version)]
+	[InlineData("export", CommandLineOptionTokens.Export)]
+	[InlineData("report", CommandLineOptionTokens.Report)]
+	[InlineData("preview-search", CommandLineOptionTokens.PreviewSearch)]
+	public async Task Process_KnownOptionNameWithoutDashWritesTerminalUsageError(string value, string expectedSuggestion)
+	{
+		var result = await RunAppAsync(value);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.StartsWith("DevProjex: ", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains($"Use --path {value}", result.Stderr, StringComparison.Ordinal);
+		Assert.DoesNotContain("Папка не найдена", result.Stderr, StringComparison.Ordinal);
+		Assert.DoesNotContain("Folder not found", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("--no_ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("--noui", CommandLineOptionTokens.NoUi)]
+	[InlineData("--silet", CommandLineOptionTokens.Silent)]
+	[InlineData("--preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	[InlineData("--tree-fomat", CommandLineOptionTokens.TreeFormat)]
+	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	public async Task Process_OptionTyposWriteUsageErrorWithSuggestion(string value, string expectedSuggestion)
+	{
+		var result = await RunAppAsync(value);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.StartsWith("DevProjex: ", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", result.Stderr, StringComparison.Ordinal);
+		Assert.DoesNotContain("Usage:", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Folder not found", result.Stderr, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--no-ui=true")]
+	[InlineData("--silent=false")]
+	[InlineData("--help=true")]
+	[InlineData("-h=true")]
+	[InlineData("--version=true")]
+	[InlineData("--preview=true")]
+	public async Task Process_ValueLessFlagWithInlineValueWritesUsageError(string value)
+	{
+		var result = await RunAppAsync(value);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.StartsWith("DevProjex: ", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains("does not accept a value", result.Stderr, StringComparison.Ordinal);
+		Assert.DoesNotContain("Usage:", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_CommandStyleExportWritesUsageErrorInsteadOfOpeningUi()
+	{
+		var result = await RunAppAsync("export", "tree");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.StartsWith("DevProjex: ", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains("Did you mean '--export'?", result.Stderr, StringComparison.Ordinal);
+		Assert.DoesNotContain("Folder not found", result.Stderr, StringComparison.Ordinal);
+	}
+
 	private static string SeedTerminalWorkspace(TemporaryDirectory temp)
 	{
 		var projectPath = temp.CreateDirectory("terminal project with spaces");
