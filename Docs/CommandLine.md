@@ -51,6 +51,8 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--report [file]` | Writes a JSON analysis report. If `file` is omitted, DevProjex writes to the default report folder. Use `--report -` to write JSON to stdout. |
 | `--report-path <file>` | Writes a JSON analysis report to a specific file. |
 | `--report-format json` | Selects the report format. JSON is the v1 format. |
+| `--benchmark <folder>` | Runs the standard project report benchmark against a folder and exits without showing the window. |
+| `--benchmark-output <file>` | Writes the detailed benchmark JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex benchmark folder. |
 | `--export <mode>` | Exports project text and exits without showing the window. Supported modes: `tree`, `content`, `tree-content`. |
 | `--output <file\|->`, `-o <file\|->` | Writes export text to a specific file, or to stdout when `-` is used. If omitted, export writes to stdout. |
 | `--export-format ascii\|json\|xml\|md`, `--format ascii\|json\|xml\|md` | Selects tree format for `tree` and `tree-content` exports. Content remains plain text. |
@@ -137,6 +139,24 @@ devprojex --no-ui --path "/home/me/projects/app" --report -
 
 In that mode stdout contains only the JSON report. If `--strict` is also used and diagnostics are present, the JSON is still written to stdout before DevProjex returns a failure exit code and writes diagnostic messages to stderr.
 
+## Benchmark
+
+`--benchmark <folder>` runs one standard project report benchmark profile:
+
+- cold process runs: DevProjex starts itself as a child process with `--no-ui --path <folder> --report -`;
+- warm pipeline runs: the same report/analyze pipeline is executed repeatedly inside the current process;
+- stdout prints a short human-readable summary;
+- a detailed JSON report is saved automatically.
+
+```bash
+devprojex --benchmark "/home/me/projects/app"
+devprojex --benchmark "C:\Projects\App" --benchmark-output "C:\Reports\devprojex-benchmark.json"
+```
+
+The benchmark measures wall time, CPU time, process memory, managed memory and GC counts for warm runs, stdout/report size, exit codes, and captured errors for every run. The JSON report also records application/runtime/OS details and the exact child command line used for cold runs.
+
+`--benchmark` is intentionally one fixed scenario: project report analysis. It cannot be combined with `--path`, report/export options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
+
 ## Exports
 
 Exports are human-readable text payloads that match the app's copy/export behavior:
@@ -189,7 +209,7 @@ Automation-friendly output is kept strict:
 
 - `stdout`: help text, version text, generated file paths, implicit or explicit JSON report payloads, or export payloads.
 - `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
-- no UI is created for `--help`, `--version`, `--no-ui`, or `--export`.
+- no UI is created for `--help`, `--version`, `--no-ui`, `--export`, or `--benchmark`.
 - only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
 
 ## Windows Portable EXE Note
