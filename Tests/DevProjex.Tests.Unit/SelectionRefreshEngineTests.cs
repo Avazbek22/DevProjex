@@ -232,6 +232,46 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
+	public void ComputeFullRefreshSnapshot_CheckedControllersWithNoImpactStayHidden()
+	{
+		var scanner = new ProfileFallbackVisibilityScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(scanner),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			(_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				ShowAdvancedCounts: true));
+		var context = CreateDefaultsContext() with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>
+			{
+				IgnoreOptionId.UseGitIgnore,
+				IgnoreOptionId.SmartIgnore
+			},
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = true,
+				[IgnoreOptionId.SmartIgnore] = true
+			},
+			IgnoreOptionStateCacheIsComplete = true
+		};
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(context, CancellationToken.None);
+
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.UseGitIgnore, out var gitState));
+		Assert.True(gitState);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.SmartIgnore, out var smartState));
+		Assert.True(smartState);
+	}
+
+	[Fact]
 	public void ComputeLiveRefreshSnapshot_ReusesIgnoreRulesForIdenticalInputs()
 	{
 		var scanner = new StableSnapshotScanner();

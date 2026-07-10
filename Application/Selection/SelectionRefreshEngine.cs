@@ -743,10 +743,13 @@ public sealed class SelectionRefreshEngine(
         if (controllerImpactCount > 0)
             return true;
 
-        // Controller toggles are reversible UI controls. Once the user has an explicit
-        // checked/unchecked state, zero effective impact must not remove the control,
-        // otherwise turning .gitignore off can make it impossible to turn back on.
-        return stateCacheIsComplete && stateCache.ContainsKey(optionId);
+        // Controller toggles are reversible UI controls. An explicit unchecked state must
+        // stay visible even when its own current impact drops to zero; otherwise turning
+        // .gitignore off can make it impossible to turn back on. Checked zero-impact
+        // controllers remain hidden so restored profiles do not promote no-op rules.
+        return stateCacheIsComplete &&
+               stateCache.TryGetValue(optionId, out var isChecked) &&
+               !isChecked;
     }
 
     private static IgnoreSectionSnapshotState CreateSnapshotState(

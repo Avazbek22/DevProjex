@@ -205,6 +205,29 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 		Assert.False(viewModel.AllIgnoreChecked);
 	}
 
+	[Fact]
+	public void PopulateIgnoreOptionsForRootSelection_CheckedGitController_HidesWhenImpactDropsToZero()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, includeGitIgnore: true);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+
+		ApplyIgnoreCounts(
+			coordinator,
+			IgnoreOptionCounts.Empty,
+			new IgnoreControllerImpactCounts(GitIgnore: 1));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.UseGitIgnore).IsChecked);
+
+		ApplyIgnoreCounts(coordinator, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty);
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, coordinator.GetSelectedIgnoreOptionIds());
+		Assert.True(coordinator.SnapshotIgnoreOptionStatesForPersistence()![IgnoreOptionId.UseGitIgnore]);
+	}
+
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)
 	{
 		return Assert.Single(viewModel.IgnoreOptions, option => option.Id == id);

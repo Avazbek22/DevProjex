@@ -842,6 +842,37 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_ExportTreeToStdout_IgnoreOverrideControlsGitIgnoredDotFile()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", ".env\n");
+		temp.CreateFile("App.csproj", "<Project />\n");
+		temp.CreateFile("Program.cs", "Console.WriteLine(\"ok\");\n");
+		temp.CreateFile(".env", "SECRET=1\n");
+
+		var gitIgnoreOnly = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			".",
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreGitIgnore);
+		var allIgnoreOff = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			".",
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, gitIgnoreOnly.ExitCode);
+		Assert.Equal(string.Empty, gitIgnoreOnly.Stderr);
+		Assert.Contains("Program.cs", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain(".env", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+
+		Assert.Equal(CommandLineExitCodes.Success, allIgnoreOff.ExitCode);
+		Assert.Equal(string.Empty, allIgnoreOff.Stderr);
+		Assert.Contains("Program.cs", allIgnoreOff.Stdout, StringComparison.Ordinal);
+		Assert.Contains(".env", allIgnoreOff.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task Process_ExportTreeContentToRelativeOutputFromWorkingDirectory()
 	{
 		using var temp = new TemporaryDirectory();

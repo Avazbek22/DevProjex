@@ -889,11 +889,12 @@ public sealed partial class SelectionSyncCoordinator(
         if (controllerImpactCount > 0)
             return true;
 
-        // Controller toggles must stay reversible after an explicit user choice. If an
-        // unchecked .gitignore removes its own measured impact, hiding the checkbox would
-        // trap the user until the profile or project state is reset.
+        // Controller toggles must stay reversible after an explicit user choice. Only the
+        // unchecked zero-impact state is forced visible; checked zero-impact profile state
+        // stays hidden so it cannot unexpectedly become an active runtime selection.
         return _session.IgnoreOptionStateCacheIsComplete &&
-               _session.IgnoreOptions.OptionStateCache.ContainsKey(optionId);
+               _session.IgnoreOptions.OptionStateCache.TryGetValue(optionId, out var isChecked) &&
+               !isChecked;
     }
 
     private static IgnoreOptionsAvailability CreateCountDrivenIgnoreAvailability(
