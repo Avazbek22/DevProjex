@@ -28,8 +28,10 @@ Format qoidalari:
 * Daraxtni eksport qilish:
   * ASCII -> faqat `.txt`.
   * JSON -> standart `.json`, saqlash oynasida `.json` va `.txt` mavjud.
-* Mazmunni eksport qilish — har doim mazmunning matn formati, `.txt` fayl (ASCII/JSON tumbleri ta’sir qilmaydi).
-* Daraxt va mazmunni eksport qilish — har doim `.txt` fayl; ASCII/JSON tumbleri faqat natijadagi daraxt blokining formatiga ta’sir qiladi.
+  * XML -> standart `.xml`, saqlash oynasida `.xml` va `.txt` mavjud.
+  * MD -> standart `.md`, saqlash oynasida `.md` va `.txt` mavjud.
+* Mazmunni eksport qilish — har doim mazmunning matn formati, `.txt` fayl (daraxt formati tumbleri ta’sir qilmaydi).
+* Daraxt va mazmunni eksport qilish — har doim `.txt` fayl; tanlangan daraxt formati faqat natijadagi daraxt blokining formatiga ta’sir qiladi.
 
 Eksport fayllari UTF-8 (BOMsiz) formatida yoziladi.
 
@@ -50,7 +52,7 @@ Qoidalar:
 * ro‘yxatga faqat lokal jildlar qo‘shiladi;
 * DevProjex orqali klonlangan Git repozitoriylari bu ro‘yxatga qo‘shilmaydi;
 * dublikatlar yaratilmaydi — bir xil jildni qayta ochish uni ro‘yxatning yuqorisiga olib chiqadi;
-* 10 tagacha so‘nggi jild saqlanadi;
+* 15 tagacha so‘nggi jild saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.
 
 Har bir element uchun jildning qisqa nomi ko‘rsatiladi, to‘liq yo‘l esa tooltip’da mavjud bo‘ladi.
@@ -70,6 +72,7 @@ Misollar:
 * `devprojex . --export content` — fayllar mazmunini terminalga chiqarish.
 * `devprojex . --export tree-content` — daraxt va mazmunni terminalga chiqarish.
 * `devprojex . --export tree-content -o context.txt` — natijani faylga saqlash.
+* `devprojex --benchmark "C:\Projects\App"` — standart loyiha hisoboti workflow’ini o‘lchash.
 
 Xususiyatlar:
 * `.` terminaldagi joriy papkani bildiradi;
@@ -104,11 +107,13 @@ Ro‘yxatdan element tanlansa, URL avtomatik ravishda kiritish maydoniga qo‘yi
 Faol klonlash vaqtida ro‘yxat vaqtincha yashiriladi.
 
 ## 6) Nusxa
-### Daraxt formati tumbleri (ASCII/JSON)
+### Daraxt formati tumbleri (ASCII / JSON / XML / MD)
 Tumbler natijada daraxt ishtirok etadigan amallar uchun daraxt ko‘rinishi formatini belgilaydi.
 
 * ASCII — shoxlari bor matnli daraxt.
 * JSON — JSON formatidagi strukturali daraxt.
+* XML — parserlar va vositalar uchun ixcham XML daraxt.
+* MD — hujjatlar va AI promptlar uchun ichma-ich Markdown ro‘yxat.
 
 Tumbler quyidagilarga ta’sir qiladi:
 * Daraxtni nusxalash
@@ -123,7 +128,7 @@ Tumbler quyidagilarga ta’sir qilmaydi:
 ### Daraxtni nusxalash
 Loyiha daraxtini nusxalaydi.
 Agar belgilangan tugunlar bo‘lsa, daraxt tanlov bo‘yicha quriladi; tanlov bo‘sh yoki yaroqsiz bo‘lsa, to‘liq daraxt nusxalanadi.
-Natija formati ASCII/JSON tumbleri bilan aniqlanadi.
+Natija formati daraxt formati tumbleri bilan aniqlanadi.
 Tugmalar: Ctrl+Shift+C va Ctrl+Alt+C.
 
 ### Mazmunni nusxalash
@@ -138,19 +143,29 @@ Tugma: Ctrl+Alt+V.
 Daraxt va mazmunni birlashtiradi:
 * daraxt tanlov bo‘yicha; agar tanlov bo‘sh yoki yaroqsiz bo‘lsa — to‘liq daraxt;
 * mazmun «Mazmunni nusxalash» qoidalari bo‘yicha;
-* daraxt blokining formati ASCII/JSON tumbleri bilan aniqlanadi.
+* daraxt blokining formati daraxt formati tumbleri bilan aniqlanadi.
 Tugma: Ctrl+Shift+V.
 
-### JSON ko‘rinishi
-JSON rejimida daraxtning strukturali ko‘rinishi ishlatiladi.
+### Daraxt ko‘rinishlari
+Daraxt formatlari bir xil tanlangan loyiha daraxtini turlicha ko‘rsatadi.
 
-Daraxt (Daraxtni nusxalash / Daraxtni eksport qilish):
+JSON:
 * `rootPath` — `/` orqali normallashtirilgan absolyut ildiz yo‘li.
 * `tree` — ildiz papkaning mazmuni.
 * JSON eksport shu daraxt formatidan foydalanadi: massivlar fayllarni, obyektlar ichki papkalarni, `/` joriy papkadagi fayllarni saqlaydi, `[]` esa bo‘sh papkani bildiradi.
 
+XML:
+* ildiz tugun — `<t r="...">`;
+* papkalar — `<d n="...">`;
+* fayllar — `<f>File.cs</f>`.
+
+MD:
+* `Root: ...` bilan boshlanadi;
+* ichma-ich Markdown ro‘yxatidan foydalanadi;
+* papkalar `/` bilan tugaydi.
+
 Daraxt + mazmun:
-* JSON daraxt blokiga qo‘llanadi;
+* tanlangan daraxt formati daraxt blokiga qo‘llanadi;
 * mazmun bloki matn bo‘lib qoladi;
 * mazmun blokidagi fayl sarlavhalari `/` orqali relative yo‘llardan foydalanadi;
 * eksport `.txt` formatida saqlanadi.
@@ -398,7 +413,7 @@ Muhim:
 ### 13.2 Metrikalar qanday hisoblanadi
 Daraxt metrikalari:
 * aynan eksport pipeline’i yaratadigan real daraxt matni bo‘yicha hisoblanadi;
-* joriy ASCII/JSON formatini hisobga oladi.
+* joriy daraxt formatini hisobga oladi.
 
 Mazmun metrikalari:
 * mazmunni nusxalash/eksport qilish qoidalari bilan bir xil hisoblanadi;
@@ -410,7 +425,7 @@ Qayta hisoblash quyidagi holatlarda bajariladi:
 * loyiha ochilgandan/yangilangandan keyin;
 * sozlamalar qo‘llangandan keyin (ignore, fayl turlari, root jildlar);
 * daraxtdagi checkboxlar o‘zgarganda (debounce bilan);
-* ASCII/JSON almashtirilganda (daraxt ishlatiladigan amallar uchun).
+* daraxt formati almashtirilganda (daraxt ishlatiladigan amallar uchun).
 * fon hisoblash bekor qilinsa, keyingi to‘liq yakunlangan qayta hisoblashgacha hisoblagichlar 0 ga o‘rnatiladi.
 
 ## 14) Ikonkalar

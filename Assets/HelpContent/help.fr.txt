@@ -28,8 +28,10 @@ Règles de format :
 * Exporter l’arborescence :
   * ASCII -> uniquement `.txt`.
   * JSON -> `.json` par défaut, avec `.json` et `.txt` disponibles dans la boîte de sauvegarde.
-* Exporter le contenu — toujours au format texte du contenu, fichier `.txt` (le sélecteur ASCII/JSON n’influence pas).
-* Exporter arborescence et contenu — toujours fichier `.txt` ; le sélecteur ASCII/JSON n’influence que le format du bloc arborescence dans le résultat.
+  * XML -> `.xml` par défaut, avec `.xml` et `.txt` disponibles dans la boîte de sauvegarde.
+  * MD -> `.md` par défaut, avec `.md` et `.txt` disponibles dans la boîte de sauvegarde.
+* Exporter le contenu — toujours au format texte du contenu, fichier `.txt` (le sélecteur de format d’arborescence n’influence pas).
+* Exporter arborescence et contenu — toujours fichier `.txt` ; le format d’arborescence choisi n’influence que le format du bloc arborescence dans le résultat.
 
 Les fichiers exportés sont écrits en UTF-8 sans BOM.
 
@@ -50,7 +52,7 @@ Règles :
 * seuls les dossiers locaux sont ajoutés à la liste ;
 * les dépôts Git clonés via DevProjex ne sont pas ajoutés à cette liste ;
 * aucun doublon n’est créé — rouvrir le même dossier le remonte en haut de la liste ;
-* jusqu’à 10 derniers dossiers sont conservés ;
+* jusqu’à 15 derniers dossiers sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.
 
 Pour chaque élément, le nom court du dossier est affiché ; le chemin complet est disponible dans une info-bulle.
@@ -70,6 +72,7 @@ Exemples :
 * `devprojex . --export content` — afficher le contenu des fichiers dans le terminal.
 * `devprojex . --export tree-content` — afficher l’arborescence et le contenu dans le terminal.
 * `devprojex . --export tree-content -o context.txt` — enregistrer le résultat dans un fichier.
+* `devprojex --benchmark "C:\Projects\App"` — mesurer le workflow standard de rapport de projet.
 
 Particularités :
 * `.` désigne le dossier courant du terminal ;
@@ -104,11 +107,13 @@ Si vous choisissez un élément dans la liste, l’URL est automatiquement insé
 Pendant un clonage actif, la liste est temporairement masquée.
 
 ## 6) Copier
-### Sélecteur de format de l’arborescence (ASCII/JSON)
+### Sélecteur de format de l’arborescence (ASCII / JSON / XML / MD)
 Le sélecteur définit le format de représentation de l’arborescence pour les opérations où l’arbre participe au résultat.
 
 * ASCII — arborescence textuelle avec branches.
 * JSON — arborescence structurée en JSON.
+* XML — arborescence XML compacte pour les parseurs et outils.
+* MD — liste Markdown imbriquée pour la documentation et les prompts IA.
 
 Le sélecteur influence :
 * Copier l’arborescence
@@ -123,7 +128,7 @@ Le sélecteur n’influence pas :
 ### Copier l’arborescence
 Copie l’arborescence du projet.
 S’il y a des nœuds cochés, l’arborescence est construite à partir de la sélection ; si la sélection est vide ou invalide, l’arborescence complète est copiée.
-Le format du résultat est défini par le sélecteur ASCII/JSON.
+Le format du résultat est défini par le sélecteur de format d’arborescence.
 Raccourcis : Ctrl+Shift+C et Ctrl+Alt+C.
 
 ### Copier le contenu
@@ -138,19 +143,29 @@ Raccourci : Ctrl+Alt+V.
 Combine arborescence et contenu :
 * arborescence depuis la sélection ; si la sélection est vide ou invalide, l’arborescence complète est utilisée ;
 * contenu selon les mêmes règles que « Copier le contenu » ;
-* le format du bloc arborescence est défini par le sélecteur ASCII/JSON.
+* le format du bloc arborescence est défini par le sélecteur de format d’arborescence.
 Raccourci : Ctrl+Shift+V.
 
-### Représentation JSON
-Le mode JSON utilise une représentation structurée de l’arborescence.
+### Représentations de l’arborescence
+Les formats représentent différemment la même arborescence de projet sélectionnée.
 
-Arborescence (Copier l’arborescence / Exporter l’arborescence) :
+JSON :
 * `rootPath` — chemin racine absolu normalisé avec `/`.
 * `tree` — contenu du dossier racine.
 * L’export JSON utilise ce format d’arborescence : les tableaux contiennent les fichiers, les objets contiennent les sous-dossiers, `/` contient les fichiers du dossier courant, et `[]` représente un dossier vide.
 
+XML :
+* le nœud racine est `<t r="...">` ;
+* les dossiers sont `<d n="...">` ;
+* les fichiers sont `<f>File.cs</f>`.
+
+MD :
+* commence par `Root: ...` ;
+* utilise une liste Markdown imbriquée ;
+* les dossiers se terminent par `/`.
+
 Arborescence + contenu :
-* JSON s’applique au bloc arborescence ;
+* le format d’arborescence choisi s’applique au bloc arborescence ;
 * le bloc contenu reste textuel ;
 * les en-têtes de fichiers du bloc contenu utilisent des chemins relatifs avec `/` ;
 * export en `.txt`.
@@ -398,7 +413,7 @@ Important :
 ### 13.2 Comment les métriques sont calculées
 Métriques de l’arbre :
 * sont calculées à partir de la sortie réelle de l’arbre générée par le même pipeline d’export ;
-* respectent le format ASCII/JSON courant.
+* respectent le format d’arborescence courant.
 
 Métriques du contenu :
 * suivent les mêmes règles que la copie/export du contenu ;
@@ -410,7 +425,7 @@ Le recalcul est effectué :
 * après ouverture/actualisation d’un projet ;
 * après application des paramètres (ignore, types de fichiers, dossiers racine) ;
 * lors des changements de cases à cocher dans l’arbre (avec debounce) ;
-* lors du basculement ASCII/JSON (pour les opérations utilisant l’arbre).
+* lors du basculement du format d’arborescence (pour les opérations utilisant l’arbre).
 * si le calcul en arrière-plan est annulé, les compteurs sont remis à 0 jusqu’au prochain recalcul terminé.
 
 ## 14) Icônes

@@ -207,7 +207,7 @@ When report and export are requested together, `--report-path` and `--output` mu
 
 Automation-friendly output is kept strict:
 
-- `stdout`: help text, version text, generated file paths, implicit or explicit JSON report payloads, or export payloads.
+- `stdout`: help text, version text, generated file paths, benchmark summaries, implicit or explicit JSON report payloads, or export payloads.
 - `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
 - no UI is created for `--help`, `--version`, `--no-ui`, `--export`, or `--benchmark`.
 - only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
@@ -296,6 +296,18 @@ Print a JSON tree to stdout:
 
 ```bash
 devprojex "/home/me/projects/app" --export tree --format json
+```
+
+Print an XML tree to stdout:
+
+```bash
+devprojex "/home/me/projects/app" --export tree --format xml
+```
+
+Export Markdown tree and content to a file:
+
+```bash
+devprojex "/home/me/projects/app" --export tree-content --format md -o ./context.md
 ```
 
 Pipe the JSON report to stdout:

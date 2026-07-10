@@ -28,8 +28,10 @@ Formatregeln:
 * Baum exportieren:
   * ASCII -> nur `.txt`.
   * JSON -> Standard `.json`, im Speichern-Dialog sind `.json` und `.txt` verfügbar.
-* Inhalt exportieren — immer Textformat des Inhalts, Datei `.txt` (ASCII/JSON-Schalter wirkt hier nicht).
-* Baum und Inhalt exportieren — immer Datei `.txt`; der ASCII/JSON-Schalter beeinflusst nur das Format des Baumblocks im Ergebnis.
+  * XML -> Standard `.xml`, im Speichern-Dialog sind `.xml` und `.txt` verfügbar.
+  * MD -> Standard `.md`, im Speichern-Dialog sind `.md` und `.txt` verfügbar.
+* Inhalt exportieren — immer Textformat des Inhalts, Datei `.txt` (der Baumformat-Schalter wirkt hier nicht).
+* Baum und Inhalt exportieren — immer Datei `.txt`; das gewählte Baumformat beeinflusst nur das Format des Baumblocks im Ergebnis.
 
 Exportdateien werden in UTF-8 ohne BOM geschrieben.
 
@@ -50,7 +52,7 @@ Regeln:
 * in die Liste werden nur lokale Ordner aufgenommen;
 * über DevProjex geklonte Git-Repositories werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Öffnen desselben Ordners verschiebt ihn nach oben;
-* es werden bis zu 10 letzte Ordner gespeichert;
+* es werden bis zu 15 letzte Ordner gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
 
 Für jeden Eintrag wird der kurze Ordnername angezeigt; der vollständige Pfad ist über einen Tooltip verfügbar.
@@ -70,6 +72,7 @@ Beispiele:
 * `devprojex . --export content` — Dateiinhalte im Terminal ausgeben.
 * `devprojex . --export tree-content` — Baum und Inhalte im Terminal ausgeben.
 * `devprojex . --export tree-content -o context.txt` — das Ergebnis in eine Datei speichern.
+* `devprojex --benchmark "C:\Projects\App"` — den Standard-Projektreport-Workflow messen.
 
 Hinweise:
 * `.` bedeutet den aktuellen Terminal-Ordner;
@@ -104,11 +107,13 @@ Wenn Sie einen Eintrag auswählen, wird die URL automatisch in das Eingabefeld e
 Während eines aktiven Klonvorgangs wird die Liste vorübergehend ausgeblendet.
 
 ## 6) Kopieren
-### Baumformat-Schalter (ASCII/JSON)
+### Baumformat-Schalter (ASCII / JSON / XML / MD)
 Der Schalter legt das Baumdarstellungsformat für Operationen fest, bei denen der Baum im Ergebnis enthalten ist.
 
 * ASCII — Textbaum mit Zweigen.
 * JSON — strukturierter Baum in JSON.
+* XML — kompakter XML-Baum für Parser und Werkzeuge.
+* MD — verschachtelte Markdown-Liste für Dokumentation und AI-Prompts.
 
 Der Schalter beeinflusst:
 * Baum kopieren
@@ -123,7 +128,7 @@ Der Schalter beeinflusst nicht:
 ### Baum kopieren
 Kopiert den Projektbaum.
 Wenn Knoten markiert sind, wird der Baum aus der Auswahl gebaut; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert.
-Das Ergebnisformat wird vom ASCII/JSON-Schalter bestimmt.
+Das Ergebnisformat wird vom Baumformat-Schalter bestimmt.
 Tastenkürzel: Ctrl+Shift+C und Ctrl+Alt+C.
 
 ### Inhalt kopieren
@@ -138,19 +143,29 @@ Tastenkürzel: Ctrl+Alt+V.
 Kombiniert Baum und Inhalte:
 * Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum verwendet;
 * Inhalte nach denselben Regeln wie „Inhalt kopieren“;
-* das Format des Baumblocks wird vom ASCII/JSON-Schalter bestimmt.
+* das Format des Baumblocks wird vom Baumformat-Schalter bestimmt.
 Tastenkürzel: Ctrl+Shift+V.
 
-### JSON-Darstellung
-Im JSON-Modus wird eine strukturierte Baumdarstellung verwendet.
+### Baumdarstellungen
+Baumformate stellen denselben ausgewählten Projektbaum unterschiedlich dar.
 
-Baum (Baum kopieren / Baum exportieren):
+JSON:
 * `rootPath` — absoluter Wurzelpfad, mit `/` normalisiert.
 * `tree` — Inhalt des Wurzelordners.
 * Der JSON-Export verwendet dieses Baumformat: Arrays enthalten Dateien, Objekte enthalten Unterordner, `/` enthält Dateien des aktuellen Ordners, und `[]` steht für einen leeren Ordner.
 
+XML:
+* Wurzelknoten ist `<t r="...">`;
+* Ordner sind `<d n="...">`;
+* Dateien sind `<f>File.cs</f>`.
+
+MD:
+* beginnt mit `Root: ...`;
+* verwendet eine verschachtelte Markdown-Liste;
+* Ordner enden mit `/`.
+
 Baum + Inhalt:
-* JSON gilt für den Baumblock;
+* das gewählte Baumformat gilt für den Baumblock;
 * der Inhaltsblock bleibt Text;
 * Dateiüberschriften im Inhaltsblock verwenden relative Pfade mit `/`;
 * Export erfolgt als `.txt`.
@@ -398,7 +413,7 @@ Wichtig:
 ### 13.2 Wie die Kennzahlen berechnet werden
 Baum-Kennzahlen:
 * werden aus der tatsächlichen Baum-Ausgabe berechnet, die von derselben Export-Pipeline erzeugt wird;
-* berücksichtigen das aktuelle ASCII/JSON-Format.
+* berücksichtigen das aktuelle Baumformat.
 
 Inhalt-Kennzahlen:
 * folgen denselben Regeln wie beim Kopieren/Exportieren von Inhalten;
@@ -410,7 +425,7 @@ Neu berechnet wird:
 * nach dem Öffnen/Aktualisieren eines Projekts;
 * nach dem Anwenden von Einstellungen (Ignore, Dateitypen, Root-Ordner);
 * bei Änderungen von Checkboxen im Baum (mit Debounce);
-* beim Umschalten ASCII/JSON (für Operationen mit Baum-Ausgabe).
+* beim Umschalten des Baumformats (für Operationen mit Baum-Ausgabe).
 * wenn die Hintergrundberechnung abgebrochen wird, werden die Zähler auf 0 gesetzt, bis die nächste vollständige Neuberechnung abgeschlossen ist.
 
 ## 14) Symbole

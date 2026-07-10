@@ -28,8 +28,10 @@ Regole di formato:
 * Esporta albero:
   * ASCII -> solo `.txt`.
   * JSON -> predefinito `.json`, con `.json` e `.txt` disponibili nella finestra di salvataggio.
-* Esporta contenuto — sempre formato testo del contenuto, file `.txt` (il selettore ASCII/JSON non influisce).
-* Esporta albero e contenuto — sempre file `.txt`; il selettore ASCII/JSON influisce solo sul formato del blocco albero nel risultato.
+  * XML -> predefinito `.xml`, con `.xml` e `.txt` disponibili nella finestra di salvataggio.
+  * MD -> predefinito `.md`, con `.md` e `.txt` disponibili nella finestra di salvataggio.
+* Esporta contenuto — sempre formato testo del contenuto, file `.txt` (il selettore formato albero non influisce).
+* Esporta albero e contenuto — sempre file `.txt`; il formato albero selezionato influisce solo sul formato del blocco albero nel risultato.
 
 I file esportati vengono scritti in UTF-8 senza BOM.
 
@@ -50,7 +52,7 @@ Regole:
 * nell’elenco vengono aggiunte solo cartelle locali;
 * i repository Git clonati tramite DevProjex non vengono aggiunti a questo elenco;
 * non vengono creati duplicati — riaprire la stessa cartella la sposta in cima;
-* vengono conservate fino a 10 cartelle recenti;
+* vengono conservate fino a 15 cartelle recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
 
 Per ogni elemento viene mostrato il nome breve della cartella; il percorso completo è disponibile in un tooltip.
@@ -70,6 +72,7 @@ Esempi:
 * `devprojex . --export content` — stampare il contenuto dei file nel terminale.
 * `devprojex . --export tree-content` — stampare albero e contenuti nel terminale.
 * `devprojex . --export tree-content -o context.txt` — salvare il risultato in un file.
+* `devprojex --benchmark "C:\Projects\App"` — misurare il workflow standard del report di progetto.
 
 Note:
 * `.` indica la cartella corrente del terminale;
@@ -104,11 +107,13 @@ Se selezioni un elemento dall’elenco, l’URL viene inserito automaticamente n
 Durante una clonazione attiva l’elenco viene nascosto temporaneamente.
 
 ## 6) Copia
-### Selettore formato albero (ASCII/JSON)
+### Selettore formato albero (ASCII / JSON / XML / MD)
 Il selettore definisce il formato di rappresentazione dell’albero per le operazioni in cui l’albero partecipa al risultato.
 
 * ASCII — albero testuale con rami.
 * JSON — albero strutturato in JSON.
+* XML — albero XML compatto per parser e strumenti.
+* MD — lista Markdown annidata per documentazione e prompt AI.
 
 Il selettore influisce su:
 * Copia albero
@@ -123,7 +128,7 @@ Il selettore non influisce su:
 ### Copia albero
 Copia l’albero del progetto.
 Se ci sono nodi selezionati, l’albero è costruito dalla selezione; se la selezione è vuota o non valida, viene copiato l’albero completo.
-Il formato del risultato è definito dal selettore ASCII/JSON.
+Il formato del risultato è definito dal selettore formato albero.
 Scorciatoie: Ctrl+Shift+C e Ctrl+Alt+C.
 
 ### Copia contenuto
@@ -138,19 +143,29 @@ Scorciatoia: Ctrl+Alt+V.
 Combina albero e contenuto:
 * albero dalla selezione; se la selezione è vuota o non valida, viene usato l’albero completo;
 * contenuto secondo le stesse regole di «Copia contenuto»;
-* il formato del blocco albero è definito dal selettore ASCII/JSON.
+* il formato del blocco albero è definito dal selettore formato albero.
 Scorciatoia: Ctrl+Shift+V.
 
-### Rappresentazione JSON
-In modalità JSON viene usata una rappresentazione strutturata dell’albero.
+### Rappresentazioni dell’albero
+I formati albero rappresentano in modi diversi lo stesso albero di progetto selezionato.
 
-Albero (Copia albero / Esporta albero):
+JSON:
 * `rootPath` — percorso radice assoluto normalizzato con `/`.
 * `tree` — contenuto della cartella radice.
 * L’export JSON usa questo formato albero: gli array contengono i file, gli oggetti contengono le sottocartelle, `/` contiene i file della cartella corrente e `[]` rappresenta una cartella vuota.
 
+XML:
+* il nodo radice è `<t r="...">`;
+* le cartelle sono `<d n="...">`;
+* i file sono `<f>File.cs</f>`.
+
+MD:
+* inizia con `Root: ...`;
+* usa una lista Markdown annidata;
+* le cartelle terminano con `/`.
+
 Albero + contenuto:
-* JSON si applica al blocco albero;
+* il formato albero selezionato si applica al blocco albero;
 * il blocco contenuto resta testuale;
 * le intestazioni dei file nel blocco contenuto usano percorsi relativi con `/`;
 * esportazione in `.txt`.
@@ -398,7 +413,7 @@ Importante:
 ### 13.2 Come vengono calcolate le metriche
 Metriche albero:
 * sono calcolate dall’output reale dell’albero generato dalla stessa pipeline di export;
-* rispettano il formato ASCII/JSON corrente.
+* rispettano il formato albero corrente.
 
 Metriche contenuto:
 * seguono le stesse regole della copia/export contenuto;
@@ -410,7 +425,7 @@ Il ricalcolo avviene:
 * dopo apertura/aggiornamento progetto;
 * dopo applicazione impostazioni (ignore, tipi file, cartelle root);
 * quando cambiano le checkbox nell’albero (con debounce);
-* quando si passa ASCII/JSON (per operazioni che usano l’albero).
+* quando si cambia formato albero (per operazioni che usano l’albero).
 * quando il calcolo in background viene annullato, i contatori vengono impostati a 0 fino al successivo ricalcolo completato.
 
 ## 14) Icone

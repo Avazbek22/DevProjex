@@ -12,7 +12,7 @@
 
 DevProjex is a cross-platform desktop app for turning real folders and codebases into **clean, controlled context for AI chats, reviews, and documentation**.
 
-Select only what matters, preview the result, and copy or export it as **tree, content, or both** in ASCII or JSON.
+Select only what matters, preview the result, and copy or export it as **tree, content, or both** in ASCII, MD, JSON, or XML.
 
 It’s built for real projects where terminal output is noisy, IDE integrations are limited, and you still need fast, controlled context for an AI chat or a human reviewer.
 
@@ -54,7 +54,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **TreeView with checkbox selection**
 * **Multiple copy/export modes** (tree / content / combined)
 * **Preview mode** (tree / content / combined) before copy/export
-* **ASCII/JSON tree format toggle** for tree-based operations
+* **ASCII, MD, JSON, and XML tree formats** for AI prompts, documentation, and parsers
 * **Per-project local parameter profiles** (saved per local project path)
 * **Export to file** from menu (tree / content / tree + content)
 * **Search & name filtering** for large projects
@@ -129,7 +129,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
   * tree + content (selection-aware, falls back to full)
 * Exports:
 
-  * tree (`.txt` in ASCII mode, `.json`/`.txt` in JSON mode, `.xml`/`.txt` in XML mode, `.md`/`.txt` in MD mode)
+  * tree (`.txt`, `.md`, `.json`, `.xml` depending on the selected tree format)
   * content (`.txt`)
   * tree + content (`.txt`, with selected tree format)
 * Shows preview output before copy/export
