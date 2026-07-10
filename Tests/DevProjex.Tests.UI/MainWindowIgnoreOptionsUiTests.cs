@@ -231,6 +231,32 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task ExplicitUncheckedGitIgnoreController_RemainsVisibleWhenDotFilesMaskItsOnlyImpact()
+    {
+        using var project = UiTestProject.CreateWithGitIgnoreDotFileOnlyWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: false);
+
+            await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: false);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFiles, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task CleanPythonSmartController_RemainsHiddenUntilSmartArtifactAppears()
     {
         using var project = UiTestProject.CreateWithCleanPythonSmartWorkspace();

@@ -841,9 +841,13 @@ public sealed partial class SelectionSyncCoordinator(
                 return availability with
                 {
                     IncludeGitIgnore = availability.IncludeGitIgnore &&
-                                       _ignoreControllerImpactCounts.GitIgnore > 0,
+                                       ShouldKeepControllerVisible(
+                                           IgnoreOptionId.UseGitIgnore,
+                                           _ignoreControllerImpactCounts.GitIgnore),
                     IncludeSmartIgnore = availability.IncludeSmartIgnore &&
-                                         _ignoreControllerImpactCounts.SmartIgnore > 0,
+                                         ShouldKeepControllerVisible(
+                                             IgnoreOptionId.SmartIgnore,
+                                             _ignoreControllerImpactCounts.SmartIgnore),
                     IncludeHiddenFolders = _ignoreOptionCounts.HiddenFolders > 0,
                     HiddenFoldersCount = _ignoreOptionCounts.HiddenFolders,
                     IncludeHiddenFiles = _ignoreOptionCounts.HiddenFiles > 0,
@@ -876,6 +880,20 @@ public sealed partial class SelectionSyncCoordinator(
         {
             return CreateCountDrivenIgnoreAvailability(includeGitIgnore: false, includeSmartIgnore: false);
         }
+    }
+
+    private bool ShouldKeepControllerVisible(
+        IgnoreOptionId optionId,
+        int controllerImpactCount)
+    {
+        if (controllerImpactCount > 0)
+            return true;
+
+        // Controller toggles must stay reversible after an explicit user choice. If an
+        // unchecked .gitignore removes its own measured impact, hiding the checkbox would
+        // trap the user until the profile or project state is reset.
+        return _session.IgnoreOptionStateCacheIsComplete &&
+               _session.IgnoreOptions.OptionStateCache.ContainsKey(optionId);
     }
 
     private static IgnoreOptionsAvailability CreateCountDrivenIgnoreAvailability(

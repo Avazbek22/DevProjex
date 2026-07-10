@@ -115,6 +115,17 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithGitIgnoreDotFileOnlyWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, ".gitignore", ".env\n");
+            WriteFile(rootPath, "App.csproj", "<Project />\n");
+            WriteFile(rootPath, "Program.cs", "Console.WriteLine(\"ok\");\n");
+            WriteFile(rootPath, ".env", "SECRET=1\n");
+        });
+    }
+
     public static UiTestProject CreateWithPythonGitIgnoreWorkspace()
     {
         return Create(static rootPath =>

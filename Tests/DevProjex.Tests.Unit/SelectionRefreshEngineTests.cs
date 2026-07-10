@@ -190,6 +190,48 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
+	public void ComputeFullRefreshSnapshot_ExplicitUncheckedControllersStayVisibleWhenImpactDropsToZero()
+	{
+		var scanner = new ProfileFallbackVisibilityScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(scanner),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			(_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				ShowAdvancedCounts: true));
+		var context = CreateDefaultsContext() with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(),
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = false,
+				[IgnoreOptionId.SmartIgnore] = false
+			},
+			IgnoreOptionStateCacheIsComplete = true,
+			CurrentSnapshotState = new IgnoreSectionSnapshotState(
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+				ControllerImpactCounts: new IgnoreControllerImpactCounts(GitIgnore: 1, SmartIgnore: 1),
+				HasExtensionlessEntries: false,
+				ExtensionlessEntriesCount: 0)
+		};
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(context, CancellationToken.None);
+
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && !option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore && !option.IsChecked);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.UseGitIgnore, out var gitState));
+		Assert.False(gitState);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.SmartIgnore, out var smartState));
+		Assert.False(smartState);
+	}
+
+	[Fact]
 	public void ComputeLiveRefreshSnapshot_ReusesIgnoreRulesForIdenticalInputs()
 	{
 		var scanner = new StableSnapshotScanner();

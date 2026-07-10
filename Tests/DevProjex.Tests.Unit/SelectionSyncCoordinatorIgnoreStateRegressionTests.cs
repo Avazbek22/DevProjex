@@ -180,21 +180,52 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 		Assert.True(coordinator.SnapshotIgnoreOptionStatesForPersistence()![IgnoreOptionId.EmptyFolders]);
 	}
 
+	[Fact]
+	public void PopulateIgnoreOptionsForRootSelection_ExplicitUncheckedGitController_RemainsVisibleWithZeroImpact()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, includeGitIgnore: true);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+
+		ApplyIgnoreCounts(
+			coordinator,
+			IgnoreOptionCounts.Empty,
+			new IgnoreControllerImpactCounts(GitIgnore: 1));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		var gitIgnore = GetIgnoreOption(viewModel, IgnoreOptionId.UseGitIgnore);
+		Assert.True(gitIgnore.IsChecked);
+
+		gitIgnore.IsChecked = false;
+
+		ApplyIgnoreCounts(coordinator, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty);
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.UseGitIgnore).IsChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
+	}
+
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)
 	{
 		return Assert.Single(viewModel.IgnoreOptions, option => option.Id == id);
 	}
 
-	private static void ApplyIgnoreCounts(SelectionSyncCoordinator coordinator, IgnoreOptionCounts ignoreCounts)
+	private static void ApplyIgnoreCounts(
+		SelectionSyncCoordinator coordinator,
+		IgnoreOptionCounts ignoreCounts,
+		IgnoreControllerImpactCounts controllerImpactCounts = default)
 	{
 		var method = typeof(SelectionSyncCoordinator).GetMethod(
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, true]);
+		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, controllerImpactCounts, true]);
 	}
 
-	private static SelectionSyncCoordinator CreateCoordinator(MainWindowViewModel viewModel)
+	private static SelectionSyncCoordinator CreateCoordinator(
+		MainWindowViewModel viewModel,
+		bool includeGitIgnore = false,
+		bool includeSmartIgnore = false)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var scanner = new StubFileSystemScanner();
@@ -215,8 +246,8 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 				SmartIgnoredFolders: new HashSet<string>(),
 				SmartIgnoredFiles: new HashSet<string>()),
 			(_, _) => new IgnoreOptionsAvailability(
-				IncludeGitIgnore: false,
-				IncludeSmartIgnore: false,
+				IncludeGitIgnore: includeGitIgnore,
+				IncludeSmartIgnore: includeSmartIgnore,
 				ShowAdvancedCounts: true),
 			_ => false,
 			() => null);

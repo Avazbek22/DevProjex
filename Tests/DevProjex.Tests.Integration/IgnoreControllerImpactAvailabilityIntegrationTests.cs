@@ -143,6 +143,37 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 	}
 
 	[Fact]
+	public void DotFileOnlyGitIgnoreController_ExplicitUncheckedStateStaysVisibleWhenDotFilesMaskItsImpact()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile(".gitignore", ".env\n");
+		project.CreateFile("App.csproj", "<Project />\n");
+		project.CreateFile("Program.cs", "Console.WriteLine(\"ok\");\n");
+		project.CreateFile(".env", "SECRET=1\n");
+
+		var services = CreateServices();
+		var allOff = services.Engine.ComputeFullRefreshSnapshot(
+			CreateAllIgnoreOptionsOffContext(project.Path),
+			TestContext.Current.CancellationToken);
+		var dotFilesOn = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithForcedIgnoreOptions(
+				project.Path,
+				allOff,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.UseGitIgnore] = false,
+					[IgnoreOptionId.DotFiles] = true
+				}),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(allOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(allOff.ControllerImpactCounts.GitIgnore > 0);
+		Assert.Equal(0, dotFilesOn.ControllerImpactCounts.GitIgnore);
+		AssertIgnoreOption(dotFilesOn, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+		AssertIgnoreOption(dotFilesOn, IgnoreOptionId.DotFiles, expectedVisible: true, expectedChecked: true);
+	}
+
+	[Fact]
 	public void RiderProjectsStyleWorkspace_HidesDotFolders_WhenGitIgnoreAlreadyMasksAllDotFolders()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -278,6 +309,46 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 				.Where(optionId => !disabled.Contains(optionId))
 				.ToHashSet(),
 			IgnoreOptionStateCache = stateCache
+		};
+	}
+
+	private static SelectionRefreshContext CreateAllIgnoreOptionsOffContext(string projectPath) =>
+		CreateDefaultContext(projectPath) with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(),
+			IgnoreOptionStateCache = Enum.GetValues<IgnoreOptionId>()
+				.ToDictionary(optionId => optionId, _ => false),
+			IgnoreAllPreference = false,
+			IgnoreOptionStateCacheIsComplete = true
+		};
+
+	private static SelectionRefreshContext CreateContextWithForcedIgnoreOptions(
+		string projectPath,
+		SelectionRefreshSnapshot snapshot,
+		IReadOnlyDictionary<IgnoreOptionId, bool> forcedStates)
+	{
+		var stateCache = snapshot.IgnoreOptionStateCache.ToDictionary(pair => pair.Key, pair => pair.Value);
+		var selected = snapshot.IgnoreOptions
+			.Where(option => option.IsChecked)
+			.Select(option => option.Id)
+			.ToHashSet();
+		foreach (var (optionId, isChecked) in forcedStates)
+		{
+			stateCache[optionId] = isChecked;
+			if (isChecked)
+				selected.Add(optionId);
+			else
+				selected.Remove(optionId);
+		}
+
+		return CreateContextFromSnapshot(projectPath, snapshot) with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = selected,
+			IgnoreOptionStateCache = stateCache,
+			IgnoreAllPreference = null,
+			IgnoreOptionStateCacheIsComplete = true
 		};
 	}
 

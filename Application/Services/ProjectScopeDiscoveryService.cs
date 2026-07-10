@@ -10,8 +10,10 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 {
 	private const int ScopeCacheLimit = 128;
 	private static readonly TimeSpan ScopeCacheTtl = TimeSpan.FromSeconds(5);
-	private const int NestedProjectProbeMaxDepth = 2;
-	private const int NestedProjectProbeMaxDirectoriesPerScope = 256;
+	private const int DefaultNestedProjectProbeMaxDepth = 2;
+	private const int DefaultNestedProjectProbeMaxDirectoriesPerScope = 256;
+	private const int MonorepoNestedProjectProbeMaxDepth = 8;
+	private const int MonorepoNestedProjectProbeMaxDirectoriesPerScope = 1_000;
 	private static readonly EnumerationOptions TopLevelEnumerationOptions = new()
 	{
 		RecurseSubdirectories = false,
@@ -25,10 +27,77 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		".git",
 		".hg",
 		".svn",
+		".github",
+		".gitlab",
+		".circleci",
 		".idea",
 		".vscode",
 		".vs",
 		".fleet"
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	private static readonly FrozenSet<string> ScopeDiscoveryPruneDirectoryNames = new[]
+	{
+		".git",
+		".hg",
+		".svn",
+		".github",
+		".gitlab",
+		".circleci",
+		".idea",
+		".vscode",
+		".vs",
+		".fleet",
+		"node_modules",
+		"bower_components",
+		"jspm_packages",
+		"vendor",
+		".bundle",
+		"bin",
+		"obj",
+		"build",
+		"dist",
+		"out",
+		"target",
+		".gradle",
+		".next",
+		".nuxt",
+		".cache",
+		".parcel-cache",
+		"coverage",
+		".nyc_output",
+		"tmp",
+		"temp",
+		"__pycache__",
+		".pytest_cache",
+		".mypy_cache",
+		".ruff_cache",
+		".tox",
+		".venv",
+		"venv",
+		"env"
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	private static readonly FrozenSet<string> MonorepoContainerDirectoryNames = new[]
+	{
+		"apps",
+		"packages",
+		"services",
+		"libs",
+		"modules",
+		"projects",
+		"tools",
+		"examples"
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	private static readonly FrozenSet<string> MonorepoMarkerFiles = new[]
+	{
+		"pnpm-workspace.yaml",
+		"nx.json",
+		"turbo.json",
+		"lerna.json",
+		"rush.json",
+		"go.work"
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	private static readonly FrozenSet<string> ProjectMarkerFiles = new[]
@@ -40,6 +109,10 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		"bun.lockb",
 		"bun.lock",
 		"pnpm-workspace.yaml",
+		"nx.json",
+		"turbo.json",
+		"lerna.json",
+		"rush.json",
 		"npm-shrinkwrap.json",
 		"pyproject.toml",
 		"requirements.txt",
@@ -180,8 +253,14 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			{
 				var hasGitIgnore = HasGitIgnoreFile(directoryPath);
 				var hasMarker = HasProjectMarker(directoryPath);
-				if (ShouldSkipProjectScopeCandidate(directoryPath, hasGitIgnore, hasMarker))
+				if (ShouldSkipProjectScopeCandidate(
+					    directoryPath,
+					    hasGitIgnore,
+					    hasMarker,
+					    isExplicitRootSelection: hasExplicitRootSelection))
+				{
 					return localCandidates;
+				}
 
 				localCandidates.Add(new ProjectScope(
 					directoryPath,
@@ -264,16 +343,23 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			(candidate, _, localScopes) =>
 			{
 				localScopes.Add(candidate);
+				var probe = ResolveNestedProjectProbe(candidate.RootPath);
 
 				foreach (var childPath in EnumerateDescendantDirectoriesSafe(
 							 candidate.RootPath,
-							 NestedProjectProbeMaxDepth,
-							 NestedProjectProbeMaxDirectoriesPerScope))
+							 probe.MaxDepth,
+							 probe.MaxDirectories))
 				{
 					var hasGitIgnore = HasGitIgnoreFile(childPath);
 					var hasMarker = HasProjectMarker(childPath);
-					if (ShouldSkipProjectScopeCandidate(childPath, hasGitIgnore, hasMarker))
+					if (ShouldSkipProjectScopeCandidate(
+						    childPath,
+						    hasGitIgnore,
+						    hasMarker,
+						    isExplicitRootSelection: false))
+					{
 						continue;
+					}
 					if (!hasGitIgnore && !hasMarker)
 						continue;
 
@@ -306,6 +392,29 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		}
 
 		return SortScopes(uniqueScopes.Values).ToArray();
+	}
+
+	private static NestedProjectProbe ResolveNestedProjectProbe(
+		string candidateRootPath)
+	{
+		var candidateName = GetDirectoryName(candidateRootPath);
+		var isKnownMonorepoContainer =
+			!string.IsNullOrWhiteSpace(candidateName) &&
+			MonorepoContainerDirectoryNames.Contains(candidateName);
+
+		// Keep the default probe intentionally shallow. Only obvious monorepo
+		// roots/containers get the wider BFS so normal folder opens do not turn
+		// into expensive dependency-style discovery scans.
+		if (isKnownMonorepoContainer || HasMonorepoMarker(candidateRootPath))
+		{
+			return new NestedProjectProbe(
+				MonorepoNestedProjectProbeMaxDepth,
+				MonorepoNestedProjectProbeMaxDirectoriesPerScope);
+		}
+
+		return new NestedProjectProbe(
+			DefaultNestedProjectProbeMaxDepth,
+			DefaultNestedProjectProbeMaxDirectoriesPerScope);
 	}
 
 	private static List<ProjectScope> SortScopes(IEnumerable<ProjectScope> scopes)
@@ -394,13 +503,17 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	private static bool ShouldSkipProjectScopeCandidate(
 		string directoryPath,
 		bool hasGitIgnore,
-		bool hasProjectMarker)
+		bool hasProjectMarker,
+		bool isExplicitRootSelection)
 	{
-		if (hasProjectMarker)
-			return false;
-
 		var name = GetDirectoryName(directoryPath);
 		if (string.IsNullOrWhiteSpace(name))
+			return false;
+
+		if (!isExplicitRootSelection && ScopeDiscoveryPruneDirectoryNames.Contains(name))
+			return true;
+
+		if (hasProjectMarker)
 			return false;
 
 		if (NonProjectScopeDirectoryNames.Contains(name))
@@ -416,7 +529,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	{
 		var name = GetDirectoryName(directoryPath);
 		return !string.IsNullOrWhiteSpace(name) &&
-			   NonProjectScopeDirectoryNames.Contains(name);
+			   ScopeDiscoveryPruneDirectoryNames.Contains(name);
 	}
 
 	private static string GetDirectoryName(string directoryPath)
@@ -460,6 +573,24 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			// Full enumeration is only a fallback path for extension/custom markers.
 			// Keep descriptor-specific marker files discoverable even on partial IO failures.
 			return smartIgnore.HasKnownProjectMarker(directoryPath);
+		}
+
+		return false;
+	}
+
+	private static bool HasMonorepoMarker(string directoryPath)
+	{
+		foreach (var markerFile in MonorepoMarkerFiles)
+		{
+			try
+			{
+				if (File.Exists(Path.Combine(directoryPath, markerFile)))
+					return true;
+			}
+			catch
+			{
+				// Monorepo detection is an optimization hint; IO failures fall back to the shallow probe.
+			}
 		}
 
 		return false;
@@ -527,6 +658,8 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	private sealed record ScopeCacheEntry(DateTime CachedAtUtc, ProjectScanContext Context);
 
 	private readonly record struct ProjectMarkerFileCandidate(string FileName, string Extension);
+
+	private readonly record struct NestedProjectProbe(int MaxDepth, int MaxDirectories);
 }
 
 public sealed record ProjectScope(

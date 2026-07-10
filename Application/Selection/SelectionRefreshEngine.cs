@@ -387,7 +387,12 @@ public sealed class SelectionRefreshEngine(
                                      : EmptyIgnoreSelection);
         var stateCache = new Dictionary<IgnoreOptionId, bool>(
             stateCacheOverride ?? context.IgnoreOptionStateCache);
-        var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots, snapshotState);
+        var availability = ResolveIgnoreOptionsAvailability(
+            path,
+            selectedRoots,
+            snapshotState,
+            stateCache,
+            context.IgnoreOptionStateCacheIsComplete);
 
         var descriptors = ignoreOptionsService.GetOptions(availability);
         var defaultFallbackReferenceSelections = GetIgnoreDefaultFallbackReferenceSelections(
@@ -669,7 +674,9 @@ public sealed class SelectionRefreshEngine(
     private IgnoreOptionsAvailability ResolveIgnoreOptionsAvailability(
         string? path,
         IReadOnlyCollection<string> selectedRootFolders,
-        IgnoreSectionSnapshotState snapshotState)
+        IgnoreSectionSnapshotState snapshotState,
+        IReadOnlyDictionary<IgnoreOptionId, bool> stateCache,
+        bool stateCacheIsComplete)
     {
         if (string.IsNullOrWhiteSpace(path))
             return CreateCountDrivenIgnoreAvailability(includeGitIgnore: false, includeSmartIgnore: false);
@@ -682,9 +689,17 @@ public sealed class SelectionRefreshEngine(
                 return availability with
                 {
                     IncludeGitIgnore = availability.IncludeGitIgnore &&
-                                       snapshotState.ControllerImpactCounts.GitIgnore > 0,
+                                       ShouldKeepControllerVisible(
+                                           IgnoreOptionId.UseGitIgnore,
+                                           snapshotState.ControllerImpactCounts.GitIgnore,
+                                           stateCache,
+                                           stateCacheIsComplete),
                     IncludeSmartIgnore = availability.IncludeSmartIgnore &&
-                                         snapshotState.ControllerImpactCounts.SmartIgnore > 0,
+                                         ShouldKeepControllerVisible(
+                                             IgnoreOptionId.SmartIgnore,
+                                             snapshotState.ControllerImpactCounts.SmartIgnore,
+                                             stateCache,
+                                             stateCacheIsComplete),
                     IncludeHiddenFolders = snapshotState.IgnoreOptionCounts.HiddenFolders > 0,
                     HiddenFoldersCount = snapshotState.IgnoreOptionCounts.HiddenFolders,
                     IncludeHiddenFiles = snapshotState.IgnoreOptionCounts.HiddenFiles > 0,
@@ -717,6 +732,21 @@ public sealed class SelectionRefreshEngine(
         {
             return CreateCountDrivenIgnoreAvailability(includeGitIgnore: false, includeSmartIgnore: false);
         }
+    }
+
+    private static bool ShouldKeepControllerVisible(
+        IgnoreOptionId optionId,
+        int controllerImpactCount,
+        IReadOnlyDictionary<IgnoreOptionId, bool> stateCache,
+        bool stateCacheIsComplete)
+    {
+        if (controllerImpactCount > 0)
+            return true;
+
+        // Controller toggles are reversible UI controls. Once the user has an explicit
+        // checked/unchecked state, zero effective impact must not remove the control,
+        // otherwise turning .gitignore off can make it impossible to turn back on.
+        return stateCacheIsComplete && stateCache.ContainsKey(optionId);
     }
 
     private static IgnoreSectionSnapshotState CreateSnapshotState(
