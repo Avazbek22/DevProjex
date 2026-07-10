@@ -166,8 +166,8 @@ public sealed class AppInstancePackagingContractTests
             .Where(element => element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
             .ToArray();
 
-        // Avalonia.FreeDesktop 12 currently uses the old Tmds.DBus.Protocol.Connection API.
-        // Tmds.DBus.Protocol 0.93+ removed that type, so a direct package override breaks Linux/X11 startup.
+        // Avalonia.FreeDesktop owns the DBus compatibility boundary. A direct Tmds
+        // override can recreate the Linux/X11 startup TypeLoadException we saw on Arch.
         Assert.Empty(directTmdsReferences);
         Assert.Empty(centralTmdsVersions);
     }
@@ -190,16 +190,25 @@ public sealed class AppInstancePackagingContractTests
 
         using var document = JsonDocument.Parse(File.ReadAllText(assetsPath));
         var libraries = document.RootElement.GetProperty("libraries");
+        var resolvedAvaloniaFreeDesktopVersions = libraries
+            .EnumerateObject()
+            .Where(static property => property.Name.StartsWith("Avalonia.FreeDesktop/", StringComparison.Ordinal))
+            .Select(static property => property.Name["Avalonia.FreeDesktop/".Length..])
+            .ToArray();
         var resolvedTmdsVersions = libraries
             .EnumerateObject()
             .Where(static property => property.Name.StartsWith("Tmds.DBus.Protocol/", StringComparison.Ordinal))
             .Select(static property => property.Name["Tmds.DBus.Protocol/".Length..])
             .ToArray();
 
+        var resolvedAvaloniaFreeDesktopVersion = Assert.Single(resolvedAvaloniaFreeDesktopVersions);
         var resolvedVersion = Assert.Single(resolvedTmdsVersions);
         Assert.True(
-            Version.Parse(resolvedVersion) < new Version(0, 93, 0),
-            $"Linux/X11 startup requires Tmds.DBus.Protocol < 0.93 while Avalonia.FreeDesktop still references the old Connection API. Resolved: {resolvedVersion}");
+            Version.Parse(resolvedAvaloniaFreeDesktopVersion) >= new Version(12, 1, 0),
+            $"Avalonia.FreeDesktop 12.1.0+ is required for the updated DBus API boundary. Resolved: {resolvedAvaloniaFreeDesktopVersion}");
+        Assert.True(
+            Version.Parse(resolvedVersion) >= new Version(0, 94, 0),
+            $"Avalonia.FreeDesktop 12.1.0+ should resolve the updated Tmds.DBus.Protocol graph. Resolved: {resolvedVersion}");
     }
 
     [Fact]
@@ -213,7 +222,10 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("linux-arm64", workflow, StringComparison.Ordinal);
         Assert.Contains("Validate Linux DBus Dependency Graph", workflow, StringComparison.Ordinal);
         Assert.Contains("Tmds.DBus.Protocol/*", workflow, StringComparison.Ordinal);
-        Assert.Contains("[Version]\"0.93.0\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Do not override Tmds.DBus.Protocol directly", workflow, StringComparison.Ordinal);
+        Assert.Contains("Avalonia.FreeDesktop/*", workflow, StringComparison.Ordinal);
+        Assert.Contains("[Version]\"12.1.0\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("[Version]\"0.94.0\"", workflow, StringComparison.Ordinal);
         Assert.Contains("Startup Smoke (Linux X11)", workflow, StringComparison.Ordinal);
         Assert.Contains("xvfb-run -a", workflow, StringComparison.Ordinal);
         Assert.Contains("/p:PublishSingleFile=true", workflow, StringComparison.Ordinal);

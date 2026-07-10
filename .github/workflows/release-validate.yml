@@ -100,6 +100,23 @@ jobs:
         if: ${{ startsWith(matrix.rid, 'linux-') }}
         shell: pwsh
         run: |
+          $packageFiles = Get-ChildItem -Path "." -Recurse -Include "*.csproj", "*.props", "*.targets" -File |
+            Where-Object { $_.FullName -notmatch "[\\/](bin|obj)[\\/]" }
+          $directTmdsOverrides = @(
+            foreach ($packageFile in $packageFiles) {
+              [xml]$packageXml = Get-Content -Raw -Path $packageFile.FullName
+              foreach ($item in $packageXml.SelectNodes("//*[local-name()='PackageReference' or local-name()='PackageVersion']")) {
+                if ($item.Include -eq "Tmds.DBus.Protocol") {
+                  Resolve-Path -Relative $packageFile.FullName
+                }
+              }
+            }
+          )
+
+          if ($directTmdsOverrides.Count -gt 0) {
+            throw "Do not override Tmds.DBus.Protocol directly. Avalonia.FreeDesktop owns the compatible DBus version. Overrides found in: $($directTmdsOverrides -join ', ')"
+          }
+
           $assetsPath = "Apps/Avalonia/DevProjex.Avalonia/obj/project.assets.json"
           if (-not (Test-Path -LiteralPath $assetsPath)) {
             throw "Project assets file was not produced by restore: $assetsPath"
@@ -110,15 +127,29 @@ jobs:
             $assets.libraries.PSObject.Properties.Name |
               Where-Object { $_ -like "Tmds.DBus.Protocol/*" }
           )
+          $freeDesktopLibraries = @(
+            $assets.libraries.PSObject.Properties.Name |
+              Where-Object { $_ -like "Avalonia.FreeDesktop/*" }
+          )
+
+          if ($freeDesktopLibraries.Count -ne 1) {
+            throw "Expected exactly one Avalonia.FreeDesktop library in the restore graph, found $($freeDesktopLibraries.Count): $($freeDesktopLibraries -join ', ')"
+          }
 
           if ($dbusLibraries.Count -ne 1) {
             throw "Expected exactly one Tmds.DBus.Protocol library in the restore graph, found $($dbusLibraries.Count): $($dbusLibraries -join ', ')"
           }
 
+          $freeDesktopVersionText = $freeDesktopLibraries[0].Substring("Avalonia.FreeDesktop/".Length)
+          $freeDesktopVersion = [Version]$freeDesktopVersionText
+          if ($freeDesktopVersion -lt [Version]"12.1.0") {
+            throw "Avalonia.FreeDesktop 12.1.0+ is required for the updated Tmds.DBus.Protocol API boundary. Resolved: $freeDesktopVersionText"
+          }
+
           $versionText = $dbusLibraries[0].Substring("Tmds.DBus.Protocol/".Length)
           $version = [Version]$versionText
-          if ($version -ge [Version]"0.93.0") {
-            throw "Avalonia.FreeDesktop still references the legacy Tmds.DBus.Protocol.Connection API. Tmds.DBus.Protocol 0.93+ removes that type and breaks Linux/X11 startup. Resolved: $versionText"
+          if ($version -lt [Version]"0.94.0") {
+            throw "Avalonia.FreeDesktop 12.1.0+ should resolve the updated Tmds.DBus.Protocol graph. Resolved: $versionText"
           }
 
       - name: Publish
