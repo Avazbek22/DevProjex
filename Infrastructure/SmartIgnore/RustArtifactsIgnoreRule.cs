@@ -4,7 +4,10 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Rust build output folders.
 /// Activates when Cargo.toml exists in the scope root.
 /// </summary>
-public sealed class RustArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
+public sealed class RustArtifactsIgnoreRule :
+	ISmartIgnoreRule,
+	IProjectRootFactsSmartIgnoreRule,
+	ISmartIgnoreRuleDescriptorProvider
 {
 	private const string MarkerFile = "Cargo.toml";
 
@@ -17,6 +20,11 @@ public sealed class RustArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRule
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
 		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+
+	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
+		rootFacts.Exists && rootFacts.HasMarkerFile(MarkerFile)
+			? MatchResult
+			: SmartIgnoreResult.Empty;
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

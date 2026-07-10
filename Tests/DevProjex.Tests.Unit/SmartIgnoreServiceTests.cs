@@ -94,6 +94,21 @@ public sealed class SmartIgnoreServiceTests
 		Assert.True(service.IsKnownProjectMarker("service.XPROJ", ".XPROJ"));
 	}
 
+	[Fact]
+	public void Build_UsesProjectRootFactsAwareRulesWithoutLegacyRootPathEvaluation()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("package.json", "{}");
+
+		var rule = new FactsOnlySmartIgnoreRule();
+		var service = new SmartIgnoreService([rule]);
+
+		var result = service.Build(temp.Path);
+
+		Assert.Contains("node_modules", result.FolderNames);
+		Assert.Equal(1, rule.FactsEvaluateCallCount);
+	}
+
 	private sealed class ThrowingSmartIgnoreRule : ISmartIgnoreRule
 	{
 		public SmartIgnoreResult Evaluate(string rootPath)
@@ -114,5 +129,27 @@ public sealed class SmartIgnoreServiceTests
 			new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
 		public SmartIgnoreResult Evaluate(string rootPath) => SmartIgnoreResult.Empty;
+	}
+
+	private sealed class FactsOnlySmartIgnoreRule : IProjectRootFactsSmartIgnoreRule
+	{
+		private int _factsEvaluateCallCount;
+
+		public int FactsEvaluateCallCount => Volatile.Read(ref _factsEvaluateCallCount);
+
+		public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts)
+		{
+			Interlocked.Increment(ref _factsEvaluateCallCount);
+			return rootFacts.HasMarkerFile("package.json")
+				? new SmartIgnoreResult(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" },
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+				: SmartIgnoreResult.Empty;
+		}
+
+		public SmartIgnoreResult Evaluate(string rootPath)
+		{
+			throw new InvalidOperationException("Facts-aware smart ignore rules must not use the legacy IO path.");
+		}
 	}
 }

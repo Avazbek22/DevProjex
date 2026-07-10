@@ -7,7 +7,9 @@ public sealed class SmartIgnoreService
 	private readonly IReadOnlyList<ISmartIgnoreRule> _rules;
 	private readonly IReadOnlyList<SmartIgnoreRuleDescriptor> _descriptors;
 
-	public SmartIgnoreService(IEnumerable<ISmartIgnoreRule> rules)
+	public SmartIgnoreService(
+		IEnumerable<ISmartIgnoreRule> rules,
+		ProjectRootFactsProvider? rootFactsProvider = null)
 	{
 		var ruleList = rules.ToList();
 		_rules = ruleList;
@@ -15,9 +17,15 @@ public sealed class SmartIgnoreService
 			.OfType<ISmartIgnoreRuleDescriptorProvider>()
 			.Select(provider => provider.Descriptor)
 			.ToArray();
+		RootFactsProvider = rootFactsProvider ?? new ProjectRootFactsProvider();
 	}
 
-	public SmartIgnoreResult Build(string rootPath)
+	public ProjectRootFactsProvider RootFactsProvider { get; }
+
+	public SmartIgnoreResult Build(string rootPath) =>
+		Build(RootFactsProvider.Get(rootPath));
+
+	public SmartIgnoreResult Build(ProjectRootFacts rootFacts)
 	{
 		var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -27,7 +35,9 @@ public sealed class SmartIgnoreService
 			SmartIgnoreResult result;
 			try
 			{
-				result = rule.Evaluate(rootPath);
+				result = rule is IProjectRootFactsSmartIgnoreRule factsRule
+					? factsRule.Evaluate(rootFacts)
+					: rule.Evaluate(rootFacts.RootPath);
 			}
 			catch
 			{
@@ -52,21 +62,27 @@ public sealed class SmartIgnoreService
 
 	public bool HasKnownProjectMarker(string rootPath)
 	{
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (string.IsNullOrWhiteSpace(rootPath))
 			return false;
 
-		try
+		return HasKnownProjectMarker(RootFactsProvider.Get(rootPath));
+	}
+
+	public bool HasKnownProjectMarker(ProjectRootFacts rootFacts)
+	{
+		if (!rootFacts.Exists)
+			return false;
+
+		if (!rootFacts.IsAccessible)
+			return HasKnownProjectMarkerByTargetedProbe(rootFacts.RootPath);
+
+		foreach (var descriptor in _descriptors)
 		{
-			foreach (var filePath in Directory.EnumerateFiles(rootPath, "*", SearchOption.TopDirectoryOnly))
+			if (rootFacts.HasAnyMarkerFile(descriptor.MarkerFiles) ||
+			    rootFacts.HasAnyFileExtension(descriptor.MarkerExtensions))
 			{
-				var fileName = Path.GetFileName(filePath);
-				if (IsKnownProjectMarker(fileName, Path.GetExtension(fileName)))
-					return true;
+				return true;
 			}
-		}
-		catch
-		{
-			return HasKnownProjectMarkerByTargetedProbe(rootPath);
 		}
 
 		return false;

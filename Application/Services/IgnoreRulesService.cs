@@ -161,21 +161,8 @@ public sealed class IgnoreRulesService(
 		if (smart.FolderNames.Count == 0)
 			return false;
 
-		try
-		{
-			foreach (var directory in Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly))
-			{
-				var name = Path.GetFileName(directory);
-				if (smart.FolderNames.Contains(name))
-					return true;
-			}
-		}
-		catch
-		{
-			// Best-effort check.
-		}
-
-		return false;
+		var rootFacts = smartIgnore.RootFactsProvider.Get(rootPath);
+		return rootFacts.HasAnyDirectoryName(smart.FolderNames);
 	}
 
 	private ScopedSmartIgnoreBuildResult BuildScopedSmartIgnore(ProjectScanContext context)
@@ -266,7 +253,7 @@ public sealed class IgnoreRulesService(
 
 		foreach (var scope in scopesWithGitIgnore)
 		{
-			var matcher = TryBuildGitIgnoreMatcher(scope.RootPath);
+			var matcher = TryBuildGitIgnoreMatcher(scope.RootPath, smartIgnore.RootFactsProvider.Get(scope.RootPath));
 			if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty))
 				continue;
 
@@ -279,24 +266,26 @@ public sealed class IgnoreRulesService(
 		IReadOnlyCollection<string>? selectedRootFolders) =>
 		_projectScopeDiscovery.Discover(rootPath, selectedRootFolders);
 
-	private static GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath)
+	private static GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath, ProjectRootFacts? rootFacts = null)
 	{
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (string.IsNullOrWhiteSpace(rootPath))
 			return GitIgnoreMatcher.Empty;
 
 		var gitIgnorePath = Path.Combine(rootPath, ".gitignore");
-		if (!File.Exists(gitIgnorePath))
+		if (rootFacts is not null && !rootFacts.HasGitIgnoreFile)
 			return GitIgnoreMatcher.Empty;
 
 		try
 		{
-			var hasSignature = TryGetGitIgnoreSignature(gitIgnorePath, out var cacheKey, out var signature);
-			if (hasSignature)
+			var cacheKey = Path.GetFullPath(gitIgnorePath);
+			var signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+
+			if (signature.HasValue)
 			{
 				lock (CacheSync)
 				{
 					if (GitIgnoreCache.TryGetValue(cacheKey, out var cached) &&
-						cached.Signature.Equals(signature))
+						cached.Signature.Equals(signature.GetValueOrDefault()))
 					{
 						return cached.Matcher;
 					}
@@ -304,11 +293,11 @@ public sealed class IgnoreRulesService(
 			}
 
 			var matcher = GitIgnoreMatcher.Build(rootPath, File.ReadLines(gitIgnorePath));
-			if (hasSignature)
+			if (signature.HasValue)
 			{
 				lock (CacheSync)
 				{
-					GitIgnoreCache[cacheKey] = new GitIgnoreCacheEntry(signature, matcher);
+					GitIgnoreCache[cacheKey] = new GitIgnoreCacheEntry(signature.GetValueOrDefault(), matcher);
 					if (GitIgnoreCache.Count > CacheLimit)
 						GitIgnoreCache.Clear();
 				}
@@ -322,49 +311,7 @@ public sealed class IgnoreRulesService(
 		}
 	}
 
-	private static bool TryGetGitIgnoreSignature(
-		string gitIgnorePath,
-		out string cacheKey,
-		out GitIgnoreSignature signature)
-	{
-		cacheKey = Path.GetFullPath(gitIgnorePath);
-		signature = default;
-
-		try
-		{
-			var linkInfo = new FileInfo(gitIgnorePath);
-			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
-			{
-				// A symlinked .gitignore is valid project input. Use target metadata for cache
-				// invalidation, but keep the link path as the cache key so rules stay scoped
-				// to the project root that owns the .gitignore entry.
-				var resolvedTarget = linkInfo.ResolveLinkTarget(returnFinalTarget: true);
-				if (resolvedTarget is not FileInfo targetInfo || !targetInfo.Exists)
-					return false;
-
-				targetInfo.Refresh();
-				signature = new GitIgnoreSignature(
-					targetInfo.LastWriteTimeUtc.Ticks,
-					targetInfo.Length,
-					linkInfo.LinkTarget ?? string.Empty);
-				return true;
-			}
-
-			signature = new GitIgnoreSignature(
-				linkInfo.LastWriteTimeUtc.Ticks,
-				linkInfo.Length,
-				LinkTarget: string.Empty);
-			return true;
-		}
-		catch
-		{
-			return false;
-		}
-	}
-
-	private readonly record struct GitIgnoreSignature(long LastWriteTicksUtc, long LengthBytes, string LinkTarget);
-
-	private sealed record GitIgnoreCacheEntry(GitIgnoreSignature Signature, GitIgnoreMatcher Matcher);
+	private sealed record GitIgnoreCacheEntry(ProjectRootFileSignature Signature, GitIgnoreMatcher Matcher);
 
 	private sealed record ScopedSmartIgnoreBuildResult(
 		IReadOnlySet<string> FolderNames,
