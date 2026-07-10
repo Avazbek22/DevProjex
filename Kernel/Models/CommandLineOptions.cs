@@ -14,6 +14,7 @@ public sealed record CommandLineOptions(
 	public bool ShowVersion { get; init; }
 	public StartupReportOptions Report { get; init; } = StartupReportOptions.Disabled;
 	public StartupExportOptions Export { get; init; } = StartupExportOptions.Disabled;
+	public StartupUiOptions Ui { get; init; } = StartupUiOptions.Default;
 	public IReadOnlyList<string> IncludeRootFolders { get; init; } = [];
 	public IReadOnlyList<string> IncludeExtensions { get; init; } = [];
 	public IReadOnlyList<IgnoreOptionId> IgnoreOptions { get; init; } = [];
@@ -38,6 +39,7 @@ public sealed record CommandLineOptions(
 		bool showVersion = false;
 		var report = StartupReportOptions.Disabled;
 		var export = StartupExportOptions.Disabled;
+		var ui = StartupUiOptions.Default;
 		var includeRootFolders = new List<string>();
 		var includeExtensions = new List<string>();
 		var ignoreOptions = new List<IgnoreOptionId>();
@@ -60,12 +62,18 @@ public sealed record CommandLineOptions(
 
 			if (IsHelpToken(arg))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				showHelp = true;
 				continue;
 			}
 
 			if (arg.Equals(CommandLineOptionTokens.Version, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				showVersion = true;
 				continue;
 			}
@@ -93,6 +101,9 @@ public sealed record CommandLineOptions(
 			if (arg.Equals(CommandLineOptionTokens.ElevationAttempted, StringComparison.OrdinalIgnoreCase) ||
 			    arg.Equals(CommandLineOptionTokens.LegacyElevationAttempted, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				elevationAttempted = true;
 				continue;
 			}
@@ -100,13 +111,85 @@ public sealed record CommandLineOptions(
 			if (arg.Equals(CommandLineOptionTokens.NoUi, StringComparison.OrdinalIgnoreCase) ||
 			    arg.Equals(CommandLineOptionTokens.Silent, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				noUi = true;
 				continue;
 			}
 
 			if (arg.Equals(CommandLineOptionTokens.Strict, StringComparison.OrdinalIgnoreCase))
 			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
 				strict = true;
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.Last, StringComparison.OrdinalIgnoreCase))
+			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
+				ui = ui with { OpenLastProject = true };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.Preview, StringComparison.OrdinalIgnoreCase))
+			{
+				if (TryRejectUnexpectedInlineValue(arg, inlineValue, errors))
+					continue;
+
+				ui = ui with { OpenPreview = true };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.PreviewMode, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				if (!TryParseStartupPreviewMode(value, out var previewMode))
+				{
+					errors.Add(new CommandLineParseError("invalid-preview-mode", $"Unsupported preview mode '{value}'.", arg));
+					continue;
+				}
+
+				ui = ui with { OpenPreview = true, PreviewMode = previewMode };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.TreeFormat, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				if (!TryParseTreeTextFormat(value, out var format))
+				{
+					errors.Add(new CommandLineParseError("invalid-tree-format", $"Unsupported tree format '{value}'.", arg));
+					continue;
+				}
+
+				ui = ui with { TreeFormat = format };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.TreeFilter, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				ui = ui with { TreeFilter = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.PreviewSearch, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				ui = ui with { OpenPreview = true, PreviewSearch = value };
 				continue;
 			}
 
@@ -175,7 +258,7 @@ public sealed record CommandLineOptions(
 				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					continue;
 
-				if (!TryParseExportFormat(value, out var format))
+				if (!TryParseTreeTextFormat(value, out var format))
 				{
 					errors.Add(new CommandLineParseError("invalid-export-format", $"Unsupported export format '{value}'.", arg));
 					continue;
@@ -228,7 +311,7 @@ public sealed record CommandLineOptions(
 
 			if (IsOptionToken(arg))
 			{
-				errors.Add(new CommandLineParseError("unknown-option", $"Unknown option '{arg}'.", arg));
+				errors.Add(new CommandLineParseError("unknown-option", BuildUnknownOptionMessage(arg), arg));
 				if (!hasInlineValue && i + 1 < args.Length && !IsOptionToken(args[i + 1]))
 					i++;
 				continue;
@@ -240,9 +323,20 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
+			if (TryResolveMissingOptionPrefix(arg, out var suggestedOption))
+			{
+				errors.Add(new CommandLineParseError(
+					"missing-option-prefix",
+					$"Unknown command or path-like argument '{arg}'. Did you mean '{suggestedOption}'? Use --path {Quote(arg)} if this is a folder name.",
+					arg));
+				continue;
+			}
+
 			path = arg;
 			hasPositionalPath = true;
 		}
+
+		ValidateStartupUiOptions(path, ui, errors);
 
 		var options = new CommandLineOptions(path, lang, elevationAttempted)
 		{
@@ -251,6 +345,7 @@ public sealed record CommandLineOptions(
 			ShowVersion = showVersion,
 			Report = report,
 			Export = export,
+			Ui = ui,
 			IncludeRootFolders = includeRootFolders.ToArray(),
 			IncludeExtensions = includeExtensions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
 			IgnoreOptions = ignoreOptions.ToArray(),
@@ -316,7 +411,37 @@ public sealed record CommandLineOptions(
 		if (Export.FormatSpecified || Export.Format != TreeTextFormat.Ascii)
 		{
 			parts.Add(CommandLineOptionTokens.ExportFormat);
-			parts.Add(Export.Format.ToString().ToLowerInvariant());
+			parts.Add(FormatTreeTextFormat(Export.Format));
+		}
+
+		if (Ui.OpenLastProject)
+			parts.Add(CommandLineOptionTokens.Last);
+
+		if (Ui.OpenPreview && Ui.PreviewMode is null && string.IsNullOrWhiteSpace(Ui.PreviewSearch))
+			parts.Add(CommandLineOptionTokens.Preview);
+
+		if (Ui.PreviewMode is { } previewMode)
+		{
+			parts.Add(CommandLineOptionTokens.PreviewMode);
+			parts.Add(FormatStartupPreviewMode(previewMode));
+		}
+
+		if (Ui.TreeFormat is { } treeFormat)
+		{
+			parts.Add(CommandLineOptionTokens.TreeFormat);
+			parts.Add(FormatTreeTextFormat(treeFormat));
+		}
+
+		if (!string.IsNullOrWhiteSpace(Ui.TreeFilter))
+		{
+			parts.Add(CommandLineOptionTokens.TreeFilter);
+			parts.Add(Quote(Ui.TreeFilter!));
+		}
+
+		if (!string.IsNullOrWhiteSpace(Ui.PreviewSearch))
+		{
+			parts.Add(CommandLineOptionTokens.PreviewSearch);
+			parts.Add(Quote(Ui.PreviewSearch!));
 		}
 
 		foreach (var root in IncludeRootFolders)
@@ -482,6 +607,21 @@ public sealed record CommandLineOptions(
 		return false;
 	}
 
+	private static bool TryRejectUnexpectedInlineValue(
+		string optionName,
+		string? inlineValue,
+		List<CommandLineParseError> errors)
+	{
+		if (inlineValue is null)
+			return false;
+
+		errors.Add(new CommandLineParseError(
+			"unexpected-value",
+			$"Option '{optionName}' does not accept a value.",
+			optionName));
+		return true;
+	}
+
 	private static bool IsHelpToken(string value) =>
 		value.Equals(CommandLineOptionTokens.Help, StringComparison.OrdinalIgnoreCase) ||
 		value.Equals(CommandLineOptionTokens.ShortHelp, StringComparison.OrdinalIgnoreCase) ||
@@ -495,6 +635,133 @@ public sealed record CommandLineOptions(
 		return value.StartsWith("--", StringComparison.Ordinal) ||
 		       (value.Length == 2 && value[0] == '-' && char.IsLetter(value[1])) ||
 		       value.Equals(CommandLineOptionTokens.WindowsHelp, StringComparison.Ordinal);
+	}
+
+	private static string BuildUnknownOptionMessage(string option)
+	{
+		if (TrySuggestLongOption(option, allowFuzzy: true, out var suggestion))
+			return $"Unknown option '{option}'. Did you mean '{suggestion}'?";
+
+		return $"Unknown option '{option}'.";
+	}
+
+	private static bool TryResolveMissingOptionPrefix(string value, out string suggestedOption)
+	{
+		suggestedOption = string.Empty;
+		if (string.IsNullOrWhiteSpace(value) ||
+		    value.StartsWith(".", StringComparison.Ordinal) ||
+		    value.StartsWith("~", StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		var looksLikeSlashOption =
+			value.Length > 1 &&
+			value[0] == '/' &&
+			value[1] != '/' &&
+			value.IndexOf('/', 1) < 0 &&
+			value.IndexOf('\\', 1) < 0;
+		if (looksLikeSlashOption &&
+		    TrySuggestLongOption(value, value.Contains('-') || value.Contains('_'), out suggestedOption))
+		{
+			return true;
+		}
+
+		if (global::System.IO.Path.IsPathRooted(value))
+			return false;
+
+		var allowFuzzy = value.Contains('-') || value.Contains('_');
+		return TrySuggestLongOption(value, allowFuzzy, out suggestedOption);
+	}
+
+	private static bool TrySuggestLongOption(string value, bool allowFuzzy, out string suggestedOption)
+	{
+		suggestedOption = string.Empty;
+		var normalizedValue = NormalizeOptionCandidate(value);
+		if (normalizedValue.Length == 0)
+			return false;
+
+		var compactValue = RemoveOptionSeparators(normalizedValue);
+		string? nearestOption = null;
+		var nearestDistance = int.MaxValue;
+
+		foreach (var option in CommandLineOptionTokens.PublicHelpTokens)
+		{
+			if (!option.StartsWith("--", StringComparison.Ordinal))
+				continue;
+
+			var normalizedOption = NormalizeOptionCandidate(option);
+			if (normalizedValue.Equals(normalizedOption, StringComparison.Ordinal) ||
+			    compactValue.Equals(RemoveOptionSeparators(normalizedOption), StringComparison.Ordinal))
+			{
+				suggestedOption = option;
+				return true;
+			}
+
+			if (!allowFuzzy)
+				continue;
+
+			var distance = CalculateBoundedEditDistance(normalizedValue, normalizedOption, maxDistance: 2);
+			if (distance < nearestDistance)
+			{
+				nearestDistance = distance;
+				nearestOption = option;
+			}
+		}
+
+		if (nearestOption is null || nearestDistance > 2)
+			return false;
+
+		suggestedOption = nearestOption;
+		return true;
+	}
+
+	private static string NormalizeOptionCandidate(string value)
+	{
+		var trimmed = value.Trim();
+		while (trimmed.StartsWith("--", StringComparison.Ordinal))
+			trimmed = trimmed[2..];
+		while (trimmed.StartsWith("-", StringComparison.Ordinal))
+			trimmed = trimmed[1..];
+		while (trimmed.StartsWith("/", StringComparison.Ordinal))
+			trimmed = trimmed[1..];
+
+		return NormalizeOptionName(trimmed);
+	}
+
+	private static string RemoveOptionSeparators(string value) =>
+		value.Replace("-", string.Empty, StringComparison.Ordinal);
+
+	private static int CalculateBoundedEditDistance(string left, string right, int maxDistance)
+	{
+		if (Math.Abs(left.Length - right.Length) > maxDistance)
+			return maxDistance + 1;
+
+		var previous = new int[right.Length + 1];
+		var current = new int[right.Length + 1];
+		for (var j = 0; j <= right.Length; j++)
+			previous[j] = j;
+
+		for (var i = 1; i <= left.Length; i++)
+		{
+			current[0] = i;
+			var bestInRow = current[0];
+			for (var j = 1; j <= right.Length; j++)
+			{
+				var substitutionCost = left[i - 1] == right[j - 1] ? 0 : 1;
+				current[j] = Math.Min(
+					Math.Min(current[j - 1] + 1, previous[j] + 1),
+					previous[j - 1] + substitutionCost);
+				bestInRow = Math.Min(bestInRow, current[j]);
+			}
+
+			if (bestInRow > maxDistance)
+				return maxDistance + 1;
+
+			(previous, current) = (current, previous);
+		}
+
+		return previous[right.Length];
 	}
 
 	private static bool TryParseReportFormat(string value, out StartupReportFormat format)
@@ -530,7 +797,28 @@ public sealed record CommandLineOptions(
 		}
 	}
 
-	private static bool TryParseExportFormat(string value, out TreeTextFormat format)
+	private static bool TryParseStartupPreviewMode(string value, out StartupPreviewMode mode)
+	{
+		switch (NormalizeOptionName(value))
+		{
+			case "tree":
+				mode = StartupPreviewMode.Tree;
+				return true;
+			case "content":
+				mode = StartupPreviewMode.Content;
+				return true;
+			case "tree-content":
+			case "tree-and-content":
+			case "all":
+				mode = StartupPreviewMode.TreeContent;
+				return true;
+			default:
+				mode = default;
+				return false;
+		}
+	}
+
+	private static bool TryParseTreeTextFormat(string value, out TreeTextFormat format)
 	{
 		switch (NormalizeOptionName(value))
 		{
@@ -541,9 +829,47 @@ public sealed record CommandLineOptions(
 			case "json":
 				format = TreeTextFormat.Json;
 				return true;
+			case "xml":
+				format = TreeTextFormat.Xml;
+				return true;
+			case "md":
+			case "markdown":
+				format = TreeTextFormat.Markdown;
+				return true;
 			default:
 				format = TreeTextFormat.Ascii;
 				return false;
+		}
+	}
+
+	private static void ValidateStartupUiOptions(
+		string? path,
+		StartupUiOptions ui,
+		List<CommandLineParseError> errors)
+	{
+		if (ui.OpenLastProject && !string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-startup-target",
+				"Use either --last or --path/positional folder, not both.",
+				CommandLineOptionTokens.Last));
+		}
+
+		if (ui.HasStartupActions && !ui.OpenLastProject && string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"ui-startup-requires-project",
+				"UI startup options require --path, a positional folder, or --last.",
+				null));
+		}
+
+		if (!string.IsNullOrWhiteSpace(ui.TreeFilter) &&
+		    !string.IsNullOrWhiteSpace(ui.PreviewSearch))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-search-and-filter",
+				"--tree-filter and --preview-search cannot be used together because the desktop UI shows only one tree text tool at a time.",
+				CommandLineOptionTokens.PreviewSearch));
 		}
 	}
 
@@ -553,6 +879,23 @@ public sealed record CommandLineOptions(
 		StartupExportMode.Content => "content",
 		StartupExportMode.TreeContent => "tree-content",
 		_ => mode.ToString().ToLowerInvariant()
+	};
+
+	private static string FormatStartupPreviewMode(StartupPreviewMode mode) => mode switch
+	{
+		StartupPreviewMode.Tree => "tree",
+		StartupPreviewMode.Content => "content",
+		StartupPreviewMode.TreeContent => "tree-content",
+		_ => mode.ToString().ToLowerInvariant()
+	};
+
+	private static string FormatTreeTextFormat(TreeTextFormat format) => format switch
+	{
+		TreeTextFormat.Ascii => "ascii",
+		TreeTextFormat.Json => "json",
+		TreeTextFormat.Xml => "xml",
+		TreeTextFormat.Markdown => "md",
+		_ => format.ToString().ToLowerInvariant()
 	};
 
 	private static string NormalizeExtension(string value)
@@ -659,6 +1002,38 @@ public sealed record StartupExportOptions(
 }
 
 public enum StartupExportMode
+{
+	Tree,
+	Content,
+	TreeContent
+}
+
+public sealed record StartupUiOptions(
+	bool OpenLastProject,
+	bool OpenPreview,
+	StartupPreviewMode? PreviewMode,
+	TreeTextFormat? TreeFormat,
+	string? TreeFilter,
+	string? PreviewSearch)
+{
+	public static StartupUiOptions Default { get; } = new(
+		OpenLastProject: false,
+		OpenPreview: false,
+		PreviewMode: null,
+		TreeFormat: null,
+		TreeFilter: null,
+		PreviewSearch: null);
+
+	public bool HasStartupActions =>
+		OpenLastProject ||
+		OpenPreview ||
+		PreviewMode is not null ||
+		TreeFormat is not null ||
+		!string.IsNullOrWhiteSpace(TreeFilter) ||
+		!string.IsNullOrWhiteSpace(PreviewSearch);
+}
+
+public enum StartupPreviewMode
 {
 	Tree,
 	Content,

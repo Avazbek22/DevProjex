@@ -2,6 +2,7 @@ using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class CommandLineAutomationRunnerTests
 {
 	[Fact]
@@ -56,6 +57,100 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Equal(string.Empty, output.ToString());
 		Assert.Contains("DevProjex: Unknown option '--unknown'.", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("-no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	[InlineData("--no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("--preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	public async Task RunUtilityOrHeadlessAsync_OptionTyposWriteStderrAndDoNotCreateServices(
+		string value,
+		string expectedSuggestion)
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created for parser errors.");
+			});
+		var parseResult = CommandLineOptions.Parse([value]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("DevProjex: ", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--no-ui=true")]
+	[InlineData("--help=true")]
+	[InlineData("--preview=true")]
+	public async Task RunUtilityOrHeadlessAsync_ValueLessFlagWithInlineValueWritesStderrAndDoesNotCreateServices(string value)
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created for parser errors.");
+			});
+		var parseResult = CommandLineOptions.Parse([value]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("does not accept a value", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_CommandStyleExportWritesStderrAndDoesNotCreateServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created for parser errors.");
+			});
+		var parseResult = CommandLineOptions.Parse(["export", "tree"]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("Did you mean '--export'?", error.ToString(), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -128,6 +223,8 @@ public sealed class CommandLineAutomationRunnerTests
 	[Theory]
 	[InlineData("ascii")]
 	[InlineData("json")]
+	[InlineData("xml")]
+	[InlineData("md")]
 	public async Task RunUtilityOrHeadlessAsync_FormatAliasWithoutExportWritesUsageErrorBeforeCreatingServices(string format)
 	{
 		using var output = new StringWriter();
@@ -147,6 +244,103 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Equal(string.Empty, output.ToString());
 		Assert.Contains("--output and --export-format require --export", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_NoUiWithDesktopStartupOptionsWritesUsageErrorBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.Preview
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("UI startup options cannot be combined", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_ExportWithDesktopStartupOptionsWritesUsageErrorBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.TreeFormat, "md"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("UI startup options cannot be combined", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_SilentWithPreviewSearchWritesUsageErrorBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created.");
+			});
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Silent,
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.PreviewSearch, "Program"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("UI startup options cannot be combined", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_ParseErrorFromCompetingDesktopSearchToolsWinsBeforeServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var context = CreateContext(output, error);
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.TreeFilter, "src",
+			CommandLineOptionTokens.PreviewSearch, "Program"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("--tree-filter and --preview-search cannot be used together", error.ToString(), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -273,6 +467,11 @@ public sealed class CommandLineAutomationRunnerTests
 	{
 		Assert.False(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([])));
 		Assert.False(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Path, "/tmp/project"])));
+		Assert.False(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.PreviewMode, "tree-content",
+			CommandLineOptionTokens.TreeFormat, "md"
+		])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse(["--unknown"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Help])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Version])));
@@ -282,6 +481,8 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.ShortOutput, "/tmp/context.txt"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "ascii"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "json"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "xml"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "md"])));
 	}
 
 	private static CommandLineAutomationContext CreateContext(

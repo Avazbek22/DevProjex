@@ -69,7 +69,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
@@ -164,7 +164,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-terminal-command-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          key: nuget-terminal-command-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
           restore-keys: |
             nuget-terminal-command-${{ runner.os }}-
             nuget-${{ runner.os }}-
@@ -198,7 +198,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineOptions|FullyQualifiedName~ReportPathResolver"
+          --filter "Category=TerminalCommand"
           --logger "trx;LogFileName=terminal-command-unit.trx"
           --results-directory "TestResults/terminal-command-unit"
 
@@ -210,7 +210,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineOptions|FullyQualifiedName~ReportPathResolver"
+          --filter "Category=TerminalCommand"
           --logger "trx;LogFileName=terminal-command-unit.trx"
           --results-directory "TestResults/terminal-command-unit"
 
@@ -222,7 +222,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineProcessSmoke|FullyQualifiedName~CommandLineDocumentation"
+          --filter "Category=TerminalCommand"
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 
@@ -234,7 +234,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineProcessSmoke|FullyQualifiedName~CommandLineDocumentation"
+          --filter "Category=TerminalCommand"
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 

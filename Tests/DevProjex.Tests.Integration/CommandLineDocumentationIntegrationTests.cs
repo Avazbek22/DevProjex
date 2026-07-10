@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Integration;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class CommandLineDocumentationIntegrationTests
 {
 	[Fact]

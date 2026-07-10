@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 using System.Xml;
 
@@ -89,6 +90,23 @@ public sealed class TreeExportService
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths))
 			return string.Empty;
 
+		return BuildSelectedTreeFromIncludedPaths(
+			rootPath,
+			root,
+			includedPaths,
+			format,
+			displayRootPath,
+			displayRootName);
+	}
+
+	private static string BuildSelectedTreeFromIncludedPaths(
+		string rootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths,
+		TreeTextFormat format,
+		string? displayRootPath,
+		string? displayRootName)
+	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 
@@ -131,7 +149,13 @@ public sealed class TreeExportService
 
 		if (format != TreeTextFormat.Ascii)
 			return ExportOutputMetricsCalculator.FromText(
-				BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath, displayRootName));
+				BuildSelectedTreeFromIncludedPaths(
+					rootPath,
+					root,
+					includedPaths,
+					format,
+					displayRootPath,
+					displayRootName));
 
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
@@ -278,17 +302,18 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		IReadOnlySet<string>? includedPaths)
 	{
-		using var stream = new MemoryStream();
-		using (var writer = new Utf8JsonWriter(stream, JsonWriterOptions))
+		var buffer = new ArrayBufferWriter<byte>();
+		using (var writer = new Utf8JsonWriter(buffer, JsonWriterOptions))
 		{
 			writer.WriteStartObject();
 			writer.WriteString("rootPath", ResolveStructuredRootPath(localRootPath));
 			writer.WritePropertyName("tree");
 			WriteJsonTreeContents(writer, root, includedPaths);
 			writer.WriteEndObject();
+			writer.Flush();
 		}
 
-		return Encoding.UTF8.GetString(stream.ToArray());
+		return Encoding.UTF8.GetString(buffer.WrittenSpan);
 	}
 
 	private static string BuildXmlDocument(
@@ -518,10 +543,19 @@ public sealed class TreeExportService
 			: sanitized;
 	}
 
-	private static List<TreeNodeDescriptor> GetOrderedStructuredChildren(
+	private static IReadOnlyList<TreeNodeDescriptor> GetOrderedStructuredChildren(
 		IReadOnlyList<TreeNodeDescriptor> children,
 		IReadOnlySet<string>? includedPaths)
 	{
+		if (includedPaths is null && IsStructuredTreeOrder(children))
+		{
+			// Inventory projection already establishes this order for normal trees. Reusing
+			// the immutable child view avoids one list allocation and one sort per directory
+			// for every JSON, XML, and Markdown render while retaining a defensive fallback
+			// for synthetic/custom descriptors.
+			return children;
+		}
+
 		var ordered = new List<TreeNodeDescriptor>(children.Count);
 		foreach (var child in children)
 		{
@@ -529,8 +563,21 @@ public sealed class TreeExportService
 				ordered.Add(child);
 		}
 
-		ordered.Sort(CompareStructuredTreeNodes);
+		if (!IsStructuredTreeOrder(ordered))
+			ordered.Sort(CompareStructuredTreeNodes);
+
 		return ordered;
+	}
+
+	private static bool IsStructuredTreeOrder(IReadOnlyList<TreeNodeDescriptor> children)
+	{
+		for (var index = 1; index < children.Count; index++)
+		{
+			if (CompareStructuredTreeNodes(children[index - 1], children[index]) > 0)
+				return false;
+		}
+
+		return true;
 	}
 
 	private static int CompareStructuredTreeNodes(TreeNodeDescriptor left, TreeNodeDescriptor right)

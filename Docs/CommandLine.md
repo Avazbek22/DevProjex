@@ -53,7 +53,13 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--report-format json` | Selects the report format. JSON is the v1 format. |
 | `--export <mode>` | Exports project text and exits without showing the window. Supported modes: `tree`, `content`, `tree-content`. |
 | `--output <file\|->`, `-o <file\|->` | Writes export text to a specific file, or to stdout when `-` is used. If omitted, export writes to stdout. |
-| `--export-format ascii\|json`, `--format ascii\|json` | Selects tree format for `tree` and `tree-content` exports. Content remains plain text. `--format json` is the short practical form for the rare JSON tree export. |
+| `--export-format ascii\|json\|xml\|md`, `--format ascii\|json\|xml\|md` | Selects tree format for `tree` and `tree-content` exports. Content remains plain text. |
+| `--last` | Opens the most recent local project folder in the desktop UI. Cannot be combined with `--path` or a positional folder. |
+| `--preview` | Opens preview after the project is loaded in the desktop UI. |
+| `--preview-mode tree\|content\|tree-content` | Selects the desktop preview content mode at startup and opens preview. |
+| `--tree-format ascii\|json\|xml\|md` | Selects the desktop tree format at startup. This is separate from headless `--format`. |
+| `--tree-filter <text>` | Opens the desktop tree filter with the provided query. |
+| `--preview-search <text>` | Opens preview search with the provided query. |
 | `--include-root <name>`, `--roots <name>` | Includes one root folder. Can be repeated. |
 | `--include-extension <ext>`, `--ext <ext>` | Includes one extension. Can be repeated. `cs` and `.cs` are equivalent. |
 | `--ignore <name\|none>` | Uses exact ignore options for automation. Can be repeated. |
@@ -78,6 +84,23 @@ none
 ```
 
 `--ignore none` means "use an explicit empty ignore set". It is different from omitting `--ignore`, where DevProjex uses the current default ignore behavior.
+
+## Desktop Startup
+
+Desktop startup options make the visible app open directly in a useful state without changing the headless export/report contract:
+
+```bash
+devprojex --last --preview
+devprojex "/home/me/projects/app" --preview-mode tree-content --tree-format md
+devprojex "/home/me/projects/app" --tree-filter Services
+devprojex "/home/me/projects/app" --preview-search ProjectAnalysisService
+```
+
+`--preview-mode` implies `--preview`. `--preview-search` also implies `--preview` because the command is meant to show the project and search state immediately.
+
+`--tree-filter` and `--preview-search` cannot be combined. The desktop UI intentionally shows only one tree text tool at a time, so the CLI keeps that same rule instead of silently choosing one.
+
+Desktop startup options require either a project path or `--last`. They are not valid with `--no-ui`, `--silent`, or `--export`.
 
 ## Reports
 
@@ -130,7 +153,7 @@ devprojex "/home/me/projects/app" --export tree-content -o ./context.txt
 devprojex "/home/me/projects/app" --export content --roots src --ext cs -o ./src-content.md
 ```
 
-`--format json` changes only the tree part. File contents remain plain text so the result is still easy to paste into tools that expect source context.
+`--format json`, `--format xml`, or `--format md` changes only the tree part. File contents remain plain text so the result is still easy to paste into tools that expect source context.
 `--format` and `--export-format` are valid for `tree` and `tree-content`; `content` exports are always plain text.
 
 JSON tree exports use this structure:

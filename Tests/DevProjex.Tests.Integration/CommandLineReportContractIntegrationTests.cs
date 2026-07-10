@@ -3,6 +3,7 @@ using DevProjex.Infrastructure.Reports;
 
 namespace DevProjex.Tests.Integration;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class CommandLineReportContractIntegrationTests
 {
 	[Fact]

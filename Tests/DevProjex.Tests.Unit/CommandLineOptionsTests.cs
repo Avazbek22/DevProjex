@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class CommandLineOptionsTests
 {
 	[Fact]
@@ -151,6 +152,91 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_ReadsRootedPositionalPathThatLooksLikeUnixPath()
+	{
+		var result = CommandLineOptions.Parse(["/tmp/no-ui"]);
+
+		AssertValid(result);
+		Assert.Equal("/tmp/no-ui", result.Options.Path);
+	}
+
+	[Theory]
+	[InlineData("no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("no_ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("noui", CommandLineOptionTokens.NoUi)]
+	[InlineData("no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("-no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("-no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("silent", CommandLineOptionTokens.Silent)]
+	[InlineData("help", CommandLineOptionTokens.Help)]
+	[InlineData("version", CommandLineOptionTokens.Version)]
+	[InlineData("export", CommandLineOptionTokens.Export)]
+	[InlineData("report", CommandLineOptionTokens.Report)]
+	[InlineData("tree-format", CommandLineOptionTokens.TreeFormat)]
+	[InlineData("tree-formt", CommandLineOptionTokens.TreeFormat)]
+	[InlineData("preview-search", CommandLineOptionTokens.PreviewSearch)]
+	public void Parse_RejectsKnownLongOptionNamesWithoutPrefix(string value, string expectedSuggestion)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertInvalid(result, "missing-option-prefix");
+		Assert.Null(result.Options.Path);
+		var error = Assert.Single(result.Errors);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", error.Message, StringComparison.Ordinal);
+		Assert.Contains($"Use --path {value}", error.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Parse_CommandStyleExportReportsMissingOptionPrefixInsteadOfLaunchingUi()
+	{
+		var result = CommandLineOptions.Parse(["export", "tree"]);
+
+		AssertInvalid(result, "missing-option-prefix");
+		Assert.Contains(
+			result.Errors,
+			static error => error.Message.Contains("Did you mean '--export'?", StringComparison.Ordinal));
+	}
+
+	[Theory]
+	[InlineData("/no-ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/no_ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("/no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("/help", CommandLineOptionTokens.Help)]
+	[InlineData("/version", CommandLineOptionTokens.Version)]
+	[InlineData("/export", CommandLineOptionTokens.Export)]
+	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	public void Parse_RejectsSlashStyleOptionTyposWithoutTreatingThemAsPaths(string value, string expectedSuggestion)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertInvalid(result, "missing-option-prefix");
+		Assert.Null(result.Options.Path);
+		var error = Assert.Single(result.Errors);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", error.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Parse_AllowsKnownOptionNameAsExplicitPathValue()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Path, "no-ui"]);
+
+		AssertValid(result);
+		Assert.Equal("no-ui", result.Options.Path);
+	}
+
+	[Theory]
+	[InlineData("./no-ui")]
+	[InlineData("../report")]
+	[InlineData(".\\silent")]
+	public void Parse_AllowsPathLikePositionalValuesThatResembleOptionNames(string value)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertValid(result);
+		Assert.Equal(value, result.Options.Path);
+	}
+
+	[Fact]
 	public void Parse_RejectsSecondPositionalPath()
 	{
 		var result = CommandLineOptions.Parse(["/tmp/one", "/tmp/two"]);
@@ -166,6 +252,43 @@ public sealed class CommandLineOptionsTests
 
 		AssertInvalid(result, "unknown-option");
 		Assert.Null(result.Options.Path);
+	}
+
+	[Theory]
+	[InlineData("--help=true")]
+	[InlineData("-h=true")]
+	[InlineData("--version=true")]
+	[InlineData("--no-ui=true")]
+	[InlineData("--silent=false")]
+	[InlineData("--strict=true")]
+	[InlineData("--last=true")]
+	[InlineData("--preview=true")]
+	[InlineData("--elevation-attempted=true")]
+	public void Parse_RejectsInlineValuesForValueLessFlags(string value)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertInvalid(result, "unexpected-value");
+		var error = Assert.Single(result.Errors);
+		Assert.Contains("does not accept a value", error.Message, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--no-uii", CommandLineOptionTokens.NoUi)]
+	[InlineData("--no_ui", CommandLineOptionTokens.NoUi)]
+	[InlineData("--noui", CommandLineOptionTokens.NoUi)]
+	[InlineData("--silet", CommandLineOptionTokens.Silent)]
+	[InlineData("--prevew", CommandLineOptionTokens.Preview)]
+	[InlineData("--preview-serch", CommandLineOptionTokens.PreviewSearch)]
+	[InlineData("--tree-fomat", CommandLineOptionTokens.TreeFormat)]
+	[InlineData("--export-formt", CommandLineOptionTokens.ExportFormat)]
+	public void Parse_UnknownOptionSuggestsClosestKnownLongOption(string value, string expectedSuggestion)
+	{
+		var result = CommandLineOptions.Parse([value]);
+
+		AssertInvalid(result, "unknown-option");
+		var error = Assert.Single(result.Errors);
+		Assert.Contains($"Did you mean '{expectedSuggestion}'?", error.Message, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -267,6 +390,9 @@ public sealed class CommandLineOptionsTests
 	[InlineData("ascii", TreeTextFormat.Ascii)]
 	[InlineData("text", TreeTextFormat.Ascii)]
 	[InlineData("json", TreeTextFormat.Json)]
+	[InlineData("xml", TreeTextFormat.Xml)]
+	[InlineData("md", TreeTextFormat.Markdown)]
+	[InlineData("markdown", TreeTextFormat.Markdown)]
 	public void Parse_ReadsExportFormat(string value, TreeTextFormat expectedFormat)
 	{
 		var result = CommandLineOptions.Parse([
@@ -327,6 +453,168 @@ public sealed class CommandLineOptionsTests
 		Assert.True(result.Options.Export.FormatSpecified);
 		Assert.Equal(["src", "tests"], result.Options.IncludeRootFolders);
 		Assert.Equal([".cs", ".json"], result.Options.IncludeExtensions);
+	}
+
+	[Fact]
+	public void Parse_ReadsDesktopStartupOptions()
+	{
+		var result = CommandLineOptions.Parse([
+			"/tmp/root",
+			CommandLineOptionTokens.PreviewMode, "tree-content",
+			CommandLineOptionTokens.TreeFormat, "md",
+			CommandLineOptionTokens.TreeFilter, "Services"
+		]);
+
+		AssertValid(result);
+		Assert.Equal("/tmp/root", result.Options.Path);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Equal(StartupPreviewMode.TreeContent, result.Options.Ui.PreviewMode);
+		Assert.Equal(TreeTextFormat.Markdown, result.Options.Ui.TreeFormat);
+		Assert.Equal("Services", result.Options.Ui.TreeFilter);
+		Assert.Null(result.Options.Ui.PreviewSearch);
+	}
+
+	[Fact]
+	public void Parse_ReadsLastAndPreviewSearchAsDesktopStartupOptions()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Last,
+			CommandLineOptionTokens.PreviewSearch, "ProjectAnalysisService"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Ui.OpenLastProject);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Equal("ProjectAnalysisService", result.Options.Ui.PreviewSearch);
+	}
+
+	[Fact]
+	public void Parse_PreviewFlagWithProjectOpensDefaultPreviewWithoutChangingModeOrSearch()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/root",
+			CommandLineOptionTokens.Preview
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Null(result.Options.Ui.PreviewMode);
+		Assert.Null(result.Options.Ui.TreeFormat);
+		Assert.Null(result.Options.Ui.TreeFilter);
+		Assert.Null(result.Options.Ui.PreviewSearch);
+	}
+
+	[Theory]
+	[InlineData("tree", StartupPreviewMode.Tree)]
+	[InlineData("content", StartupPreviewMode.Content)]
+	[InlineData("tree-content", StartupPreviewMode.TreeContent)]
+	[InlineData("tree-and-content", StartupPreviewMode.TreeContent)]
+	[InlineData("all", StartupPreviewMode.TreeContent)]
+	public void Parse_ReadsEveryDesktopPreviewModeAlias(string value, StartupPreviewMode expectedMode)
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/root",
+			CommandLineOptionTokens.PreviewMode, value
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Equal(expectedMode, result.Options.Ui.PreviewMode);
+	}
+
+	[Theory]
+	[InlineData("ascii", TreeTextFormat.Ascii)]
+	[InlineData("text", TreeTextFormat.Ascii)]
+	[InlineData("json", TreeTextFormat.Json)]
+	[InlineData("xml", TreeTextFormat.Xml)]
+	[InlineData("md", TreeTextFormat.Markdown)]
+	[InlineData("markdown", TreeTextFormat.Markdown)]
+	public void Parse_ReadsEveryDesktopTreeFormatAlias(string value, TreeTextFormat expectedFormat)
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/root",
+			CommandLineOptionTokens.TreeFormat, value
+		]);
+
+		AssertValid(result);
+		Assert.Equal(expectedFormat, result.Options.Ui.TreeFormat);
+	}
+
+	[Fact]
+	public void Parse_DesktopStartupInlineValuesMatchSeparatedValues()
+	{
+		var separated = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/root",
+			CommandLineOptionTokens.PreviewMode, "tree-content",
+			CommandLineOptionTokens.TreeFormat, "md",
+			CommandLineOptionTokens.TreeFilter, "Services"
+		]);
+		var inline = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.Path}=/tmp/root",
+			$"{CommandLineOptionTokens.PreviewMode}=tree-content",
+			$"{CommandLineOptionTokens.TreeFormat}=md",
+			$"{CommandLineOptionTokens.TreeFilter}=Services"
+		]);
+
+		AssertValid(separated);
+		AssertValid(inline);
+		AssertEquivalentOptions(separated.Options, inline.Options);
+	}
+
+	[Fact]
+	public void Parse_DesktopStartupInlineValuesCanContainSpacesAndEquals()
+	{
+		var result = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.Path}=/tmp/root",
+			$"{CommandLineOptionTokens.TreeFilter}=Project Services=Core",
+			$"{CommandLineOptionTokens.TreeFormat}=markdown"
+		]);
+
+		AssertValid(result);
+		Assert.Equal("Project Services=Core", result.Options.Ui.TreeFilter);
+		Assert.Equal(TreeTextFormat.Markdown, result.Options.Ui.TreeFormat);
+	}
+
+	[Fact]
+	public void Parse_RejectsDesktopStartupOptionsWithoutProjectTarget()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Preview]);
+
+		AssertInvalid(result, "ui-startup-requires-project");
+	}
+
+	[Fact]
+	public void Parse_RejectsLastWithExplicitPath()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Last,
+			CommandLineOptionTokens.Path, "/tmp/root"
+		]);
+
+		AssertInvalid(result, "conflicting-startup-target");
+	}
+
+	[Fact]
+	public void Parse_RejectsLastWithPositionalPath()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Last,
+			"/tmp/root"
+		]);
+
+		AssertInvalid(result, "conflicting-startup-target");
+	}
+
+	[Fact]
+	public void Parse_RejectsTreeFilterAndPreviewSearchTogether()
+	{
+		var result = CommandLineOptions.Parse([
+			"/tmp/root",
+			CommandLineOptionTokens.TreeFilter, "Services",
+			CommandLineOptionTokens.PreviewSearch, "Program"
+		]);
+
+		AssertInvalid(result, "conflicting-search-and-filter");
 	}
 
 	[Fact]
@@ -405,11 +693,33 @@ public sealed class CommandLineOptionsTests
 	{
 		var result = CommandLineOptions.Parse([
 			CommandLineOptionTokens.Export, "tree",
-			CommandLineOptionTokens.ExportFormat, "xml"
+			CommandLineOptionTokens.ExportFormat, "yaml"
 		]);
 
 		AssertInvalid(result, "invalid-export-format");
 		Assert.True(result.Options.Export.Enabled);
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedTreeFormat()
+	{
+		var result = CommandLineOptions.Parse([
+			"/tmp/root",
+			CommandLineOptionTokens.TreeFormat, "yaml"
+		]);
+
+		AssertInvalid(result, "invalid-tree-format");
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedPreviewMode()
+	{
+		var result = CommandLineOptions.Parse([
+			"/tmp/root",
+			CommandLineOptionTokens.PreviewMode, "split"
+		]);
+
+		AssertInvalid(result, "invalid-preview-mode");
 	}
 
 	[Fact]
@@ -676,6 +986,90 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void ToArguments_PreservesPreviewOnlyForRelaunch()
+	{
+		var options = new CommandLineOptions("/tmp/root", AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with { OpenPreview = true }
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--preview", args);
+		Assert.DoesNotContain("--preview-mode", args);
+		Assert.DoesNotContain("--preview-search", args);
+	}
+
+	[Fact]
+	public void ToArguments_PreservesDesktopStartupOptionsForRelaunch()
+	{
+		var options = new CommandLineOptions("/tmp/root folder", AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with
+			{
+				OpenLastProject = false,
+				OpenPreview = true,
+				PreviewMode = StartupPreviewMode.TreeContent,
+				TreeFormat = TreeTextFormat.Markdown,
+				TreeFilter = "App Services"
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--path", args);
+		Assert.Contains("\"/tmp/root folder\"", args);
+		Assert.Contains("--preview-mode", args);
+		Assert.Contains("tree-content", args);
+		Assert.Contains("--tree-format", args);
+		Assert.Contains("md", args);
+		Assert.Contains("--tree-filter", args);
+		Assert.Contains("\"App Services\"", args);
+	}
+
+	[Fact]
+	public void ToArguments_CanonicalizesDesktopStartupAliasesForRelaunch()
+	{
+		var options = new CommandLineOptions("/tmp/root", AppLanguage.En, false)
+		{
+			Ui = StartupUiOptions.Default with
+			{
+				OpenPreview = true,
+				PreviewMode = StartupPreviewMode.TreeContent,
+				TreeFormat = TreeTextFormat.Markdown
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--preview-mode", args);
+		Assert.Contains("tree-content", args);
+		Assert.Contains("--tree-format", args);
+		Assert.Contains("md", args);
+		Assert.DoesNotContain("tree-and-content", args);
+		Assert.DoesNotContain("markdown", args);
+	}
+
+	[Fact]
+	public void ToArguments_PreservesLastAndPreviewSearchForRelaunch()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			Ui = StartupUiOptions.Default with
+			{
+				OpenLastProject = true,
+				PreviewSearch = "Project Analysis"
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--last", args);
+		Assert.Contains("--preview-search", args);
+		Assert.Contains("\"Project Analysis\"", args);
+	}
+
+	[Fact]
 	public void ToArguments_PreservesExplicitIgnoreNone()
 	{
 		var options = CommandLineOptions.Empty with
@@ -790,6 +1184,7 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(expected.Report, actual.Report);
 		Assert.Equal(expected.Export, actual.Export);
 		Assert.Equal(expected.Export.FormatSpecified, actual.Export.FormatSpecified);
+		Assert.Equal(expected.Ui, actual.Ui);
 		Assert.Equal(expected.IncludeRootFolders, actual.IncludeRootFolders);
 		Assert.Equal(expected.IncludeExtensions, actual.IncludeExtensions);
 		Assert.Equal(expected.IgnoreOptions, actual.IgnoreOptions);
@@ -840,6 +1235,10 @@ public sealed class CommandLineOptionsTests
 		CommandLineOptionTokens.ShortOutput,
 		CommandLineOptionTokens.ExportFormat,
 		CommandLineOptionTokens.Format,
+		CommandLineOptionTokens.PreviewMode,
+		CommandLineOptionTokens.TreeFormat,
+		CommandLineOptionTokens.TreeFilter,
+		CommandLineOptionTokens.PreviewSearch,
 		CommandLineOptionTokens.IncludeRoot,
 		CommandLineOptionTokens.Roots,
 		CommandLineOptionTokens.IncludeExtension,

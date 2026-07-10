@@ -135,6 +135,9 @@ internal static class CommandLineAutomationRunner
 		if (HasDetachedExportOptions(options))
 			return "--output and --export-format require --export.";
 
+		if (options.Ui.HasStartupActions)
+			return "UI startup options cannot be combined with --no-ui, --silent, or --export.";
+
 		if (options.Export.Enabled &&
 		    options.Export.Mode == StartupExportMode.Content &&
 		    options.Export.Format != TreeTextFormat.Ascii)

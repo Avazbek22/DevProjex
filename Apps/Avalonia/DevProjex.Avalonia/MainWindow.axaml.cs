@@ -81,17 +81,7 @@ public partial class MainWindow : Window
         PreviewSelectionRange SelectionRange);
 
     private static async Task YieldUiAsync(DispatcherPriority priority)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-        {
-            // Dispatcher.Yield is the Avalonia 12 replacement for posting an empty UI callback
-            // when the caller already runs on the UI thread.
-            await Dispatcher.Yield(priority);
-            return;
-        }
-
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, priority);
-    }
+        => await DispatcherTaskSchedulerProvider.YieldAsync(priority);
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     private sealed class ProjectLoadTiming
@@ -908,10 +898,9 @@ public partial class MainWindow : Window
         if (_awaitingSystemDialogActivation)
             return;
 
-        // Deactivation is a good cleanup opportunity only after a genuinely large session.
-        // MemoryCleanupPolicy keeps routine Alt-Tab transitions below that threshold free of
-        // Gen2 compaction and working-set churn.
-        ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.WindowDeactivated);
+        // Do not use deactivation as a cleanup trigger. Alt-Tab, focus changes and native
+        // window-manager handoffs are common interactive paths; forcing Gen2/working-set
+        // trimming here saves little and creates avoidable page faults when the user returns.
     }
 
     private async Task WaitForWindowActivationAfterSystemDialogAsync(CancellationToken cancellationToken = default)
@@ -1030,17 +1019,23 @@ public partial class MainWindow : Window
                 await ShowErrorAsync(string.Join(Environment.NewLine, _startupCommandLineErrors.Select(static error => error.Message)));
             }
 
-            if (!string.IsNullOrWhiteSpace(_startupOptions.Path))
+            var startupProjectPath = ResolveStartupProjectPath();
+            if (!string.IsNullOrWhiteSpace(startupProjectPath))
             {
                 var startupLoadStopwatch = Stopwatch.StartNew();
-                var opened = await TryOpenFolderAsync(_startupOptions.Path!, fromDialog: false);
+                var opened = await TryOpenFolderAsync(startupProjectPath, fromDialog: false);
                 startupLoadStopwatch.Stop();
 
                 if (opened)
                 {
                     await TryApplyStartupSelectionOverridesAsync();
                     await TryWriteStartupReportAsync(startupLoadStopwatch.Elapsed);
+                    await TryApplyStartupUiOptionsAsync();
                 }
+            }
+            else if (_startupOptions.Ui.OpenLastProject)
+            {
+                await ShowInfoAsync(_viewModel.MenuFileRecentEmpty);
             }
             else
             {
@@ -1068,6 +1063,26 @@ public partial class MainWindow : Window
         {
             await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private string? ResolveStartupProjectPath()
+    {
+        if (!string.IsNullOrWhiteSpace(_startupOptions.Path))
+            return _startupOptions.Path;
+
+        if (!_startupOptions.Ui.OpenLastProject)
+            return null;
+
+        foreach (var recentFolder in _recentProjectsDb.RecentFolders)
+        {
+            if (!string.IsNullOrWhiteSpace(recentFolder.Path) &&
+                Directory.Exists(recentFolder.Path))
+            {
+                return recentFolder.Path;
+            }
+        }
+
+        return null;
     }
 
     #region Drop Zone Handlers
@@ -3684,6 +3699,11 @@ public partial class MainWindow : Window
 
     private async void OpenPreviewMode()
     {
+        await OpenPreviewModeAsync();
+    }
+
+    private async Task OpenPreviewModeAsync()
+    {
         if (!_viewModel.IsProjectLoaded)
             return;
         if (_previewPaneAnimating || _treePaneAnimating)
@@ -4103,6 +4123,12 @@ public partial class MainWindow : Window
     /// Multiple rapid requests are coalesced into one cleanup run.
     /// </summary>
     private void SchedulePreviewMemoryCleanup(bool force)
+        => SchedulePreviewMemoryCleanup(force, MemoryCleanupReason.PreviewClose);
+
+    private void SchedulePreviewRebuildMemoryCleanup(bool force)
+        => SchedulePreviewMemoryCleanup(force, MemoryCleanupReason.PreviewRebuildCompleted);
+
+    private void SchedulePreviewMemoryCleanup(bool force, MemoryCleanupReason reason)
     {
         if (!force)
             return;
@@ -4131,7 +4157,7 @@ public partial class MainWindow : Window
                 if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
                     return;
 
-                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.PreviewClose);
+                ScheduleBackgroundMemoryCleanup(reason);
             }
             catch (OperationCanceledException)
             {
@@ -7124,6 +7150,101 @@ public partial class MainWindow : Window
         await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath);
         await _selectionCoordinator.WaitForPendingRefreshesAsync();
     }
+
+    private async Task TryApplyStartupUiOptionsAsync()
+    {
+        var ui = _startupOptions.Ui;
+        if (!ui.HasStartupActions || !_viewModel.IsProjectLoaded)
+            return;
+
+        if (ui.TreeFormat is { } treeFormat)
+            _viewModel.SelectedExportFormat = MapStartupTreeFormat(treeFormat);
+
+        if (ui.PreviewMode is { } previewMode)
+            _viewModel.SelectedPreviewContentMode = MapStartupPreviewMode(previewMode);
+
+        if (!string.IsNullOrWhiteSpace(ui.TreeFilter))
+            await ApplyStartupTreeFilterAsync(ui.TreeFilter!);
+
+        var shouldOpenPreview =
+            ui.OpenPreview ||
+            ui.PreviewMode is not null ||
+            !string.IsNullOrWhiteSpace(ui.PreviewSearch);
+
+        if (shouldOpenPreview && !_viewModel.IsPreviewMode)
+            await OpenPreviewModeAsync();
+
+        if (!string.IsNullOrWhiteSpace(ui.PreviewSearch))
+            await ApplyStartupPreviewSearchAsync(ui.PreviewSearch!);
+    }
+
+    private async Task ApplyStartupTreeFilterAsync(string query)
+    {
+        var normalizedQuery = query.Trim();
+        if (normalizedQuery.Length == 0 || !_viewModel.IsSearchFilterAvailable)
+            return;
+
+        if (IsSearchBarEffectivelyVisible())
+            await CloseSearchAsync(focusTree: false);
+
+        ShowFilter(focusInput: false, selectAllOnFocus: false);
+
+        Interlocked.Increment(ref _suppressSearchFilterRealtimeDepth);
+        try
+        {
+            _viewModel.SearchQuery = string.Empty;
+            _viewModel.NameFilter = normalizedQuery;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _suppressSearchFilterRealtimeDepth);
+        }
+
+        _filterCoordinator.CancelPending();
+        _viewModel.SetFilterInProgress(true);
+        await ApplyFilterRealtimeAsync(CancellationToken.None);
+    }
+
+    private async Task ApplyStartupPreviewSearchAsync(string query)
+    {
+        var normalizedQuery = query.Trim();
+        if (normalizedQuery.Length == 0 || !_viewModel.IsSearchFilterAvailable)
+            return;
+
+        if (IsFilterBarEffectivelyVisible())
+            await CloseFilterAsync(focusTree: false);
+
+        ShowSearch(focusInput: false, selectAllOnFocus: false);
+
+        Interlocked.Increment(ref _suppressSearchFilterRealtimeDepth);
+        try
+        {
+            _viewModel.NameFilter = string.Empty;
+            _viewModel.SearchQuery = normalizedQuery;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _suppressSearchFilterRealtimeDepth);
+        }
+
+        _searchCoordinator.CancelPending();
+        _searchCoordinator.UpdateSearchMatches();
+    }
+
+    private static ExportFormat MapStartupTreeFormat(TreeTextFormat format) => format switch
+    {
+        TreeTextFormat.Json => ExportFormat.Json,
+        TreeTextFormat.Xml => ExportFormat.Xml,
+        TreeTextFormat.Markdown => ExportFormat.Markdown,
+        _ => ExportFormat.Ascii
+    };
+
+    private static PreviewContentMode MapStartupPreviewMode(StartupPreviewMode mode) => mode switch
+    {
+        StartupPreviewMode.Content => PreviewContentMode.Content,
+        StartupPreviewMode.TreeContent => PreviewContentMode.TreeAndContent,
+        _ => PreviewContentMode.Tree
+    };
 
     private async Task TryWriteStartupReportAsync(TimeSpan loadingElapsed)
     {

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using DevProjex.Avalonia.Services;
@@ -48,6 +47,15 @@ internal sealed class MetricsPipeline(
         int TrailingNewlineChars,
         int TrailingNewlineLineBreaks);
 
+    private readonly record struct FileMetricsScanResult(
+        FileMetricsData Metrics,
+        bool HasMetrics,
+        bool WasInspected);
+
+    private readonly record struct FileMetricsCacheEntry(
+        FileMetricsData Metrics,
+        bool HasMetrics);
+
     private const double CompactStatusMetricsThresholdWidth = 1050;
 
     private static readonly FrozenSet<string> MetricsWarmupBinaryExtensions =
@@ -64,22 +72,11 @@ internal sealed class MetricsPipeline(
         }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private static async Task YieldUiAsync(DispatcherPriority priority)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-        {
-            // Avalonia 12 exposes an explicit dispatcher yield, which makes these
-            // warmup waits read as scheduling points instead of empty callbacks.
-            await Dispatcher.Yield(priority);
-            return;
-        }
-
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, priority);
-    }
+        => await DispatcherTaskSchedulerProvider.YieldAsync(priority);
 
     private readonly object _metricsLock = new();
     private readonly object _computationCacheLock = new();
-    private readonly Dictionary<string, FileMetricsData> _fileMetricsCache = new(PathComparer.Default);
-    private readonly HashSet<string> _inspectedFileMetricsPaths = new(PathComparer.Default);
+    private readonly Dictionary<string, FileMetricsCacheEntry> _fileMetricsCache = new(PathComparer.Default);
 
     private CancellationTokenSource? _metricsCalculationCts;
     private DispatcherTimer? _metricsDebounceTimer;
@@ -253,12 +250,8 @@ internal sealed class MetricsPipeline(
         lock (_metricsLock)
         {
             _fileMetricsCache.Clear();
-            _inspectedFileMetricsPaths.Clear();
             if (trimCapacity)
-            {
                 _fileMetricsCache.TrimExcess();
-                _inspectedFileMetricsPaths.TrimExcess();
-            }
         }
 
         InvalidateComputedCaches();
@@ -368,8 +361,8 @@ internal sealed class MetricsPipeline(
             indeterminate: false,
             operationType: StatusOperationType.MetricsCalculation,
             cancelAction: CancelBackgroundCalculation);
-        var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
-        var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
+        IReadOnlyList<string> stagedFilePaths = Array.Empty<string>();
+        FileMetricsScanResult[] stagedResults = [];
         try
         {
             if (statusOperations.IsActive(statusOperationId))
@@ -382,6 +375,8 @@ internal sealed class MetricsPipeline(
                     () => GetOrBuildAllOrderedFilePaths(currentTree),
                     linkedCts.Token);
             }
+            stagedFilePaths = filePaths;
+            stagedResults = new FileMetricsScanResult[filePaths.Count];
 
             ClearFileMetricsCache(trimCapacity: true);
 
@@ -410,14 +405,12 @@ internal sealed class MetricsPipeline(
 
             await ScanFileMetricsAsync(
                 filePaths,
-                stagedMetrics,
-                stagedInspectedPaths,
+                stagedResults,
                 linkedCts.Token,
                 statusOperationId,
                 MetricsCalculationPolicy.GetBaselineWarmupParallelism(Environment.ProcessorCount));
 
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
+            MergeStagedMetricsIntoCache(stagedFilePaths, stagedResults);
 
             _isBackgroundMetricsActive = false;
             _hasCompleteMetricsBaseline = true;
@@ -431,11 +424,20 @@ internal sealed class MetricsPipeline(
         {
             _isBackgroundMetricsActive = false;
             _hasCompleteMetricsBaseline = false;
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
+            MergeStagedMetricsIntoCache(stagedFilePaths, stagedResults);
             bool hasCachedMetrics;
             lock (_metricsLock)
-                hasCachedMetrics = _fileMetricsCache.Count > 0;
+            {
+                hasCachedMetrics = false;
+                foreach (var entry in _fileMetricsCache.Values)
+                {
+                    if (!entry.HasMetrics)
+                        continue;
+
+                    hasCachedMetrics = true;
+                    break;
+                }
+            }
             if (_metricsCancellationRequestedByUser)
             {
                 _metricsCancellationRequestedByUser = false;
@@ -466,38 +468,33 @@ internal sealed class MetricsPipeline(
         return true;
     }
 
-    private void MergeStagedMetricsIntoCache(ConcurrentDictionary<string, FileMetricsData> stagedMetrics)
+    private void MergeStagedMetricsIntoCache(
+        IReadOnlyList<string> filePaths,
+        IReadOnlyList<FileMetricsScanResult> results)
     {
-        if (stagedMetrics.IsEmpty)
+        if (filePaths.Count == 0 || results.Count == 0)
             return;
 
         lock (_metricsLock)
         {
-            foreach (var pair in stagedMetrics)
-                _fileMetricsCache[pair.Key] = pair.Value;
+            var count = Math.Min(filePaths.Count, results.Count);
+            for (var index = 0; index < count; index++)
+            {
+                var result = results[index];
+                if (!result.WasInspected)
+                    continue;
+
+                var filePath = filePaths[index];
+                _fileMetricsCache[filePath] = new FileMetricsCacheEntry(
+                    result.Metrics,
+                    result.HasMetrics);
+            }
         }
-
-        stagedMetrics.Clear();
-    }
-
-    private void MergeInspectedMetricsPaths(ConcurrentDictionary<string, byte> inspectedPaths)
-    {
-        if (inspectedPaths.IsEmpty)
-            return;
-
-        lock (_metricsLock)
-        {
-            foreach (var pair in inspectedPaths)
-                _inspectedFileMetricsPaths.Add(pair.Key);
-        }
-
-        inspectedPaths.Clear();
     }
 
     private async Task ScanFileMetricsAsync(
         IReadOnlyList<string> filePaths,
-        ConcurrentDictionary<string, FileMetricsData> stagedMetrics,
-        ConcurrentDictionary<string, byte> stagedInspectedPaths,
+        FileMetricsScanResult[] stagedResults,
         CancellationToken cancellationToken,
         long statusOperationId,
         int maxDegreeOfParallelism)
@@ -513,13 +510,17 @@ internal sealed class MetricsPipeline(
             CancellationToken = cancellationToken
         };
 
-        await Parallel.ForEachAsync(filePaths, parallelOptions, async (filePath, ct) =>
+        await Parallel.ForAsync(0, filePaths.Count, parallelOptions, async (index, ct) =>
         {
+            var filePath = filePaths[index];
             try
             {
                 if (IsDefinitelyBinaryByExtensionForMetricsWarmup(filePath))
                 {
-                    stagedInspectedPaths[filePath] = 0;
+                    stagedResults[index] = new FileMetricsScanResult(
+                        Metrics: default,
+                        HasMetrics: false,
+                        WasInspected: true);
                     return;
                 }
 
@@ -528,22 +529,29 @@ internal sealed class MetricsPipeline(
 
                 if (metrics is not null)
                 {
-                    stagedMetrics[filePath] = new FileMetricsData(
-                        metrics.SizeBytes,
-                        metrics.LineCount,
-                        metrics.CharCount,
-                        metrics.IsEmpty,
-                        metrics.IsWhitespaceOnly,
-                        metrics.IsEstimated,
-                        metrics.CrLfPairCount,
-                        metrics.TrailingNewlineChars,
-                        metrics.TrailingNewlineLineBreaks);
+                    stagedResults[index] = new FileMetricsScanResult(
+                        new FileMetricsData(
+                            metrics.SizeBytes,
+                            metrics.LineCount,
+                            metrics.CharCount,
+                            metrics.IsEmpty,
+                            metrics.IsWhitespaceOnly,
+                            metrics.IsEstimated,
+                            metrics.CrLfPairCount,
+                            metrics.TrailingNewlineChars,
+                            metrics.TrailingNewlineLineBreaks),
+                        HasMetrics: true,
+                        WasInspected: true);
+                    return;
                 }
 
                 // Null means "not exportable as text", not "still missing". Remembering the
                 // completed probe prevents binary files from keeping selected content metrics
                 // stuck behind a permanent "missing metrics" gate.
-                stagedInspectedPaths[filePath] = 0;
+                stagedResults[index] = new FileMetricsScanResult(
+                    Metrics: default,
+                    HasMetrics: false,
+                    WasInspected: true);
             }
             catch (OperationCanceledException)
             {
@@ -551,7 +559,10 @@ internal sealed class MetricsPipeline(
             }
             catch
             {
-                stagedInspectedPaths[filePath] = 0;
+                stagedResults[index] = new FileMetricsScanResult(
+                    Metrics: default,
+                    HasMetrics: false,
+                    WasInspected: true);
             }
             finally
             {
@@ -778,7 +789,7 @@ internal sealed class MetricsPipeline(
             for (var index = 0; index < orderedPaths.Count; index++)
             {
                 var path = orderedPaths[index];
-                if (!_inspectedFileMetricsPaths.Contains(path))
+                if (!_fileMetricsCache.ContainsKey(path))
                     missingPaths.Add(path);
             }
         }
@@ -803,8 +814,7 @@ internal sealed class MetricsPipeline(
             indeterminate: false,
             operationType: StatusOperationType.MetricsCalculation,
             cancelAction: CancelBackgroundCalculation);
-        var stagedMetrics = new ConcurrentDictionary<string, FileMetricsData>(PathComparer.Default);
-        var stagedInspectedPaths = new ConcurrentDictionary<string, byte>(PathComparer.Default);
+        var stagedResults = new FileMetricsScanResult[missingPaths.Count];
 
         try
         {
@@ -813,21 +823,18 @@ internal sealed class MetricsPipeline(
 
             await ScanFileMetricsAsync(
                 missingPaths,
-                stagedMetrics,
-                stagedInspectedPaths,
+                stagedResults,
                 linkedCts.Token,
                 statusOperationId,
                 MetricsCalculationPolicy.GetSelectionRecoveryParallelism(Environment.ProcessorCount));
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
+            MergeStagedMetricsIntoCache(missingPaths, stagedResults);
 
             if (statusOperations.IsActive(statusOperationId))
                 viewModel.StatusProgressValue = 100;
         }
         catch (OperationCanceledException)
         {
-            MergeStagedMetricsIntoCache(stagedMetrics);
-            MergeInspectedMetricsPaths(stagedInspectedPaths);
+            MergeStagedMetricsIntoCache(missingPaths, stagedResults);
             throw;
         }
         finally
@@ -936,9 +943,13 @@ internal sealed class MetricsPipeline(
         {
             foreach (var path in orderedPaths)
             {
-                if (!_fileMetricsCache.TryGetValue(path, out var metrics))
+                if (!_fileMetricsCache.TryGetValue(path, out var cacheEntry) ||
+                    !cacheEntry.HasMetrics)
+                {
                     continue;
+                }
 
+                var metrics = cacheEntry.Metrics;
                 var contentOnlyPath = MapExportDisplayPath(path, contentOnlyPathMapper);
                 var treeAndContentPath = MapExportDisplayPath(path, treeAndContentPathMapper);
                 var fileMetrics = new ContentFileMetrics(
@@ -1068,8 +1079,14 @@ internal sealed class MetricsPipeline(
 
     private static bool IsDefinitelyBinaryByExtensionForMetricsWarmup(string path)
     {
-        var extension = Path.GetExtension(path);
-        return !string.IsNullOrWhiteSpace(extension) && MetricsWarmupBinaryExtensions.Contains(extension);
+        var extension = Path.GetExtension(path.AsSpan());
+        if (extension.IsWhiteSpace())
+            return false;
+
+        if (MetricsWarmupBinaryExtensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup))
+            return lookup.Contains(extension);
+
+        return MetricsWarmupBinaryExtensions.Contains(extension.ToString());
     }
 
     private static string MapExportDisplayPath(string filePath, Func<string, string>? mapFilePath)

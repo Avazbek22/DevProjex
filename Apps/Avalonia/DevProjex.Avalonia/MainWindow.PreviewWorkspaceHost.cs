@@ -128,7 +128,7 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
 
     void IPreviewWorkspacePipelineHost.SchedulePreviewMemoryCleanupForDocument(IPreviewTextDocument document)
     {
-        SchedulePreviewMemoryCleanup(
+        SchedulePreviewRebuildMemoryCleanup(
             force: PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
                 document.CharacterCount,
                 document.LineCount));

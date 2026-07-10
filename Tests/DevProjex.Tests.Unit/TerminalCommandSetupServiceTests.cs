@@ -3,6 +3,7 @@ using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandSetupServiceTests
 {
 	[Fact]
@@ -119,6 +120,19 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void BuildWindowsLauncherContent_PreservesBatchMetacharactersInsideQuotedEnvironmentValues()
+	{
+		var target = @"C:\Tools & Stuff\Dev^Projex!100%\DevProjex.exe";
+
+		var launcher = TerminalCommandSetupService.BuildWindowsLauncherContent(target);
+
+		Assert.Contains("rem target: " + target, launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_EXE=C:\\Tools & Stuff\\Dev^Projex!100%%\\DevProjex.exe\"", launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_DLL=C:\\Tools & Stuff\\Dev^Projex!100%%\\DevProjex.dll\"", launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("start /wait", launcher, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
 	public void BuildWindowsLauncherContent_ArgumentModeUsesConsoleRouteForSingleFilePublish()
 	{
 		var target = @"C:\Tools\DevProjex\DevProjex.exe";
@@ -191,6 +205,32 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.False(result.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.NotSupported, result.Outcome);
 		Assert.Null(snapshot.CommandPath);
+	}
+
+	[Fact]
+	public void Probe_WindowsPortableBuild_PathProvidersThrow_KeepsSetupActionableWithoutCrashing()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.Windows,
+			IsWindowsPackagedApp = () => false,
+			LocalAppDataPathProvider = () => temp.Path,
+			PathVariableProvider = () => throw new IOException("process PATH unavailable"),
+			UserPathVariableProvider = () => throw new IOException("user PATH unavailable"),
+			MachinePathVariableProvider = () => throw new IOException("machine PATH unavailable"),
+			UserPathVariableWriter = _ => throw new InvalidOperationException("Probe must not write PATH."),
+			ExecutablePathProvider = () => target,
+			PathListSeparator = ';'
+		});
+
+		var snapshot = service.Probe();
+
+		Assert.Equal(TerminalCommandSetupState.NotInstalled, snapshot.State);
+		Assert.True(snapshot.CanInstall);
+		Assert.False(snapshot.UserBinDirectoryIsInPath);
+		Assert.Contains("PATH", snapshot.ShellProfileHint, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -332,6 +372,48 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.False(snapshot.UserBinDirectoryIsInPath);
 		Assert.True(result.Success);
 		AssertPathListContains(userPath, userBin);
+	}
+
+	[Fact]
+	public void InstallOrRepair_WindowsPortableBuild_TransientUserPathReadFailureStillInstallsOnceProviderRecovers()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userPath = string.Empty;
+		var userPathReadCount = 0;
+		var writeCount = 0;
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.Windows,
+			IsWindowsPackagedApp = () => false,
+			LocalAppDataPathProvider = () => temp.Path,
+			PathVariableProvider = () => string.Empty,
+			UserPathVariableProvider = () =>
+			{
+				userPathReadCount++;
+				if (userPathReadCount == 1)
+					throw new IOException("transient user PATH read failure");
+
+				return userPath;
+			},
+			MachinePathVariableProvider = () => string.Empty,
+			UserPathVariableWriter = value =>
+			{
+				writeCount++;
+				userPath = value;
+			},
+			ExecutablePathProvider = () => target,
+			PathListSeparator = ';'
+		});
+
+		var result = service.InstallOrRepair();
+		var commandPath = Path.Combine(temp.Path, "DevProjex", "bin", CommandLineExecutableAliases.WindowsPortableCommandFileName);
+
+		Assert.True(result.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Created, result.Outcome);
+		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
+		Assert.Equal(1, writeCount);
+		AssertPathListContains(userPath, Path.GetDirectoryName(commandPath)!);
 	}
 
 	[Fact]
@@ -604,6 +686,34 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.True(snapshot.CanInstall);
 		Assert.False(snapshot.UserBinDirectoryIsInPath);
 		Assert.Contains(".local/bin", snapshot.ShellProfileHint, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Probe_UnixPathProviderThrows_KeepsInstallActionableAndInstallsWithProfileHint()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.Linux,
+			HomeDirectoryProvider = () => temp.Path,
+			PathVariableProvider = () => throw new IOException("PATH unavailable"),
+			ExecutablePathProvider = () => target
+		});
+
+		var snapshot = service.Probe();
+		var result = service.InstallOrRepair();
+		var wrapperPath = Path.Combine(temp.Path, ".local", "bin", CommandLineExecutableAliases.UnixCommand);
+
+		Assert.Equal(TerminalCommandSetupState.NotInstalled, snapshot.State);
+		Assert.True(snapshot.CanInstall);
+		Assert.False(snapshot.UserBinDirectoryIsInPath);
+		Assert.Contains(".local/bin", snapshot.ShellProfileHint, StringComparison.Ordinal);
+		Assert.True(result.Success);
+		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
+		Assert.False(result.Snapshot.UserBinDirectoryIsInPath);
+		Assert.Contains(".local/bin", result.Snapshot.ShellProfileHint, StringComparison.Ordinal);
+		Assert.True(File.Exists(wrapperPath));
 	}
 
 	[Fact]
@@ -887,6 +997,20 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.StartsWith("#!/bin/sh", wrapper, StringComparison.Ordinal);
 		Assert.Contains("# target: " + target, wrapper, StringComparison.Ordinal);
 		Assert.Contains("exec '/Users/me/DevProjex'\"'\"'s builds/DevProjex' \"$@\"", wrapper, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void BuildWrapperContent_UsesLfOnlyAndPreservesUnicodeSpaceAndApostropheTarget()
+	{
+		var target = "/home/me/Dev Projex's builds/Приложение/DevProjex";
+
+		var wrapper = TerminalCommandSetupService.BuildWrapperContent(target);
+
+		Assert.DoesNotContain("\r", wrapper, StringComparison.Ordinal);
+		Assert.StartsWith("#!/bin/sh\n", wrapper, StringComparison.Ordinal);
+		Assert.EndsWith("\n", wrapper, StringComparison.Ordinal);
+		Assert.Contains("# target: " + target, wrapper, StringComparison.Ordinal);
+		Assert.Contains("exec '/home/me/Dev Projex'\"'\"'s builds/Приложение/DevProjex' \"$@\"", wrapper, StringComparison.Ordinal);
 	}
 
 	[Fact]

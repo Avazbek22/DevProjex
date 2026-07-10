@@ -728,6 +728,16 @@
                         Classes="segmented-control preview-segmented-control">
                   <Grid Name="PreviewSegmentGrid"
                         ColumnDefinitions="1.15*,1.15*,1.6*">
+                    <Grid Grid.ColumnSpan="3"
+                          Classes="preview-segment-divider-layer"
+                          ColumnDefinitions="1.15*,1.15*,1.6*"
+                          IsHitTestVisible="False">
+                      <Border Grid.Column="0"
+                              Classes="preview-segment-divider" />
+                      <Border Grid.Column="1"
+                              Classes="preview-segment-divider" />
+                    </Grid>
+
                     <Border Name="PreviewSegmentThumb"
                             Grid.Column="0"
                             Classes="segment-thumb preview-segment-thumb"

@@ -466,5 +466,77 @@ public sealed class FileContentAnalyzerTests
 		Assert.Equal(0, result.TrailingNewlineLineBreaks);
 	}
 
+	[Theory]
+	[InlineData("single line")]
+	[InlineData("line 1\nline 2\n")]
+	[InlineData("line 1\rline 2\r")]
+	[InlineData("line 1\r\nline 2\nline 3\r")]
+	[InlineData(" \t\r\n\u2003")]
+	[InlineData("Привет\n世界\r\n")]
+	public async Task GetTextFileMetricsAsync_TextMatrix_MatchesFullContentMetrics(string content)
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("matrix.txt", content);
+
+		var metrics = await _analyzer.GetTextFileMetricsAsync(
+			file,
+			TestContext.Current.CancellationToken);
+		var fullContent = await _analyzer.TryReadAsTextAsync(
+			file,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(metrics);
+		Assert.NotNull(fullContent);
+		Assert.Equal(fullContent.SizeBytes, metrics.SizeBytes);
+		Assert.Equal(fullContent.LineCount, metrics.LineCount);
+		Assert.Equal(fullContent.CharCount, metrics.CharCount);
+		Assert.Equal(fullContent.IsEmpty, metrics.IsEmpty);
+		Assert.Equal(fullContent.IsWhitespaceOnly, metrics.IsWhitespaceOnly);
+		Assert.Equal(fullContent.IsEstimated, metrics.IsEstimated);
+		Assert.Equal(fullContent.TrailingNewlineChars, metrics.TrailingNewlineChars);
+		Assert.Equal(fullContent.TrailingNewlineLineBreaks, metrics.TrailingNewlineLineBreaks);
+	}
+
+	[Fact]
+	public async Task GetTextFileMetricsAsync_FileOpenForConcurrentReads_RemainsReadable()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("shared.txt", "line 1\nline 2");
+		await using var otherReader = new FileStream(
+			file,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+
+		var metrics = await _analyzer.GetTextFileMetricsAsync(
+			file,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(metrics);
+		Assert.Equal(2, metrics.LineCount);
+		Assert.Equal(13, metrics.CharCount);
+	}
+
+	[Fact]
+	public async Task GetTextFileMetricsAsync_ConcurrentFiles_PreservesEveryResult()
+	{
+		using var temp = new TemporaryDirectory();
+		var files = Enumerable.Range(0, 32)
+			.Select(index => temp.CreateFile($"file-{index:D2}.txt", $"value-{index}\nnext"))
+			.ToArray();
+
+		var tasks = files.Select(path => Task.Run(
+			() => _analyzer.GetTextFileMetricsAsync(path, TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken));
+		var results = await Task.WhenAll(tasks);
+
+		Assert.All(results, result =>
+		{
+			Assert.NotNull(result);
+			Assert.Equal(2, result.LineCount);
+			Assert.False(result.IsEstimated);
+		});
+	}
+
 	#endregion
 }

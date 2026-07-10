@@ -10,7 +10,7 @@ internal enum MemoryCleanupReason
     SearchClose = 5,
     FilterClose = 6,
     PreviewClose = 7,
-    WindowDeactivated = 8
+    PreviewRebuildCompleted = 8
 }
 
 internal readonly record struct MemoryCleanupPlan(
@@ -79,9 +79,11 @@ internal static class MemoryCleanupPolicy
                 WaitForUiSettled: false,
                 MinimumManagedHeapBytes: 0),
 
-            // Do not compact a healthy small heap every time the user Alt-Tabs. Besides the
-            // collection itself, trimming the working set creates page faults on reactivation.
-            MemoryCleanupReason.WindowDeactivated => new(
+            // Preview rebuilds are interactive: switching tree formats can briefly allocate a
+            // large document, but unlike closing preview it doesn't mean the user explicitly
+            // asked us to return memory immediately. Keep this path threshold-gated so normal
+            // format switches stay smooth and the runtime can handle small transient buffers.
+            MemoryCleanupReason.PreviewRebuildCompleted => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: false,
                 MinimumManagedHeapBytes: RoutineCleanupMinimumManagedHeapBytes),

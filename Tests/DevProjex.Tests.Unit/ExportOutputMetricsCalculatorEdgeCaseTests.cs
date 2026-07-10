@@ -1,0 +1,135 @@
+namespace DevProjex.Tests.Unit;
+
+public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
+{
+	private const string ClipboardBlankLine = "\u00A0";
+
+	[Theory]
+	[InlineData("", 0, 0, 0)]
+	[InlineData("a", 1, 1, 1)]
+	[InlineData("abcd", 1, 4, 1)]
+	[InlineData("abcde", 1, 5, 2)]
+	[InlineData("abcdefgh", 1, 8, 2)]
+	[InlineData("abcdefghi", 1, 9, 3)]
+	[InlineData("abc\n", 2, 4, 1)]
+	[InlineData("abc\r\n", 2, 4, 1)]
+	public void FromText_TokenAndLineBoundariesStayStable(
+		string text,
+		int expectedLines,
+		int expectedChars,
+		int expectedTokens)
+	{
+		var metrics = ExportOutputMetricsCalculator.FromText(text);
+
+		Assert.Equal(expectedLines, metrics.Lines);
+		Assert.Equal(expectedChars, metrics.Chars);
+		Assert.Equal(expectedTokens, metrics.Tokens);
+	}
+
+	[Fact]
+	public void FromText_UnicodeEmojiAndCombiningMarksUseRenderedUtf16CharCount()
+	{
+		const string text = "Привет\nCafe\u0301\n🙂";
+
+		var metrics = ExportOutputMetricsCalculator.FromText(text);
+
+		Assert.Equal(3, metrics.Lines);
+		Assert.Equal(GetExpectedNormalizedCharCount(text), metrics.Chars);
+		Assert.Equal((metrics.Chars + 3) / 4, metrics.Tokens);
+	}
+
+	[Fact]
+	public void FromContentFiles_IgnoresBlankPathsDeduplicatesAndKeepsFirstDuplicateMetrics()
+	{
+		var files = new[]
+		{
+			new ContentFileMetrics(" ", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false),
+			new ContentFileMetrics("b.txt", 4, 1, 4, IsEmpty: false, IsWhitespaceOnly: false),
+			new ContentFileMetrics("a.txt", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false),
+			new ContentFileMetrics("a.txt", 9, 1, 9, IsEmpty: false, IsWhitespaceOnly: false),
+			new ContentFileMetrics("\t", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false)
+		};
+		var expectedText = string.Join(
+			'\n',
+			[
+				"a.txt:",
+				ClipboardBlankLine,
+				"[No Content, 0 bytes]",
+				ClipboardBlankLine,
+				ClipboardBlankLine,
+				"b.txt:",
+				ClipboardBlankLine,
+				"bbbb"
+			]);
+
+		var actual = ExportOutputMetricsCalculator.FromContentFiles(files);
+		var expected = ExportOutputMetricsCalculator.FromText(expectedText);
+
+		Assert.Equal(expected, actual);
+	}
+
+	[Fact]
+	public void FromContentFiles_WhitespaceAndEstimatedBranchesMatchRenderedClipboardMarkers()
+	{
+		var files = new[]
+		{
+			new ContentFileMetrics(
+				Path: "estimated.log",
+				SizeBytes: 20_000_000,
+				LineCount: 100_000,
+				CharCount: 20_000_000,
+				IsEmpty: false,
+				IsWhitespaceOnly: false,
+				IsEstimated: true),
+			new ContentFileMetrics(
+				Path: "spaces.txt",
+				SizeBytes: 6,
+				LineCount: 2,
+				CharCount: 6,
+				IsEmpty: false,
+				IsWhitespaceOnly: true)
+		};
+		var expectedText = string.Join(
+			'\n',
+			[
+				"estimated.log:",
+				ClipboardBlankLine,
+				string.Empty,
+				ClipboardBlankLine,
+				ClipboardBlankLine,
+				"spaces.txt:",
+				ClipboardBlankLine,
+				"[Whitespace, 6 bytes]"
+			]);
+
+		var actual = ExportOutputMetricsCalculator.FromContentFiles(files);
+		var expected = ExportOutputMetricsCalculator.FromText(expectedText);
+
+		Assert.Equal(expected, actual);
+	}
+
+	[Fact]
+	public void OrderedAccumulator_ReturnsEmptyWhenOnlyInvalidOrTrailingBlankRowsWereAppended()
+	{
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+
+		accumulator.AppendFile(new ContentFileMetrics("", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false));
+		accumulator.AppendFile(new ContentFileMetrics("   ", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false));
+
+		Assert.Equal(ExportOutputMetrics.Empty, accumulator.ToMetrics());
+	}
+
+	private static int GetExpectedNormalizedCharCount(string text)
+	{
+		var count = 0;
+		for (var i = 0; i < text.Length; i++)
+		{
+			if (text[i] == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+				i++;
+
+			count++;
+		}
+
+		return count;
+	}
+}

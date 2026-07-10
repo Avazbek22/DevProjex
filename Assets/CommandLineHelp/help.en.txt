@@ -20,8 +20,15 @@ Options:
   --export <mode>                 Export project text: tree, content, tree-content.
                                   Defaults to stdout when --output is omitted.
   --output, -o <file|->           Write export text to a file or stdout with -.
-  --export-format, --format ascii|json
+  --export-format, --format ascii|json|xml|md
                                   Tree format for tree and tree-content exports.
+  --last                          Open the most recent local project folder.
+  --preview                       Open the desktop preview after loading the project.
+  --preview-mode tree|content|tree-content
+                                  Select the preview content mode at startup.
+  --tree-format ascii|json|xml|md Select the desktop tree format at startup.
+  --tree-filter <text>            Open the tree filter with this query.
+  --preview-search <text>         Open preview search with this query.
   --include-root, --roots <name>  Include one root folder. Can be repeated.
   --include-extension, --ext <ext>
                                   Include one extension. Can be repeated.
@@ -40,6 +47,9 @@ Ignore option names:
 Examples:
   DevProjex "C:\Projects\App"
   DevProjex.exe --path "C:\Projects\App"
+  devprojex --last --preview
+  devprojex "/home/me/projects/app" --preview-mode tree-content --tree-format md
+  devprojex "/home/me/projects/app" --tree-filter Services
   devprojex.exe --path "C:\Projects\App" --report
   devprojex "/home/me/projects/app"
   DevProjex "/home/me/projects/app"

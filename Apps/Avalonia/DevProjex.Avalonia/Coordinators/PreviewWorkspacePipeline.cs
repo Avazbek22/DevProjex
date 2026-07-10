@@ -124,7 +124,6 @@ internal sealed class PreviewWorkspacePipeline(
                 {
                     host.ApplyPreviewDocument(currentPreviewDocument);
                     _refreshRequested = false;
-                    host.SchedulePreviewMemoryCleanupForDocument(currentPreviewDocument);
                 }
 
                 return;
