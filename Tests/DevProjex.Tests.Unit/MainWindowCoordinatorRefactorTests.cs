@@ -335,8 +335,27 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         Assert.Equal(1, host.ApplyDocumentCount);
         Assert.Equal(0, host.BuildDocumentCount);
+        Assert.Equal(0, host.PreviewDocumentCleanupRequestCount);
         Assert.True(pipeline.IsIdle);
         Assert.False(viewModel.IsPreviewLoading);
+    }
+
+    [Fact]
+    public async Task PreviewWorkspacePipeline_NewBuildSchedulesCleanupForAppliedDocument()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        var host = new RecordingPreviewWorkspaceHost(viewModel);
+        using var pipeline = new PreviewWorkspacePipeline(host, TimeSpan.FromMilliseconds(1));
+
+        await pipeline.RefreshNowAsync();
+
+        Assert.Equal(1, host.ApplyDocumentCount);
+        Assert.Equal(1, host.BuildDocumentCount);
+        Assert.Equal(1, host.PreviewDocumentCleanupRequestCount);
+        viewModel.PreviewDocument?.Dispose();
     }
 
     [Fact]
@@ -1088,6 +1107,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public int BuildDocumentCount { get; private set; }
 
+        public int PreviewDocumentCleanupRequestCount { get; private set; }
+
         public bool EnsurePreviewTreeReady() => true;
 
         public void ApplyPreviewNoDataText() =>
@@ -1162,6 +1183,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         public void SchedulePreviewMemoryCleanupForDocument(IPreviewTextDocument document)
         {
             _ = document;
+            PreviewDocumentCleanupRequestCount++;
         }
     }
 

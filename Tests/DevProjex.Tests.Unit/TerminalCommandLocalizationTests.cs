@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandLocalizationTests
 {
 	private static readonly string[] RequiredKeys =

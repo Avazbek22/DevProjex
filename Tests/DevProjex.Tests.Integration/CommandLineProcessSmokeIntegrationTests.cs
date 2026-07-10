@@ -5,6 +5,7 @@ using System.Xml.Linq;
 
 namespace DevProjex.Tests.Integration;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class CommandLineProcessSmokeIntegrationTests
 {
 	[Theory]

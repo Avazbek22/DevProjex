@@ -2,6 +2,7 @@ using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandSetupDialogTextTests
 {
 	[Theory]

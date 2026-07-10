@@ -2,6 +2,7 @@ using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandAutomaticPromptGateTests
 {
 	[Fact]

@@ -2,6 +2,7 @@ using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Tests.Integration;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 {
 	[Fact]

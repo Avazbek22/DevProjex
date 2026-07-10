@@ -81,17 +81,7 @@ public partial class MainWindow : Window
         PreviewSelectionRange SelectionRange);
 
     private static async Task YieldUiAsync(DispatcherPriority priority)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-        {
-            // Dispatcher.Yield is the Avalonia 12 replacement for posting an empty UI callback
-            // when the caller already runs on the UI thread.
-            await Dispatcher.Yield(priority);
-            return;
-        }
-
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, priority);
-    }
+        => await DispatcherTaskSchedulerProvider.YieldAsync(priority);
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     private sealed class ProjectLoadTiming
@@ -908,10 +898,9 @@ public partial class MainWindow : Window
         if (_awaitingSystemDialogActivation)
             return;
 
-        // Deactivation is a good cleanup opportunity only after a genuinely large session.
-        // MemoryCleanupPolicy keeps routine Alt-Tab transitions below that threshold free of
-        // Gen2 compaction and working-set churn.
-        ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.WindowDeactivated);
+        // Do not use deactivation as a cleanup trigger. Alt-Tab, focus changes and native
+        // window-manager handoffs are common interactive paths; forcing Gen2/working-set
+        // trimming here saves little and creates avoidable page faults when the user returns.
     }
 
     private async Task WaitForWindowActivationAfterSystemDialogAsync(CancellationToken cancellationToken = default)
@@ -4134,6 +4123,12 @@ public partial class MainWindow : Window
     /// Multiple rapid requests are coalesced into one cleanup run.
     /// </summary>
     private void SchedulePreviewMemoryCleanup(bool force)
+        => SchedulePreviewMemoryCleanup(force, MemoryCleanupReason.PreviewClose);
+
+    private void SchedulePreviewRebuildMemoryCleanup(bool force)
+        => SchedulePreviewMemoryCleanup(force, MemoryCleanupReason.PreviewRebuildCompleted);
+
+    private void SchedulePreviewMemoryCleanup(bool force, MemoryCleanupReason reason)
     {
         if (!force)
             return;
@@ -4162,7 +4157,7 @@ public partial class MainWindow : Window
                 if (cleanupVersion != Volatile.Read(ref _previewMemoryCleanupVersion))
                     return;
 
-                ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.PreviewClose);
+                ScheduleBackgroundMemoryCleanup(reason);
             }
             catch (OperationCanceledException)
             {

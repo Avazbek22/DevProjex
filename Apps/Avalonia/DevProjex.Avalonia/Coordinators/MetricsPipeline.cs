@@ -72,17 +72,7 @@ internal sealed class MetricsPipeline(
         }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private static async Task YieldUiAsync(DispatcherPriority priority)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-        {
-            // Avalonia 12 exposes an explicit dispatcher yield, which makes these
-            // warmup waits read as scheduling points instead of empty callbacks.
-            await Dispatcher.Yield(priority);
-            return;
-        }
-
-        await Dispatcher.UIThread.InvokeAsync(static () => { }, priority);
-    }
+        => await DispatcherTaskSchedulerProvider.YieldAsync(priority);
 
     private readonly object _metricsLock = new();
     private readonly object _computationCacheLock = new();

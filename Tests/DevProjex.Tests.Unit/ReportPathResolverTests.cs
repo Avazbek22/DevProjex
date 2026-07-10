@@ -2,6 +2,7 @@ using DevProjex.Infrastructure.Reports;
 
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class ReportPathResolverTests
 {
 	[Fact]

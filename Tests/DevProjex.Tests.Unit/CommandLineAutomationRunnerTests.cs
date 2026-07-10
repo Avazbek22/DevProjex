@@ -2,6 +2,7 @@ using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class CommandLineAutomationRunnerTests
 {
 	[Fact]

@@ -3,6 +3,7 @@ using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandSetupServiceTests
 {
 	[Fact]

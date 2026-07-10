@@ -11,7 +11,7 @@ public sealed class MemoryCleanupPolicyTests
     [InlineData((int)MemoryCleanupReason.SearchClose, false, 400)]
     [InlineData((int)MemoryCleanupReason.FilterClose, false, 400)]
     [InlineData((int)MemoryCleanupReason.PreviewClose, false, 140)]
-    [InlineData((int)MemoryCleanupReason.WindowDeactivated, false, 400)]
+    [InlineData((int)MemoryCleanupReason.PreviewRebuildCompleted, false, 400)]
     public void CreateDeferredPlan_ReturnsStableReasonSpecificContract(
         int reasonRaw,
         bool expectedWaitForUiSettled,
@@ -79,7 +79,7 @@ public sealed class MemoryCleanupPolicyTests
     [InlineData((int)MemoryCleanupReason.GitBranchSwitch)]
     [InlineData((int)MemoryCleanupReason.SearchClose)]
     [InlineData((int)MemoryCleanupReason.FilterClose)]
-    [InlineData((int)MemoryCleanupReason.WindowDeactivated)]
+    [InlineData((int)MemoryCleanupReason.PreviewRebuildCompleted)]
     public void ShouldRun_RoutineLifecycleCleanup_RequiresMaterialManagedHeap(int reasonRaw)
     {
         var plan = MemoryCleanupPolicy.CreateDeferredPlan(
@@ -102,6 +102,21 @@ public sealed class MemoryCleanupPolicyTests
             settingsPanelAnimationDuration: TimeSpan.Zero);
 
         Assert.True(MemoryCleanupPolicy.ShouldRun(plan, managedHeapBytes: 0));
+    }
+
+    [Fact]
+    public void ShouldRun_PreviewRebuildCleanup_RemainsThresholdGated()
+    {
+        var plan = MemoryCleanupPolicy.CreateDeferredPlan(
+            MemoryCleanupReason.PreviewRebuildCompleted,
+            settingsPanelAnimationDuration: TimeSpan.Zero);
+
+        Assert.False(MemoryCleanupPolicy.ShouldRun(
+            plan,
+            MemoryCleanupPolicy.RoutineCleanupMinimumManagedHeapBytes - 1));
+        Assert.True(MemoryCleanupPolicy.ShouldRun(
+            plan,
+            MemoryCleanupPolicy.RoutineCleanupMinimumManagedHeapBytes));
     }
 
     [Fact]
