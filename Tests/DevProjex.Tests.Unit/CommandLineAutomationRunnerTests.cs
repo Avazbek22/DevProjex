@@ -585,6 +585,87 @@ public sealed class CommandLineAutomationRunnerTests
 	}
 
 	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_UiBenchmarkWritesSummaryAndDetailedJsonReport()
+	{
+		using var runCountOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_UI_BENCHMARK_RUNS", "2");
+		using var warmupOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_UI_BENCHMARK_WARMUP", "1");
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var reportPath = Path.Combine(temp.Path, "benchmark", "ui-result.json");
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var processRunner = new FakeUiBenchmarkProcessRunner();
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.BenchmarkUi, temp.Path,
+			CommandLineOptionTokens.BenchmarkOutput, reportPath
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(
+				output,
+				error,
+				uiBenchmarkProcessRunner: processRunner),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(string.Empty, error.ToString());
+		var summary = output.ToString();
+		Assert.Contains("DevProjex UI benchmark", summary, StringComparison.Ordinal);
+		Assert.Contains("Cold UI process:", summary, StringComparison.Ordinal);
+		Assert.Contains("Scenario: standard-ui", summary, StringComparison.Ordinal);
+		Assert.Contains(Path.GetFullPath(reportPath).Replace('\\', '/'), summary, StringComparison.Ordinal);
+		Assert.DoesNotContain("{", summary, StringComparison.Ordinal);
+		Assert.True(File.Exists(reportPath));
+		Assert.Equal(3, processRunner.Requests.Count);
+		Assert.All(processRunner.Requests, request =>
+		{
+			Assert.Contains(CommandLineOptionTokens.SessionMetrics, request.Arguments);
+			Assert.Contains(temp.Path, request.Arguments);
+			Assert.Contains(CommandLineOptionTokens.SessionMetricsOutput, request.Arguments);
+			Assert.Contains(CommandLineOptionTokens.UiBenchmarkScript, request.Arguments);
+			Assert.Contains("standard", request.Arguments);
+			Assert.DoesNotContain(CommandLineOptionTokens.BenchmarkUi, request.Arguments);
+		});
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
+		var root = document.RootElement;
+		Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("ui-benchmark", root.GetProperty("kind").GetString());
+		Assert.Equal("standard-ui", root.GetProperty("scenario").GetString());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), root.GetProperty("targetPath").GetString());
+		Assert.Equal(2, root.GetProperty("configuration").GetProperty("runs").GetInt32());
+		Assert.Equal(1, root.GetProperty("configuration").GetProperty("warmup").GetInt32());
+		Assert.False(root.GetProperty("hasFailures").GetBoolean());
+		Assert.Equal(1, root.GetProperty("coldUiProcess").GetProperty("warmupRuns").GetArrayLength());
+		Assert.Equal(2, root.GetProperty("coldUiProcess").GetProperty("runs").GetArrayLength());
+		Assert.True(root.GetProperty("coldUiProcess").GetProperty("summary").GetProperty("avgPreviewOpenMilliseconds").GetDouble() > 0);
+		Assert.True(root.GetProperty("coldUiProcess").GetProperty("summary").GetProperty("avgSearchMilliseconds").GetDouble() > 0);
+		Assert.Contains(CommandLineOptionTokens.UiBenchmarkScript, root.GetProperty("executable").GetProperty("arguments").EnumerateArray().Select(static item => item.GetString()));
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_UiBenchmarkMissingTargetWritesRuntimeErrorBeforeChildProcess()
+	{
+		using var temp = new TemporaryDirectory();
+		var missingPath = Path.Combine(temp.Path, "missing");
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var processRunner = new FakeUiBenchmarkProcessRunner();
+		var parseResult = CommandLineOptions.Parse([CommandLineOptionTokens.BenchmarkUi, missingPath]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error, uiBenchmarkProcessRunner: processRunner),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Empty(processRunner.Requests);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("UI benchmark target folder was not found", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ShouldRunBeforeAvalonia_ReturnsTrueOnlyForUtilityOrHeadlessModes()
 	{
 		Assert.False(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([])));
@@ -611,6 +692,13 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "xml"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "md"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Benchmark, "/tmp/project"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.BenchmarkUi, "/tmp/project"])));
+		Assert.False(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics,
+			"/tmp/project",
+			CommandLineOptionTokens.UiBenchmarkScript,
+			"standard"
+		])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([
 			CommandLineOptionTokens.SessionMetrics,
 			"/tmp/project",
@@ -624,6 +712,7 @@ public sealed class CommandLineAutomationRunnerTests
 		string version = "test-version",
 		Func<CommandLineOptions, AvaloniaAppServices>? servicesFactory = null,
 		ICommandLineBenchmarkProcessRunner? benchmarkProcessRunner = null,
+		ICommandLineBenchmarkProcessRunner? uiBenchmarkProcessRunner = null,
 		Func<string>? benchmarkLocalAppDataProvider = null) =>
 		new(
 			Output: output,
@@ -632,6 +721,7 @@ public sealed class CommandLineAutomationRunnerTests
 			HelpContentProvider: new CommandLineHelpContentProvider(),
 			VersionProvider: () => version,
 			BenchmarkProcessRunner: benchmarkProcessRunner,
+			UiBenchmarkProcessRunner: uiBenchmarkProcessRunner,
 			BenchmarkLocalAppDataProvider: benchmarkLocalAppDataProvider);
 
 	private sealed class FakeBenchmarkProcessRunner : ICommandLineBenchmarkProcessRunner
@@ -665,6 +755,83 @@ public sealed class CommandLineAutomationRunnerTests
 				Error: null);
 			return Task.FromResult(run);
 		}
+	}
+
+	private sealed class FakeUiBenchmarkProcessRunner : ICommandLineBenchmarkProcessRunner
+	{
+		public List<CommandLineBenchmarkProcessRequest> Requests { get; } = [];
+
+		public async Task<CommandLineBenchmarkProcessRun> RunAsync(
+			CommandLineBenchmarkProcessRequest request,
+			int index,
+			bool isWarmup,
+			CancellationToken cancellationToken)
+		{
+			Requests.Add(request);
+			var outputIndex = request.Arguments.ToList().IndexOf(CommandLineOptionTokens.SessionMetricsOutput);
+			Assert.True(outputIndex >= 0);
+			var sessionReportPath = request.Arguments[outputIndex + 1];
+			var directory = Path.GetDirectoryName(sessionReportPath);
+			if (!string.IsNullOrWhiteSpace(directory))
+				Directory.CreateDirectory(directory);
+
+			await File.WriteAllTextAsync(
+				sessionReportPath,
+				CreateSessionMetricsReportJson(index),
+				cancellationToken);
+
+			var stdout = $"DevProjex session metrics: {sessionReportPath.Replace('\\', '/')}{Environment.NewLine}";
+			return new CommandLineBenchmarkProcessRun(
+				Index: index,
+				IsWarmup: isWarmup,
+				StartedAt: DateTimeOffset.Now,
+				WallMilliseconds: 1_000 + index,
+				CpuMilliseconds: 500 + index,
+				PeakWorkingSetBytes: 256 * 1024 * 1024,
+				PeakPrivateMemoryBytes: 192 * 1024 * 1024,
+				StdoutCharacters: stdout.Length,
+				StdoutBytes: Encoding.UTF8.GetByteCount(stdout),
+				StderrCharacters: 0,
+				ExitCode: CommandLineExitCodes.Success,
+				Error: null);
+		}
+
+		private static string CreateSessionMetricsReportJson(int index) =>
+			$$"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "interactive-session",
+			  "targetPath": "C:/Project",
+			  "outputPath": "C:/Reports/session-{{index}}.json",
+			  "startedAt": "2026-07-11T00:00:00Z",
+			  "endedAt": "2026-07-11T00:00:10Z",
+			  "durationMilliseconds": {{10_000 + index}},
+			  "summary": {
+			    "sampleCount": 3,
+			    "eventCount": 8,
+			    "droppedSamples": 0,
+			    "droppedEvents": 0,
+			    "averageCpuPercent": 2.5,
+			    "peakCpuPercent": 7.5,
+			    "averageIdleCpuPercent": 0.1,
+			    "peakIdleCpuPercent": 0.2,
+			    "peakWorkingSetBytes": 268435456,
+			    "peakPrivateMemoryBytes": 201326592,
+			    "peakManagedMemoryBytes": 67108864,
+			    "gen0Collections": 2,
+			    "gen1Collections": 1,
+			    "gen2Collections": 0
+			  },
+			  "samples": [],
+			  "events": [
+			    { "name": "project.load", "atMilliseconds": 100, "durationMilliseconds": {{100 + index}}, "success": true },
+			    { "name": "ui.benchmark.step", "atMilliseconds": 500, "stepName": "preview.open", "durationMilliseconds": {{200 + index}}, "success": true },
+			    { "name": "ui.benchmark.step", "atMilliseconds": 800, "stepName": "search.apply", "durationMilliseconds": {{20 + index}}, "success": true },
+			    { "name": "ui.benchmark.step", "atMilliseconds": 900, "stepName": "filter.apply", "durationMilliseconds": {{40 + index}}, "success": true },
+			    { "name": "ui.benchmark.step", "atMilliseconds": 950, "stepName": "idle.settle", "durationMilliseconds": 1500, "success": true }
+			  ]
+			}
+			""";
 	}
 
 	private sealed class TemporaryEnvironmentVariable : IDisposable

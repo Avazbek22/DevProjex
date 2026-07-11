@@ -2,7 +2,10 @@ using System.IO.Enumeration;
 
 namespace DevProjex.Application.Services;
 
-public sealed class ProjectRootFactsProvider
+public sealed class ProjectRootFactsProvider(
+	TimeSpan? cacheTtl = null,
+	int cacheLimit = ProjectRootFactsProvider.DefaultCacheLimit,
+	Func<DateTime>? utcNowProvider = null)
 {
 	private const int DefaultCacheLimit = 256;
 	private static readonly TimeSpan DefaultCacheTtl = TimeSpan.FromSeconds(5);
@@ -16,19 +19,9 @@ public sealed class ProjectRootFactsProvider
 
 	private readonly object _cacheSync = new();
 	private readonly Dictionary<string, CacheEntry> _cache = new(PathComparer.Default);
-	private readonly TimeSpan _cacheTtl;
-	private readonly int _cacheLimit;
-	private readonly Func<DateTime> _utcNowProvider;
-
-	public ProjectRootFactsProvider(
-		TimeSpan? cacheTtl = null,
-		int cacheLimit = DefaultCacheLimit,
-		Func<DateTime>? utcNowProvider = null)
-	{
-		_cacheTtl = cacheTtl ?? DefaultCacheTtl;
-		_cacheLimit = Math.Max(0, cacheLimit);
-		_utcNowProvider = utcNowProvider ?? (() => DateTime.UtcNow);
-	}
+	private readonly TimeSpan _cacheTtl = cacheTtl ?? DefaultCacheTtl;
+	private readonly int _cacheLimit = Math.Max(0, cacheLimit);
+	private readonly Func<DateTime> _utcNowProvider = utcNowProvider ?? (() => DateTime.UtcNow);
 
 	public ProjectRootFacts Get(string rootPath, bool forceRefresh = false)
 	{

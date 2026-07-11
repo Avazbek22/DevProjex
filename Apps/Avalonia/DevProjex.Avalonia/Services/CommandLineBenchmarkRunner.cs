@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace DevProjex.Avalonia.Services;
 
-internal sealed class CommandLineBenchmarkRunner
+internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext context)
 {
 	private const int DefaultMeasuredRuns = 7;
 	private const int DefaultWarmupRuns = 1;
@@ -22,13 +22,6 @@ internal sealed class CommandLineBenchmarkRunner
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 	};
-
-	private readonly CommandLineBenchmarkContext _context;
-
-	public CommandLineBenchmarkRunner(CommandLineBenchmarkContext context)
-	{
-		_context = context;
-	}
 
 	public async Task<int> RunAsync(CommandLineOptions options, CancellationToken cancellationToken)
 	{
@@ -61,7 +54,7 @@ internal sealed class CommandLineBenchmarkRunner
 			var report = CommandLineBenchmarkReport.Create(
 				createdAt,
 				targetPath,
-				_context.VersionProvider(),
+				context.VersionProvider(),
 				coldRequest,
 				runConfiguration,
 				coldRuns,
@@ -94,7 +87,7 @@ internal sealed class CommandLineBenchmarkRunner
 		for (var index = 0; index < configuration.TotalRuns; index++)
 		{
 			var isWarmup = index < configuration.Warmup;
-			runs.Add(await _context.ProcessRunner
+			runs.Add(await context.ProcessRunner
 				.RunAsync(request, index + 1, isWarmup, cancellationToken)
 				.ConfigureAwait(false));
 		}
@@ -107,7 +100,7 @@ internal sealed class CommandLineBenchmarkRunner
 		CommandLineBenchmarkRunConfiguration configuration,
 		CancellationToken cancellationToken)
 	{
-		var services = _context.ServicesFactory(CommandLineOptions.Empty);
+		var services = context.ServicesFactory(CommandLineOptions.Empty);
 		var runs = new List<CommandLineBenchmarkPipelineRun>(configuration.TotalRuns);
 		for (var index = 0; index < configuration.TotalRuns; index++)
 		{
@@ -277,7 +270,7 @@ internal sealed class CommandLineBenchmarkRunner
 		if (!string.IsNullOrWhiteSpace(explicitPath))
 			return Path.GetFullPath(explicitPath);
 
-		var localAppData = _context.LocalAppDataProvider();
+		var localAppData = context.LocalAppDataProvider();
 		if (string.IsNullOrWhiteSpace(localAppData))
 			localAppData = Path.GetTempPath();
 
@@ -337,7 +330,7 @@ internal sealed class CommandLineBenchmarkRunner
 		};
 
 		foreach (var line in lines)
-			await _context.Output.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
+			await context.Output.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
 	}
 
 	private static string FormatMilliseconds(double value) =>
@@ -413,7 +406,7 @@ internal sealed class CommandLineBenchmarkRunner
 		}
 	}
 
-	private void WriteError(string message) => _context.Error.WriteLine($"DevProjex: {message}");
+	private void WriteError(string message) => context.Error.WriteLine($"DevProjex: {message}");
 }
 
 internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBenchmarkProcessRunner

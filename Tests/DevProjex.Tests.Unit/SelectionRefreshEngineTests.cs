@@ -1010,17 +1010,10 @@ public sealed class SelectionRefreshEngineTests
 			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
 	}
 
-	private sealed class ProfileFallbackVisibilityScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
+	private sealed class ProfileFallbackVisibilityScanner(IgnoreControllerImpactCounts controllerImpactCounts = default)
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider,
+			IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
 	{
-		private readonly IgnoreControllerImpactCounts _controllerImpactCounts;
-
-		public ProfileFallbackVisibilityScanner(
-			IgnoreControllerImpactCounts controllerImpactCounts = default)
-		{
-			_controllerImpactCounts = controllerImpactCounts;
-		}
-
 		public bool CanReadRoot(string rootPath) => true;
 
 		public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
@@ -1083,7 +1076,7 @@ public sealed class SelectionRefreshEngineTests
 					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 					IgnoreOptionCounts.Empty,
 					IgnoreOptionCounts.Empty,
-					_controllerImpactCounts),
+					controllerImpactCounts),
 				false,
 				false);
 		}

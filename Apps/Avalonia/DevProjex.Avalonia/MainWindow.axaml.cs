@@ -1081,6 +1081,8 @@ public partial class MainWindow : Window
                     await TryApplyStartupSelectionOverridesAsync();
                     await TryWriteStartupReportAsync(startupLoadStopwatch.Elapsed);
                     await TryApplyStartupUiOptionsAsync();
+                    if (await TryRunStartupUiBenchmarkScriptAsync())
+                        return;
                 }
             }
             else if (_startupOptions.Ui.OpenLastProject)
@@ -7264,6 +7266,191 @@ public partial class MainWindow : Window
 
         if (!string.IsNullOrWhiteSpace(ui.PreviewSearch))
             await ApplyStartupPreviewSearchAsync(ui.PreviewSearch!);
+    }
+
+    private async Task<bool> TryRunStartupUiBenchmarkScriptAsync()
+    {
+        if (!_startupOptions.UiBenchmarkScript.Enabled || !_viewModel.IsProjectLoaded)
+            return false;
+
+        try
+        {
+            switch (_startupOptions.UiBenchmarkScript.Script)
+            {
+                case StartupUiBenchmarkScript.Standard:
+                    await RunStandardUiBenchmarkScriptAsync();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _sessionMetrics.RecordUiBenchmarkStep("scenario.failed", TimeSpan.Zero, success: false, ex.GetType().Name);
+        }
+        finally
+        {
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(250));
+            Close();
+        }
+
+        return true;
+    }
+
+    private async Task RunStandardUiBenchmarkScriptAsync()
+    {
+        await RunUiBenchmarkStepAsync("startup.settle", async () =>
+        {
+            await _selectionCoordinator.WaitForPendingRefreshesAsync();
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromSeconds(1));
+        });
+
+        await RunUiBenchmarkStepAsync("preview.open", async () =>
+        {
+            await OpenPreviewModeAsync();
+            await WaitForUiBenchmarkConditionAsync(
+                () => _viewModel.IsPreviewMode && !_viewModel.IsPreviewLoading && !_previewPaneAnimating,
+                TimeSpan.FromSeconds(30),
+                "preview did not open");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromSeconds(1));
+        });
+
+        await RunUiBenchmarkStepAsync("tree-format.json", () => ApplyUiBenchmarkTreeFormatAsync(ExportFormat.Json));
+        await RunUiBenchmarkStepAsync("tree-format.xml", () => ApplyUiBenchmarkTreeFormatAsync(ExportFormat.Xml));
+        await RunUiBenchmarkStepAsync("tree-format.md", () => ApplyUiBenchmarkTreeFormatAsync(ExportFormat.Markdown));
+        await RunUiBenchmarkStepAsync("tree-format.ascii", () => ApplyUiBenchmarkTreeFormatAsync(ExportFormat.Ascii));
+
+        await RunUiBenchmarkStepAsync("preview-mode.content", () => ApplyUiBenchmarkPreviewModeAsync(PreviewContentMode.Content));
+        await RunUiBenchmarkStepAsync("preview-mode.tree-content", () => ApplyUiBenchmarkPreviewModeAsync(PreviewContentMode.TreeAndContent));
+        await RunUiBenchmarkStepAsync("preview-mode.tree", () => ApplyUiBenchmarkPreviewModeAsync(PreviewContentMode.Tree));
+
+        var searchQuery = ResolveUiBenchmarkQuery("service", "test", "src", "app");
+        await RunUiBenchmarkStepAsync("search.apply", async () =>
+        {
+            await ApplyStartupPreviewSearchAsync(searchQuery);
+            await WaitForUiBenchmarkConditionAsync(
+                () => _viewModel.SearchVisible &&
+                      string.Equals(_viewModel.SearchQuery, searchQuery, StringComparison.Ordinal) &&
+                      !_viewModel.IsSearchInProgress,
+                TimeSpan.FromSeconds(10),
+                "search did not apply");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        await RunUiBenchmarkStepAsync("search.navigate", async () =>
+        {
+            TryNavigateSearchMatches(1);
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        var filterQuery = ResolveUiBenchmarkQuery("test", "src", "service", "app");
+        await RunUiBenchmarkStepAsync("filter.apply", async () =>
+        {
+            await ApplyStartupTreeFilterAsync(filterQuery);
+            await WaitForUiBenchmarkConditionAsync(
+                () => _viewModel.FilterVisible &&
+                      string.Equals(_viewModel.NameFilter, filterQuery, StringComparison.Ordinal) &&
+                      !_viewModel.IsFilterInProgress,
+                TimeSpan.FromSeconds(20),
+                "filter did not apply");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        await RunUiBenchmarkStepAsync("filter.close", async () =>
+        {
+            await CloseFilterAsync(focusTree: false);
+            await WaitForUiBenchmarkConditionAsync(
+                () => !_viewModel.FilterVisible && string.IsNullOrEmpty(_viewModel.NameFilter),
+                TimeSpan.FromSeconds(10),
+                "filter did not close");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        await RunUiBenchmarkStepAsync("preview.close", async () =>
+        {
+            ClosePreviewMode();
+            await WaitForUiBenchmarkConditionAsync(
+                () => !_viewModel.IsPreviewMode && !_previewPaneAnimating && !_treePaneAnimating,
+                TimeSpan.FromSeconds(30),
+                "preview did not close");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        await RunUiBenchmarkStepAsync("idle.settle", () => SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(1500)));
+    }
+
+    private async Task RunUiBenchmarkStepAsync(string stepName, Func<Task> action)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await action();
+            stopwatch.Stop();
+            _sessionMetrics.RecordUiBenchmarkStep(stepName, stopwatch.Elapsed, success: true);
+        }
+        catch
+        {
+            stopwatch.Stop();
+            _sessionMetrics.RecordUiBenchmarkStep(stepName, stopwatch.Elapsed, success: false);
+            throw;
+        }
+    }
+
+    private async Task ApplyUiBenchmarkTreeFormatAsync(ExportFormat format)
+    {
+        _viewModel.SelectedExportFormat = format;
+        await WaitForUiBenchmarkConditionAsync(
+            () => _viewModel.SelectedExportFormat == format && !_viewModel.IsPreviewLoading,
+            TimeSpan.FromSeconds(20),
+            $"tree format {format} did not settle");
+        await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+    }
+
+    private async Task ApplyUiBenchmarkPreviewModeAsync(PreviewContentMode mode)
+    {
+        await SwitchPreviewModeAsync(mode);
+        await WaitForUiBenchmarkConditionAsync(
+            () => _viewModel.SelectedPreviewContentMode == mode && !_viewModel.IsPreviewLoading && !_previewModeSwitchInProgress,
+            TimeSpan.FromSeconds(20),
+            $"preview mode {mode} did not settle");
+        await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+    }
+
+    private string ResolveUiBenchmarkQuery(params string[] candidates)
+    {
+        if (_currentTree?.Root is null)
+            return candidates[0];
+
+        foreach (var candidate in candidates)
+        {
+            if (NameFilterMatchCounter.CountMatchesUnderRoot(_currentTree.Root, candidate) > 0)
+                return candidate;
+        }
+
+        return candidates[0];
+    }
+
+    private static async Task WaitForUiBenchmarkConditionAsync(
+        Func<bool> condition,
+        TimeSpan timeout,
+        string timeoutMessage)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (condition())
+                return;
+
+            await YieldUiAsync(DispatcherPriority.Background);
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        throw new TimeoutException(timeoutMessage);
+    }
+
+    private static async Task SettleUiBenchmarkStepAsync(TimeSpan minimumDelay)
+    {
+        await WaitForPreviewRenderPassesAsync();
+        await Task.Delay(minimumDelay);
+        await YieldUiAsync(DispatcherPriority.Background);
     }
 
     private async Task ApplyStartupTreeFilterAsync(string query)

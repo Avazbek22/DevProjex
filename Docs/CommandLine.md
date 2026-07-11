@@ -52,7 +52,8 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--report-path <file>` | Writes a JSON analysis report to a specific file. |
 | `--report-format json` | Selects the report format. JSON is the v1 format. |
 | `--benchmark <folder>` | Runs the standard project report benchmark against a folder and exits without showing the window. |
-| `--benchmark-output <file>` | Writes the detailed benchmark JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex benchmark folder. |
+| `--benchmark-ui <folder>` | Runs the standard desktop UI benchmark against a folder. It opens real UI child processes, runs a deterministic preview/search/filter scenario, then exits. |
+| `--benchmark-output <file>` | Writes the detailed benchmark JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex benchmark folder. Applies to `--benchmark` and `--benchmark-ui`. |
 | `--session-metrics <folder>` | Opens the desktop app with a project folder and records low-overhead UI session metrics until the window exits. |
 | `--session-metrics-output <file>` | Writes the detailed session metrics JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex session metrics folder. |
 | `--export <mode>` | Exports project text and exits without showing the window. Supported modes: `tree`, `content`, `tree-content`. |
@@ -181,6 +182,24 @@ The benchmark measures wall time, CPU time, process memory, managed memory and G
 
 `--benchmark` is intentionally one fixed scenario: project report analysis. It cannot be combined with `--path`, report/export options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
 
+## UI Benchmark
+
+`--benchmark-ui <folder>` runs one standard desktop UI benchmark profile:
+
+- cold UI process runs: DevProjex starts itself as child processes with `--session-metrics <folder>` and an internal deterministic UI script;
+- each child opens the real Avalonia window, loads the project, opens preview, switches tree formats and preview modes, applies tree search and tree filter, waits for idle, closes the window, and writes a session metrics report;
+- stdout prints a short human-readable summary;
+- a detailed JSON report aggregates the child session reports.
+
+```bash
+devprojex --benchmark-ui "/home/me/projects/app"
+devprojex --benchmark-ui "C:\Projects\App" --benchmark-output "C:\Reports\devprojex-ui-benchmark.json"
+```
+
+The UI benchmark measures child process wall time, CPU time, process memory, project load timing, scripted preview/search/filter timings, session CPU/memory/GC samples, exit codes, and captured errors. The JSON report also records application/runtime/OS details, the exact child command line, and paths to the raw session metrics reports.
+
+`--benchmark-ui` is intentionally one fixed scenario: standard desktop UI workflow. It cannot be combined with `--benchmark`, `--session-metrics`, `--path`, report/export options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
+
 ## Exports
 
 Exports are human-readable text payloads that match the app's copy/export behavior:
@@ -234,7 +253,7 @@ Automation-friendly output is kept strict:
 - `stdout`: help text, version text, generated file paths, benchmark summaries, implicit or explicit JSON report payloads, or export payloads.
 - `stdout` for `--session-metrics`: a short line with the saved JSON report path after the desktop window closes.
 - `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
-- no UI is created for `--help`, `--version`, `--no-ui`, `--export`, or `--benchmark`. `--session-metrics` intentionally creates the UI because it records an interactive session.
+- no UI is created for `--help`, `--version`, `--no-ui`, `--export`, or `--benchmark`. `--session-metrics` opens one interactive UI session, and `--benchmark-ui` opens real UI child processes for repeatable UI measurement.
 - only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
 
 ## Windows Portable EXE Note

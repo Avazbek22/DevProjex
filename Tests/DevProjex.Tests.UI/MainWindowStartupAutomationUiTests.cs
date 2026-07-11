@@ -328,6 +328,47 @@ public sealed class MainWindowStartupAutomationUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task StartupUiBenchmarkScript_RunsStandardScenarioAndWritesStepMetrics()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var outputPath = Path.Combine(project.AppDataPath, "session-metrics", "ui-benchmark-session.json");
+		var options = ParseValidOptions(
+			CommandLineOptionTokens.SessionMetrics, project.RootPath,
+			CommandLineOptionTokens.SessionMetricsOutput, outputPath,
+			CommandLineOptionTokens.UiBenchmarkScript, "standard");
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !window.IsVisible && File.Exists(outputPath),
+				"scripted UI benchmark to close the window and write the session report",
+				TimeSpan.FromSeconds(45));
+
+			Assert.True(File.Exists(outputPath), "Expected the scripted UI benchmark session report to be written.");
+			var json = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
+			using var document = JsonDocument.Parse(json);
+			var events = document.RootElement.GetProperty("events").EnumerateArray().ToArray();
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "preview.open"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "tree-format.json"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "tree-format.xml"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "tree-format.md"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "search.apply"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "filter.apply"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "preview.close"));
+			Assert.Contains(events, static item => item.GetProperty("name").GetString() == "tree.search");
+			Assert.Contains(events, static item => item.GetProperty("name").GetString() == "tree.filter");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task StartupReport_WritesReportAfterCommandLineProjectLoad()
 	{
 		using var project = UiTestProject.CreateDefault();
@@ -450,6 +491,14 @@ public sealed class MainWindowStartupAutomationUiTests
 		var result = CommandLineOptions.Parse(args);
 		Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors.Select(static error => error.Message)));
 		return result.Options;
+	}
+
+	private static bool HasSuccessfulBenchmarkStep(JsonElement item, string stepName)
+	{
+		return item.GetProperty("name").GetString() == "ui.benchmark.step" &&
+		       item.GetProperty("stepName").GetString() == stepName &&
+		       item.GetProperty("success").GetBoolean() &&
+		       item.GetProperty("durationMilliseconds").GetDouble() > 0;
 	}
 
 	private static string? GetCurrentPath(MainWindow window)

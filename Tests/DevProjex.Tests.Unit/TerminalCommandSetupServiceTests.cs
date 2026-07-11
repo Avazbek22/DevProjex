@@ -255,6 +255,36 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void InstallOrRepair_WindowsPortableBuild_MovesLauncherBeforeWindowsAppsAlias()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var windowsApps = Path.Combine(temp.Path, "Microsoft", "WindowsApps");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		File.WriteAllText(commandPath, TerminalCommandSetupService.BuildWindowsLauncherContent(target));
+		var userPath = string.Join(';', windowsApps, userBin);
+		var service = CreateWindowsPortableService(temp.Path, processPath: string.Empty, () => userPath, value => userPath = value, target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+		var entries = userPath.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+		Assert.Equal(TerminalCommandSetupState.Stale, snapshot.State);
+		Assert.True(snapshot.CanRepair);
+		Assert.True(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Repaired, install.Outcome);
+		Assert.Equal(TerminalCommandSetupState.Installed, install.Snapshot.State);
+		Assert.Equal(
+			NormalizeForPathListAssert(userBin),
+			NormalizeForPathListAssert(entries[0]));
+		Assert.Equal(
+			NormalizeForPathListAssert(windowsApps),
+			NormalizeForPathListAssert(entries[1]));
+		Assert.Equal(2, entries.Length);
+	}
+
+	[Fact]
 	public void Probe_WindowsPortableBuild_LegacyLauncherWithoutConsoleRoute_ReturnsRepairableStale()
 	{
 		using var temp = new TemporaryDirectory();

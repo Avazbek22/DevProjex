@@ -100,6 +100,7 @@ devprojex --last --preview
 devprojex "/path/to/project" --export tree-content -o ./context.txt --roots src --ext cs
 devprojex --path "/path/to/project" --no-ui --report -
 devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
+devprojex --benchmark-ui "/path/to/project"
 devprojex --session-metrics "/path/to/project" --preview --tree-format md
 ```
 
@@ -109,6 +110,7 @@ Use it to:
 * generate clean AI-ready context without opening the UI;
 * export selected tree/content payloads directly to files or stdout;
 * produce machine-readable JSON analysis reports;
+* benchmark the headless report pipeline or a repeatable desktop UI workflow;
 * record interactive UI session metrics for practical CPU/RAM diagnostics;
 * fail CI when selected roots/extensions produce diagnostics;
 * reuse the same ignore logic as the desktop app.

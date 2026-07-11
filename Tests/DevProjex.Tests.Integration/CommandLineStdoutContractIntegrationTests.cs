@@ -163,9 +163,13 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("content-structured-format", "--export-format applies only to tree")]
 	[InlineData("report-and-export-stdout", "Cannot combine --report - with --export.")]
 	[InlineData("same-report-and-export-file", "--report-path and --output must point to different files.")]
-	[InlineData("benchmark-output-without-benchmark", "--benchmark-output requires --benchmark.")]
+	[InlineData("benchmark-output-without-benchmark", "--benchmark-output requires --benchmark or --benchmark-ui.")]
 	[InlineData("benchmark-with-path", "Use --benchmark <folder> without --path or a positional folder.")]
 	[InlineData("benchmark-with-report", "--benchmark runs the standard project report benchmark")]
+	[InlineData("benchmark-ui-with-path", "Use --benchmark-ui <folder> without --path or a positional folder.")]
+	[InlineData("benchmark-ui-with-report", "--benchmark-ui runs the standard desktop UI benchmark")]
+	[InlineData("benchmark-ui-with-benchmark", "--benchmark-ui runs the standard desktop UI benchmark")]
+	[InlineData("ui-benchmark-script-without-session-metrics", "--ui-benchmark-script is an internal option and requires --session-metrics.")]
 	[InlineData("session-metrics-output-without-session-metrics", "--session-metrics-output requires --session-metrics.")]
 	[InlineData("session-metrics-with-path", "Use --session-metrics <folder> without --path or a positional folder.")]
 	[InlineData("session-metrics-with-no-ui", "--session-metrics opens the desktop app")]
@@ -194,6 +198,7 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("help", CommandLineOptionTokens.Help)]
 	[InlineData("version", CommandLineOptionTokens.Version)]
 	[InlineData("benchmark", CommandLineOptionTokens.Benchmark)]
+	[InlineData("benchmark-ui", CommandLineOptionTokens.BenchmarkUi)]
 	[InlineData("session-metrics", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("export", CommandLineOptionTokens.Export)]
 	[InlineData("report", CommandLineOptionTokens.Report)]
@@ -219,6 +224,7 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("--preview-serch", CommandLineOptionTokens.PreviewSearch)]
 	[InlineData("--tree-fomat", CommandLineOptionTokens.TreeFormat)]
 	[InlineData("--benchmak", CommandLineOptionTokens.Benchmark)]
+	[InlineData("--benchmak-ui", CommandLineOptionTokens.BenchmarkUi)]
 	[InlineData("--session-metric", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
 	public async Task Process_OptionTyposWriteUsageErrorWithSuggestion(string value, string expectedSuggestion)
@@ -356,6 +362,25 @@ public sealed class CommandLineStdoutContractIntegrationTests
 			[
 				CommandLineOptionTokens.Benchmark, projectPath,
 				CommandLineOptionTokens.Report
+			],
+			"benchmark-ui-with-path" =>
+			[
+				CommandLineOptionTokens.BenchmarkUi, projectPath,
+				CommandLineOptionTokens.Path, projectPath
+			],
+			"benchmark-ui-with-report" =>
+			[
+				CommandLineOptionTokens.BenchmarkUi, projectPath,
+				CommandLineOptionTokens.Report
+			],
+			"benchmark-ui-with-benchmark" =>
+			[
+				CommandLineOptionTokens.BenchmarkUi, projectPath,
+				CommandLineOptionTokens.Benchmark, projectPath
+			],
+			"ui-benchmark-script-without-session-metrics" =>
+			[
+				CommandLineOptionTokens.UiBenchmarkScript, "standard"
 			],
 			"session-metrics-output-without-session-metrics" =>
 			[

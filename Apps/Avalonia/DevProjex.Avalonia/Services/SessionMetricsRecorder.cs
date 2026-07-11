@@ -218,6 +218,19 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
         });
     }
 
+    internal void RecordUiBenchmarkStep(string stepName, TimeSpan duration, bool success, string? errorCode = null)
+    {
+        RecordEvent(new SessionMetricsEvent
+        {
+            Name = "ui.benchmark.step",
+            AtMilliseconds = GetElapsedMilliseconds(),
+            StepName = stepName,
+            DurationMilliseconds = RoundMilliseconds(duration),
+            Success = success,
+            ErrorCode = errorCode
+        });
+    }
+
     internal void RecordMemoryCleanupScheduled(MemoryCleanupReason reason)
     {
         RecordEvent(new SessionMetricsEvent
@@ -693,6 +706,7 @@ internal sealed class SessionMetricsEvent
     public string? PreviewMode { get; init; }
     public bool? PreviewVisible { get; init; }
     public string? OperationKind { get; init; }
+    public string? StepName { get; init; }
     public int? PayloadCharacters { get; init; }
     public bool? Success { get; init; }
     public string? CleanupReason { get; init; }

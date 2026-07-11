@@ -632,26 +632,79 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		return false;
 	}
 
-	private bool IsWindowsUserBinDirectoryReachable(string directory) =>
-		IsDirectoryInPathValue(directory, SafeGetUserPathVariable()) ||
-		IsDirectoryInPathValue(directory, SafeGetMachinePathVariable());
+	private bool IsWindowsUserBinDirectoryReachable(string directory)
+	{
+		if (IsDirectoryInPathValue(directory, SafeGetMachinePathVariable()))
+			return true;
+
+		var userPath = SafeGetUserPathVariable();
+		return IsDirectoryInPathValue(directory, userPath) &&
+		       !IsWindowsPortableCommandShadowedByWindowsApps(directory, userPath);
+	}
 
 	private void EnsureWindowsUserBinDirectoryIsInPath(string? directory)
 	{
-		if (string.IsNullOrWhiteSpace(directory) || IsWindowsUserBinDirectoryReachable(directory))
+		if (string.IsNullOrWhiteSpace(directory))
+			return;
+		if (IsDirectoryInPathValue(directory, SafeGetMachinePathVariable()))
 			return;
 
 		var userPath = SafeGetUserPathVariable();
+		if (IsDirectoryInPathValue(directory, userPath) &&
+		    !IsWindowsPortableCommandShadowedByWindowsApps(directory, userPath))
+			return;
+
 		var separator = _options.PathListSeparator ?? ';';
 		var entries = string.IsNullOrWhiteSpace(userPath)
 			? new List<string>()
 			: userPath.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-		if (!entries.Any(entry => AreSamePath(entry, directory)))
+		for (var index = entries.Count - 1; index >= 0; index--)
+		{
+			if (AreSamePath(entries[index], directory))
+				entries.RemoveAt(index);
+		}
+
+		var windowsAppsIndex = entries.FindIndex(IsWindowsAppsDirectory);
+		if (windowsAppsIndex >= 0)
+			entries.Insert(windowsAppsIndex, directory);
+		else
 			entries.Add(directory);
 
 		_options.UserPathVariableWriter(string.Join(separator, entries));
 		WindowsEnvironmentChangeBroadcaster.NotifyEnvironmentChanged();
+	}
+
+	private bool IsWindowsPortableCommandShadowedByWindowsApps(string directory, string? path)
+	{
+		if (string.IsNullOrWhiteSpace(path))
+			return false;
+
+		var separator = _options.PathListSeparator ?? ';';
+		var entries = path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		var directoryIndex = Array.FindIndex(entries, entry => AreSamePath(entry, directory));
+		if (directoryIndex <= 0)
+			return false;
+
+		for (var index = 0; index < directoryIndex; index++)
+		{
+			if (IsWindowsAppsDirectory(entries[index]))
+				return true;
+		}
+
+		return false;
+	}
+
+	private static bool IsWindowsAppsDirectory(string path)
+	{
+		var normalized = path
+			.Trim()
+			.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+			.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+
+		return normalized.EndsWith(
+			Path.Combine("Microsoft", "WindowsApps"),
+			StringComparison.OrdinalIgnoreCase);
 	}
 
 	private string? SafeGetHomeDirectory()

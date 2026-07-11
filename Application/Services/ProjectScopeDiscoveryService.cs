@@ -5,7 +5,9 @@ using System.Runtime.InteropServices;
 
 namespace DevProjex.Application.Services;
 
-public sealed class ProjectScopeDiscoveryService
+public sealed class ProjectScopeDiscoveryService(
+	SmartIgnoreService smartIgnore,
+	ProjectRootFactsProvider? rootFactsProvider = null)
 {
 	private const int ScopeCacheLimit = 128;
 	private static readonly TimeSpan ScopeCacheTtl = TimeSpan.FromSeconds(5);
@@ -143,16 +145,7 @@ public sealed class ProjectScopeDiscoveryService
 
 	private readonly object _scopeCacheSync = new();
 	private readonly Dictionary<string, ScopeCacheEntry> _scopeCache = new(PathStringComparer);
-	private readonly SmartIgnoreService _smartIgnore;
-	private readonly ProjectRootFactsProvider _rootFactsProvider;
-
-	public ProjectScopeDiscoveryService(
-		SmartIgnoreService smartIgnore,
-		ProjectRootFactsProvider? rootFactsProvider = null)
-	{
-		_smartIgnore = smartIgnore;
-		_rootFactsProvider = rootFactsProvider ?? smartIgnore.RootFactsProvider;
-	}
+	private readonly ProjectRootFactsProvider _rootFactsProvider = rootFactsProvider ?? smartIgnore.RootFactsProvider;
 
 	public ProjectScanContext Discover(
 		string rootPath,
@@ -552,7 +545,7 @@ public sealed class ProjectScopeDiscoveryService
 	{
 		return rootFacts.HasAnyMarkerFile(ProjectMarkerFiles) ||
 		       rootFacts.HasAnyFileExtension(ProjectMarkerExtensions) ||
-		       _smartIgnore.HasKnownProjectMarker(rootFacts);
+		       smartIgnore.HasKnownProjectMarker(rootFacts);
 	}
 
 	private static bool HasMonorepoMarker(ProjectRootFacts rootFacts) =>
