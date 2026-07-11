@@ -545,6 +545,8 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Contains(CommandLineOptionTokens.TreeFormat, result.Stdout, StringComparison.Ordinal);
 		Assert.Contains(CommandLineOptionTokens.TreeFilter, result.Stdout, StringComparison.Ordinal);
 		Assert.Contains(CommandLineOptionTokens.PreviewSearch, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.SessionMetrics, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.SessionMetricsOutput, result.Stdout, StringComparison.Ordinal);
 		Assert.Contains("ascii|json|xml|md", result.Stdout, StringComparison.Ordinal);
 	}
 

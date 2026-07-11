@@ -100,6 +100,8 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _viewModel.TreeNodes.Clear();
 
         _currentTree = result.Tree;
+        if (interactiveFilter)
+            _lastInteractiveFilterUsedInMemory = usedInMemoryFilter;
         UpdateCurrentTreeInventory(input, result, interactiveFilter, usedInMemoryFilter);
         _metrics.InvalidateComputedCaches();
 

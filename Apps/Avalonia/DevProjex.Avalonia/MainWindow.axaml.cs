@@ -145,6 +145,7 @@ public partial class MainWindow : Window
     private TreeNodeDescriptor? _lastInteractiveFilteredRoot;
     private TreeNodeDescriptor? _lastInteractiveFilterBaseRoot;
     private string? _lastInteractiveFilterQuery;
+    private bool _lastInteractiveFilterUsedInMemory;
     private readonly Dictionary<string, TreeNodeDescriptor> _interactiveFilterQueryCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _interactiveFilterQueryCacheLru = [];
     private readonly Dictionary<string, LinkedListNode<string>> _interactiveFilterQueryCacheNodes = new(StringComparer.OrdinalIgnoreCase);
@@ -335,6 +336,7 @@ public partial class MainWindow : Window
     private readonly ReportPathResolver _reportPathResolver;
     private readonly ProjectAnalysisReportWriter _projectAnalysisReportWriter;
     private readonly ITerminalCommandSetupService _terminalCommandSetupService;
+    private readonly SessionMetricsRecorder _sessionMetrics;
 
     public MainWindow(
         CommandLineOptions startupOptions,
@@ -369,6 +371,7 @@ public partial class MainWindow : Window
         _reportPathResolver = services.ReportPathResolver;
         _projectAnalysisReportWriter = services.ProjectAnalysisReportWriter;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
+        _sessionMetrics = services.SessionMetricsRecorder;
         _recentProjectsStore = services.RecentProjectsStore;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
@@ -412,6 +415,8 @@ public partial class MainWindow : Window
             _viewModel,
             services.TaskbarProgressService);
         _viewModel.SetToastItems(_toastService.Items);
+        _sessionMetrics.SetIdleStateProvider(IsSessionMetricsIdle);
+        _sessionMetrics.Start(_startupOptions.SessionMetrics.Path, GetApplicationVersion());
         EnsureAppStateStoresExist();
         LoadRecentProjects();
         DataContext = _viewModel;
@@ -561,7 +566,8 @@ public partial class MainWindow : Window
         _searchCoordinator = new TreeSearchCoordinator(
             _viewModel,
             _treeView ?? throw new InvalidOperationException(),
-            ScheduleSearchMemoryCleanupAfterRender);
+            ScheduleSearchMemoryCleanupAfterRender,
+            _sessionMetrics);
         _filterCoordinator = new NameFilterCoordinator(
             ApplyFilterRealtimeWithToken,
             () => !string.IsNullOrWhiteSpace(_viewModel.NameFilter),
@@ -628,6 +634,7 @@ public partial class MainWindow : Window
                 _metrics.Recalculate(); // Update tree metrics when the selected tree format changes.
                 InvalidatePreviewCache();
                 SchedulePreviewRefresh();
+                _sessionMetrics.RecordTreeFormatChanged(GetCurrentTreeTextFormat());
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
             {
@@ -635,11 +642,17 @@ public partial class MainWindow : Window
                     UpdatePreviewSegmentThumbPosition(animate: false);
                 if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
                     _metrics.RenderStatusBarMetrics();
+                _sessionMetrics.RecordPreviewModeChanged(
+                    _viewModel.SelectedPreviewContentMode,
+                    _viewModel.IsAnyPreviewVisible);
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
             {
                 if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
                     _metrics.RenderStatusBarMetrics();
+                _sessionMetrics.RecordPreviewModeChanged(
+                    _viewModel.SelectedPreviewContentMode,
+                    _viewModel.IsAnyPreviewVisible);
             }
             else if (args.PropertyName is nameof(MainWindowViewModel.PreviewFontSize)
                      or nameof(MainWindowViewModel.SelectedFontFamily))
@@ -690,6 +703,7 @@ public partial class MainWindow : Window
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
+        CompleteSessionMetricsRecording();
         FlushPersistedStateOnWindowClose();
 
         // Unsubscribe from window events
@@ -791,6 +805,42 @@ public partial class MainWindow : Window
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
             disposable.Dispose();
+
+        _sessionMetrics.Dispose();
+    }
+
+    private bool IsSessionMetricsIdle()
+        => IsVisible &&
+           !_viewModel.StatusBusy &&
+           !_viewModel.IsSearchInProgress &&
+           !_viewModel.IsFilterInProgress &&
+           !_viewModel.IsPreviewLoading &&
+           !_settingsAnimating &&
+           !_previewModeSwitchInProgress;
+
+    private void CompleteSessionMetricsRecording()
+    {
+        var completion = _sessionMetrics.Complete();
+        if (completion is null)
+            return;
+
+        if (completion.Success)
+        {
+            Console.Out.WriteLine($"DevProjex session metrics: {completion.NormalizedOutputPath}");
+            return;
+        }
+
+        Console.Error.WriteLine($"DevProjex: failed to write session metrics to {completion.NormalizedOutputPath}: {completion.ErrorMessage}");
+    }
+
+    private static string GetApplicationVersion()
+    {
+        var assembly = typeof(MainWindow).Assembly;
+        return assembly
+                   .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                   ?.InformationalVersion
+               ?? assembly.GetName().Version?.ToString()
+               ?? "unknown";
     }
 
     private void UpdateDropZoneAnimationState()
@@ -1067,6 +1117,9 @@ public partial class MainWindow : Window
 
     private string? ResolveStartupProjectPath()
     {
+        if (_startupOptions.SessionMetrics.Enabled)
+            return _startupOptions.SessionMetrics.Path;
+
         if (!string.IsNullOrWhiteSpace(_startupOptions.Path))
             return _startupOptions.Path;
 
@@ -2388,6 +2441,7 @@ public partial class MainWindow : Window
             var content = BuildTreeTextForSelection(selected, format);
 
             await SetClipboardTextAsync(content);
+            _sessionMetrics.RecordClipboard("tree", format, content.Length, success: true);
             _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
@@ -2435,6 +2489,7 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
+            _sessionMetrics.RecordClipboard("content", format: null, content.Length, success: true);
             CompleteStatusOperation(ref statusOperationId);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
@@ -2471,6 +2526,7 @@ public partial class MainWindow : Window
                     CancellationToken.None,
                     pathPresentation));
             await SetClipboardTextAsync(content);
+            _sessionMetrics.RecordClipboard("tree-content", format, content.Length, success: true);
             CompleteStatusOperation(ref statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
@@ -2499,7 +2555,10 @@ public partial class MainWindow : Window
                 fileTypeChoices: CreateTreeExportFileTypeChoices(format));
 
             if (saved)
+            {
+                _sessionMetrics.RecordFileExport("tree", format, content.Length, success: true);
                 _toastService.Show(_localization["Toast.Export.Tree"]);
+            }
         }
         catch (Exception ex)
         {
@@ -2554,7 +2613,10 @@ public partial class MainWindow : Window
                 fileTypeChoices: [CreateTextFileType()]);
 
             if (saved)
+            {
+                _sessionMetrics.RecordFileExport("content", format: null, content.Length, success: true);
                 _toastService.Show(_localization["Toast.Export.Content"]);
+            }
         }
         catch (Exception ex)
         {
@@ -2599,7 +2661,10 @@ public partial class MainWindow : Window
                 fileTypeChoices: [CreateTextFileType()]);
 
             if (saved)
+            {
+                _sessionMetrics.RecordFileExport("tree-content", format, content.Length, success: true);
                 _toastService.Show(_localization["Toast.Export.TreeAndContent"]);
+            }
         }
         catch (Exception ex)
         {
@@ -4006,11 +4071,12 @@ public partial class MainWindow : Window
         if (!MemoryCleanupPolicy.ShouldRun(cleanupPlan, GC.GetTotalMemory(forceFullCollection: false)))
             return;
 
-        ScheduleBackgroundMemoryCleanupCore(cleanupPlan);
+        ScheduleBackgroundMemoryCleanupCore(reason, cleanupPlan);
     }
 
-    private void ScheduleBackgroundMemoryCleanupCore(MemoryCleanupPlan cleanupPlan)
+    private void ScheduleBackgroundMemoryCleanupCore(MemoryCleanupReason reason, MemoryCleanupPlan cleanupPlan)
     {
+        _sessionMetrics.RecordMemoryCleanupScheduled(reason);
         var cleanupCts = ReplaceCancellationSource(ref _backgroundMemoryCleanupCts);
 
         _ = Task.Run(async () =>
@@ -4034,7 +4100,9 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                var stopwatch = Stopwatch.StartNew();
                 ForceMemoryCleanup();
+                _sessionMetrics.RecordMemoryCleanupCompleted(reason, stopwatch.Elapsed);
             }
             catch (OperationCanceledException)
             {
@@ -6182,6 +6250,7 @@ public partial class MainWindow : Window
 
     private async Task ApplyFilterRealtimeAsync(CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         var version = 0;
         try
         {
@@ -6208,10 +6277,10 @@ public partial class MainWindow : Window
             if (version != _filterApplyVersion)
                 return;
 
-            _viewModel.UpdateFilterMatchSummary(
-                hasQuery && _currentTree is not null
-                    ? NameFilterMatchCounter.CountMatchesUnderRoot(_currentTree.Root, query!)
-                    : 0);
+            var matchCount = hasQuery && _currentTree is not null
+                ? NameFilterMatchCounter.CountMatchesUnderRoot(_currentTree.Root, query!)
+                : 0;
+            _viewModel.UpdateFilterMatchSummary(matchCount);
             _searchCoordinator.UpdateHighlights(query);
 
             if (hasQuery)
@@ -6232,6 +6301,12 @@ public partial class MainWindow : Window
                 _filterExpansionSnapshot = null;
                 ResetInteractiveFilterCache();
             }
+
+            _sessionMetrics.RecordTreeFilter(
+                query,
+                matchCount,
+                stopwatch.Elapsed,
+                _lastInteractiveFilterUsedInMemory);
         }
         catch (OperationCanceledException)
         {
@@ -7088,6 +7163,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
+        var stopwatch = Stopwatch.StartNew();
         string normalizedPath;
         try
         {
@@ -7095,18 +7171,21 @@ public partial class MainWindow : Window
         }
         catch
         {
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "invalid-path");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
         if (!Directory.Exists(normalizedPath))
         {
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "folder-not-found");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
         if (!_scanOptions.CanReadRoot(normalizedPath))
         {
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
             if (TryElevateAndRestart(normalizedPath))
                 return false;
 
@@ -7115,8 +7194,17 @@ public partial class MainWindow : Window
             return false;
         }
 
-        await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
-        return true;
+        try
+        {
+            await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: true);
+            return true;
+        }
+        catch
+        {
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-failed");
+            throw;
+        }
     }
 
     private async Task TryApplyStartupSelectionOverridesAsync()

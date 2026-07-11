@@ -35,4 +35,5 @@ public sealed record AvaloniaAppServices(
     ReportPathResolver ReportPathResolver,
     ProjectAnalysisReportWriter ProjectAnalysisReportWriter,
     ITerminalCommandSetupService TerminalCommandSetupService,
-    ITaskbarProgressService TaskbarProgressService);
+    ITaskbarProgressService TaskbarProgressService,
+    SessionMetricsRecorder SessionMetricsRecorder);

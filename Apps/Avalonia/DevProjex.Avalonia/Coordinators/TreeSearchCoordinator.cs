@@ -3,7 +3,8 @@ namespace DevProjex.Avalonia.Coordinators;
 public sealed class TreeSearchCoordinator(
     MainWindowViewModel viewModel,
     TreeView treeView,
-    Action? onSearchApplied = null)
+    Action? onSearchApplied = null,
+    ITreeSearchMetricsSink? metricsSink = null)
     : IDisposable
 {
     private enum BringIntoViewResult
@@ -148,6 +149,7 @@ public sealed class TreeSearchCoordinator(
 
     public void UpdateSearchMatches(bool normalizeTreeWhenEmptyQuery = true)
     {
+        var stopwatch = Stopwatch.StartNew();
         viewModel.SetSearchInProgress(false);
 
         lock (_searchCtsLock)
@@ -177,17 +179,30 @@ public sealed class TreeSearchCoordinator(
             }
 
             ApplySearchResultCore(query, Array.Empty<TreeNodeViewModel>());
+            metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
+                query,
+                stopwatch.Elapsed,
+                TotalNodes: 0,
+                MatchCount: 0,
+                UsedCache: false));
             return;
         }
 
         EnsureSearchIndexCurrent();
         var source = CreateSearchSource(query);
-        var matches = TryGetCachedMatches(query, out var cachedMatches)
+        var usedCache = TryGetCachedMatches(query, out var cachedMatches);
+        var matches = usedCache
             ? cachedMatches
             : CollectMatches(source, query);
         if (!ReferenceEquals(matches, cachedMatches))
             CacheMatches(query, matches);
         ApplySearchResultCore(query, matches);
+        metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
+            query,
+            stopwatch.Elapsed,
+            source.Count,
+            matches.Count,
+            usedCache));
     }
 
     public bool HasMatches => _searchMatches.Count > 0;
@@ -285,6 +300,7 @@ public sealed class TreeSearchCoordinator(
 
         _searchMatchIndex = (_searchMatchIndex + step + _searchMatches.Count) % _searchMatches.Count;
         SelectSearchMatch();
+        metricsSink?.RecordTreeSearchNavigation(step, _searchMatchIndex + 1, _searchMatches.Count);
     }
 
     public bool TryNavigateForCurrentQuery(int step)
@@ -340,6 +356,7 @@ public sealed class TreeSearchCoordinator(
 
     private async Task RunSearchAsync(int version, CancellationToken token)
     {
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             string query = string.Empty;
@@ -361,15 +378,26 @@ public sealed class TreeSearchCoordinator(
             if (string.IsNullOrWhiteSpace(query))
             {
                 await Dispatcher.UIThread.InvokeAsync(
-                    () => ApplySearchResultCore(query, Array.Empty<TreeNodeViewModel>()),
+                    () =>
+                    {
+                        ApplySearchResultCore(query, Array.Empty<TreeNodeViewModel>());
+                        metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
+                            query,
+                            stopwatch.Elapsed,
+                            TotalNodes: 0,
+                            MatchCount: 0,
+                            UsedCache: false));
+                    },
                     DispatcherPriority.Background);
                 return;
             }
 
             List<TreeNodeViewModel> matches;
+            var usedCache = false;
             if (TryGetCachedMatches(query, out var cachedMatches))
             {
                 matches = cachedMatches;
+                usedCache = true;
             }
             else
             {
@@ -383,6 +411,12 @@ public sealed class TreeSearchCoordinator(
                     return;
 
                 ApplySearchResultCore(query, matches);
+                metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
+                    query,
+                    stopwatch.Elapsed,
+                    sourceNodes?.Count ?? 0,
+                    matches.Count,
+                    usedCache));
             }, DispatcherPriority.Background);
         }
         catch (OperationCanceledException)

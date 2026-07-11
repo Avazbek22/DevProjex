@@ -166,6 +166,10 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("benchmark-output-without-benchmark", "--benchmark-output requires --benchmark.")]
 	[InlineData("benchmark-with-path", "Use --benchmark <folder> without --path or a positional folder.")]
 	[InlineData("benchmark-with-report", "--benchmark runs the standard project report benchmark")]
+	[InlineData("session-metrics-output-without-session-metrics", "--session-metrics-output requires --session-metrics.")]
+	[InlineData("session-metrics-with-path", "Use --session-metrics <folder> without --path or a positional folder.")]
+	[InlineData("session-metrics-with-no-ui", "--session-metrics opens the desktop app")]
+	[InlineData("session-metrics-stdout-output", "--session-metrics-output must point to a JSON file path")]
 	public async Task Process_UsageErrors_WriteOnlyStderrAndNeverCreateOutputFiles(string scenario, string expectedError)
 	{
 		using var temp = new TemporaryDirectory();
@@ -190,6 +194,7 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("help", CommandLineOptionTokens.Help)]
 	[InlineData("version", CommandLineOptionTokens.Version)]
 	[InlineData("benchmark", CommandLineOptionTokens.Benchmark)]
+	[InlineData("session-metrics", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("export", CommandLineOptionTokens.Export)]
 	[InlineData("report", CommandLineOptionTokens.Report)]
 	[InlineData("preview-search", CommandLineOptionTokens.PreviewSearch)]
@@ -214,6 +219,7 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("--preview-serch", CommandLineOptionTokens.PreviewSearch)]
 	[InlineData("--tree-fomat", CommandLineOptionTokens.TreeFormat)]
 	[InlineData("--benchmak", CommandLineOptionTokens.Benchmark)]
+	[InlineData("--session-metric", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
 	public async Task Process_OptionTyposWriteUsageErrorWithSuggestion(string value, string expectedSuggestion)
 	{
@@ -350,6 +356,25 @@ public sealed class CommandLineStdoutContractIntegrationTests
 			[
 				CommandLineOptionTokens.Benchmark, projectPath,
 				CommandLineOptionTokens.Report
+			],
+			"session-metrics-output-without-session-metrics" =>
+			[
+				CommandLineOptionTokens.SessionMetricsOutput, sharedPath
+			],
+			"session-metrics-with-path" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, projectPath,
+				CommandLineOptionTokens.Path, projectPath
+			],
+			"session-metrics-with-no-ui" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, projectPath,
+				CommandLineOptionTokens.NoUi
+			],
+			"session-metrics-stdout-output" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, projectPath,
+				CommandLineOptionTokens.SessionMetricsOutput, CommandLineOptionTokens.StandardOutputReportPath
 			],
 			_ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unknown stderr contract scenario.")
 		};

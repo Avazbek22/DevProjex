@@ -46,6 +46,7 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal("/tmp/report.json", result.Options.Report.Path);
 		Assert.Equal(StartupReportFormat.Json, result.Options.Report.Format);
 		Assert.False(result.Options.Benchmark.Enabled);
+		Assert.False(result.Options.SessionMetrics.Enabled);
 		Assert.True(result.Options.Export.Enabled);
 		Assert.Equal(StartupExportMode.TreeContent, result.Options.Export.Mode);
 		Assert.Equal("/tmp/context.txt", result.Options.Export.Path);
@@ -171,6 +172,8 @@ public sealed class CommandLineOptionsTests
 	[InlineData("silent", CommandLineOptionTokens.Silent)]
 	[InlineData("help", CommandLineOptionTokens.Help)]
 	[InlineData("version", CommandLineOptionTokens.Version)]
+	[InlineData("benchmark", CommandLineOptionTokens.Benchmark)]
+	[InlineData("session-metrics", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("export", CommandLineOptionTokens.Export)]
 	[InlineData("report", CommandLineOptionTokens.Report)]
 	[InlineData("tree-format", CommandLineOptionTokens.TreeFormat)]
@@ -655,6 +658,75 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_SessionMetricsOpensUiProjectAndAllowsDesktopStartupOptions()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/root folder",
+			CommandLineOptionTokens.SessionMetricsOutput, "/tmp/reports/session metrics.json",
+			CommandLineOptionTokens.PreviewMode, "tree-content",
+			CommandLineOptionTokens.TreeFormat, "xml",
+			CommandLineOptionTokens.TreeFilter, "Services"
+		]);
+
+		AssertValid(result);
+		Assert.Null(result.Options.Path);
+		Assert.True(result.Options.SessionMetrics.Enabled);
+		Assert.Equal("/tmp/root folder", result.Options.SessionMetrics.Path);
+		Assert.Equal("/tmp/reports/session metrics.json", result.Options.SessionMetrics.OutputPath);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Equal(StartupPreviewMode.TreeContent, result.Options.Ui.PreviewMode);
+		Assert.Equal(TreeTextFormat.Xml, result.Options.Ui.TreeFormat);
+		Assert.Equal("Services", result.Options.Ui.TreeFilter);
+	}
+
+	[Fact]
+	public void Parse_SessionMetricsInlineValuesMatchSeparatedValues()
+	{
+		var separated = CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+			CommandLineOptionTokens.SessionMetricsOutput, "/tmp/session.json",
+			CommandLineOptionTokens.Preview
+		]);
+		var inline = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.SessionMetrics}=/tmp/root",
+			$"{CommandLineOptionTokens.SessionMetricsOutput}=/tmp/session.json",
+			CommandLineOptionTokens.Preview
+		]);
+
+		AssertValid(separated);
+		AssertValid(inline);
+		AssertEquivalentOptions(separated.Options, inline.Options);
+	}
+
+	[Theory]
+	[InlineData("with-path")]
+	[InlineData("with-positional-path")]
+	[InlineData("with-last")]
+	[InlineData("with-no-ui")]
+	[InlineData("with-report")]
+	[InlineData("with-export")]
+	[InlineData("with-benchmark")]
+	[InlineData("with-selection")]
+	[InlineData("stdout-output")]
+	public void Parse_RejectsSessionMetricsConflicts(string scenario)
+	{
+		var result = CommandLineOptions.Parse(BuildSessionMetricsConflictArgs(scenario));
+
+		Assert.False(result.Success);
+		Assert.Contains(result.Errors, static error =>
+			error.Code.StartsWith("conflicting-session-metrics", StringComparison.Ordinal) ||
+			error.Code == "session-metrics-output-requires-file");
+	}
+
+	[Fact]
+	public void Parse_RejectsSessionMetricsOutputWithoutSessionMetrics()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.SessionMetricsOutput, "/tmp/session.json"]);
+
+		AssertInvalid(result, "session-metrics-output-requires-session-metrics");
+	}
+
+	[Fact]
 	public void Parse_RejectsDesktopStartupOptionsWithoutProjectTarget()
 	{
 		var result = CommandLineOptions.Parse([CommandLineOptionTokens.Preview]);
@@ -1063,6 +1135,30 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void ToArguments_PreservesSessionMetricsCommand()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			SessionMetrics = new StartupSessionMetricsOptions(true, "/tmp/root folder", "/tmp/result folder/session.json"),
+			Ui = StartupUiOptions.Default with
+			{
+				OpenPreview = true,
+				TreeFormat = TreeTextFormat.Markdown
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--session-metrics", args);
+		Assert.Contains("\"/tmp/root folder\"", args);
+		Assert.Contains("--session-metrics-output", args);
+		Assert.Contains("\"/tmp/result folder/session.json\"", args);
+		Assert.Contains("--preview", args);
+		Assert.Contains("--tree-format", args);
+		Assert.Contains("md", args);
+	}
+
+	[Fact]
 	public void ToArguments_PreservesExplicitAsciiExportFormatForRelaunch()
 	{
 		var options = CommandLineOptions.Empty with
@@ -1256,6 +1352,57 @@ public sealed class CommandLineOptionsTests
 		AssertInvalid(result, "missing-value");
 	}
 
+	private static string[] BuildSessionMetricsConflictArgs(string scenario) =>
+		scenario switch
+		{
+			"with-path" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Path, "/tmp/root"
+			],
+			"with-positional-path" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				"/tmp/other"
+			],
+			"with-last" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Last
+			],
+			"with-no-ui" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.NoUi
+			],
+			"with-report" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Report
+			],
+			"with-export" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Export, "tree"
+			],
+			"with-benchmark" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Benchmark, "/tmp/root"
+			],
+			"with-selection" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Roots, "src"
+			],
+			"stdout-output" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.SessionMetricsOutput, CommandLineOptionTokens.StandardOutputReportPath
+			],
+			_ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unknown session metrics conflict scenario.")
+		};
+
 	private static void AssertValid(CommandLineParseResult result)
 	{
 		Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors.Select(static error => error.Message)));
@@ -1278,6 +1425,7 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(expected.ShowVersion, actual.ShowVersion);
 		Assert.Equal(expected.Report, actual.Report);
 		Assert.Equal(expected.Benchmark, actual.Benchmark);
+		Assert.Equal(expected.SessionMetrics, actual.SessionMetrics);
 		Assert.Equal(expected.Export, actual.Export);
 		Assert.Equal(expected.Export.FormatSpecified, actual.Export.FormatSpecified);
 		Assert.Equal(expected.Ui, actual.Ui);
@@ -1309,6 +1457,7 @@ public sealed class CommandLineOptionsTests
 		{ CommandLineOptionTokens.ReportPath, "/tmp/report.json" },
 		{ CommandLineOptionTokens.ReportFormat, "json" },
 		{ CommandLineOptionTokens.Benchmark, "/tmp/root" },
+		{ CommandLineOptionTokens.SessionMetrics, "/tmp/root" },
 		{ CommandLineOptionTokens.Export, "tree-content" },
 		{ CommandLineOptionTokens.Output, "/tmp/context.txt" },
 		{ CommandLineOptionTokens.ShortOutput, "/tmp/context.txt" },
@@ -1329,6 +1478,8 @@ public sealed class CommandLineOptionsTests
 		CommandLineOptionTokens.ReportFormat,
 		CommandLineOptionTokens.Benchmark,
 		CommandLineOptionTokens.BenchmarkOutput,
+		CommandLineOptionTokens.SessionMetrics,
+		CommandLineOptionTokens.SessionMetricsOutput,
 		CommandLineOptionTokens.Export,
 		CommandLineOptionTokens.Output,
 		CommandLineOptionTokens.ShortOutput,

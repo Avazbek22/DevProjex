@@ -20,6 +20,12 @@ internal static class Program
                 .GetResult();
         }
 
+        if (parseResult.Options.SessionMetrics.Enabled)
+        {
+            ConfigureCommandLineEncoding();
+            WindowsParentConsole.AttachForCommandLine();
+        }
+
         return BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);
     }

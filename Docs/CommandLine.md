@@ -53,6 +53,8 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--report-format json` | Selects the report format. JSON is the v1 format. |
 | `--benchmark <folder>` | Runs the standard project report benchmark against a folder and exits without showing the window. |
 | `--benchmark-output <file>` | Writes the detailed benchmark JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex benchmark folder. |
+| `--session-metrics <folder>` | Opens the desktop app with a project folder and records low-overhead UI session metrics until the window exits. |
+| `--session-metrics-output <file>` | Writes the detailed session metrics JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex session metrics folder. |
 | `--export <mode>` | Exports project text and exits without showing the window. Supported modes: `tree`, `content`, `tree-content`. |
 | `--output <file\|->`, `-o <file\|->` | Writes export text to a specific file, or to stdout when `-` is used. If omitted, export writes to stdout. |
 | `--export-format ascii\|json\|xml\|md`, `--format ascii\|json\|xml\|md` | Selects tree format for `tree` and `tree-content` exports. Content remains plain text. |
@@ -61,7 +63,7 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--preview-mode tree\|content\|tree-content` | Selects the desktop preview content mode at startup and opens preview. |
 | `--tree-format ascii\|json\|xml\|md` | Selects the desktop tree format at startup. This is separate from headless `--format`. |
 | `--tree-filter <text>` | Opens the desktop tree filter with the provided query. |
-| `--preview-search <text>` | Opens preview search with the provided query. |
+| `--preview-search <text>` | Opens preview and the tree search bar with the provided query. |
 | `--include-root <name>`, `--roots <name>` | Includes one root folder. Can be repeated. |
 | `--include-extension <ext>`, `--ext <ext>` | Includes one extension. Can be repeated. `cs` and `.cs` are equivalent. |
 | `--ignore <name\|none>` | Uses exact ignore options for automation. Can be repeated. |
@@ -98,11 +100,33 @@ devprojex "/home/me/projects/app" --tree-filter Services
 devprojex "/home/me/projects/app" --preview-search ProjectAnalysisService
 ```
 
-`--preview-mode` implies `--preview`. `--preview-search` also implies `--preview` because the command is meant to show the project and search state immediately.
+`--preview-mode` implies `--preview`. `--preview-search` also implies `--preview` because the command is meant to show the project and tree search state immediately.
 
 `--tree-filter` and `--preview-search` cannot be combined. The desktop UI intentionally shows only one tree text tool at a time, so the CLI keeps that same rule instead of silently choosing one.
 
 Desktop startup options require either a project path or `--last`. They are not valid with `--no-ui`, `--silent`, or `--export`.
+
+## Session Metrics
+
+`--session-metrics <folder>` opens the normal desktop app and records one interactive session until the window closes:
+
+- CPU, working set, private memory, managed memory, and GC samples;
+- project load timing;
+- tree search and tree filter timing, match counts, and cache/fallback hints;
+- tree format and preview mode switches;
+- copy/export payload sizes;
+- scheduled and completed memory cleanup events.
+
+```bash
+devprojex --session-metrics "/home/me/projects/app" --preview --tree-format md
+devprojex --session-metrics "C:\Projects\App" --session-metrics-output "C:\Reports\devprojex-session.json"
+```
+
+The detailed JSON report is written automatically when the window closes. If `--session-metrics-output` is omitted, the report is saved under the user's local DevProjex session metrics folder.
+
+Search and filter text is not stored in the report. DevProjex records only the query length and a salted per-report fingerprint so repeated queries can be correlated inside one report without exposing the query itself.
+
+`--session-metrics` is a desktop UI mode. It can be combined with desktop startup options such as `--preview`, `--preview-mode`, `--tree-format`, `--tree-filter`, and `--preview-search`. It cannot be combined with `--path`, positional folders, `--last`, `--benchmark`, `--report`, `--export`, selection overrides, `--strict`, `--no-ui`, or `--silent`.
 
 ## Reports
 
@@ -208,8 +232,9 @@ When report and export are requested together, `--report-path` and `--output` mu
 Automation-friendly output is kept strict:
 
 - `stdout`: help text, version text, generated file paths, benchmark summaries, implicit or explicit JSON report payloads, or export payloads.
+- `stdout` for `--session-metrics`: a short line with the saved JSON report path after the desktop window closes.
 - `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
-- no UI is created for `--help`, `--version`, `--no-ui`, `--export`, or `--benchmark`.
+- no UI is created for `--help`, `--version`, `--no-ui`, `--export`, or `--benchmark`. `--session-metrics` intentionally creates the UI because it records an interactive session.
 - only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
 
 ## Windows Portable EXE Note

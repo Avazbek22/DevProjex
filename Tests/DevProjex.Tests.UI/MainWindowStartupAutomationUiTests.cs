@@ -294,6 +294,40 @@ public sealed class MainWindowStartupAutomationUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task StartupSessionMetrics_LoadsProjectAndWritesPrivateReportOnClose()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var outputPath = Path.Combine(project.AppDataPath, "session-metrics", "session.json");
+		var options = ParseValidOptions(
+			CommandLineOptionTokens.SessionMetrics, project.RootPath,
+			CommandLineOptionTokens.SessionMetricsOutput, outputPath,
+			CommandLineOptionTokens.PreviewSearch, "Preview");
+		var window = CreateStartupWindow(options, appDataPath);
+
+		window.Show();
+		await UiTestDriver.WaitForPreviewReadyAsync(window);
+		await UiTestDriver.WaitForSearchAppliedAsync(window, "Preview");
+
+		await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+
+		Assert.True(File.Exists(outputPath));
+		var json = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Preview", json, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(json);
+		var root = document.RootElement;
+		Assert.Equal("interactive-session", root.GetProperty("kind").GetString());
+		Assert.Equal(GetComparablePath(project.RootPath).Replace('\\', '/'), root.GetProperty("targetPath").GetString());
+		var events = root.GetProperty("events").EnumerateArray().ToArray();
+		Assert.Contains(events, static item => item.GetProperty("name").GetString() == "session.started");
+		Assert.Contains(events, static item => item.GetProperty("name").GetString() == "project.load");
+		Assert.Contains(events, static item =>
+			item.GetProperty("name").GetString() == "preview.mode.changed" &&
+			item.GetProperty("previewVisible").GetBoolean());
+		Assert.Contains(events, static item => item.GetProperty("name").GetString() == "tree.search");
+	}
+
+	[AvaloniaFact]
 	public async Task StartupReport_WritesReportAfterCommandLineProjectLoad()
 	{
 		using var project = UiTestProject.CreateDefault();

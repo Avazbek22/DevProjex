@@ -594,6 +594,11 @@ public sealed class CommandLineAutomationRunnerTests
 			CommandLineOptionTokens.PreviewMode, "tree-content",
 			CommandLineOptionTokens.TreeFormat, "md"
 		])));
+		Assert.False(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/project",
+			CommandLineOptionTokens.Preview,
+			CommandLineOptionTokens.TreeFormat, "md"
+		])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse(["--unknown"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Help])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Version])));
@@ -606,6 +611,11 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "xml"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "md"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Benchmark, "/tmp/project"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics,
+			"/tmp/project",
+			CommandLineOptionTokens.NoUi
+		])));
 	}
 
 	private static CommandLineAutomationContext CreateContext(

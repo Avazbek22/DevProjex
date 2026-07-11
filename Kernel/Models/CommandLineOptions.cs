@@ -14,6 +14,7 @@ public sealed record CommandLineOptions(
 	public bool ShowVersion { get; init; }
 	public StartupReportOptions Report { get; init; } = StartupReportOptions.Disabled;
 	public StartupBenchmarkOptions Benchmark { get; init; } = StartupBenchmarkOptions.Disabled;
+	public StartupSessionMetricsOptions SessionMetrics { get; init; } = StartupSessionMetricsOptions.Disabled;
 	public StartupExportOptions Export { get; init; } = StartupExportOptions.Disabled;
 	public StartupUiOptions Ui { get; init; } = StartupUiOptions.Default;
 	public IReadOnlyList<string> IncludeRootFolders { get; init; } = [];
@@ -40,6 +41,7 @@ public sealed record CommandLineOptions(
 		bool showVersion = false;
 		var report = StartupReportOptions.Disabled;
 		var benchmark = StartupBenchmarkOptions.Disabled;
+		var sessionMetrics = StartupSessionMetricsOptions.Disabled;
 		var export = StartupExportOptions.Disabled;
 		var ui = StartupUiOptions.Default;
 		var includeRootFolders = new List<string>();
@@ -247,6 +249,24 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
+			if (arg.Equals(CommandLineOptionTokens.SessionMetrics, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				sessionMetrics = sessionMetrics with { Enabled = true, Path = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.SessionMetricsOutput, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				sessionMetrics = sessionMetrics with { OutputPath = value };
+				continue;
+			}
+
 			if (arg.Equals(CommandLineOptionTokens.Export, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
@@ -356,8 +376,9 @@ public sealed record CommandLineOptions(
 			hasPositionalPath = true;
 		}
 
-		ValidateStartupUiOptions(path, ui, errors);
+		ValidateStartupUiOptions(path, ui, sessionMetrics, errors);
 		ValidateBenchmarkOptions(path, noUi, strict, report, benchmark, export, ui, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
+		ValidateSessionMetricsOptions(path, noUi, strict, report, benchmark, sessionMetrics, export, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
 
 		var options = new CommandLineOptions(path, lang, elevationAttempted)
 		{
@@ -366,6 +387,7 @@ public sealed record CommandLineOptions(
 			ShowVersion = showVersion,
 			Report = report,
 			Benchmark = benchmark,
+			SessionMetrics = sessionMetrics,
 			Export = export,
 			Ui = ui,
 			IncludeRootFolders = includeRootFolders.ToArray(),
@@ -428,6 +450,18 @@ public sealed record CommandLineOptions(
 		{
 			parts.Add(CommandLineOptionTokens.BenchmarkOutput);
 			parts.Add(Quote(Benchmark.OutputPath!));
+		}
+
+		if (SessionMetrics.Enabled)
+		{
+			parts.Add(CommandLineOptionTokens.SessionMetrics);
+			parts.Add(Quote(SessionMetrics.Path!));
+		}
+
+		if (!string.IsNullOrWhiteSpace(SessionMetrics.OutputPath))
+		{
+			parts.Add(CommandLineOptionTokens.SessionMetricsOutput);
+			parts.Add(Quote(SessionMetrics.OutputPath!));
 		}
 
 		if (Export.Enabled)
@@ -879,6 +913,7 @@ public sealed record CommandLineOptions(
 	private static void ValidateStartupUiOptions(
 		string? path,
 		StartupUiOptions ui,
+		StartupSessionMetricsOptions sessionMetrics,
 		List<CommandLineParseError> errors)
 	{
 		if (ui.OpenLastProject && !string.IsNullOrWhiteSpace(path))
@@ -889,11 +924,22 @@ public sealed record CommandLineOptions(
 				CommandLineOptionTokens.Last));
 		}
 
-		if (ui.HasStartupActions && !ui.OpenLastProject && string.IsNullOrWhiteSpace(path))
+		if (ui.OpenLastProject && sessionMetrics.Enabled)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-session-metrics-last",
+				"Use either --session-metrics <folder> or --last, not both.",
+				CommandLineOptionTokens.SessionMetrics));
+		}
+
+		if (ui.HasStartupActions &&
+		    !ui.OpenLastProject &&
+		    string.IsNullOrWhiteSpace(path) &&
+		    !sessionMetrics.Enabled)
 		{
 			errors.Add(new CommandLineParseError(
 				"ui-startup-requires-project",
-				"UI startup options require --path, a positional folder, or --last.",
+				"UI startup options require --path, a positional folder, --last, or --session-metrics.",
 				null));
 		}
 
@@ -948,6 +994,66 @@ public sealed record CommandLineOptions(
 				"conflicting-benchmark-options",
 				"--benchmark runs the standard project report benchmark and cannot be combined with report, export, UI startup, selection, strict, --no-ui, or --silent options.",
 				CommandLineOptionTokens.Benchmark));
+		}
+	}
+
+	private static void ValidateSessionMetricsOptions(
+		string? path,
+		bool noUi,
+		bool strict,
+		StartupReportOptions report,
+		StartupBenchmarkOptions benchmark,
+		StartupSessionMetricsOptions sessionMetrics,
+		StartupExportOptions export,
+		IReadOnlyList<string> includeRootFolders,
+		IReadOnlyList<string> includeExtensions,
+		bool ignoreOptionsSpecified,
+		List<CommandLineParseError> errors)
+	{
+		if (!sessionMetrics.Enabled)
+		{
+			if (!string.IsNullOrWhiteSpace(sessionMetrics.OutputPath))
+			{
+				errors.Add(new CommandLineParseError(
+					"session-metrics-output-requires-session-metrics",
+					"--session-metrics-output requires --session-metrics.",
+					CommandLineOptionTokens.SessionMetricsOutput));
+			}
+
+			return;
+		}
+
+		if (string.Equals(sessionMetrics.OutputPath?.Trim(), CommandLineOptionTokens.StandardOutputReportPath, StringComparison.Ordinal))
+		{
+			errors.Add(new CommandLineParseError(
+				"session-metrics-output-requires-file",
+				"--session-metrics-output must point to a JSON file path, not stdout.",
+				CommandLineOptionTokens.SessionMetricsOutput));
+		}
+
+		if (!string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-session-metrics-path",
+				"Use --session-metrics <folder> without --path or a positional folder.",
+				CommandLineOptionTokens.SessionMetrics));
+		}
+
+		if (string.IsNullOrWhiteSpace(sessionMetrics.Path))
+		{
+			errors.Add(new CommandLineParseError(
+				"session-metrics-requires-path",
+				"--session-metrics requires a folder path.",
+				CommandLineOptionTokens.SessionMetrics));
+		}
+
+		if (noUi || strict || report.Enabled || benchmark.Enabled || export.Enabled || export.HasOutputPath || export.FormatSpecified ||
+		    includeRootFolders.Count > 0 || includeExtensions.Count > 0 || ignoreOptionsSpecified)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-session-metrics-options",
+				"--session-metrics opens the desktop app and cannot be combined with report, export, benchmark, selection, strict, --no-ui, or --silent options.",
+				CommandLineOptionTokens.SessionMetrics));
 		}
 	}
 
@@ -1067,6 +1173,14 @@ public sealed record StartupBenchmarkOptions(
 	string? OutputPath)
 {
 	public static StartupBenchmarkOptions Disabled { get; } = new(false, null, null);
+}
+
+public sealed record StartupSessionMetricsOptions(
+	bool Enabled,
+	string? Path,
+	string? OutputPath)
+{
+	public static StartupSessionMetricsOptions Disabled { get; } = new(false, null, null);
 }
 
 public sealed record StartupExportOptions(
