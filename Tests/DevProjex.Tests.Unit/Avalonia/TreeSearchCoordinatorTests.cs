@@ -216,6 +216,93 @@ public sealed class TreeSearchCoordinatorTests
 		Assert.Equal("(0 / 0)", viewModel.SearchMatchSummaryText);
 	}
 
+	[Theory]
+	[InlineData(100, -50, -20, 200, 1000, 50)]
+	[InlineData(100, 220, 250, 200, 1000, 150)]
+	[InlineData(10, -50, -20, 200, 1000, 0)]
+	[InlineData(780, 240, 280, 200, 1000, 800)]
+	public void ResolveVerticalOffsetForSearchNavigation_WhenTargetIsOutsideViewport_ReturnsClampedVerticalOffset(
+		double currentOffsetY,
+		double itemTop,
+		double itemBottom,
+		double viewportHeight,
+		double extentHeight,
+		double expectedOffsetY)
+	{
+		var targetOffsetY = TreeSearchCoordinator.ResolveVerticalOffsetForSearchNavigation(
+			currentOffsetY,
+			itemTop,
+			itemBottom,
+			viewportHeight,
+			extentHeight);
+
+		Assert.Equal(expectedOffsetY, targetOffsetY);
+	}
+
+	[Theory]
+	[InlineData(100, 0, 30)]
+	[InlineData(100, -20, 10)]
+	[InlineData(100, 190, 230)]
+	public void ResolveVerticalOffsetForSearchNavigation_WhenTargetIsAlreadyPartlyVisible_KeepsCurrentOffset(
+		double currentOffsetY,
+		double itemTop,
+		double itemBottom)
+	{
+		var targetOffsetY = TreeSearchCoordinator.ResolveVerticalOffsetForSearchNavigation(
+			currentOffsetY,
+			itemTop,
+			itemBottom,
+			viewportHeight: 200,
+			extentHeight: 1000);
+
+		Assert.Equal(currentOffsetY, targetOffsetY);
+	}
+
+	[Theory]
+	[InlineData(0, 500, 200, 0)]
+	[InlineData(120, 500, 200, 120)]
+	[InlineData(420, 500, 200, 300)]
+	[InlineData(-15, 500, 200, 0)]
+	[InlineData(120, 150, 200, 0)]
+	public void ResolveClampedTreeHorizontalOffset_ReturnsOffsetInsideScrollableRange(
+		double preservedOffsetX,
+		double extentWidth,
+		double viewportWidth,
+		double expectedOffsetX)
+	{
+		var targetOffsetX = TreeSearchCoordinator.ResolveClampedTreeHorizontalOffset(
+			preservedOffsetX,
+			extentWidth,
+			viewportWidth);
+
+		Assert.Equal(expectedOffsetX, targetOffsetX);
+	}
+
+	[Theory]
+	[InlineData(0, 12, 120, 200, 500, 0)]
+	[InlineData(80, 0, 200.5, 200, 500, 80)]
+	[InlineData(120, -30, 90, 200, 500, 90)]
+	[InlineData(120, 160, 260, 200, 500, 180)]
+	[InlineData(10, -50, 90, 200, 500, 0)]
+	[InlineData(260, 170, 260, 200, 500, 300)]
+	public void ResolveHorizontalOffsetForSearchNavigation_OnlyMovesWhenTargetIsHorizontallyClipped(
+		double currentOffsetX,
+		double itemLeft,
+		double itemRight,
+		double viewportWidth,
+		double extentWidth,
+		double expectedOffsetX)
+	{
+		var targetOffsetX = TreeSearchCoordinator.ResolveHorizontalOffsetForSearchNavigation(
+			currentOffsetX,
+			itemLeft,
+			itemRight,
+			viewportWidth,
+			extentWidth);
+
+		Assert.Equal(expectedOffsetX, targetOffsetX);
+	}
+
 	[Fact]
 	public void UpdateSearchMatches_WhenQueryHasNoMatches_ResetsSearchSummary()
 	{
