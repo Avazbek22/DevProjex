@@ -2,6 +2,7 @@ using Avalonia.Controls;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class TreeSearchCoordinatorTests
 {
 	[Fact]
