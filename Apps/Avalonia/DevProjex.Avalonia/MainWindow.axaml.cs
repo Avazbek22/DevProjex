@@ -203,6 +203,7 @@ public partial class MainWindow : Window
     private int _filterApplyVersion;
     private SuspendedTreeToolMode _previewOnlySuspendedTreeToolMode;
     private CancellationTokenSource? _projectOperationCts;
+    private CancellationTokenSource? _applySettingsCts;
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
@@ -6280,25 +6281,11 @@ public partial class MainWindow : Window
             if (version != _filterApplyVersion)
                 return;
 
-            var matchCount = hasQuery && _currentTree is not null
-                ? NameFilterMatchCounter.CountMatchesUnderRoot(_currentTree.Root, query!)
-                : 0;
-            _viewModel.UpdateFilterMatchSummary(matchCount);
-            _searchCoordinator.UpdateHighlights(query);
+            var matchCount = hasQuery ? ApplyNameFilterPresentation(query!) : 0;
+            if (!hasQuery)
+                _viewModel.UpdateFilterMatchSummary(0);
 
-            if (hasQuery)
-            {
-                using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-                {
-                    TreeSearchEngine.ApplySmartExpandForFilter(
-                        _viewModel.TreeNodes,
-                        query!,
-                        node => node.DisplayName,
-                        node => node.Children,
-                        (node, expanded) => node.IsExpanded = expanded);
-                }
-            }
-            else if (_filterExpansionSnapshot is not null)
+            if (!hasQuery && _filterExpansionSnapshot is not null)
             {
                 RestoreExpandedNodes(_filterExpansionSnapshot);
                 _filterExpansionSnapshot = null;
@@ -7120,36 +7107,58 @@ public partial class MainWindow : Window
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
+        var applyCts = ReplaceCancellationSource(ref _applySettingsCts);
+        var cancellationToken = applyCts.Token;
+        void CancelApply()
+        {
+            applyCts.Cancel();
+            _selectionCoordinator.CancelPendingRefreshes();
+            _refreshPipeline.CancelActiveRefresh();
+        }
+
         try
         {
-            // Font family follows WinForms behavior: applied only on Apply
-            var pending = _viewModel.PendingFontFamily;
-            if (pending is not null &&
-                !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                _viewModel.SelectedFontFamily = pending;
-            }
+            await using var statusLease = SelectionRefreshStatusLease.StartApplyingSettings(
+                _viewModel,
+                _statusOperations,
+                CancelApply,
+                cancellationToken);
 
-            // Apply must observe the latest converged section state. A user can click Apply
-            // while an earlier ignore refresh is still finishing; rebuilding the tree first
-            // would capture stale root-folder availability and keep newly revealed folders hidden.
-            await _selectionCoordinator.WaitForPendingRefreshesAsync();
-            await RefreshTreeAsync();
-            // Most checkbox changes already queue and apply a converged selection snapshot
-            // before Apply rebuilds the tree. Running another live refresh unconditionally
-            // doubles the expensive scan path on large projects, so only do it if a new
-            // selection change landed while the tree was rebuilding.
-            await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath);
-            await _selectionCoordinator.WaitForPendingRefreshesAsync();
-            _projectProfiles.PersistIfNeeded(_currentPath);
+            try
+            {
+                // Font family follows WinForms behavior: applied only on Apply
+                var pending = _viewModel.PendingFontFamily;
+                if (pending is not null &&
+                    !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    _viewModel.SelectedFontFamily = pending;
+                }
+
+                // Apply must observe the latest converged section state. A user can click Apply
+                // while an earlier ignore refresh is still finishing; rebuilding the tree first
+                // would capture stale root-folder availability and keep newly revealed folders hidden.
+                await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                await RefreshTreeAsync(cancellationToken: cancellationToken);
+                // Most checkbox changes already queue and apply a converged selection snapshot
+                // before Apply rebuilds the tree. Running another live refresh unconditionally
+                // doubles the expensive scan path on large projects, so only do it if a new
+                // selection change landed while the tree was rebuilding.
+                await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath, cancellationToken);
+                await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                _projectProfiles.PersistIfNeeded(_currentPath);
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancellation is handled by status operation fallback.
+            }
+            catch (Exception ex)
+            {
+                await ShowErrorAsync(ex.Message);
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Cancellation is handled by status operation fallback.
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync(ex.Message);
+            DisposeIfCurrent(ref _applySettingsCts, applyCts);
         }
     }
 
@@ -8926,6 +8935,11 @@ public partial class MainWindow : Window
                 break;
             case StatusOperationType.SelectionRefresh:
                 _selectionCoordinator.CancelPendingRefreshes();
+                break;
+            case StatusOperationType.ApplySettings:
+                _applySettingsCts?.Cancel();
+                _selectionCoordinator.CancelPendingRefreshes();
+                _refreshPipeline.CancelActiveRefresh();
                 break;
             case StatusOperationType.MetricsCalculation:
                 // Metrics cancellation is handled below by dedicated fallback logic.

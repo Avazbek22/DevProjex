@@ -9,5 +9,6 @@ public enum StatusOperationType
     GitPullUpdates = 4,
     GitSwitchBranch = 5,
     PreviewBuild = 6,
-    SelectionRefresh = 7
+    SelectionRefresh = 7,
+    ApplySettings = 8
 }

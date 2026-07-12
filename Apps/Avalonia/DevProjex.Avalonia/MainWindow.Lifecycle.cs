@@ -17,6 +17,7 @@ public partial class MainWindow
         CancelAndDispose(ref _previewModeSwitchCts);
 
         CancelAndDispose(ref _projectOperationCts);
+        CancelAndDispose(ref _applySettingsCts);
         CancelAndDispose(ref _gitCloneCts);
         CancelAndDispose(ref _gitOperationCts);
     }

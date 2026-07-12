@@ -206,6 +206,7 @@
   "Status.Operation.SwitchingBranch": "Zweigwechsel {0}",
   "Status.Operation.CalculatingData": "Daten werden berechnet",
   "Status.Operation.UpdatingOptions": "Optionen werden aktualisiert",
+  "Status.Operation.ApplyingSettings": "Einstellungen werden angewendet",
   "Status.Operation.PreparingPreview": "Vorschau wird vorbereitet",
   "Status.Operation.PreparingOutput": "Ausgabe wird vorbereitet",
   "Toast.Operation.PreviewCanceled": "Vorschau-Vorbereitung abgebrochen",

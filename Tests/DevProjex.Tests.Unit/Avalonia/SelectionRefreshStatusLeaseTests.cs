@@ -35,6 +35,29 @@ public sealed class SelectionRefreshStatusLeaseTests
     }
 
     [AvaloniaFact]
+    public async Task FastApplySettings_DoesNotShowStatusOperation()
+    {
+        var viewModel = CreateViewModel();
+        var status = CreateStatusCoordinator(viewModel);
+
+        await using (SelectionRefreshStatusLease.StartApplyingSettings(
+                         viewModel,
+                         status,
+                         cancelAction: () => { },
+                         TestContext.Current.CancellationToken))
+        {
+        }
+
+        await AssertOperationTypeRemainsAsync(
+            status,
+            StatusOperationType.None,
+            FastRefreshGuardWindow,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(viewModel.StatusBusy);
+    }
+
+    [AvaloniaFact]
     public async Task LongRefresh_ShowsSelectionRefreshStatusAndClearsOnDispose()
     {
         var viewModel = CreateViewModel();
@@ -118,6 +141,72 @@ public sealed class SelectionRefreshStatusLeaseTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task LongApplySettings_ReplacesSelectionStatusAndExposesItsOwnCancellation()
+    {
+        var viewModel = CreateViewModel();
+        var status = CreateStatusCoordinator(viewModel);
+        var selectionOperation = status.Begin(
+            "Updating options",
+            operationType: StatusOperationType.SelectionRefresh);
+        var canceled = false;
+
+        await using (SelectionRefreshStatusLease.StartApplyingSettings(
+                         viewModel,
+                         status,
+                         () => canceled = true,
+                         TestContext.Current.CancellationToken))
+        {
+            var snapshot = await WaitForOperationTypeAsync(
+                status,
+                StatusOperationType.ApplySettings,
+                SelectionRefreshVisibleTimeout,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(status.IsActive(selectionOperation));
+            Assert.Equal("Applying settings", viewModel.StatusOperationText);
+            Assert.True(viewModel.StatusProgressIsIndeterminate);
+            Assert.NotNull(snapshot.CancelAction);
+
+            snapshot.CancelAction();
+            Assert.True(canceled);
+        }
+
+        await FlushDispatcherAsync();
+
+        Assert.False(viewModel.StatusBusy);
+        Assert.Equal(StatusOperationType.None, status.GetActiveSnapshot().OperationType);
+    }
+
+    [AvaloniaFact]
+    public async Task LongApplySettings_DoesNotReplaceUnrelatedUserOperation()
+    {
+        var viewModel = CreateViewModel();
+        var status = CreateStatusCoordinator(viewModel);
+        var previewOperation = status.Begin(
+            "Preparing preview",
+            operationType: StatusOperationType.PreviewBuild);
+
+        await using (SelectionRefreshStatusLease.StartApplyingSettings(
+                         viewModel,
+                         status,
+                         cancelAction: () => { },
+                         TestContext.Current.CancellationToken))
+        {
+            await AssertOperationTypeRemainsAsync(
+                status,
+                StatusOperationType.PreviewBuild,
+                FastRefreshGuardWindow,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(status.IsActive(previewOperation));
+            Assert.Equal("Preparing preview", viewModel.StatusOperationText);
+        }
+
+        Assert.True(status.IsActive(previewOperation));
+        status.Complete(previewOperation);
+    }
+
     private static async Task<StatusOperationSnapshot> WaitForOperationTypeAsync(
         StatusOperationCoordinator status,
         StatusOperationType expectedOperationType,
@@ -182,7 +271,8 @@ public sealed class SelectionRefreshStatusLeaseTests
             [AppLanguage.En] = new Dictionary<string, string>
             {
                 ["Status.Operation.CalculatingData"] = "Calculating data",
-                ["Status.Operation.UpdatingOptions"] = "Updating options"
+                ["Status.Operation.UpdatingOptions"] = "Updating options",
+                ["Status.Operation.ApplyingSettings"] = "Applying settings"
             }
         });
 
