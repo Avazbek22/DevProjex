@@ -8,5 +8,6 @@ public enum StatusOperationType
     MetricsCalculation = 3,
     GitPullUpdates = 4,
     GitSwitchBranch = 5,
-    PreviewBuild = 6
+    PreviewBuild = 6,
+    SelectionRefresh = 7
 }

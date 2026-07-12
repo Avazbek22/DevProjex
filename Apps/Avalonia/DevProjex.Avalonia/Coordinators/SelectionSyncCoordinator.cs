@@ -1,5 +1,6 @@
 using DevProjex.Application.Models;
 using DevProjex.Avalonia.Collections;
+using DevProjex.Avalonia.Services;
 using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
@@ -12,7 +13,8 @@ public sealed partial class SelectionSyncCoordinator(
     Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, IgnoreRules> buildIgnoreRules,
     Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> getIgnoreOptionsAvailability,
     Func<string, bool> tryElevateAndRestart,
-    Func<string?> currentPathProvider)
+    Func<string?> currentPathProvider,
+    StatusOperationCoordinator? statusOperations = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -752,6 +754,17 @@ public sealed partial class SelectionSyncCoordinator(
         }
     }
 
+    public void CancelPendingRefreshes()
+    {
+        lock (_backgroundRefreshSync)
+        {
+            _liveOptionsRefreshCts?.Cancel();
+            _fullRefreshRequestCts?.Cancel();
+            _liveOptionsRequestVersion = unchecked(_liveOptionsRequestVersion + 1);
+            _fullRefreshRequestVersion = unchecked(_fullRefreshRequestVersion + 1);
+        }
+    }
+
     /// <summary>
     /// Clears internal caches when switching to a new project folder.
     /// This helps release memory from the previous project.
@@ -1054,6 +1067,7 @@ public sealed partial class SelectionSyncCoordinator(
     {
         if (_suppressIgnoreItemCheck) return;
 
+        var changedOption = sender as IgnoreOptionViewModel;
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = null;
 
@@ -1065,8 +1079,20 @@ public sealed partial class SelectionSyncCoordinator(
         var currentPath = currentPathProvider();
         if (!string.IsNullOrEmpty(currentPath))
         {
-            QueueFullRefresh(currentPath);
+            QueueRefreshForIgnoreOptionChange(currentPath, changedOption?.Id);
         }
+    }
+
+    private void QueueRefreshForIgnoreOptionChange(string currentPath, IgnoreOptionId? changedOptionId)
+    {
+        if (changedOptionId.HasValue &&
+            IgnoreOptionRefreshPlanner.GetImpact(changedOptionId.Value) == IgnoreOptionRefreshImpact.FileVisibility)
+        {
+            QueueLiveOptionsRefresh(currentPath);
+            return;
+        }
+
+        QueueFullRefresh(currentPath);
     }
 
     /// <summary>
@@ -1081,6 +1107,7 @@ public sealed partial class SelectionSyncCoordinator(
         Task previousTask;
         Task queuedTask;
         CancellationToken token;
+        Action cancelAction;
         int version;
         lock (_backgroundRefreshSync)
         {
@@ -1094,8 +1121,9 @@ public sealed partial class SelectionSyncCoordinator(
 
             _liveOptionsRefreshCts = new CancellationTokenSource();
             token = _liveOptionsRefreshCts.Token;
+            cancelAction = _liveOptionsRefreshCts.Cancel;
             version = unchecked(++_liveOptionsRequestVersion);
-            queuedTask = RunQueuedLiveOptionsRefreshAsync(currentPath, version, token);
+            queuedTask = RunQueuedLiveOptionsRefreshAsync(currentPath, version, token, cancelAction);
             _latestLiveOptionsRefreshTask = queuedTask;
         }
 
@@ -1117,6 +1145,7 @@ public sealed partial class SelectionSyncCoordinator(
         Task invalidatedLiveTask;
         Task queuedTask;
         CancellationToken token;
+        Action cancelAction;
         int version;
         lock (_backgroundRefreshSync)
         {
@@ -1139,8 +1168,9 @@ public sealed partial class SelectionSyncCoordinator(
 
             _fullRefreshRequestCts = new CancellationTokenSource();
             token = _fullRefreshRequestCts.Token;
+            cancelAction = _fullRefreshRequestCts.Cancel;
             version = unchecked(++_fullRefreshRequestVersion);
-            queuedTask = RunQueuedFullRefreshAsync(currentPath, version, token);
+            queuedTask = RunQueuedFullRefreshAsync(currentPath, version, token, cancelAction);
             _latestFullRefreshTask = queuedTask;
         }
 
@@ -1152,13 +1182,20 @@ public sealed partial class SelectionSyncCoordinator(
     private async Task RunQueuedLiveOptionsRefreshAsync(
         string currentPath,
         int version,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action cancelAction)
     {
         if (cancellationToken.IsCancellationRequested)
             return;
         if (version != Volatile.Read(ref _liveOptionsRequestVersion))
             return;
 
+        using var _ = PerformanceMetrics.Measure("SelectionRefresh.LiveOptions");
+        await using var statusLease = SelectionRefreshStatusLease.Start(
+            viewModel,
+            statusOperations,
+            cancelAction,
+            cancellationToken);
         await UpdateLiveOptionsFromRootSelectionCoreAsync(
             currentPath,
             version,
@@ -1168,13 +1205,20 @@ public sealed partial class SelectionSyncCoordinator(
     private async Task RunQueuedFullRefreshAsync(
         string currentPath,
         int version,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action cancelAction)
     {
         if (cancellationToken.IsCancellationRequested)
             return;
         if (version != Volatile.Read(ref _fullRefreshRequestVersion))
             return;
 
+        using var _ = PerformanceMetrics.Measure("SelectionRefresh.Full");
+        await using var statusLease = SelectionRefreshStatusLease.Start(
+            viewModel,
+            statusOperations,
+            cancelAction,
+            cancellationToken);
         await RefreshRootAndDependentsCoreAsync(
             currentPath,
             version,

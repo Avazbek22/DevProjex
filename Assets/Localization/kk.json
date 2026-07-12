@@ -205,6 +205,7 @@
   "Status.Operation.GettingUpdatesBranch": "Жаңарту {0}",
   "Status.Operation.SwitchingBranch": "Тармақты ауыстыру {0}",
   "Status.Operation.CalculatingData": "Деректерді есептеу",
+  "Status.Operation.UpdatingOptions": "Параметрлерді жаңарту",
   "Status.Operation.PreparingPreview": "Алдын ала қарау дайындалуда",
   "Status.Operation.PreparingOutput": "Нәтиже дайындалуда",
   "Toast.Operation.PreviewCanceled": "Алдын ала қарауды дайындау тоқтатылды",

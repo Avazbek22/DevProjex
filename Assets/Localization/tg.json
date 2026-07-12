@@ -205,6 +205,7 @@
   "Status.Operation.GettingUpdatesBranch": "Навсозӣ {0}",
   "Status.Operation.SwitchingBranch": "Ивазкунии шоха {0}",
   "Status.Operation.CalculatingData": "Ҳисобкунии додаҳо",
+  "Status.Operation.UpdatingOptions": "Навсозии параметрҳо",
   "Status.Operation.PreparingPreview": "Пешнамоиш омода мешавад",
   "Status.Operation.PreparingOutput": "Омодасозии натиҷа",
   "Toast.Operation.PreviewCanceled": "Омодасозии пешнамоиш бекор карда шуд",

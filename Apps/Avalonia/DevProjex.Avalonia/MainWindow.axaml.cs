@@ -404,7 +404,8 @@ public partial class MainWindow : Window
             BuildIgnoreRules,
             GetIgnoreOptionsAvailability,
             TryElevateAndRestart,
-            () => _currentPath);
+            () => _currentPath,
+            _statusOperations);
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
@@ -8922,6 +8923,9 @@ public partial class MainWindow : Window
                 break;
             case StatusOperationType.PreviewBuild:
                 _previewPipeline.CancelActiveBuild();
+                break;
+            case StatusOperationType.SelectionRefresh:
+                _selectionCoordinator.CancelPendingRefreshes();
                 break;
             case StatusOperationType.MetricsCalculation:
                 // Metrics cancellation is handled below by dedicated fallback logic.
