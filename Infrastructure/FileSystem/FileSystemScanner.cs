@@ -2626,6 +2626,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						effectiveRules,
 						effectiveGitIgnoreContext,
 						effectiveGitIgnoreCandidateContext);
+					facts = PromoteRootControllerImpactCandidate(facts, effectiveRules);
 					if (IsPotentialControllerImpactCandidate(facts, effectiveRules))
 						controllerImpactCandidates.Add(facts);
 				}
@@ -2742,6 +2743,22 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 
 		return facts.IsSmartIgnoredCandidate;
+	}
+
+	private static DirectoryScanFacts PromoteRootControllerImpactCandidate(
+		in DirectoryScanFacts facts,
+		IgnoreRules effectiveRules)
+	{
+		if (facts.IsSmartIgnoredCandidate)
+			return facts;
+
+		// Root-folder options are computed before the final selected-root scope is known.
+		// If SmartIgnore hides a top-level artifact folder, the later scoped scan can no
+		// longer infer that folder from selected roots. Probe artifact signatures here so
+		// the controller keeps visible impact evidence instead of hiding its own toggle.
+		return effectiveRules.SmartArtifactIgnoreCandidateMatcher.IsIgnoredDirectory(facts.FullPath, facts.Name)
+			? facts with { IsSmartIgnoredCandidate = true }
+			: facts;
 	}
 
 	private static ScanResult<IgnoreOptionCounts> CountRootDirectoryToggleCandidates(

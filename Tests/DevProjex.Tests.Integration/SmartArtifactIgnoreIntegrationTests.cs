@@ -19,6 +19,7 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		AssertPathVisible(tree, "workspace/python/main.py");
 		AssertPathVisible(tree, "workspace/cpp/main.cpp");
 		AssertPathVisible(tree, "workspace/unity/Assets/Game.cs");
+		AssertPathVisible(tree, "workspace/go/main.go");
 		AssertPathVisible(tree, "workspace/build/README.md");
 		AssertPathHidden(tree, "workspace/app/obj/project.assets.json");
 		AssertPathHidden(tree, "workspace/app/bin/Debug/App.dll");
@@ -26,6 +27,7 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		AssertPathHidden(tree, "workspace/python/__pycache__/main.cpython-313.pyc");
 		AssertPathHidden(tree, "workspace/cpp/cmake-build-debug/CMakeCache.txt");
 		AssertPathHidden(tree, "workspace/unity/Library/ArtifactDB");
+		AssertPathHidden(tree, "workspace/go/pkg/mod/cache/download/github.com/acme/lib/@v/v1.0.0.mod");
 	}
 
 	[Fact]
@@ -86,6 +88,7 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		temp.CreateFile("vendor/Domain.cs", "class Domain {}\n");
 		temp.CreateFile("cache/CachePolicy.cs", "class CachePolicy {}\n");
 		temp.CreateFile("obj/PlainSource.cs", "class PlainSource {}\n");
+		temp.CreateFile("pkg/domain.go", "package pkg\n");
 		var rules = CreateArtifactRules(useSmartIgnore: true);
 
 		var tree = BuildTree(temp.Path, rules);
@@ -95,6 +98,7 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		AssertPathVisible(tree, "vendor/Domain.cs");
 		AssertPathVisible(tree, "cache/CachePolicy.cs");
 		AssertPathVisible(tree, "obj/PlainSource.cs");
+		AssertPathVisible(tree, "pkg/domain.go");
 	}
 
 	[Fact]
@@ -146,6 +150,37 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		Assert.DoesNotContain("ArtifactDB", stdout, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task CommandLineAutomationRunner_OtherIgnoreTogglesDoNotActivateSmartArtifacts()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/App.cs", "class App {}\n");
+		temp.CreateFile("obj/project.assets.json", "{}\n");
+		temp.CreateFile(".dot/payload.txt", "dot folder\n");
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreEmptyFiles,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreExtensionlessFiles
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(string.Empty, error.ToString());
+		var stdout = output.ToString();
+		Assert.Contains("App.cs", stdout, StringComparison.Ordinal);
+		Assert.Contains("project.assets.json", stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain(".dot", stdout, StringComparison.Ordinal);
+	}
+
 	private static void SeedMixedArtifactWorkspace(TemporaryDirectory temp)
 	{
 		temp.CreateFile("workspace/app/src/Program.cs", "class Program {}\n");
@@ -159,6 +194,8 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		temp.CreateFile("workspace/cpp/cmake-build-debug/CMakeCache.txt", "cache\n");
 		temp.CreateFile("workspace/unity/Assets/Game.cs", "class Game {}\n");
 		temp.CreateFile("workspace/unity/Library/ArtifactDB", "artifact db\n");
+		temp.CreateFile("workspace/go/main.go", "package main\n");
+		temp.CreateFile("workspace/go/pkg/mod/cache/download/github.com/acme/lib/@v/v1.0.0.mod", "module github.com/acme/lib\n");
 		temp.CreateFile("workspace/build/README.md", "source folder with suspicious name\n");
 	}
 
@@ -185,10 +222,12 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 				".cs",
 				".cpp",
 				".dll",
+				".go",
 				".json",
 				".md",
 				".py",
 				".pyc",
+				".mod",
 				".tag",
 				".ts",
 				string.Empty
@@ -200,6 +239,7 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 				"cache",
 				"Library",
 				"obj",
+				"pkg",
 				"src",
 				"temp",
 				"tmp",

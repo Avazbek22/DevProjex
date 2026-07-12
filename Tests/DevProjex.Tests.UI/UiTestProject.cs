@@ -105,6 +105,15 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithTopLevelSmartArtifactWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("src", "App.cs"), "class App {}\n");
+            WriteFile(rootPath, Path.Combine("obj", "project.assets.json"), "{}\n");
+        });
+    }
+
     public static UiTestProject CreateWithCleanGitAndSmartWorkspace()
     {
         return Create(static rootPath =>

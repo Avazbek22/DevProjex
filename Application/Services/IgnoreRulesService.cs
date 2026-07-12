@@ -129,7 +129,10 @@ public sealed class IgnoreRulesService(
 
 		var includeGitIgnore = context.HasAnyGitIgnore;
 		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore && context.HasAnyWithoutGitIgnore;
-		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
+		return new IgnoreOptionsAvailability(
+			includeGitIgnore,
+			includeSmartIgnore,
+			SmartIgnoreFollowsGitIgnore: context.IsSingleScopeWithGitIgnore);
 	}
 
 	private IgnoreOptionsAvailability BuildUiIgnoreOptionsAvailability(ProjectScanContext context)
@@ -141,7 +144,10 @@ public sealed class IgnoreRulesService(
 		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore &&
 								 context.HasAnyWithoutGitIgnore &&
 								 HasRelevantSmartIgnoreCandidates(context);
-		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
+		return new IgnoreOptionsAvailability(
+			includeGitIgnore,
+			includeSmartIgnore,
+			SmartIgnoreFollowsGitIgnore: context.IsSingleScopeWithGitIgnore);
 	}
 
 	private bool HasRelevantSmartIgnoreCandidates(ProjectScanContext context)

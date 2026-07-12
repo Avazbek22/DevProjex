@@ -14,6 +14,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.False(availability.IncludeSmartIgnore);
+		Assert.True(availability.SmartIgnoreFollowsGitIgnore);
 	}
 
 	[Fact]
@@ -88,6 +89,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.False(availability.IncludeSmartIgnore);
+		Assert.True(availability.SmartIgnoreFollowsGitIgnore);
 	}
 
 	[Fact]
@@ -129,6 +131,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
+		Assert.False(availability.SmartIgnoreFollowsGitIgnore);
 	}
 
 	[Fact]

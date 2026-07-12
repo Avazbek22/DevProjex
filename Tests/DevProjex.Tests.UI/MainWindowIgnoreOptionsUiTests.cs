@@ -285,6 +285,40 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task TopLevelSmartArtifactController_RemainsVisibleWhenAllIgnoreRulesAreDisabled()
+    {
+        using var project = UiTestProject.CreateWithTopLevelSmartArtifactWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            Assert.DoesNotContain(
+                UiTestDriver.GetViewModel(window).RootFolders,
+                option => string.Equals(option.Name, "obj", StringComparison.OrdinalIgnoreCase));
+
+            await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: false);
+            Assert.Contains(
+                UiTestDriver.GetViewModel(window).RootFolders,
+                option => string.Equals(option.Name, "obj", StringComparison.OrdinalIgnoreCase) && option.IsChecked);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task DotFolderExtensionlessNoise_RecomputesExtensionlessCounterAfterDynamicIgnoreOptionsAppear()
     {
         using var project = UiTestProject.CreateWithDotFolderExtensionlessNoise();

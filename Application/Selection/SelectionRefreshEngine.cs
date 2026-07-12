@@ -483,9 +483,11 @@ public sealed class SelectionRefreshEngine(
     private static void AddDefaultDynamicIgnoreOptions(HashSet<IgnoreOptionId> selected)
     {
         // Defaults are applied optimistically before the first expensive snapshot pass.
-        // The scanner reports direct impact for self-hidden root-level directories, so
-        // directory toggles no longer need a second convergence pass just to prove that
-        // .idea/.git/hidden roots existed before they were filtered out.
+        // The scanner reports direct impact for self-hidden root-level directories and
+        // controller-owned artifacts, so toggles can prove their own root-level evidence
+        // before they filter it out of the visible root list.
+        selected.Add(IgnoreOptionId.UseGitIgnore);
+        selected.Add(IgnoreOptionId.SmartIgnore);
         selected.Add(IgnoreOptionId.HiddenFolders);
         selected.Add(IgnoreOptionId.HiddenFiles);
         selected.Add(IgnoreOptionId.DotFolders);
@@ -686,18 +688,25 @@ public sealed class SelectionRefreshEngine(
             var availability = CreateCountDrivenIgnoreAvailability(getIgnoreOptionsAvailability(path, selectedRootFolders));
             if (snapshotState.HasIgnoreOptionCounts)
             {
+                var hasMeasuredGitIgnoreImpact = snapshotState.ControllerImpactCounts.GitIgnore > 0;
+                var hasMeasuredSmartIgnoreImpact = snapshotState.ControllerImpactCounts.SmartIgnore > 0;
+                var canPromoteSmartIgnoreFromMeasuredImpact =
+                    hasMeasuredSmartIgnoreImpact && !availability.SmartIgnoreFollowsGitIgnore;
                 return availability with
                 {
-                    IncludeGitIgnore = availability.IncludeGitIgnore &&
+                    // Scoped availability can become false after a controller hides its own
+                    // top-level root option. A measured impact count is stronger evidence:
+                    // keep the controller visible so the user can reverse that filtering.
+                    IncludeGitIgnore = (availability.IncludeGitIgnore || hasMeasuredGitIgnoreImpact) &&
                                        ShouldKeepControllerVisible(
                                            IgnoreOptionId.UseGitIgnore,
                                            snapshotState.ControllerImpactCounts.GitIgnore,
                                            stateCache,
                                            stateCacheIsComplete),
-                    IncludeSmartIgnore = availability.IncludeSmartIgnore &&
-                                         ShouldKeepControllerVisible(
-                                             IgnoreOptionId.SmartIgnore,
-                                             snapshotState.ControllerImpactCounts.SmartIgnore,
+                    IncludeSmartIgnore = (availability.IncludeSmartIgnore || canPromoteSmartIgnoreFromMeasuredImpact) &&
+                                          ShouldKeepControllerVisible(
+                                              IgnoreOptionId.SmartIgnore,
+                                              snapshotState.ControllerImpactCounts.SmartIgnore,
                                              stateCache,
                                              stateCacheIsComplete),
                     IncludeHiddenFolders = snapshotState.IgnoreOptionCounts.HiddenFolders > 0,

@@ -97,6 +97,98 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 	}
 
 	[Fact]
+	public void SmartController_IsVisibleForTopLevelSignatureArtifactWithoutKnownStackMarker()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("obj/project.assets.json", "{}\n");
+
+		var snapshot = ComputeDefaultSnapshot(project.Path);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedVisible: false, expectedChecked: null);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.DoesNotContain(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void SmartController_ExplicitUncheckedStateStaysVisibleForSignatureArtifact()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("obj/project.assets.json", "{}\n");
+		var services = CreateServices();
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithForcedIgnoreOptions(
+				project.Path,
+				baseline,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.SmartIgnore] = false
+				}),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void SmartController_AllIgnoreOptionsOff_StaysVisibleUncheckedForSignatureArtifact()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("obj/project.assets.json", "{}\n");
+		var services = CreateServices();
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateAllIgnoreOptionsOffContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
+		Assert.Contains(snapshot.RootOptions!, option => option.Name == "obj" && option.IsChecked);
+	}
+
+	[Fact]
+	public void SmartArtifactRootOwnership_DoesNotStealDotFolderCountsWhenSmartIsDisabled()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("obj/project.assets.json", "{}\n");
+		project.CreateFile(".idea/workspace.xml", "<project />\n");
+		var services = CreateServices();
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		var smartOff = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithForcedIgnoreOptions(
+				project.Path,
+				baseline,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.SmartIgnore] = false,
+					[IgnoreOptionId.DotFolders] = true
+				}),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(baseline, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		AssertIgnoreOption(baseline, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+		Assert.Equal(1, baseline.IgnoreOptionCounts.DotFolders);
+
+		AssertIgnoreOption(smartOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		AssertIgnoreOption(smartOff, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+		Assert.Equal(1, smartOff.IgnoreOptionCounts.DotFolders);
+		Assert.Contains(smartOff.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
 	public void RiderProjectsStyleWorkspace_ShowsDotFolders_WhenNestedProjectDotFoldersAffectOutput()
 	{
 		using var workspace = new TemporaryDirectory();

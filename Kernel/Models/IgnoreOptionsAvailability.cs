@@ -17,4 +17,5 @@ public sealed record IgnoreOptionsAvailability(
 	int ExtensionlessFilesCount = 0,
 	bool IncludeEmptyFiles = false,
 	int EmptyFilesCount = 0,
-	bool ShowAdvancedCounts = false);
+	bool ShowAdvancedCounts = false,
+	bool SmartIgnoreFollowsGitIgnore = false);
