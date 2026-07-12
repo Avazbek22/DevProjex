@@ -23,7 +23,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         SelectionRefreshSnapshot selectionSnapshot)
     {
         var allowedExt = CollectCheckedSelectionNames(
-            selectionSnapshot.ExtensionOptions,
+            selectionSnapshot.EffectiveExtensionOptions,
             StringComparer.OrdinalIgnoreCase);
         var allowedRoot = CollectCheckedSelectionNames(
             selectionSnapshot.RootOptions,

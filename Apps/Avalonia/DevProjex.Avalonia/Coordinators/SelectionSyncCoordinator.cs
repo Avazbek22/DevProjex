@@ -282,8 +282,8 @@ public sealed partial class SelectionSyncCoordinator(
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            var visibleExtensions = new List<string>(scan.Value.Extensions.Count);
-            var extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+            var visibleExtensions = new List<string>(scan.Value.VisibleExtensions.Count);
+            var extensionlessEntriesCount = SplitExtensions(scan.Value.VisibleExtensions, visibleExtensions);
             extensionlessEntriesCount = Math.Max(
                 extensionlessEntriesCount,
                 scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -307,8 +307,8 @@ public sealed partial class SelectionSyncCoordinator(
                     cancellationToken,
                     includeControllerImpactProbeRoots);
 
-                visibleExtensions = new List<string>(scan.Value.Extensions.Count);
-                extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+                visibleExtensions = new List<string>(scan.Value.VisibleExtensions.Count);
+                extensionlessEntriesCount = SplitExtensions(scan.Value.VisibleExtensions, visibleExtensions);
                 extensionlessEntriesCount = Math.Max(
                     extensionlessEntriesCount,
                     scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -1362,7 +1362,7 @@ public sealed partial class SelectionSyncCoordinator(
             ApplyRootOptions(snapshot.RootOptions);
 
         ApplyExtensionOptions(
-            snapshot.ExtensionOptions,
+            snapshot.EffectiveExtensionOptions,
             snapshot.ExtensionlessEntriesCount,
             snapshot.IgnoreOptionCounts,
             snapshot.ControllerImpactCounts,
@@ -1605,9 +1605,9 @@ public sealed partial class SelectionSyncCoordinator(
 
     private static IgnoreRules BuildExtensionAvailabilityScanRules(IgnoreRules rules)
     {
-        // Extension availability must not depend on file-level toggles that can hide the
-        // very extensions required to keep those toggles visible. Otherwise options such as
-        // EmptyFiles or ExtensionlessFiles can disappear immediately after becoming checked.
+        // File-level rules are relaxed only for the internal availability state. The scanner
+        // also returns the effective set used by the visible UI, so ignored-only extensions
+        // never become no-op choices while toggle counters remain reversible.
         if (!rules.IgnoreHiddenFiles &&
             !rules.IgnoreDotFiles &&
             !rules.IgnoreEmptyFiles &&

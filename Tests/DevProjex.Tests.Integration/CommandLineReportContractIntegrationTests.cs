@@ -378,6 +378,40 @@ public sealed class CommandLineReportContractIntegrationTests
 			path => Path.GetFileName(path).Contains("replace-existing", StringComparison.Ordinal));
 	}
 
+	[Fact]
+	public async Task NoUi_IgnoredNumericFileExtensions_AreAbsentFromInventoryAndEffectiveSelection()
+	{
+		using var temp = new TemporaryDirectory();
+		var rootPath = temp.CreateDirectory("numeric-extension-project");
+		temp.CreateFile(Path.Combine("numeric-extension-project", "App.csproj"), "<Project />\n");
+		temp.CreateFile(Path.Combine("numeric-extension-project", "src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("numeric-extension-project", "empty.1770912967589"), string.Empty);
+		temp.CreateFile(Path.Combine("numeric-extension-project", "src", ".transient.1770912967590"), "dot payload\n");
+		temp.CreateFile(Path.Combine("numeric-extension-project", "src", "archive.1770912967591"), "visible payload\n");
+		var reportPath = Path.Combine(temp.Path, "reports", "numeric-extensions.json");
+
+		await RunNoUiReportAsync(
+			reportPath,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, rootPath,
+			CommandLineOptionTokens.ReportPath, reportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreEmptyFiles,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFiles);
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
+		var root = document.RootElement;
+		var availableExtensions = ReadStringArray(root.GetProperty("inventory").GetProperty("availableExtensions"));
+		var selectedExtensions = ReadStringArray(root.GetProperty("selection").GetProperty("selectedExtensions"));
+
+		Assert.Contains(".cs", availableExtensions);
+		Assert.Contains(".1770912967591", availableExtensions);
+		Assert.DoesNotContain(".1770912967589", availableExtensions);
+		Assert.DoesNotContain(".1770912967590", availableExtensions);
+		Assert.DoesNotContain(".1770912967589", selectedExtensions);
+		Assert.DoesNotContain(".1770912967590", selectedExtensions);
+		Assert.Equal(3, ReadTreeFileCount(root));
+	}
+
 	private static async Task RunNoUiReportAsync(string expectedReportPath, params string[] args)
 		=> await RunNoUiReportAsync(expectedReportPath, configureServices: null, args);
 

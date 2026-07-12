@@ -105,6 +105,21 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithIgnoredNumericExtensions()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, "App.csproj", "<Project />\n");
+            WriteFile(rootPath, Path.Combine("src", "App.cs"), "class App {}\n");
+            WriteFile(rootPath, "empty-root.1770912967589", string.Empty);
+            WriteFile(rootPath, Path.Combine("src", "generated", "empty-nested.1770912967590"), string.Empty);
+            WriteFile(rootPath, Path.Combine("src", ".transient.1770912967591"), "dot payload\n");
+            WriteFile(rootPath, Path.Combine("src", "archive.1770912967592"), "visible payload\n");
+            WriteFile(rootPath, Path.Combine("src", "visible.1770912967593"), "visible payload\n");
+            WriteFile(rootPath, Path.Combine("src", "empty.1770912967593"), string.Empty);
+        });
+    }
+
     public static UiTestProject CreateWithTopLevelSmartArtifactWorkspace()
     {
         return Create(static rootPath =>

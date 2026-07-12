@@ -65,7 +65,8 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptionStateCache: dynamicSection.IgnoreOptionStateCache,
             RootAccessDenied: rootSection.RootAccessDenied || dynamicSection.RootAccessDenied,
             HadAccessDenied: rootSection.HadAccessDenied || dynamicSection.HadAccessDenied,
-            TreeInventory: dynamicSection.TreeInventory);
+            TreeInventory: dynamicSection.TreeInventory,
+            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions);
     }
 
     public SelectionRefreshSnapshot ComputeLiveRefreshSnapshot(
@@ -95,7 +96,8 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptionStateCache: dynamicSection.IgnoreOptionStateCache,
             RootAccessDenied: dynamicSection.RootAccessDenied,
             HadAccessDenied: dynamicSection.HadAccessDenied,
-            TreeInventory: dynamicSection.TreeInventory);
+            TreeInventory: dynamicSection.TreeInventory,
+            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions);
     }
 
     private RootSectionSnapshot BuildRootSection(
@@ -269,6 +271,10 @@ public sealed class SelectionRefreshEngine(
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
             extensionOptions = ForceAllChecked(extensionOptions);
 
+        var visibleExtensionOptions = FilterVisibleExtensionOptions(
+            extensionOptions,
+            scanData.VisibleExtensions);
+
         if (usedProfileFallback &&
             !ExtensionSnapshotReusePolicy.CanReuseSnapshot(effectiveExtensionPolicy, extensionOptions))
         {
@@ -309,6 +315,10 @@ public sealed class SelectionRefreshEngine(
 
             if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
                 extensionOptions = ForceAllChecked(extensionOptions);
+
+            visibleExtensionOptions = FilterVisibleExtensionOptions(
+                extensionOptions,
+                scanData.VisibleExtensions);
         }
 
         var ignoreState = BuildIgnoreOptionState(
@@ -322,6 +332,7 @@ public sealed class SelectionRefreshEngine(
         return new DynamicSectionSnapshot(
             RootOptions: null,
             ExtensionOptions: extensionOptions,
+            VisibleExtensionOptions: visibleExtensionOptions,
             IgnoreOptions: ignoreState.VisibleOptions,
             ExtensionlessEntriesCount: extensionlessEntriesCount,
             HasIgnoreOptionCounts: true,
@@ -786,6 +797,37 @@ public sealed class SelectionRefreshEngine(
         return updated;
     }
 
+    private static IReadOnlyList<SelectionOption> FilterVisibleExtensionOptions(
+        IReadOnlyList<SelectionOption> options,
+        IReadOnlySet<string> visibleExtensionEntries)
+    {
+        if (options.Count == 0 || visibleExtensionEntries.Count == 0)
+            return [];
+
+        var visibleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in visibleExtensionEntries)
+        {
+            var extension = Path.GetExtension(entry);
+            if (!string.IsNullOrWhiteSpace(extension))
+                visibleNames.Add(extension);
+        }
+
+        if (visibleNames.Count == options.Count &&
+            options.All(option => visibleNames.Contains(option.Name)))
+        {
+            return options;
+        }
+
+        var filtered = new List<SelectionOption>(Math.Min(options.Count, visibleNames.Count));
+        foreach (var option in options)
+        {
+            if (visibleNames.Contains(option.Name))
+                filtered.Add(option);
+        }
+
+        return filtered;
+    }
+
     private static IExtensionInclusionPolicy? BuildEffectiveExtensionPolicy(SelectionRefreshContext context)
     {
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
@@ -1108,6 +1150,7 @@ public sealed class SelectionRefreshEngine(
     private sealed record DynamicSectionSnapshot(
         IReadOnlyList<SelectionOption>? RootOptions,
         IReadOnlyList<SelectionOption> ExtensionOptions,
+        IReadOnlyList<SelectionOption> VisibleExtensionOptions,
         IReadOnlyList<ResolvedIgnoreOptionState> IgnoreOptions,
         int ExtensionlessEntriesCount,
         bool HasIgnoreOptionCounts,

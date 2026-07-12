@@ -8,6 +8,43 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowIgnoreOptionsUiTests
 {
     [AvaloniaFact]
+    public async Task IgnoredNumericExtensions_AreNotOfferedUntilTheirOwningIgnoreRuleIsDisabled()
+    {
+        using var project = UiTestProject.CreateWithIgnoredNumericExtensions();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            Assert.Contains(viewModel.Extensions, option => option.Name == ".1770912967592");
+            Assert.Contains(viewModel.Extensions, option => option.Name == ".1770912967593");
+            Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".1770912967589");
+            Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".1770912967590");
+            Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".1770912967591");
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetViewModel(window).Extensions.Any(option => option.Name == ".1770912967589") &&
+                      UiTestDriver.GetViewModel(window).Extensions.Any(option => option.Name == ".1770912967590"),
+                "empty-file numeric extensions to become available");
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetViewModel(window).Extensions.All(option =>
+                    option.Name is not ".1770912967589" and not ".1770912967590"),
+                "empty-file numeric extensions to be removed again");
+
+            Assert.Contains(UiTestDriver.GetViewModel(window).Extensions, option => option.Name == ".1770912967593");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task NewWorkspace_WithDynamicIgnoreEntries_KeepsDynamicOptionsCheckedByDefault()
     {
         using var project = UiTestProject.CreateWithDynamicIgnoreEntries();

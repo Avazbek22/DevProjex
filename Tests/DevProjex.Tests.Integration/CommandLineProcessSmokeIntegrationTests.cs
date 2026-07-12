@@ -112,6 +112,41 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task UserLevelTerminalCommand_NoUiReportDoesNotAdvertiseIgnoredNumericExtensions()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("numeric extension project");
+		temp.CreateFile(Path.Combine("numeric extension project", "App.csproj"), "<Project />\n");
+		temp.CreateFile(Path.Combine("numeric extension project", "src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("numeric extension project", "empty.1770912967589"), string.Empty);
+		temp.CreateFile(Path.Combine("numeric extension project", "src", ".transient.1770912967590"), "dot payload\n");
+		temp.CreateFile(Path.Combine("numeric extension project", "src", "archive.1770912967591"), "visible payload\n");
+
+		var result = await RunUserLevelTerminalCommandAsync(
+			temp,
+			temp.Path,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreEmptyFiles,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFiles);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		var root = document.RootElement;
+		var availableExtensions = ReadStringArray(root.GetProperty("inventory").GetProperty("availableExtensions"));
+		var selectedExtensions = ReadStringArray(root.GetProperty("selection").GetProperty("selectedExtensions"));
+
+		Assert.Contains(".1770912967591", availableExtensions);
+		Assert.DoesNotContain(".1770912967589", availableExtensions);
+		Assert.DoesNotContain(".1770912967590", availableExtensions);
+		Assert.DoesNotContain(".1770912967589", selectedExtensions);
+		Assert.DoesNotContain(".1770912967590", selectedExtensions);
+		Assert.Equal(3, root.GetProperty("inventory").GetProperty("tree").GetProperty("fileCount").GetInt32());
+	}
+
+	[Fact]
 	public async Task UserLevelTerminalCommand_TreeContentJsonStdoutKeepsJsonTreeAndPlainTextContent()
 	{
 		using var temp = new TemporaryDirectory();

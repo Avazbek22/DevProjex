@@ -221,6 +221,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			cancellationToken);
 
 		var aggregatedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var aggregatedEffectiveExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var rawCounts = IgnoreOptionCounts.Empty;
 		var effectiveCounts = IgnoreOptionCounts.Empty;
 		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
@@ -239,6 +240,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			cancellationToken,
 			rootFileInventoryEntries);
 		aggregatedExtensions.UnionWith(rootFileSnapshot.Value.Extensions);
+		aggregatedEffectiveExtensions.UnionWith(rootFileSnapshot.Value.VisibleExtensions);
 		rawCounts = rawCounts.Add(rootFileSnapshot.Value.RawIgnoreOptionCounts);
 		effectiveCounts = effectiveCounts.Add(rootFileSnapshot.Value.EffectiveIgnoreOptionCounts);
 		controllerImpactCounts = controllerImpactCounts.Add(rootFileSnapshot.Value.ControllerImpactCounts);
@@ -274,6 +276,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						inventoryCapture);
 
 					localState.Extensions.UnionWith(snapshot.Value.Extensions);
+					localState.EffectiveExtensions.UnionWith(snapshot.Value.VisibleExtensions);
 					localState.RawCounts.Add(snapshot.Value.RawIgnoreOptionCounts);
 					localState.EffectiveCounts = localState.EffectiveCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
 					localState.ControllerImpactCounts =
@@ -300,6 +303,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					{
 						if (localState.Extensions.Count > 0)
 							aggregatedExtensions.UnionWith(localState.Extensions);
+						if (localState.EffectiveExtensions.Count > 0)
+							aggregatedEffectiveExtensions.UnionWith(localState.EffectiveExtensions);
 						rawCounts = rawCounts.Add(localState.RawCounts.ToImmutable());
 						effectiveCounts = effectiveCounts.Add(localState.EffectiveCounts);
 						controllerImpactCounts = controllerImpactCounts.Add(localState.ControllerImpactCounts);
@@ -350,7 +355,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			aggregatedExtensions,
 			rawCounts,
 			effectiveCounts,
-			controllerImpactCounts);
+			controllerImpactCounts,
+			aggregatedEffectiveExtensions);
 		var treeInventory = captureTreeInventory
 			? BuildRootSelectionInventory(
 				rootPath,
@@ -1323,6 +1329,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var effectiveExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var rawCounts = default(MutableIgnoreOptionCounts);
 		var effectiveCounts = default(MutableIgnoreOptionCounts);
 		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
@@ -1334,7 +1341,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					extensions,
 					IgnoreOptionCounts.Empty,
 					IgnoreOptionCounts.Empty,
-					IgnoreControllerImpactCounts.Empty),
+					IgnoreControllerImpactCounts.Empty,
+					effectiveExtensions),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
@@ -1383,6 +1391,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						facts.IsExtensionless,
 						extensions,
 						skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
+				if (PassesExtensionDiscoveryRules(facts, effectiveRules))
+					AddExtensionEntry(
+						file.Name,
+						facts.Extension,
+						facts.IsExtensionless,
+						effectiveExtensions,
+						skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 
 				var visibility = EvaluateFileVisibilityProfile(
 					facts,
@@ -1412,7 +1427,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					extensions,
 					IgnoreOptionCounts.Empty,
 					IgnoreOptionCounts.Empty,
-					IgnoreControllerImpactCounts.Empty),
+					IgnoreControllerImpactCounts.Empty,
+					effectiveExtensions),
 				RootAccessDenied: true,
 				HadAccessDenied: true);
 		}
@@ -1423,7 +1439,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					extensions,
 					IgnoreOptionCounts.Empty,
 					IgnoreOptionCounts.Empty,
-					IgnoreControllerImpactCounts.Empty),
+					IgnoreControllerImpactCounts.Empty,
+					effectiveExtensions),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
@@ -1433,7 +1450,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				extensions,
 				rawCounts.ToImmutable(),
 				effectiveCounts.ToImmutable(),
-				controllerImpactCounts),
+				controllerImpactCounts,
+				effectiveExtensions),
 			RootAccessDenied: false,
 			HadAccessDenied: false);
 	}
@@ -1472,6 +1490,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 
 		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var effectiveExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var rawCounts = default(MutableIgnoreOptionCounts);
 		var fileMetrics = ArrayPool<EffectiveIgnoreNodeFileMetrics>.Shared.Rent(directories.Count);
 		var visibilityStates = ArrayPool<EffectiveIgnoreNodeVisibilityState>.Shared.Rent(directories.Count);
@@ -1523,6 +1542,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				int index,
 				CancellationToken token,
 				HashSet<string> localExtensions,
+				HashSet<string> localEffectiveExtensions,
 				ref MutableIgnoreOptionCounts localRawCounts)
 			{
 				token.ThrowIfCancellationRequested();
@@ -1583,6 +1603,17 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 								localExtensions,
 								skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 							localMetrics.ExtensionDiscoveryVisibleFiles++;
+						}
+
+						if (extensionDiscoveryVisible &&
+						    PassesExtensionDiscoveryRules(facts, effectiveRules))
+						{
+							AddExtensionEntry(
+								file.Name,
+								facts.Extension,
+								facts.IsExtensionless,
+								localEffectiveExtensions,
+								skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 						}
 
 						var visibility = EvaluateFileVisibilityProfile(
@@ -1666,12 +1697,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						index,
 						parallelOptions.CancellationToken,
 						localState.Extensions,
+						localState.EffectiveExtensions,
 						ref localState.RawCounts);
 					return localState;
 				},
 				localState =>
 				{
 					if (localState.Extensions.Count == 0 &&
+					    localState.EffectiveExtensions.Count == 0 &&
 					    localState.RawCounts.IsEmpty)
 					{
 						return;
@@ -1682,6 +1715,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						rawCounts.Add(localState.RawCounts);
 						if (localState.Extensions.Count > 0)
 							extensions.UnionWith(localState.Extensions);
+						if (localState.EffectiveExtensions.Count > 0)
+							effectiveExtensions.UnionWith(localState.EffectiveExtensions);
 					}
 				});
 
@@ -1746,7 +1781,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					extensions,
 					rawCounts.ToImmutable(),
 					finalizedCounts.IgnoreOptionCounts,
-					finalizedCounts.ControllerImpactCounts),
+					finalizedCounts.ControllerImpactCounts,
+					effectiveExtensions),
 				discovery.RootAccessDenied,
 				hadAccessDenied == 1);
 		}

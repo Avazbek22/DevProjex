@@ -11,6 +11,7 @@ public sealed partial class FileSystemScanner
     private sealed class IgnoreSectionSnapshotLocalState
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> EffectiveExtensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts RawCounts;
         public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
@@ -19,6 +20,7 @@ public sealed partial class FileSystemScanner
     private sealed class ProjectWorkspaceScanLocalState(bool captureTreeInventory)
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> EffectiveExtensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts RawCounts;
         public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
@@ -26,6 +28,7 @@ public sealed partial class FileSystemScanner
 
         public bool IsEmpty =>
             Extensions.Count == 0 &&
+            EffectiveExtensions.Count == 0 &&
             RawCounts.IsEmpty &&
             EffectiveCounts == IgnoreOptionCounts.Empty &&
             ControllerImpactCounts == IgnoreControllerImpactCounts.Empty &&
