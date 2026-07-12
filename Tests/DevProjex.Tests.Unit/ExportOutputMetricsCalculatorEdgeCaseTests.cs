@@ -119,6 +119,35 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 		Assert.Equal(ExportOutputMetrics.Empty, accumulator.ToMetrics());
 	}
 
+	[Fact]
+	public void OrderedAccumulator_AggregatesWorkspaceMetricsBeyondInt32WithoutWrappingToZero()
+	{
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		accumulator.AppendFile(new ContentFileMetrics(
+			Path: "a",
+			SizeBytes: 1_500_000_000,
+			LineCount: 1_200_000_000,
+			CharCount: 1_500_000_000,
+			IsEmpty: false,
+			IsWhitespaceOnly: false));
+		accumulator.AppendFile(new ContentFileMetrics(
+			Path: "b",
+			SizeBytes: 1_500_000_000,
+			LineCount: 1_200_000_000,
+			CharCount: 1_500_000_000,
+			IsEmpty: false,
+			IsWhitespaceOnly: false));
+
+		var metrics = accumulator.ToMetrics();
+
+		Assert.Equal(2_400_000_006L, metrics.Lines);
+		Assert.Equal(3_000_000_015L, metrics.Chars);
+		Assert.Equal(750_000_004L, metrics.Tokens);
+		Assert.True(metrics.Lines > int.MaxValue);
+		Assert.True(metrics.Chars > int.MaxValue);
+		Assert.NotEqual(ExportOutputMetrics.Empty, metrics);
+	}
+
 	private static int GetExpectedNormalizedCharCount(string text)
 	{
 		var count = 0;

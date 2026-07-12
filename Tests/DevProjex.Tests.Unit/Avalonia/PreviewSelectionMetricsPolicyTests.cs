@@ -77,4 +77,14 @@ public sealed class PreviewSelectionMetricsPolicyTests
         var expectedValue = (12345 / 1_000.0).ToString("F1") + "K";
         Assert.Equal($"[Lines: {expectedValue}]", text);
     }
+
+    [Fact]
+    public void AddMetrics_ValuesBeyondInt32RemainExact()
+    {
+        var result = PreviewSelectionMetricsPolicy.AddMetrics(
+            new ExportOutputMetrics(1_500_000_000, 2_000_000_000, 500_000_000),
+            new ExportOutputMetrics(1_200_000_000, 1_500_000_000, 375_000_000));
+
+        Assert.Equal(new ExportOutputMetrics(2_700_000_000, 3_500_000_000, 875_000_000), result);
+    }
 }

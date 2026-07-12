@@ -368,9 +368,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (lineHeight <= 0)
             return 1;
 
-        var normalizedOffset = Math.Max(0, verticalOffset);
-        var lineNumber = (int)Math.Floor((normalizedOffset - TopPadding) / lineHeight) + 1;
-        return Math.Clamp(lineNumber, 1, ResolveLineCount());
+        return ResolveLineNumberAtOffset(verticalOffset, TopPadding, lineHeight, ResolveLineCount());
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -398,7 +396,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         var viewportTop = Math.Max(0, VerticalOffset);
         var viewportHeight = ResolveViewportHeightForRendering(lineHeight);
         var contentTopPadding = ResolveContentTopPadding();
-        var firstVisibleLine = Math.Max(1, (int)Math.Floor((viewportTop - contentTopPadding) / lineHeight) + 1);
+        var firstVisibleLine = ResolveLineNumberAtOffset(viewportTop, contentTopPadding, lineHeight, lineCount);
         var visibleLineCount = double.IsFinite(viewportHeight)
             ? (int)Math.Clamp(Math.Ceiling(viewportHeight / lineHeight), 1, MaxRenderedVisibleLines)
             : MaxRenderedVisibleLines;
@@ -413,11 +411,22 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (visibleWindow.Text.Length == 0)
             return;
 
-        var origin = new Point(LeftPadding, contentTopPadding + (firstVisibleLine - 1) * lineHeight);
+        var origin = new Point(
+            LeftPadding,
+            CalculateViewportRelativeLineOriginY(
+                firstVisibleLine,
+                contentTopPadding,
+                lineHeight,
+                viewportTop));
 
-        using (PushTopOverlayClip(context, viewportTop))
+        // ScrollViewer translates this oversized child by -viewportTop. Cancel that
+        // transform locally and draw the small visible window around Y=0. Sending
+        // billion-pixel glyph coordinates to the composition backend loses precision,
+        // even though only a few dozen lines are actually visible.
+        using (context.PushTransform(Matrix.CreateTranslation(0, viewportTop)))
+        using (PushTopOverlayClip(context, viewportHeight))
         {
-            DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight);
+            DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight, viewportTop);
 
             if (!TryGetVisibleSelectionRange(visibleWindow, out _, out _))
             {
@@ -426,7 +435,13 @@ public sealed class VirtualizedPreviewTextControl : Control
             else
             {
                 var (selectionBackground, selectionForeground) = ResolveSelectionBrushes();
-                DrawSelectionBackgrounds(context, visibleWindow, selectionBackground, typeface, lineHeight);
+                DrawSelectionBackgrounds(
+                    context,
+                    visibleWindow,
+                    selectionBackground,
+                    typeface,
+                    lineHeight,
+                    viewportTop);
                 DrawVisibleTextLinesWithSelection(context, visibleWindow, origin, typeface, lineHeight, selectionForeground);
             }
         }
@@ -434,15 +449,15 @@ public sealed class VirtualizedPreviewTextControl : Control
         DrawStickyHeader(context, typeface);
     }
 
-    private IDisposable? PushTopOverlayClip(DrawingContext context, double viewportTop)
+    private IDisposable? PushTopOverlayClip(DrawingContext context, double viewportHeight)
     {
         var clipHeight = Math.Max(0, TopOverlayClipHeight);
         if (clipHeight <= 0)
             return null;
 
-        var clipTop = viewportTop + clipHeight;
+        var clipTop = clipHeight;
         var clipWidth = Math.Max(Bounds.Width, HorizontalOffset + Math.Max(ViewportWidth, 1));
-        var clipBottom = Math.Max(Bounds.Height, viewportTop + Math.Max(ViewportHeight, 1));
+        var clipBottom = Math.Max(clipTop, Math.Max(viewportHeight, 1));
         var clipRectHeight = Math.Max(0, clipBottom - clipTop);
         return clipRectHeight > 0
             ? context.PushClip(new Rect(0, clipTop, clipWidth, clipRectHeight))
@@ -798,7 +813,8 @@ public sealed class VirtualizedPreviewTextControl : Control
         VisibleTextWindow visibleWindow,
         IBrush selectionBackground,
         Typeface typeface,
-        double lineHeight)
+        double lineHeight,
+        double viewportTop)
     {
         if (!TryGetNormalizedSelection(out var selectionStart, out var selectionEnd))
             return;
@@ -834,7 +850,7 @@ public sealed class VirtualizedPreviewTextControl : Control
             if (width <= 0)
                 continue;
 
-            var top = ResolveContentTopPadding() + (lineNumber - 1) * lineHeight;
+            var top = ResolveContentTopPadding() + ((lineNumber - 1) * lineHeight) - viewportTop;
             context.FillRectangle(selectionBackground, new Rect(left, top, width, lineHeight));
         }
     }
@@ -1146,7 +1162,8 @@ public sealed class VirtualizedPreviewTextControl : Control
         DrawingContext context,
         int firstVisibleLine,
         int lastVisibleLine,
-        double lineHeight)
+        double lineHeight,
+        double viewportTop)
     {
         if (SectionDividerBrush is null || Document?.Sections is not { Count: > 0 } sections)
             return;
@@ -1171,10 +1188,39 @@ public sealed class VirtualizedPreviewTextControl : Control
             if (section.StartLine <= 1)
                 continue;
 
-            var y = ResolveContentTopPadding() + ((section.HeaderLine - 1) * lineHeight) - dividerOffset;
+            var y = ResolveContentTopPadding() +
+                    ((section.HeaderLine - 1) * lineHeight) -
+                    viewportTop -
+                    dividerOffset;
             context.DrawLine(dividerPen, new Point(LeftPadding, y), new Point(right, y));
         }
     }
+
+    private static int ResolveLineNumberAtOffset(
+        double verticalOffset,
+        double contentTopPadding,
+        double lineHeight,
+        int lineCount)
+    {
+        if (!double.IsFinite(verticalOffset) || lineHeight <= 0 || lineCount <= 1)
+            return 1;
+
+        var rawLineNumber = Math.Floor((Math.Max(0, verticalOffset) - contentTopPadding) / lineHeight) + 1;
+        if (rawLineNumber <= 1)
+            return 1;
+
+        if (rawLineNumber >= lineCount)
+            return lineCount;
+
+        return (int)rawLineNumber;
+    }
+
+    internal static double CalculateViewportRelativeLineOriginY(
+        int firstVisibleLine,
+        double contentTopPadding,
+        double lineHeight,
+        double viewportTop) =>
+        contentTopPadding + ((Math.Max(1, firstVisibleLine) - 1) * lineHeight) - viewportTop;
 
     private void DrawStickyHeader(DrawingContext context, Typeface typeface)
     {

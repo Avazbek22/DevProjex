@@ -1460,7 +1460,7 @@ internal static class UiTestDriver
         }
     }
 
-    private static bool TryParseMetricNumber(string text, out int value)
+    private static bool TryParseMetricNumber(string text, out long value)
     {
         value = 0;
         if (string.IsNullOrWhiteSpace(text))
@@ -1486,7 +1486,7 @@ internal static class UiTestDriver
             // Integer status values use localized group separators only. We deliberately
             // keep digits and drop every separator so 4,698 / 4 698 / 4.698 all become 4698.
             normalized = string.Concat(normalized.Where(char.IsDigit));
-            if (normalized.Length == 0 || !int.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out value))
+            if (normalized.Length == 0 || !long.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out value))
                 return false;
 
             return true;
@@ -1518,7 +1518,11 @@ internal static class UiTestDriver
             return false;
         }
 
-        value = (int)Math.Round(parsed * multiplier, MidpointRounding.AwayFromZero);
+        var scaled = Math.Round(parsed * multiplier, MidpointRounding.AwayFromZero);
+        if (scaled < 0 || scaled > long.MaxValue)
+            return false;
+
+        value = (long)scaled;
         return true;
     }
 }

@@ -62,6 +62,7 @@ public sealed class ThemeBrushCoordinatorTests
 
 		var firstBackgroundBrush = GetBrush(harness.Window, "AppBackgroundBrush");
 		var firstPanelBrush = GetBrush(harness.Window, "AppPanelBrush");
+		var firstStickyHeaderBrush = GetBrush(harness.Window, "PreviewStickyHeaderBrush");
 		var firstMenuBrush = GetBrush(harness.Window, "MenuPopupBrush");
 		var firstPanelColor = firstPanelBrush.Color;
 
@@ -71,8 +72,10 @@ public sealed class ThemeBrushCoordinatorTests
 
 		Assert.Same(firstBackgroundBrush, GetBrush(harness.Window, "AppBackgroundBrush"));
 		Assert.Same(firstPanelBrush, GetBrush(harness.Window, "AppPanelBrush"));
+		Assert.Same(firstStickyHeaderBrush, GetBrush(harness.Window, "PreviewStickyHeaderBrush"));
 		Assert.Same(firstMenuBrush, GetBrush(harness.Window, "MenuPopupBrush"));
 		Assert.NotEqual(firstPanelColor, firstPanelBrush.Color);
+		Assert.Equal(byte.MaxValue, firstStickyHeaderBrush.Color.A);
 		Assert.IsType<SolidColorBrush>(app.Resources["AppAccentBrush"]);
 		Assert.IsType<SolidColorBrush>(harness.Window.Resources["AppBorderBrush"]);
 	}
@@ -87,6 +90,7 @@ public sealed class ThemeBrushCoordinatorTests
 
 		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_backgroundBrush"));
 		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_panelBrush"));
+		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_previewStickyHeaderBrush"));
 		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_accentBrush"));
 	}
 

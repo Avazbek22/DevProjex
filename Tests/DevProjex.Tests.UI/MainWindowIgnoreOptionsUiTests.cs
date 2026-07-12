@@ -1097,8 +1097,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
             await AssertExtensionStatesAsync(
                 window,
-                visibleChecked: [".dll", ".log", ".js", ".pyc", ".env"],
-                hidden: [".xml"]);
+                visibleChecked: [".dll", ".log", ".js", ".pyc"],
+                hidden: [".xml", ".env"]);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:

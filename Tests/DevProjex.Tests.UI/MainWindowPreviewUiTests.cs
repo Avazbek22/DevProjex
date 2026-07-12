@@ -1,4 +1,5 @@
 using Avalonia.Layout;
+using Avalonia.Media;
 using DevProjex.Application.Services;
 using System.Xml.Linq;
 
@@ -626,6 +627,9 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
             Assert.True(stickyHeaderCap.IsVisible);
             Assert.True(stickyHeaderContainer.IsVisible);
+            Assert.Equal(1, stickyHeaderContainer.Opacity);
+            var stickyBackground = Assert.IsType<SolidColorBrush>(stickyHeaderContainer.Background);
+            Assert.Equal(byte.MaxValue, stickyBackground.Color.A);
             Assert.InRange(Math.Abs(capBounds.Width - lineNumbersBounds.Width), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Center.X - capBounds.Center.X), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Width - 24), 0, 1.5);
