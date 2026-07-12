@@ -318,6 +318,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			// Keep initial project-load inventory focused on the currently selected roots.
 			// Root-level toggle candidates still affect counts, but reading their full
 			// subtrees here would delay first paint for folders that are invisible now.
+			// This is the core performance trade-off of the hybrid ignore model: root probes
+			// keep checkboxes reversible, while selected-root scans do the expensive content
+			// work only for roots the user can currently see.
 			var rootCandidateCounts = CountRootDirectoryToggleCandidates(
 				scanPlan.DirectoryToggleCandidates,
 				effectiveRules,
@@ -648,6 +651,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		// Selected-scope directories need a content probe because EmptyFolders can already
 		// remove an empty folder. Root-list candidates are different: hiding the top-level
 		// checkbox itself is user-visible even before extension/content filters are applied.
+		// Keep those concepts separate: controller impact answers "would this controller
+		// remove a visible choice or visible content?", not "does this folder have a raw
+		// suspicious name?".
 		if (requireVisibleContentWhenEmptyFoldersIgnored &&
 		    rules.IgnoreEmptyFolders &&
 		    !HasVisibleContentForControllerImpactCandidate(
@@ -2756,6 +2762,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		// If SmartIgnore hides a top-level artifact folder, the later scoped scan can no
 		// longer infer that folder from selected roots. Probe artifact signatures here so
 		// the controller keeps visible impact evidence instead of hiding its own toggle.
+		// This deliberately uses the signature-backed artifact matcher, not broad smart
+		// folder names, so source folders named build/vendor/pkg are not promoted by name.
 		return effectiveRules.SmartArtifactIgnoreCandidateMatcher.IsIgnoredDirectory(facts.FullPath, facts.Name)
 			? facts with { IsSmartIgnoredCandidate = true }
 			: facts;

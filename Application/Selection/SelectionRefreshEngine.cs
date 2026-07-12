@@ -485,7 +485,9 @@ public sealed class SelectionRefreshEngine(
         // Defaults are applied optimistically before the first expensive snapshot pass.
         // The scanner reports direct impact for self-hidden root-level directories and
         // controller-owned artifacts, so toggles can prove their own root-level evidence
-        // before they filter it out of the visible root list.
+        // before they filter it out of the visible root list. Removing controller defaults
+        // here makes top-level obj/bin/log/cache roots disappear first and then prevents the
+        // UI from discovering which checkbox should bring them back.
         selected.Add(IgnoreOptionId.UseGitIgnore);
         selected.Add(IgnoreOptionId.SmartIgnore);
         selected.Add(IgnoreOptionId.HiddenFolders);
@@ -697,6 +699,8 @@ public sealed class SelectionRefreshEngine(
                     // Scoped availability can become false after a controller hides its own
                     // top-level root option. A measured impact count is stronger evidence:
                     // keep the controller visible so the user can reverse that filtering.
+                    // Smart Ignore is the exception when it follows Use .gitignore; then the
+                    // measured smart impact belongs to the gitignore controller in the UI.
                     IncludeGitIgnore = (availability.IncludeGitIgnore || hasMeasuredGitIgnoreImpact) &&
                                        ShouldKeepControllerVisible(
                                            IgnoreOptionId.UseGitIgnore,

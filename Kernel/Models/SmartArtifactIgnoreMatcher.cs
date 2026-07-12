@@ -3,6 +3,20 @@ using System.IO.Enumeration;
 
 namespace DevProjex.Kernel.Models;
 
+// Smart artifact ignore is the generic half of the hybrid ignore model. Stack-specific
+// smart rules are still preferred when a project marker proves the technology, but real
+// workspaces often contain generated folders outside a clean project root: copied build
+// artifacts, package caches, temporary publish folders, or dependency stores. This matcher
+// catches those cases without requiring a deep "guess the project type" scan.
+//
+// The contract is deliberately conservative:
+// 1. A cheap name/prefix check only marks a directory as suspicious.
+// 2. A bounded top-level signature probe must prove generated-tool output.
+// 3. Source-looking folders with names like build, vendor, cache, pkg, or Library stay
+//    visible unless their own contents contain a strong artifact signature.
+//
+// Do not replace this with "ignore every known folder name". That would be faster but
+// would hide real source trees in large mixed workspaces and home-directory opens.
 public sealed class SmartArtifactIgnoreMatcher
 {
 	private const int MaxEnumeratedSignatureEntries = 1024;
@@ -99,6 +113,9 @@ public sealed class SmartArtifactIgnoreMatcher
 
 	private static SmartArtifactDirectoryRule[] CreateDefaultRules() =>
 	[
+		// Rules intentionally describe portable artifact signatures rather than project
+		// identity. The same directory name can be source in one repo and generated output
+		// in another, so every broad name below needs at least one strong local marker.
 		SmartArtifactDirectoryRule.Exact(
 			"obj",
 			files:

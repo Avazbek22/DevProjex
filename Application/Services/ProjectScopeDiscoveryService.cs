@@ -236,6 +236,10 @@ public sealed class ProjectScopeDiscoveryService(
 		var hasExplicitRootSelection = selectedRootFolders is not null && selectedRootFolders.Count > 0;
 		var rootHasGitIgnore = rootFacts.HasGitIgnoreFile;
 		var rootHasProjectMarker = HasProjectMarker(rootFacts);
+		// Scope discovery is intentionally about project ownership, not artifact hiding.
+		// The generic artifact matcher handles dependency/build/cache folders later, after
+		// the selected roots are known. Keeping discovery conservative prevents home-folder
+		// and monorepo opens from turning dependency forests into fake project scopes.
 		var candidateDirectories = ResolveCandidateDirectories(rootFacts, selectedRootFolders);
 
 		if (candidateDirectories.Count == 0)
@@ -415,7 +419,9 @@ public sealed class ProjectScopeDiscoveryService(
 
 		// Keep the default probe intentionally shallow. Only obvious monorepo
 		// roots/containers get the wider BFS so normal folder opens do not turn
-		// into expensive dependency-style discovery scans.
+		// into expensive dependency-style discovery scans. Smart artifact filtering is a
+		// later, cheaper layer; do not compensate for missed scopes by increasing this
+		// depth globally unless benchmarks prove it is safe for large user folders.
 		if (isKnownMonorepoContainer || HasMonorepoMarker(candidateFacts))
 		{
 			return new NestedProjectProbe(

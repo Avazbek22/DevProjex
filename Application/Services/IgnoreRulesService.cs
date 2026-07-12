@@ -30,7 +30,12 @@ public sealed class IgnoreRulesService(
 		var requestedGitIgnore = availability.IncludeGitIgnore &&
 								 selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 
-		// Smart ignore is hidden for single-project gitignore scenario and follows UseGitIgnore toggle there.
+		// Hybrid ignore has two controller modes:
+		// - In mixed workspaces, .gitignore and Smart Ignore are independent because some
+		//   scopes may have repository rules while other scopes only have generated artifacts.
+		// - In a single .gitignore scope, Smart Ignore is intentionally hidden and follows
+		//   Use .gitignore. Users get one practical "respect project ignore policy" switch
+		//   instead of two overlapping switches that hide the same build output.
 		var smartIgnoreFollowsGitIgnore = !availability.IncludeSmartIgnore &&
 		                                  context.IsSingleScopeWithGitIgnore;
 		var useSmartIgnore = availability.IncludeSmartIgnore
@@ -51,6 +56,10 @@ public sealed class IgnoreRulesService(
 			? scopedMatchers[0].Matcher
 			: GitIgnoreMatcher.Empty;
 
+		// Candidate smart rules are built even when Smart Ignore is currently unchecked or
+		// hidden under Use .gitignore. The scanner uses candidates to measure whether a
+		// controller would affect the visible tree; without that evidence, a controller can
+		// hide its own root-level artifacts and then disappear from the UI.
 		var smartCandidate = availability.IncludeSmartIgnore || smartIgnoreFollowsGitIgnore
 			? BuildScopedSmartIgnore(context)
 			: ScopedSmartIgnoreBuildResult.Empty;
@@ -127,6 +136,9 @@ public sealed class IgnoreRulesService(
 		if (context.Scopes.Count == 0)
 			return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
 
+		// Runtime availability is broader than UI availability. The rule builder must be
+		// able to construct candidate matchers for impact probes even when the UI later
+		// decides a controller has zero visible effect and hides the checkbox.
 		var includeGitIgnore = context.HasAnyGitIgnore;
 		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore && context.HasAnyWithoutGitIgnore;
 		return new IgnoreOptionsAvailability(
@@ -140,6 +152,10 @@ public sealed class IgnoreRulesService(
 		if (context.Scopes.Count == 0)
 			return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
 
+		// UI availability is intentionally evidence-based. A Smart Ignore checkbox should
+		// appear only when there is a project marker, a rule-specific root artifact, or a
+		// signature-backed generic artifact candidate. That keeps clean workspaces quiet
+		// while still surfacing the option for messy polyglot folders.
 		var includeGitIgnore = context.HasAnyGitIgnore;
 		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore &&
 								 context.HasAnyWithoutGitIgnore &&
