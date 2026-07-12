@@ -62,6 +62,12 @@ public sealed record IgnoreRules(
 
 	public bool SmartIgnoreFollowsGitIgnore { get; init; }
 
+	public SmartArtifactIgnoreMatcher SmartArtifactIgnoreMatcher { get; init; } =
+		SmartArtifactIgnoreMatcher.Empty;
+
+	public SmartArtifactIgnoreMatcher SmartArtifactIgnoreCandidateMatcher { get; init; } =
+		SmartArtifactIgnoreMatcher.Empty;
+
 	public readonly record struct GitIgnoreEvaluation(bool IsIgnored, bool ShouldTraverseIgnoredDirectory)
 	{
 		public static readonly GitIgnoreEvaluation NotIgnored = new(false, false);
@@ -277,6 +283,9 @@ public sealed record IgnoreRules(
 		if (!ShouldApplySmartIgnore(fullPath, isDirectory: true))
 			return false;
 
+		if (SmartArtifactIgnoreMatcher.IsIgnoredDirectory(fullPath, name))
+			return true;
+
 		if (!SmartIgnoredFolders.Contains(name))
 			return false;
 
@@ -296,6 +305,9 @@ public sealed record IgnoreRules(
 	{
 		if (!ShouldApplySmartIgnoreCandidate(fullPath, isDirectory: true))
 			return false;
+
+		if (SmartArtifactIgnoreCandidateMatcher.IsIgnoredDirectory(fullPath, name))
+			return true;
 
 		var candidateFolders = SmartIgnoreCandidateFolders ?? SmartIgnoredFolders;
 		if (!candidateFolders.Contains(name))

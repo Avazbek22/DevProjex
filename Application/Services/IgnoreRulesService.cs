@@ -103,6 +103,10 @@ public sealed class IgnoreRulesService(
 			ScopedSmartIgnoreCandidateMatchers = smartCandidate.ScopedMatchers,
 			SmartIgnoreCandidateFolders = smartCandidate.FolderNames,
 			SmartIgnoreCandidateFiles = smartCandidate.FileNames,
+			SmartArtifactIgnoreMatcher = useSmartIgnore
+				? SmartArtifactIgnoreMatcher.Default
+				: SmartArtifactIgnoreMatcher.Empty,
+			SmartArtifactIgnoreCandidateMatcher = SmartArtifactIgnoreMatcher.Default,
 			SmartIgnoreFollowsGitIgnore = smartIgnoreFollowsGitIgnore
 		};
 	}
@@ -149,6 +153,10 @@ public sealed class IgnoreRulesService(
 				continue;
 
 			if (scope.HasProjectMarker || HasSmartCandidatesInRootEntries(context, scope.RootPath))
+				return true;
+
+			var rootFacts = smartIgnore.RootFactsProvider.Get(scope.RootPath);
+			if (SmartArtifactIgnoreMatcher.Default.HasCandidateDirectory(rootFacts))
 				return true;
 		}
 

@@ -84,8 +84,10 @@ public sealed class IgnorePipelineMatrixIntegrationTests
 		if (includesGitProject)
 		{
 			var gitProjectNode = treeResult.Root.Children.Single(child => child.Name == "proj-git");
-			Assert.Equal(!rules.UseGitIgnore, gitProjectNode.Children.Any(child => child.Name == "bin"));
-			Assert.Equal(!rules.UseGitIgnore, gitProjectNode.Children.Any(child => child.Name == "obj"));
+			var smartAppliesGit = rules.ShouldApplySmartIgnore(Path.Combine(temp.Path, "proj-git", "src"));
+			var shouldHideGitArtifacts = rules.UseGitIgnore || (rules.UseSmartIgnore && smartAppliesGit);
+			Assert.Equal(!shouldHideGitArtifacts, gitProjectNode.Children.Any(child => child.Name == "bin"));
+			Assert.Equal(!shouldHideGitArtifacts, gitProjectNode.Children.Any(child => child.Name == "obj"));
 		}
 
 		if (includesNoGitProject)
@@ -103,11 +105,12 @@ public sealed class IgnorePipelineMatrixIntegrationTests
 		var extensions = extensionScan.Value;
 
 		var expectedCs = includesGitProject;
-		var expectedDll = includesGitProject && !rules.UseGitIgnore;
+		var smartAppliesGitProject = rules.ShouldApplySmartIgnore(Path.Combine(temp.Path, "proj-git", "src"));
+		var expectedDll = includesGitProject && !(rules.UseGitIgnore || (rules.UseSmartIgnore && smartAppliesGitProject));
 		var smartAppliesNoGit = rules.ShouldApplySmartIgnore(Path.Combine(temp.Path, "proj-no-git", "src"));
 		var expectedTs = includesNoGitProject;
 		var expectedJs = includesNoGitProject && !(rules.UseSmartIgnore && smartAppliesNoGit);
-		var expectedTxt = (includesGitProject && !rules.UseGitIgnore) ||
+		var expectedTxt = (includesGitProject && !(rules.UseGitIgnore || (rules.UseSmartIgnore && smartAppliesGitProject))) ||
 		                  (includesNoGitProject && !(rules.UseSmartIgnore && smartAppliesNoGit));
 
 		Assert.Equal(expectedCs, extensions.Contains(".cs"));
