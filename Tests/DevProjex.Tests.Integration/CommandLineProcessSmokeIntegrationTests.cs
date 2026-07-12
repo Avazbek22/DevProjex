@@ -2049,6 +2049,9 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			: Path.Combine(appDirectory, CommandLineExecutableAliases.DisplayName);
 
 		Assert.True(File.Exists(appHostPath), $"Expected apphost executable at {appHostPath}.");
+		// The installed-command smoke tests validate wrapper semantics. They should not
+		// depend on whether the runner preserved the apphost execute bit in build output.
+		MakeExecutableIfUnix(appHostPath);
 		return appHostPath;
 	}
 
