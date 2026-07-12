@@ -1085,8 +1085,7 @@ public sealed partial class SelectionSyncCoordinator(
 
     private void QueueRefreshForIgnoreOptionChange(string currentPath, IgnoreOptionId? changedOptionId)
     {
-        if (changedOptionId.HasValue &&
-            IgnoreOptionRefreshPlanner.GetImpact(changedOptionId.Value) == IgnoreOptionRefreshImpact.FileVisibility)
+        if (SelectionRefreshRoutingPolicy.CanUseLiveOptionsRefresh(changedOptionId))
         {
             QueueLiveOptionsRefresh(currentPath);
             return;

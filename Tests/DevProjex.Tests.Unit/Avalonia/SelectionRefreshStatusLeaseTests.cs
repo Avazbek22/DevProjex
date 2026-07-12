@@ -2,6 +2,7 @@ using Avalonia.Threading;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class SelectionRefreshStatusLeaseTests
 {
     [AvaloniaFact]

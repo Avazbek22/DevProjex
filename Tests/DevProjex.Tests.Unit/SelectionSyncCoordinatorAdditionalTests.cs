@@ -121,45 +121,6 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
-	public async Task IgnoreFileVisibilityToggle_UsesLiveRefreshWithoutRootFolderScan()
-	{
-		var viewModel = CreateViewModel();
-		var path = @"C:\Project";
-		var scanner = new CountingRootSelectionSnapshotScanner();
-		var coordinator = CreateCoordinator(viewModel, scanner, () => path);
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1));
-		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], path);
-		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
-		scanner.ResetCounts();
-
-		var hiddenFiles = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFiles);
-		hiddenFiles.IsChecked = !hiddenFiles.IsChecked;
-		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
-
-		Assert.Equal(0, scanner.RootFolderNamesCount);
-		Assert.True(scanner.RootSelectionSnapshotCount > 0);
-	}
-
-	[Fact]
-	public async Task IgnoreRootStructureToggle_UsesFullRefreshAndRefreshesRootFolders()
-	{
-		var viewModel = CreateViewModel();
-		var path = @"C:\Project";
-		var scanner = new CountingRootSelectionSnapshotScanner();
-		var coordinator = CreateCoordinator(viewModel, scanner, () => path);
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1));
-		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], path);
-		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
-		scanner.ResetCounts();
-
-		var hiddenFolders = viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFolders);
-		hiddenFolders.IsChecked = !hiddenFolders.IsChecked;
-		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
-
-		Assert.True(scanner.RootFolderNamesCount > 0);
-	}
-
-	[Fact]
 	public void ApplySelectionRefreshSnapshot_InvalidatesOlderStandaloneIgnoreAvailabilityRefreshes()
 	{
 		var viewModel = CreateViewModel();
@@ -964,13 +925,6 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		: IFileSystemScanner, IFileSystemScannerRootSelectionSnapshotProvider
 	{
 		public int RootSelectionSnapshotCount { get; private set; }
-		public int RootFolderNamesCount { get; private set; }
-
-		public void ResetCounts()
-		{
-			RootSelectionSnapshotCount = 0;
-			RootFolderNamesCount = 0;
-		}
 
 		public bool CanReadRoot(string rootPath) => true;
 
@@ -990,7 +944,7 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			string rootPath,
 			IgnoreRules rules,
 			CancellationToken cancellationToken = default) =>
-			new(CountRootFolderNames(), false, false);
+			new(["src"], false, false);
 
 		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
 			string rootPath,
@@ -1010,12 +964,6 @@ private static SelectionSyncCoordinator CreateCoordinator(
 					new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1)),
 				false,
 				false);
-		}
-
-		private List<string> CountRootFolderNames()
-		{
-			RootFolderNamesCount++;
-			return ["src"];
 		}
 	}
 

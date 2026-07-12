@@ -100,6 +100,9 @@ jobs:
           --verbosity minimal
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
+          --blame-hang
+          --blame-hang-timeout 8m
+          --blame-hang-dump-type mini
 
       - name: Run ${{ matrix.suite_name }} Tests (Linux headless)
         if: ${{ matrix.os_id == 'linux' }}
@@ -111,6 +114,9 @@ jobs:
           --verbosity minimal
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
+          --blame-hang
+          --blame-hang-timeout 8m
+          --blame-hang-dump-type mini
 
       - name: Print Test Runner Logs
         if: ${{ failure() }}
