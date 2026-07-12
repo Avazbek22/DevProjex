@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia.Threading;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -5,6 +6,10 @@ namespace DevProjex.Tests.Unit.Avalonia;
 [Collection("AvaloniaUI")]
 public sealed class SelectionRefreshStatusLeaseTests
 {
+    private static readonly TimeSpan SelectionRefreshVisibleTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan FastRefreshGuardWindow = TimeSpan.FromMilliseconds(350);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(20);
+
     [AvaloniaFact]
     public async Task FastRefresh_DoesNotShowStatusOperation()
     {
@@ -19,8 +24,11 @@ public sealed class SelectionRefreshStatusLeaseTests
         {
         }
 
-        await Task.Delay(280, TestContext.Current.CancellationToken);
-        await Dispatcher.UIThread.InvokeAsync(() => { });
+        await AssertOperationTypeRemainsAsync(
+            status,
+            StatusOperationType.None,
+            FastRefreshGuardWindow,
+            TestContext.Current.CancellationToken);
 
         Assert.False(viewModel.StatusBusy);
         Assert.Equal(StatusOperationType.None, status.GetActiveSnapshot().OperationType);
@@ -38,8 +46,11 @@ public sealed class SelectionRefreshStatusLeaseTests
                          cancelAction: null,
                          TestContext.Current.CancellationToken))
         {
-            await Task.Delay(280, TestContext.Current.CancellationToken);
-            await Dispatcher.UIThread.InvokeAsync(() => { });
+            await WaitForOperationTypeAsync(
+                status,
+                StatusOperationType.SelectionRefresh,
+                SelectionRefreshVisibleTimeout,
+                TestContext.Current.CancellationToken);
 
             Assert.True(viewModel.StatusBusy);
             Assert.True(viewModel.StatusProgressIsIndeterminate);
@@ -47,7 +58,7 @@ public sealed class SelectionRefreshStatusLeaseTests
             Assert.Equal(StatusOperationType.SelectionRefresh, status.GetActiveSnapshot().OperationType);
         }
 
-        await Dispatcher.UIThread.InvokeAsync(() => { });
+        await FlushDispatcherAsync();
 
         Assert.False(viewModel.StatusBusy);
         Assert.Equal(StatusOperationType.None, status.GetActiveSnapshot().OperationType);
@@ -66,8 +77,11 @@ public sealed class SelectionRefreshStatusLeaseTests
                          cancelAction: null,
                          TestContext.Current.CancellationToken))
         {
-            await Task.Delay(280, TestContext.Current.CancellationToken);
-            await Dispatcher.UIThread.InvokeAsync(() => { });
+            await AssertOperationTypeRemainsAsync(
+                status,
+                StatusOperationType.MetricsCalculation,
+                FastRefreshGuardWindow,
+                TestContext.Current.CancellationToken);
 
             Assert.True(viewModel.StatusBusy);
             Assert.Equal("Calculating data", viewModel.StatusOperationText);
@@ -90,16 +104,69 @@ public sealed class SelectionRefreshStatusLeaseTests
                          cancelAction: () => canceled = true,
                          TestContext.Current.CancellationToken))
         {
-            await Task.Delay(280, TestContext.Current.CancellationToken);
-            await Dispatcher.UIThread.InvokeAsync(() => { });
-
-            var snapshot = status.GetActiveSnapshot();
+            var snapshot = await WaitForOperationTypeAsync(
+                status,
+                StatusOperationType.SelectionRefresh,
+                SelectionRefreshVisibleTimeout,
+                TestContext.Current.CancellationToken);
             Assert.Equal(StatusOperationType.SelectionRefresh, snapshot.OperationType);
+            Assert.True(snapshot.CancelAction is not null, "Expected an active selection refresh status to expose a cancel action.");
 
-            snapshot.CancelAction?.Invoke();
+            snapshot.CancelAction.Invoke();
 
             Assert.True(canceled);
         }
+    }
+
+    private static async Task<StatusOperationSnapshot> WaitForOperationTypeAsync(
+        StatusOperationCoordinator status,
+        StatusOperationType expectedOperationType,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            await FlushDispatcherAsync();
+
+            var snapshot = status.GetActiveSnapshot();
+            if (snapshot.OperationType == expectedOperationType)
+                return snapshot;
+
+            await Task.Delay(PollInterval, cancellationToken);
+        }
+
+        var actualSnapshot = status.GetActiveSnapshot();
+        Assert.Fail(
+            $"Expected active status operation '{expectedOperationType}' within {timeout}, " +
+            $"but current operation is '{actualSnapshot.OperationType}'.");
+        return default;
+    }
+
+    private static async Task AssertOperationTypeRemainsAsync(
+        StatusOperationCoordinator status,
+        StatusOperationType expectedOperationType,
+        TimeSpan duration,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < duration)
+        {
+            await FlushDispatcherAsync();
+
+            var snapshot = status.GetActiveSnapshot();
+            Assert.Equal(expectedOperationType, snapshot.OperationType);
+
+            await Task.Delay(PollInterval, cancellationToken);
+        }
+    }
+
+    private static async Task FlushDispatcherAsync()
+    {
+        // SelectionRefreshStatusLease schedules status transitions at Background priority.
+        // Tests must drain that queue before reading the snapshot, otherwise slow CI runners
+        // can observe the old state and report a false regression.
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
     }
 
     private static StatusOperationCoordinator CreateStatusCoordinator(MainWindowViewModel viewModel) =>
