@@ -96,7 +96,11 @@ public static class ProjectTreeInventoryRootFolderProjection
             if (directory.IsAccessDenied)
                 return true;
 
-            if (!rules.IgnoreEmptyFolders)
+            // A traversable Git-ignored directory is only a path to possible negated descendants.
+            // Do not surface the directory itself when EmptyFolders is disabled.
+            var isTraversedGitIgnoredDirectory =
+                gitIgnore.IsIgnored && gitIgnore.ShouldTraverseIgnoredDirectory;
+            if (!rules.IgnoreEmptyFolders && !isTraversedGitIgnoredDirectory)
                 return true;
 
             for (var childOffset = 0; childOffset < directory.ChildCount; childOffset++)

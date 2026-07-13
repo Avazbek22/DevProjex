@@ -84,6 +84,67 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
     }
 
     [Fact]
+    public void FullRefresh_DisablingOnlyEmptyFolders_KeepsControllerOwnedRootsOutOfRootOptionsAndTree()
+    {
+        using var temp = new TemporaryDirectory();
+        temp.CreateFile(
+            ".gitignore",
+            "artifacts/\ncodex/\npublish/\nTestResult*/\n!**/[Pp]ackages/build/\n");
+        temp.CreateFile("App.csproj", "<Project />\n");
+        temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+        temp.CreateFile(Path.Combine("docs", "readme.md"), "docs\n");
+        temp.CreateFile(Path.Combine("artifacts", "publish", "App.dll"), "artifact\n");
+        temp.CreateFile(Path.Combine("codex", "rules", "default.rules"), "rules\n");
+        temp.CreateFile(Path.Combine("publish", "App.dll"), "publish\n");
+        temp.CreateFile(Path.Combine("TestResults", "results.trx"), "results\n");
+        Directory.CreateDirectory(Path.Combine(temp.Path, "temp"));
+        var scanner = new CountingWorkspaceScanner();
+        var services = ProjectLoadWorkflowRefreshHarness.CreateServices(scanner);
+
+        var defaults = services.Engine.ComputeFullRefreshSnapshot(
+            ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path) with
+            {
+                CaptureTreeInventory = true
+            },
+            TestContext.Current.CancellationToken);
+        var scansBeforeToggle = scanner.WorkspaceScanCount;
+        var ignoreStates = new Dictionary<IgnoreOptionId, bool>(defaults.IgnoreOptionStateCache)
+        {
+            [IgnoreOptionId.EmptyFolders] = false
+        };
+        var selectedIgnoreOptions = ProjectLoadWorkflowRefreshHarness.CollectCheckedIgnoreOptionIds(defaults);
+        selectedIgnoreOptions.Remove(IgnoreOptionId.EmptyFolders);
+
+        var emptyFoldersDisabled = services.Engine.ComputeFullRefreshSnapshot(
+            ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(temp.Path, defaults) with
+            {
+                IgnoreSelectionInitialized = true,
+                IgnoreSelectionCache = selectedIgnoreOptions,
+                IgnoreOptionStateCache = ignoreStates,
+                IgnoreOptionStateCacheIsComplete = true,
+                IgnoreAllPreference = null,
+                CaptureTreeInventory = true
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, scanner.WorkspaceScanCount - scansBeforeToggle);
+        Assert.Contains(emptyFoldersDisabled.IgnoreOptions, option =>
+            option.Id == IgnoreOptionId.EmptyFolders && !option.IsChecked);
+        Assert.Contains(emptyFoldersDisabled.IgnoreOptions, option =>
+            option.Id == IgnoreOptionId.UseGitIgnore && option.IsChecked);
+        Assert.True(emptyFoldersDisabled.ControllerImpactCounts.GitIgnore > 0);
+        Assert.Equal(1, emptyFoldersDisabled.IgnoreOptionCounts.EmptyFolders);
+        Assert.Contains(emptyFoldersDisabled.RootOptions!, option =>
+            option.Name == "temp" && option.IsChecked);
+        Assert.DoesNotContain(emptyFoldersDisabled.RootOptions!, option =>
+            option.Name is "artifacts" or "codex" or "publish" or "TestResults");
+        Assert.Equal(
+            ["docs", "src", "temp"],
+            emptyFoldersDisabled.RootOptions!.Select(static option => option.Name).Order(PathComparer.Default));
+        AssertRootOptionsMatchProjectedTree(temp.Path, services, emptyFoldersDisabled);
+    }
+
+    [Fact]
     public void FullRefresh_MultiLevelIgnoredAndVisibleRoots_MatchTreeAcrossAllIgnoreCycle()
     {
         using var temp = new TemporaryDirectory();

@@ -38,6 +38,36 @@ public sealed class ProjectTreeInventoryRootFolderProjectionTests
     }
 
     [Fact]
+    public void RemoveCheckedRootsWithoutVisibleStructure_EmptyFoldersVisible_KeepsTraversableGitIgnoredRootHidden()
+    {
+        var rootPath = CreateSyntheticRootPath();
+        var inventory = BuildInventory(rootPath, DirectoryNode("project", FileNode("drop.txt")));
+        var option = new SelectionOption("project", IsChecked: true);
+        var rules = CreateRules(ignoreEmptyFolders: false) with
+        {
+            UseGitIgnore = true,
+            GitIgnoreMatcher = GitIgnoreMatcher.Build(
+                rootPath,
+                ["project/", "!**/packages/build/"])
+        };
+        var projectPath = Path.Combine(rootPath, "project");
+        var gitIgnore = rules.CreateGitIgnoreScanContext(rootPath)
+            .Evaluate(projectPath, "project", isDirectory: true, "project");
+
+        Assert.True(gitIgnore.IsIgnored);
+        Assert.True(gitIgnore.ShouldTraverseIgnoredDirectory);
+
+        var projected = ProjectTreeInventoryRootFolderProjection.RemoveCheckedRootsWithoutVisibleStructure(
+            inventory,
+            [option],
+            new HashSet<string>([".txt"], StringComparer.OrdinalIgnoreCase),
+            rules,
+            TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(option, projected);
+    }
+
+    [Fact]
     public void RemoveCheckedRootsWithoutVisibleStructure_MissingAndUncheckedRoots_PreservesOnlySelectableOptions()
     {
         var rootPath = CreateSyntheticRootPath();
