@@ -523,6 +523,15 @@ public sealed class ProjectScopeDiscoveryService(
 		if (hasProjectMarker)
 			return false;
 
+		// A confirmed generated/dependency layout must never become an independent
+		// project scope. The signature probe is bounded and name-gated, so ordinary
+		// source folders named packages, registry, build, or vendor remain discoverable.
+		if (!isExplicitRootSelection &&
+		    SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directoryPath, name))
+		{
+			return true;
+		}
+
 		if (NonProjectScopeDirectoryNames.Contains(name))
 			return true;
 
@@ -535,8 +544,16 @@ public sealed class ProjectScopeDiscoveryService(
 	private static bool ShouldSkipProjectScopeTraversal(string directoryPath)
 	{
 		var name = GetDirectoryName(directoryPath);
-		return !string.IsNullOrWhiteSpace(name) &&
-			   ScopeDiscoveryPruneDirectoryNames.Contains(name);
+		if (string.IsNullOrWhiteSpace(name))
+			return false;
+
+		if (ScopeDiscoveryPruneDirectoryNames.Contains(name))
+			return true;
+
+		// Prune only after local evidence proves an artifact store. This prevents
+		// wide package caches from consuming the nested-scope BFS budget while keeping
+		// source monorepo containers with the same names fully traversable.
+		return SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directoryPath, name);
 	}
 
 	private static string GetDirectoryName(string directoryPath)

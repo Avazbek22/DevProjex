@@ -156,6 +156,157 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 	}
 
 	[Fact]
+	public void SmartController_LegacyDependencyStore_IsVisibleAndRemovesOnlyArtifactExtensions()
+	{
+		using var project = new TemporaryDirectory();
+		CreateLegacyPackageStoreWorkspace(project);
+		var services = CreateServices();
+		var rules = services.IgnoreRulesService.Build(
+			project.Path,
+			[IgnoreOptionId.SmartIgnore],
+			["src"]);
+		var localStatePath = Path.Combine(project.Path, "App.sln.DotSettings.user");
+
+		Assert.True(rules.UseSmartIgnore);
+		Assert.True(rules.IsSmartIgnoredFile(
+			localStatePath,
+			Path.GetFileName(localStatePath),
+			shouldApplySmartIgnore: true));
+		var rootFileScan = new FileSystemScanner().GetRootFileIgnoreSectionSnapshot(
+			project.Path,
+			rules,
+			rules,
+			effectiveAllowedExtensions: null,
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(".user", rootFileScan.Value.VisibleExtensions);
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".cs");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".config");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".DotSettings");
+		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".nupkg");
+		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".dll");
+		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".user");
+	}
+
+	[Fact]
+	public void SmartController_LegacyDependencyStore_AllOptionsOffKeepsImpactAndArtifactExtensions()
+	{
+		using var project = new TemporaryDirectory();
+		CreateLegacyPackageStoreWorkspace(project);
+		var services = CreateServices();
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateAllIgnoreOptionsOffContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".nupkg");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".dll");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".user");
+	}
+
+	[Fact]
+	public void SmartController_ReusedRefreshEngineDetectsArtifactSignatureAddedAfterInitialScan()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("packages/README.md", "source packages\n");
+		var services = CreateServices();
+		var sourceSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(sourceSnapshot, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+		Assert.Contains(sourceSnapshot.EffectiveExtensionOptions, option => option.Name == ".md");
+
+		project.CreateFile("packages/repositories.config", "<repositories />\n");
+		var artifactSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextFromSnapshot(project.Path, sourceSnapshot),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(artifactSnapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.True(artifactSnapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.DoesNotContain(artifactSnapshot.EffectiveExtensionOptions, option => option.Name == ".md");
+		Assert.DoesNotContain(artifactSnapshot.EffectiveExtensionOptions, option => option.Name == ".config");
+	}
+
+	[Fact]
+	public void SmartController_ReusedRefreshEngineRevealsSourceAfterArtifactSignatureIsRemoved()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("packages/README.md", "source packages\n");
+		var markerPath = project.CreateFile("packages/repositories.config", "<repositories />\n");
+		var services = CreateServices();
+		var artifactSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(artifactSnapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.DoesNotContain(artifactSnapshot.EffectiveExtensionOptions, option => option.Name == ".md");
+
+		File.Delete(markerPath);
+		var sourceSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextFromSnapshot(project.Path, artifactSnapshot),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(sourceSnapshot, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+		Assert.Equal(0, sourceSnapshot.ControllerImpactCounts.SmartIgnore);
+		Assert.Contains(sourceSnapshot.EffectiveExtensionOptions, option => option.Name == ".md");
+	}
+
+	[Fact]
+	public void SmartController_UserSpecificProjectStateAloneHasBidirectionalToggleImpact()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("App.csproj", "<Project />\n");
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("App.csproj.user", "local state\n");
+		var services = CreateServices();
+
+		var enabled = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+		var disabled = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithForcedIgnoreOptions(
+				project.Path,
+				enabled,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.SmartIgnore] = false
+				}),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(enabled, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.True(enabled.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.DoesNotContain(enabled.EffectiveExtensionOptions, option => option.Name == ".user");
+		AssertIgnoreOption(disabled, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(disabled.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(disabled.EffectiveExtensionOptions, option => option.Name == ".user");
+	}
+
+	[Fact]
+	public void SmartController_SourcePackagesWithoutArtifactFingerprint_RemainsHidden()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("packages/domain/Order.cs", "class Order {}\n");
+		project.CreateFile("packages/api/Controller.cs", "class Controller {}\n");
+
+		var snapshot = ComputeDefaultSnapshot(project.Path);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+		Assert.Equal(0, snapshot.ControllerImpactCounts.SmartIgnore);
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".cs");
+	}
+
+	[Fact]
 	public void SmartArtifactRootOwnership_DoesNotStealDotFolderCountsWhenSmartIsDisabled()
 	{
 		using var project = new TemporaryDirectory();
@@ -313,6 +464,18 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 		project.CreateFile("logs/runtime.log", "ignored\n");
 		project.CreateFile(".idea/settings.xml", "<settings />\n");
 		project.CreateFile(".run/App.run.xml", "<component />\n");
+	}
+
+	private static void CreateLegacyPackageStoreWorkspace(TemporaryDirectory project)
+	{
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("packages.config", "<packages />\n");
+		project.CreateFile("App.sln.DotSettings", "shared settings\n");
+		project.CreateFile("App.sln.DotSettings.user", "local settings\n");
+		project.CreateFile("packages/Alpha.1.0.0/Alpha.1.0.0.nupkg", "package\n");
+		project.CreateFile("packages/Alpha.1.0.0/lib/Alpha.dll", "binary\n");
+		project.CreateFile("packages/Beta.2.0.0/Beta.2.0.0.nupkg", "package\n");
+		project.CreateFile("packages/Beta.2.0.0/ref/Beta.dll", "binary\n");
 	}
 
 	private static void CreateRiderProjectsStyleWorkspace(

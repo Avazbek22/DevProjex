@@ -178,7 +178,7 @@ public sealed class IgnoreRulesService(
 				return true;
 
 			var rootFacts = smartIgnore.RootFactsProvider.Get(scope.RootPath);
-			if (SmartArtifactIgnoreMatcher.Default.HasCandidateDirectory(rootFacts))
+			if (SmartArtifactIgnoreMatcher.Default.HasConfirmedArtifactDirectory(rootFacts))
 				return true;
 		}
 

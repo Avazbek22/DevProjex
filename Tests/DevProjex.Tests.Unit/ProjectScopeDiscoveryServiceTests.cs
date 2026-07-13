@@ -134,6 +134,23 @@ public sealed class ProjectScopeDiscoveryServiceTests
 	}
 
 	[Fact]
+	public void Discover_AdaptiveProbe_PrunesConfirmedLegacyPackageStoreButKeepsSourcePackages()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - packages/**\n  - services/**\n");
+		temp.CreateFile("services/api/package.json", "{}");
+		CreateLegacyNuGetPackageWithNestedMarker(temp, "Alpha.1.0.0", "lib");
+		CreateLegacyNuGetPackageWithNestedMarker(temp, "Beta.2.0.0", "ref");
+
+		var discovery = CreateDiscovery();
+		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.Contains(context.Scopes, scope => ScopeEndsWith(scope, "services/api"));
+		Assert.DoesNotContain(context.Scopes, scope => ScopeContains(scope, "packages/Alpha.1.0.0"));
+		Assert.DoesNotContain(context.Scopes, scope => ScopeContains(scope, "packages/Beta.2.0.0"));
+	}
+
+	[Fact]
 	public void Discover_TopLevelDependencyFolder_IsNotPromotedAsWorkspaceScope()
 	{
 		using var temp = new TemporaryDirectory();
@@ -189,6 +206,19 @@ public sealed class ProjectScopeDiscoveryServiceTests
 		relativePath
 			.Replace('/', Path.DirectorySeparatorChar)
 			.Replace('\\', Path.DirectorySeparatorChar);
+
+	private static void CreateLegacyNuGetPackageWithNestedMarker(
+		TemporaryDirectory temp,
+		string packageDirectoryName,
+		string layoutDirectoryName)
+	{
+		temp.CreateFile(
+			$"packages/{packageDirectoryName}/{packageDirectoryName}.nupkg",
+			"package");
+		temp.CreateFile(
+			$"packages/{packageDirectoryName}/{layoutDirectoryName}/package.json",
+			"{}");
+	}
 
 	private sealed class DescriptorOnlySmartIgnoreRule(
 		IEnumerable<string>? markerFiles = null,

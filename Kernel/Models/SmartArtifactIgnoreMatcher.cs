@@ -23,49 +23,70 @@ public sealed class SmartArtifactIgnoreMatcher
 	private static readonly StringComparer NameComparer = StringComparer.OrdinalIgnoreCase;
 	private static readonly FrozenSet<string> EmptyNameSet =
 		Array.Empty<string>().ToFrozenSet(NameComparer);
+	private static readonly FrozenDictionary<string, SmartArtifactDirectoryRule[]> EmptyRuleIndex =
+		new Dictionary<string, SmartArtifactDirectoryRule[]>(NameComparer).ToFrozenDictionary(NameComparer);
 	private static readonly string[] EmptyNames = [];
 
 	public static SmartArtifactIgnoreMatcher Empty { get; } = new([]);
 
-	public static SmartArtifactIgnoreMatcher Default { get; } = new(CreateDefaultRules());
+	public static SmartArtifactIgnoreMatcher Default { get; } = new(
+		CreateDefaultRules(),
+		CreateDefaultIgnoredFileSuffixes());
 
 	private readonly SmartArtifactDirectoryRule[] _rules;
-	private readonly FrozenSet<string> _exactCandidateNames;
-	private readonly string[] _candidatePrefixes;
+	private readonly FrozenDictionary<string, SmartArtifactDirectoryRule[]> _exactRulesByName;
+	private readonly SmartArtifactDirectoryRule[] _prefixRules;
+	private readonly string[] _ignoredFileSuffixes;
+	private readonly string[] _ignoredFileTerminalSuffixes;
 
-	public SmartArtifactIgnoreMatcher(IEnumerable<SmartArtifactDirectoryRule> rules)
+	public SmartArtifactIgnoreMatcher(
+		IEnumerable<SmartArtifactDirectoryRule> rules,
+		IEnumerable<string>? ignoredFileSuffixes = null)
 	{
 		_rules = rules.ToArray();
+		_ignoredFileSuffixes = ignoredFileSuffixes?
+			.Where(static suffix => !string.IsNullOrWhiteSpace(suffix))
+			.Distinct(NameComparer)
+			.ToArray() ?? EmptyNames;
+		_ignoredFileTerminalSuffixes = _ignoredFileSuffixes
+			.Select(static suffix =>
+			{
+				var extension = Path.GetExtension(suffix);
+				return string.IsNullOrEmpty(extension) ? suffix : extension;
+			})
+			.Distinct(NameComparer)
+			.ToArray();
 		if (_rules.Length == 0)
 		{
-			_exactCandidateNames = EmptyNameSet;
-			_candidatePrefixes = EmptyNames;
+			_exactRulesByName = EmptyRuleIndex;
+			_prefixRules = [];
 			return;
 		}
 
-		_exactCandidateNames = _rules
+		_exactRulesByName = _rules
 			.Where(static rule => rule.MatchKind == SmartArtifactNameMatchKind.Exact)
-			.Select(static rule => rule.NamePattern)
-			.ToFrozenSet(NameComparer);
-		_candidatePrefixes = _rules
+			.GroupBy(static rule => rule.NamePattern, NameComparer)
+			.ToFrozenDictionary(
+				static group => group.Key,
+				static group => group.ToArray(),
+				NameComparer);
+		_prefixRules = _rules
 			.Where(static rule => rule.MatchKind == SmartArtifactNameMatchKind.Prefix)
-			.Select(static rule => rule.NamePattern)
-			.Distinct(NameComparer)
 			.ToArray();
 	}
 
-	public bool HasRules => _rules.Length > 0;
+	public bool HasRules => _rules.Length > 0 || _ignoredFileSuffixes.Length > 0;
 
 	public bool IsCandidateName(string name)
 	{
 		if (string.IsNullOrWhiteSpace(name))
 			return false;
 
-		if (_exactCandidateNames.Contains(name))
+		if (_exactRulesByName.ContainsKey(name))
 			return true;
 
-		foreach (var prefix in _candidatePrefixes)
-			if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+		foreach (var rule in _prefixRules)
+			if (name.StartsWith(rule.NamePattern, StringComparison.OrdinalIgnoreCase))
 				return true;
 
 		return false;
@@ -85,6 +106,47 @@ public sealed class SmartArtifactIgnoreMatcher
 		return false;
 	}
 
+	public bool HasConfirmedArtifactDirectory(ProjectRootFacts rootFacts)
+	{
+		if (!rootFacts.Exists || !rootFacts.IsAccessible)
+			return false;
+
+		foreach (var directory in rootFacts.Directories)
+		{
+			if (!directory.IsReparsePoint && IsIgnoredDirectory(directory.FullPath, directory.Name))
+				return true;
+		}
+
+		return false;
+	}
+
+	public bool IsIgnoredFile(string name)
+	{
+		if (string.IsNullOrWhiteSpace(name))
+			return false;
+
+		// Most files fail this short terminal check. Full long-suffix comparisons are
+		// reserved for the rare matching extension, keeping the scanner hot path cheap.
+		var hasMatchingTerminalSuffix = false;
+		foreach (var terminalSuffix in _ignoredFileTerminalSuffixes)
+		{
+			if (!name.EndsWith(terminalSuffix, StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			hasMatchingTerminalSuffix = true;
+			break;
+		}
+
+		if (!hasMatchingTerminalSuffix)
+			return false;
+
+		foreach (var suffix in _ignoredFileSuffixes)
+			if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+				return true;
+
+		return false;
+	}
+
 	public bool IsIgnoredDirectory(string fullPath, string name)
 	{
 		if (_rules.Length == 0 || string.IsNullOrWhiteSpace(fullPath) || !IsCandidateName(name))
@@ -94,14 +156,41 @@ public sealed class SmartArtifactIgnoreMatcher
 		// then a bounded artifact signature probe only for suspicious directories.
 		// Generic names like "build" or "Library" stay visible unless their own
 		// contents prove that they are generated tool output.
-		return IsIgnoredDirectoryCore(fullPath, name);
+		return IsIgnoredDirectoryCore(fullPath, name, portableOnly: false);
 	}
 
-	private bool IsIgnoredDirectoryCore(string fullPath, string name)
+	public bool IsPortableIgnoredDirectory(string fullPath, string name)
 	{
-		foreach (var rule in _rules)
+		if (_rules.Length == 0 || string.IsNullOrWhiteSpace(fullPath) || !IsCandidateName(name))
+			return false;
+
+		return IsIgnoredDirectoryCore(fullPath, name, portableOnly: true);
+	}
+
+	private bool IsIgnoredDirectoryCore(string fullPath, string name, bool portableOnly)
+	{
+		if (_exactRulesByName.TryGetValue(name, out var exactRules) &&
+		    HasMatchingStrongSignature(exactRules, fullPath, portableOnly))
 		{
-			if (!rule.MatchesName(name))
+			return true;
+		}
+
+		return HasMatchingStrongSignature(_prefixRules, fullPath, portableOnly, name);
+	}
+
+	private static bool HasMatchingStrongSignature(
+		SmartArtifactDirectoryRule[] rules,
+		string fullPath,
+		bool portableOnly,
+		string? candidateName = null)
+	{
+		for (var index = 0; index < rules.Length; index++)
+		{
+			var rule = rules[index];
+			if (portableOnly && !rule.ApplyOutsideProjectScopes)
+				continue;
+
+			if (candidateName is not null && !rule.MatchesName(candidateName))
 				continue;
 
 			if (rule.HasStrongSignature(fullPath))
@@ -160,6 +249,42 @@ public sealed class SmartArtifactIgnoreMatcher
 			"jspm_packages",
 			files: ["package.json"],
 			directories: ["npm", "github"]),
+		SmartArtifactDirectoryRule.Exact(
+			"packages",
+			files: ["repositories.config"],
+			pathSuffixSegments: [".nuget", "packages"],
+			repeatedChildSignature: new RepeatedChildArtifactSignature(
+				selfNamedFileSuffix: ".nupkg",
+				layoutDirectories:
+				[
+					"lib",
+					"ref",
+					"runtimes",
+					"tools",
+					"analyzers",
+					"build",
+					"content",
+					"contentFiles"
+				],
+				minimumMatches: 2,
+				maxEntries: 48),
+			applyOutsideProjectScopes: true),
+		SmartArtifactDirectoryRule.Exact(
+			"repository",
+			pathSuffixSegments: [".m2", "repository"],
+			applyOutsideProjectScopes: true),
+		SmartArtifactDirectoryRule.Exact(
+			"registry",
+			pathSuffixSegments: [".cargo", "registry"],
+			applyOutsideProjectScopes: true),
+		SmartArtifactDirectoryRule.Exact(
+			"_cacache",
+			directories: ["content-v2", "index-v5"],
+			applyOutsideProjectScopes: true),
+		SmartArtifactDirectoryRule.Exact(
+			"modules-2",
+			directories: ["files-2.1"],
+			applyOutsideProjectScopes: true),
 		SmartArtifactDirectoryRule.Exact(
 			"__pycache__",
 			fileExtensions: [".pyc", ".pyo"]),
@@ -373,6 +498,16 @@ public sealed class SmartArtifactIgnoreMatcher
 			fileSuffixes: [".xcuserstate"])
 	];
 
+	private static string[] CreateDefaultIgnoredFileSuffixes() =>
+	[
+		// These files contain machine/user-specific IDE state. Shared equivalents such as
+		// .sln.DotSettings deliberately remain visible.
+		".sln.DotSettings.user",
+		".csproj.user",
+		".fsproj.user",
+		".vbproj.user"
+	];
+
 	public sealed class SmartArtifactDirectoryRule
 	{
 		private readonly FrozenSet<string> _files;
@@ -380,6 +515,8 @@ public sealed class SmartArtifactIgnoreMatcher
 		private readonly string[] _fileSuffixes;
 		private readonly string[] _fileExtensions;
 		private readonly FrozenSet<string> _childFiles;
+		private readonly string[] _pathSuffixSegments;
+		private readonly RepeatedChildArtifactSignature? _repeatedChildSignature;
 
 		private SmartArtifactDirectoryRule(
 			string namePattern,
@@ -388,7 +525,10 @@ public sealed class SmartArtifactIgnoreMatcher
 			IReadOnlyCollection<string> directories,
 			IReadOnlyCollection<string> fileSuffixes,
 			IReadOnlyCollection<string> fileExtensions,
-			IReadOnlyCollection<string> childFiles)
+			IReadOnlyCollection<string> childFiles,
+			IReadOnlyCollection<string> pathSuffixSegments,
+			RepeatedChildArtifactSignature? repeatedChildSignature,
+			bool applyOutsideProjectScopes)
 		{
 			NamePattern = namePattern;
 			MatchKind = matchKind;
@@ -397,11 +537,16 @@ public sealed class SmartArtifactIgnoreMatcher
 			_fileSuffixes = fileSuffixes.Count == 0 ? EmptyNames : fileSuffixes.ToArray();
 			_fileExtensions = fileExtensions.Count == 0 ? EmptyNames : fileExtensions.ToArray();
 			_childFiles = ToNameSet(childFiles);
+			_pathSuffixSegments = pathSuffixSegments.Count == 0 ? EmptyNames : pathSuffixSegments.ToArray();
+			_repeatedChildSignature = repeatedChildSignature;
+			ApplyOutsideProjectScopes = applyOutsideProjectScopes;
 		}
 
 		public string NamePattern { get; }
 
 		public SmartArtifactNameMatchKind MatchKind { get; }
+
+		public bool ApplyOutsideProjectScopes { get; }
 
 		public static SmartArtifactDirectoryRule Exact(
 			string name,
@@ -409,7 +554,10 @@ public sealed class SmartArtifactIgnoreMatcher
 			IReadOnlyCollection<string>? directories = null,
 			IReadOnlyCollection<string>? fileSuffixes = null,
 			IReadOnlyCollection<string>? fileExtensions = null,
-			IReadOnlyCollection<string>? childFiles = null) =>
+			IReadOnlyCollection<string>? childFiles = null,
+			IReadOnlyCollection<string>? pathSuffixSegments = null,
+			RepeatedChildArtifactSignature? repeatedChildSignature = null,
+			bool applyOutsideProjectScopes = false) =>
 			new(
 				name,
 				SmartArtifactNameMatchKind.Exact,
@@ -417,7 +565,10 @@ public sealed class SmartArtifactIgnoreMatcher
 				directories ?? [],
 				fileSuffixes ?? [],
 				fileExtensions ?? [],
-				childFiles ?? []);
+				childFiles ?? [],
+				pathSuffixSegments ?? [],
+				repeatedChildSignature,
+				applyOutsideProjectScopes);
 
 		public static SmartArtifactDirectoryRule Prefix(
 			string prefix,
@@ -425,7 +576,10 @@ public sealed class SmartArtifactIgnoreMatcher
 			IReadOnlyCollection<string>? directories = null,
 			IReadOnlyCollection<string>? fileSuffixes = null,
 			IReadOnlyCollection<string>? fileExtensions = null,
-			IReadOnlyCollection<string>? childFiles = null) =>
+			IReadOnlyCollection<string>? childFiles = null,
+			IReadOnlyCollection<string>? pathSuffixSegments = null,
+			RepeatedChildArtifactSignature? repeatedChildSignature = null,
+			bool applyOutsideProjectScopes = false) =>
 			new(
 				prefix,
 				SmartArtifactNameMatchKind.Prefix,
@@ -433,7 +587,10 @@ public sealed class SmartArtifactIgnoreMatcher
 				directories ?? [],
 				fileSuffixes ?? [],
 				fileExtensions ?? [],
-				childFiles ?? []);
+				childFiles ?? [],
+				pathSuffixSegments ?? [],
+				repeatedChildSignature,
+				applyOutsideProjectScopes);
 
 		public bool MatchesName(string name) =>
 			MatchKind switch
@@ -447,6 +604,9 @@ public sealed class SmartArtifactIgnoreMatcher
 		{
 			try
 			{
+				if (MatchesPathSuffix(directoryPath))
+					return true;
+
 				foreach (var file in _files)
 				{
 					if (File.Exists(Path.Combine(directoryPath, file)))
@@ -459,16 +619,47 @@ public sealed class SmartArtifactIgnoreMatcher
 						return true;
 				}
 
+				if (_repeatedChildSignature?.Matches(directoryPath) == true)
+					return true;
+
 				if (_fileSuffixes.Length > 0 || _fileExtensions.Length > 0 || _childFiles.Count > 0)
 					return HasEnumeratedSignature(directoryPath);
 			}
-			catch (UnauthorizedAccessException)
+			catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       ArgumentException or
+			       NotSupportedException or
+			       System.Security.SecurityException)
 			{
 				return false;
 			}
-			catch (IOException)
-			{
+
+			return false;
+		}
+
+		private bool MatchesPathSuffix(string directoryPath)
+		{
+			if (_pathSuffixSegments.Length == 0)
 				return false;
+
+			var currentPath = directoryPath.TrimEnd(
+				Path.DirectorySeparatorChar,
+				Path.AltDirectorySeparatorChar);
+			for (var index = _pathSuffixSegments.Length - 1; index >= 0; index--)
+			{
+				var actualSegment = Path.GetFileName(currentPath);
+				if (!string.Equals(actualSegment, _pathSuffixSegments[index], StringComparison.OrdinalIgnoreCase))
+					return false;
+
+				if (index == 0)
+					return true;
+
+				var parentPath = Path.GetDirectoryName(currentPath);
+				if (string.IsNullOrWhiteSpace(parentPath))
+					return false;
+
+				currentPath = parentPath;
 			}
 
 			return false;
@@ -531,6 +722,74 @@ public sealed class SmartArtifactIgnoreMatcher
 				: values.ToFrozenSet(NameComparer);
 	}
 
+	public sealed class RepeatedChildArtifactSignature
+	{
+		private readonly FrozenSet<string> _layoutDirectories;
+
+		public RepeatedChildArtifactSignature(
+			string selfNamedFileSuffix,
+			IReadOnlyCollection<string> layoutDirectories,
+			int minimumMatches,
+			int maxEntries)
+		{
+			if (string.IsNullOrWhiteSpace(selfNamedFileSuffix))
+				throw new ArgumentException("A self-named file suffix is required.", nameof(selfNamedFileSuffix));
+			if (minimumMatches <= 0)
+				throw new ArgumentOutOfRangeException(nameof(minimumMatches));
+			if (maxEntries < minimumMatches)
+				throw new ArgumentOutOfRangeException(nameof(maxEntries));
+
+			SelfNamedFileSuffix = selfNamedFileSuffix;
+			_layoutDirectories = layoutDirectories.Count == 0
+				? EmptyNameSet
+				: layoutDirectories.ToFrozenSet(NameComparer);
+			MinimumMatches = minimumMatches;
+			MaxEntries = maxEntries;
+		}
+
+		public string SelfNamedFileSuffix { get; }
+
+		public int MinimumMatches { get; }
+
+		public int MaxEntries { get; }
+
+		internal bool Matches(string directoryPath)
+		{
+			var inspectedEntries = 0;
+			var matchingChildren = 0;
+			foreach (var entry in EnumerateTopLevelEntries(directoryPath))
+			{
+				if (++inspectedEntries > MaxEntries)
+					return false;
+				if (!entry.IsDirectory)
+					continue;
+
+				var selfNamedArtifactPath = Path.Combine(
+					entry.FullPath,
+					entry.Name + SelfNamedFileSuffix);
+				if (!File.Exists(selfNamedArtifactPath) || !HasKnownLayoutDirectory(entry.FullPath))
+					continue;
+
+				if (++matchingChildren >= MinimumMatches)
+					return true;
+			}
+
+			return false;
+		}
+
+		private bool HasKnownLayoutDirectory(string childPath)
+		{
+			if (_layoutDirectories.Count == 0)
+				return true;
+
+			foreach (var directory in _layoutDirectories)
+				if (Directory.Exists(Path.Combine(childPath, directory)))
+					return true;
+
+			return false;
+		}
+	}
+
 	private static IEnumerable<SmartArtifactEntry> EnumerateTopLevelEntries(string directoryPath)
 	{
 		var enumerable = new FileSystemEnumerable<SmartArtifactEntry>(
@@ -547,7 +806,8 @@ public sealed class SmartArtifactIgnoreMatcher
 			{
 				RecurseSubdirectories = false,
 				ReturnSpecialDirectories = false,
-				AttributesToSkip = 0,
+				// Signature probes must not follow links into caches outside the opened tree.
+				AttributesToSkip = FileAttributes.ReparsePoint,
 				IgnoreInaccessible = true
 			});
 		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => true;

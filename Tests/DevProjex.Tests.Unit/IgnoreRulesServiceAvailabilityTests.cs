@@ -30,6 +30,34 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		Assert.True(availability.IncludeSmartIgnore);
 	}
 
+	[Fact]
+	public void GetIgnoreOptionsAvailability_SourcePackagesNameAlone_DoesNotShowSmartOption()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/packages/domain/Order.cs", "class Order {}");
+		temp.CreateFile("workspace/packages/api/Controller.cs", "class Controller {}");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.False(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_ConfirmedLegacyPackageStore_ShowsSmartOption()
+	{
+		using var temp = new TemporaryDirectory();
+		CreateLegacyNuGetPackage(temp, "Alpha.1.0.0", "lib");
+		CreateLegacyNuGetPackage(temp, "Beta.2.0.0", "ref");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+	}
+
 	[Theory]
 	[InlineData("requirements.txt")]
 	[InlineData("setup.py")]
@@ -324,6 +352,17 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		{
 			throw new UnauthorizedAccessException("Access denied.");
 		}
+	}
+
+	private static void CreateLegacyNuGetPackage(
+		TemporaryDirectory temp,
+		string packageDirectoryName,
+		string layoutDirectoryName)
+	{
+		temp.CreateFile(
+			$"workspace/packages/{packageDirectoryName}/{packageDirectoryName}.nupkg",
+			"package");
+		temp.CreateFolder($"workspace/packages/{packageDirectoryName}/{layoutDirectoryName}");
 	}
 
 	private static IgnoreOptionsService CreateIgnoreOptionsService()

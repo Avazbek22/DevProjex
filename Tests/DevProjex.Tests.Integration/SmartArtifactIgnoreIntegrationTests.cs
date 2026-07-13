@@ -117,6 +117,108 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		AssertPathHidden(tree, "tmp/CACHEDIR.TAG");
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void TreeBuilder_LegacyDependencyStoreAndUserState_FollowOnlySmartIgnoreToggle(
+		bool useSmartIgnore)
+	{
+		using var temp = new TemporaryDirectory();
+		SeedLegacyNuGetWorkspace(temp);
+		var rules = CreateArtifactRules(useSmartIgnore);
+
+		var tree = BuildTree(temp.Path, rules);
+
+		AssertPathVisible(tree, "src/App.cs");
+		AssertPathVisible(tree, "packages.config");
+		AssertPathVisible(tree, "App.sln.DotSettings");
+		Assert.Equal(!useSmartIgnore, ContainsPath(tree.Root, "App.sln.DotSettings.user"));
+		Assert.Equal(!useSmartIgnore, ContainsPath(
+			tree.Root,
+			"packages/Alpha.1.0.0/Alpha.1.0.0.nupkg"));
+		Assert.Equal(!useSmartIgnore, ContainsPath(
+			tree.Root,
+			"packages/Beta.2.0.0/lib/Beta.dll"));
+	}
+
+	[Fact]
+	public void TreeBuilder_SourcePackagesMonorepo_IsNotHiddenByGenericArtifactMatcher()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("packages/api/package.json", "{}");
+		temp.CreateFile("packages/api/src/index.ts", "export {};");
+		temp.CreateFile("packages/domain/Domain.csproj", "<Project />");
+		temp.CreateFile("packages/domain/Order.cs", "class Order {}");
+		var rules = CreateArtifactRules(useSmartIgnore: true);
+
+		var tree = BuildTree(temp.Path, rules);
+
+		AssertPathVisible(tree, "packages/api/src/index.ts");
+		AssertPathVisible(tree, "packages/domain/Order.cs");
+	}
+
+	[Fact]
+	public void TreeBuilder_ReusedRulesHideDirectoryAfterArtifactSignatureAppears()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/App.cs", "class App {}\n");
+		temp.CreateFile("packages/README.md", "source packages\n");
+		var rules = CreateArtifactRules(useSmartIgnore: true);
+
+		AssertPathVisible(BuildTree(temp.Path, rules), "packages/README.md");
+
+		temp.CreateFile("packages/repositories.config", "<repositories />\n");
+
+		var refreshedTree = BuildTree(temp.Path, rules);
+		AssertPathVisible(refreshedTree, "src/App.cs");
+		AssertPathHidden(refreshedTree, "packages/README.md");
+	}
+
+	[Fact]
+	public void TreeBuilder_ReusedRulesRevealSourceDirectoryAfterArtifactSignatureDisappears()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/App.cs", "class App {}\n");
+		temp.CreateFile("packages/README.md", "source packages\n");
+		var markerPath = temp.CreateFile("packages/repositories.config", "<repositories />\n");
+		var rules = CreateArtifactRules(useSmartIgnore: true);
+
+		AssertPathHidden(BuildTree(temp.Path, rules), "packages/README.md");
+
+		File.Delete(markerPath);
+
+		var refreshedTree = BuildTree(temp.Path, rules);
+		AssertPathVisible(refreshedTree, "src/App.cs");
+		AssertPathVisible(refreshedTree, "packages/README.md");
+	}
+
+	[Fact]
+	public void IgnoreRulesService_SingleGitIgnoreControllerAlsoControlsGenericArtifacts()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedLegacyNuGetWorkspace(temp);
+		temp.CreateFile(".gitignore", "*.log\n");
+		temp.CreateFile("App.csproj", "<Project />\n");
+		var service = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
+
+		var disabledRules = service.Build(temp.Path, [], selectedRootFolders: []);
+		var enabledRules = service.Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: []);
+
+		Assert.True(disabledRules.SmartIgnoreFollowsGitIgnore);
+		Assert.False(disabledRules.UseSmartIgnore);
+		Assert.True(enabledRules.SmartIgnoreFollowsGitIgnore);
+		Assert.True(enabledRules.UseSmartIgnore);
+		AssertPathVisible(
+			BuildTree(temp.Path, disabledRules),
+			"packages/Alpha.1.0.0/Alpha.1.0.0.nupkg");
+		AssertPathHidden(
+			BuildTree(temp.Path, enabledRules),
+			"packages/Alpha.1.0.0/Alpha.1.0.0.nupkg");
+	}
+
 	[Fact]
 	public async Task CommandLineAutomationRunner_SmartIgnoreExportHidesSignatureArtifactsWithoutMarkers()
 	{
@@ -181,6 +283,36 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		Assert.DoesNotContain(".dot", stdout, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task CommandLineAutomationRunner_SmartIgnoreExportHidesLegacyPackagesAndLocalProjectState()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedLegacyNuGetWorkspace(temp);
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var parseResult = CommandLineOptions.Parse(
+		[
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			CreateContext(output, error),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(string.Empty, error.ToString());
+		var stdout = output.ToString();
+		Assert.Contains("App.cs", stdout, StringComparison.Ordinal);
+		Assert.Contains("packages.config", stdout, StringComparison.Ordinal);
+		Assert.Contains("App.sln.DotSettings", stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Alpha.1.0.0", stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Beta.2.0.0", stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("DotSettings.user", stdout, StringComparison.Ordinal);
+	}
+
 	private static void SeedMixedArtifactWorkspace(TemporaryDirectory temp)
 	{
 		temp.CreateFile("workspace/app/src/Program.cs", "class Program {}\n");
@@ -197,6 +329,18 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		temp.CreateFile("workspace/go/main.go", "package main\n");
 		temp.CreateFile("workspace/go/pkg/mod/cache/download/github.com/acme/lib/@v/v1.0.0.mod", "module github.com/acme/lib\n");
 		temp.CreateFile("workspace/build/README.md", "source folder with suspicious name\n");
+	}
+
+	private static void SeedLegacyNuGetWorkspace(TemporaryDirectory temp)
+	{
+		temp.CreateFile("src/App.cs", "class App {}\n");
+		temp.CreateFile("packages.config", "<packages />\n");
+		temp.CreateFile("App.sln.DotSettings", "shared settings\n");
+		temp.CreateFile("App.sln.DotSettings.user", "local settings\n");
+		temp.CreateFile("packages/Alpha.1.0.0/Alpha.1.0.0.nupkg", "package\n");
+		temp.CreateFile("packages/Alpha.1.0.0/ref/Alpha.dll", "binary\n");
+		temp.CreateFile("packages/Beta.2.0.0/Beta.2.0.0.nupkg", "package\n");
+		temp.CreateFile("packages/Beta.2.0.0/lib/Beta.dll", "binary\n");
 	}
 
 	private static IgnoreRules CreateArtifactRules(bool useSmartIgnore) => new(
@@ -225,11 +369,15 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 				".go",
 				".json",
 				".md",
+				".nupkg",
 				".py",
 				".pyc",
 				".mod",
 				".tag",
 				".ts",
+				".config",
+				".DotSettings",
+				".user",
 				string.Empty
 			},
 			AllowedRootFolders: new HashSet<string>(PathComparer.Default)
@@ -239,6 +387,7 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 				"cache",
 				"Library",
 				"obj",
+				"packages",
 				"pkg",
 				"src",
 				"temp",
