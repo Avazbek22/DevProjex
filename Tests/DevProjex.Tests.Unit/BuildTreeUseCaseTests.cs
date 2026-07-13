@@ -118,6 +118,59 @@ public sealed class BuildTreeUseCaseTests
 		Assert.Equal(1, treeBuilder.BuildFromInventoryCount);
 	}
 
+	[Fact]
+	public void ReadCompositeInventory_ForwardsRulesAndRootSelectionToSupportedBuilder()
+	{
+		var treeBuilder = new CompositeInventoryTreeBuilderStub();
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>()
+		});
+		var localization = new LocalizationService(catalog, AppLanguage.En);
+		var useCase = new BuildTreeUseCase(
+			treeBuilder,
+			new TreeNodePresentationService(localization, new StubIconMapper()));
+		var roots = new HashSet<string>(["src"], PathComparer.Default);
+		var discoveryRules = CreateOptions().IgnoreRules;
+		var projectionRules = discoveryRules with { IgnoreDotFolders = true };
+
+		var result = useCase.ReadCompositeInventory(
+			"/root",
+			roots,
+			discoveryRules,
+			projectionRules,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(useCase.SupportsCompositeInventory);
+		Assert.Same(treeBuilder.Inventory, result);
+		Assert.Same(roots, treeBuilder.AllowedRootFolders);
+		Assert.Same(discoveryRules, treeBuilder.DiscoveryRules);
+		Assert.Same(projectionRules, treeBuilder.ProjectionRules);
+	}
+
+	[Fact]
+	public void ReadCompositeInventory_UnsupportedBuilderThrowsWithoutStartingBuild()
+	{
+		var treeBuilder = new StubTreeBuilder();
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>()
+		});
+		var localization = new LocalizationService(catalog, AppLanguage.En);
+		var useCase = new BuildTreeUseCase(
+			treeBuilder,
+			new TreeNodePresentationService(localization, new StubIconMapper()));
+		var rules = CreateOptions().IgnoreRules;
+
+		Assert.False(useCase.SupportsCompositeInventory);
+		Assert.Throws<NotSupportedException>(() => useCase.ReadCompositeInventory(
+			"/root",
+			new HashSet<string>(PathComparer.Default),
+			rules,
+			rules,
+			TestContext.Current.CancellationToken));
+	}
+
 	private static TreeFilterOptions CreateOptions()
 	{
 		return new TreeFilterOptions(
@@ -204,6 +257,35 @@ public sealed class BuildTreeUseCaseTests
 				new FileSystemNode("root", "/root", true, false, FileSystemNode.EmptyChildren),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
+		}
+	}
+
+	private sealed class CompositeInventoryTreeBuilderStub : ITreeBuilder, IProjectTreeCompositeInventoryBuilder
+	{
+		public ProjectTreeInventorySnapshot Inventory { get; } = CreateSingleRootInventory("/root");
+		public IReadOnlySet<string>? AllowedRootFolders { get; private set; }
+		public IgnoreRules? DiscoveryRules { get; private set; }
+		public IgnoreRules? ProjectionRules { get; private set; }
+
+		public TreeBuildResult Build(
+			string rootPath,
+			TreeFilterOptions options,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ProjectTreeInventorySnapshot ReadCompositeInventory(
+			string rootPath,
+			IReadOnlySet<string> allowedRootFolders,
+			IgnoreRules discoveryRules,
+			IgnoreRules projectionRules,
+			CancellationToken cancellationToken = default)
+		{
+			Assert.Equal("/root", rootPath);
+			cancellationToken.ThrowIfCancellationRequested();
+			AllowedRootFolders = allowedRootFolders;
+			DiscoveryRules = discoveryRules;
+			ProjectionRules = projectionRules;
+			return Inventory;
 		}
 	}
 }

@@ -1,6 +1,6 @@
 namespace DevProjex.Infrastructure.FileSystem;
 
-public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
+public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IProjectTreeCompositeInventoryBuilder
 {
 	private const int RootProjectionParallelThreshold = 24;
 
@@ -23,6 +23,44 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				isProjectRootChild,
 				options,
 				gitIgnoreContext),
+			cancellationToken);
+	}
+
+	public ProjectTreeInventorySnapshot ReadCompositeInventory(
+		string rootPath,
+		IReadOnlySet<string> allowedRootFolders,
+		IgnoreRules discoveryRules,
+		IgnoreRules projectionRules,
+		CancellationToken cancellationToken = default)
+	{
+		var discoveryGitIgnoreContext = discoveryRules.CreateGitIgnoreScanContext(rootPath);
+		var projectionGitIgnoreContext = projectionRules.CreateGitIgnoreScanContext(rootPath);
+		return ProjectTreeInventoryScanner.Read(
+			rootPath,
+			(entry, isProjectRootChild) =>
+			{
+				if (isProjectRootChild && !allowedRootFolders.Contains(entry.Name))
+					return false;
+
+				var discoveryGitIgnore = discoveryRules.UseGitIgnore
+					? discoveryGitIgnoreContext.Evaluate(
+						entry.FullPath,
+						entry.RelativePath,
+						isDirectory: true,
+						entry.Name)
+					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				if (!ShouldSkipDirectory(entry, discoveryRules, discoveryGitIgnore))
+					return true;
+
+				var projectionGitIgnore = projectionRules.UseGitIgnore
+					? projectionGitIgnoreContext.Evaluate(
+						entry.FullPath,
+						entry.RelativePath,
+						isDirectory: true,
+						entry.Name)
+					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				return !ShouldSkipDirectory(entry, projectionRules, projectionGitIgnore);
+			},
 			cancellationToken);
 	}
 

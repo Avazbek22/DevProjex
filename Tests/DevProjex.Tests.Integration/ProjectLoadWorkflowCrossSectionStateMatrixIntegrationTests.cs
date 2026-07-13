@@ -20,21 +20,29 @@ public sealed class ProjectLoadWorkflowCrossSectionStateMatrixIntegrationTests
 
         var services = CreateServices();
         var baselineSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            CreateDefaultContext(rootPath),
+            CreateDefaultContext(rootPath) with { CaptureTreeInventory = true },
             CancellationToken.None);
         var scenario = CreateScenario(baselineSnapshot, rootScenario, extensionScenario, ignoreScenario);
 
         var firstSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            CreateScenarioContext(rootPath, scenario),
+            CreateScenarioContext(rootPath, scenario) with { CaptureTreeInventory = true },
             CancellationToken.None);
 
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            firstSnapshot);
         AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(firstSnapshot);
         AssertScenarioSelectionContract(firstSnapshot, scenario);
 
         var secondSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            BuildConvergedContext(rootPath, firstSnapshot),
+            BuildConvergedContext(rootPath, firstSnapshot) with { CaptureTreeInventory = true },
             CancellationToken.None);
 
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            secondSnapshot);
         AssertEquivalentSnapshots(firstSnapshot, secondSnapshot);
         AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(secondSnapshot);
         AssertScenarioSelectionContract(secondSnapshot, scenario);

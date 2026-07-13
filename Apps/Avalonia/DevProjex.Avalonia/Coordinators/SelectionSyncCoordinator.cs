@@ -344,14 +344,14 @@ public sealed partial class SelectionSyncCoordinator(
         var previousRootStates = SnapshotRootOptionStateCacheOrNull(hasPreviousSelections);
 
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
-        var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, null);
+        var discoveryRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, null);
         return Task.Run(async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (IsStalePathRequest(path)) return;
 
             // Root folder list does not require full extension scan.
-            var scan = scanOptions.GetRootFolders(path, ignoreRules, cancellationToken);
+            var scan = scanOptions.GetRootFolders(path, discoveryRules, cancellationToken);
             if (scan.RootAccessDenied)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -360,13 +360,19 @@ public sealed partial class SelectionSyncCoordinator(
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            var options = filterSelectionService.BuildRootFolderOptions(
+            var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, scan.Value);
+            var visibleRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
+                path,
                 scan.Value,
+                ignoreRules,
+                cancellationToken);
+            var options = filterSelectionService.BuildRootFolderOptions(
+                visibleRootFolders,
                 prev,
                 ignoreRules,
                 hasPreviousSelections,
                 previousRootStates);
-            options = ApplyMissingProfileSelectionsFallbackToRootFolders(options, scan.Value, ignoreRules);
+            options = ApplyMissingProfileSelectionsFallbackToRootFolders(options, visibleRootFolders, ignoreRules);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -621,7 +627,7 @@ public sealed partial class SelectionSyncCoordinator(
 
                 _session.LastLoadedPath = currentPath;
                 MarkSelectionRefreshDirty();
-                return CreateSelectionRefreshContext(currentPath);
+                return CreateSelectionRefreshContext(currentPath, captureTreeInventory: true);
             });
             if (context is null)
                 return;

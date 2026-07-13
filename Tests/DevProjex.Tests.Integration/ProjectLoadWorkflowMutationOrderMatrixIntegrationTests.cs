@@ -22,17 +22,25 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
 
         var services = CreateServices();
         var baselineSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            CreateDefaultContext(rootPath),
+            CreateDefaultContext(rootPath) with { CaptureTreeInventory = true },
             CancellationToken.None);
         var targetScenario = CreateScenario(baselineSnapshot, rootScenario, extensionScenario, ignoreScenario);
 
         var directSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            CreateScenarioContext(rootPath, targetScenario),
+            CreateScenarioContext(rootPath, targetScenario) with { CaptureTreeInventory = true },
             CancellationToken.None);
         var directConverged = services.Engine.ComputeFullRefreshSnapshot(
-            BuildConvergedContext(rootPath, directSnapshot),
+            BuildConvergedContext(rootPath, directSnapshot) with { CaptureTreeInventory = true },
             CancellationToken.None);
 
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            directSnapshot);
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            directConverged);
         AssertEquivalentSnapshots(directSnapshot, directConverged);
         AssertScenarioSelectionContract(directConverged, targetScenario);
 
@@ -42,6 +50,10 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
         {
             var stepContext = clientState.CreateStepContext(rootPath, currentSnapshot, targetScenario, step);
             currentSnapshot = services.Engine.ComputeFullRefreshSnapshot(stepContext, CancellationToken.None);
+            SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+                rootPath,
+                services.IgnoreRulesService,
+                currentSnapshot);
             clientState.MergeVisibleState(currentSnapshot);
         }
 
@@ -53,6 +65,14 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
         var orderedSecondPass = services.Engine.ComputeFullRefreshSnapshot(
             clientState.CreateConvergedContext(rootPath, orderedConverged),
             CancellationToken.None);
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            orderedConverged);
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            orderedSecondPass);
         AssertEquivalentSnapshots(orderedConverged, orderedSecondPass);
         AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(orderedConverged);
         AssertRequestedSelectionsStillChecked(orderedConverged, targetScenario);
@@ -195,7 +215,8 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
                 RootOptionStateCache = new Dictionary<string, bool>(_rootStates, PathComparer.Default),
                 ExtensionOptionStateCache = new Dictionary<string, bool>(
                     _extensionStates,
-                    StringComparer.OrdinalIgnoreCase)
+                    StringComparer.OrdinalIgnoreCase),
+                CaptureTreeInventory = true
             };
         }
 

@@ -48,6 +48,7 @@ public sealed class SelectionRefreshEngine(
 
         var dynamicSection = BuildDynamicSection(
             dynamicContext,
+            rootSection.Options,
             rootSection.SelectedRoots,
             initialSelectedIgnoreOptions,
             warmIgnore.IgnoreOptionStateCache,
@@ -79,6 +80,7 @@ public sealed class SelectionRefreshEngine(
         var selectedIgnoreOptions = BuildInitialLiveRefreshIgnoreSelection(context);
         var dynamicSection = BuildDynamicSection(
             context,
+            rootOptions: null,
             selectedRoots,
             selectedIgnoreOptions,
             context.IgnoreOptionStateCache,
@@ -105,15 +107,21 @@ public sealed class SelectionRefreshEngine(
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
         CancellationToken cancellationToken)
     {
-        var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, null);
-        var scan = scanOptions.GetRootFolders(context.Path, ignoreRules, cancellationToken);
+        var discoveryRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, null);
+        var scan = scanOptions.GetRootFolders(context.Path, discoveryRules, cancellationToken);
+        var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, scan.Value);
+        var visibleRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
+            context.Path,
+            scan.Value,
+            ignoreRules,
+            cancellationToken);
 
         var previousSelections = context.RootSelectionInitialized
             ? new HashSet<string>(context.RootSelectionCache, PathComparer.Default)
             : EmptyRootSelection;
 
         var options = filterSelectionService.BuildRootFolderOptions(
-            scan.Value,
+            visibleRootFolders,
             previousSelections,
             ignoreRules,
             context.RootSelectionInitialized,
@@ -122,7 +130,7 @@ public sealed class SelectionRefreshEngine(
             context.PreparedSelectionMode,
             context.RootSelectionCache,
             options,
-            scan.Value,
+            visibleRootFolders,
             ignoreRules,
             filterSelectionService,
             EmptyRootSelection);
@@ -136,6 +144,7 @@ public sealed class SelectionRefreshEngine(
 
     private DynamicSectionSnapshot BuildDynamicSection(
         SelectionRefreshContext context,
+        IReadOnlyList<SelectionOption>? rootOptions,
         IReadOnlyCollection<string> selectedRoots,
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyDictionary<IgnoreOptionId, bool> ignoreStateCache,
@@ -143,6 +152,7 @@ public sealed class SelectionRefreshEngine(
         CancellationToken cancellationToken)
     {
         var currentRoots = selectedRoots;
+        var currentRootOptions = rootOptions;
         var currentSelectedIgnoreOptions = selectedIgnoreOptions;
         var currentIgnoreStateCache = ignoreStateCache;
         var previousSnapshot = beforeSnapshot;
@@ -168,6 +178,25 @@ public sealed class SelectionRefreshEngine(
             rootAccessDenied |= snapshot.RootAccessDenied;
             hadAccessDenied |= snapshot.HadAccessDenied;
 
+            if (currentRootOptions is not null && snapshot.TreeInventory is not null)
+            {
+                var projectedRootOptions = ProjectTreeInventoryRootFolderProjection
+                    .RemoveCheckedRootsWithoutVisibleStructure(
+                        snapshot.TreeInventory,
+                        currentRootOptions,
+                        CollectCheckedSelectionNames(
+                            snapshot.VisibleExtensionOptions,
+                            StringComparer.OrdinalIgnoreCase),
+                        snapshot.EffectiveRules,
+                        cancellationToken);
+                if (!ReferenceEquals(projectedRootOptions, currentRootOptions))
+                {
+                    currentRootOptions = projectedRootOptions;
+                    refreshedRootOptions = projectedRootOptions;
+                    currentRoots = CollectCheckedSelectionNames(projectedRootOptions, PathComparer.Default);
+                }
+            }
+
             var refreshPlan = IgnoreSectionRefreshPlanBuilder.Build(
                 previousSnapshot,
                 snapshot.SnapshotState,
@@ -190,6 +219,7 @@ public sealed class SelectionRefreshEngine(
                     snapshot.SelectedIgnoreOptions,
                     cancellationToken);
                 currentRoots = rebuiltRootSection.SelectedRoots;
+                currentRootOptions = rebuiltRootSection.Options;
                 refreshedRootOptions = rebuiltRootSection.Options;
                 rootAccessDenied |= rebuiltRootSection.RootAccessDenied;
                 hadAccessDenied |= rebuiltRootSection.HadAccessDenied;
@@ -343,7 +373,8 @@ public sealed class SelectionRefreshEngine(
             SnapshotState: snapshotState,
             RootAccessDenied: scan.RootAccessDenied,
             HadAccessDenied: scan.HadAccessDenied,
-            TreeInventory: scan.Value.TreeInventory);
+            TreeInventory: scan.Value.TreeInventory,
+            EffectiveRules: ignoreRules);
     }
 
     private ScanResult<ProjectWorkspaceScanSnapshot> GetDynamicSectionScan(
@@ -1161,7 +1192,8 @@ public sealed class SelectionRefreshEngine(
         IgnoreSectionSnapshotState SnapshotState,
         bool RootAccessDenied,
         bool HadAccessDenied,
-        ProjectTreeInventorySnapshot? TreeInventory);
+        ProjectTreeInventorySnapshot? TreeInventory,
+        IgnoreRules EffectiveRules);
 
     private sealed record IgnoreOptionResolutionResult(
         IReadOnlyList<ResolvedIgnoreOptionState> VisibleOptions,

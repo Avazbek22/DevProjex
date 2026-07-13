@@ -2,6 +2,8 @@ namespace DevProjex.Application.UseCases;
 
 public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 {
+	public bool SupportsWorkspaceSnapshots => scanner is IFileSystemScannerProjectWorkspaceScanner;
+
 	public ScanOptionsResult Execute(ScanOptionsRequest request, CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
