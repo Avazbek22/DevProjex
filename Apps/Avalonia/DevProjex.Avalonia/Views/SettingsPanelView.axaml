@@ -35,6 +35,12 @@
     <Style Selector="ListBox.settings-list > ListBoxItem:pointerover">
       <Setter Property="Background" Value="Transparent" />
     </Style>
+    <Style Selector="ListBox.settings-list > ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter,
+                     ListBox.settings-list > ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter,
+                     ListBox.settings-list > ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
   </UserControl.Styles>
   <Border Name="PanelRoot"
           MinWidth="285"
