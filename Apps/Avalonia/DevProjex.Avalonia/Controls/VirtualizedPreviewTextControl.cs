@@ -112,10 +112,17 @@ public sealed class VirtualizedPreviewTextControl : Control
     private MenuItem? _copyMenuItem;
     private MenuItem? _selectAllMenuItem;
     private MenuItem? _clearSelectionMenuItem;
-    private static readonly Cursor PreviewTextCursor =
-        new(StandardCursorType.Ibeam);
-    private static readonly Cursor PreviewMenuCursor =
-        new(StandardCursorType.Arrow);
+    private static Cursor? _previewTextCursor;
+    private static Cursor? _previewMenuCursor;
+
+    // Cursor construction resolves a platform service. Keep it out of the type
+    // initializer so geometry helpers and detached controls remain usable before
+    // Avalonia finishes bootstrapping its desktop or headless backend.
+    private static Cursor PreviewTextCursor =>
+        _previewTextCursor ??= new Cursor(StandardCursorType.Ibeam);
+
+    private static Cursor PreviewMenuCursor =>
+        _previewMenuCursor ??= new Cursor(StandardCursorType.Arrow);
 
     static VirtualizedPreviewTextControl()
     {
@@ -324,8 +331,13 @@ public sealed class VirtualizedPreviewTextControl : Control
     public VirtualizedPreviewTextControl()
     {
         Focusable = true;
-        Cursor = PreviewMenuCursor;
         RebuildTextLayoutMetadata();
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Cursor = PreviewMenuCursor;
     }
 
     public void ClearSelection()

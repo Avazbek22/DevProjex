@@ -7,6 +7,15 @@ namespace DevProjex.Tests.Unit.Avalonia;
 [Collection("AvaloniaUI")]
 public sealed class VirtualizedPreviewTextControlTests
 {
+    [Fact]
+    public void DetachedConstruction_DoesNotRequirePlatformCursorFactory()
+    {
+        var control = new VirtualizedPreviewTextControl();
+
+        Assert.True(control.Focusable);
+        Assert.Null(control.Cursor);
+    }
+
     [AvaloniaFact]
     public void SelectAll_WithDocument_SelectsFullNormalizedTextAndRange()
     {
