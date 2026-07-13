@@ -1144,6 +1144,56 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_SmartIgnoreNegativeMatrixPreservesEverySourceLookalikeAndPrunesOnlyProvenArtifacts()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("smart-ignore-negative-matrix");
+		SeedSmartIgnoreNegativeMatrixProject(projectPath);
+		var sourceFiles = new[]
+		{
+			"App.csproj",
+			"build/README.md",
+			"build/docs/CMakeCache.txt",
+			"cmake-build/CMakeCache.txt",
+			"m2-backup/repository/service/package.json",
+			"obj-backup/project.assets.json",
+			"packages/Alpha/Alpha.nupkg",
+			"src/App.cs",
+			"vendor/src/autoload.php"
+		};
+		var provenArtifactFiles = new[]
+		{
+			"App.csproj.user",
+			"obj/project.assets.json"
+		};
+
+		var smartOnly = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+		var noIgnores = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, smartOnly.ExitCode);
+		Assert.Equal(string.Empty, smartOnly.Stderr);
+		AssertTreeOnlyStdoutContract(smartOnly.Stdout, "json", projectPath, sourceFiles);
+
+		Assert.Equal(CommandLineExitCodes.Success, noIgnores.ExitCode);
+		Assert.Equal(string.Empty, noIgnores.Stderr);
+		AssertTreeOnlyStdoutContract(
+			noIgnores.Stdout,
+			"json",
+			projectPath,
+			sourceFiles.Concat(provenArtifactFiles).ToArray());
+	}
+
+	[Fact]
 	public async Task Process_SmartIgnoreXmlFileExportMatchesStdoutTreeContract()
 	{
 		using var temp = new TemporaryDirectory();
@@ -2265,6 +2315,22 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		WriteProjectFile(projectPath, Path.Combine(".cargo", "registry", "index", "config.json"), "{}\n");
 		WriteProjectFile(projectPath, Path.Combine(".npm", "_cacache", "content-v2", "sha"), "cache\n");
 		WriteProjectFile(projectPath, Path.Combine(".gradle", "caches", "modules-2", "files-2.1", "acme.jar"), "binary\n");
+	}
+
+	private static void SeedSmartIgnoreNegativeMatrixProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, "App.csproj", "<Project />\n");
+		WriteProjectFile(projectPath, "App.csproj.user", "local state\n");
+		WriteProjectFile(projectPath, Path.Combine("src", "App.cs"), "class App {}\n");
+		WriteProjectFile(projectPath, Path.Combine("obj", "project.assets.json"), "{}\n");
+		WriteProjectFile(projectPath, Path.Combine("obj-backup", "project.assets.json"), "{}\n");
+		WriteProjectFile(projectPath, Path.Combine("build", "README.md"), "source build folder\n");
+		WriteProjectFile(projectPath, Path.Combine("build", "docs", "CMakeCache.txt"), "source documentation\n");
+		WriteProjectFile(projectPath, Path.Combine("vendor", "src", "autoload.php"), "<?php // source\n");
+		WriteProjectFile(projectPath, Path.Combine("packages", "Alpha", "Alpha.nupkg"), "single incomplete package\n");
+		Directory.CreateDirectory(Path.Combine(projectPath, "packages", "Alpha", "lib"));
+		WriteProjectFile(projectPath, Path.Combine("m2-backup", "repository", "service", "package.json"), "{}\n");
+		WriteProjectFile(projectPath, Path.Combine("cmake-build", "CMakeCache.txt"), "source fixture\n");
 	}
 
 	private static void SeedComplexUserProject(string projectPath)

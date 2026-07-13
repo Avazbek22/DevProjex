@@ -129,6 +129,23 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithSmartIgnoreNegativeMatrixWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, "App.csproj", "<Project />\n");
+            WriteFile(rootPath, Path.Combine("src", "App.cs"), "class App {}\n");
+            WriteFile(rootPath, Path.Combine("obj-backup", "project.assets.json"), "{}\n");
+            WriteFile(rootPath, Path.Combine("build", "README.md"), "source build folder\n");
+            WriteFile(rootPath, Path.Combine("build", "docs", "CMakeCache.txt"), "source documentation\n");
+            WriteFile(rootPath, Path.Combine("vendor", "src", "autoload.php"), "<?php // source\n");
+            WriteFile(rootPath, Path.Combine("packages", "Alpha", "Alpha.nupkg"), "single incomplete package\n");
+            Directory.CreateDirectory(Path.Combine(rootPath, "packages", "Alpha", "lib"));
+            WriteFile(rootPath, Path.Combine("m2-backup", "repository", "service", "package.json"), "{}\n");
+            WriteFile(rootPath, Path.Combine("cmake-build", "CMakeCache.txt"), "source fixture\n");
+        });
+    }
+
     public static UiTestProject CreateWithCleanGitAndSmartWorkspace()
     {
         return Create(static rootPath =>

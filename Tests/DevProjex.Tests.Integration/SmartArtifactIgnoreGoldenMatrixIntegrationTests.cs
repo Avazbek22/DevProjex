@@ -14,15 +14,22 @@ public sealed class SmartArtifactIgnoreGoldenMatrixIntegrationTests
 		"artifact-store/packages/Alpha/Alpha.nupkg",
 		"artifact-store/packages/Beta/Beta.nupkg",
 		"artifact-store/packages/repositories.config",
+		"build/README.md",
+		"build/docs/CMakeCache.txt",
+		"cmake-build/CMakeCache.txt",
 		"emptied-by-file/zero.bin",
 		"empty/zero.dat",
 		"git-owned/secret.log",
 		"keep/README.md",
+		"m2-backup/repository/service/package.json",
+		"obj-backup/project.assets.json",
+		"packages/Alpha/Alpha.nupkg",
 		"packages/domain/Order.cs",
 		"project/App.csproj",
 		"project/App.csproj.user",
 		"project/obj/project.assets.json",
-		"src/App.cs"
+		"src/App.cs",
+		"vendor/src/autoload.php"
 	];
 
 	[Theory]
@@ -196,6 +203,14 @@ public sealed class SmartArtifactIgnoreGoldenMatrixIntegrationTests
 		temp.CreateFile(".env", "ENV=value\n");
 		temp.CreateFile("LICENSE", "license\n");
 		temp.CreateFile("src/App.cs", "class App {}\n");
+		temp.CreateFile("obj-backup/project.assets.json", "{}\n");
+		temp.CreateFile("build/README.md", "source build folder\n");
+		temp.CreateFile("build/docs/CMakeCache.txt", "source documentation\n");
+		temp.CreateFile("cmake-build/CMakeCache.txt", "source fixture\n");
+		temp.CreateFile("vendor/src/autoload.php", "<?php // source\n");
+		temp.CreateFile("packages/Alpha/Alpha.nupkg", "single incomplete package\n");
+		temp.CreateDirectory("packages/Alpha/lib");
+		temp.CreateFile("m2-backup/repository/service/package.json", "{}\n");
 		temp.CreateFile("packages/domain/Order.cs", "class Order {}\n");
 		temp.CreateFile("artifact-store/packages/repositories.config", "<repositories />\n");
 		temp.CreateFile("artifact-store/packages/Alpha/Alpha.nupkg", "package\n");
@@ -276,6 +291,7 @@ public sealed class SmartArtifactIgnoreGoldenMatrixIntegrationTests
 				".md",
 				".nupkg",
 				".pom",
+				".php",
 				".txt",
 				".user"
 			},
@@ -284,14 +300,19 @@ public sealed class SmartArtifactIgnoreGoldenMatrixIntegrationTests
 				".local",
 				".m2",
 				"artifact-store",
+				"build",
+				"cmake-build",
 				"empty",
 				"empty-folder",
 				"emptied-by-file",
 				"git-owned",
 				"keep",
+				"m2-backup",
+				"obj-backup",
 				"packages",
 				"project",
-				"src"
+				"src",
+				"vendor"
 			},
 			IgnoreRules: rules);
 

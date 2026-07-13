@@ -356,6 +356,64 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task SmartIgnoreNegativeMatrix_RefreshAndToggleCyclePrunesOnlyNewProvenArtifact()
+    {
+        using var project = UiTestProject.CreateWithSmartIgnoreNegativeMatrixWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: false);
+            await AssertSmartIgnoreNegativeSourcePathsAsync(window);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".cs", ".json", ".md", ".nupkg", ".php", ".txt"],
+                hidden: [".user"]);
+
+            WriteTextFile(project.RootPath, Path.Combine("obj", "project.assets.json"), "{}\n");
+            WriteTextFile(project.RootPath, "App.csproj.user", "local state\n");
+            await UiTestDriver.RefreshProjectAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await AssertSmartIgnoreNegativeSourcePathsAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: false, "obj", "project.assets.json");
+            await WaitForExtensionStateAsync(window, ".user", visible: false);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: false);
+            await AssertSmartIgnoreNegativeSourcePathsAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "obj", "project.assets.json");
+            await WaitForExtensionStateAsync(window, ".user", visible: true, isChecked: true);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await AssertSmartIgnoreNegativeSourcePathsAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: false, "obj", "project.assets.json");
+            await WaitForExtensionStateAsync(window, ".user", visible: false);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task DotFolderExtensionlessNoise_RecomputesExtensionlessCounterAfterDynamicIgnoreOptionsAppear()
     {
         using var project = UiTestProject.CreateWithDotFolderExtensionlessNoise();
@@ -1809,6 +1867,26 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await WaitForExtensionStateAsync(window, extension, visible: true, isChecked: true);
         foreach (var extension in hidden)
             await WaitForExtensionStateAsync(window, extension, visible: false);
+    }
+
+    private static async Task AssertSmartIgnoreNegativeSourcePathsAsync(MainWindow window)
+    {
+        string[][] visiblePaths =
+        [
+            ["obj-backup", "project.assets.json"],
+            ["build", "README.md"],
+            ["build", "docs", "CMakeCache.txt"],
+            ["vendor", "src", "autoload.php"],
+            ["packages", "Alpha", "Alpha.nupkg"],
+            ["m2-backup", "repository", "service", "package.json"],
+            ["cmake-build", "CMakeCache.txt"]
+        ];
+
+        await UiTestDriver.WaitForConditionAsync(
+            window,
+            () => visiblePaths.All(path => ProjectTreeContainsPath(window, path)),
+            "all source lookalikes in the Smart Ignore negative matrix to remain visible");
+        await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
     }
 
     private static async Task WaitForProjectTreePathStateAsync(
