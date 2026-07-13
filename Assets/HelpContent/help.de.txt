@@ -73,6 +73,9 @@ Beispiele:
 * `devprojex . --export tree-content` — Baum und Inhalte im Terminal ausgeben.
 * `devprojex . --export tree-content -o context.txt` — das Ergebnis in eine Datei speichern.
 * `devprojex --benchmark "C:\Projects\App"` — den Standard-Projektreport-Workflow messen.
+* `devprojex --last --preview` — das letzte Projekt direkt im Vorschaumodus öffnen.
+* `devprojex --benchmark-ui "C:\Projects\App"` — den Standard-UI-Workflow messen.
+* `devprojex --session-metrics "C:\Projects\App"` — UI-Sitzungsmetriken bis zum Schließen des Fensters aufzeichnen.
 
 Hinweise:
 * `.` bedeutet den aktuellen Terminal-Ordner;
@@ -320,7 +323,10 @@ Die Anwendung bildet Projektbereiche (Scopes), in denen die Ignore-Regeln gelten
 * Ordner der ersten Ebene
 * verschachtelte Projekt-Unterordner
 
-Die Suchtiefe für verschachtelte Projektbereiche ist fest: 2 Ebenen.
+Die Suche nach verschachtelten Projektbereichen ist begrenzt und hängt von der Ordnerstruktur ab.
+Für normale Projekte wird eine flache Suche verwendet. In erkannten Monorepos kann tiefer gesucht werden.
+Systemordner, Abhängigkeiten und bestätigte Build-Artefakte werden bei der Bereichssuche übersprungen.
+
 Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.gitignore` und Smart Ignore. Sobald ein Bereich gefunden wurde, werden die Regeln auf seinen Inhalt durch den normalen Baum-Scan angewendet.
 
 ### 12.2 „.gitignore verwenden“
@@ -330,9 +336,15 @@ Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.giti
 Bei Ordnern mit mehreren Projekten gilt die `.gitignore` eines Projekts nicht für benachbarte Projekte außerhalb seines Bereichs.
 
 ### 12.3 „Smart Ignore“
-* Wird nur angezeigt, wenn es sinnvoll ist.
-* Aktiviert: typische Build-/Tool-Artefakte werden zusätzlich ausgeblendet.
+* Wird nur angezeigt, wenn es den resultierenden Baum verändern kann.
+* Aktiviert: typische Build-Artefakte, Tool-Caches und Abhängigkeitsspeicher werden zusätzlich ausgeblendet.
 * Deaktiviert: Smart-Regeln werden nicht angewendet.
+
+Ein Ordner wird nicht allein wegen seines Namens ignoriert.
+Bei allgemeinen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `Library` wird zusätzlich der Inhalt geprüft.
+Enthält der Ordner normalen Quellcode, bleibt er sichtbar.
+
+Smart Ignore berücksichtigt die Struktur jedes erkannten Projekts und arbeitet getrennt innerhalb seines Bereichs.
 
 ### 12.4 Grundregeln
 Optionen:
@@ -355,7 +367,7 @@ Bei Deaktivierung werden beide abgeschaltet.
 
 2. Ein Projekt ohne `.gitignore`.
 „.gitignore verwenden“ wird nicht angezeigt.
-„Smart Ignore“ wird nur angezeigt, wenn es relevant ist.
+„Smart Ignore“ wird nur angezeigt, wenn es den aktuellen Baum beeinflussen kann.
 
 3. Mehrprojekt-Workspace: ein Teil mit `.gitignore`, ein Teil ohne.
 „.gitignore verwenden“ und „Smart Ignore“ werden angezeigt.
@@ -366,8 +378,8 @@ Smart Ignore (wenn aktiviert) ergänzt die Filterung in den gefundenen Bereichen
 „.gitignore verwenden“ wird angezeigt.
 „Smart Ignore“ wird nicht als separater Punkt angezeigt.
 
-5. Ordner ohne relevante Regeln.
-Wenn keine `.gitignore` gefunden wird und Smart Ignore nicht relevant ist, werden diese Punkte nicht angezeigt.
+5. Ordner ohne anwendbare Regeln.
+Wenn keine `.gitignore` gefunden wird und Smart Ignore den Baum nicht beeinflusst, werden diese Punkte nicht angezeigt.
 Es bleiben nur die grundlegenden Sichtbarkeitsregeln.
 
 ### 12.6 Leere Ordner
@@ -474,7 +486,8 @@ Fortschrittsmodi:
 Verhalten:
 * während der Hintergrundberechnung von Daten wird Prozentfortschritt angezeigt;
 * bei einigen Git-Operationen wird Prozent angezeigt, wenn die Fortschrittsquelle ihn liefert;
-* bei sehr schnellen Operationen kann der Fortschritt nur kurz sichtbar sein.
+* Aktualisierungen verfügbarer Optionen und das Anwenden von Einstellungen werden angezeigt, wenn die Operation merklich Zeit benötigt;
+* schnelle Operationen werden ohne Fortschrittsanzeige abgeschlossen.
 
 X-Schaltfläche (Abbrechen) in der Statusleiste:
 * führt eine Best-Effort-Abbruchanforderung für Operationen mit Abbruchunterstützung aus;

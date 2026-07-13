@@ -73,6 +73,9 @@ Esempi:
 * `devprojex . --export tree-content` — stampare albero e contenuti nel terminale.
 * `devprojex . --export tree-content -o context.txt` — salvare il risultato in un file.
 * `devprojex --benchmark "C:\Projects\App"` — misurare il workflow standard del report di progetto.
+* `devprojex --last --preview` — aprire l’ultimo progetto direttamente in modalità anteprima.
+* `devprojex --benchmark-ui "C:\Projects\App"` — misurare lo scenario UI standard.
+* `devprojex --session-metrics "C:\Projects\App"` — registrare le metriche della sessione UI fino alla chiusura della finestra.
 
 Note:
 * `.` indica la cartella corrente del terminale;
@@ -320,7 +323,10 @@ L’app costruisce ambiti di progetto (scope) in cui applicare le regole di igno
 * cartelle di primo livello
 * sottocartelle di progetto annidate
 
-La profondità di ricerca degli ambiti annidati è fissa: 2 livelli.
+La ricerca degli ambiti di progetto annidati è limitata e dipende dalla struttura della cartella.
+Per i progetti normali viene usata una ricerca poco profonda. Nei monorepo riconosciuti la ricerca può essere più profonda.
+Le cartelle di sistema, le dipendenze e gli artefatti di build confermati vengono ignorati durante la ricerca degli ambiti.
+
 Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e Smart Ignore. Una volta trovato un ambito, le regole vengono applicate al suo contenuto tramite la normale scansione dell’albero.
 
 ### 12.2 « Usa .gitignore »
@@ -330,9 +336,15 @@ Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e
 Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
 
 ### 12.3 « Smart ignore »
-* Viene mostrato solo quando è pertinente.
-* Attivo: nasconde anche i tipici artefatti di build e strumenti.
+* Viene mostrato solo quando può modificare l’albero risultante.
+* Attivo: nasconde anche i tipici artefatti di build, le cache degli strumenti e gli archivi delle dipendenze.
 * Disattivo: le regole smart non vengono applicate.
+
+Una cartella non viene ignorata solo per il suo nome.
+Per nomi comuni come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` viene controllato anche il contenuto.
+Se la cartella contiene normali file sorgente, rimane visibile.
+
+Smart Ignore considera la struttura di ogni progetto rilevato e opera separatamente nel relativo ambito.
 
 ### 12.4 Regole base
 Opzioni:
@@ -355,7 +367,7 @@ Quando è disattivo, entrambi vengono disattivati.
 
 2. Progetto singolo senza `.gitignore`.
 « Usa .gitignore » non viene mostrato.
-« Smart ignore » viene mostrato solo se pertinente.
+« Smart ignore » viene mostrato solo se può influire sull’albero corrente.
 
 3. Workspace multi-progetto, alcuni progetti con `.gitignore`, altri senza.
 Vengono mostrati « Usa .gitignore » e « Smart ignore ».
@@ -366,8 +378,8 @@ Smart Ignore (se attivo) completa il filtraggio negli ambiti rilevati.
 Viene mostrato « Usa .gitignore ».
 « Smart ignore » non viene mostrato come opzione separata.
 
-5. Cartella senza regole pertinenti.
-Se non viene trovato `.gitignore` e Smart Ignore non è pertinente, queste opzioni non vengono mostrate.
+5. Cartella senza regole applicabili.
+Se non viene trovato `.gitignore` e Smart Ignore non influisce sull’albero, queste opzioni non vengono mostrate.
 Restano solo le regole base di visibilità.
 
 ### 12.6 Cartelle vuote
@@ -474,7 +486,8 @@ Modalità progresso:
 Comportamento:
 * durante il calcolo dati in background viene mostrata la percentuale;
 * per alcune operazioni Git la percentuale viene mostrata se la sorgente la fornisce;
-* per operazioni molto rapide il progresso può apparire solo per poco tempo.
+* l’aggiornamento delle opzioni disponibili e l’applicazione delle impostazioni vengono mostrati se l’operazione richiede un tempo percepibile;
+* le operazioni rapide terminano senza mostrare il progresso.
 
 Pulsante X (annulla) nella barra di stato:
 * esegue annullamento best-effort per operazioni che supportano l’annullamento;

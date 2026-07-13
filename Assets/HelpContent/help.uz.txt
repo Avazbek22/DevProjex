@@ -73,6 +73,9 @@ Misollar:
 * `devprojex . --export tree-content` — daraxt va mazmunni terminalga chiqarish.
 * `devprojex . --export tree-content -o context.txt` — natijani faylga saqlash.
 * `devprojex --benchmark "C:\Projects\App"` — standart loyiha hisoboti workflow’ini o‘lchash.
+* `devprojex --last --preview` — oxirgi loyihani darhol preview rejimida ochish.
+* `devprojex --benchmark-ui "C:\Projects\App"` — standart UI ssenariysini o‘lchash.
+* `devprojex --session-metrics "C:\Projects\App"` — oyna yopilguncha UI sessiyasi metrikalarini yozib borish.
 
 Xususiyatlar:
 * `.` terminaldagi joriy papkani bildiradi;
@@ -320,7 +323,10 @@ Ilova ignore qoidalari ishlaydigan loyiha hududlarini (scope) tuzadi:
 * birinchi darajadagi papkalar
 * ichki loyiha papkalari
 
-Ichki loyiha hududlarini qidirish chuqurligi qat’iy: 2 daraja.
+Ichki loyiha hududlarini qidirish cheklangan va papka tuzilishiga bog‘liq.
+Oddiy loyihalarda sayoz qidiruv ishlatiladi. Aniqlangan monorepo ichida qidiruv chuqurroq bajarilishi mumkin.
+Xizmat papkalari, bog‘liqliklar va tasdiqlangan build artefaktlari hududlarni qidirishda o‘tkazib yuboriladi.
+
 Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga tegishli. Hudud topilgach, qoidalar uning ichidagi kontentga oddiy daraxt skani orqali qo‘llanadi.
 
 ### 12.2 ".gitignore dan foydalanish"
@@ -330,9 +336,15 @@ Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga te
 Ko‘p loyihali papkada bir loyiha `.gitignore` qoidasi o‘z hududidan tashqaridagi qo‘shni loyihalarga qo‘llanmaydi.
 
 ### 12.3 "Smart ignore"
-* Faqat mos holatda ko‘rsatiladi.
-* Yoqilgan: build/tool artefaktlari qo‘shimcha yashiriladi.
+* Faqat yakuniy daraxtni o‘zgartira olsa ko‘rsatiladi.
+* Yoqilgan: odatiy build artefaktlari, vosita keshlari va bog‘liqlik omborlari qo‘shimcha yashiriladi.
 * O‘chirilgan: smart-qoidalar qo‘llanmaydi.
+
+Papka faqat nomi sababli ignore qilinmaydi.
+`build`, `vendor`, `packages`, `cache`, `pkg` yoki `Library` kabi umumiy nomlar uchun papka mazmuni ham tekshiriladi.
+Agar papkada oddiy manba kodi bo‘lsa, u ko‘rinadigan bo‘lib qoladi.
+
+Smart Ignore har bir aniqlangan loyiha tuzilishini hisobga olib, uning hududida alohida ishlaydi.
 
 ### 12.4 Asosiy qoidalar
 Variantlar:
@@ -355,7 +367,7 @@ O‘chirilganda, ikkalasi ham o‘chadi.
 
 2. Bitta loyiha, `.gitignore` yo‘q.
 ".gitignore dan foydalanish" ko‘rinmaydi.
-"Smart ignore" faqat mos bo‘lsa ko‘rinadi.
+"Smart ignore" joriy daraxtga ta’sir qila olsa ko‘rinadi.
 
 3. Ko‘p loyihali workspace: bir qismida `.gitignore` bor, bir qismida yo‘q.
 ".gitignore dan foydalanish" va "Smart ignore" ko‘rinadi.
@@ -366,8 +378,8 @@ Smart Ignore (yoqilgan bo‘lsa) aniqlangan hududlarda filtrlashni to‘ldiradi.
 ".gitignore dan foydalanish" ko‘rinadi.
 "Smart ignore" alohida variant sifatida ko‘rinmaydi.
 
-5. Mos qoidalarsiz papka.
-Agar `.gitignore` topilmasa va Smart Ignore mos bo‘lmasa, bu variantlar ko‘rsatilmaydi.
+5. Qo‘llanadigan qoidalarsiz papka.
+Agar `.gitignore` topilmasa va Smart Ignore daraxtga ta’sir qilmasa, bu variantlar ko‘rsatilmaydi.
 Faqat asosiy ko‘rinish qoidalari qoladi.
 
 ### 12.6 Bo‘sh papkalar
@@ -474,7 +486,8 @@ Progress rejimlari:
 Xulq-atvor:
 * fon rejimida ma’lumot hisoblash vaqtida foizli progress ko‘rsatiladi;
 * ayrim Git amallarida progress manbasi foiz berganda foiz ko‘rsatiladi;
-* juda tez amallarda progress juda qisqa ko‘rinishi mumkin.
+* mavjud parametrlarni yangilash va sozlamalarni qo‘llash amal sezilarli vaqt olsa ko‘rsatiladi;
+* tez amallar progressni ko‘rsatmasdan yakunlanadi.
 
 Status-bardagi X (bekor qilish) tugmasi:
 * bekor qilishni qo‘llaydigan amallar uchun best-effort bekor qilishni bajaradi;

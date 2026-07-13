@@ -73,6 +73,9 @@ Examples:
 * `devprojex . --export tree-content` — print the tree and contents in the terminal.
 * `devprojex . --export tree-content -o context.txt` — save the result to a file.
 * `devprojex --benchmark "C:\Projects\App"` — measure the standard project report workflow.
+* `devprojex --last --preview` — open the most recent project directly in Preview mode.
+* `devprojex --benchmark-ui "C:\Projects\App"` — measure the standard UI workflow.
+* `devprojex --session-metrics "C:\Projects\App"` — record UI session metrics until the window closes.
 
 Notes:
 * `.` means the current terminal folder;
@@ -320,7 +323,10 @@ The app builds project scopes where ignore rules are applied:
 * first-level folders
 * nested project subfolders
 
-Nested project scope discovery depth is fixed: 2 levels.
+Nested project scope discovery is bounded and depends on the folder structure.
+Regular projects use shallow discovery. Recognized monorepos can be searched more deeply.
+Service folders, dependencies, and confirmed build artifacts are skipped during scope discovery.
+
 This limit only controls discovery of nested scopes for `.gitignore` and Smart Ignore. Once a scope is found, rules are applied to that scope's contents through the normal tree scan.
 
 ### 12.2 "Use .gitignore"
@@ -330,9 +336,15 @@ This limit only controls discovery of nested scopes for `.gitignore` and Smart I
 For multi-project folders, one project's `.gitignore` is not applied to neighboring projects outside its scope.
 
 ### 12.3 "Smart ignore"
-* Shown only when it is relevant.
-* Enabled: common build/tool artifacts are additionally hidden.
+* Shown only when it can change the resulting tree.
+* Enabled: common build artifacts, tool caches, and dependency stores are additionally hidden.
 * Disabled: smart rules are not applied.
+
+A folder is not ignored only because of its name.
+For common names such as `build`, `vendor`, `packages`, `cache`, `pkg`, or `Library`, the contents are also checked.
+If the folder contains regular source files, it remains visible.
+
+Smart Ignore considers the structure of each detected project and works separately inside its scope.
 
 ### 12.4 Basic rules
 Options:
@@ -355,7 +367,7 @@ When disabled, both `.gitignore` and Smart Ignore are disabled.
 
 2. Single project without `.gitignore`.
 "Use .gitignore" is not shown.
-"Smart ignore" is shown only when relevant.
+"Smart ignore" is shown only when it can affect the current tree.
 
 3. Multi-project workspace, some projects have `.gitignore`, some do not.
 Both "Use .gitignore" and "Smart ignore" are shown.
@@ -366,8 +378,8 @@ Smart Ignore (when enabled) complements filtering in detected scopes.
 "Use .gitignore" is shown.
 "Smart ignore" is not shown as a separate option.
 
-5. Folder without relevant rules.
-If no `.gitignore` is found and Smart Ignore is not relevant, these options are hidden.
+5. Folder without applicable rules.
+If no `.gitignore` is found and Smart Ignore does not affect the tree, these options are hidden.
 Only basic visibility rules remain.
 
 ### 12.6 Empty folders
@@ -474,7 +486,8 @@ Progress modes:
 Behavior:
 * during background data calculation, percent progress is shown;
 * for some Git operations, percent is shown when the progress source provides it;
-* for very fast operations, progress can appear only briefly.
+* available-option updates and settings application are shown when the operation takes noticeable time;
+* fast operations finish without showing progress.
 
 X button (cancel) in the status bar:
 * performs best-effort cancellation for operations that support cancellation;

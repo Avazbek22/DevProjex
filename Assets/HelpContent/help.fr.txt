@@ -73,6 +73,9 @@ Exemples :
 * `devprojex . --export tree-content` — afficher l’arborescence et le contenu dans le terminal.
 * `devprojex . --export tree-content -o context.txt` — enregistrer le résultat dans un fichier.
 * `devprojex --benchmark "C:\Projects\App"` — mesurer le workflow standard de rapport de projet.
+* `devprojex --last --preview` — ouvrir le dernier projet directement en mode aperçu.
+* `devprojex --benchmark-ui "C:\Projects\App"` — mesurer le scénario UI standard.
+* `devprojex --session-metrics "C:\Projects\App"` — enregistrer les métriques de la session UI jusqu’à la fermeture de la fenêtre.
 
 Particularités :
 * `.` désigne le dossier courant du terminal ;
@@ -320,7 +323,10 @@ L’application construit des zones de projet (scopes) où les règles d’ignor
 * dossiers du premier niveau
 * sous-dossiers de projet imbriqués
 
-La profondeur de recherche des zones de projet imbriquées est fixe : 2 niveaux.
+La recherche des zones de projet imbriquées est limitée et dépend de la structure du dossier.
+Une recherche peu profonde est utilisée pour les projets ordinaires. La recherche peut aller plus loin dans les monorepos reconnus.
+Les dossiers système, les dépendances et les artefacts de build confirmés sont ignorés pendant la recherche des zones.
+
 Cette limite concerne uniquement la détection des zones imbriquées pour `.gitignore` et Smart Ignore. Une fois la zone trouvée, les règles sont appliquées à son contenu par le parcours normal de l’arbre.
 
 ### 12.2 « Utiliser .gitignore »
@@ -330,9 +336,15 @@ Cette limite concerne uniquement la détection des zones imbriquées pour `.giti
 Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
 
 ### 12.3 « Smart ignore »
-* Affiché uniquement lorsqu’il est pertinent.
-* Activé : les artefacts courants de build/outils sont masqués en plus.
+* Affiché uniquement lorsqu’il peut modifier l’arbre résultant.
+* Activé : les artefacts de build, caches d’outils et magasins de dépendances courants sont masqués en plus.
 * Désactivé : les règles smart ne sont pas appliquées.
+
+Un dossier n’est pas ignoré uniquement à cause de son nom.
+Pour les noms courants comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le contenu est également vérifié.
+Si le dossier contient des sources ordinaires, il reste visible.
+
+Smart Ignore tient compte de la structure de chaque projet détecté et fonctionne séparément dans sa zone.
 
 ### 12.4 Règles de base
 Options :
@@ -355,7 +367,7 @@ Quand elle est désactivée, les deux sont désactivés.
 
 2. Projet unique sans `.gitignore`.
 « Utiliser .gitignore » n’est pas affiché.
-« Smart ignore » n’est affiché que s’il est pertinent.
+« Smart ignore » n’est affiché que s’il peut affecter l’arbre courant.
 
 3. Espace multi-projets, certains projets ont `.gitignore`, d’autres non.
 « Utiliser .gitignore » et « Smart ignore » sont affichés.
@@ -366,8 +378,8 @@ Smart Ignore (s’il est activé) complète le filtrage dans les zones détecté
 « Utiliser .gitignore » est affiché.
 « Smart ignore » n’est pas affiché comme option séparée.
 
-5. Dossier sans règles pertinentes.
-Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’est pas pertinent, ces options sont masquées.
+5. Dossier sans règles applicables.
+Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’affecte pas l’arbre, ces options sont masquées.
 Seules les règles de visibilité de base restent actives.
 
 ### 12.6 Dossiers vides
@@ -474,7 +486,8 @@ Modes de progression :
 Comportement :
 * pendant le calcul de données en arrière-plan, une progression en pourcentage est affichée ;
 * pour certaines opérations Git, le pourcentage est affiché si la source de progression le fournit ;
-* pour les opérations très rapides, la progression peut n’apparaître que brièvement.
+* la mise à jour des options disponibles et l’application des paramètres sont affichées si l’opération prend un temps perceptible ;
+* les opérations rapides se terminent sans afficher de progression.
 
 Bouton X (annuler) dans la barre d’état :
 * exécute une annulation best-effort pour les opérations qui prennent en charge l’annulation ;
