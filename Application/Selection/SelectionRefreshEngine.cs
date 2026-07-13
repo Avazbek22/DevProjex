@@ -158,6 +158,7 @@ public sealed class SelectionRefreshEngine(
         var previousSnapshot = beforeSnapshot;
         var previousRuntimeSnapshot = EmptySnapshotState;
         IReadOnlyList<SelectionOption>? refreshedRootOptions = null;
+        ProjectWorkspaceScanSnapshot? reusableWorkspaceScan = null;
         var rootAccessDenied = false;
         var hadAccessDenied = false;
 
@@ -167,16 +168,20 @@ public sealed class SelectionRefreshEngine(
         // requiring the user to trigger another refresh manually.
         for (var passIndex = 0; passIndex < MaximumDynamicSnapshotPasses; passIndex++)
         {
+            var workspaceScanReuse = reusableWorkspaceScan;
+            reusableWorkspaceScan = null;
             var snapshot = BuildSingleDynamicSnapshot(
                 context,
                 currentRoots,
                 currentSelectedIgnoreOptions,
                 currentIgnoreStateCache,
                 previousRuntimeSnapshot,
+                workspaceScanReuse,
                 cancellationToken);
 
             rootAccessDenied |= snapshot.RootAccessDenied;
             hadAccessDenied |= snapshot.HadAccessDenied;
+            var rootProjectionChanged = false;
 
             if (currentRootOptions is not null && snapshot.TreeInventory is not null)
             {
@@ -194,6 +199,7 @@ public sealed class SelectionRefreshEngine(
                     currentRootOptions = projectedRootOptions;
                     refreshedRootOptions = projectedRootOptions;
                     currentRoots = CollectCheckedSelectionNames(projectedRootOptions, PathComparer.Default);
+                    rootProjectionChanged = true;
                 }
             }
 
@@ -202,7 +208,9 @@ public sealed class SelectionRefreshEngine(
                 snapshot.SnapshotState,
                 BuildMeasuredSelectionForRefreshPlanning(currentSelectedIgnoreOptions, snapshot.SnapshotState),
                 snapshot.SelectedIgnoreOptions);
-            if (!refreshPlan.RequiresSecondSnapshotPass)
+            var canReuseWorkspaceScan = rootProjectionChanged &&
+                                       !refreshPlan.RequiresSecondSnapshotPass;
+            if (!refreshPlan.RequiresSecondSnapshotPass && !rootProjectionChanged)
             {
                 return snapshot with
                 {
@@ -229,6 +237,8 @@ public sealed class SelectionRefreshEngine(
             currentIgnoreStateCache = snapshot.IgnoreOptionStateCache;
             previousSnapshot = snapshot.SnapshotState;
             previousRuntimeSnapshot = snapshot.SnapshotState;
+            if (canReuseWorkspaceScan)
+                reusableWorkspaceScan = snapshot.WorkspaceScan;
 
             if (passIndex == MaximumDynamicSnapshotPasses - 1)
             {
@@ -250,6 +260,7 @@ public sealed class SelectionRefreshEngine(
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyDictionary<IgnoreOptionId, bool> ignoreStateCache,
         IgnoreSectionSnapshotState previousRuntimeSnapshotState,
+        ProjectWorkspaceScanSnapshot? reusableWorkspaceScan,
         CancellationToken cancellationToken)
     {
         var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
@@ -266,6 +277,7 @@ public sealed class SelectionRefreshEngine(
             extensionScanRules,
             ignoreRules,
             effectiveExtensionPolicy,
+            reusableWorkspaceScan,
             cancellationToken);
         var scanData = scan.Value.IgnoreSection;
 
@@ -315,6 +327,7 @@ public sealed class SelectionRefreshEngine(
                 extensionScanRules,
                 ignoreRules,
                 BuildResolvedExtensionPolicy(extensionOptions),
+                reusableWorkspaceScan: null,
                 cancellationToken);
             scanData = scan.Value.IgnoreSection;
 
@@ -374,7 +387,8 @@ public sealed class SelectionRefreshEngine(
             RootAccessDenied: scan.RootAccessDenied,
             HadAccessDenied: scan.HadAccessDenied,
             TreeInventory: scan.Value.TreeInventory,
-            EffectiveRules: ignoreRules);
+            EffectiveRules: ignoreRules,
+            WorkspaceScan: scan.Value);
     }
 
     private ScanResult<ProjectWorkspaceScanSnapshot> GetDynamicSectionScan(
@@ -384,8 +398,28 @@ public sealed class SelectionRefreshEngine(
         IgnoreRules extensionScanRules,
         IgnoreRules ignoreRules,
         IExtensionInclusionPolicy? effectiveExtensionPolicy,
+        ProjectWorkspaceScanSnapshot? reusableWorkspaceScan,
         CancellationToken cancellationToken)
     {
+        var includeDirectoryToggleProbeRoots = ShouldIncludeDirectoryToggleProbeRoots(
+            context,
+            selectedRoots,
+            selectedIgnoreOptions);
+        var includeControllerImpactProbeRoots = ShouldIncludeControllerImpactProbeRoots(
+            context,
+            selectedIgnoreOptions);
+        if (context.CaptureTreeInventory &&
+            reusableWorkspaceScan is not null &&
+            ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
+                reusableWorkspaceScan,
+                selectedRoots,
+                includeDirectoryToggleProbeRoots,
+                includeControllerImpactProbeRoots,
+                out var projectedScan))
+        {
+            return projectedScan;
+        }
+
         return context.CaptureTreeInventory
             ? scanOptions.GetProjectWorkspaceSnapshotForRootFolders(
                 context.Path,
@@ -393,18 +427,19 @@ public sealed class SelectionRefreshEngine(
                 extensionScanRules,
                 ignoreRules,
                 effectiveExtensionPolicy,
-                includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
+                includeDirectoryToggleProbeRoots,
                 cancellationToken,
-                includeControllerImpactProbeRoots: ShouldIncludeControllerImpactProbeRoots(context, selectedIgnoreOptions))
+                includeControllerImpactProbeRoots,
+                captureRootScanBreakdown: true)
             : WrapIgnoreSectionScan(scanOptions.GetIgnoreSectionSnapshotForRootFolders(
                 context.Path,
                 selectedRoots,
                 extensionScanRules,
                 ignoreRules,
                 effectiveExtensionPolicy,
-                includeDirectoryToggleProbeRoots: ShouldIncludeDirectoryToggleProbeRoots(context, selectedRoots, selectedIgnoreOptions),
+                includeDirectoryToggleProbeRoots,
                 cancellationToken,
-                includeControllerImpactProbeRoots: ShouldIncludeControllerImpactProbeRoots(context, selectedIgnoreOptions)));
+                includeControllerImpactProbeRoots));
     }
 
     private static ScanResult<ProjectWorkspaceScanSnapshot> WrapIgnoreSectionScan(ScanResult<IgnoreSectionScanData> scan)
@@ -1193,7 +1228,8 @@ public sealed class SelectionRefreshEngine(
         bool RootAccessDenied,
         bool HadAccessDenied,
         ProjectTreeInventorySnapshot? TreeInventory,
-        IgnoreRules EffectiveRules);
+        IgnoreRules EffectiveRules,
+        ProjectWorkspaceScanSnapshot WorkspaceScan);
 
     private sealed record IgnoreOptionResolutionResult(
         IReadOnlyList<ResolvedIgnoreOptionState> VisibleOptions,

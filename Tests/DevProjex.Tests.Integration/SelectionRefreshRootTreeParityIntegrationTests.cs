@@ -5,6 +5,29 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class SelectionRefreshRootTreeParityIntegrationTests
 {
+	[Fact]
+	public void FullRefresh_RootProjection_ReusesPerRootScanWithoutSecondFilesystemTraversal()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("App.csproj", "<Project />\n");
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		Directory.CreateDirectory(Path.Combine(temp.Path, "empty-root"));
+		var scanner = new CountingWorkspaceScanner();
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices(scanner);
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path) with
+			{
+				CaptureTreeInventory = true
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, scanner.WorkspaceScanCount);
+		Assert.DoesNotContain(snapshot.RootOptions!, option => option.Name == "empty-root");
+		Assert.Contains(snapshot.RootOptions!, option => option.Name == "src");
+		AssertRootOptionsMatchProjectedTree(temp.Path, services, snapshot);
+	}
+
     [Fact]
     public void ScopedControllerProjection_MultipleIgnoredRoots_DoesNotDuplicateVisibleRoots()
     {
@@ -272,4 +295,41 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
             },
             TestContext.Current.CancellationToken);
     }
+
+	private sealed class CountingWorkspaceScanner :
+		IFileSystemScanner,
+		IFileSystemScannerProjectWorkspaceScanner
+	{
+		private readonly FileSystemScanner _inner = new();
+
+		public int WorkspaceScanCount { get; private set; }
+
+		public bool CanReadRoot(string rootPath) => _inner.CanReadRoot(rootPath);
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetExtensions(rootPath, rules, cancellationToken);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetRootFileExtensions(rootPath, rules, cancellationToken);
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetRootFolderNames(rootPath, rules, cancellationToken);
+
+		public ScanResult<ProjectWorkspaceScanSnapshot> ScanProjectWorkspace(
+			ProjectWorkspaceScanRequest request,
+			CancellationToken cancellationToken = default)
+		{
+			WorkspaceScanCount++;
+			return _inner.ScanProjectWorkspace(request, cancellationToken);
+		}
+	}
 }

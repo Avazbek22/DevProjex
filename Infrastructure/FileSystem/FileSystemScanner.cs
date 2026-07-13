@@ -212,6 +212,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var includeDirectoryToggleProbeRoots = request.IncludeDirectoryToggleProbeRoots;
 		var includeControllerImpactProbeRoots = request.IncludeControllerImpactProbeRoots;
 		var captureTreeInventory = request.CaptureTreeInventory;
+		var captureRootScanBreakdown = request.CaptureRootScanBreakdown && captureTreeInventory;
 
 		var scanPlan = BuildRootSelectionScanPlan(
 			rootPath,
@@ -253,14 +254,23 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var subtreeInventories = captureTreeInventory
 			? new List<ProjectTreeInventorySnapshot>()
 			: null;
-		if (scanPlan.SelectedRootPaths.Count > 0)
+		var rootScanSnapshots = captureRootScanBreakdown
+			? new Dictionary<string, ProjectWorkspaceRootScanSnapshot>(scanPlan.SelectedRoots.Count, PathComparer.Default)
+			: null;
+		var projectGitIgnoreContext = captureRootScanBreakdown
+			? effectiveRules.CreateGitIgnoreScanContext(rootPath)
+			: IgnoreRules.GitIgnoreScanContext.Disabled(effectiveRules);
+		var projectGitIgnoreCandidateContext = captureRootScanBreakdown
+			? effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath)
+			: IgnoreRules.GitIgnoreScanContext.Disabled(effectiveRules);
+		if (scanPlan.SelectedRoots.Count > 0)
 		{
 			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 			Parallel.ForEach(
-				scanPlan.SelectedRootPaths,
+				scanPlan.SelectedRoots,
 				parallelOptions,
-				() => new ProjectWorkspaceScanLocalState(captureTreeInventory),
-				(folderPath, _, localState) =>
+				() => new ProjectWorkspaceScanLocalState(captureTreeInventory, captureRootScanBreakdown),
+				(folder, _, localState) =>
 				{
 					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
 
@@ -268,7 +278,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						? new ProjectTreeInventoryCapture()
 						: null;
 					var snapshot = ScanIgnoreSectionSnapshotCore(
-						folderPath,
+						folder.FullPath,
 						extensionDiscoveryRules,
 						effectiveRules,
 						effectiveExtensionPolicy,
@@ -286,6 +296,29 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					    inventoryCapture?.Inventory is not null)
 					{
 						localState.TreeInventories.Add(inventoryCapture.Inventory);
+					}
+					if (localState.RootSnapshots is not null)
+					{
+						var directoryToggleProbeCounts = includeDirectoryToggleProbeRoots
+							? CountRootDirectoryToggleCandidate(folder, effectiveRules)
+							: IgnoreOptionCounts.Empty;
+						var controllerImpactProbeCounts = includeControllerImpactProbeRoots
+							? CountRootDirectoryControllerImpactCandidate(
+								folder,
+								effectiveRules,
+								effectiveExtensionPolicy,
+								projectGitIgnoreContext,
+								projectGitIgnoreCandidateContext,
+								parallelOptions.CancellationToken)
+							: IgnoreControllerImpactCounts.Empty;
+						localState.RootSnapshots.Add(new KeyValuePair<string, ProjectWorkspaceRootScanSnapshot>(
+							folder.Name,
+							new ProjectWorkspaceRootScanSnapshot(
+								snapshot.Value,
+								directoryToggleProbeCounts,
+								controllerImpactProbeCounts,
+								snapshot.RootAccessDenied,
+								snapshot.HadAccessDenied)));
 					}
 
 					if (snapshot.RootAccessDenied)
@@ -315,10 +348,17 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						{
 							subtreeInventories.AddRange(localState.TreeInventories);
 						}
+						if (rootScanSnapshots is not null &&
+						    localState.RootSnapshots is not null)
+						{
+							foreach (var pair in localState.RootSnapshots)
+								rootScanSnapshots[pair.Key] = pair.Value;
+						}
 					}
 				});
 		}
 
+		var unselectedDirectoryToggleProbeCounts = IgnoreOptionCounts.Empty;
 		if (includeDirectoryToggleProbeRoots && scanPlan.DirectoryToggleCandidates.Count > 0)
 		{
 			// Keep initial project-load inventory focused on the currently selected roots.
@@ -332,12 +372,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				effectiveRules,
 				cancellationToken);
 			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
+			unselectedDirectoryToggleProbeCounts = rootCandidateCounts.Value;
 			if (rootCandidateCounts.RootAccessDenied)
 				Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootCandidateCounts.HadAccessDenied)
 				Interlocked.Exchange(ref hadAccessDenied, 1);
 		}
 
+		var unselectedControllerImpactProbeCounts = IgnoreControllerImpactCounts.Empty;
 		if (scanPlan.ControllerImpactCandidates.Count > 0)
 		{
 			var rootControllerImpactCounts = CountRootDirectoryControllerImpactCandidates(
@@ -346,6 +388,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				effectiveExtensionPolicy,
 				cancellationToken);
 			controllerImpactCounts = controllerImpactCounts.Add(rootControllerImpactCounts.Value);
+			unselectedControllerImpactProbeCounts = rootControllerImpactCounts.Value;
 			if (rootControllerImpactCounts.RootAccessDenied)
 				Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootControllerImpactCounts.HadAccessDenied)
@@ -366,8 +409,21 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				rootAccessDenied == 1,
 				hadAccessDenied == 1)
 			: null;
+		var breakdown = captureRootScanBreakdown
+			? new ProjectWorkspaceScanBreakdown(
+				rootFileSnapshot.Value,
+				rootScanSnapshots!,
+				unselectedDirectoryToggleProbeCounts,
+				unselectedControllerImpactProbeCounts,
+				includeDirectoryToggleProbeRoots,
+				includeControllerImpactProbeRoots,
+				scanPlan.RootAccessDenied,
+				scanPlan.HadAccessDenied,
+				rootFileSnapshot.RootAccessDenied,
+				rootFileSnapshot.HadAccessDenied)
+			: null;
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
-			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory),
+			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory, breakdown),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1);
 	}
@@ -2633,13 +2689,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool includeControllerImpactProbeRoots,
 		CancellationToken cancellationToken)
 	{
-		var selectedRootPaths = new List<string>(selectedRootFolders.Count);
+		var selectedRoots = new List<FileSystemDirectoryEntry>(selectedRootFolders.Count);
 		var directoryToggleCandidates = new List<FileSystemDirectoryEntry>();
 		var controllerImpactCandidates = new List<DirectoryScanFacts>();
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new RootSelectionScanPlan(
-				selectedRootPaths,
+				selectedRoots,
 				directoryToggleCandidates,
 				controllerImpactCandidates,
 				RootAccessDenied: false,
@@ -2666,7 +2722,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 				if (selectedNames.Contains(directory.Name))
 				{
-					selectedRootPaths.Add(directory.FullPath);
+					selectedRoots.Add(directory);
 					continue;
 				}
 
@@ -2698,9 +2754,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 		catch (UnauthorizedAccessException)
 		{
-			AddSelectedRootPathsByName(rootPath, selectedNames, selectedRootPaths);
+			AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
 			return new RootSelectionScanPlan(
-				selectedRootPaths,
+				selectedRoots,
 				directoryToggleCandidates,
 				controllerImpactCandidates,
 				RootAccessDenied: true,
@@ -2708,21 +2764,21 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 		catch
 		{
-			AddSelectedRootPathsByName(rootPath, selectedNames, selectedRootPaths);
+			AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
 		}
 
 		return new RootSelectionScanPlan(
-			selectedRootPaths,
+			selectedRoots,
 			directoryToggleCandidates,
 			controllerImpactCandidates,
 			RootAccessDenied: false,
 			HadAccessDenied: false);
 	}
 
-	private static void AddSelectedRootPathsByName(
+	private static void AddSelectedRootsByName(
 		string rootPath,
 		IReadOnlyCollection<string> selectedNames,
-		List<string> selectedRootPaths)
+		List<FileSystemDirectoryEntry> selectedRoots)
 	{
 		if (selectedNames.Count == 0)
 			return;
@@ -2750,7 +2806,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					continue;
 				}
 
-				selectedRootPaths.Add(fullPath);
+				selectedRoots.Add(new FileSystemDirectoryEntry(
+					selectedName,
+					fullPath,
+					selectedName,
+					HasHiddenAttribute(fullPath)));
 			}
 			catch
 			{
@@ -2848,35 +2908,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			(directory, _, localCounts) =>
 			{
 				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
-				if (IsSuppressedByNonDirectoryToggleRule(directory.FullPath, directory.Name, effectiveRules))
-					return localCounts;
-
-				var isDotFolder = IgnoreRuleSemantics.IsDotName(directory.Name);
-				var isHiddenByCurrentHiddenFolderRule =
-					IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
-						effectiveRules.IgnoreHiddenFolders,
-						directory.IsHidden,
-						isDotFolder,
-						effectiveRules.IgnoreDotFolders);
-				var shouldCountDotFolder =
-					isDotFolder &&
-					(effectiveRules.IgnoreDotFolders || !isHiddenByCurrentHiddenFolderRule);
-
-				if (shouldCountDotFolder)
-				{
-					// A root-level dot directory is direct evidence for the DotFolders
-					// toggle only when no active controller already owns it. This matches
-					// Help 11.9: basic counters show elements hidden by that specific rule
-					// in the current tree configuration.
-					localCounts.DotFolders++;
-				}
-
-				if (isHiddenByCurrentHiddenFolderRule)
-				{
-					// Same contract as DotFolders: native hidden root folders are direct
-					// directory-toggle evidence once controller rules have not claimed them.
-					localCounts.HiddenFolders++;
-				}
+				var contribution = CountRootDirectoryToggleCandidate(directory, effectiveRules);
+				localCounts.DotFolders += contribution.DotFolders;
+				localCounts.HiddenFolders += contribution.HiddenFolders;
 
 				return localCounts;
 			},
@@ -2893,6 +2927,62 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			new IgnoreOptionCounts(HiddenFolders: hiddenFolders, DotFolders: dotFolders),
 			RootAccessDenied: false,
 			HadAccessDenied: false);
+	}
+
+	private static IgnoreOptionCounts CountRootDirectoryToggleCandidate(
+		in FileSystemDirectoryEntry directory,
+		IgnoreRules effectiveRules)
+	{
+		if ((!effectiveRules.IgnoreDotFolders && !effectiveRules.IgnoreHiddenFolders) ||
+		    IsSuppressedByNonDirectoryToggleRule(directory.FullPath, directory.Name, effectiveRules))
+		{
+			return IgnoreOptionCounts.Empty;
+		}
+
+		var isDotFolder = IgnoreRuleSemantics.IsDotName(directory.Name);
+		var isHiddenByCurrentHiddenFolderRule = IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
+			effectiveRules.IgnoreHiddenFolders,
+			directory.IsHidden,
+			isDotFolder,
+			effectiveRules.IgnoreDotFolders);
+		var dotFolders = isDotFolder &&
+		                 (effectiveRules.IgnoreDotFolders || !isHiddenByCurrentHiddenFolderRule)
+			? 1
+			: 0;
+
+		// Root probes count evidence owned by a directory toggle only after controller
+		// rules have declined it. This keeps projected and direct-scan labels identical.
+		return new IgnoreOptionCounts(
+			HiddenFolders: isHiddenByCurrentHiddenFolderRule ? 1 : 0,
+			DotFolders: dotFolders);
+	}
+
+	private static IgnoreControllerImpactCounts CountRootDirectoryControllerImpactCandidate(
+		in FileSystemDirectoryEntry directory,
+		IgnoreRules effectiveRules,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext,
+		CancellationToken cancellationToken)
+	{
+		var facts = AnalyzeDirectory(
+			directory.FullPath,
+			directory.RelativePath,
+			directory.Name,
+			directory.IsHidden,
+			effectiveRules,
+			gitIgnoreContext,
+			gitIgnoreCandidateContext);
+		facts = PromoteRootControllerImpactCandidate(facts, effectiveRules);
+		if (!IsPotentialControllerImpactCandidate(facts, effectiveRules))
+			return IgnoreControllerImpactCounts.Empty;
+
+		return CountDirectDirectoryControllerImpact(
+			facts,
+			effectiveRules,
+			effectiveExtensionPolicy,
+			cancellationToken,
+			requireVisibleContentWhenEmptyFoldersIgnored: false);
 	}
 
 	private static ScanResult<IgnoreControllerImpactCounts> CountRootDirectoryControllerImpactCandidates(

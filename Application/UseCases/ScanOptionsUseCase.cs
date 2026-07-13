@@ -438,7 +438,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		bool includeDirectoryToggleProbeRoots = false,
 		CancellationToken cancellationToken = default,
-		bool includeControllerImpactProbeRoots = false)
+		bool includeControllerImpactProbeRoots = false,
+		bool captureRootScanBreakdown = false)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -453,7 +454,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 					effectiveExtensionPolicy,
 					CaptureTreeInventory: true,
 					IncludeDirectoryToggleProbeRoots: includeDirectoryToggleProbeRoots,
-					IncludeControllerImpactProbeRoots: includeControllerImpactProbeRoots),
+					IncludeControllerImpactProbeRoots: includeControllerImpactProbeRoots,
+					CaptureRootScanBreakdown: captureRootScanBreakdown),
 				cancellationToken);
 		}
 

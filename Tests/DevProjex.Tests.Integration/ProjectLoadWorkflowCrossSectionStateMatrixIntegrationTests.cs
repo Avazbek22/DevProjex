@@ -24,8 +24,9 @@ public sealed class ProjectLoadWorkflowCrossSectionStateMatrixIntegrationTests
             CancellationToken.None);
         var scenario = CreateScenario(baselineSnapshot, rootScenario, extensionScenario, ignoreScenario);
 
+        var scenarioContext = CreateScenarioContext(rootPath, scenario) with { CaptureTreeInventory = true };
         var firstSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            CreateScenarioContext(rootPath, scenario) with { CaptureTreeInventory = true },
+            scenarioContext,
             CancellationToken.None);
 
         SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
@@ -36,7 +37,7 @@ public sealed class ProjectLoadWorkflowCrossSectionStateMatrixIntegrationTests
         AssertScenarioSelectionContract(firstSnapshot, scenario);
 
         var secondSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            BuildConvergedContext(rootPath, firstSnapshot) with { CaptureTreeInventory = true },
+            BuildConvergedContext(rootPath, firstSnapshot, scenarioContext) with { CaptureTreeInventory = true },
             CancellationToken.None);
 
         SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(

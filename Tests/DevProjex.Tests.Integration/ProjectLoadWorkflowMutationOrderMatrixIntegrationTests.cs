@@ -26,11 +26,12 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
             CancellationToken.None);
         var targetScenario = CreateScenario(baselineSnapshot, rootScenario, extensionScenario, ignoreScenario);
 
+        var directContext = CreateScenarioContext(rootPath, targetScenario) with { CaptureTreeInventory = true };
         var directSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            CreateScenarioContext(rootPath, targetScenario) with { CaptureTreeInventory = true },
+            directContext,
             CancellationToken.None);
         var directConverged = services.Engine.ComputeFullRefreshSnapshot(
-            BuildConvergedContext(rootPath, directSnapshot) with { CaptureTreeInventory = true },
+            BuildConvergedContext(rootPath, directSnapshot, directContext) with { CaptureTreeInventory = true },
             CancellationToken.None);
 
         SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
