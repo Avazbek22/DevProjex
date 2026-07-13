@@ -92,6 +92,9 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		var childEntries = inventory.GetChildren(parentIndex);
 		if (childEntries.Length == 0)
 			return;
+		var shouldApplySmartIgnoreForFiles = options.IgnoreRules.ShouldApplySmartIgnore(
+			parentEntry.FullPath,
+			isDirectory: true);
 
 		if (parentIndex == 0)
 		{
@@ -103,6 +106,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				allowedExtensions,
 				gitIgnoreContext,
 				hasNameFilter,
+				shouldApplySmartIgnoreForFiles,
 				cancellationToken);
 			return;
 		}
@@ -118,6 +122,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				allowedExtensions,
 				gitIgnoreContext,
 				hasNameFilter,
+				shouldApplySmartIgnoreForFiles,
 				cancellationToken);
 			if (node is not null)
 				children.Add(node);
@@ -132,6 +137,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool hasNameFilter,
+		bool shouldApplySmartIgnoreForFiles,
 		CancellationToken cancellationToken)
 	{
 		var firstChildIndex = inventory.GetEntry(0).FirstChildIndex;
@@ -151,6 +157,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 					allowedExtensions,
 					gitIgnoreContext,
 					hasNameFilter,
+					shouldApplySmartIgnoreForFiles,
 					cancellationToken);
 				if (node is not null)
 					children.Add(node);
@@ -175,6 +182,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				allowedExtensions,
 				gitIgnoreContext,
 				hasNameFilter,
+				shouldApplySmartIgnoreForFiles,
 				parallelOptions.CancellationToken);
 		});
 
@@ -202,6 +210,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool hasNameFilter,
+		bool shouldApplySmartIgnoreForFiles,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -219,12 +228,12 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				cancellationToken);
 
 		return ProjectFile(
-			inventory,
 			in entry,
 			options,
 			allowedExtensions,
 			gitIgnoreContext,
-			hasNameFilter);
+			hasNameFilter,
+			shouldApplySmartIgnoreForFiles);
 	}
 
 	private static FileSystemNode? ProjectDirectory(
@@ -292,20 +301,17 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 	}
 
 	private static FileSystemNode? ProjectFile(
-		ProjectTreeInventorySnapshot inventory,
 		in ProjectTreeInventoryEntry entry,
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
-		bool hasNameFilter)
+		bool hasNameFilter,
+		bool shouldApplySmartIgnoreForFiles)
 	{
 		var ignore = options.IgnoreRules;
 		var fileGitIgnore = ignore.UseGitIgnore
 			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: false, entry.Name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
-		ref readonly var parentEntry = ref inventory.GetEntryRef(entry.ParentIndex);
-		var shouldApplySmartIgnoreForFiles = ignore.ShouldApplySmartIgnore(parentEntry.FullPath, isDirectory: true);
-
 		if (ShouldSkipFile(entry, ignore, shouldApplySmartIgnoreForFiles, fileGitIgnore))
 			return null;
 

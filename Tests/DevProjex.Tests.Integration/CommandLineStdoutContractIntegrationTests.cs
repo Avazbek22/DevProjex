@@ -136,7 +136,7 @@ public sealed class CommandLineStdoutContractIntegrationTests
 
 		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken));
 		var root = document.RootElement;
-		Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal(Path.GetFullPath(projectPath).Replace('\\', '/'), root.GetProperty("targetPath").GetString());
 		Assert.Equal(Path.GetFullPath(outputPath).Replace('\\', '/'), root.GetProperty("outputPath").GetString());
 		Assert.False(root.GetProperty("hasFailures").GetBoolean());
@@ -153,6 +153,10 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, warmRun.GetProperty("exitCode").GetInt32());
 		Assert.True(coldRun.GetProperty("stdoutBytes").GetInt32() > 0);
 		Assert.True(warmRun.GetProperty("stdoutBytes").GetInt32() > 0);
+		Assert.True(warmRun.GetProperty("allocatedBytes").GetInt64() > 0);
+		Assert.Equal(64, root.GetProperty("workload").GetProperty("fingerprint").GetString()!.Length);
+		Assert.Equal(64, executable.GetProperty("assemblySha256").GetString()!.Length);
+		Assert.True(root.GetProperty("metricsConsistent").GetBoolean());
 		Assert.Equal(0, root.GetProperty("coldProcess").GetProperty("warmupRuns").GetArrayLength());
 		Assert.Equal(0, root.GetProperty("warmPipeline").GetProperty("warmupRuns").GetArrayLength());
 	}

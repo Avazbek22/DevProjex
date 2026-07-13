@@ -8,7 +8,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	{
 		try
 		{
-			_ = Directory.EnumerateFileSystemEntries(rootPath).GetEnumerator().MoveNext();
+			using var enumerator = Directory.EnumerateFileSystemEntries(rootPath).GetEnumerator();
+			_ = enumerator.MoveNext();
 			return true;
 		}
 		catch (UnauthorizedAccessException)
@@ -594,6 +595,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
 	{
 		var isExtensionless = IsExtensionlessFileName(name);
+		var extensionStart = GetExtensionStart(name);
 		var gitIgnored = rules.UseGitIgnore &&
 		                 gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: false, name).IsIgnored;
 		var gitIgnoredCandidate = gitIgnoreCandidateContext
@@ -603,7 +605,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		return new FileScanFacts(
 			Name: name,
 			RelativePath: relativePath,
-			Extension: Path.GetExtension(name),
+			ExtensionStart: extensionStart,
 			IsHidden: isHidden,
 			IsDot: IgnoreRuleSemantics.IsDotName(name),
 			IsEmpty: length == 0,
@@ -654,6 +656,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (!PassesNonControllerDirectoryRules(facts, rules))
 			return IgnoreControllerImpactCounts.Empty;
 
+		var gitDirectImpact =
+			facts.GitIgnoreCandidateEvaluation.IsIgnored &&
+			!facts.GitIgnoreCandidateEvaluation.ShouldTraverseIgnoredDirectory;
+		var smartDirectImpact = facts.IsSmartIgnoredCandidate;
+		if (!gitDirectImpact && !smartDirectImpact)
+			return IgnoreControllerImpactCounts.Empty;
+
 		// Selected-scope directories need a content probe because EmptyFolders can already
 		// remove an empty folder. Root-list candidates are different: hiding the top-level
 		// checkbox itself is user-visible even before extension/content filters are applied.
@@ -671,11 +680,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		{
 			return IgnoreControllerImpactCounts.Empty;
 		}
-
-		var gitDirectImpact =
-			facts.GitIgnoreCandidateEvaluation.IsIgnored &&
-			!facts.GitIgnoreCandidateEvaluation.ShouldTraverseIgnoredDirectory;
-		var smartDirectImpact = facts.IsSmartIgnoredCandidate;
 
 		return new IgnoreControllerImpactCounts(
 			GitIgnore: gitDirectImpact || (rules.SmartIgnoreFollowsGitIgnore && smartDirectImpact) ? 1 : 0,
@@ -771,7 +775,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var facts = new FileScanFacts(
 			Name: file.Name,
 			RelativePath: file.RelativePath,
-			Extension: Path.GetExtension(file.Name),
+			ExtensionStart: GetExtensionStart(file.Name),
 			IsHidden: file.IsHidden,
 			IsDot: IgnoreRuleSemantics.IsDotName(file.Name),
 			IsEmpty: file.Length == 0,
@@ -887,10 +891,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (facts.IsExtensionless)
 			return true;
 
-		if (string.IsNullOrWhiteSpace(facts.Extension))
+		var extension = GetExtensionSpan(facts);
+		if (extension.IsEmpty)
 			return false;
 
-		return extensionPolicy is null || extensionPolicy.AllowsExtension(facts.Extension.AsSpan());
+		return extensionPolicy is null || extensionPolicy.AllowsExtension(extension);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -905,12 +910,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (!allowWhenExtensionsAreDiscovered)
 			return false;
 
+		var extension = GetExtensionSpan(facts);
 		if (extensionPolicy is null)
-			return allowWhenExtensionsAreDiscovered &&
-			       !string.IsNullOrWhiteSpace(facts.Extension);
+			return !extension.IsEmpty;
 
-		return !string.IsNullOrWhiteSpace(facts.Extension) &&
-		       extensionPolicy.AllowsExtension(facts.Extension.AsSpan());
+		return !extension.IsEmpty && extensionPolicy.AllowsExtension(extension);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1116,11 +1120,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 								continue;
 
 							hasVisibleFiles = true;
-							var ext = Path.GetExtension(file.Name);
-							if (IsExtensionlessFileName(file.Name))
-								localState.Extensions.Add(file.Name);
-							else if (!string.IsNullOrWhiteSpace(ext))
-								localState.Extensions.Add(ext);
+							AddExtensionEntry(file.Name, localState.Extensions);
 						}
 					}
 					catch (OperationCanceledException)
@@ -1247,11 +1247,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					    fileGitIgnore))
 					continue;
 
-				var ext = Path.GetExtension(file.Name);
-				if (IsExtensionlessFileName(file.Name))
-					exts.Add(file.Name);
-				else if (!string.IsNullOrWhiteSpace(ext))
-					exts.Add(ext);
+				AddExtensionEntry(file.Name, exts);
 			}
 		}
 		catch (OperationCanceledException)
@@ -1386,16 +1382,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				var passesDiscovery = PassesExtensionDiscoveryRules(facts, extensionDiscoveryRules);
 				if (passesDiscovery)
 					AddExtensionEntry(
-						file.Name,
-						facts.Extension,
-						facts.IsExtensionless,
+						facts,
 						extensions,
 						skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 				if (PassesExtensionDiscoveryRules(facts, effectiveRules))
 					AddExtensionEntry(
-						file.Name,
-						facts.Extension,
-						facts.IsExtensionless,
+						facts,
 						effectiveExtensions,
 						skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 
@@ -1597,9 +1589,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						if (passesDiscovery)
 						{
 							AddExtensionEntry(
-								file.Name,
-								facts.Extension,
-								facts.IsExtensionless,
+								facts,
 								localExtensions,
 								skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 							localMetrics.ExtensionDiscoveryVisibleFiles++;
@@ -1609,9 +1599,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						    PassesExtensionDiscoveryRules(facts, effectiveRules))
 						{
 							AddExtensionEntry(
-								file.Name,
-								facts.Extension,
-								facts.IsExtensionless,
+								facts,
 								localEffectiveExtensions,
 								skipExtensionlessEntry: effectiveRules.IgnoreExtensionlessFiles);
 						}
@@ -2578,23 +2566,44 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static void AddExtensionEntry(
-		string fileName,
-		string extension,
-		bool isExtensionless,
-		ICollection<string> extensions,
+		in FileScanFacts facts,
+		HashSet<string> extensions,
 		bool skipExtensionlessEntry = false)
 	{
-		if (isExtensionless)
+		if (facts.IsExtensionless)
 		{
 			if (skipExtensionlessEntry)
 				return;
 
+			extensions.Add(facts.Name);
+			return;
+		}
+
+		AddUniqueExtension(extensions, GetExtensionSpan(facts));
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static void AddExtensionEntry(string fileName, HashSet<string> extensions)
+	{
+		if (IsExtensionlessFileName(fileName))
+		{
 			extensions.Add(fileName);
 			return;
 		}
 
-		if (!string.IsNullOrWhiteSpace(extension))
-			extensions.Add(extension);
+		AddUniqueExtension(extensions, Path.GetExtension(fileName.AsSpan()));
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static void AddUniqueExtension(HashSet<string> extensions, ReadOnlySpan<char> extension)
+	{
+		if (extension.IsEmpty)
+			return;
+
+		if (extensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup) && lookup.Contains(extension))
+			return;
+
+		extensions.Add(extension.ToString());
 	}
 
 	private ScanResult<int> ScanEffectiveEmptyFolderCountCore(
@@ -3005,5 +3014,18 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static bool IsExtensionlessFileName(string name) =>
 		IgnoreRuleSemantics.IsExtensionlessFileName(name);
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static int GetExtensionStart(string name)
+	{
+		var extension = Path.GetExtension(name.AsSpan());
+		return extension.IsEmpty ? -1 : name.Length - extension.Length;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static ReadOnlySpan<char> GetExtensionSpan(in FileScanFacts facts) =>
+		facts.ExtensionStart < 0
+			? ReadOnlySpan<char>.Empty
+			: facts.Name.AsSpan(facts.ExtensionStart);
 
 }

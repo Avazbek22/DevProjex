@@ -176,11 +176,12 @@ public sealed class ProjectScopeDiscoveryService(
 			}
 		}
 
-		var rootFacts = _rootFactsProvider.Get(normalizedRoot, forceRefresh: true);
+		var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
+		var rootFacts = rootFactsCache.Get(normalizedRoot);
 		if (!rootFacts.Exists)
 			return ProjectScanContext.Empty;
 
-		var context = BuildProjectScanContext(rootFacts, selectedRootFolders);
+		var context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
 		lock (_scopeCacheSync)
 		{
 			_scopeCache[cacheKey] = new ScopeCacheEntry(now, context);
@@ -230,7 +231,8 @@ public sealed class ProjectScopeDiscoveryService(
 
 	private ProjectScanContext BuildProjectScanContext(
 		ProjectRootFacts rootFacts,
-		IReadOnlyCollection<string>? selectedRootFolders)
+		IReadOnlyCollection<string>? selectedRootFolders,
+		ProjectRootFactsOperationCache rootFactsCache)
 	{
 		var rootPath = rootFacts.RootPath;
 		var hasExplicitRootSelection = selectedRootFolders is not null && selectedRootFolders.Count > 0;
@@ -264,7 +266,7 @@ public sealed class ProjectScopeDiscoveryService(
 			static () => new List<ProjectScope>(),
 			(directoryPath, _, localCandidates) =>
 			{
-				var candidateFacts = _rootFactsProvider.Get(directoryPath, forceRefresh: true);
+				var candidateFacts = rootFactsCache.Get(directoryPath);
 				var hasGitIgnore = candidateFacts.HasGitIgnoreFile;
 				var hasMarker = HasProjectMarker(candidateFacts);
 				if (ShouldSkipProjectScopeCandidate(
@@ -293,7 +295,7 @@ public sealed class ProjectScopeDiscoveryService(
 			});
 
 		var candidates = SortScopes(scopedCandidates).ToArray();
-		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates);
+		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates, rootFactsCache);
 
 		if (hasExplicitRootSelection)
 		{
@@ -342,7 +344,8 @@ public sealed class ProjectScopeDiscoveryService(
 	}
 
 	private ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
-		IReadOnlyList<ProjectScope> candidates)
+		IReadOnlyList<ProjectScope> candidates,
+		ProjectRootFactsOperationCache rootFactsCache)
 	{
 		if (candidates.Count == 0)
 			return [];
@@ -357,15 +360,16 @@ public sealed class ProjectScopeDiscoveryService(
 			(candidate, _, localScopes) =>
 			{
 				localScopes.Add(candidate);
-				var candidateFacts = _rootFactsProvider.Get(candidate.RootPath, forceRefresh: true);
+				var candidateFacts = rootFactsCache.Get(candidate.RootPath);
 				var probe = ResolveNestedProjectProbe(candidateFacts);
 
 				foreach (var childPath in EnumerateDescendantDirectoriesSafe(
 							 candidate.RootPath,
 							 probe.MaxDepth,
-							 probe.MaxDirectories))
+							 probe.MaxDirectories,
+							 rootFactsCache))
 				{
-					var childFacts = _rootFactsProvider.Get(childPath, forceRefresh: true);
+					var childFacts = rootFactsCache.Get(childPath);
 					var hasGitIgnore = childFacts.HasGitIgnoreFile;
 					var hasMarker = HasProjectMarker(childFacts);
 					if (ShouldSkipProjectScopeCandidate(
@@ -444,7 +448,8 @@ public sealed class ProjectScopeDiscoveryService(
 	private IEnumerable<string> EnumerateDescendantDirectoriesSafe(
 		string rootPath,
 		int maxDepth,
-		int maxDirectories)
+		int maxDirectories,
+		ProjectRootFactsOperationCache rootFactsCache)
 	{
 		if (maxDepth <= 0 || maxDirectories <= 0)
 			yield break;
@@ -459,7 +464,7 @@ public sealed class ProjectScopeDiscoveryService(
 			if (currentDepth >= maxDepth)
 				continue;
 
-			var children = GetChildDirectoriesSafe(_rootFactsProvider.Get(currentPath, forceRefresh: true));
+			var children = GetChildDirectoriesSafe(rootFactsCache.Get(currentPath));
 
 			foreach (var childPath in children)
 			{
@@ -587,6 +592,21 @@ public sealed class ProjectScopeDiscoveryService(
 		}
 
 		return directories;
+	}
+
+	private sealed class ProjectRootFactsOperationCache(ProjectRootFactsProvider provider)
+	{
+		private readonly ConcurrentDictionary<string, Lazy<ProjectRootFacts>> _facts = new(PathStringComparer);
+
+		public ProjectRootFacts Get(string rootPath)
+		{
+			return _facts.GetOrAdd(
+				rootPath,
+				static (path, factsProvider) => new Lazy<ProjectRootFacts>(
+					() => factsProvider.Get(path, forceRefresh: true),
+					LazyThreadSafetyMode.ExecutionAndPublication),
+				provider).Value;
+		}
 	}
 
 	private sealed record ScopeCacheEntry(DateTime CachedAtUtc, ProjectScanContext Context);

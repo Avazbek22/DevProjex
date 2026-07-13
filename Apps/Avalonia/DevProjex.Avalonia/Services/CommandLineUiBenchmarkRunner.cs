@@ -482,11 +482,7 @@ internal sealed record CommandLineUiBenchmarkReport(
 			ProcessArchitecture: RuntimeInformation.ProcessArchitecture.ToString(),
 			RuntimeIdentifier: RuntimeInformation.RuntimeIdentifier,
 			Configuration: configuration,
-			Executable: new CommandLineBenchmarkExecutableInfo(
-				FileName: request.FileName,
-				Arguments: request.Arguments,
-				WorkingDirectory: request.WorkingDirectory,
-				CommandLine: request.CommandLine),
+			Executable: CommandLineBenchmarkExecutableInfo.Create(request),
 			ColdUiProcess: new CommandLineUiBenchmarkSection(
 				Summary: CommandLineUiBenchmarkSummary.FromRuns(measuredRuns),
 				WarmupRuns: runs.Where(static run => run.IsWarmup).ToArray(),

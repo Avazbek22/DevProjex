@@ -80,7 +80,7 @@ public sealed partial class FileSystemScanner
     private readonly record struct FileScanFacts(
         string Name,
         string RelativePath,
-        string Extension,
+        int ExtensionStart,
         bool IsHidden,
         bool IsDot,
         bool IsEmpty,

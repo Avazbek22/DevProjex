@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -122,12 +123,14 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		var process = Process.GetCurrentProcess();
 		var cpuBefore = TryGetTotalProcessorTime(process);
 		var managedBefore = GC.GetTotalMemory(forceFullCollection: false);
+		var allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
 		var gen0Before = GC.CollectionCount(0);
 		var gen1Before = GC.CollectionCount(1);
 		var gen2Before = GC.CollectionCount(2);
 		var startedAt = DateTimeOffset.Now;
 		var stopwatch = Stopwatch.StartNew();
 		var stdout = string.Empty;
+		ProjectAnalysisReport? analysisReport = null;
 		string? error = null;
 		var exitCode = CommandLineExitCodes.Success;
 
@@ -140,11 +143,11 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 					SelectedExtensions: null,
 					SelectedIgnoreOptions: null),
 				cancellationToken);
-			var report = await services.ProjectAnalysisService
+			analysisReport = await services.ProjectAnalysisService
 				.BuildReportFromTreeAsync(loadedProject, cancellationToken)
 				.ConfigureAwait(false);
 			using var writer = new StringWriter(CultureInfo.InvariantCulture);
-			await services.ProjectAnalysisReportWriter.WriteAsync(report, writer, cancellationToken)
+			await services.ProjectAnalysisReportWriter.WriteAsync(analysisReport, writer, cancellationToken)
 				.ConfigureAwait(false);
 			stdout = writer.ToString();
 		}
@@ -164,7 +167,11 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 
 		var cpuAfter = TryGetTotalProcessorTime(process);
 		var managedAfter = GC.GetTotalMemory(forceFullCollection: false);
+		var allocatedAfter = GC.GetTotalAllocatedBytes(precise: false);
 		TryRefresh(process);
+		var workload = analysisReport is null
+			? null
+			: CommandLineBenchmarkWorkload.FromReport(analysisReport);
 
 		return new CommandLineBenchmarkPipelineRun(
 			Index: index,
@@ -177,11 +184,16 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			ManagedMemoryBeforeBytes: managedBefore,
 			ManagedMemoryAfterBytes: managedAfter,
 			ManagedMemoryDeltaBytes: managedAfter - managedBefore,
+			AllocatedBytes: Math.Max(0, allocatedAfter - allocatedBefore),
 			Gen0Collections: GC.CollectionCount(0) - gen0Before,
 			Gen1Collections: GC.CollectionCount(1) - gen1Before,
 			Gen2Collections: GC.CollectionCount(2) - gen2Before,
 			StdoutCharacters: stdout.Length,
 			StdoutBytes: Encoding.UTF8.GetByteCount(stdout),
+			LoadingMilliseconds: analysisReport?.Timing.LoadingMilliseconds,
+			AnalysisMilliseconds: analysisReport?.Timing.AnalysisMilliseconds,
+			ReportedTotalMilliseconds: analysisReport?.Timing.TotalMilliseconds,
+			Workload: workload,
 			ExitCode: exitCode,
 			Error: error);
 	}
@@ -323,7 +335,15 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			$"  median wall: {FormatMilliseconds(report.WarmPipeline.Summary.MedianWallMilliseconds)}",
 			$"  min/max: {FormatMilliseconds(report.WarmPipeline.Summary.MinWallMilliseconds)} / {FormatMilliseconds(report.WarmPipeline.Summary.MaxWallMilliseconds)}",
 			$"  avg cpu: {FormatMilliseconds(report.WarmPipeline.Summary.AvgCpuMilliseconds)}",
+			$"  avg allocated: {FormatMegabytes(report.WarmPipeline.Summary.AvgAllocatedBytes)}",
+			$"  avg loading: {FormatMilliseconds(report.WarmPipeline.Summary.AvgLoadingMilliseconds)}",
+			$"  avg analysis: {FormatMilliseconds(report.WarmPipeline.Summary.AvgAnalysisMilliseconds)}",
 			$"  managed memory: {FormatMegabytes(report.WarmPipeline.Summary.ManagedMemoryAfterBytes)}",
+			$"  workload stable: {report.WorkloadConsistent.ToString(CultureInfo.InvariantCulture)}",
+			$"  selection stable: {report.SelectionConsistent.ToString(CultureInfo.InvariantCulture)}",
+			$"  inventory stable: {report.InventoryConsistent.ToString(CultureInfo.InvariantCulture)}",
+			$"  metrics stable: {report.MetricsConsistent.ToString(CultureInfo.InvariantCulture)}",
+			$"  workload fingerprint: {report.Workload?.Fingerprint ?? "n/a"}",
 			string.Empty,
 			"Result:",
 			$"  {report.OutputPath}"
@@ -590,6 +610,11 @@ internal sealed record CommandLineBenchmarkReport(
 	string RuntimeIdentifier,
 	CommandLineBenchmarkRunConfiguration Configuration,
 	CommandLineBenchmarkExecutableInfo Executable,
+	CommandLineBenchmarkWorkload? Workload,
+	bool WorkloadConsistent,
+	bool SelectionConsistent,
+	bool InventoryConsistent,
+	bool MetricsConsistent,
 	CommandLineBenchmarkSection<CommandLineBenchmarkProcessRun> ColdProcess,
 	CommandLineBenchmarkSection<CommandLineBenchmarkPipelineRun> WarmPipeline,
 	bool HasFailures,
@@ -610,9 +635,31 @@ internal sealed record CommandLineBenchmarkReport(
 		var hasFailures =
 			coldMeasuredRuns.Any(static run => run.ExitCode != CommandLineExitCodes.Success) ||
 			warmMeasuredRuns.Any(static run => run.ExitCode != CommandLineExitCodes.Success);
+		var successfulWarmRuns = warmMeasuredRuns
+			.Where(static run => run.ExitCode == CommandLineExitCodes.Success)
+			.ToArray();
+		var workload = successfulWarmRuns
+			.Select(static run => run.Workload)
+			.FirstOrDefault(static value => value is not null);
+		var selectionConsistent = workload is not null && successfulWarmRuns.All(
+			run => string.Equals(
+				run.Workload?.SelectionFingerprint,
+				workload.SelectionFingerprint,
+				StringComparison.Ordinal));
+		var inventoryConsistent = workload is not null && successfulWarmRuns.All(
+			run => string.Equals(
+				run.Workload?.InventoryFingerprint,
+				workload.InventoryFingerprint,
+				StringComparison.Ordinal));
+		var metricsConsistent = workload is not null && successfulWarmRuns.All(
+			run => string.Equals(
+				run.Workload?.MetricsFingerprint,
+				workload.MetricsFingerprint,
+				StringComparison.Ordinal));
+		var workloadConsistent = selectionConsistent && inventoryConsistent && metricsConsistent;
 
 		return new CommandLineBenchmarkReport(
-			SchemaVersion: 1,
+			SchemaVersion: 2,
 			CreatedAt: createdAt,
 			TargetPath: Path.GetFullPath(targetPath).Replace('\\', '/'),
 			ApplicationVersion: applicationVersion,
@@ -621,11 +668,12 @@ internal sealed record CommandLineBenchmarkReport(
 			ProcessArchitecture: RuntimeInformation.ProcessArchitecture.ToString(),
 			RuntimeIdentifier: RuntimeInformation.RuntimeIdentifier,
 			Configuration: configuration,
-			Executable: new CommandLineBenchmarkExecutableInfo(
-				FileName: coldRequest.FileName,
-				Arguments: coldRequest.Arguments,
-				WorkingDirectory: coldRequest.WorkingDirectory,
-				CommandLine: coldRequest.CommandLine),
+			Executable: CommandLineBenchmarkExecutableInfo.Create(coldRequest),
+			Workload: workload,
+			WorkloadConsistent: workloadConsistent,
+			SelectionConsistent: selectionConsistent,
+			InventoryConsistent: inventoryConsistent,
+			MetricsConsistent: metricsConsistent,
 			ColdProcess: new CommandLineBenchmarkSection<CommandLineBenchmarkProcessRun>(
 				Summary: CommandLineBenchmarkSummary.FromProcessRuns(coldMeasuredRuns),
 				WarmupRuns: coldRuns.Where(static run => run.IsWarmup).ToArray(),
@@ -643,7 +691,162 @@ internal sealed record CommandLineBenchmarkExecutableInfo(
 	string FileName,
 	IReadOnlyList<string> Arguments,
 	string WorkingDirectory,
-	string CommandLine);
+	string CommandLine,
+	string? AssemblyPath,
+	string? AssemblySha256)
+{
+	public static CommandLineBenchmarkExecutableInfo Create(CommandLineBenchmarkProcessRequest request)
+	{
+		var assemblyPath = typeof(CommandLineBenchmarkRunner).Assembly.Location;
+		return new CommandLineBenchmarkExecutableInfo(
+			FileName: request.FileName,
+			Arguments: request.Arguments,
+			WorkingDirectory: request.WorkingDirectory,
+			CommandLine: request.CommandLine,
+			AssemblyPath: string.IsNullOrWhiteSpace(assemblyPath)
+				? null
+				: Path.GetFullPath(assemblyPath).Replace('\\', '/'),
+			AssemblySha256: TryGetSha256(assemblyPath));
+	}
+
+	private static string? TryGetSha256(string assemblyPath)
+	{
+		if (string.IsNullOrWhiteSpace(assemblyPath) || !File.Exists(assemblyPath))
+			return null;
+
+		try
+		{
+			using var stream = new FileStream(
+				assemblyPath,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 64 * 1024,
+				FileOptions.SequentialScan);
+			return Convert.ToHexString(SHA256.HashData(stream));
+		}
+		catch
+		{
+			return null;
+		}
+	}
+}
+
+internal sealed record CommandLineBenchmarkWorkload(
+	string Fingerprint,
+	string SelectionFingerprint,
+	string InventoryFingerprint,
+	string MetricsFingerprint,
+	int AvailableRootFolderCount,
+	int AvailableExtensionCount,
+	int SelectedRootFolderCount,
+	int SelectedExtensionCount,
+	IReadOnlyList<IgnoreOptionId> SelectedIgnoreOptions,
+	int DirectoryCount,
+	int FileCount,
+	int AccessDeniedDirectoryCount,
+	long TreeLines,
+	long TreeChars,
+	long TreeTokens,
+	long ContentLines,
+	long ContentChars,
+	long ContentTokens)
+{
+	public static CommandLineBenchmarkWorkload FromReport(ProjectAnalysisReport report)
+	{
+		var selectionFingerprint = BuildSelectionFingerprint(report);
+		var inventoryFingerprint = BuildInventoryFingerprint(report);
+		var metricsFingerprint = BuildMetricsFingerprint(report);
+		var fingerprint = HashValues(selectionFingerprint, inventoryFingerprint, metricsFingerprint);
+		return new CommandLineBenchmarkWorkload(
+			Fingerprint: fingerprint,
+			SelectionFingerprint: selectionFingerprint,
+			InventoryFingerprint: inventoryFingerprint,
+			MetricsFingerprint: metricsFingerprint,
+			AvailableRootFolderCount: report.Inventory.AvailableRootFolders.Count,
+			AvailableExtensionCount: report.Inventory.AvailableExtensions.Count,
+			SelectedRootFolderCount: report.Selection.SelectedRootFolders.Count,
+			SelectedExtensionCount: report.Selection.SelectedExtensions.Count,
+			SelectedIgnoreOptions: report.Selection.SelectedIgnoreOptions,
+			DirectoryCount: report.Inventory.Tree.DirectoryCount,
+			FileCount: report.Inventory.Tree.FileCount,
+			AccessDeniedDirectoryCount: report.Inventory.Tree.AccessDeniedDirectoryCount,
+			TreeLines: report.Metrics.Tree.Lines,
+			TreeChars: report.Metrics.Tree.Chars,
+			TreeTokens: report.Metrics.Tree.Tokens,
+			ContentLines: report.Metrics.Content.Lines,
+			ContentChars: report.Metrics.Content.Chars,
+			ContentTokens: report.Metrics.Content.Tokens);
+	}
+
+	private static string BuildSelectionFingerprint(ProjectAnalysisReport report)
+	{
+		var builder = new StringBuilder(capacity: 1024);
+		AppendValue(builder, report.RootPath);
+		AppendSortedValues(builder, report.Selection.SelectedRootFolders);
+		AppendSortedValues(builder, report.Selection.SelectedExtensions);
+		foreach (var option in report.Selection.SelectedIgnoreOptions)
+			AppendValue(builder, ((int)option).ToString(CultureInfo.InvariantCulture));
+		return Hash(builder);
+	}
+
+	private static string BuildInventoryFingerprint(ProjectAnalysisReport report)
+	{
+		var builder = new StringBuilder(capacity: 1024);
+		AppendSortedValues(builder, report.Inventory.AvailableRootFolders);
+		AppendSortedValues(builder, report.Inventory.AvailableExtensions);
+		AppendValue(builder, report.Inventory.Tree.DirectoryCount.ToString(CultureInfo.InvariantCulture));
+		AppendValue(builder, report.Inventory.Tree.FileCount.ToString(CultureInfo.InvariantCulture));
+		AppendValue(builder, report.Inventory.Tree.AccessDeniedDirectoryCount.ToString(CultureInfo.InvariantCulture));
+		return Hash(builder);
+	}
+
+	private static string BuildMetricsFingerprint(ProjectAnalysisReport report)
+	{
+		var builder = new StringBuilder(capacity: 256);
+		AppendValue(builder, report.Metrics.Tree.Lines.ToString(CultureInfo.InvariantCulture));
+		AppendValue(builder, report.Metrics.Tree.Chars.ToString(CultureInfo.InvariantCulture));
+		AppendValue(builder, report.Metrics.Tree.Tokens.ToString(CultureInfo.InvariantCulture));
+		AppendValue(builder, report.Metrics.Content.Lines.ToString(CultureInfo.InvariantCulture));
+		AppendValue(builder, report.Metrics.Content.Chars.ToString(CultureInfo.InvariantCulture));
+		AppendValue(builder, report.Metrics.Content.Tokens.ToString(CultureInfo.InvariantCulture));
+		return Hash(builder);
+	}
+
+	private static string HashValues(params string[] values)
+	{
+		var builder = new StringBuilder(capacity: values.Length * 65);
+		AppendValues(builder, values);
+		return Hash(builder);
+	}
+
+	private static string Hash(StringBuilder builder)
+	{
+		return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+	}
+
+	private static void AppendValues(StringBuilder builder, IReadOnlyList<string> values)
+	{
+		foreach (var value in values)
+			AppendValue(builder, value);
+	}
+
+	private static void AppendSortedValues(StringBuilder builder, IReadOnlyList<string> values)
+	{
+		var sortedValues = new List<string>(values);
+		sortedValues.Sort(StringComparer.Ordinal);
+		AppendValues(builder, sortedValues);
+	}
+
+	private static void AppendValue(StringBuilder builder, string value)
+	{
+		builder
+			.Append(value.Length.ToString(CultureInfo.InvariantCulture))
+			.Append(':')
+			.Append(value)
+			.Append(';');
+	}
+}
 
 internal sealed record CommandLineBenchmarkSection<TRun>(
 	CommandLineBenchmarkSummary Summary,
@@ -662,6 +865,10 @@ internal sealed record CommandLineBenchmarkSummary(
 	long? PeakWorkingSetBytes,
 	long? PeakPrivateMemoryBytes,
 	long? ManagedMemoryAfterBytes,
+	long? AvgAllocatedBytes,
+	double? AvgLoadingMilliseconds,
+	double? AvgAnalysisMilliseconds,
+	double? AvgReportedTotalMilliseconds,
 	long? AvgStdoutBytes)
 {
 	public static CommandLineBenchmarkSummary FromProcessRuns(IReadOnlyList<CommandLineBenchmarkProcessRun> runs)
@@ -676,6 +883,10 @@ internal sealed record CommandLineBenchmarkSummary(
 			peakWorkingSetBytes: MaxNullable(successfulRuns.Select(static run => run.PeakWorkingSetBytes)),
 			peakPrivateMemoryBytes: MaxNullable(successfulRuns.Select(static run => run.PeakPrivateMemoryBytes)),
 			managedMemoryAfterBytes: null,
+			allocatedBytes: null,
+			loadingMilliseconds: null,
+			analysisMilliseconds: null,
+			reportedTotalMilliseconds: null,
 			stdoutBytes: successfulRuns.Select(static run => (long?)run.StdoutBytes).ToArray());
 	}
 
@@ -691,6 +902,10 @@ internal sealed record CommandLineBenchmarkSummary(
 			peakWorkingSetBytes: MaxNullable(successfulRuns.Select(static run => run.WorkingSetBytes)),
 			peakPrivateMemoryBytes: MaxNullable(successfulRuns.Select(static run => run.PrivateMemoryBytes)),
 			managedMemoryAfterBytes: MaxNullable(successfulRuns.Select(static run => (long?)run.ManagedMemoryAfterBytes)),
+			allocatedBytes: successfulRuns.Select(static run => (long?)run.AllocatedBytes).ToArray(),
+			loadingMilliseconds: successfulRuns.Select(static run => run.LoadingMilliseconds).ToArray(),
+			analysisMilliseconds: successfulRuns.Select(static run => run.AnalysisMilliseconds).ToArray(),
+			reportedTotalMilliseconds: successfulRuns.Select(static run => run.ReportedTotalMilliseconds).ToArray(),
 			stdoutBytes: successfulRuns.Select(static run => (long?)run.StdoutBytes).ToArray());
 	}
 
@@ -703,6 +918,10 @@ internal sealed record CommandLineBenchmarkSummary(
 		long? peakWorkingSetBytes,
 		long? peakPrivateMemoryBytes,
 		long? managedMemoryAfterBytes,
+		IReadOnlyList<long?>? allocatedBytes,
+		IReadOnlyList<double?>? loadingMilliseconds,
+		IReadOnlyList<double?>? analysisMilliseconds,
+		IReadOnlyList<double?>? reportedTotalMilliseconds,
 		IReadOnlyList<long?> stdoutBytes)
 	{
 		return new CommandLineBenchmarkSummary(
@@ -717,6 +936,12 @@ internal sealed record CommandLineBenchmarkSummary(
 			PeakWorkingSetBytes: peakWorkingSetBytes,
 			PeakPrivateMemoryBytes: peakPrivateMemoryBytes,
 			ManagedMemoryAfterBytes: managedMemoryAfterBytes,
+			AvgAllocatedBytes: allocatedBytes is null ? null : AverageNullableLong(allocatedBytes),
+			AvgLoadingMilliseconds: loadingMilliseconds is null ? null : AverageNullable(loadingMilliseconds),
+			AvgAnalysisMilliseconds: analysisMilliseconds is null ? null : AverageNullable(analysisMilliseconds),
+			AvgReportedTotalMilliseconds: reportedTotalMilliseconds is null
+				? null
+				: AverageNullable(reportedTotalMilliseconds),
 			AvgStdoutBytes: AverageNullableLong(stdoutBytes));
 	}
 
@@ -782,10 +1007,15 @@ internal sealed record CommandLineBenchmarkPipelineRun(
 	long ManagedMemoryBeforeBytes,
 	long ManagedMemoryAfterBytes,
 	long ManagedMemoryDeltaBytes,
+	long AllocatedBytes,
 	int Gen0Collections,
 	int Gen1Collections,
 	int Gen2Collections,
 	int StdoutCharacters,
 	int StdoutBytes,
+	double? LoadingMilliseconds,
+	double? AnalysisMilliseconds,
+	double? ReportedTotalMilliseconds,
+	CommandLineBenchmarkWorkload? Workload,
 	int ExitCode,
 	string? Error);

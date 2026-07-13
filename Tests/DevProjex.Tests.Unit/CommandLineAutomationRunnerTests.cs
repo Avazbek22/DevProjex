@@ -509,7 +509,7 @@ public sealed class CommandLineAutomationRunnerTests
 
 		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
 		var root = document.RootElement;
-		Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), root.GetProperty("targetPath").GetString());
 		Assert.Equal(2, root.GetProperty("configuration").GetProperty("runs").GetInt32());
 		Assert.Equal(1, root.GetProperty("configuration").GetProperty("warmup").GetInt32());
@@ -518,7 +518,17 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.Equal(2, root.GetProperty("coldProcess").GetProperty("runs").GetArrayLength());
 		Assert.Equal(1, root.GetProperty("warmPipeline").GetProperty("warmupRuns").GetArrayLength());
 		Assert.Equal(2, root.GetProperty("warmPipeline").GetProperty("runs").GetArrayLength());
-		Assert.True(root.GetProperty("warmPipeline").GetProperty("runs")[0].GetProperty("stdoutBytes").GetInt32() > 0);
+		var firstWarmRun = root.GetProperty("warmPipeline").GetProperty("runs")[0];
+		Assert.True(firstWarmRun.GetProperty("stdoutBytes").GetInt32() > 0);
+		Assert.True(firstWarmRun.GetProperty("allocatedBytes").GetInt64() > 0);
+		Assert.True(firstWarmRun.GetProperty("loadingMilliseconds").GetDouble() >= 0);
+		Assert.True(firstWarmRun.GetProperty("analysisMilliseconds").GetDouble() >= 0);
+		Assert.True(root.GetProperty("workloadConsistent").GetBoolean());
+		Assert.True(root.GetProperty("selectionConsistent").GetBoolean());
+		Assert.True(root.GetProperty("inventoryConsistent").GetBoolean());
+		Assert.True(root.GetProperty("metricsConsistent").GetBoolean());
+		Assert.Equal(64, root.GetProperty("workload").GetProperty("fingerprint").GetString()!.Length);
+		Assert.Equal(64, root.GetProperty("executable").GetProperty("assemblySha256").GetString()!.Length);
 		Assert.Contains("--report -", root.GetProperty("executable").GetProperty("commandLine").GetString(), StringComparison.Ordinal);
 	}
 
