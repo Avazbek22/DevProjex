@@ -748,8 +748,14 @@ public sealed class MainWindowIgnoreOptionsUiTests
             // some of them off. The next refresh must preserve those manual choices.
             UiTestDriver.GetViewModel(secondWindow).Extensions.Single(option => option.Name == ".log").IsChecked = false;
             await UiTestDriver.WaitForSelectionRefreshIdleAsync(secondWindow);
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(secondWindow, "generated");
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.EmptyFolders,
+                visible: true,
+                isChecked: true);
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(secondWindow, IgnoreOptionId.EmptyFolders);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(secondWindow);
+            await UiTestDriver.ClickRootFolderCheckBoxAsync(secondWindow, "generated");
             await ApplySettingsAndWaitForIgnoreRefreshAsync(secondWindow);
 
             MutateExternalRefreshWorkspaceSecondWave(project.RootPath);
