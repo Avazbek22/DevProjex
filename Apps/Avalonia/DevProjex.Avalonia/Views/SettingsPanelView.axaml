@@ -6,12 +6,6 @@
              x:DataType="vm:MainWindowViewModel"
              x:CompileBindings="True">
   <UserControl.Styles>
-    <Style Selector="Border.settings-list-entry">
-      <Setter Property="Margin" Value="0,0,0,-3" />
-    </Style>
-    <Style Selector="Window.compact-mode Border.settings-list-entry">
-      <Setter Property="Margin" Value="0,0,0,-5" />
-    </Style>
     <Style Selector="CheckBox.settings-list-entry">
       <Setter Property="Margin" Value="0,1,0,-2" />
     </Style>
@@ -84,10 +78,10 @@
             </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:IgnoreOptionViewModel">
-                <Border Classes="ignore-option-item settings-list-entry">
+                <Border Classes="ignore-option-item">
                   <Grid RowDefinitions="Auto,Auto">
                     <CheckBox Grid.Row="0"
-                              Classes="list-item"
+                              Classes="list-item settings-list-entry"
                               Content="{Binding Label}"
                               IsChecked="{Binding IsChecked, Mode=TwoWay}" />
                     <Border Grid.Row="1"

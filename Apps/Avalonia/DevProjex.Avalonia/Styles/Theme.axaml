@@ -766,10 +766,6 @@
         <Setter Property="FontSize" Value="{ReflectionBinding $parent[CheckBox].FontSize}" />
     </Style>
 
-    <Style Selector="Window.compact-mode Border.ignore-option-separator">
-        <Setter Property="Margin" Value="0,-4,0,3" />
-    </Style>
-
     <!-- "All" checkboxes: same scale as list items, but text is compensated below. -->
     <Style Selector="Window.compact-mode CheckBox.section-all">
         <Setter Property="Margin" Value="0,4,2,-9" />
