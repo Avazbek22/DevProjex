@@ -1056,6 +1056,133 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Contains("PACKAGE_SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("ascii")]
+	[InlineData("json")]
+	[InlineData("xml")]
+	[InlineData("md")]
+	public async Task Process_TreeContentAllFormatsApplySmartIgnoreToTreeAndContent(string format)
+	{
+		using var temp = new TemporaryDirectory();
+		SeedPortableSmartIgnoreProject(temp);
+		var expectedFiles = new[]
+		{
+			"App.sln.DotSettings",
+			"packages.config",
+			"src/App.cs"
+		};
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.Format, format,
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var (treePart, contentPart) = SplitTreeContentStdout(format, result.Stdout);
+		AssertTreeOnlyStdoutContract(treePart, format, temp.Path, expectedFiles);
+		Assert.Contains("SOURCE_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.Contains("SHARED_SETTINGS_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("LOCAL_STATE_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("REPOSITORY_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("PACKAGE_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("DotSettings.user", treePart, StringComparison.Ordinal);
+		Assert.DoesNotContain("repositories.config", treePart, StringComparison.Ordinal);
+		Assert.DoesNotContain(".nupkg", treePart, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public async Task Process_SmartIgnorePortableStoreMatrixPrunesOnlyConfirmedStores()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("portable-store-matrix");
+		SeedPortableStoreMatrixProject(projectPath);
+		var sourceFiles = new[]
+		{
+			"source/_cacache/Cache.cs",
+			"source/modules-2/Modules.cs",
+			"source/packages/Domain.cs",
+			"source/registry/Registry.cs",
+			"source/repository/Repository.cs",
+			"src/App.cs"
+		};
+		var artifactFiles = new[]
+		{
+			".cargo/registry/index/config.json",
+			".gradle/caches/modules-2/files-2.1/acme.jar",
+			".m2/repository/acme/module.pom",
+			".npm/_cacache/content-v2/sha",
+			".nuget/packages/acme/Acme.nupkg"
+		};
+
+		var smartOnly = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+		var noIgnores = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, smartOnly.ExitCode);
+		Assert.Equal(string.Empty, smartOnly.Stderr);
+		AssertTreeOnlyStdoutContract(smartOnly.Stdout, "json", projectPath, sourceFiles);
+
+		Assert.Equal(CommandLineExitCodes.Success, noIgnores.ExitCode);
+		Assert.Equal(string.Empty, noIgnores.Stderr);
+		AssertTreeOnlyStdoutContract(
+			noIgnores.Stdout,
+			"json",
+			projectPath,
+			sourceFiles.Concat(artifactFiles).ToArray());
+	}
+
+	[Fact]
+	public async Task Process_SmartIgnoreXmlFileExportMatchesStdoutTreeContract()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("portable smart project");
+		SeedPortableSmartIgnoreProject(projectPath);
+		var outputPath = Path.Combine(temp.Path, "exports", "smart-tree.xml");
+		var expectedFiles = new[]
+		{
+			"App.sln.DotSettings",
+			"packages.config",
+			"src/App.cs"
+		};
+
+		var stdoutResult = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "xml",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+		var fileResult = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "xml",
+			CommandLineOptionTokens.Output, outputPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+
+		Assert.Equal(CommandLineExitCodes.Success, stdoutResult.ExitCode);
+		Assert.Equal(string.Empty, stdoutResult.Stderr);
+		AssertTreeOnlyStdoutContract(stdoutResult.Stdout, "xml", projectPath, expectedFiles);
+
+		Assert.Equal(CommandLineExitCodes.Success, fileResult.ExitCode);
+		Assert.Equal(string.Empty, fileResult.Stderr);
+		Assert.Equal(Path.GetFullPath(outputPath), AssertSingleOutputLine(fileResult.Stdout));
+		Assert.True(File.Exists(outputPath));
+		var exported = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
+		AssertTreeOnlyStdoutContract(exported, "xml", projectPath, expectedFiles);
+		Assert.True(XNode.DeepEquals(XDocument.Parse(stdoutResult.Stdout), XDocument.Parse(exported)));
+	}
+
 	[Fact]
 	public async Task Process_ExportTreeContentToRelativeOutputFromWorkingDirectory()
 	{
@@ -2123,6 +2250,21 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		WriteProjectFile(projectPath, Path.Combine("packages", "Alpha.1.0.0", "lib", "Alpha.dll"), "binary\n");
 		WriteProjectFile(projectPath, Path.Combine("packages", "Beta.2.0.0", "Beta.2.0.0.nupkg"), "package\n");
 		WriteProjectFile(projectPath, Path.Combine("packages", "Beta.2.0.0", "ref", "Beta.dll"), "binary\n");
+	}
+
+	private static void SeedPortableStoreMatrixProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, Path.Combine("src", "App.cs"), "class App {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "packages", "Domain.cs"), "class Domain {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "repository", "Repository.cs"), "class Repository {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "registry", "Registry.cs"), "class Registry {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "_cacache", "Cache.cs"), "class Cache {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "modules-2", "Modules.cs"), "class Modules {}\n");
+		WriteProjectFile(projectPath, Path.Combine(".nuget", "packages", "acme", "Acme.nupkg"), "package\n");
+		WriteProjectFile(projectPath, Path.Combine(".m2", "repository", "acme", "module.pom"), "<project />\n");
+		WriteProjectFile(projectPath, Path.Combine(".cargo", "registry", "index", "config.json"), "{}\n");
+		WriteProjectFile(projectPath, Path.Combine(".npm", "_cacache", "content-v2", "sha"), "cache\n");
+		WriteProjectFile(projectPath, Path.Combine(".gradle", "caches", "modules-2", "files-2.1", "acme.jar"), "binary\n");
 	}
 
 	private static void SeedComplexUserProject(string projectPath)
