@@ -93,6 +93,7 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
         temp.CreateFile("App.csproj", "<Project />\n");
         temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
         temp.CreateFile(Path.Combine("docs", "readme.md"), "docs\n");
+        Directory.CreateDirectory(Path.Combine(temp.Path, "src", "empty-nested"));
         temp.CreateFile(Path.Combine("artifacts", "publish", "App.dll"), "artifact\n");
         temp.CreateFile(Path.Combine("codex", "rules", "default.rules"), "rules\n");
         temp.CreateFile(Path.Combine("publish", "App.dll"), "publish\n");
@@ -107,6 +108,14 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
                 CaptureTreeInventory = true
             },
             TestContext.Current.CancellationToken);
+
+        AssertEmptyFoldersState(defaults, expectedChecked: true, expectedCount: 2);
+        Assert.DoesNotContain(defaults.RootOptions!, option => option.Name == "temp");
+        Assert.Equal(
+            ["docs", "src"],
+            defaults.RootOptions!.Select(static option => option.Name).Order(PathComparer.Default));
+        AssertRootOptionsMatchProjectedTree(temp.Path, services, defaults);
+
         var scansBeforeToggle = scanner.WorkspaceScanCount;
         var ignoreStates = new Dictionary<IgnoreOptionId, bool>(defaults.IgnoreOptionStateCache)
         {
@@ -128,12 +137,10 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal(1, scanner.WorkspaceScanCount - scansBeforeToggle);
-        Assert.Contains(emptyFoldersDisabled.IgnoreOptions, option =>
-            option.Id == IgnoreOptionId.EmptyFolders && !option.IsChecked);
+        AssertEmptyFoldersState(emptyFoldersDisabled, expectedChecked: false, expectedCount: 2);
         Assert.Contains(emptyFoldersDisabled.IgnoreOptions, option =>
             option.Id == IgnoreOptionId.UseGitIgnore && option.IsChecked);
         Assert.True(emptyFoldersDisabled.ControllerImpactCounts.GitIgnore > 0);
-        Assert.Equal(1, emptyFoldersDisabled.IgnoreOptionCounts.EmptyFolders);
         Assert.Contains(emptyFoldersDisabled.RootOptions!, option =>
             option.Name == "temp" && option.IsChecked);
         Assert.DoesNotContain(emptyFoldersDisabled.RootOptions!, option =>
@@ -142,6 +149,35 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
             ["docs", "src", "temp"],
             emptyFoldersDisabled.RootOptions!.Select(static option => option.Name).Order(PathComparer.Default));
         AssertRootOptionsMatchProjectedTree(temp.Path, services, emptyFoldersDisabled);
+
+        var scansBeforeReenable = scanner.WorkspaceScanCount;
+        var reenabledIgnoreStates = new Dictionary<IgnoreOptionId, bool>(
+            emptyFoldersDisabled.IgnoreOptionStateCache)
+        {
+            [IgnoreOptionId.EmptyFolders] = true
+        };
+        var reenabledIgnoreOptions = ProjectLoadWorkflowRefreshHarness
+            .CollectCheckedIgnoreOptionIds(emptyFoldersDisabled);
+        reenabledIgnoreOptions.Add(IgnoreOptionId.EmptyFolders);
+        var emptyFoldersReenabled = services.Engine.ComputeFullRefreshSnapshot(
+            ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(temp.Path, emptyFoldersDisabled) with
+            {
+                IgnoreSelectionInitialized = true,
+                IgnoreSelectionCache = reenabledIgnoreOptions,
+                IgnoreOptionStateCache = reenabledIgnoreStates,
+                IgnoreOptionStateCacheIsComplete = true,
+                IgnoreAllPreference = null,
+                CaptureTreeInventory = true
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, scanner.WorkspaceScanCount - scansBeforeReenable);
+        AssertEmptyFoldersState(emptyFoldersReenabled, expectedChecked: true, expectedCount: 2);
+        Assert.DoesNotContain(emptyFoldersReenabled.RootOptions!, option => option.Name == "temp");
+        Assert.Equal(
+            ["docs", "src"],
+            emptyFoldersReenabled.RootOptions!.Select(static option => option.Name).Order(PathComparer.Default));
+        AssertRootOptionsMatchProjectedTree(temp.Path, services, emptyFoldersReenabled);
     }
 
     [Fact]
@@ -196,7 +232,8 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
         temp.CreateFile("App.csproj", "<Project />\n");
         temp.CreateFile(Path.Combine("src", "level-1", "level-2", "App.cs"), "class App {}\n");
         temp.CreateFile(Path.Combine("docs", "level-1", "level-2", "readme.md"), "docs\n");
-        var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+        var scanner = new CountingWorkspaceScanner();
+        var services = ProjectLoadWorkflowRefreshHarness.CreateServices(scanner);
 
         var defaults = services.Engine.ComputeFullRefreshSnapshot(
             ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path) with
@@ -210,11 +247,15 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
             defaults.RootOptions!.Select(static option => option.Name).Order(PathComparer.Default));
         AssertRootOptionsMatchProjectedTree(temp.Path, services, defaults);
 
+        var scansBeforeDisable = scanner.WorkspaceScanCount;
         var markdownDisabled = RefreshWithExtensionState(temp.Path, services, defaults, ".md", isChecked: false);
 
+        Assert.Equal(1, scanner.WorkspaceScanCount - scansBeforeDisable);
+        AssertEmptyFoldersState(markdownDisabled, expectedChecked: true, expectedCount: 3);
         Assert.Equal(["src"], markdownDisabled.RootOptions!.Select(static option => option.Name));
         AssertRootOptionsMatchProjectedTree(temp.Path, services, markdownDisabled);
 
+        var scansBeforeEnable = scanner.WorkspaceScanCount;
         var markdownEnabled = RefreshWithExtensionState(
             temp.Path,
             services,
@@ -222,6 +263,7 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
             ".md",
             isChecked: true);
 
+        Assert.Equal(1, scanner.WorkspaceScanCount - scansBeforeEnable);
         Assert.Equal(
             ["docs", "src"],
             markdownEnabled.RootOptions!.Select(static option => option.Name).Order(PathComparer.Default));
@@ -304,6 +346,19 @@ public sealed class SelectionRefreshRootTreeParityIntegrationTests
             rootPath,
             services.IgnoreRulesService,
             snapshot);
+    }
+
+    private static void AssertEmptyFoldersState(
+        SelectionRefreshSnapshot snapshot,
+        bool expectedChecked,
+        int expectedCount)
+    {
+        Assert.Equal(expectedCount, snapshot.IgnoreOptionCounts.EmptyFolders);
+        var option = Assert.Single(
+            snapshot.IgnoreOptions,
+            option => option.Id == IgnoreOptionId.EmptyFolders);
+        Assert.Equal(expectedChecked, option.IsChecked);
+        Assert.EndsWith($"({expectedCount})", option.Label);
     }
 
     private static SelectionRefreshSnapshot RefreshWithAllIgnoreOptionsDisabled(

@@ -37,6 +37,41 @@ public sealed class ProjectTreeInventoryRootFolderProjectionTests
         Assert.Equal(expectedVisible, projected.Contains(option));
     }
 
+    [Theory]
+    [InlineData(ProjectionCase.EmptyFolderIgnored, true)]
+    [InlineData(ProjectionCase.DisallowedExtension, true)]
+    [InlineData(ProjectionCase.IgnoredExtensionlessFile, true)]
+    [InlineData(ProjectionCase.IgnoredEmptyFile, true)]
+    [InlineData(ProjectionCase.IgnoredDotFile, true)]
+    [InlineData(ProjectionCase.IgnoredHiddenFile, true)]
+    [InlineData(ProjectionCase.IgnoredSmartDirectory, true)]
+    [InlineData(ProjectionCase.GitIgnoredFile, true)]
+    [InlineData(ProjectionCase.EmptyFolderVisible, false)]
+    [InlineData(ProjectionCase.AllowedFile, false)]
+    [InlineData(ProjectionCase.ExtensionlessFile, false)]
+    [InlineData(ProjectionCase.GitNegatedDescendant, false)]
+    [InlineData(ProjectionCase.AccessDeniedDirectory, false)]
+    [InlineData(ProjectionCase.DeepAllowedFile, false)]
+    [InlineData(ProjectionCase.MixedIgnoredAndVisibleBranches, false)]
+    public void RemoveCheckedRootsWithoutVisibleStructure_EmptyFolderOwnershipMatrix(
+        ProjectionCase projectionCase,
+        bool expectedOwnedByEmptyFolders)
+    {
+        var fixture = CreateFixture(projectionCase);
+
+        ProjectTreeInventoryRootFolderProjection.RemoveCheckedRootsWithoutVisibleStructure(
+            fixture.Inventory,
+            [new SelectionOption("project", IsChecked: true)],
+            fixture.AllowedExtensions,
+            fixture.Rules,
+            out var emptyFolderOwnedRemovedRoots,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            expectedOwnedByEmptyFolders,
+            emptyFolderOwnedRemovedRoots?.Contains("project") == true);
+    }
+
     [Fact]
     public void RemoveCheckedRootsWithoutVisibleStructure_EmptyFoldersVisible_KeepsTraversableGitIgnoredRootHidden()
     {
@@ -65,6 +100,31 @@ public sealed class ProjectTreeInventoryRootFolderProjectionTests
             TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(option, projected);
+    }
+
+    [Fact]
+    public void RemoveCheckedRootsWithoutVisibleStructure_TraversableGitIgnoredRoot_IsNotOwnedByEmptyFolders()
+    {
+        var rootPath = CreateSyntheticRootPath();
+        var inventory = BuildInventory(rootPath, DirectoryNode("project", FileNode("drop.txt")));
+        var rules = CreateRules(ignoreEmptyFolders: true) with
+        {
+            UseGitIgnore = true,
+            GitIgnoreMatcher = GitIgnoreMatcher.Build(
+                rootPath,
+                ["project/", "!**/packages/build/"])
+        };
+
+        var projected = ProjectTreeInventoryRootFolderProjection.RemoveCheckedRootsWithoutVisibleStructure(
+            inventory,
+            [new SelectionOption("project", IsChecked: true)],
+            new HashSet<string>([".txt"], StringComparer.OrdinalIgnoreCase),
+            rules,
+            out var emptyFolderOwnedRemovedRoots,
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(projected);
+        Assert.Null(emptyFolderOwnedRemovedRoots);
     }
 
     [Fact]

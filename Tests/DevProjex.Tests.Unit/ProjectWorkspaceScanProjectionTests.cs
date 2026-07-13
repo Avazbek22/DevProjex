@@ -12,6 +12,7 @@ public sealed class ProjectWorkspaceScanProjectionTests
 			["keep"],
 			includeDirectoryToggleProbeRoots: true,
 			includeControllerImpactProbeRoots: true,
+			retainedRemovedRootEmptyFolderImpactRoots: null,
 			out var projected);
 
 		Assert.True(reused);
@@ -26,6 +27,29 @@ public sealed class ProjectWorkspaceScanProjectionTests
 	}
 
 	[Fact]
+	public void TryProjectSelectedRoots_RetainsOnlyExplicitlyOwnedEmptyFolderImpact()
+	{
+		var source = CreateSource();
+
+		var reused = ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
+			source,
+			["keep"],
+			includeDirectoryToggleProbeRoots: true,
+			includeControllerImpactProbeRoots: true,
+			retainedRemovedRootEmptyFolderImpactRoots:
+				new HashSet<string>(["remove"], PathComparer.Default),
+			out var projected);
+
+		Assert.True(reused);
+		Assert.Equal(
+			new IgnoreOptionCounts(HiddenFolders: 1, EmptyFolders: 5, DotFolders: 1),
+			projected.Value.IgnoreSection.EffectiveIgnoreOptionCounts);
+		Assert.DoesNotContain(".md", projected.Value.IgnoreSection.Extensions);
+		Assert.DoesNotContain(".tmp", projected.Value.IgnoreSection.Extensions);
+		Assert.Equal(0, projected.Value.IgnoreSection.EffectiveIgnoreOptionCounts.EmptyFiles);
+	}
+
+	[Fact]
 	public void TryProjectSelectedRoots_UnknownRootFallsBack()
 	{
 		var reused = ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
@@ -33,6 +57,7 @@ public sealed class ProjectWorkspaceScanProjectionTests
 			["new-root"],
 			includeDirectoryToggleProbeRoots: true,
 			includeControllerImpactProbeRoots: true,
+			retainedRemovedRootEmptyFolderImpactRoots: null,
 			out _);
 
 		Assert.False(reused);
@@ -46,6 +71,7 @@ public sealed class ProjectWorkspaceScanProjectionTests
 			["keep"],
 			includeDirectoryToggleProbeRoots: false,
 			includeControllerImpactProbeRoots: true,
+			retainedRemovedRootEmptyFolderImpactRoots: null,
 			out _);
 
 		Assert.False(reused);
@@ -61,6 +87,7 @@ public sealed class ProjectWorkspaceScanProjectionTests
 			["keep"],
 			includeDirectoryToggleProbeRoots: true,
 			includeControllerImpactProbeRoots: true,
+			retainedRemovedRootEmptyFolderImpactRoots: null,
 			out _);
 
 		Assert.False(reused);
@@ -81,11 +108,17 @@ public sealed class ProjectWorkspaceScanProjectionTests
 				RootAccessDenied: false,
 				HadAccessDenied: false),
 			["remove"] = new(
-				CreateSection([".md"], new IgnoreOptionCounts(EmptyFiles: 4)),
+				CreateSection([".md"], new IgnoreOptionCounts(EmptyFolders: 3, EmptyFiles: 4)),
 				new IgnoreOptionCounts(DotFolders: 1),
 				new IgnoreControllerImpactCounts(SmartIgnore: 1),
 				RootAccessDenied: false,
-				HadAccessDenied: removedRootHadAccessDenied)
+				HadAccessDenied: removedRootHadAccessDenied),
+			["controller-remove"] = new(
+				CreateSection([".tmp"], new IgnoreOptionCounts(EmptyFolders: 7, EmptyFiles: 8)),
+				IgnoreOptionCounts.Empty,
+				IgnoreControllerImpactCounts.Empty,
+				RootAccessDenied: false,
+				HadAccessDenied: false)
 		};
 		var breakdown = new ProjectWorkspaceScanBreakdown(
 			rootFiles,
@@ -113,7 +146,9 @@ public sealed class ProjectWorkspaceScanProjectionTests
 			hadAccessDenied: false);
 
 		return new ProjectWorkspaceScanSnapshot(
-			CreateSection([".root", ".cs", ".md"], new IgnoreOptionCounts(EmptyFolders: 2, EmptyFiles: 4)),
+			CreateSection(
+				[".root", ".cs", ".md", ".tmp"],
+				new IgnoreOptionCounts(EmptyFolders: 12, EmptyFiles: 12)),
 			inventory,
 			breakdown);
 	}

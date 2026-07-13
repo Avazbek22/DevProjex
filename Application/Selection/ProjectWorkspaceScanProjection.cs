@@ -7,6 +7,7 @@ public static class ProjectWorkspaceScanProjection
 		IReadOnlyCollection<string> selectedRoots,
 		bool includeDirectoryToggleProbeRoots,
 		bool includeControllerImpactProbeRoots,
+		IReadOnlySet<string>? retainedRemovedRootEmptyFolderImpactRoots,
 		out ScanResult<ProjectWorkspaceScanSnapshot> projected)
 	{
 		projected = default!;
@@ -58,6 +59,16 @@ public static class ProjectWorkspaceScanProjection
 				effectiveCounts = effectiveCounts.Add(rootSnapshot.DirectoryToggleProbeCounts);
 			if (includeControllerImpactProbeRoots)
 				controllerImpactCounts = controllerImpactCounts.Add(rootSnapshot.ControllerImpactProbeCounts);
+			if (retainedRemovedRootEmptyFolderImpactRoots?.Contains(rootName) == true)
+			{
+				// Preserve only roots classified as EmptyFolders-owned by the inventory projection.
+				// Controller-owned roots stay excluded from both the tree and the option count.
+				effectiveCounts = effectiveCounts with
+				{
+					EmptyFolders = effectiveCounts.EmptyFolders +
+					               rootSnapshot.IgnoreSection.EffectiveIgnoreOptionCounts.EmptyFolders
+				};
+			}
 		}
 
 		if (includeDirectoryToggleProbeRoots)

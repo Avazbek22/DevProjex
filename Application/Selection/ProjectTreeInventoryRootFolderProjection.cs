@@ -9,9 +9,25 @@ public static class ProjectTreeInventoryRootFolderProjection
         IReadOnlyList<SelectionOption> rootOptions,
         IReadOnlySet<string> allowedExtensions,
         IgnoreRules rules,
+        CancellationToken cancellationToken = default) =>
+        RemoveCheckedRootsWithoutVisibleStructure(
+            inventory,
+            rootOptions,
+            allowedExtensions,
+            rules,
+            out _,
+            cancellationToken);
+
+    public static IReadOnlyList<SelectionOption> RemoveCheckedRootsWithoutVisibleStructure(
+        ProjectTreeInventorySnapshot inventory,
+        IReadOnlyList<SelectionOption> rootOptions,
+        IReadOnlySet<string> allowedExtensions,
+        IgnoreRules rules,
+        out IReadOnlySet<string>? emptyFolderOwnedRemovedRoots,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        emptyFolderOwnedRemovedRoots = null;
         if (rootOptions.Count == 0 || inventory.Entries.Count == 0 || inventory.RootAccessDenied)
             return rootOptions;
 
@@ -28,24 +44,34 @@ public static class ProjectTreeInventoryRootFolderProjection
         var gitIgnoreContext = rules.CreateGitIgnoreScanContext(inventoryRoot.FullPath);
         var pendingDirectories = new Stack<int>();
         List<SelectionOption>? projectedOptions = null;
+        HashSet<string>? emptyFolderOwnedRoots = null;
         for (var optionIndex = 0; optionIndex < rootOptions.Count; optionIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var option = rootOptions[optionIndex];
-            var keepOption = !option.IsChecked ||
-                             (rootEntryIndexes.TryGetValue(option.Name, out var rootEntryIndex) &&
-                              HasSelectableStructure(
-                                  inventory,
-                                  rootEntryIndex,
-                                  allowedExtensions,
-                                  rules,
-                                  gitIgnoreContext,
-                                  pendingDirectories,
-                                  cancellationToken));
+            var projection = !option.IsChecked
+                ? RootProjection.Visible
+                : rootEntryIndexes.TryGetValue(option.Name, out var rootEntryIndex)
+                    ? ClassifySelectableStructure(
+                        inventory,
+                        rootEntryIndex,
+                        allowedExtensions,
+                        rules,
+                        gitIgnoreContext,
+                        pendingDirectories,
+                        cancellationToken)
+                    : RootProjection.HiddenByOtherRules;
+            var keepOption = projection == RootProjection.Visible;
             if (keepOption)
             {
                 projectedOptions?.Add(option);
                 continue;
+            }
+
+            if (projection == RootProjection.HiddenByEmptyFolders)
+            {
+                emptyFolderOwnedRoots ??= new HashSet<string>(PathComparer.Default);
+                emptyFolderOwnedRoots.Add(option.Name);
             }
 
             if (projectedOptions is null)
@@ -56,10 +82,11 @@ public static class ProjectTreeInventoryRootFolderProjection
             }
         }
 
+        emptyFolderOwnedRemovedRoots = emptyFolderOwnedRoots;
         return projectedOptions ?? rootOptions;
     }
 
-    private static bool HasSelectableStructure(
+    private static RootProjection ClassifySelectableStructure(
         ProjectTreeInventorySnapshot inventory,
         int rootEntryIndex,
         IReadOnlySet<string> allowedExtensions,
@@ -70,6 +97,7 @@ public static class ProjectTreeInventoryRootFolderProjection
     {
         pendingDirectories.Clear();
         pendingDirectories.Push(rootEntryIndex);
+        var hasStructureHiddenByEmptyFolders = false;
 
         while (pendingDirectories.Count > 0)
         {
@@ -94,14 +122,16 @@ public static class ProjectTreeInventoryRootFolderProjection
             }
 
             if (directory.IsAccessDenied)
-                return true;
+                return RootProjection.Visible;
 
             // A traversable Git-ignored directory is only a path to possible negated descendants.
-            // Do not surface the directory itself when EmptyFolders is disabled.
+            // It is not an EmptyFolders-owned root unless a normally visible descendant exists.
             var isTraversedGitIgnoredDirectory =
                 gitIgnore.IsIgnored && gitIgnore.ShouldTraverseIgnoredDirectory;
             if (!rules.IgnoreEmptyFolders && !isTraversedGitIgnoredDirectory)
-                return true;
+                return RootProjection.Visible;
+            if (!isTraversedGitIgnoredDirectory)
+                hasStructureHiddenByEmptyFolders = true;
 
             for (var childOffset = 0; childOffset < directory.ChildCount; childOffset++)
             {
@@ -129,11 +159,13 @@ public static class ProjectTreeInventoryRootFolderProjection
                     rules.ShouldApplySmartIgnore(directory.FullPath, isDirectory: true),
                     fileGitIgnore);
                 if (!fileDecision.IsIgnored && IsAllowedFile(child.Name, allowedExtensions))
-                    return true;
+                    return RootProjection.Visible;
             }
         }
 
-        return false;
+        return hasStructureHiddenByEmptyFolders
+            ? RootProjection.HiddenByEmptyFolders
+            : RootProjection.HiddenByOtherRules;
     }
 
     private static bool IsAllowedFile(string fileName, IReadOnlySet<string> allowedExtensions)
@@ -155,5 +187,12 @@ public static class ProjectTreeInventoryRootFolderProjection
         }
 
         return allowedExtensions.Contains(extension.ToString());
+    }
+
+    private enum RootProjection
+    {
+        Visible,
+        HiddenByEmptyFolders,
+        HiddenByOtherRules
     }
 }

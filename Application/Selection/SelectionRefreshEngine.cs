@@ -159,6 +159,7 @@ public sealed class SelectionRefreshEngine(
         var previousRuntimeSnapshot = EmptySnapshotState;
         IReadOnlyList<SelectionOption>? refreshedRootOptions = null;
         ProjectWorkspaceScanSnapshot? reusableWorkspaceScan = null;
+        HashSet<string>? reusableRemovedRootEmptyFolderImpactRoots = null;
         var rootAccessDenied = false;
         var hadAccessDenied = false;
 
@@ -169,7 +170,9 @@ public sealed class SelectionRefreshEngine(
         for (var passIndex = 0; passIndex < MaximumDynamicSnapshotPasses; passIndex++)
         {
             var workspaceScanReuse = reusableWorkspaceScan;
+            var removedRootEmptyFolderImpactRoots = reusableRemovedRootEmptyFolderImpactRoots;
             reusableWorkspaceScan = null;
+            reusableRemovedRootEmptyFolderImpactRoots = null;
             var snapshot = BuildSingleDynamicSnapshot(
                 context,
                 currentRoots,
@@ -177,6 +180,7 @@ public sealed class SelectionRefreshEngine(
                 currentIgnoreStateCache,
                 previousRuntimeSnapshot,
                 workspaceScanReuse,
+                removedRootEmptyFolderImpactRoots,
                 cancellationToken);
 
             rootAccessDenied |= snapshot.RootAccessDenied;
@@ -193,6 +197,7 @@ public sealed class SelectionRefreshEngine(
                             snapshot.VisibleExtensionOptions,
                             StringComparer.OrdinalIgnoreCase),
                         snapshot.EffectiveRules,
+                        out var emptyFolderOwnedRemovedRoots,
                         cancellationToken);
                 if (!ReferenceEquals(projectedRootOptions, currentRootOptions))
                 {
@@ -200,6 +205,11 @@ public sealed class SelectionRefreshEngine(
                     refreshedRootOptions = projectedRootOptions;
                     currentRoots = CollectCheckedSelectionNames(projectedRootOptions, PathComparer.Default);
                     rootProjectionChanged = true;
+                    if (emptyFolderOwnedRemovedRoots is not null)
+                    {
+                        removedRootEmptyFolderImpactRoots ??= new HashSet<string>(PathComparer.Default);
+                        removedRootEmptyFolderImpactRoots.UnionWith(emptyFolderOwnedRemovedRoots);
+                    }
                 }
             }
 
@@ -238,7 +248,10 @@ public sealed class SelectionRefreshEngine(
             previousSnapshot = snapshot.SnapshotState;
             previousRuntimeSnapshot = snapshot.SnapshotState;
             if (canReuseWorkspaceScan)
+            {
                 reusableWorkspaceScan = snapshot.WorkspaceScan;
+                reusableRemovedRootEmptyFolderImpactRoots = removedRootEmptyFolderImpactRoots;
+            }
 
             if (passIndex == MaximumDynamicSnapshotPasses - 1)
             {
@@ -261,6 +274,7 @@ public sealed class SelectionRefreshEngine(
         IReadOnlyDictionary<IgnoreOptionId, bool> ignoreStateCache,
         IgnoreSectionSnapshotState previousRuntimeSnapshotState,
         ProjectWorkspaceScanSnapshot? reusableWorkspaceScan,
+        IReadOnlySet<string>? retainedRemovedRootEmptyFolderImpactRoots,
         CancellationToken cancellationToken)
     {
         var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
@@ -278,6 +292,7 @@ public sealed class SelectionRefreshEngine(
             ignoreRules,
             effectiveExtensionPolicy,
             reusableWorkspaceScan,
+            retainedRemovedRootEmptyFolderImpactRoots,
             cancellationToken);
         var scanData = scan.Value.IgnoreSection;
 
@@ -328,6 +343,7 @@ public sealed class SelectionRefreshEngine(
                 ignoreRules,
                 BuildResolvedExtensionPolicy(extensionOptions),
                 reusableWorkspaceScan: null,
+                retainedRemovedRootEmptyFolderImpactRoots: null,
                 cancellationToken);
             scanData = scan.Value.IgnoreSection;
 
@@ -399,6 +415,7 @@ public sealed class SelectionRefreshEngine(
         IgnoreRules ignoreRules,
         IExtensionInclusionPolicy? effectiveExtensionPolicy,
         ProjectWorkspaceScanSnapshot? reusableWorkspaceScan,
+        IReadOnlySet<string>? retainedRemovedRootEmptyFolderImpactRoots,
         CancellationToken cancellationToken)
     {
         var includeDirectoryToggleProbeRoots = ShouldIncludeDirectoryToggleProbeRoots(
@@ -415,6 +432,7 @@ public sealed class SelectionRefreshEngine(
                 selectedRoots,
                 includeDirectoryToggleProbeRoots,
                 includeControllerImpactProbeRoots,
+                retainedRemovedRootEmptyFolderImpactRoots,
                 out var projectedScan))
         {
             return projectedScan;
