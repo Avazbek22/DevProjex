@@ -8924,7 +8924,8 @@ public partial class MainWindow : Window
                 _previewPipeline.CancelActiveBuild();
                 break;
             case StatusOperationType.SelectionRefresh:
-                _selectionCoordinator.CancelPendingRefreshes();
+                if (_selectionCoordinator.CancelPendingRefreshes())
+                    _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
                 break;
             case StatusOperationType.ApplySettings:
                 _applySettingsCts?.Cancel();

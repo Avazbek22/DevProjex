@@ -1499,6 +1499,125 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task IgnoreAllRefresh_CancelRestoresStableSelectionTreeAndMetricsBeforeLateScanCompletes()
+    {
+        using var project = UiTestProject.CreateWithRootExtensionIgnoreStressWorkspace();
+        using var blockingScanner = new SwitchableBlockingFileSystemScanner(
+            project.RootPath,
+            ignoreCancellation: true);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            configureServices: services => services with
+            {
+                ScanOptionsUseCase = new ScanOptionsUseCase(blockingScanner)
+            });
+
+        try
+        {
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var englishIgnoreLabels = viewModel.IgnoreOptions
+                .Select(static option => (option.Id, option.Label))
+                .ToArray();
+            await UiTestDriver.RaiseMenuItemClickAsync(
+                UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageRuMenuItem"));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !englishIgnoreLabels.SequenceEqual(
+                    viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label))),
+                "ignore option labels to be localized before the rollback baseline is exercised");
+
+            var stableRoots = viewModel.RootFolders
+                .Select(static option => (option.Name, option.IsChecked))
+                .ToArray();
+            var stableExtensions = viewModel.Extensions
+                .Select(static option => (option.Name, option.IsChecked))
+                .ToArray();
+            var stableIgnoreOptions = viewModel.IgnoreOptions
+                .Select(static option => (option.Id, option.Label, option.IsChecked))
+                .ToArray();
+            var stableTreeNodes = viewModel.TreeNodes.ToArray();
+            var stableAllRootsChecked = viewModel.AllRootFoldersChecked;
+            var stableAllExtensionsChecked = viewModel.AllExtensionsChecked;
+            var stableAllIgnoreChecked = viewModel.AllIgnoreChecked;
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(
+                window,
+                out var stableTreeMetrics,
+                out var stableContentMetrics));
+
+            blockingScanner.EnableBlocking();
+            await UiTestDriver.ClickAsync(
+                window,
+                UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+            Assert.True(
+                blockingScanner.WaitForBlockedCall(TimeSpan.FromSeconds(10)),
+                "The ignore-all refresh did not reach the controlled scanner block.");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => viewModel.StatusBusy &&
+                      string.Equals(
+                          viewModel.StatusOperationText,
+                          viewModel.StatusOperationUpdatingOptions,
+                          StringComparison.Ordinal),
+                "the blocked ignore-all refresh to expose its cancellation action");
+
+            Assert.False(viewModel.AllIgnoreChecked);
+            Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
+
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+
+            Assert.Equal(stableAllRootsChecked, viewModel.AllRootFoldersChecked);
+            Assert.Equal(stableAllExtensionsChecked, viewModel.AllExtensionsChecked);
+            Assert.Equal(stableAllIgnoreChecked, viewModel.AllIgnoreChecked);
+            Assert.Equal(
+                stableRoots,
+                viewModel.RootFolders.Select(static option => (option.Name, option.IsChecked)).ToArray());
+            Assert.Equal(
+                stableExtensions,
+                viewModel.Extensions.Select(static option => (option.Name, option.IsChecked)).ToArray());
+            Assert.Equal(
+                stableIgnoreOptions,
+                viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
+            Assert.Equal(stableTreeNodes.Length, viewModel.TreeNodes.Count);
+            for (var index = 0; index < stableTreeNodes.Length; index++)
+                Assert.Same(stableTreeNodes[index], viewModel.TreeNodes[index]);
+
+            // The scanner intentionally ignores cancellation. Releasing it verifies that the
+            // invalidated late result cannot overwrite the synchronously restored presentation.
+            blockingScanner.Release();
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+
+            Assert.Equal(
+                stableRoots,
+                viewModel.RootFolders.Select(static option => (option.Name, option.IsChecked)).ToArray());
+            Assert.Equal(
+                stableExtensions,
+                viewModel.Extensions.Select(static option => (option.Name, option.IsChecked)).ToArray());
+            Assert.Equal(
+                stableIgnoreOptions,
+                viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
+            Assert.Equal(stableAllRootsChecked, viewModel.AllRootFoldersChecked);
+            Assert.Equal(stableAllExtensionsChecked, viewModel.AllExtensionsChecked);
+            Assert.Equal(stableAllIgnoreChecked, viewModel.AllIgnoreChecked);
+            Assert.Equal(stableTreeNodes.Length, viewModel.TreeNodes.Count);
+            for (var index = 0; index < stableTreeNodes.Length; index++)
+                Assert.Same(stableTreeNodes[index], viewModel.TreeNodes[index]);
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(
+                window,
+                out var restoredTreeMetrics,
+                out var restoredContentMetrics));
+            Assert.Equal(stableTreeMetrics, restoredTreeMetrics);
+            Assert.Equal(stableContentMetrics, restoredContentMetrics);
+        }
+        finally
+        {
+            blockingScanner.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task ProjectSwitch_BlockedStaleIgnoreRefreshDoesNotOverwriteNewProject()
     {
         using var projectA = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
