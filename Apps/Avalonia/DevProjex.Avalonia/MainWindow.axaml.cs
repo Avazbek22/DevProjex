@@ -321,6 +321,7 @@ public partial class MainWindow : Window
     // Real-time metrics calculation
     private CancellationTokenSource? _previewSelectionMetricsCts;
     private DispatcherTimer? _previewSelectionMetricsDebounceTimer;
+    private readonly TreeSelectionSnapshotCache _treeSelectionSnapshotCache = new();
 
     private int _previewSelectionMetricsVersion;
     private static readonly TimeSpan PreviewSelectionMetricsDebounceInterval = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80));
@@ -422,7 +423,6 @@ public partial class MainWindow : Window
         EnsureAppStateStoresExist();
         LoadRecentProjects();
         DataContext = _viewModel;
-        SubscribeToMetricsUpdates();
 
         InitializeComponent();
 
@@ -726,7 +726,6 @@ public partial class MainWindow : Window
             _viewModel.PropertyChanged -= _viewModelPropertyChangedHandler;
 
         // Unsubscribe from tree checkbox changes for metrics
-        UnsubscribeFromMetricsUpdates();
 
         // Unsubscribe from DragDrop events
         if (_dropZoneContainer is not null)
@@ -8056,8 +8055,13 @@ public partial class MainWindow : Window
         // startup costs on large projects. We now materialize only the root-visible level
         // during load and defer deeper branches until the UI actually needs them.
         var node = materializeChildrenNow || descriptor.Children.Count == 0
-            ? new TreeNodeViewModel(descriptor, parent, icon)
-            : new TreeNodeViewModel(descriptor, parent, icon, BuildDeferredChildViewModels);
+            ? new TreeNodeViewModel(descriptor, parent, icon, checkedChanged: OnTreeNodeCheckedChanged)
+            : new TreeNodeViewModel(
+                descriptor,
+                parent,
+                icon,
+                BuildDeferredChildViewModels,
+                OnTreeNodeCheckedChanged);
 
         if (!materializeChildrenNow || descriptor.Children.Count == 0)
             return node;
@@ -8531,12 +8535,7 @@ public partial class MainWindow : Window
     }
 
     private HashSet<string> GetCheckedPaths()
-    {
-        var selected = new HashSet<string>(PathComparer.Default);
-        foreach (var node in _viewModel.TreeNodes)
-            node.CollectCheckedPaths(selected);
-        return selected;
-    }
+        => _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
 
     private IReadOnlyList<string> BuildOrderedUniqueFilePaths(IReadOnlySet<string> selectedPaths)
     {
@@ -8695,18 +8694,9 @@ public partial class MainWindow : Window
 
     private bool IsBackgroundMetricsActive() => _metrics.IsBackgroundActive;
 
-    private void SubscribeToMetricsUpdates()
+    private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
     {
-        TreeNodeViewModel.GlobalCheckedChanged += OnTreeNodeCheckedChanged;
-    }
-
-    private void UnsubscribeFromMetricsUpdates()
-    {
-        TreeNodeViewModel.GlobalCheckedChanged -= OnTreeNodeCheckedChanged;
-    }
-
-    private void OnTreeNodeCheckedChanged(object? sender, EventArgs e)
-    {
+        _treeSelectionSnapshotCache.Invalidate();
         _metrics.ScheduleRecalculate();
         SchedulePreviewRefresh();
     }

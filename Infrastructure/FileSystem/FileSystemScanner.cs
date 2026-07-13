@@ -544,8 +544,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var gitIgnoreEvaluation = rules.UseGitIgnore
 			? gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: true, name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
-		var gitIgnoreCandidateEvaluation =
-			gitIgnoreCandidateContext.Evaluate(fullPath, relativePath, isDirectory: true, name);
+		var gitIgnoreCandidateEvaluation = rules.GitIgnoreCandidateMatchesActiveRules
+			? gitIgnoreEvaluation
+			: gitIgnoreCandidateContext.Evaluate(fullPath, relativePath, isDirectory: true, name);
+		var isSmartIgnored = rules.IsSmartIgnoredDirectory(fullPath, name);
 
 		return new DirectoryScanFacts(
 			Name: name,
@@ -553,8 +555,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			RelativePath: relativePath,
 			IsHidden: isHidden,
 			IsDot: IgnoreRuleSemantics.IsDotName(name),
-			IsSmartIgnored: rules.IsSmartIgnoredDirectory(fullPath, name),
-			IsSmartIgnoredCandidate: rules.IsSmartIgnoredDirectoryCandidate(fullPath, name),
+			IsSmartIgnored: isSmartIgnored,
+			IsSmartIgnoredCandidate: rules.SmartIgnoreCandidateMatchesActiveRules
+				? isSmartIgnored
+				: rules.IsSmartIgnoredDirectoryCandidate(fullPath, name),
 			GitIgnoreEvaluation: gitIgnoreEvaluation,
 			GitIgnoreCandidateEvaluation: gitIgnoreCandidateEvaluation);
 	}
@@ -598,9 +602,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var extensionStart = GetExtensionStart(name);
 		var gitIgnored = rules.UseGitIgnore &&
 		                 gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: false, name).IsIgnored;
-		var gitIgnoredCandidate = gitIgnoreCandidateContext
-			.Evaluate(fullPath, relativePath, isDirectory: false, name)
-			.IsIgnored;
+		var gitIgnoredCandidate = rules.GitIgnoreCandidateMatchesActiveRules
+			? gitIgnored
+			: gitIgnoreCandidateContext
+				.Evaluate(fullPath, relativePath, isDirectory: false, name)
+				.IsIgnored;
+		var isSmartIgnored = rules.IsSmartIgnoredFile(fullPath, name, shouldApplySmartIgnoreForFiles);
 
 		return new FileScanFacts(
 			Name: name,
@@ -610,11 +617,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			IsDot: IgnoreRuleSemantics.IsDotName(name),
 			IsEmpty: length == 0,
 			IsExtensionless: isExtensionless,
-			IsSmartIgnored: rules.IsSmartIgnoredFile(fullPath, name, shouldApplySmartIgnoreForFiles),
-			IsSmartIgnoredCandidate: rules.IsSmartIgnoredFileCandidate(
-				fullPath,
-				name,
-				shouldApplySmartIgnoreCandidateForFiles),
+			IsSmartIgnored: isSmartIgnored,
+			IsSmartIgnoredCandidate: rules.SmartIgnoreCandidateMatchesActiveRules
+				? isSmartIgnored
+				: rules.IsSmartIgnoredFileCandidate(
+					fullPath,
+					name,
+					shouldApplySmartIgnoreCandidateForFiles),
 			IsGitIgnored: gitIgnored,
 			IsGitIgnoredCandidate: gitIgnoredCandidate);
 	}

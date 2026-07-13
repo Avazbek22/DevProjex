@@ -596,6 +596,25 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void ApplyRootOptions_WhenOnlyCheckedStateChanges_UpdatesExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.AllRootFoldersChecked = false;
+		var coordinator = CreateCoordinator(viewModel);
+		ApplyRootOptions(coordinator, [new SelectionOption("src", true), new SelectionOption("tests", false)]);
+		var firstRoot = viewModel.RootFolders[0];
+		var collectionEvents = 0;
+		viewModel.RootFolders.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyRootOptions(coordinator, [new SelectionOption("src", false), new SelectionOption("tests", true)]);
+
+		Assert.Same(firstRoot, viewModel.RootFolders[0]);
+		Assert.False(viewModel.RootFolders[0].IsChecked);
+		Assert.True(viewModel.RootFolders[1].IsChecked);
+		Assert.Equal(0, collectionEvents);
+	}
+
+	[Fact]
 	public void ApplyExtensionOptions_WhenOptionsAreUnchanged_KeepsExistingViewModels()
 	{
 		var viewModel = CreateViewModel();
@@ -615,6 +634,25 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		ApplyExtensionOptions(coordinator, options);
 
 		Assert.Same(firstExtension, viewModel.Extensions[0]);
+		Assert.Equal(0, collectionEvents);
+	}
+
+	[Fact]
+	public void ApplyExtensionOptions_WhenOnlyCheckedStateChanges_UpdatesExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.AllExtensionsChecked = false;
+		var coordinator = CreateCoordinator(viewModel);
+		ApplyExtensionOptions(coordinator, [new SelectionOption(".cs", true), new SelectionOption(".md", false)]);
+		var firstExtension = viewModel.Extensions[0];
+		var collectionEvents = 0;
+		viewModel.Extensions.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyExtensionOptions(coordinator, [new SelectionOption(".cs", false), new SelectionOption(".md", true)]);
+
+		Assert.Same(firstExtension, viewModel.Extensions[0]);
+		Assert.False(viewModel.Extensions[0].IsChecked);
+		Assert.True(viewModel.Extensions[1].IsChecked);
 		Assert.Equal(0, collectionEvents);
 	}
 
@@ -642,6 +680,30 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		ApplyResolvedIgnoreOptions(coordinator, options, stateCache);
 
 		Assert.Same(firstIgnoreOption, viewModel.IgnoreOptions[0]);
+		Assert.Equal(0, collectionEvents);
+	}
+
+	[Fact]
+	public void ApplyResolvedIgnoreOptions_WhenStateAndLabelChange_UpdatesExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(viewModel);
+		ApplyResolvedIgnoreOptions(
+			coordinator,
+			[new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders (1)", true, true)],
+			new Dictionary<IgnoreOptionId, bool> { [IgnoreOptionId.DotFolders] = true });
+		var firstIgnoreOption = viewModel.IgnoreOptions[0];
+		var collectionEvents = 0;
+		viewModel.IgnoreOptions.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyResolvedIgnoreOptions(
+			coordinator,
+			[new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders (2)", true, false)],
+			new Dictionary<IgnoreOptionId, bool> { [IgnoreOptionId.DotFolders] = false });
+
+		Assert.Same(firstIgnoreOption, viewModel.IgnoreOptions[0]);
+		Assert.Equal("dot folders (2)", firstIgnoreOption.Label);
+		Assert.False(firstIgnoreOption.IsChecked);
 		Assert.Equal(0, collectionEvents);
 	}
 

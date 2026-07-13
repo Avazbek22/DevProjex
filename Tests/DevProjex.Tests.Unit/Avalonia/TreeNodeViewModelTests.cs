@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class TreeNodeViewModelTests
@@ -306,6 +308,86 @@ public sealed class TreeNodeViewModelTests
 
         Assert.All(root.Children, child => Assert.True(child.IsChecked is false));
         Assert.True(root.IsChecked is false);
+    }
+
+    [Fact]
+    public void IsChecked_CascadeSkipsBranchesAlreadyInTargetState()
+    {
+        var root = CreateTree();
+        root.Children[0].IsChecked = true;
+        var unchangedBranch = root.Children[1];
+        var propertyChangedCount = 0;
+        unchangedBranch.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(TreeNodeViewModel.IsChecked))
+                propertyChangedCount++;
+        };
+
+        root.IsChecked = false;
+
+        Assert.Equal(0, propertyChangedCount);
+        Assert.False(unchangedBranch.IsChecked);
+    }
+
+    [Fact]
+    public void CheckedChangedCallback_IsScopedToOwningTree()
+    {
+        var firstTreeChanges = 0;
+        var secondTreeChanges = 0;
+        var firstRoot = new TreeNodeViewModel(
+            CreateDescriptor("First"),
+            parent: null,
+            icon: null,
+            checkedChanged: _ => firstTreeChanges++);
+        var secondRoot = new TreeNodeViewModel(
+            CreateDescriptor("Second"),
+            parent: null,
+            icon: null,
+            checkedChanged: _ => secondTreeChanges++);
+
+        firstRoot.IsChecked = true;
+
+        Assert.Equal(1, firstTreeChanges);
+        Assert.Equal(0, secondTreeChanges);
+    }
+
+    [Fact]
+    public void TreeSelectionSnapshotCache_ReusesSnapshotUntilSelectionChanges()
+    {
+        var root = CreateTree();
+        root.IsChecked = true;
+        var roots = new List<TreeNodeViewModel> { root };
+        var cache = new TreeSelectionSnapshotCache();
+
+        var first = cache.GetOrCreate(roots);
+        var second = cache.GetOrCreate(roots);
+        root.IsChecked = false;
+        cache.Invalidate();
+        var changed = cache.GetOrCreate(roots);
+
+        Assert.Same(first, second);
+        Assert.NotSame(first, changed);
+        Assert.Contains(root.FullPath, first);
+        Assert.Empty(changed);
+    }
+
+    [Fact]
+    public void TreeSelectionSnapshotCache_RebuildsWhenTreeRootChanges()
+    {
+        var firstRoot = CreateNode("First");
+        firstRoot.IsChecked = true;
+        var roots = new List<TreeNodeViewModel> { firstRoot };
+        var cache = new TreeSelectionSnapshotCache();
+        var first = cache.GetOrCreate(roots);
+        var secondRoot = CreateNode("Second");
+        secondRoot.IsChecked = true;
+        roots[0] = secondRoot;
+
+        var second = cache.GetOrCreate(roots);
+
+        Assert.NotSame(first, second);
+        Assert.DoesNotContain(firstRoot.FullPath, second);
+        Assert.Contains(secondRoot.FullPath, second);
     }
 
     [Fact]

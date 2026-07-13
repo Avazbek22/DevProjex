@@ -11,6 +11,8 @@ public sealed class ProjectAnalysisService(
 	IFileContentAnalyzer fileContentAnalyzer,
 	Func<DateTimeOffset>? utcNowProvider = null)
 {
+	private const int MaximumConcurrentContentMetricReads = 4;
+	private const int ContentMetricBatchSize = 1024;
 	private readonly Func<DateTimeOffset> _utcNowProvider = utcNowProvider ?? (() => DateTimeOffset.UtcNow);
 
 	public async Task<ProjectAnalysisReport> AnalyzeAsync(
@@ -171,26 +173,50 @@ public sealed class ProjectAnalysisService(
 		if (orderedFilePaths is null || orderedFilePaths.Count == 0)
 			return ExportOutputMetrics.Empty;
 
-		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		foreach (var path in orderedFilePaths)
+		var parallelOptions = new ParallelOptions
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var metrics = await fileContentAnalyzer.GetTextFileMetricsAsync(path, cancellationToken)
-				.ConfigureAwait(false);
-			if (metrics is null)
-				continue;
+			MaxDegreeOfParallelism = Math.Min(
+				MaximumConcurrentContentMetricReads,
+				ScanParallelismPolicy.MaxDegreeOfParallelism),
+			CancellationToken = cancellationToken
+		};
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		var batchMetrics = new TextFileMetrics?[Math.Min(ContentMetricBatchSize, orderedFilePaths.Count)];
+		for (var batchStart = 0; batchStart < orderedFilePaths.Count; batchStart += batchMetrics.Length)
+		{
+			var batchCount = Math.Min(batchMetrics.Length, orderedFilePaths.Count - batchStart);
+			await Parallel.ForAsync(
+				0,
+				batchCount,
+				parallelOptions,
+				async (batchIndex, token) =>
+				{
+					batchMetrics[batchIndex] = await fileContentAnalyzer
+						.GetTextFileMetricsAsync(orderedFilePaths[batchStart + batchIndex], token)
+						.ConfigureAwait(false);
+				}).ConfigureAwait(false);
 
-			accumulator.AppendFile(new ContentFileMetrics(
-				Path: path,
-				SizeBytes: metrics.SizeBytes,
-				LineCount: metrics.LineCount,
-				CharCount: metrics.CharCount,
-				IsEmpty: metrics.IsEmpty,
-				IsWhitespaceOnly: metrics.IsWhitespaceOnly,
-				IsEstimated: metrics.IsEstimated,
-				CrLfPairCount: metrics.CrLfPairCount,
-				TrailingNewlineChars: metrics.TrailingNewlineChars,
-				TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+			for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var metrics = batchMetrics[batchIndex];
+				if (metrics is null)
+					continue;
+
+				accumulator.AppendFile(new ContentFileMetrics(
+					Path: orderedFilePaths[batchStart + batchIndex],
+					SizeBytes: metrics.SizeBytes,
+					LineCount: metrics.LineCount,
+					CharCount: metrics.CharCount,
+					IsEmpty: metrics.IsEmpty,
+					IsWhitespaceOnly: metrics.IsWhitespaceOnly,
+					IsEstimated: metrics.IsEstimated,
+					CrLfPairCount: metrics.CrLfPairCount,
+					TrailingNewlineChars: metrics.TrailingNewlineChars,
+					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+			}
+
+			Array.Clear(batchMetrics, 0, batchCount);
 		}
 
 		return accumulator.ToMetrics();

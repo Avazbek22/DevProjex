@@ -6,11 +6,34 @@
              x:DataType="vm:MainWindowViewModel"
              x:CompileBindings="True">
   <UserControl.Styles>
-    <Style Selector="StackPanel.settings-list-panel">
-      <Setter Property="Spacing" Value="-3" />
+    <Style Selector="Border.settings-list-entry">
+      <Setter Property="Margin" Value="0,0,0,-3" />
     </Style>
-    <Style Selector="Window.compact-mode StackPanel.settings-list-panel">
-      <Setter Property="Spacing" Value="-5" />
+    <Style Selector="Window.compact-mode Border.settings-list-entry">
+      <Setter Property="Margin" Value="0,0,0,-5" />
+    </Style>
+    <Style Selector="CheckBox.settings-list-entry">
+      <Setter Property="Margin" Value="0,1,0,-2" />
+    </Style>
+    <Style Selector="Window.compact-mode CheckBox.settings-list-entry">
+      <Setter Property="Margin" Value="0,0,0,-5" />
+    </Style>
+    <Style Selector="ListBox.settings-list">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ListBox.settings-list > ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Focusable" Value="False" />
+    </Style>
+    <Style Selector="ListBox.settings-list > ListBoxItem:selected">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.settings-list > ListBoxItem:pointerover">
+      <Setter Property="Background" Value="Transparent" />
     </Style>
   </UserControl.Styles>
   <Border Name="PanelRoot"
@@ -41,32 +64,34 @@
                     IsCheckedChanged="OnIgnoreAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
-          <ScrollViewer IsScrollInertiaEnabled="True"
-                        VerticalScrollBarVisibility="Auto"
-                        HorizontalScrollBarVisibility="Disabled">
-            <ItemsControl ItemsSource="{Binding IgnoreOptions}">
-              <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <StackPanel Classes="settings-list-panel" />
-                </ItemsPanelTemplate>
-              </ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:IgnoreOptionViewModel">
-                  <Border Classes="ignore-option-item">
-                    <Grid RowDefinitions="Auto,Auto">
-                      <CheckBox Grid.Row="0"
-                                Classes="list-item"
-                                Content="{Binding Label}"
-                                IsChecked="{Binding IsChecked, Mode=TwoWay}" />
-                      <Border Grid.Row="1"
-                              Classes="ignore-option-separator"
-                              IsVisible="{Binding IsGitIgnoreOption}" />
-                    </Grid>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </ScrollViewer>
+          <ListBox Name="IgnoreOptionsList"
+                   Classes="settings-list"
+                   ItemsSource="{Binding IgnoreOptions}"
+                   SelectionMode="Multiple"
+                   ScrollViewer.IsScrollInertiaEnabled="True"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <VirtualizingStackPanel />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:IgnoreOptionViewModel">
+                <Border Classes="ignore-option-item settings-list-entry">
+                  <Grid RowDefinitions="Auto,Auto">
+                    <CheckBox Grid.Row="0"
+                              Classes="list-item"
+                              Content="{Binding Label}"
+                              IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                    <Border Grid.Row="1"
+                            Classes="ignore-option-separator"
+                            IsVisible="{Binding IsGitIgnoreOption}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
         </Border>
       </Grid>
 
@@ -79,23 +104,25 @@
                     IsCheckedChanged="OnExtensionsAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
-          <ScrollViewer IsScrollInertiaEnabled="True"
-                        VerticalScrollBarVisibility="Auto"
-                        HorizontalScrollBarVisibility="Disabled">
-            <ItemsControl ItemsSource="{Binding Extensions}">
-              <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <StackPanel Classes="settings-list-panel" />
-                </ItemsPanelTemplate>
-              </ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:SelectionOptionViewModel">
-                  <CheckBox Classes="list-item" Content="{Binding Name}"
-                            IsChecked="{Binding IsChecked, Mode=TwoWay}" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </ScrollViewer>
+          <ListBox Name="ExtensionsList"
+                   Classes="settings-list"
+                   ItemsSource="{Binding Extensions}"
+                   SelectionMode="Multiple"
+                   ScrollViewer.IsScrollInertiaEnabled="True"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <VirtualizingStackPanel />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:SelectionOptionViewModel">
+                <CheckBox Classes="list-item settings-list-entry" Content="{Binding Name}"
+                          IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
         </Border>
       </Grid>
 
@@ -109,23 +136,25 @@
                     IsCheckedChanged="OnRootAllChanged" />
         </Grid>
         <Border Grid.Row="1" Classes="checklist-border">
-          <ScrollViewer IsScrollInertiaEnabled="True"
-                        VerticalScrollBarVisibility="Auto"
-                        HorizontalScrollBarVisibility="Disabled">
-            <ItemsControl ItemsSource="{Binding RootFolders}">
-              <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <StackPanel Classes="settings-list-panel" />
-                </ItemsPanelTemplate>
-              </ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:SelectionOptionViewModel">
-                  <CheckBox Classes="list-item" Content="{Binding Name}"
-                            IsChecked="{Binding IsChecked, Mode=TwoWay}" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </ScrollViewer>
+          <ListBox Name="RootFoldersList"
+                   Classes="settings-list"
+                   ItemsSource="{Binding RootFolders}"
+                   SelectionMode="Multiple"
+                   ScrollViewer.IsScrollInertiaEnabled="True"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <VirtualizingStackPanel />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:SelectionOptionViewModel">
+                <CheckBox Classes="list-item settings-list-entry" Content="{Binding Name}"
+                          IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
         </Border>
       </Grid>
     </Grid>

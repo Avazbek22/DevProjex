@@ -30,6 +30,8 @@ public sealed record IgnoreRules(
 
 	public bool UseGitIgnore { get; init; }
 	public bool UseSmartIgnore { get; init; }
+	public bool GitIgnoreCandidateMatchesActiveRules { get; init; }
+	public bool SmartIgnoreCandidateMatchesActiveRules { get; init; }
 	public bool IgnoreEmptyFolders { get; init; }
 	public bool IgnoreEmptyFiles { get; init; }
 	public bool IgnoreExtensionlessFiles { get; init; }

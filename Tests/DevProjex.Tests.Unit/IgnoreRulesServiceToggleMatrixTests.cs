@@ -29,6 +29,8 @@ public sealed class IgnoreRulesServiceToggleMatrixTests
 
 		Assert.Equal(useGitIgnoreSelected, rules.UseGitIgnore);
 		Assert.Equal(expectedUseSmartIgnore, rules.UseSmartIgnore);
+		Assert.Equal(rules.UseGitIgnore, rules.GitIgnoreCandidateMatchesActiveRules);
+		Assert.Equal(rules.UseSmartIgnore, rules.SmartIgnoreCandidateMatchesActiveRules);
 		Assert.Equal(selected.Contains(IgnoreOptionId.HiddenFolders), rules.IgnoreHiddenFolders);
 		Assert.Equal(selected.Contains(IgnoreOptionId.HiddenFiles), rules.IgnoreHiddenFiles);
 		Assert.Equal(selected.Contains(IgnoreOptionId.DotFolders), rules.IgnoreDotFolders);

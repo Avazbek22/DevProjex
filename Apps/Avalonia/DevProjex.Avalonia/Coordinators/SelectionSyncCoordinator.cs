@@ -1279,7 +1279,19 @@ public sealed partial class SelectionSyncCoordinator(
             : IgnoreControllerImpactCounts.Empty;
         _hasIgnoreOptionCounts = hasIgnoreOptionCounts;
 
-        if (!SelectionOptionsMatch(viewModel.Extensions, options))
+        if (SelectionOptionIdentitiesMatch(viewModel.Extensions, options))
+        {
+            _suppressExtensionItemCheck = true;
+            try
+            {
+                UpdateSelectionOptionStates(viewModel.Extensions, options);
+            }
+            finally
+            {
+                _suppressExtensionItemCheck = false;
+            }
+        }
+        else
         {
             var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
             foreach (var option in options)
@@ -1301,7 +1313,19 @@ public sealed partial class SelectionSyncCoordinator(
 
     private void ApplyRootOptions(IReadOnlyList<SelectionOption> options)
     {
-        if (!SelectionOptionsMatch(viewModel.RootFolders, options))
+        if (SelectionOptionIdentitiesMatch(viewModel.RootFolders, options))
+        {
+            _suppressRootItemCheck = true;
+            try
+            {
+                UpdateSelectionOptionStates(viewModel.RootFolders, options);
+            }
+            finally
+            {
+                _suppressRootItemCheck = false;
+            }
+        }
+        else
         {
             var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
             foreach (var option in options)
@@ -1325,11 +1349,19 @@ public sealed partial class SelectionSyncCoordinator(
         IReadOnlyList<ResolvedIgnoreOptionState> options,
         IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
     {
-        var descriptors = new List<IgnoreOptionDescriptor>(options.Count);
-        foreach (var option in options)
-            descriptors.Add(new IgnoreOptionDescriptor(option.Id, option.Label, option.DefaultChecked));
-
-        if (!IgnoreOptionsMatch(viewModel.IgnoreOptions, options))
+        if (IgnoreOptionIdentitiesMatch(viewModel.IgnoreOptions, options))
+        {
+            _suppressIgnoreItemCheck = true;
+            try
+            {
+                UpdateIgnoreOptionStates(viewModel.IgnoreOptions, options);
+            }
+            finally
+            {
+                _suppressIgnoreItemCheck = false;
+            }
+        }
+        else
         {
             var optionViewModels = new List<IgnoreOptionViewModel>(options.Count);
             foreach (var option in options)
@@ -1346,7 +1378,14 @@ public sealed partial class SelectionSyncCoordinator(
             }
         }
 
-        _ignoreOptions = descriptors;
+        if (!IgnoreOptionDescriptorsMatch(_ignoreOptions, options))
+        {
+            var descriptors = new List<IgnoreOptionDescriptor>(options.Count);
+            foreach (var option in options)
+                descriptors.Add(new IgnoreOptionDescriptor(option.Id, option.Label, option.DefaultChecked));
+
+            _ignoreOptions = descriptors;
+        }
         _session.IgnoreOptions.ReplaceStateCache(stateCache);
         _session.IgnoreOptionStateCacheIsComplete = true;
         SyncIgnoreAllCheckbox();
@@ -1396,7 +1435,7 @@ public sealed partial class SelectionSyncCoordinator(
             collection.Add(item);
     }
 
-    private static bool SelectionOptionsMatch(
+    private static bool SelectionOptionIdentitiesMatch(
         IReadOnlyList<SelectionOptionViewModel> current,
         IReadOnlyList<SelectionOption> next)
     {
@@ -1405,18 +1444,50 @@ public sealed partial class SelectionSyncCoordinator(
 
         for (var index = 0; index < next.Count; index++)
         {
-            if (!string.Equals(current[index].Name, next[index].Name, StringComparison.Ordinal) ||
-                current[index].IsChecked != next[index].IsChecked)
-            {
+            if (!string.Equals(current[index].Name, next[index].Name, StringComparison.Ordinal))
                 return false;
-            }
         }
 
         return true;
     }
 
-    private static bool IgnoreOptionsMatch(
+    private static void UpdateSelectionOptionStates(
+        IReadOnlyList<SelectionOptionViewModel> current,
+        IReadOnlyList<SelectionOption> next)
+    {
+        for (var index = 0; index < next.Count; index++)
+            current[index].IsChecked = next[index].IsChecked;
+    }
+
+    private static bool IgnoreOptionIdentitiesMatch(
         IReadOnlyList<IgnoreOptionViewModel> current,
+        IReadOnlyList<ResolvedIgnoreOptionState> next)
+    {
+        if (current.Count != next.Count)
+            return false;
+
+        for (var index = 0; index < next.Count; index++)
+        {
+            if (current[index].Id != next[index].Id)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static void UpdateIgnoreOptionStates(
+        IReadOnlyList<IgnoreOptionViewModel> current,
+        IReadOnlyList<ResolvedIgnoreOptionState> next)
+    {
+        for (var index = 0; index < next.Count; index++)
+        {
+            current[index].Label = next[index].Label;
+            current[index].IsChecked = next[index].IsChecked;
+        }
+    }
+
+    private static bool IgnoreOptionDescriptorsMatch(
+        IReadOnlyList<IgnoreOptionDescriptor> current,
         IReadOnlyList<ResolvedIgnoreOptionState> next)
     {
         if (current.Count != next.Count)
@@ -1428,7 +1499,7 @@ public sealed partial class SelectionSyncCoordinator(
             var nextOption = next[index];
             if (currentOption.Id != nextOption.Id ||
                 !string.Equals(currentOption.Label, nextOption.Label, StringComparison.Ordinal) ||
-                currentOption.IsChecked != nextOption.IsChecked)
+                currentOption.DefaultChecked != nextOption.DefaultChecked)
             {
                 return false;
             }

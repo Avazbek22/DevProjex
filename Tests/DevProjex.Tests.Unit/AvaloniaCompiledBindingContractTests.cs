@@ -64,6 +64,26 @@ public sealed class AvaloniaCompiledBindingContractTests
 		return data;
 	}
 
+	[Fact]
+	public void SettingsPanel_UsesVirtualizedListsForChecklistSections()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"Views",
+			"SettingsPanelView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+
+		Assert.Equal(3, root.Descendants(avaloniaNamespace + "ListBox").Count());
+		Assert.Equal(3, root.Descendants(avaloniaNamespace + "VirtualizingStackPanel").Count());
+		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsControl"));
+		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsRepeater"));
+	}
+
 	private static string FindRepositoryRoot()
 	{
 		var directory = AppContext.BaseDirectory;

@@ -258,6 +258,11 @@ internal static class UiTestDriver
 
     public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "RootFoldersList",
+            GetViewModel(window).RootFolders.FirstOrDefault(option =>
+                string.Equals(option.Name, rootFolderName, StringComparison.Ordinal)));
         await ClickResolvedControlAsync(
             window,
             () => FindRootFolderCheckBox(window, rootFolderName),
@@ -266,6 +271,11 @@ internal static class UiTestDriver
 
     public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "ExtensionsList",
+            GetViewModel(window).Extensions.FirstOrDefault(option =>
+                string.Equals(option.Name, extensionName, StringComparison.Ordinal)));
         await ClickResolvedControlAsync(
             window,
             () => FindExtensionCheckBox(window, extensionName),
@@ -274,6 +284,10 @@ internal static class UiTestDriver
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "IgnoreOptionsList",
+            GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
         await ClickResolvedControlAsync(
             window,
             () => FindIgnoreOptionCheckBox(window, optionId),
@@ -1137,6 +1151,19 @@ internal static class UiTestDriver
 
         if (scrolled)
             await WaitForSettledFramesAsync(frameCount: 6);
+    }
+
+    private static async Task ScrollSettingsItemIntoViewAsync(
+        MainWindow window,
+        string listName,
+        object? item)
+    {
+        if (item is null)
+            return;
+
+        var list = GetRequiredControl<ListBox>(window, listName);
+        await window.Dispatcher.InvokeAsync(() => list.ScrollIntoView(item));
+        await WaitForSettledFramesAsync(frameCount: 4);
     }
 
     private static async Task WaitForControlReadyForPointerAsync(MainWindow window, Control control)

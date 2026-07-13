@@ -102,6 +102,8 @@ public sealed class IgnoreRulesService(
 			IgnoreExtensionlessFiles = selectedOptions.Contains(IgnoreOptionId.ExtensionlessFiles),
 			UseGitIgnore = useGitIgnore,
 			UseSmartIgnore = useSmartIgnore,
+			GitIgnoreCandidateMatchesActiveRules = useGitIgnore,
+			SmartIgnoreCandidateMatchesActiveRules = useSmartIgnore,
 			GitIgnoreMatcher = gitIgnoreMatcher,
 			ScopedGitIgnoreMatchers = scopedMatchers,
 			GitIgnoreCandidateMatcher = candidateGitIgnoreMatcher,
