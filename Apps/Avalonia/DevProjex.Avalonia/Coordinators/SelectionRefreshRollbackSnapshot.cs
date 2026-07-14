@@ -25,4 +25,5 @@ internal sealed record SelectionRefreshRollbackSnapshot(
     bool AllIgnoreChecked,
     bool IgnoreOptionsInitialized,
     bool? IgnoreAllPreference,
-    bool IgnoreOptionStateCacheIsComplete);
+    bool IgnoreOptionStateCacheIsComplete,
+    bool HasAuthoritativeRootOptions);

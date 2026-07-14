@@ -257,8 +257,10 @@ public sealed partial class SelectionSyncCoordinator(
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
         var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, rootFolders);
         var extensionScanRules = BuildExtensionAvailabilityScanRules(ignoreRules);
-        var forceAllExtensionsChecked = !ShouldSuppressAllTogglesOverride() && viewModel.AllExtensionsChecked;
-        var includeDirectoryToggleProbeRoots = !ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked;
+        var forceAllExtensionsChecked =
+            !ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh();
+        var includeDirectoryToggleProbeRoots =
+            !ShouldSuppressAllTogglesOverride() && ResolveAllRootFoldersCheckedForRefresh();
         var includeControllerImpactProbeRoots = ShouldIncludeControllerImpactProbeRoots(selectedIgnoreOptions);
         var effectiveExtensionPolicy = BuildEffectiveExtensionPolicyForLiveCounts(forceAllExtensionsChecked);
         return Task.Run(async () =>
@@ -1366,7 +1368,7 @@ public sealed partial class SelectionSyncCoordinator(
             _suppressExtensionItemCheck = false;
         }
 
-        if (!ShouldSuppressAllTogglesOverride() && viewModel.AllExtensionsChecked)
+        if (!ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh())
             SetAllChecked(viewModel.Extensions, true, ref _suppressExtensionItemCheck);
 
         SyncAllCheckbox(viewModel.Extensions, ref _suppressExtensionAllCheck,
@@ -1400,7 +1402,7 @@ public sealed partial class SelectionSyncCoordinator(
             _suppressRootItemCheck = false;
         }
 
-        if (!ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked)
+        if (!ShouldSuppressAllTogglesOverride() && ResolveAllRootFoldersCheckedForRefresh())
             SetAllChecked(viewModel.RootFolders, true, ref _suppressRootItemCheck);
 
         SyncAllCheckbox(viewModel.RootFolders, ref _suppressRootAllCheck,
@@ -1522,7 +1524,8 @@ public sealed partial class SelectionSyncCoordinator(
             viewModel.AllIgnoreChecked,
             _session.IgnoreOptions.IsInitialized,
             _session.IgnoreOptions.AllPreference,
-            _session.IgnoreOptionStateCacheIsComplete);
+            _session.IgnoreOptionStateCacheIsComplete,
+            snapshot.RootOptions is not null);
     }
 
     private bool TryRestoreKnownSelectionSnapshot(
@@ -1535,7 +1538,7 @@ public sealed partial class SelectionSyncCoordinator(
         {
             // A superseded refresh may already have changed count labels while the
             // checkbox state returned to stable. Reapply the authoritative presentation.
-            RestoreStableSelectionSnapshot(stableSnapshot);
+            _stableSelectionSnapshot = RestoreStableSelectionSnapshot(stableSnapshot);
             return true;
         }
 
@@ -1554,8 +1557,7 @@ public sealed partial class SelectionSyncCoordinator(
         }
 
         var previousStableSnapshot = _stableSelectionSnapshot;
-        RestoreStableSelectionSnapshot(reversibleSnapshot);
-        _stableSelectionSnapshot = reversibleSnapshot;
+        _stableSelectionSnapshot = RestoreStableSelectionSnapshot(reversibleSnapshot);
         _reversibleSelectionSnapshot = previousStableSnapshot;
         return true;
     }
@@ -1580,6 +1582,15 @@ public sealed partial class SelectionSyncCoordinator(
         if (!PathComparer.Default.Equals(currentPath, stableSnapshot.Path) ||
             !PathComparer.Default.Equals(currentPath, reversibleSnapshot.Path))
         {
+            return false;
+        }
+
+        if (origin == SelectionRefreshOrigin.IgnoreOption &&
+            !SelectionRefreshRoutingPolicy.CanUseLiveOptionsRefresh(changedIgnoreOptionId) &&
+            !reversibleSnapshot.HasAuthoritativeRootOptions)
+        {
+            // A live snapshot has no root inventory. Reusing it after a structural
+            // ignore reversal could restore roots discovered under different filters.
             return false;
         }
 
@@ -1695,8 +1706,11 @@ public sealed partial class SelectionSyncCoordinator(
         return true;
     }
 
-    private void RestoreStableSelectionSnapshot(SelectionRefreshRollbackSnapshot snapshot)
+    private SelectionRefreshRollbackSnapshot RestoreStableSelectionSnapshot(
+        SelectionRefreshRollbackSnapshot snapshot)
     {
+        snapshot = RetainUnknownSelectionStates(snapshot);
+
         _suppressRootAllCheck = true;
         _suppressExtensionAllCheck = true;
         _suppressIgnoreAllCheck = true;
@@ -1742,6 +1756,45 @@ public sealed partial class SelectionSyncCoordinator(
 
         lock (_ignoreRulesBuildCacheSync)
             _ignoreRulesBuildCache = null;
+
+        return snapshot;
+    }
+
+    private SelectionRefreshRollbackSnapshot RetainUnknownSelectionStates(
+        SelectionRefreshRollbackSnapshot snapshot)
+    {
+        // Visible selections belong to the snapshot, while hidden option preferences
+        // must survive until another section makes those options visible again.
+        var rootStates = new Dictionary<string, bool>(
+            snapshot.RootOptionStateCache,
+            PathComparer.Default);
+        RetainUnknownSelectionStates(_session.RootFolders.OptionStates, rootStates);
+
+        var extensionStates = new Dictionary<string, bool>(
+            snapshot.ExtensionOptionStateCache,
+            StringComparer.OrdinalIgnoreCase);
+        RetainUnknownSelectionStates(
+            _session.Extensions.OptionStates,
+            extensionStates);
+
+        return snapshot with
+        {
+            RootOptionStateCache = rootStates,
+            ExtensionOptionStateCache = extensionStates
+        };
+    }
+
+    private static void RetainUnknownSelectionStates(
+        IReadOnlyDictionary<string, bool> currentStates,
+        IDictionary<string, bool> targetStates)
+    {
+        foreach (var (name, isChecked) in currentStates)
+        {
+            if (targetStates.ContainsKey(name))
+                continue;
+
+            targetStates[name] = isChecked;
+        }
     }
 
     private static IReadOnlyList<SelectionOption> ResolveStableSelectionOptions(
@@ -2033,8 +2086,8 @@ public sealed partial class SelectionSyncCoordinator(
         new(
             Path: path,
             PreparedSelectionMode: _session.PreparedMode,
-            AllRootFoldersChecked: viewModel.AllRootFoldersChecked,
-            AllExtensionsChecked: viewModel.AllExtensionsChecked,
+            AllRootFoldersChecked: ResolveAllRootFoldersCheckedForRefresh(),
+            AllExtensionsChecked: ResolveAllExtensionsCheckedForRefresh(),
             RootSelectionInitialized: _session.RootFolders.IsInitialized,
             RootSelectionCache: _session.RootFolders.SnapshotSelectedNames(),
             ExtensionsSelectionInitialized: _session.Extensions.IsInitialized,
@@ -2048,6 +2101,16 @@ public sealed partial class SelectionSyncCoordinator(
             ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
             IgnoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
             CaptureTreeInventory: captureTreeInventory);
+
+    // UI master checkboxes only describe visible rows; refresh policy also needs
+    // explicit states retained for rows temporarily hidden by another section.
+    private bool ResolveAllRootFoldersCheckedForRefresh() =>
+        viewModel.AllRootFoldersChecked &&
+        !_session.RootFolders.OptionStates.Values.Contains(false);
+
+    private bool ResolveAllExtensionsCheckedForRefresh() =>
+        viewModel.AllExtensionsChecked &&
+        !_session.Extensions.OptionStates.Values.Contains(false);
 
     private HashSet<IgnoreOptionId> SnapshotRuntimeSelectedIgnoreOptions()
     {
