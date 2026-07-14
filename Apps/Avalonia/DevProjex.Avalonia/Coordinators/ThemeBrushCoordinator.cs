@@ -16,7 +16,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     private SolidColorBrush _currentBorderBrush = new(Colors.Gray);
     private SolidColorBrush? _backgroundBrush;
     private SolidColorBrush? _panelBrush;
-    private SolidColorBrush? _previewStickyHeaderBrush;
     private SolidColorBrush? _accentBrush;
 
     public void HandleSubmenuOpened(object? sender, RoutedEventArgs e)
@@ -230,13 +229,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         _panelBrush.Color = panelColor;
         UpdateResource("AppPanelBrush", _panelBrush);
 
-        // The sticky path overlays dense preview text. It must preserve the current
-        // panel hue without inheriting material transparency from ordinary islands.
-        var stickyHeaderColor = Color.FromArgb(byte.MaxValue, panelBase.R, panelBase.G, panelBase.B);
-        _previewStickyHeaderBrush ??= new SolidColorBrush(stickyHeaderColor);
-        _previewStickyHeaderBrush.Color = stickyHeaderColor;
-        UpdateResource("PreviewStickyHeaderBrush", _previewStickyHeaderBrush);
-
         var menuColor = Color.FromArgb(menuAlpha, menuBase.R, menuBase.G, menuBase.B);
         _currentMenuBrush.Color = menuColor;
         UpdateResource("MenuPopupBrush", _currentMenuBrush);
@@ -360,7 +352,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         // Null out brush references to break any resource dictionary ties
         _backgroundBrush = null;
         _panelBrush = null;
-        _previewStickyHeaderBrush = null;
         _accentBrush = null;
     }
 }

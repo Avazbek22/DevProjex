@@ -42,7 +42,6 @@
     <!-- Brushes -->
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
-    <SolidColorBrush x:Key="PreviewStickyHeaderBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="AppBorderBrush" Color="{StaticResource AppBorderColor}" />
     <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource AppAccentColor}" />
     <SolidColorBrush x:Key="AppAccentHoverBrush" Color="{StaticResource AppAccentHoverColor}" />
@@ -119,7 +118,6 @@
     <!-- Brushes -->
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
-    <SolidColorBrush x:Key="PreviewStickyHeaderBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="AppBorderBrush" Color="{StaticResource AppBorderColor}" />
     <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource AppAccentColor}" />
     <SolidColorBrush x:Key="AppAccentHoverBrush" Color="{StaticResource AppAccentHoverColor}" />
@@ -575,14 +573,14 @@
     </Style>
 
     <Style Selector="Border.preview-sticky-header-cap">
-        <Setter Property="Background" Value="{DynamicResource PreviewStickyHeaderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="0,0,0,1" />
         <Setter Property="VerticalAlignment" Value="Stretch" />
     </Style>
 
     <Style Selector="Border.preview-sticky-header">
-        <Setter Property="Background" Value="{DynamicResource PreviewStickyHeaderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="0,0,0,1" />
         <Setter Property="VerticalAlignment" Value="Stretch" />
