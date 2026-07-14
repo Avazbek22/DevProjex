@@ -166,6 +166,56 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			coordinator,
 			oracle.CurrentSnapshot,
 			"hidden attributes unavailable");
+
+		await ExecuteActionAndRefreshAsync(
+			viewModel,
+			coordinator,
+			oracle,
+			workspace.RootPath,
+			SettingsAction.SetAllIgnore(false));
+		var expectedUnavailableOptionIds = new[]
+		{
+			IgnoreOptionId.HiddenFolders,
+			IgnoreOptionId.HiddenFiles
+		}.Order().ToArray();
+		var actualUnavailableOptionIds = oracle.IgnoreStates.Keys
+			.Except(actualIgnoreOptionIds)
+			.Order()
+			.ToArray();
+		Assert.Equal(expectedUnavailableOptionIds, actualUnavailableOptionIds);
+
+		var actions = new List<SettingsAction>();
+		var column = 1;
+		var expectedVisibleIgnoreStates = BuildPairwiseIgnoreStates(
+			actualIgnoreOptionIds,
+			row: 11,
+			ref column,
+			actions);
+		var expectedIgnoreStateCache = BuildExpectedIgnoreStateCache(
+			oracle.IgnoreStates,
+			expectedVisibleIgnoreStates);
+		var expectedRootStates = new Dictionary<string, bool>(oracle.RootStates, PathComparer.Default);
+		var expectedExtensionStates = new Dictionary<string, bool>(
+			oracle.ExtensionStates,
+			StringComparer.OrdinalIgnoreCase);
+
+		ExecuteActionBurst(viewModel, coordinator, oracle, workspace.RootPath, actions);
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+		var expectedSnapshot = oracle.Recompute();
+		const string stepName = "hidden attributes unavailable after visible ignore burst";
+		AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, stepName);
+		AssertOracleStates(
+			oracle,
+			expectedRootStates,
+			expectedExtensionStates,
+			expectedIgnoreStateCache,
+			stepName);
+		await AssertTreeAndMetricsMatchOracleAsync(
+			workspace.RootPath,
+			viewModel,
+			coordinator,
+			expectedSnapshot,
+			stepName);
 	}
 
 	[AvaloniaTheory]
@@ -205,7 +255,10 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			ref column,
 			actions,
 			SettingsAction.ToggleExtension);
-		var expectedIgnoreStates = BuildPairwiseIgnoreStates(ignoreOptionIds, row, ref column, actions);
+		var expectedVisibleIgnoreStates = BuildPairwiseIgnoreStates(ignoreOptionIds, row, ref column, actions);
+		var expectedIgnoreStateCache = BuildExpectedIgnoreStateCache(
+			oracle.IgnoreStates,
+			expectedVisibleIgnoreStates);
 		Assert.Equal(totalControlCount + 1, column);
 
 		ExecuteActionBurst(viewModel, coordinator, oracle, workspace.RootPath, actions);
@@ -213,7 +266,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		var expectedSnapshot = oracle.Recompute();
 		var stepName = $"pairwise row {row}/{PairwiseRowCount - 1}";
 		AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, stepName);
-		AssertOracleStates(oracle, expectedRootStates, expectedExtensionStates, expectedIgnoreStates, stepName);
+		AssertOracleStates(oracle, expectedRootStates, expectedExtensionStates, expectedIgnoreStateCache, stepName);
 		await AssertTreeAndMetricsMatchOracleAsync(
 			workspace.RootPath,
 			viewModel,
@@ -480,6 +533,22 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				actions.Add(SettingsAction.ToggleIgnore(optionId));
 		}
 		return states;
+	}
+
+	private static Dictionary<IgnoreOptionId, bool> BuildExpectedIgnoreStateCache(
+		IReadOnlyDictionary<IgnoreOptionId, bool> baselineCache,
+		IReadOnlyDictionary<IgnoreOptionId, bool> expectedVisibleStates)
+	{
+		var expectedCache = new Dictionary<IgnoreOptionId, bool>(baselineCache);
+		foreach (var (optionId, isChecked) in expectedVisibleStates)
+		{
+			Assert.True(
+				expectedCache.ContainsKey(optionId),
+				$"Visible ignore option '{optionId}' is missing from the persistent state cache.");
+			expectedCache[optionId] = isChecked;
+		}
+
+		return expectedCache;
 	}
 
 	private static IReadOnlyList<SettingsAction> BuildSelectionConvergenceActions(
