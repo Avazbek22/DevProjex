@@ -4,29 +4,34 @@ namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class JsonLocalizationCatalog : ILocalizationCatalog
 {
-	private readonly Lazy<IReadOnlyDictionary<AppLanguage, IReadOnlyDictionary<string, string>>> _cache = new(LoadAll);
+	private readonly IReadOnlyDictionary<AppLanguage, Lazy<IReadOnlyDictionary<string, string>>> _cache = CreateCache();
 
 	public IReadOnlyDictionary<string, string> Get(AppLanguage language)
 	{
-		var cache = _cache.Value;
-		return cache.TryGetValue(language, out var dict) ? dict : cache[AppLanguage.En];
+		var resource = _cache.TryGetValue(language, out var localizedResource)
+			? localizedResource
+			: _cache[AppLanguage.En];
+		return resource.Value;
 	}
 
-	private static IReadOnlyDictionary<AppLanguage, IReadOnlyDictionary<string, string>> LoadAll()
+	private static IReadOnlyDictionary<AppLanguage, Lazy<IReadOnlyDictionary<string, string>>> CreateCache()
 	{
 		var assembly = typeof(Marker).Assembly;
-		return new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		return new Dictionary<AppLanguage, Lazy<IReadOnlyDictionary<string, string>>>
 		{
-			[AppLanguage.Ru] = Load(assembly, "ru"),
-			[AppLanguage.En] = Load(assembly, "en"),
-			[AppLanguage.Uz] = Load(assembly, "uz"),
-			[AppLanguage.Tg] = Load(assembly, "tg"),
-			[AppLanguage.Kk] = Load(assembly, "kk"),
-			[AppLanguage.Fr] = Load(assembly, "fr"),
-			[AppLanguage.De] = Load(assembly, "de"),
-			[AppLanguage.It] = Load(assembly, "it")
+			[AppLanguage.Ru] = CreateResource(assembly, "ru"),
+			[AppLanguage.En] = CreateResource(assembly, "en"),
+			[AppLanguage.Uz] = CreateResource(assembly, "uz"),
+			[AppLanguage.Tg] = CreateResource(assembly, "tg"),
+			[AppLanguage.Kk] = CreateResource(assembly, "kk"),
+			[AppLanguage.Fr] = CreateResource(assembly, "fr"),
+			[AppLanguage.De] = CreateResource(assembly, "de"),
+			[AppLanguage.It] = CreateResource(assembly, "it")
 		}.ToFrozenDictionary();
 	}
+
+	private static Lazy<IReadOnlyDictionary<string, string>> CreateResource(Assembly assembly, string code) =>
+		new(() => Load(assembly, code), LazyThreadSafetyMode.ExecutionAndPublication);
 
 	private static IReadOnlyDictionary<string, string> Load(Assembly assembly, string code)
 	{

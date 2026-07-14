@@ -11,6 +11,7 @@ public sealed class MainWindowLifecycleUiTests
 		"_searchMemoryCleanupCts",
 		"_backgroundMemoryCleanupCts",
 		"_previewModeSwitchCts",
+		"_windowLifetimeCts",
 		"_projectOperationCts",
 		"_gitCloneCts",
 		"_gitOperationCts"

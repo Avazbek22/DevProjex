@@ -4,6 +4,7 @@ public partial class MainWindow
 {
     private void CancelAndDisposeWindowOperations()
     {
+        CancelAndDispose(ref _windowLifetimeCts);
         _metrics.Dispose();
         _projectLoadPipeline.Dispose();
         _previewPipeline.Dispose();

@@ -23,13 +23,22 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         try
         {
             var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+            var expectedStorePaths = new[]
+            {
+                Path.Combine(storeDirectory, "user-settings.json"),
+                Path.Combine(storeDirectory, "user-settings.json.bak"),
+                Path.Combine(storeDirectory, "recent-projects.json"),
+                Path.Combine(storeDirectory, "recent-projects.json.bak"),
+                Path.Combine(storeDirectory, "project-profiles.json"),
+                Path.Combine(storeDirectory, "project-profiles.json.bak")
+            };
 
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "user-settings.json")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "user-settings.json.bak")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "recent-projects.json")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "recent-projects.json.bak")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "project-profiles.json")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "project-profiles.json.bak")));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => expectedStorePaths.All(File.Exists),
+                "deferred startup state-store bootstrap to create primary and backup files");
+
+            Assert.All(expectedStorePaths, path => Assert.True(File.Exists(path), path));
         }
         finally
         {

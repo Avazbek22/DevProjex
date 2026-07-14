@@ -80,7 +80,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 		var oracle = SettingsIslandOracle.Create(workspace.RootPath);
 		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
-		Assert.Equal(Enum.GetValues<IgnoreOptionId>().Order(), ignoreOptionIds.Order());
+		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), ignoreOptionIds.Order());
 
 		var baselineFingerprint = CaptureIslandFingerprint(viewModel);
 		var visitedMasks = new HashSet<int>();
@@ -144,6 +144,30 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			"ignore power-set final round-trip");
 	}
 
+	[AvaloniaFact]
+	public async Task PublicSettingsEvents_WithoutHiddenAttributes_ExcludesOnlyUnavailableOptionsAndMatchesOracle()
+	{
+		using var workspace = SettingsIslandWorkspace.Create(markHiddenAttributes: false);
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, workspace.RootPath);
+		await InitializeCoordinatorAsync(coordinator, viewModel, workspace.RootPath);
+		var oracle = SettingsIslandOracle.Create(workspace.RootPath);
+
+		var actualIgnoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).Order().ToArray();
+		var expectedIgnoreOptionIds = ResolveExpectedIgnoreOptionIds(
+			hiddenFoldersSupported: false,
+			hiddenFilesSupported: false).Order().ToArray();
+
+		Assert.Equal(expectedIgnoreOptionIds, actualIgnoreOptionIds);
+		AssertIslandMatchesOracle(viewModel, coordinator, oracle.CurrentSnapshot, "hidden attributes unavailable");
+		await AssertTreeAndMetricsMatchOracleAsync(
+			workspace.RootPath,
+			viewModel,
+			coordinator,
+			oracle.CurrentSnapshot,
+			"hidden attributes unavailable");
+	}
+
 	[AvaloniaTheory]
 	[MemberData(nameof(PairwiseRows))]
 	public async Task PublicSettingsEvents_PairwiseAllSectionsBurst_PreservesEveryRequestedStateAndResult(int row)
@@ -166,7 +190,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
 		var totalControlCount = rootNames.Length + extensionNames.Length + ignoreOptionIds.Length;
 		Assert.InRange(totalControlCount, 3, PairwiseColumnCapacity);
-		Assert.Equal(Enum.GetValues<IgnoreOptionId>().Order(), ignoreOptionIds.Order());
+		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), ignoreOptionIds.Order());
 
 		var actions = new List<SettingsAction>(totalControlCount + 2)
 		{
@@ -293,7 +317,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				await AssertIslandRemainsStableAsync(viewModel, coordinator, stepName);
 		}
 
-		Assert.Equal(Enum.GetValues<IgnoreOptionId>().Order(), toggledIgnoreIds.Order());
+		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), toggledIgnoreIds.Order());
 		Assert.Contains(SettingsActionKind.ToggleRoot, actionKinds);
 		Assert.Contains(SettingsActionKind.ToggleExtension, actionKinds);
 		Assert.Contains(SettingsActionKind.ToggleIgnore, actionKinds);
@@ -322,6 +346,28 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				Assert.Equal(4, combinations.Count);
 			}
 		}
+	}
+
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	[InlineData(true, true)]
+	public void ResolveExpectedIgnoreOptionIds_ReflectsHostHiddenAttributeCapabilities(
+		bool hiddenFoldersSupported,
+		bool hiddenFilesSupported)
+	{
+		var expected = ResolveExpectedIgnoreOptionIds(hiddenFoldersSupported, hiddenFilesSupported);
+
+		Assert.Equal(hiddenFoldersSupported, expected.Contains(IgnoreOptionId.HiddenFolders));
+		Assert.Equal(hiddenFilesSupported, expected.Contains(IgnoreOptionId.HiddenFiles));
+		Assert.Equal(
+			Enum.GetValues<IgnoreOptionId>().Length - (hiddenFoldersSupported ? 0 : 1) - (hiddenFilesSupported ? 0 : 1),
+			expected.Count);
+		Assert.All(
+			Enum.GetValues<IgnoreOptionId>()
+				.Except([IgnoreOptionId.HiddenFolders, IgnoreOptionId.HiddenFiles]),
+			optionId => Assert.Contains(optionId, expected));
 	}
 
 	public static IEnumerable<object[]> PairwiseRows()
@@ -367,7 +413,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		string rootPath)
 	{
 		var snapshot = oracle.CurrentSnapshot;
-		var maximumTransitions = Enum.GetValues<IgnoreOptionId>().Length * 2;
+		var maximumTransitions = viewModel.IgnoreOptions.Count * 2;
 		for (var transition = 0; transition < maximumTransitions; transition++)
 		{
 			var checkedOption = viewModel.IgnoreOptions.FirstOrDefault(static option => option.IsChecked);
@@ -1008,6 +1054,17 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			Assert.DoesNotContain(relativePath, relativePaths);
 	}
 
+	private static IReadOnlyList<IgnoreOptionId> ResolveExpectedIgnoreOptionIds(
+		bool hiddenFoldersSupported,
+		bool hiddenFilesSupported)
+	{
+		return Enum.GetValues<IgnoreOptionId>()
+			.Where(optionId =>
+				(optionId != IgnoreOptionId.HiddenFolders || hiddenFoldersSupported) &&
+				(optionId != IgnoreOptionId.HiddenFiles || hiddenFilesSupported))
+			.ToArray();
+	}
+
 	private static HashSet<string> FlattenRelativePaths(string rootPath, TreeNodeDescriptor root)
 	{
 		var paths = new HashSet<string>(StringComparer.Ordinal);
@@ -1430,14 +1487,21 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 	private sealed class SettingsIslandWorkspace : IDisposable
 	{
-		private SettingsIslandWorkspace(string rootPath)
+		private SettingsIslandWorkspace(
+			string rootPath,
+			bool hiddenFoldersSupported,
+			bool hiddenFilesSupported)
 		{
 			RootPath = rootPath;
+			ExpectedIgnoreOptionIds = ResolveExpectedIgnoreOptionIds(
+				hiddenFoldersSupported,
+				hiddenFilesSupported);
 		}
 
 		public string RootPath { get; }
+		public IReadOnlyList<IgnoreOptionId> ExpectedIgnoreOptionIds { get; }
 
-		public static SettingsIslandWorkspace Create()
+		public static SettingsIslandWorkspace Create(bool markHiddenAttributes = true)
 		{
 			var rootPath = Path.Combine(
 				Path.GetTempPath(),
@@ -1445,8 +1509,11 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				"SettingsIslandMatrix",
 				Guid.NewGuid().ToString("N"));
 			Directory.CreateDirectory(rootPath);
-			Seed(rootPath);
-			return new SettingsIslandWorkspace(rootPath);
+			Seed(rootPath, markHiddenAttributes);
+			return new SettingsIslandWorkspace(
+				rootPath,
+				HasHiddenAttribute(Path.Combine(rootPath, "hidden-root")),
+				HasHiddenAttribute(Path.Combine(rootPath, "gamma", "hidden-note.txt")));
 		}
 
 		public void Dispose()
@@ -1462,7 +1529,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			}
 		}
 
-		private static void Seed(string rootPath)
+		private static void Seed(string rootPath, bool markHiddenAttributes)
 		{
 			WriteFile(rootPath, ".gitignore", "artifacts/\n*.tmp\n");
 			WriteFile(rootPath, "root-evidence.cs", "class RootEvidence {}\n");
@@ -1512,11 +1579,13 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 			var hiddenRoot = Path.Combine(rootPath, "hidden-root");
 			WriteFile(rootPath, Path.Combine("hidden-root", "nested", "hidden.txt"), "hidden root payload\n");
-			TryMarkHidden(hiddenRoot);
+			if (markHiddenAttributes)
+				TryMarkHidden(hiddenRoot);
 
 			var hiddenFile = Path.Combine(rootPath, "gamma", "hidden-note.txt");
 			WriteFile(rootPath, Path.Combine("gamma", "hidden-note.txt"), "hidden file payload\n");
-			TryMarkHidden(hiddenFile);
+			if (markHiddenAttributes)
+				TryMarkHidden(hiddenFile);
 		}
 
 		private static void WriteFile(string rootPath, string relativePath, string content)
@@ -1559,6 +1628,18 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			catch
 			{
 				// Hidden attributes depend on the host filesystem; the remaining matrix stays portable.
+			}
+		}
+
+		private static bool HasHiddenAttribute(string path)
+		{
+			try
+			{
+				return File.GetAttributes(path).HasFlag(FileAttributes.Hidden);
+			}
+			catch
+			{
+				return false;
 			}
 		}
 	}

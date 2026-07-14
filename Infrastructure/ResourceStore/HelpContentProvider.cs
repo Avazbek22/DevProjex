@@ -2,12 +2,14 @@ namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class HelpContentProvider
 {
-    private readonly Lazy<IReadOnlyDictionary<AppLanguage, string>> _cache = new(LoadAll);
+    private readonly IReadOnlyDictionary<AppLanguage, Lazy<string>> _cache = CreateCache();
 
     public string GetHelpBody(AppLanguage language)
     {
-        var cache = _cache.Value;
-        return cache.TryGetValue(language, out var body) ? body : cache[AppLanguage.En];
+        var resource = _cache.TryGetValue(language, out var localizedResource)
+            ? localizedResource
+            : _cache[AppLanguage.En];
+        return resource.Value;
     }
 
     public static string ToPlainText(string rawBody)
@@ -26,21 +28,24 @@ public sealed class HelpContentProvider
         return builder.ToString().TrimEnd();
     }
 
-    private static IReadOnlyDictionary<AppLanguage, string> LoadAll()
+    private static IReadOnlyDictionary<AppLanguage, Lazy<string>> CreateCache()
     {
         var assembly = typeof(Marker).Assembly;
-        return new Dictionary<AppLanguage, string>
+        return new Dictionary<AppLanguage, Lazy<string>>
         {
-            [AppLanguage.Ru] = Load(assembly, "ru"),
-            [AppLanguage.En] = Load(assembly, "en"),
-            [AppLanguage.Uz] = Load(assembly, "uz"),
-            [AppLanguage.Tg] = Load(assembly, "tg"),
-            [AppLanguage.Kk] = Load(assembly, "kk"),
-            [AppLanguage.Fr] = Load(assembly, "fr"),
-            [AppLanguage.De] = Load(assembly, "de"),
-            [AppLanguage.It] = Load(assembly, "it")
+            [AppLanguage.Ru] = CreateResource(assembly, "ru"),
+            [AppLanguage.En] = CreateResource(assembly, "en"),
+            [AppLanguage.Uz] = CreateResource(assembly, "uz"),
+            [AppLanguage.Tg] = CreateResource(assembly, "tg"),
+            [AppLanguage.Kk] = CreateResource(assembly, "kk"),
+            [AppLanguage.Fr] = CreateResource(assembly, "fr"),
+            [AppLanguage.De] = CreateResource(assembly, "de"),
+            [AppLanguage.It] = CreateResource(assembly, "it")
         };
     }
+
+    private static Lazy<string> CreateResource(Assembly assembly, string code) =>
+        new(() => Load(assembly, code), LazyThreadSafetyMode.ExecutionAndPublication);
 
     private static string Load(Assembly assembly, string code)
     {

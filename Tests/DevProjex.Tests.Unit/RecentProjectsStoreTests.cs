@@ -78,6 +78,38 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void LoadForStartup_WhenStoreLockIsHeld_ReturnsDefaultWithinBoundedTime()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var lockPath = store.GetPath() + ".lock";
+		Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+		using var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+		var loaded = store.LoadForStartup(TimeSpan.FromMilliseconds(25));
+
+		stopwatch.Stop();
+		Assert.Empty(loaded.RecentFolders);
+		Assert.Empty(loaded.RecentRepositories);
+		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Startup load took {stopwatch.Elapsed}.");
+	}
+
+	[Fact]
+	public void LoadForStartup_WhenStoreIsAvailable_ReturnsPersistedHistory()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folderPath = Path.Combine(temp.Path, "Workspace");
+		store.AddFolder(store.Load(), folderPath);
+
+		var loaded = store.LoadForStartup(TimeSpan.FromMilliseconds(25));
+
+		var folder = Assert.Single(loaded.RecentFolders);
+		Assert.Equal(Path.GetFullPath(folderPath), folder.Path);
+	}
+
+	[Fact]
 	public void TryPersist_DetachedSnapshot_WritesPrimaryAndBackup()
 	{
 		using var temp = new TemporaryDirectory();

@@ -298,9 +298,12 @@ public partial class MainWindow : Window
     private const double StartupRevealHiddenOpacity = 0.0;
     private const double StartupRevealVisibleOpacity = 1.0;
     private static readonly TimeSpan StartupBackdropWarmupDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(90));
+    private static readonly TimeSpan StartupStoreLockTimeout = TimeSpan.FromMilliseconds(100);
     private PreviewToolbarLayoutMode _previewToolbarLayoutMode = PreviewToolbarLayoutMode.Wide;
     private bool _startupRevealGateActive;
     private bool _startupRevealCompleted;
+    private CancellationTokenSource? _windowLifetimeCts = new();
+    private int _startupSequenceStarted;
 
     // Preview generation
     private bool _previewScrollSyncActive;
@@ -420,7 +423,6 @@ public partial class MainWindow : Window
         _viewModel.SetToastItems(_toastService.Items);
         _sessionMetrics.SetIdleStateProvider(IsSessionMetricsIdle);
         _sessionMetrics.Start(_startupOptions.SessionMetrics.Path, GetApplicationVersion());
-        EnsureAppStateStoresExist();
         LoadRecentProjects();
         DataContext = _viewModel;
 
@@ -705,6 +707,7 @@ public partial class MainWindow : Window
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
+        CancelAndDispose(ref _windowLifetimeCts);
         CompleteSessionMetricsRecording();
         FlushPersistedStateOnWindowClose();
 
@@ -1003,23 +1006,25 @@ public partial class MainWindow : Window
     internal static bool ShouldUseStartupRevealGate()
         => OperatingSystem.IsWindows();
 
-    private async Task RevealStartupWindowAfterCompositionWarmupAsync()
+    private async Task RevealStartupWindowAfterCompositionWarmupAsync(CancellationToken cancellationToken)
     {
         if (!_startupRevealGateActive || _startupRevealCompleted)
             return;
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await YieldUiAsync(DispatcherPriority.Render);
-            await WaitForNextAnimationFrameAsync();
-            await WaitForNextAnimationFrameAsync();
+            await WaitForNextAnimationFrameAsync(cancellationToken);
+            await WaitForNextAnimationFrameAsync(cancellationToken);
             await YieldUiAsync(DispatcherPriority.Loaded);
+            cancellationToken.ThrowIfCancellationRequested();
 
             // The Avalonia frame is ready at this point, but the native Windows backdrop
             // may still attach one beat later in published builds. This tiny pause hides
             // that platform-level transparent/square intermediate frame without changing
             // the steady-state UI.
-            await Task.Delay(StartupBackdropWarmupDelay);
+            await Task.Delay(StartupBackdropWarmupDelay, cancellationToken);
         }
         finally
         {
@@ -1027,7 +1032,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task WaitForNextAnimationFrameAsync()
+    private async Task WaitForNextAnimationFrameAsync(CancellationToken cancellationToken)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         try
@@ -1040,9 +1045,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        await Task.WhenAny(
+        var completedTask = await Task.WhenAny(
             completion.Task,
-            Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250))));
+            Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250)), cancellationToken));
+        await completedTask;
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private void CompleteStartupRevealGate()
@@ -1055,7 +1062,20 @@ public partial class MainWindow : Window
         Opacity = StartupRevealVisibleOpacity;
     }
 
-    private async void OnOpened(object? sender, EventArgs e)
+    private void OnOpened(object? sender, EventArgs e)
+    {
+        if (Interlocked.Exchange(ref _startupSequenceStarted, 1) != 0)
+            return;
+
+        Opened -= OnOpened;
+        var lifetime = _windowLifetimeCts;
+        if (lifetime is null)
+            return;
+
+        ObserveDetachedTask(RunStartupAsync(lifetime.Token), "MainWindowStartup");
+    }
+
+    private async Task RunStartupAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -1063,11 +1083,14 @@ public partial class MainWindow : Window
 
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
 
-            await RevealStartupWindowAfterCompositionWarmupAsync();
+            await RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            StartDeferredAppStateBootstrap(cancellationToken);
 
             if (_startupCommandLineErrors.Count > 0)
             {
                 await ShowErrorAsync(string.Join(Environment.NewLine, _startupCommandLineErrors.Select(static error => error.Message)));
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
             var startupProjectPath = ResolveStartupProjectPath();
@@ -1076,6 +1099,7 @@ public partial class MainWindow : Window
                 var startupLoadStopwatch = Stopwatch.StartNew();
                 var opened = await TryOpenFolderAsync(startupProjectPath, fromDialog: false);
                 startupLoadStopwatch.Stop();
+                cancellationToken.ThrowIfCancellationRequested();
 
                 if (opened)
                 {
@@ -1092,30 +1116,29 @@ public partial class MainWindow : Window
             }
             else
             {
-                await TryShowAutomaticTerminalCommandPromptAsync();
+                await TryShowAutomaticTerminalCommandPromptAsync(cancellationToken);
             }
 
-            // Clean up stale cache from previous sessions (non-blocking background task)
-            _ = Task.Run(() =>
-            {
-                try
-                {
-                    _repoCacheService.CleanupStaleCacheOnStartup();
-                }
-                catch
-                {
-                    // Best effort - ignore errors
-                }
-            });
+            ObserveDetachedTask(
+                Task.Run(_repoCacheService.CleanupStaleCacheOnStartup, cancellationToken),
+                "CleanupStaleRepositoryCache");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Cancellation is handled by status operation fallback.
+            // Closing the window owns cancellation of the complete startup sequence.
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            if (!cancellationToken.IsCancellationRequested && IsVisible)
+                await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private void StartDeferredAppStateBootstrap(CancellationToken cancellationToken)
+    {
+        ObserveDetachedTask(
+            Task.Run(EnsureAppStateStoresExist, cancellationToken),
+            "EnsureAppStateStoresExist");
     }
 
     private string? ResolveStartupProjectPath()
@@ -1221,7 +1244,7 @@ public partial class MainWindow : Window
 
     private void InitializeUserSettings()
     {
-        _userSettingsDb = _userSettingsStore.Load();
+        _userSettingsDb = _userSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         ApplySavedLanguagePreference(_userSettingsDb.ViewSettings);
 
         if (!_userSettingsStore.TryParseKey(_userSettingsDb.LastSelected, out var theme, out var effect))
@@ -2182,12 +2205,22 @@ public partial class MainWindow : Window
 
     private void ApplySavedLanguagePreference(AppViewSettings settings)
     {
-        if (settings.PreferredLanguage is not AppLanguage preferredLanguage)
+        var startupLanguage = ResolveStartupLanguage(
+            _localization.CurrentLanguage,
+            _startupOptions.Language,
+            settings.PreferredLanguage);
+        if (startupLanguage == _localization.CurrentLanguage)
             return;
 
-        _localization.SetLanguage(preferredLanguage);
+        _localization.SetLanguage(startupLanguage);
         _viewModel.UpdateLocalization();
     }
+
+    internal static AppLanguage ResolveStartupLanguage(
+        AppLanguage currentLanguage,
+        AppLanguage? commandLineLanguage,
+        AppLanguage? preferredLanguage) =>
+        commandLineLanguage ?? preferredLanguage ?? currentLanguage;
 
     private void HandleThemePopoverStateChange()
     {
@@ -2278,23 +2311,35 @@ public partial class MainWindow : Window
         var predefinedFonts = new[]
             { "Consolas", "Courier New", "Fira Code", "Lucida Console", "Cascadia Code", "JetBrains Mono" };
 
-        var systemFonts = FontManager.Current?.SystemFonts?
-            .GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, FontFamily>(StringComparer.OrdinalIgnoreCase);
+        var systemFonts = FontManager.Current?.SystemFonts;
+        var predefinedFontSet = new HashSet<string>(predefinedFonts, StringComparer.OrdinalIgnoreCase);
+        var availablePredefinedFonts = new Dictionary<string, FontFamily>(StringComparer.OrdinalIgnoreCase);
+        if (systemFonts is not null)
+        {
+            foreach (var font in systemFonts)
+            {
+                if (predefinedFontSet.Contains(font.Name))
+                    availablePredefinedFonts.TryAdd(font.Name, font);
+
+                if (availablePredefinedFonts.Count == predefinedFonts.Length)
+                    break;
+            }
+        }
 
         _viewModel.FontFamilies.Add(FontFamily.Default);
 
         // Add only predefined fonts that exist on system
         foreach (var fontName in predefinedFonts)
         {
-            if (systemFonts.TryGetValue(fontName, out var font))
+            if (availablePredefinedFonts.TryGetValue(fontName, out var font))
                 _viewModel.FontFamilies.Add(font);
         }
 
-        if (_viewModel.FontFamilies.Count == 1)
+        if (_viewModel.FontFamilies.Count == 1 && systemFonts is not null)
         {
-            foreach (var font in systemFonts.Values.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
+            foreach (var font in systemFonts
+                         .DistinctBy(static font => font.Name, StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(static font => font.Name, StringComparer.OrdinalIgnoreCase))
                 _viewModel.FontFamilies.Add(font);
         }
 
@@ -5387,7 +5432,7 @@ public partial class MainWindow : Window
 
     private void LoadRecentProjects()
     {
-        _recentProjectsDb = _recentProjectsStore.Load();
+        _recentProjectsDb = _recentProjectsStore.LoadForStartup(StartupStoreLockTimeout);
         SyncRecentProjectsToViewModel();
     }
 
@@ -7571,12 +7616,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task TryShowAutomaticTerminalCommandPromptAsync()
+    private async Task TryShowAutomaticTerminalCommandPromptAsync(CancellationToken cancellationToken)
     {
         try
         {
             await YieldUiAsync(DispatcherPriority.Background);
-            var snapshot = _terminalCommandSetupService.Probe();
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = await Task.Run(_terminalCommandSetupService.Probe, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             var action = ResolveAutomaticTerminalCommandStartupAction(
                 _userSettingsDb.ViewSettings,
                 snapshot,
@@ -7584,12 +7631,18 @@ public partial class MainWindow : Window
 
             if (action == AutomaticTerminalCommandStartupAction.RepairSilently)
             {
-                _ = _terminalCommandSetupService.InstallOrRepair();
+                ObserveDetachedTask(
+                    Task.Run(_terminalCommandSetupService.InstallOrRepair, cancellationToken),
+                    "RepairTerminalCommand");
                 return;
             }
 
             if (action == AutomaticTerminalCommandStartupAction.ShowPrompt)
                 await ShowTerminalCommandSetupAsync(snapshot, isAutomaticPrompt: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {

@@ -601,6 +601,40 @@ public sealed class UserSettingsStoreTests
 		Assert.Equal("Light.Acrylic", reloaded.LastSelected);
 	}
 
+	[Fact]
+	public void LoadForStartup_WhenStoreLockIsHeld_ReturnsDefaultsWithinBoundedTime()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new InfrastructureUserSettingsStore(() => temp.Path);
+		var lockPath = store.GetPath() + ".lock";
+		Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+		using var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+		var loaded = store.LoadForStartup(TimeSpan.FromMilliseconds(25));
+
+		stopwatch.Stop();
+		Assert.Null(loaded.ViewSettings.PreferredLanguage);
+		Assert.True(loaded.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Startup load took {stopwatch.Elapsed}.");
+	}
+
+	[Fact]
+	public void LoadForStartup_WhenStoreIsAvailable_ReturnsPersistedSettings()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new InfrastructureUserSettingsStore(() => temp.Path);
+		var settings = store.Load();
+		settings.LastSelected = "Light.Mica";
+		settings.ViewSettings = settings.ViewSettings with { PreferredLanguage = AppLanguage.It };
+		store.Save(settings);
+
+		var loaded = store.LoadForStartup(TimeSpan.FromMilliseconds(25));
+
+		Assert.Equal("Light.Mica", loaded.LastSelected);
+		Assert.Equal(AppLanguage.It, loaded.ViewSettings.PreferredLanguage);
+	}
+
 	[Theory]
 	// Ensures Save/Load preserves lastSelected for multiple valid keys.
 	[InlineData("Light.Transparent")]
