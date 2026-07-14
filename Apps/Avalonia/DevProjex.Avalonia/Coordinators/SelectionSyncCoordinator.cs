@@ -1601,19 +1601,27 @@ public sealed partial class SelectionSyncCoordinator(
         var ignoreMatchesKnownState = CurrentIgnoreSelectionMatches(stableSnapshot) ||
                                       CurrentIgnoreSelectionMatches(reversibleSnapshot);
 
+        // Restoring a whole snapshot is safe only when sections outside the initiating
+        // toggle have no conflicting explicit preferences in the two known states.
         return origin switch
         {
             SelectionRefreshOrigin.RootSelection =>
                 CurrentRootSelectionMatches(reversibleSnapshot) &&
                 extensionMatchesKnownState &&
-                ignoreMatchesKnownState,
+                ignoreMatchesKnownState &&
+                ExtensionPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
+                IgnorePreferencesAreCompatible(stableSnapshot, reversibleSnapshot),
             SelectionRefreshOrigin.ExtensionSelection =>
                 rootMatchesKnownState &&
                 CurrentExtensionSelectionMatches(reversibleSnapshot) &&
-                ignoreMatchesKnownState,
+                ignoreMatchesKnownState &&
+                RootPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
+                IgnorePreferencesAreCompatible(stableSnapshot, reversibleSnapshot),
             SelectionRefreshOrigin.IgnoreOption =>
                 rootMatchesKnownState &&
                 extensionMatchesKnownState &&
+                RootPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
+                ExtensionPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
                 CurrentIgnoreSelectionMatchesReversal(
                     stableSnapshot,
                     reversibleSnapshot,
@@ -1783,6 +1791,34 @@ public sealed partial class SelectionSyncCoordinator(
             ExtensionOptionStateCache = extensionStates
         };
     }
+
+    private static bool RootPreferencesAreCompatible(
+        SelectionRefreshRollbackSnapshot stableSnapshot,
+        SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
+        stableSnapshot.RootSelectionInitialized == reversibleSnapshot.RootSelectionInitialized &&
+        stableSnapshot.RootOptionStateCacheIsComplete == reversibleSnapshot.RootOptionStateCacheIsComplete &&
+        DictionaryStatesAreCompatible(
+            stableSnapshot.RootOptionStateCache,
+            reversibleSnapshot.RootOptionStateCache);
+
+    private static bool ExtensionPreferencesAreCompatible(
+        SelectionRefreshRollbackSnapshot stableSnapshot,
+        SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
+        stableSnapshot.ExtensionSelectionInitialized == reversibleSnapshot.ExtensionSelectionInitialized &&
+        stableSnapshot.ExtensionOptionStateCacheIsComplete == reversibleSnapshot.ExtensionOptionStateCacheIsComplete &&
+        DictionaryStatesAreCompatible(
+            stableSnapshot.ExtensionOptionStateCache,
+            reversibleSnapshot.ExtensionOptionStateCache);
+
+    private static bool IgnorePreferencesAreCompatible(
+        SelectionRefreshRollbackSnapshot stableSnapshot,
+        SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
+        stableSnapshot.IgnoreOptionsInitialized == reversibleSnapshot.IgnoreOptionsInitialized &&
+        stableSnapshot.IgnoreAllPreference == reversibleSnapshot.IgnoreAllPreference &&
+        stableSnapshot.IgnoreOptionStateCacheIsComplete == reversibleSnapshot.IgnoreOptionStateCacheIsComplete &&
+        DictionaryStatesAreCompatible(
+            stableSnapshot.IgnoreOptionStateCache,
+            reversibleSnapshot.IgnoreOptionStateCache);
 
     private static void RetainUnknownSelectionStates(
         IReadOnlyDictionary<string, bool> currentStates,
@@ -1989,6 +2025,20 @@ public sealed partial class SelectionSyncCoordinator(
         foreach (var (key, isChecked) in candidate)
         {
             if (!current.TryGetValue(key, out var currentState) || currentState != isChecked)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool DictionaryStatesAreCompatible<TKey>(
+        IReadOnlyDictionary<TKey, bool> left,
+        IReadOnlyDictionary<TKey, bool> right)
+        where TKey : notnull
+    {
+        foreach (var (key, leftState) in left)
+        {
+            if (right.TryGetValue(key, out var rightState) && leftState != rightState)
                 return false;
         }
 

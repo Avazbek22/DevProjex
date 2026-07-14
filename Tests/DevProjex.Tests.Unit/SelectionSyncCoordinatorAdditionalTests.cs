@@ -1215,6 +1215,46 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			IgnoreOptionId.EmptyFiles));
 	}
 
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void ReversibleRefresh_SectionReversalWithConflictingCrossSectionPreference_RejectsCachedSnapshot(
+		bool reverseRootSelection)
+	{
+		const string path = @"C:\Project";
+		var origin = reverseRootSelection
+			? SelectionRefreshOrigin.RootSelection
+			: SelectionRefreshOrigin.ExtensionSelection;
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		var originalSnapshot = CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433);
+		var changedSnapshot = CreateReversibleSelectionRefreshSnapshot(
+			rootChecked: false,
+			extensionChecked: false,
+			emptyFolderCount: 410);
+		ApplySelectionRefreshSnapshot(coordinator, originalSnapshot);
+		ApplyCurrentSelectionState(coordinator, viewModel, changedSnapshot);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			changedSnapshot,
+			retainPreviousSnapshot: true);
+
+		var hybridSnapshot = origin == SelectionRefreshOrigin.RootSelection
+			? CreateReversibleSelectionRefreshSnapshot(
+				rootChecked: true,
+				extensionChecked: false,
+				emptyFolderCount: 410)
+			: CreateReversibleSelectionRefreshSnapshot(
+				rootChecked: false,
+				extensionChecked: true,
+				emptyFolderCount: 410);
+		ApplyCurrentSelectionState(coordinator, viewModel, hybridSnapshot);
+
+		Assert.False(TryRestoreKnownSelectionSnapshot(coordinator, path, origin));
+		Assert.Equal(origin == SelectionRefreshOrigin.RootSelection, viewModel.RootFolders.Single().IsChecked);
+		Assert.Equal(origin == SelectionRefreshOrigin.ExtensionSelection, viewModel.Extensions.Single().IsChecked);
+	}
+
 	[Fact]
 	public void StableRefresh_CheckboxStateMatchesButCountLabelDrifted_RestoresStablePresentation()
 	{

@@ -8,6 +8,11 @@ namespace DevProjex.Tests.Unit;
 [Collection("AvaloniaUI")]
 public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 {
+	private const int PairwiseColumnCapacity = 31;
+	private const int PairwiseRowCount = 32;
+	private const int CombatStepCount = 96;
+	private const int CombatTreeCheckpointInterval = 8;
+
 	[AvaloniaTheory]
 	[MemberData(nameof(Journeys))]
 	public async Task PublicSettingsEvents_LongCrossSectionJourney_MatchesIndependentWorkflowOracleAtEveryStep(
@@ -63,6 +68,539 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		Assert.True(
 			checkpointCount >= 2,
 			$"Journey '{journeyName}' must verify more than one complete tree/metrics checkpoint.");
+	}
+
+	[AvaloniaFact]
+	public async Task PublicSettingsEvents_EveryIgnorePowerSetState_MatchesIslandTreeAndMetrics()
+	{
+		using var workspace = SettingsIslandWorkspace.Create();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, workspace.RootPath);
+		await InitializeCoordinatorAsync(coordinator, viewModel, workspace.RootPath);
+
+		var oracle = SettingsIslandOracle.Create(workspace.RootPath);
+		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
+		Assert.Equal(Enum.GetValues<IgnoreOptionId>().Order(), ignoreOptionIds.Order());
+
+		var baselineFingerprint = CaptureIslandFingerprint(viewModel);
+		var visitedMasks = new HashSet<int>();
+		var stateVisits = new int[ignoreOptionIds.Length, 2];
+		var allMask = (1 << ignoreOptionIds.Length) - 1;
+		var currentMask = allMask;
+
+		// Gray code changes exactly one checkbox between adjacent states, so every
+		// assertion observes a real public single-toggle transition rather than setup mutation.
+		for (var sequenceIndex = 0; sequenceIndex <= allMask; sequenceIndex++)
+		{
+			var targetMask = allMask ^ (sequenceIndex ^ (sequenceIndex >> 1));
+			if (sequenceIndex > 0)
+			{
+				var changedBit = FindSingleChangedBit(currentMask, targetMask, ignoreOptionIds.Length);
+				var action = SettingsAction.ToggleIgnore(ignoreOptionIds[changedBit]);
+				await ExecuteActionAndRefreshAsync(
+					viewModel,
+					coordinator,
+					oracle,
+					workspace.RootPath,
+					action);
+			}
+
+			var stepName = $"ignore power-set state {sequenceIndex + 1}/{allMask + 1}, mask={targetMask}";
+			Assert.Equal(targetMask, CaptureIgnoreMask(viewModel, ignoreOptionIds, stepName));
+			AssertIslandMatchesOracle(viewModel, coordinator, oracle.CurrentSnapshot, stepName);
+			await AssertTreeAndMetricsMatchOracleAsync(
+				workspace.RootPath,
+				viewModel,
+				coordinator,
+				oracle.CurrentSnapshot,
+				stepName);
+
+			Assert.True(visitedMasks.Add(targetMask), $"{stepName}: duplicate Gray-code state.");
+			for (var bitIndex = 0; bitIndex < ignoreOptionIds.Length; bitIndex++)
+				stateVisits[bitIndex, (targetMask >> bitIndex) & 1]++;
+			currentMask = targetMask;
+		}
+
+		Assert.Equal(1 << ignoreOptionIds.Length, visitedMasks.Count);
+		for (var bitIndex = 0; bitIndex < ignoreOptionIds.Length; bitIndex++)
+		{
+			Assert.Equal(1 << (ignoreOptionIds.Length - 1), stateVisits[bitIndex, 0]);
+			Assert.Equal(1 << (ignoreOptionIds.Length - 1), stateVisits[bitIndex, 1]);
+		}
+		AssertEveryIgnorePairVisitedAllBooleanCombinations(visitedMasks, ignoreOptionIds);
+
+		await ExecuteActionAndRefreshAsync(
+			viewModel,
+			coordinator,
+			oracle,
+			workspace.RootPath,
+			SettingsAction.SetAllIgnore(true));
+		Assert.Equal(baselineFingerprint, CaptureIslandFingerprint(viewModel));
+		await AssertTreeAndMetricsMatchOracleAsync(
+			workspace.RootPath,
+			viewModel,
+			coordinator,
+			oracle.CurrentSnapshot,
+			"ignore power-set final round-trip");
+	}
+
+	[AvaloniaTheory]
+	[MemberData(nameof(PairwiseRows))]
+	public async Task PublicSettingsEvents_PairwiseAllSectionsBurst_PreservesEveryRequestedStateAndResult(int row)
+	{
+		using var workspace = SettingsIslandWorkspace.Create();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, workspace.RootPath);
+		await InitializeCoordinatorAsync(coordinator, viewModel, workspace.RootPath);
+		var oracle = SettingsIslandOracle.Create(workspace.RootPath);
+
+		await ExecuteActionAndRefreshAsync(
+			viewModel,
+			coordinator,
+			oracle,
+			workspace.RootPath,
+			SettingsAction.SetAllIgnore(false));
+
+		var rootNames = viewModel.RootFolders.Select(static option => option.Name).ToArray();
+		var extensionNames = viewModel.Extensions.Select(static option => option.Name).ToArray();
+		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
+		var totalControlCount = rootNames.Length + extensionNames.Length + ignoreOptionIds.Length;
+		Assert.InRange(totalControlCount, 3, PairwiseColumnCapacity);
+		Assert.Equal(Enum.GetValues<IgnoreOptionId>().Order(), ignoreOptionIds.Order());
+
+		var actions = new List<SettingsAction>(totalControlCount + 2)
+		{
+			SettingsAction.SetAllRoots(false),
+			SettingsAction.SetAllExtensions(false)
+		};
+		var column = 1;
+		var expectedRootStates = BuildPairwiseStates(rootNames, row, ref column, actions, SettingsAction.ToggleRoot);
+		var expectedExtensionStates = BuildPairwiseStates(
+			extensionNames,
+			row,
+			ref column,
+			actions,
+			SettingsAction.ToggleExtension);
+		var expectedIgnoreStates = BuildPairwiseIgnoreStates(ignoreOptionIds, row, ref column, actions);
+		Assert.Equal(totalControlCount + 1, column);
+
+		ExecuteActionBurst(viewModel, coordinator, oracle, workspace.RootPath, actions);
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+		var expectedSnapshot = oracle.Recompute();
+		var stepName = $"pairwise row {row}/{PairwiseRowCount - 1}";
+		AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, stepName);
+		AssertOracleStates(oracle, expectedRootStates, expectedExtensionStates, expectedIgnoreStates, stepName);
+		await AssertTreeAndMetricsMatchOracleAsync(
+			workspace.RootPath,
+			viewModel,
+			coordinator,
+			expectedSnapshot,
+			stepName);
+		await AssertIslandRemainsStableAsync(viewModel, coordinator, stepName);
+
+		if (!viewModel.AllRootFoldersChecked)
+		{
+			expectedSnapshot = await ExecuteActionAndRefreshAsync(
+				viewModel,
+				coordinator,
+				oracle,
+				workspace.RootPath,
+				SettingsAction.SetAllRoots(true));
+		}
+		if (!viewModel.AllExtensionsChecked)
+		{
+			expectedSnapshot = await ExecuteActionAndRefreshAsync(
+				viewModel,
+				coordinator,
+				oracle,
+				workspace.RootPath,
+				SettingsAction.SetAllExtensions(true));
+		}
+		AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, $"{stepName}: evidence exposed");
+
+		expectedSnapshot = await DisableAllIgnoreOptionsIndividuallyAsync(
+			viewModel,
+			coordinator,
+			oracle,
+			workspace.RootPath);
+		var restoreSelectionActions = BuildSelectionConvergenceActions(
+			viewModel,
+			expectedRootStates,
+			expectedExtensionStates);
+		if (restoreSelectionActions.Count > 0)
+		{
+			ExecuteActionBurst(
+				viewModel,
+				coordinator,
+				oracle,
+				workspace.RootPath,
+				restoreSelectionActions);
+			await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+			expectedSnapshot = oracle.Recompute();
+		}
+
+		AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, $"{stepName}: all ignores exposed");
+		AssertVisibleStates(viewModel.RootFolders, expectedRootStates, PathComparer.Default, $"{stepName}: roots");
+		AssertVisibleStates(
+			viewModel.Extensions,
+			expectedExtensionStates,
+			StringComparer.OrdinalIgnoreCase,
+			$"{stepName}: extensions");
+	}
+
+	[AvaloniaTheory]
+	[MemberData(nameof(CombatSeeds))]
+	public async Task PublicSettingsEvents_DeterministicCombatStateMachine_RemainsConsistent(
+		int seed,
+		int stepCount)
+	{
+		using var workspace = SettingsIslandWorkspace.Create();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, workspace.RootPath);
+		await InitializeCoordinatorAsync(coordinator, viewModel, workspace.RootPath);
+		var oracle = SettingsIslandOracle.Create(workspace.RootPath);
+		var toggledIgnoreIds = new HashSet<IgnoreOptionId>();
+		var visitedFingerprints = new HashSet<string>(StringComparer.Ordinal);
+		var actionKinds = new HashSet<SettingsActionKind>();
+
+		for (var stepIndex = 0; stepIndex < stepCount; stepIndex++)
+		{
+			var action = CreateCombatAction(viewModel, seed, stepIndex);
+			if (action.IgnoreOptionId is { } optionId)
+				toggledIgnoreIds.Add(optionId);
+			actionKinds.Add(action.Kind);
+
+			var expectedSnapshot = await ExecuteActionAndRefreshAsync(
+				viewModel,
+				coordinator,
+				oracle,
+				workspace.RootPath,
+				action);
+			var stepName = $"combat seed {seed}: step {stepIndex + 1}/{stepCount} ({action})";
+			AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, stepName);
+			visitedFingerprints.Add(CaptureIslandFingerprint(viewModel));
+
+			if (stepIndex % CombatTreeCheckpointInterval == 0 || stepIndex == stepCount - 1)
+			{
+				await AssertTreeAndMetricsMatchOracleAsync(
+					workspace.RootPath,
+					viewModel,
+					coordinator,
+					expectedSnapshot,
+					stepName);
+			}
+			if (stepIndex % 7 == 0)
+				await AssertIslandRemainsStableAsync(viewModel, coordinator, stepName);
+		}
+
+		Assert.Equal(Enum.GetValues<IgnoreOptionId>().Order(), toggledIgnoreIds.Order());
+		Assert.Contains(SettingsActionKind.ToggleRoot, actionKinds);
+		Assert.Contains(SettingsActionKind.ToggleExtension, actionKinds);
+		Assert.Contains(SettingsActionKind.ToggleIgnore, actionKinds);
+		Assert.Contains(SettingsActionKind.SetAllRoots, actionKinds);
+		Assert.Contains(SettingsActionKind.SetAllExtensions, actionKinds);
+		Assert.Contains(SettingsActionKind.SetAllIgnore, actionKinds);
+		Assert.True(
+			visitedFingerprints.Count >= stepCount / 2,
+			$"Combat seed {seed} produced only {visitedFingerprints.Count} distinct island states.");
+	}
+
+	[Fact]
+	public void PairwiseBooleanPattern_CoversEveryPairAndPolarity()
+	{
+		for (var leftColumn = 1; leftColumn <= PairwiseColumnCapacity; leftColumn++)
+		{
+			for (var rightColumn = leftColumn + 1; rightColumn <= PairwiseColumnCapacity; rightColumn++)
+			{
+				var combinations = new HashSet<int>();
+				for (var row = 0; row < PairwiseRowCount; row++)
+				{
+					var left = GetPairwiseState(row, leftColumn) ? 1 : 0;
+					var right = GetPairwiseState(row, rightColumn) ? 1 : 0;
+					combinations.Add((left << 1) | right);
+				}
+				Assert.Equal(4, combinations.Count);
+			}
+		}
+	}
+
+	public static IEnumerable<object[]> PairwiseRows()
+	{
+		for (var row = 0; row < PairwiseRowCount; row++)
+			yield return [row];
+	}
+
+	public static IEnumerable<object[]> CombatSeeds()
+	{
+		foreach (var seed in new[] { 3, 11, 29, 47, 71, 101 })
+			yield return [seed, CombatStepCount];
+	}
+
+	private static async Task InitializeCoordinatorAsync(
+		SelectionSyncCoordinator coordinator,
+		MainWindowViewModel viewModel,
+		string rootPath)
+	{
+		await coordinator.RefreshRootAndDependentsAsync(
+			rootPath,
+			TestContext.Current.CancellationToken);
+		HookAllOptionListeners(coordinator, viewModel);
+	}
+
+	private static async Task<SelectionRefreshSnapshot> ExecuteActionAndRefreshAsync(
+		MainWindowViewModel viewModel,
+		SelectionSyncCoordinator coordinator,
+		SettingsIslandOracle oracle,
+		string rootPath,
+		SettingsAction action)
+	{
+		ExecuteSettingsAction(viewModel, coordinator, rootPath, action);
+		oracle.Apply(action);
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+		return oracle.Recompute();
+	}
+
+	private static async Task<SelectionRefreshSnapshot> DisableAllIgnoreOptionsIndividuallyAsync(
+		MainWindowViewModel viewModel,
+		SelectionSyncCoordinator coordinator,
+		SettingsIslandOracle oracle,
+		string rootPath)
+	{
+		var snapshot = oracle.CurrentSnapshot;
+		var maximumTransitions = Enum.GetValues<IgnoreOptionId>().Length * 2;
+		for (var transition = 0; transition < maximumTransitions; transition++)
+		{
+			var checkedOption = viewModel.IgnoreOptions.FirstOrDefault(static option => option.IsChecked);
+			if (checkedOption is null)
+				break;
+
+			snapshot = await ExecuteActionAndRefreshAsync(
+				viewModel,
+				coordinator,
+				oracle,
+				rootPath,
+				SettingsAction.ToggleIgnore(checkedOption.Id));
+		}
+
+		Assert.All(oracle.IgnoreStates, static pair => Assert.False(pair.Value));
+		Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
+		return snapshot;
+	}
+
+	private static void ExecuteActionBurst(
+		MainWindowViewModel viewModel,
+		SelectionSyncCoordinator coordinator,
+		SettingsIslandOracle oracle,
+		string rootPath,
+		IEnumerable<SettingsAction> actions)
+	{
+		foreach (var action in actions)
+		{
+			ExecuteSettingsAction(viewModel, coordinator, rootPath, action);
+			oracle.Apply(action);
+		}
+	}
+
+	private static Dictionary<string, bool> BuildPairwiseStates(
+		IReadOnlyList<string> names,
+		int row,
+		ref int column,
+		ICollection<SettingsAction> actions,
+		Func<string, SettingsAction> actionFactory)
+	{
+		var states = new Dictionary<string, bool>(PathComparer.Default);
+		foreach (var name in names)
+		{
+			var isChecked = GetPairwiseState(row, column++);
+			states.Add(name, isChecked);
+			if (isChecked)
+				actions.Add(actionFactory(name));
+		}
+		return states;
+	}
+
+	private static Dictionary<IgnoreOptionId, bool> BuildPairwiseIgnoreStates(
+		IReadOnlyList<IgnoreOptionId> optionIds,
+		int row,
+		ref int column,
+		ICollection<SettingsAction> actions)
+	{
+		var states = new Dictionary<IgnoreOptionId, bool>();
+		foreach (var optionId in optionIds)
+		{
+			var isChecked = GetPairwiseState(row, column++);
+			states.Add(optionId, isChecked);
+			if (isChecked)
+				actions.Add(SettingsAction.ToggleIgnore(optionId));
+		}
+		return states;
+	}
+
+	private static IReadOnlyList<SettingsAction> BuildSelectionConvergenceActions(
+		MainWindowViewModel viewModel,
+		IReadOnlyDictionary<string, bool> expectedRootStates,
+		IReadOnlyDictionary<string, bool> expectedExtensionStates)
+	{
+		var actions = new List<SettingsAction>();
+		foreach (var option in viewModel.RootFolders)
+		{
+			Assert.True(expectedRootStates.TryGetValue(option.Name, out var expectedState));
+			if (option.IsChecked != expectedState)
+				actions.Add(SettingsAction.ToggleRoot(option.Name));
+		}
+
+		foreach (var option in viewModel.Extensions)
+		{
+			Assert.True(expectedExtensionStates.TryGetValue(option.Name, out var expectedState));
+			if (option.IsChecked != expectedState)
+				actions.Add(SettingsAction.ToggleExtension(option.Name));
+		}
+		return actions;
+	}
+
+	private static bool GetPairwiseState(int row, int column)
+	{
+		// Distinct non-zero five-bit linear forms are pairwise independent over GF(2).
+		// Across 32 rows each pair therefore produces 00, 01, 10 and 11.
+		var value = row & column;
+		var parity = 0;
+		while (value != 0)
+		{
+			parity ^= value & 1;
+			value >>= 1;
+		}
+		return parity != 0;
+	}
+
+	private static SettingsAction CreateCombatAction(
+		MainWindowViewModel viewModel,
+		int seed,
+		int stepIndex)
+	{
+		var phase = stepIndex % 12;
+		var cycle = stepIndex / 12;
+		return phase switch
+		{
+			0 => SettingsAction.SetAllIgnore(!viewModel.AllIgnoreChecked),
+			1 => SettingsAction.SetAllRoots(!viewModel.AllRootFoldersChecked),
+			2 => SettingsAction.SetAllExtensions(!viewModel.AllExtensionsChecked),
+			>= 3 and <= 6 => SettingsAction.ToggleIgnore(
+				SelectCombatIgnoreOption(viewModel, seed + cycle * 4 + phase - 3)),
+			>= 7 and <= 8 => SettingsAction.ToggleRoot(
+				SelectCombatName(viewModel.RootFolders, seed + cycle * 2 + phase - 7, "root")),
+			_ => SettingsAction.ToggleExtension(
+				SelectCombatName(viewModel.Extensions, seed + cycle * 3 + phase - 9, "extension"))
+		};
+	}
+
+	private static IgnoreOptionId SelectCombatIgnoreOption(MainWindowViewModel viewModel, int ordinal)
+	{
+		Assert.NotEmpty(viewModel.IgnoreOptions);
+		return viewModel.IgnoreOptions[PositiveModulo(ordinal, viewModel.IgnoreOptions.Count)].Id;
+	}
+
+	private static string SelectCombatName(
+		IReadOnlyList<SelectionOptionViewModel> options,
+		int ordinal,
+		string sectionName)
+	{
+		Assert.True(options.Count > 0, $"Combat matrix requires at least one visible {sectionName} option.");
+		return options[PositiveModulo(ordinal, options.Count)].Name;
+	}
+
+	private static int PositiveModulo(int value, int divisor)
+	{
+		var remainder = value % divisor;
+		return remainder < 0 ? remainder + divisor : remainder;
+	}
+
+	private static int FindSingleChangedBit(int leftMask, int rightMask, int bitCount)
+	{
+		var difference = leftMask ^ rightMask;
+		Assert.True(difference != 0 && (difference & (difference - 1)) == 0,
+			$"Gray-code transition must change exactly one bit. Left={leftMask}; Right={rightMask}.");
+		for (var bitIndex = 0; bitIndex < bitCount; bitIndex++)
+		{
+			if ((difference & (1 << bitIndex)) != 0)
+				return bitIndex;
+		}
+		throw new InvalidOperationException("Changed Gray-code bit was outside the ignore option range.");
+	}
+
+	private static int CaptureIgnoreMask(
+		MainWindowViewModel viewModel,
+		IReadOnlyList<IgnoreOptionId> optionIds,
+		string stepName)
+	{
+		Assert.Equal(optionIds.Count, viewModel.IgnoreOptions.Count);
+		var mask = 0;
+		for (var bitIndex = 0; bitIndex < optionIds.Count; bitIndex++)
+		{
+			var option = Assert.Single(viewModel.IgnoreOptions, candidate => candidate.Id == optionIds[bitIndex]);
+			if (option.IsChecked)
+				mask |= 1 << bitIndex;
+		}
+		Assert.Equal(optionIds.Count, viewModel.IgnoreOptions.Select(static option => option.Id).Distinct().Count());
+		Assert.True(mask >= 0, $"{stepName}: invalid ignore mask.");
+		return mask;
+	}
+
+	private static void AssertEveryIgnorePairVisitedAllBooleanCombinations(
+		IReadOnlySet<int> visitedMasks,
+		IReadOnlyList<IgnoreOptionId> optionIds)
+	{
+		for (var leftBit = 0; leftBit < optionIds.Count; leftBit++)
+		{
+			for (var rightBit = leftBit + 1; rightBit < optionIds.Count; rightBit++)
+			{
+				var combinations = visitedMasks
+					.Select(mask => (((mask >> leftBit) & 1) << 1) | ((mask >> rightBit) & 1))
+					.ToHashSet();
+				Assert.True(
+					combinations.SetEquals([0, 1, 2, 3]),
+					$"Ignore pair {optionIds[leftBit]} + {optionIds[rightBit]} missed a boolean combination.");
+			}
+		}
+	}
+
+	private static void AssertOracleStates(
+		SettingsIslandOracle oracle,
+		IReadOnlyDictionary<string, bool> expectedRootStates,
+		IReadOnlyDictionary<string, bool> expectedExtensionStates,
+		IReadOnlyDictionary<IgnoreOptionId, bool> expectedIgnoreStates,
+		string stepName)
+	{
+		AssertDictionaryEqual(expectedRootStates, oracle.RootStates, PathComparer.Default, $"{stepName}: root cache");
+		AssertDictionaryEqual(
+			expectedExtensionStates,
+			oracle.ExtensionStates,
+			StringComparer.OrdinalIgnoreCase,
+			$"{stepName}: extension cache");
+		Assert.Equal(expectedIgnoreStates.OrderBy(static pair => pair.Key), oracle.IgnoreStates.OrderBy(static pair => pair.Key));
+	}
+
+	private static void AssertVisibleStates(
+		IEnumerable<SelectionOptionViewModel> visibleOptions,
+		IReadOnlyDictionary<string, bool> expectedStates,
+		StringComparer comparer,
+		string assertionName)
+	{
+		var actual = visibleOptions.ToDictionary(
+			static option => option.Name,
+			static option => option.IsChecked,
+			comparer);
+		AssertDictionaryEqual(expectedStates, actual, comparer, assertionName);
+	}
+
+	private static void AssertDictionaryEqual(
+		IReadOnlyDictionary<string, bool> expected,
+		IReadOnlyDictionary<string, bool> actual,
+		StringComparer comparer,
+		string assertionName)
+	{
+		var expectedPairs = expected.OrderBy(static pair => pair.Key, comparer).ToArray();
+		var actualPairs = actual.OrderBy(static pair => pair.Key, comparer).ToArray();
+		AssertSequenceEqual(expectedPairs, actualPairs, assertionName);
 	}
 
 	public static IEnumerable<object[]> Journeys()
@@ -342,6 +880,9 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				new TreeFilterOptions(selectedExtensions, selectedRoots, ignoreRules)),
 			CancellationToken.None);
 		var relativePaths = FlattenRelativePaths(rootPath, buildResult.Root);
+		var selectedIgnoreSet = selectedIgnoreOptions.ToHashSet();
+		bool RootSelected(string name) => selectedRoots.Contains(name);
+		bool ExtensionSelected(string extension) => selectedExtensions.Contains(extension);
 
 		foreach (var uncheckedRoot in rootOptions.Where(static option => !option.IsChecked))
 		{
@@ -350,53 +891,121 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				relativePath.StartsWith(uncheckedRoot.Name + "/", PathComparison));
 		}
 
-		if (ignoreRules.IsGitIgnored(
-			    Path.Combine(rootPath, "artifacts"),
-			    isDirectory: true,
-			    "artifacts"))
-		{
-			Assert.DoesNotContain(relativePaths, static path => path.StartsWith("artifacts/", PathComparison));
-		}
+		var artifactsIgnored = ignoreRules.IsGitIgnored(
+			Path.Combine(rootPath, "artifacts"),
+			isDirectory: true,
+			"artifacts") || ignoreRules.IsSmartIgnoredDirectory(
+			Path.Combine(rootPath, "artifacts"),
+			"artifacts");
+		AssertPathVisibility(
+			relativePaths,
+			"artifacts/reports/2026/summary.txt",
+			RootSelected("artifacts") && ExtensionSelected(".txt") && !artifactsIgnored);
 
-		if (ignoreRules.IsGitIgnored(
-			    Path.Combine(rootPath, "alpha", "runtime.log"),
-			    isDirectory: false,
-			    "runtime.log"))
-			Assert.DoesNotContain("alpha/runtime.log", relativePaths);
+		var runtimeLogIgnored = ignoreRules.IsGitIgnored(
+			Path.Combine(rootPath, "alpha", "runtime.log"),
+			isDirectory: false,
+			"runtime.log");
+		AssertPathVisibility(
+			relativePaths,
+			"alpha/runtime.log",
+			RootSelected("alpha") && ExtensionSelected(".log") && !runtimeLogIgnored);
 
-		if (ignoreRules.IsSmartIgnoredDirectory(
-			    Path.Combine(rootPath, "alpha", "bin"),
-			    "bin"))
-			Assert.DoesNotContain(relativePaths, static path => path.StartsWith("alpha/bin/", PathComparison));
+		var binIgnored = ignoreRules.IsSmartIgnoredDirectory(
+			Path.Combine(rootPath, "alpha", "bin"),
+			"bin");
+		AssertPathVisibility(
+			relativePaths,
+			"alpha/bin/Debug/net10.0/Alpha.dll",
+			RootSelected("alpha") && ExtensionSelected(".dll") && !binIgnored);
 
-		if (ignoreRules.IsSmartIgnoredDirectory(
-			    Path.Combine(rootPath, "beta", "node_modules"),
-			    "node_modules"))
-		{
-			Assert.DoesNotContain(relativePaths, static path => path.StartsWith("beta/node_modules/", PathComparison));
-		}
+		var nodeModulesIgnored = ignoreRules.IsSmartIgnoredDirectory(
+			Path.Combine(rootPath, "beta", "node_modules"),
+			"node_modules");
+		AssertPathVisibility(
+			relativePaths,
+			"beta/node_modules/pkg/dist/index.js",
+			RootSelected("beta") && ExtensionSelected(".js") && !nodeModulesIgnored);
 
-		if (selectedIgnoreOptions.Contains(IgnoreOptionId.DotFolders))
-		{
-			Assert.DoesNotContain(relativePaths, static path =>
-				path.StartsWith(".root-dot/", PathComparison) ||
-				path.StartsWith("alpha/.private/", PathComparison) ||
-				path.StartsWith("beta/.cache/", PathComparison) ||
-				path.StartsWith("gamma/.drafts/", PathComparison));
-		}
+		var dotFoldersIgnored = selectedIgnoreSet.Contains(IgnoreOptionId.DotFolders);
+		AssertPathVisibility(
+			relativePaths,
+			".root-dot/nested/deep/visible.txt",
+			RootSelected(".root-dot") && ExtensionSelected(".txt") && !dotFoldersIgnored);
+		AssertPathVisibility(
+			relativePaths,
+			"alpha/.private/nested/secret.cs",
+			RootSelected("alpha") && ExtensionSelected(".cs") && !dotFoldersIgnored);
+		AssertPathVisibility(
+			relativePaths,
+			"gamma/.drafts/deep/draft.md",
+			RootSelected("gamma") && ExtensionSelected(".md") && !dotFoldersIgnored);
 
-		if (selectedIgnoreOptions.Contains(IgnoreOptionId.EmptyFiles))
-		{
-			Assert.DoesNotContain("alpha/src/empty.cs", relativePaths);
-			Assert.DoesNotContain("gamma/empty.txt", relativePaths);
-			Assert.DoesNotContain("empty-root-file.txt", relativePaths);
-		}
+		var emptyFilesIgnored = selectedIgnoreSet.Contains(IgnoreOptionId.EmptyFiles);
+		AssertPathVisibility(
+			relativePaths,
+			"alpha/src/empty.cs",
+			RootSelected("alpha") && ExtensionSelected(".cs") && !emptyFilesIgnored);
+		AssertPathVisibility(
+			relativePaths,
+			"gamma/empty.txt",
+			RootSelected("gamma") && ExtensionSelected(".txt") && !emptyFilesIgnored);
+		AssertPathVisibility(
+			relativePaths,
+			"empty-root-file.txt",
+			ExtensionSelected(".txt") && !emptyFilesIgnored);
 
-		if (selectedIgnoreOptions.Contains(IgnoreOptionId.ExtensionlessFiles))
-		{
-			Assert.DoesNotContain("LICENSE", relativePaths);
-			Assert.DoesNotContain("gamma/README", relativePaths);
-		}
+		var extensionlessFilesIgnored = selectedIgnoreSet.Contains(IgnoreOptionId.ExtensionlessFiles);
+		AssertPathVisibility(relativePaths, "LICENSE", !extensionlessFilesIgnored);
+		AssertPathVisibility(
+			relativePaths,
+			"gamma/README",
+			RootSelected("gamma") && !extensionlessFilesIgnored);
+
+		var dotFilesIgnored = selectedIgnoreSet.Contains(IgnoreOptionId.DotFiles);
+		AssertPathVisibility(
+			relativePaths,
+			"gamma/.secret.txt",
+			RootSelected("gamma") && ExtensionSelected(".txt") && !dotFilesIgnored);
+		AssertPathVisibility(
+			relativePaths,
+			".env",
+			ExtensionSelected(".env") && !dotFilesIgnored);
+
+		var emptyFoldersIgnored = selectedIgnoreSet.Contains(IgnoreOptionId.EmptyFolders);
+		AssertPathVisibility(
+			relativePaths,
+			"delta-empty/level-1/level-2/level-3",
+			RootSelected("delta-empty") && !emptyFoldersIgnored);
+
+		var hiddenRootPath = Path.Combine(rootPath, "hidden-root");
+		var hiddenRootSupported = File.GetAttributes(hiddenRootPath).HasFlag(FileAttributes.Hidden);
+		AssertPathVisibility(
+			relativePaths,
+			"hidden-root/nested/hidden.txt",
+			RootSelected("hidden-root") &&
+			ExtensionSelected(".txt") &&
+			(!hiddenRootSupported || !selectedIgnoreSet.Contains(IgnoreOptionId.HiddenFolders)));
+
+		var hiddenFilePath = Path.Combine(rootPath, "gamma", "hidden-note.txt");
+		var hiddenFileSupported = File.GetAttributes(hiddenFilePath).HasFlag(FileAttributes.Hidden);
+		AssertPathVisibility(
+			relativePaths,
+			"gamma/hidden-note.txt",
+			RootSelected("gamma") &&
+			ExtensionSelected(".txt") &&
+			(!hiddenFileSupported || !selectedIgnoreSet.Contains(IgnoreOptionId.HiddenFiles)));
+	}
+
+	private static void AssertPathVisibility(
+		IReadOnlySet<string> relativePaths,
+		string relativePath,
+		bool shouldBeVisible)
+	{
+		if (shouldBeVisible)
+			Assert.Contains(relativePath, relativePaths);
+		else
+			Assert.DoesNotContain(relativePath, relativePaths);
 	}
 
 	private static HashSet<string> FlattenRelativePaths(string rootPath, TreeNodeDescriptor root)
@@ -582,6 +1191,9 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		}
 
 		public SelectionRefreshSnapshot CurrentSnapshot { get; private set; }
+		public IReadOnlyDictionary<string, bool> RootStates => _rootStates;
+		public IReadOnlyDictionary<string, bool> ExtensionStates => _extensionStates;
+		public IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreStates => _ignoreStates;
 
 		public static SettingsIslandOracle Create(string rootPath)
 		{
@@ -598,29 +1210,29 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			{
 				case SettingsActionKind.ToggleRoot:
 					ToggleVisibleRoot(action.Name!);
-					_nextRefreshRoute = RefreshRoute.Live;
+					PromoteRefreshRoute(RefreshRoute.Live);
 					break;
 				case SettingsActionKind.ToggleExtension:
 					ToggleVisibleExtension(action.Name!);
-					_nextRefreshRoute = RefreshRoute.Live;
+					PromoteRefreshRoute(RefreshRoute.Live);
 					break;
 				case SettingsActionKind.ToggleIgnore:
 					ToggleVisibleIgnore(action.IgnoreOptionId!.Value);
-					_nextRefreshRoute = IsLiveIgnoreOption(action.IgnoreOptionId.Value)
+					PromoteRefreshRoute(IsLiveIgnoreOption(action.IgnoreOptionId.Value)
 						? RefreshRoute.Live
-						: RefreshRoute.Full;
+						: RefreshRoute.Full);
 					break;
 				case SettingsActionKind.SetAllRoots:
 					SetAllVisibleRoots(action.IsChecked!.Value);
-					_nextRefreshRoute = RefreshRoute.Live;
+					PromoteRefreshRoute(RefreshRoute.Live);
 					break;
 				case SettingsActionKind.SetAllExtensions:
 					SetAllVisibleExtensions(action.IsChecked!.Value);
-					_nextRefreshRoute = RefreshRoute.Live;
+					PromoteRefreshRoute(RefreshRoute.Live);
 					break;
 				case SettingsActionKind.SetAllIgnore:
 					SetAllIgnoreOptions(action.IsChecked!.Value);
-					_nextRefreshRoute = RefreshRoute.Full;
+					PromoteRefreshRoute(RefreshRoute.Full);
 					break;
 				case SettingsActionKind.Checkpoint:
 					throw new InvalidOperationException("Checkpoint does not mutate the settings oracle.");
@@ -652,7 +1264,14 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			MergeNewlyDiscoveredState(snapshot);
 			SynchronizeMasterStates(snapshot);
 			CurrentSnapshot = snapshot;
+			_nextRefreshRoute = RefreshRoute.Live;
 			return snapshot;
+		}
+
+		private void PromoteRefreshRoute(RefreshRoute requestedRoute)
+		{
+			if (requestedRoute == RefreshRoute.Full)
+				_nextRefreshRoute = RefreshRoute.Full;
 		}
 
 		private SelectionRefreshContext CreateContext(bool captureTreeInventory)
@@ -846,6 +1465,15 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		private static void Seed(string rootPath)
 		{
 			WriteFile(rootPath, ".gitignore", "artifacts/\n*.tmp\n");
+			WriteFile(rootPath, "root-evidence.cs", "class RootEvidence {}\n");
+			WriteFile(rootPath, "root-evidence.csproj", "<Project />\n");
+			WriteFile(rootPath, "root-evidence.dll", "binary evidence\n");
+			WriteFile(rootPath, "root-evidence.js", "module.exports = true;\n");
+			WriteFile(rootPath, "root-evidence.json", "{}\n");
+			WriteFile(rootPath, "root-evidence.log", "log evidence\n");
+			WriteFile(rootPath, "root-evidence.md", "# evidence\n");
+			WriteFile(rootPath, "root-evidence.ts", "export const evidence = true;\n");
+			WriteFile(rootPath, "root-evidence.txt", "text evidence\n");
 
 			WriteFile(rootPath, Path.Combine("alpha", ".gitignore"), "*.log\n!keep.log\n.generated/\n");
 			WriteFile(rootPath, Path.Combine("alpha", "Alpha.csproj"), "<Project />\n");
@@ -871,6 +1499,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			WriteFile(rootPath, Path.Combine("gamma", "notes.txt"), "one\ntwo\nthree\n");
 			WriteFile(rootPath, Path.Combine("gamma", "README"), "extensionless documentation\n");
 			WriteFile(rootPath, Path.Combine("gamma", "empty.txt"), string.Empty);
+			WriteFile(rootPath, Path.Combine("gamma", ".secret.txt"), "dot file payload\n");
 			WriteFile(rootPath, Path.Combine("gamma", ".drafts", "deep", "draft.md"), "# draft\n");
 
 			WriteFile(rootPath, Path.Combine("artifacts", "reports", "2026", "summary.txt"), "ignored report\n");
