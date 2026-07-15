@@ -294,6 +294,30 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithManagedGitCloneContentWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
+            WriteFile(rootPath, Path.Combine(".git", "objects", "pack", "pack-test.pack"), "git metadata\n");
+            TryMarkHidden(Path.Combine(rootPath, ".git"));
+
+            WriteFile(
+                rootPath,
+                Path.Combine("src", "CloneContentProbe.cs"),
+                "namespace CloneProbe;\npublic static class CloneContentProbe { public const string Value = \"CLONE-CONTENT-SENTINEL\"; }\n");
+            WriteFile(
+                rootPath,
+                Path.Combine("docs", "clone-guide.md"),
+                "# Clone guide\n\nCLONE-DOCUMENTATION-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("src", "empty.txt"), string.Empty);
+            WriteBinaryFile(
+                rootPath,
+                Path.Combine("assets", "clone-image.bin"),
+                [0, 1, 2, 3, 0, 255, 4, 5]);
+        });
+    }
+
     private static UiTestProject Create(Action<string> seedWorkspace)
     {
         var testRoot = Path.Combine(
