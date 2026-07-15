@@ -64,17 +64,17 @@ public sealed class IgnorePipelinePolyglotWorkspaceMatrixIntegrationTests
 
 		if (includesMono)
 		{
-			Assert.Equal(!useGitIgnore, ContainsPath(treeResult, "mono/target"));
+			Assert.Equal(!(rules.UseGitIgnore || rules.UseSmartIgnore), ContainsPath(treeResult, "mono/target"));
 		}
 
 		if (includesWeb)
 		{
-			Assert.Equal(!useSmartIgnore, ContainsPath(treeResult, "web/node_modules"));
+			Assert.Equal(!rules.UseSmartIgnore, ContainsPath(treeResult, "web/node_modules"));
 		}
 
 		if (includesDeep)
 		{
-			Assert.Equal(!useSmartIgnore, ContainsPath(treeResult, "deep/dist"));
+			Assert.Equal(!rules.UseSmartIgnore, ContainsPath(treeResult, "deep/dist"));
 		}
 
 		var scanUseCase = new ScanOptionsUseCase(new FileSystemScanner());
@@ -86,8 +86,8 @@ public sealed class IgnorePipelinePolyglotWorkspaceMatrixIntegrationTests
 		var extensions = scan.Value.Extensions;
 		Assert.Equal(includesMono, extensions.Contains(".rs"));
 		Assert.Equal(includesWeb || includesDeep, extensions.Contains(".ts"));
-		Assert.Equal(includesMono && !useGitIgnore, extensions.Contains(".a"));
-		Assert.Equal((includesWeb || includesDeep) && !useSmartIgnore, extensions.Contains(".js"));
+		Assert.Equal(includesMono && !(rules.UseGitIgnore || rules.UseSmartIgnore), extensions.Contains(".a"));
+		Assert.Equal((includesWeb || includesDeep) && !rules.UseSmartIgnore, extensions.Contains(".js"));
 	}
 
 	private static bool ContainsRootFolder(TreeBuildResult result, string rootFolderName)

@@ -31,6 +31,19 @@ public sealed class SelectionSessionStateTests
     }
 
     [Fact]
+    public void SelectionOptionStateCache_UpdateFromVisibleOptions_ReusesSelectedNamesSet()
+    {
+        var cache = new SelectionOptionStateCache(StringComparer.OrdinalIgnoreCase);
+        cache.UpdateFromVisibleOptions([new(".cs", true), new(".md", false)]);
+        var selectedNames = cache.SelectedNames;
+
+        cache.UpdateFromVisibleOptions([new(".cs", false), new(".md", true)]);
+
+        Assert.Same(selectedNames, cache.SelectedNames);
+        Assert.Equal([".md"], cache.SelectedNames);
+    }
+
+    [Fact]
     public void SelectionOptionStateCache_LegacyProfile_DoesNotPretendToHaveFullState()
     {
         var cache = new SelectionOptionStateCache(PathComparer.Default);

@@ -379,7 +379,7 @@ internal static class PreviewSelectionMetricsPolicy
         return $"[{labels.LinesPrefix} {FormatNumber(metrics.Lines)} | {labels.CharsPrefix} {FormatNumber(metrics.Chars)} | {labels.TokensPrefix} {FormatNumber(metrics.Tokens)}]";
     }
 
-    private static string FormatNumber(int value)
+    private static string FormatNumber(long value)
     {
         return value switch
         {

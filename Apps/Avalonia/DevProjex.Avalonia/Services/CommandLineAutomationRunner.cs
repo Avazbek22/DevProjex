@@ -28,6 +28,14 @@ internal static class CommandLineAutomationRunner
 		if (parseResult.Errors.Count > 0)
 			return WriteErrors(parseResult.Errors, context.Error);
 
+		if (parseResult.Options.Benchmark.Enabled)
+			return await RunBenchmarkAsync(parseResult.Options, context, cancellationToken)
+				.ConfigureAwait(false);
+
+		if (parseResult.Options.UiBenchmark.Enabled)
+			return await RunUiBenchmarkAsync(parseResult.Options, context, cancellationToken)
+				.ConfigureAwait(false);
+
 		if (!ShouldRunHeadlessAnalysis(parseResult.Options))
 			return CommandLineExitCodes.Success;
 
@@ -39,7 +47,40 @@ internal static class CommandLineAutomationRunner
 		parseResult.Errors.Count > 0 ||
 		parseResult.Options.ShowHelp ||
 		parseResult.Options.ShowVersion ||
+		parseResult.Options.Benchmark.Enabled ||
+		parseResult.Options.UiBenchmark.Enabled ||
 		ShouldRunHeadlessAnalysis(parseResult.Options);
+
+	private static async Task<int> RunBenchmarkAsync(
+		CommandLineOptions options,
+		CommandLineAutomationContext context,
+		CancellationToken cancellationToken)
+	{
+		var benchmarkContext = new CommandLineBenchmarkContext(
+			Output: context.Output,
+			Error: context.Error,
+			ServicesFactory: context.ServicesFactory,
+			VersionProvider: context.VersionProvider,
+			ProcessRunner: context.BenchmarkProcessRunner ?? new DefaultCommandLineBenchmarkProcessRunner(),
+			LocalAppDataProvider: context.BenchmarkLocalAppDataProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
+		var runner = new CommandLineBenchmarkRunner(benchmarkContext);
+		return await runner.RunAsync(options, cancellationToken).ConfigureAwait(false);
+	}
+
+	private static async Task<int> RunUiBenchmarkAsync(
+		CommandLineOptions options,
+		CommandLineAutomationContext context,
+		CancellationToken cancellationToken)
+	{
+		var benchmarkContext = new CommandLineUiBenchmarkContext(
+			Output: context.Output,
+			Error: context.Error,
+			VersionProvider: context.VersionProvider,
+			ProcessRunner: context.UiBenchmarkProcessRunner ?? context.BenchmarkProcessRunner ?? new DefaultCommandLineBenchmarkProcessRunner(),
+			LocalAppDataProvider: context.BenchmarkLocalAppDataProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
+		var runner = new CommandLineUiBenchmarkRunner(benchmarkContext);
+		return await runner.RunAsync(options, cancellationToken).ConfigureAwait(false);
+	}
 
 	private static async Task<int> RunHeadlessAnalysisAsync(
 		CommandLineOptions options,
@@ -306,4 +347,7 @@ internal sealed record CommandLineAutomationContext(
 	TextWriter Error,
 	Func<CommandLineOptions, AvaloniaAppServices> ServicesFactory,
 	CommandLineHelpContentProvider HelpContentProvider,
-	Func<string> VersionProvider);
+	Func<string> VersionProvider,
+	ICommandLineBenchmarkProcessRunner? BenchmarkProcessRunner = null,
+	ICommandLineBenchmarkProcessRunner? UiBenchmarkProcessRunner = null,
+	Func<string>? BenchmarkLocalAppDataProvider = null);

@@ -259,6 +259,49 @@ public sealed class FileSystemScannerTests
 		Assert.DoesNotContain(".exe", result.Value);
 		Assert.DoesNotContain(".txt", result.Value);
 	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void GetExtensions_GenericDependencyStoreAndUserState_FollowSmartIgnoreToggle(bool useSmartIgnore)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateFile("packages.config", "<packages />");
+		temp.CreateFile("App.sln.DotSettings", "shared settings");
+		temp.CreateFile("App.sln.DotSettings.user", "local settings");
+		temp.CreateFile("packages/Alpha.1.0.0/Alpha.1.0.0.nupkg", "package");
+		temp.CreateFile("packages/Alpha.1.0.0/lib/Alpha.dll", "binary");
+		temp.CreateFile("packages/Beta.2.0.0/Beta.2.0.0.nupkg", "package");
+		temp.CreateFile("packages/Beta.2.0.0/ref/Beta.xml", "<doc />");
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = useSmartIgnore,
+			SmartArtifactIgnoreMatcher = useSmartIgnore
+				? SmartArtifactIgnoreMatcher.Default
+				: SmartArtifactIgnoreMatcher.Empty,
+			SmartArtifactIgnoreCandidateMatcher = SmartArtifactIgnoreMatcher.Default
+		};
+
+		var result = new FileSystemScanner().GetExtensions(
+			temp.Path,
+			rules,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(".cs", result.Value);
+		Assert.Contains(".config", result.Value);
+		Assert.Contains(".DotSettings", result.Value);
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".user"));
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".nupkg"));
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".dll"));
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".xml"));
+	}
 }
 
 

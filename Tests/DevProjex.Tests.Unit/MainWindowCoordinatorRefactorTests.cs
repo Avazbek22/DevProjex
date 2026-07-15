@@ -319,6 +319,33 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public void MetricsPipeline_StatusSnapshotPreservesWorkspaceMetricsBeyondInt32()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+        using var pipeline = CreateMetricsPipeline(viewModel, boundsWidth: 1400);
+        using var document = new InMemoryPreviewTextDocument("tree\ncontent");
+
+        pipeline.UpdateStatusBarMetrics(
+            treeLines: 100_000_000,
+            treeChars: 1_000_000_000,
+            treeTokens: 250_000_000,
+            contentLines: 2_400_000_006,
+            contentChars: 3_000_000_015,
+            contentTokens: 750_000_004);
+
+        Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
+            PreviewContentMode.TreeAndContent,
+            document,
+            new PreviewSelectionRange(1, 0, 2, 7),
+            out var metrics));
+        Assert.Equal(
+            new ExportOutputMetrics(2_500_000_006, 4_000_000_015, 1_000_000_004),
+            metrics);
+        Assert.DoesNotContain("chars 0", viewModel.StatusContentStatsText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PreviewWorkspacePipeline_CacheHitReappliesDocumentWithoutRebuilding()
     {
         var viewModel = CreateViewModel();

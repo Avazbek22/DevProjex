@@ -2,6 +2,7 @@ using DevProjex.Application.Models;
 
 namespace DevProjex.Tests.Unit;
 
+[Collection("AvaloniaUI")]
 public sealed class SelectionSyncCoordinatorAdditionalTests
 {
 	[Fact]
@@ -595,6 +596,722 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.Equal(0, collectionEvents);
 	}
 
+	[Theory]
+	[InlineData(IgnoreOptionId.SmartIgnore)]
+	[InlineData(IgnoreOptionId.UseGitIgnore)]
+	[InlineData(IgnoreOptionId.HiddenFolders)]
+	[InlineData(IgnoreOptionId.HiddenFiles)]
+	[InlineData(IgnoreOptionId.DotFolders)]
+	[InlineData(IgnoreOptionId.DotFiles)]
+	[InlineData(IgnoreOptionId.EmptyFolders)]
+	[InlineData(IgnoreOptionId.EmptyFiles)]
+	[InlineData(IgnoreOptionId.ExtensionlessFiles)]
+	public void ReversibleRefresh_IgnoreOptionToggleCycle_RestoresCountsWithoutScanning(
+		IgnoreOptionId optionId)
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		var enabledSnapshot = CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433);
+		var disabledSnapshot = CreateReversibleSelectionRefreshSnapshot(
+			optionId,
+			emptyFolderCount: 410) with
+		{
+			RootOptions =
+			[
+				new SelectionOption("src", true),
+				new SelectionOption("empty-file-root", true)
+			],
+			ExtensionOptions =
+			[
+				new SelectionOption(".cs", true),
+				new SelectionOption(".txt", true)
+			]
+		};
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			enabledSnapshot);
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			disabledSnapshot);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			disabledSnapshot,
+			retainPreviousSnapshot: true);
+
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateIgnoreReversalCurrentSnapshot(disabledSnapshot, enabledSnapshot, optionId));
+
+		Assert.True(TryRestoreKnownSelectionSnapshot(
+			coordinator,
+			path,
+			SelectionRefreshOrigin.IgnoreOption,
+			optionId));
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.True(viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked);
+		Assert.Equal(
+			"EmptyFolders (433)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+		Assert.Equal(["src"], viewModel.RootFolders.Select(static option => option.Name));
+		Assert.Equal([".cs"], viewModel.Extensions.Select(static option => option.Name));
+
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateIgnoreReversalCurrentSnapshot(enabledSnapshot, disabledSnapshot, optionId));
+
+		Assert.True(TryRestoreKnownSelectionSnapshot(
+			coordinator,
+			path,
+			SelectionRefreshOrigin.IgnoreOption,
+			optionId));
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.False(viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked);
+		Assert.Equal(
+			"EmptyFolders (410)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+		Assert.Equal(
+			["src", "empty-file-root"],
+			viewModel.RootFolders.Select(static option => option.Name));
+		Assert.Equal(
+			[".cs", ".txt"],
+			viewModel.Extensions.Select(static option => option.Name));
+	}
+
+	[AvaloniaTheory]
+	[InlineData(IgnoreOptionId.HiddenFiles)]
+	[InlineData(IgnoreOptionId.DotFiles)]
+	[InlineData(IgnoreOptionId.EmptyFiles)]
+	[InlineData(IgnoreOptionId.ExtensionlessFiles)]
+	public async Task PublicRefreshQueue_FileVisibilityToggleCycle_RestoresOriginalEmptyFoldersCounter(
+		IgnoreOptionId optionId)
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			RootSelectionSnapshot = CreateDriftedRootSelectionScanData()
+		};
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		HookAllOptionListeners(coordinator, viewModel);
+
+		viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked = false;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, scanner.RootSelectionSnapshotCount);
+		Assert.Equal(410, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+		Assert.NotEqual(
+			"EmptyFolders (433)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+		Assert.Contains(viewModel.Extensions, option => option.Name == ".txt");
+
+		viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked = true;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, scanner.RootSelectionSnapshotCount);
+		Assert.Equal(433, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+		Assert.Equal(
+			"EmptyFolders (433)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+		Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".txt");
+
+		viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked = false;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, scanner.RootSelectionSnapshotCount);
+		Assert.Equal(410, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+		Assert.Contains(viewModel.Extensions, option => option.Name == ".txt");
+	}
+
+	[AvaloniaFact]
+	public async Task PublicRefreshQueue_RapidIgnoreReversal_CancelsStaleScanAndKeepsStableSnapshot()
+	{
+		const string path = @"C:\Project";
+		using var scanStarted = new ManualResetEventSlim();
+		using var releaseScan = new ManualResetEventSlim();
+		var cancellationObserved = 0;
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			RootSelectionSnapshot = CreateDriftedRootSelectionScanData(),
+			BeforeRootSelectionSnapshot = cancellationToken =>
+			{
+				scanStarted.Set();
+				var signal = WaitHandle.WaitAny(
+					[cancellationToken.WaitHandle, releaseScan.WaitHandle],
+					TimeSpan.FromSeconds(3));
+				if (signal == 0)
+				{
+					Interlocked.Exchange(ref cancellationObserved, 1);
+					cancellationToken.ThrowIfCancellationRequested();
+				}
+
+				if (signal == WaitHandle.WaitTimeout)
+					throw new TimeoutException("The controlled selection scan was not released.");
+			}
+		};
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		HookAllOptionListeners(coordinator, viewModel);
+
+		try
+		{
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFiles).IsChecked = false;
+			Assert.True(await Task.Run(
+				() => scanStarted.Wait(TimeSpan.FromSeconds(2)),
+				TestContext.Current.CancellationToken));
+
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFiles).IsChecked = true;
+			await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+			Assert.Equal(1, Volatile.Read(ref cancellationObserved));
+			Assert.Equal(1, scanner.RootSelectionSnapshotCount);
+			Assert.Equal(433, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+			Assert.Equal(
+				"EmptyFolders (433)",
+				viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+			Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".txt");
+		}
+		finally
+		{
+			releaseScan.Set();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PublicRefreshQueue_AdditionalExtensionChange_InvalidatesEarlierIgnoreRollback()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			RootSelectionSnapshot = CreateDriftedRootSelectionScanData()
+		};
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		HookAllOptionListeners(coordinator, viewModel);
+
+		viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFiles).IsChecked = false;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(1, scanner.RootSelectionSnapshotCount);
+
+		viewModel.Extensions.Single(option => option.Name == ".txt").IsChecked = false;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(2, scanner.RootSelectionSnapshotCount);
+
+		viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFiles).IsChecked = true;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(3, scanner.RootSelectionSnapshotCount);
+		Assert.Equal(410, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+	}
+
+	[AvaloniaTheory]
+	[InlineData(IgnoreOptionId.SmartIgnore)]
+	[InlineData(IgnoreOptionId.UseGitIgnore)]
+	[InlineData(IgnoreOptionId.HiddenFolders)]
+	[InlineData(IgnoreOptionId.DotFolders)]
+	[InlineData(IgnoreOptionId.EmptyFolders)]
+	public async Task PublicFullRefreshQueue_StructuralIgnoreToggleCycle_RestoresKnownSnapshotsWithoutScanning(
+		IgnoreOptionId optionId)
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		var enabledSnapshot = CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433);
+		var disabledSnapshot = CreateReversibleSelectionRefreshSnapshot(
+			optionId,
+			emptyFolderCount: 410) with
+		{
+			RootOptions =
+			[
+				new SelectionOption("src", true),
+				new SelectionOption("generated", true)
+			]
+		};
+		ApplySelectionRefreshSnapshot(coordinator, enabledSnapshot);
+		ApplyCurrentSelectionState(coordinator, viewModel, disabledSnapshot);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			disabledSnapshot,
+			retainPreviousSnapshot: true);
+		HookAllOptionListeners(coordinator, viewModel);
+
+		viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked = true;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.Equal(433, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+		Assert.Equal(["src"], viewModel.RootFolders.Select(static option => option.Name));
+
+		viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked = false;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.Equal(410, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+		Assert.Equal(
+			["src", "generated"],
+			viewModel.RootFolders.Select(static option => option.Name));
+	}
+
+	[AvaloniaTheory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task PublicLiveRefreshQueue_RootOrExtensionToggleCycle_RestoresKnownSnapshotsWithoutScanning(
+		bool changeRootSelection)
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		var enabledSnapshot = CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433);
+		var disabledSnapshot = CreateReversibleSelectionRefreshSnapshot(
+			rootChecked: !changeRootSelection,
+			extensionChecked: changeRootSelection,
+			emptyFolderCount: 410);
+		ApplySelectionRefreshSnapshot(coordinator, enabledSnapshot);
+		ApplyCurrentSelectionState(coordinator, viewModel, disabledSnapshot);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			disabledSnapshot,
+			retainPreviousSnapshot: true);
+		HookAllOptionListeners(coordinator, viewModel);
+
+		if (changeRootSelection)
+			viewModel.RootFolders.Single().IsChecked = true;
+		else
+			viewModel.Extensions.Single().IsChecked = true;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.Equal(433, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+
+		if (changeRootSelection)
+			viewModel.RootFolders.Single().IsChecked = false;
+		else
+			viewModel.Extensions.Single().IsChecked = false;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.Equal(410, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+	}
+
+	[AvaloniaTheory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task PublicBulkSelectionToggleCycle_RestoresKnownSnapshotsWithoutScanning(
+		bool changeRootSelection)
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		var enabledSnapshot = CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433);
+		var disabledSnapshot = CreateReversibleSelectionRefreshSnapshot(
+			rootChecked: !changeRootSelection,
+			extensionChecked: changeRootSelection,
+			emptyFolderCount: 410);
+		ApplySelectionRefreshSnapshot(coordinator, enabledSnapshot);
+		ApplyCurrentSelectionState(coordinator, viewModel, disabledSnapshot);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			disabledSnapshot,
+			retainPreviousSnapshot: true);
+
+		if (changeRootSelection)
+			coordinator.HandleRootAllChanged(true, path);
+		else
+			coordinator.HandleExtensionsAllChanged(true);
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.Equal(433, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+		Assert.Equal(
+			"EmptyFolders (433)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+		Assert.True(changeRootSelection
+			? viewModel.AllRootFoldersChecked
+			: viewModel.AllExtensionsChecked);
+		Assert.True(changeRootSelection
+			? viewModel.RootFolders.Single().IsChecked
+			: viewModel.Extensions.Single().IsChecked);
+
+		if (changeRootSelection)
+			coordinator.HandleRootAllChanged(false, path);
+		else
+			coordinator.HandleExtensionsAllChanged(false);
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.Equal(410, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+		Assert.Equal(
+			"EmptyFolders (410)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+		Assert.False(changeRootSelection
+			? viewModel.AllRootFoldersChecked
+			: viewModel.AllExtensionsChecked);
+		Assert.False(changeRootSelection
+			? viewModel.RootFolders.Single().IsChecked
+			: viewModel.Extensions.Single().IsChecked);
+	}
+
+	[AvaloniaFact]
+	public async Task PublicRefreshQueue_PathChangesDuringScan_DoesNotApplyStaleSnapshot()
+	{
+		const string originalPath = @"C:\ProjectA";
+		const string newPath = @"C:\ProjectB";
+		var currentPath = originalPath;
+		using var scanStarted = new ManualResetEventSlim();
+		using var releaseScan = new ManualResetEventSlim();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			RootSelectionSnapshot = CreateDriftedRootSelectionScanData(),
+			BeforeRootSelectionSnapshot = cancellationToken =>
+			{
+				scanStarted.Set();
+				if (!releaseScan.Wait(TimeSpan.FromSeconds(3), cancellationToken))
+					throw new TimeoutException("The controlled selection scan was not released.");
+			}
+		};
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => currentPath);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		HookAllOptionListeners(coordinator, viewModel);
+
+		try
+		{
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFiles).IsChecked = false;
+			Assert.True(await Task.Run(
+				() => scanStarted.Wait(TimeSpan.FromSeconds(2)),
+				TestContext.Current.CancellationToken));
+
+			currentPath = newPath;
+			releaseScan.Set();
+			await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+			Assert.Equal(1, scanner.RootSelectionSnapshotCount);
+			Assert.Equal(433, GetPrivateIgnoreOptionCounts(coordinator).EmptyFolders);
+			Assert.Equal(
+				"EmptyFolders (433)",
+				viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+			Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".txt");
+		}
+		finally
+		{
+			releaseScan.Set();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PublicIgnoreAllChange_ExplicitPreferenceRejectsSemanticallyDifferentRollback()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			RootSelectionSnapshot = CreateDriftedRootSelectionScanData()
+		};
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		HookAllOptionListeners(coordinator, viewModel);
+
+		viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFiles).IsChecked = false;
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(1, scanner.TotalScanCount);
+		var scanCountBeforeBulkChange = scanner.TotalScanCount;
+
+		coordinator.HandleIgnoreAllChanged(true, path);
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.True(scanner.TotalScanCount > scanCountBeforeBulkChange);
+		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.All(viewModel.IgnoreOptions, static option => Assert.True(option.IsChecked));
+	}
+
+	[Fact]
+	public void ReversibleRefresh_ExtensionToggleCycle_RestoresCountsWithoutScanning()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateReversibleSelectionRefreshSnapshot(
+				extensionChecked: false,
+				emptyFolderCount: 410));
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				extensionChecked: false,
+				emptyFolderCount: 410),
+			retainPreviousSnapshot: true);
+
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+
+		Assert.True(TryRestoreKnownSelectionSnapshot(
+			coordinator,
+			path,
+			SelectionRefreshOrigin.ExtensionSelection));
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.True(viewModel.Extensions.Single().IsChecked);
+		Assert.Equal(
+			"EmptyFolders (433)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateReversibleSelectionRefreshSnapshot(
+				extensionChecked: false,
+				emptyFolderCount: 410));
+
+		Assert.True(TryRestoreKnownSelectionSnapshot(
+			coordinator,
+			path,
+			SelectionRefreshOrigin.ExtensionSelection));
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.False(viewModel.Extensions.Single().IsChecked);
+		Assert.Equal(
+			"EmptyFolders (410)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+	}
+
+	[Fact]
+	public void ReversibleRefresh_RootToggleCycle_RestoresCountsWithoutScanning()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateReversibleSelectionRefreshSnapshot(
+				rootChecked: false,
+				emptyFolderCount: 410));
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				rootChecked: false,
+				emptyFolderCount: 410),
+			retainPreviousSnapshot: true);
+
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+
+		Assert.True(TryRestoreKnownSelectionSnapshot(
+			coordinator,
+			path,
+			SelectionRefreshOrigin.RootSelection));
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.True(viewModel.RootFolders.Single().IsChecked);
+		Assert.Equal(
+			"EmptyFolders (433)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateReversibleSelectionRefreshSnapshot(
+				rootChecked: false,
+				emptyFolderCount: 410));
+
+		Assert.True(TryRestoreKnownSelectionSnapshot(
+			coordinator,
+			path,
+			SelectionRefreshOrigin.RootSelection));
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.False(viewModel.RootFolders.Single().IsChecked);
+		Assert.Equal(
+			"EmptyFolders (410)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+	}
+
+	[Fact]
+	public void ReversibleRefresh_HiddenCacheStateDiffers_RejectsCachedSnapshot()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		GetPrivateSession(coordinator).Extensions.OptionStates[".hidden"] = true;
+
+		Assert.False(TryRestoreKnownSelectionSnapshot(coordinator, path));
+		Assert.Equal(0, scanner.TotalScanCount);
+	}
+
+	[Fact]
+	public void ReversibleRefresh_IgnoreReversalAfterAdditionalExtensionChange_RejectsCachedSnapshot()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		var enabledSnapshot = CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433);
+		var disabledSnapshot = CreateReversibleSelectionRefreshSnapshot(
+			IgnoreOptionId.EmptyFiles,
+			emptyFolderCount: 410) with
+		{
+			ExtensionOptions =
+			[
+				new SelectionOption(".cs", true),
+				new SelectionOption(".txt", true)
+			]
+		};
+		ApplySelectionRefreshSnapshot(coordinator, enabledSnapshot);
+		ApplyCurrentSelectionState(coordinator, viewModel, disabledSnapshot);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			disabledSnapshot,
+			retainPreviousSnapshot: true);
+		var currentSnapshot = CreateIgnoreReversalCurrentSnapshot(
+			disabledSnapshot,
+			enabledSnapshot,
+			IgnoreOptionId.EmptyFiles) with
+		{
+			ExtensionOptions =
+			[
+				new SelectionOption(".cs", true),
+				new SelectionOption(".txt", false)
+			]
+		};
+		ApplyCurrentSelectionState(coordinator, viewModel, currentSnapshot);
+
+		Assert.False(TryRestoreKnownSelectionSnapshot(
+			coordinator,
+			path,
+			SelectionRefreshOrigin.IgnoreOption,
+			IgnoreOptionId.EmptyFiles));
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void ReversibleRefresh_SectionReversalWithConflictingCrossSectionPreference_RejectsCachedSnapshot(
+		bool reverseRootSelection)
+	{
+		const string path = @"C:\Project";
+		var origin = reverseRootSelection
+			? SelectionRefreshOrigin.RootSelection
+			: SelectionRefreshOrigin.ExtensionSelection;
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		var originalSnapshot = CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433);
+		var changedSnapshot = CreateReversibleSelectionRefreshSnapshot(
+			rootChecked: false,
+			extensionChecked: false,
+			emptyFolderCount: 410);
+		ApplySelectionRefreshSnapshot(coordinator, originalSnapshot);
+		ApplyCurrentSelectionState(coordinator, viewModel, changedSnapshot);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			changedSnapshot,
+			retainPreviousSnapshot: true);
+
+		var hybridSnapshot = origin == SelectionRefreshOrigin.RootSelection
+			? CreateReversibleSelectionRefreshSnapshot(
+				rootChecked: true,
+				extensionChecked: false,
+				emptyFolderCount: 410)
+			: CreateReversibleSelectionRefreshSnapshot(
+				rootChecked: false,
+				extensionChecked: true,
+				emptyFolderCount: 410);
+		ApplyCurrentSelectionState(coordinator, viewModel, hybridSnapshot);
+
+		Assert.False(TryRestoreKnownSelectionSnapshot(coordinator, path, origin));
+		Assert.Equal(origin == SelectionRefreshOrigin.RootSelection, viewModel.RootFolders.Single().IsChecked);
+		Assert.Equal(origin == SelectionRefreshOrigin.ExtensionSelection, viewModel.Extensions.Single().IsChecked);
+	}
+
+	[Fact]
+	public void StableRefresh_CheckboxStateMatchesButCountLabelDrifted_RestoresStablePresentation()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		ApplyCurrentSelectionState(
+			coordinator,
+			viewModel,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 410));
+
+		Assert.True(TryRestoreKnownSelectionSnapshot(coordinator, path));
+
+		Assert.Equal(0, scanner.TotalScanCount);
+		Assert.Equal(
+			"EmptyFolders (433)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+	}
+
+	[Fact]
+	public void ReversibleRefresh_DifferentPath_RejectsCachedSnapshot()
+	{
+		const string path = @"C:\ProjectA";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+
+		Assert.False(TryRestoreKnownSelectionSnapshot(coordinator, @"C:\ProjectB"));
+		Assert.Equal(0, scanner.TotalScanCount);
+	}
+
+	[Fact]
+	public void ApplyRootOptions_WhenOnlyCheckedStateChanges_UpdatesExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.AllRootFoldersChecked = false;
+		var coordinator = CreateCoordinator(viewModel);
+		ApplyRootOptions(coordinator, [new SelectionOption("src", true), new SelectionOption("tests", false)]);
+		var firstRoot = viewModel.RootFolders[0];
+		var collectionEvents = 0;
+		viewModel.RootFolders.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyRootOptions(coordinator, [new SelectionOption("src", false), new SelectionOption("tests", true)]);
+
+		Assert.Same(firstRoot, viewModel.RootFolders[0]);
+		Assert.False(viewModel.RootFolders[0].IsChecked);
+		Assert.True(viewModel.RootFolders[1].IsChecked);
+		Assert.Equal(0, collectionEvents);
+	}
+
 	[Fact]
 	public void ApplyExtensionOptions_WhenOptionsAreUnchanged_KeepsExistingViewModels()
 	{
@@ -615,6 +1332,25 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		ApplyExtensionOptions(coordinator, options);
 
 		Assert.Same(firstExtension, viewModel.Extensions[0]);
+		Assert.Equal(0, collectionEvents);
+	}
+
+	[Fact]
+	public void ApplyExtensionOptions_WhenOnlyCheckedStateChanges_UpdatesExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.AllExtensionsChecked = false;
+		var coordinator = CreateCoordinator(viewModel);
+		ApplyExtensionOptions(coordinator, [new SelectionOption(".cs", true), new SelectionOption(".md", false)]);
+		var firstExtension = viewModel.Extensions[0];
+		var collectionEvents = 0;
+		viewModel.Extensions.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyExtensionOptions(coordinator, [new SelectionOption(".cs", false), new SelectionOption(".md", true)]);
+
+		Assert.Same(firstExtension, viewModel.Extensions[0]);
+		Assert.False(viewModel.Extensions[0].IsChecked);
+		Assert.True(viewModel.Extensions[1].IsChecked);
 		Assert.Equal(0, collectionEvents);
 	}
 
@@ -645,16 +1381,67 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.Equal(0, collectionEvents);
 	}
 
+	[Fact]
+	public void ApplyResolvedIgnoreOptions_WhenStateAndLabelChange_UpdatesExistingViewModels()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(viewModel);
+		ApplyResolvedIgnoreOptions(
+			coordinator,
+			[new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders (1)", true, true)],
+			new Dictionary<IgnoreOptionId, bool> { [IgnoreOptionId.DotFolders] = true });
+		var firstIgnoreOption = viewModel.IgnoreOptions[0];
+		var collectionEvents = 0;
+		viewModel.IgnoreOptions.CollectionChanged += (_, _) => collectionEvents++;
+
+		ApplyResolvedIgnoreOptions(
+			coordinator,
+			[new ResolvedIgnoreOptionState(IgnoreOptionId.DotFolders, "dot folders (2)", true, false)],
+			new Dictionary<IgnoreOptionId, bool> { [IgnoreOptionId.DotFolders] = false });
+
+		Assert.Same(firstIgnoreOption, viewModel.IgnoreOptions[0]);
+		Assert.Equal("dot folders (2)", firstIgnoreOption.Label);
+		Assert.False(firstIgnoreOption.IsChecked);
+		Assert.Equal(0, collectionEvents);
+	}
+
 	private static MainWindowViewModel CreateViewModel()
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		return new MainWindowViewModel(localization, new HelpContentProvider());
 	}
 
-private static SelectionSyncCoordinator CreateCoordinator(
-	MainWindowViewModel viewModel,
-	IFileSystemScanner? scanner = null,
-	Func<string?>? currentPathProvider = null)
+	private static void HookAllOptionListeners(
+		SelectionSyncCoordinator coordinator,
+		MainWindowViewModel viewModel)
+	{
+		coordinator.HookOptionListeners(viewModel.RootFolders);
+		coordinator.HookOptionListeners(viewModel.Extensions);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+	}
+
+	private static IgnoreSectionScanData CreateDriftedRootSelectionScanData()
+	{
+		var counts = new IgnoreOptionCounts(
+			HiddenFolders: 1,
+			HiddenFiles: 1,
+			DotFolders: 1,
+			DotFiles: 1,
+			EmptyFolders: 410,
+			ExtensionlessFiles: 1,
+			EmptyFiles: 1);
+
+		return new IgnoreSectionScanData(
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".txt" },
+			counts,
+			counts,
+			new IgnoreControllerImpactCounts(GitIgnore: 1, SmartIgnore: 1));
+	}
+
+	private static SelectionSyncCoordinator CreateCoordinator(
+		MainWindowViewModel viewModel,
+		IFileSystemScanner? scanner = null,
+		Func<string?>? currentPathProvider = null)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		scanner ??= new StubFileSystemScanner();
@@ -925,26 +1712,47 @@ private static SelectionSyncCoordinator CreateCoordinator(
 		: IFileSystemScanner, IFileSystemScannerRootSelectionSnapshotProvider
 	{
 		public int RootSelectionSnapshotCount { get; private set; }
+		public int TotalScanCount { get; private set; }
+		public Action<CancellationToken>? BeforeRootSelectionSnapshot { get; init; }
+		public IgnoreSectionScanData RootSelectionSnapshot { get; init; } = new(
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+			new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1),
+			new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1));
 
 		public bool CanReadRoot(string rootPath) => true;
 
 		public ScanResult<HashSet<string>> GetExtensions(
 			string rootPath,
 			IgnoreRules rules,
-			CancellationToken cancellationToken = default) =>
-			new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+			CancellationToken cancellationToken = default)
+		{
+			TotalScanCount++;
+			return new ScanResult<HashSet<string>>(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+				false,
+				false);
+		}
 
 		public ScanResult<HashSet<string>> GetRootFileExtensions(
 			string rootPath,
 			IgnoreRules rules,
-			CancellationToken cancellationToken = default) =>
-			new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+			CancellationToken cancellationToken = default)
+		{
+			TotalScanCount++;
+			return new ScanResult<HashSet<string>>(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
+				false,
+				false);
+		}
 
 		public ScanResult<List<string>> GetRootFolderNames(
 			string rootPath,
 			IgnoreRules rules,
-			CancellationToken cancellationToken = default) =>
-			new(["src"], false, false);
+			CancellationToken cancellationToken = default)
+		{
+			TotalScanCount++;
+			return new ScanResult<List<string>>(["src"], false, false);
+		}
 
 		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootSelection(
 			string rootPath,
@@ -957,13 +1765,9 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			bool includeControllerImpactProbeRoots = false)
 		{
 			RootSelectionSnapshotCount++;
-			return new ScanResult<IgnoreSectionScanData>(
-				new IgnoreSectionScanData(
-					new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" },
-					IgnoreOptionCounts.Empty,
-					IgnoreOptionCounts.Empty),
-				false,
-				false);
+			TotalScanCount++;
+			BeforeRootSelectionSnapshot?.Invoke(cancellationToken);
+			return new ScanResult<IgnoreSectionScanData>(RootSelectionSnapshot, false, false);
 		}
 	}
 
@@ -978,7 +1782,10 @@ private static SelectionSyncCoordinator CreateCoordinator(
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
 				["Settings.Ignore.DotFolders"] = "dot folders",
-				["Settings.Ignore.DotFiles"] = "dot files"
+				["Settings.Ignore.DotFiles"] = "dot files",
+				["Settings.Ignore.EmptyFolders"] = "Empty folders",
+				["Settings.Ignore.EmptyFiles"] = "Empty files",
+				["Settings.Ignore.ExtensionlessFiles"] = "Extensionless files"
 			}
 		};
 
@@ -1032,13 +1839,45 @@ private static SelectionSyncCoordinator CreateCoordinator(
 
 	private static void ApplySelectionRefreshSnapshot(
 		SelectionSyncCoordinator coordinator,
-		SelectionRefreshSnapshot snapshot)
+		SelectionRefreshSnapshot snapshot,
+		bool retainPreviousSnapshot = false)
 	{
 		var method = typeof(SelectionSyncCoordinator).GetMethod(
 			"ApplySelectionRefreshSnapshot",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [snapshot]);
+		method!.Invoke(coordinator, [snapshot, retainPreviousSnapshot]);
+	}
+
+	private static void ApplyCurrentSelectionState(
+		SelectionSyncCoordinator coordinator,
+		MainWindowViewModel viewModel,
+		SelectionRefreshSnapshot snapshot)
+	{
+		viewModel.AllRootFoldersChecked = snapshot.RootOptions!.All(static option => option.IsChecked);
+		viewModel.AllExtensionsChecked = snapshot.EffectiveExtensionOptions.All(static option => option.IsChecked);
+		ApplyRootOptions(coordinator, snapshot.RootOptions!);
+		ApplyExtensionOptions(coordinator, snapshot.EffectiveExtensionOptions);
+		coordinator.UpdateExtensionsSelectionCache();
+		ApplyResolvedIgnoreOptions(
+			coordinator,
+			snapshot.IgnoreOptions,
+			snapshot.IgnoreOptionStateCache);
+	}
+
+	private static bool TryRestoreKnownSelectionSnapshot(
+		SelectionSyncCoordinator coordinator,
+		string path,
+		SelectionRefreshOrigin origin = SelectionRefreshOrigin.Unknown,
+		IgnoreOptionId? changedIgnoreOptionId = null)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"TryRestoreKnownSelectionSnapshot",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		return Assert.IsType<bool>(method!.Invoke(
+			coordinator,
+			[path, origin, changedIgnoreOptionId]));
 	}
 
 	private static SelectionRefreshSnapshot CreateSelectionRefreshSnapshot()
@@ -1072,6 +1911,68 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			HadAccessDenied: false);
 	}
 
+	private static SelectionRefreshSnapshot CreateReversibleSelectionRefreshSnapshot(
+		IgnoreOptionId? uncheckedIgnoreOption = null,
+		bool rootChecked = true,
+		bool extensionChecked = true,
+		int emptyFolderCount = 433)
+	{
+		var ignoreOptions = Enum.GetValues<IgnoreOptionId>()
+			.Select(optionId => new ResolvedIgnoreOptionState(
+				optionId,
+				$"{optionId} ({(optionId == IgnoreOptionId.EmptyFolders ? emptyFolderCount : 1)})",
+				DefaultChecked: true,
+				IsChecked: optionId != uncheckedIgnoreOption))
+			.ToArray();
+		var ignoreStateCache = ignoreOptions.ToDictionary(
+			static option => option.Id,
+			static option => option.IsChecked);
+
+		return new SelectionRefreshSnapshot(
+			RootOptions: [new SelectionOption("src", rootChecked)],
+			ExtensionOptions: [new SelectionOption(".cs", extensionChecked)],
+			IgnoreOptions: ignoreOptions,
+			ExtensionlessEntriesCount: 1,
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: new IgnoreOptionCounts(
+				HiddenFolders: 1,
+				HiddenFiles: 1,
+				DotFolders: 1,
+				DotFiles: 1,
+				EmptyFolders: emptyFolderCount,
+				ExtensionlessFiles: 1,
+				EmptyFiles: 1),
+			ControllerImpactCounts: new IgnoreControllerImpactCounts(
+				GitIgnore: 1,
+				SmartIgnore: 1),
+			IgnoreOptionStateCache: ignoreStateCache,
+			RootAccessDenied: false,
+			HadAccessDenied: false);
+	}
+
+	private static SelectionRefreshSnapshot CreateIgnoreReversalCurrentSnapshot(
+		SelectionRefreshSnapshot stableSnapshot,
+		SelectionRefreshSnapshot reversibleSnapshot,
+		IgnoreOptionId changedOptionId)
+	{
+		var reversedState = reversibleSnapshot.IgnoreOptionStateCache[changedOptionId];
+		var ignoreOptions = stableSnapshot.IgnoreOptions
+			.Select(option => option.Id == changedOptionId
+				? option with { IsChecked = reversedState }
+				: option)
+			.ToArray();
+		var stateCache = new Dictionary<IgnoreOptionId, bool>(stableSnapshot.IgnoreOptionStateCache)
+		{
+			[changedOptionId] = reversedState
+		};
+
+		return stableSnapshot with
+		{
+			IgnoreOptions = ignoreOptions,
+			IgnoreOptionStateCache = stateCache
+		};
+	}
+
 	private static void MarkSelectionRefreshDirty(SelectionSyncCoordinator coordinator)
 	{
 		var method = typeof(SelectionSyncCoordinator).GetMethod(
@@ -1097,6 +1998,15 @@ private static SelectionSyncCoordinator CreateCoordinator(
 			BindingFlags.NonPublic | BindingFlags.Instance);
 		Assert.NotNull(field);
 		return (int)field.GetValue(coordinator)!;
+	}
+
+	private static IgnoreOptionCounts GetPrivateIgnoreOptionCounts(SelectionSyncCoordinator coordinator)
+	{
+		var field = typeof(SelectionSyncCoordinator).GetField(
+			"_ignoreOptionCounts",
+			BindingFlags.NonPublic | BindingFlags.Instance);
+		Assert.NotNull(field);
+		return (IgnoreOptionCounts)field.GetValue(coordinator)!;
 	}
 }
 

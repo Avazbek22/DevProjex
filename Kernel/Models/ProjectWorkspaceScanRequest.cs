@@ -1,9 +1,9 @@
 namespace DevProjex.Kernel.Models;
 
 /// <summary>
-/// Canonical request for project workspace scans. CaptureTreeInventory controls only
-/// whether the scan keeps reusable tree inventory; ignore-section semantics must remain
-/// identical between lightweight and inventory-capturing requests.
+/// Canonical request for project workspace scans. CaptureTreeInventory controls reusable
+/// tree metadata, while CaptureRootScanBreakdown keeps per-root aggregates for an immediate
+/// selection projection. Neither option changes ignore-section semantics.
 /// </summary>
 public sealed record ProjectWorkspaceScanRequest(
 	string RootPath,
@@ -13,4 +13,5 @@ public sealed record ProjectWorkspaceScanRequest(
 	IExtensionInclusionPolicy? EffectiveExtensionPolicy,
 	bool CaptureTreeInventory,
 	bool IncludeDirectoryToggleProbeRoots,
-	bool IncludeControllerImpactProbeRoots);
+	bool IncludeControllerImpactProbeRoots,
+	bool CaptureRootScanBreakdown = false);

@@ -14,6 +14,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.False(availability.IncludeSmartIgnore);
+		Assert.True(availability.SmartIgnoreFollowsGitIgnore);
 	}
 
 	[Fact]
@@ -24,6 +25,34 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		var service = new IgnoreRulesService(new SmartIgnoreService([]));
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_SourcePackagesNameAlone_DoesNotShowSmartOption()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/packages/domain/Order.cs", "class Order {}");
+		temp.CreateFile("workspace/packages/api/Controller.cs", "class Controller {}");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.False(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_ConfirmedLegacyPackageStore_ShowsSmartOption()
+	{
+		using var temp = new TemporaryDirectory();
+		CreateLegacyNuGetPackage(temp, "Alpha.1.0.0", "lib");
+		CreateLegacyNuGetPackage(temp, "Beta.2.0.0", "ref");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
 
 		Assert.False(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
@@ -88,6 +117,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.False(availability.IncludeSmartIgnore);
+		Assert.True(availability.SmartIgnoreFollowsGitIgnore);
 	}
 
 	[Fact]
@@ -129,6 +159,28 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
+		Assert.False(availability.SmartIgnoreFollowsGitIgnore);
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_DeepMonorepoGitAndSmartScopes_ShowBothPrimaryOptions()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/domain/team/api/.gitignore", "generated/\n");
+		temp.CreateFile("apps/domain/team/worker/pyproject.toml", "[project]\nname = \"worker\"\n");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
+		var options = CreateIgnoreOptionsService().GetOptions(availability);
+
+		Assert.True(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+		Assert.Equal(6, options.Count);
+		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
 	}
 
 	[Fact]
@@ -300,5 +352,34 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		{
 			throw new UnauthorizedAccessException("Access denied.");
 		}
+	}
+
+	private static void CreateLegacyNuGetPackage(
+		TemporaryDirectory temp,
+		string packageDirectoryName,
+		string layoutDirectoryName)
+	{
+		temp.CreateFile(
+			$"workspace/packages/{packageDirectoryName}/{packageDirectoryName}.nupkg",
+			"package");
+		temp.CreateFolder($"workspace/packages/{packageDirectoryName}/{layoutDirectoryName}");
+	}
+
+	private static IgnoreOptionsService CreateIgnoreOptionsService()
+	{
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>
+			{
+				["Settings.Ignore.SmartIgnore"] = "Smart Ignore",
+				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
+				["Settings.Ignore.HiddenFiles"] = "Hidden files",
+				["Settings.Ignore.DotFolders"] = "Dot folders",
+				["Settings.Ignore.DotFiles"] = "Dot files"
+			}
+		});
+		var localization = new LocalizationService(catalog, AppLanguage.En);
+		return new IgnoreOptionsService(localization);
 	}
 }

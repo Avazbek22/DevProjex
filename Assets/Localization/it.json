@@ -205,6 +205,8 @@
   "Status.Operation.GettingUpdatesBranch": "Aggiornamento {0}",
   "Status.Operation.SwitchingBranch": "Cambio branch {0}",
   "Status.Operation.CalculatingData": "Calcolo dei dati",
+  "Status.Operation.UpdatingOptions": "Aggiornamento opzioni",
+  "Status.Operation.ApplyingSettings": "Applicazione delle impostazioni",
   "Status.Operation.PreparingPreview": "Preparazione anteprima",
   "Status.Operation.PreparingOutput": "Preparazione del risultato",
   "Toast.Operation.PreviewCanceled": "Preparazione anteprima annullata",

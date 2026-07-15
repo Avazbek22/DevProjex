@@ -56,6 +56,27 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         }
     }
 
+    public UserSettingsDb LoadForStartup(TimeSpan lockTimeout)
+    {
+        lock (_sync)
+        {
+            try
+            {
+                var fileSet = GetFileSet();
+                if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
+                    return CreateDefaultDb();
+
+                using var _ = heldLock;
+                return LoadInternal(fileSet);
+            }
+            catch
+            {
+                // Startup must remain responsive when app-data resolution or recovery IO fails.
+                return CreateDefaultDb();
+            }
+        }
+    }
+
     public void Save(UserSettingsDb db) => TrySave(db);
 
     public ThemePreset GetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect)

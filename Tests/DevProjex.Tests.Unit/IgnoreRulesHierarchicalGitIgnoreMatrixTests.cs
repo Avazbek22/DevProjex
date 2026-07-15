@@ -191,6 +191,70 @@ public sealed class IgnoreRulesHierarchicalGitIgnoreMatrixTests
 	}
 
 	[Fact]
+	public void Build_DeepMonorepoGitIgnoreScope_AppliesOnlyToOwningProject()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/domain/team/api/.gitignore", "generated/\n*.cache\n");
+		temp.CreateFile("apps/domain/team/api/generated/drop.txt", "ignored");
+		temp.CreateFile("apps/domain/team/api/src/hot.cache", "ignored");
+		temp.CreateFile("apps/domain/team/sibling/generated/drop.txt", "visible");
+		temp.CreateFile("apps/domain/team/sibling/src/hot.cache", "visible");
+
+		var rules = BuildGitIgnoreRules(temp.Path);
+
+		Assert.True(rules.UseGitIgnore);
+		Assert.Contains(rules.ScopedGitIgnoreMatchers, matcher =>
+			matcher.ScopeRootPath.EndsWith(
+				NormalizeRelativePath("apps/domain/team/api"),
+				StringComparison.OrdinalIgnoreCase));
+
+		Assert.True(rules.IsGitIgnored(
+			Path.Combine(temp.Path, NormalizeRelativePath("apps/domain/team/api/generated")),
+			isDirectory: true,
+			"generated"));
+		Assert.True(rules.IsGitIgnored(
+			Path.Combine(temp.Path, NormalizeRelativePath("apps/domain/team/api/src/hot.cache")),
+			isDirectory: false,
+			"hot.cache"));
+		Assert.False(rules.IsGitIgnored(
+			Path.Combine(temp.Path, NormalizeRelativePath("apps/domain/team/sibling/generated")),
+			isDirectory: true,
+			"generated"));
+		Assert.False(rules.IsGitIgnored(
+			Path.Combine(temp.Path, NormalizeRelativePath("apps/domain/team/sibling/src/hot.cache")),
+			isDirectory: false,
+			"hot.cache"));
+	}
+
+	[Fact]
+	public void Build_DeepMonorepoPrunedDependencyGitIgnore_IsNotUsedAsProjectController()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/product/node_modules/pkg/.gitignore", "*.cache\n");
+		temp.CreateFile("apps/product/node_modules/pkg/src/hot.cache", "dependency");
+		temp.CreateFile("apps/product/service/.gitignore", "generated/\n");
+		temp.CreateFile("apps/product/service/generated/drop.txt", "ignored");
+
+		var rules = BuildGitIgnoreRules(temp.Path);
+
+		Assert.True(rules.UseGitIgnore);
+		Assert.Contains(rules.ScopedGitIgnoreMatchers, matcher =>
+			matcher.ScopeRootPath.EndsWith(
+				NormalizeRelativePath("apps/product/service"),
+				StringComparison.OrdinalIgnoreCase));
+		Assert.DoesNotContain(rules.ScopedGitIgnoreMatchers, matcher =>
+			matcher.ScopeRootPath.Contains(
+				NormalizeRelativePath("node_modules/pkg"),
+				StringComparison.OrdinalIgnoreCase));
+		Assert.False(rules.IsGitIgnored(
+			Path.Combine(temp.Path, NormalizeRelativePath("apps/product/node_modules/pkg/src/hot.cache")),
+			isDirectory: false,
+			"hot.cache"));
+	}
+
+	[Fact]
 	public void IsGitIgnored_WhenGitIgnoreDisabled_ReturnsFalse()
 	{
 		using var temp = new TemporaryDirectory();

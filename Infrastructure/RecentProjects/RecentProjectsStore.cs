@@ -41,6 +41,27 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
+	public RecentProjectsDb LoadForStartup(TimeSpan lockTimeout)
+	{
+		lock (_sync)
+		{
+			try
+			{
+				var fileSet = GetFileSet();
+				if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
+					return CreateDefaultDb();
+
+				using var _ = heldLock;
+				return LoadInternal(fileSet);
+			}
+			catch
+			{
+				// Recent history is optional during bootstrap and must never stall the first window.
+				return CreateDefaultDb();
+			}
+		}
+	}
+
 	public bool EnsureStorageExists()
 	{
 		lock (_sync)

@@ -190,6 +190,88 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
+	public void ComputeFullRefreshSnapshot_ExplicitUncheckedControllersStayVisibleWhenImpactDropsToZero()
+	{
+		var scanner = new ProfileFallbackVisibilityScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(scanner),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			(_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				ShowAdvancedCounts: true));
+		var context = CreateDefaultsContext() with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(),
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = false,
+				[IgnoreOptionId.SmartIgnore] = false
+			},
+			IgnoreOptionStateCacheIsComplete = true,
+			CurrentSnapshotState = new IgnoreSectionSnapshotState(
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+				ControllerImpactCounts: new IgnoreControllerImpactCounts(GitIgnore: 1, SmartIgnore: 1),
+				HasExtensionlessEntries: false,
+				ExtensionlessEntriesCount: 0)
+		};
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(context, CancellationToken.None);
+
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && !option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore && !option.IsChecked);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.UseGitIgnore, out var gitState));
+		Assert.False(gitState);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.SmartIgnore, out var smartState));
+		Assert.False(smartState);
+	}
+
+	[Fact]
+	public void ComputeFullRefreshSnapshot_CheckedControllersWithNoImpactStayHidden()
+	{
+		var scanner = new ProfileFallbackVisibilityScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(scanner),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			(_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				ShowAdvancedCounts: true));
+		var context = CreateDefaultsContext() with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>
+			{
+				IgnoreOptionId.UseGitIgnore,
+				IgnoreOptionId.SmartIgnore
+			},
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = true,
+				[IgnoreOptionId.SmartIgnore] = true
+			},
+			IgnoreOptionStateCacheIsComplete = true
+		};
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(context, CancellationToken.None);
+
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.UseGitIgnore, out var gitState));
+		Assert.True(gitState);
+		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.SmartIgnore, out var smartState));
+		Assert.True(smartState);
+	}
+
+	[Fact]
 	public void ComputeLiveRefreshSnapshot_ReusesIgnoreRulesForIdenticalInputs()
 	{
 		var scanner = new StableSnapshotScanner();
@@ -928,17 +1010,10 @@ public sealed class SelectionRefreshEngineTests
 			GetRootFileIgnoreSectionSnapshot(rootPath, extensionDiscoveryRules, effectiveRules, (IReadOnlySet<string>?)null, cancellationToken);
 	}
 
-	private sealed class ProfileFallbackVisibilityScanner
-		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
+	private sealed class ProfileFallbackVisibilityScanner(IgnoreControllerImpactCounts controllerImpactCounts = default)
+		: IFileSystemScanner, IFileSystemScannerIgnoreSectionSnapshotProvider,
+			IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider
 	{
-		private readonly IgnoreControllerImpactCounts _controllerImpactCounts;
-
-		public ProfileFallbackVisibilityScanner(
-			IgnoreControllerImpactCounts controllerImpactCounts = default)
-		{
-			_controllerImpactCounts = controllerImpactCounts;
-		}
-
 		public bool CanReadRoot(string rootPath) => true;
 
 		public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
@@ -1001,7 +1076,7 @@ public sealed class SelectionRefreshEngineTests
 					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 					IgnoreOptionCounts.Empty,
 					IgnoreOptionCounts.Empty,
-					_controllerImpactCounts),
+					controllerImpactCounts),
 				false,
 				false);
 		}

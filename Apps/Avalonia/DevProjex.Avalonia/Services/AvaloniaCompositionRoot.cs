@@ -62,6 +62,10 @@ public static class AvaloniaCompositionRoot
         var reportPathResolver = new ReportPathResolver();
         var projectAnalysisReportWriter = new ProjectAnalysisReportWriter();
         var terminalCommandSetupService = new TerminalCommandSetupService();
+        var localAppDataProvider = appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        var sessionMetricsRecorder = options.SessionMetrics.Enabled
+            ? new SessionMetricsRecorder(options.SessionMetrics, localAppDataProvider)
+            : SessionMetricsRecorder.Disabled;
         var previewDocumentBuilder = new PreviewDocumentBuilder(fileContentAnalyzer);
         var repositoryWebPathPresentationService = new RepositoryWebPathPresentationService();
         var textFileExportService = new TextFileExportService();
@@ -112,6 +116,7 @@ public static class AvaloniaCompositionRoot
             ReportPathResolver: reportPathResolver,
             ProjectAnalysisReportWriter: projectAnalysisReportWriter,
             TerminalCommandSetupService: terminalCommandSetupService,
-            TaskbarProgressService: taskbarProgressService);
+            TaskbarProgressService: taskbarProgressService,
+            SessionMetricsRecorder: sessionMetricsRecorder);
     }
 }

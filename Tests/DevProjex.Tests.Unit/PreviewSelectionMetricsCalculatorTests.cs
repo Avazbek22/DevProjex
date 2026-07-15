@@ -63,4 +63,40 @@ public sealed class PreviewSelectionMetricsCalculatorTests
 
         Assert.Equal(ExportOutputMetrics.Empty, metrics);
     }
+
+    [Fact]
+    public void Calculate_LargeSelectionBeyondInt32Chars_RemainsExact()
+    {
+        using var document = new RepeatedLinePreviewDocument(lineCount: 30_000, lineLength: 100_000);
+
+        var metrics = PreviewSelectionMetricsCalculator.Calculate(
+            document,
+            new PreviewSelectionRange(1, 0, 30_000, 100_000),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(new ExportOutputMetrics(30_000, 3_000_029_999, 750_007_500), metrics);
+        Assert.True(metrics.Chars > int.MaxValue);
+    }
+
+    private sealed class RepeatedLinePreviewDocument(int lineCount, int lineLength) : IPreviewTextDocument
+    {
+        private readonly string _line = new('x', lineLength);
+
+        public int LineCount { get; } = lineCount;
+
+        public int MaxLineLength => _line.Length;
+
+        public long CharacterCount => ((long)_line.Length * LineCount) + Math.Max(0, LineCount - 1);
+
+        public IReadOnlyList<PreviewDocumentSection> Sections => [];
+
+        public string GetLineText(int lineNumber) => _line;
+
+        public string GetLineRangeText(int firstLine, int lastLine) =>
+            throw new NotSupportedException();
+
+        public void Dispose()
+        {
+        }
+    }
 }

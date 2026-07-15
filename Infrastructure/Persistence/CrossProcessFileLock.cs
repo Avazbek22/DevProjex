@@ -9,10 +9,13 @@ internal static class CrossProcessFileLock
         => Acquire(fileSet, DefaultTimeout);
 
     public static bool TryAcquire(JsonStoreFileSet fileSet, out IDisposable? heldLock)
+        => TryAcquire(fileSet, DefaultTimeout, out heldLock);
+
+    public static bool TryAcquire(JsonStoreFileSet fileSet, TimeSpan timeout, out IDisposable? heldLock)
     {
         try
         {
-            heldLock = Acquire(fileSet);
+            heldLock = Acquire(fileSet, timeout);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)

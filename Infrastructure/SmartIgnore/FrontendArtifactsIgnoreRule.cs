@@ -1,6 +1,9 @@
 namespace DevProjex.Infrastructure.SmartIgnore;
 
-public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
+public sealed class FrontendArtifactsIgnoreRule :
+	ISmartIgnoreRule,
+	IProjectRootFactsSmartIgnoreRule,
+	ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
 		"package.json",
@@ -35,6 +38,11 @@ public sealed class FrontendArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnore
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
 		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+
+	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
+		rootFacts.Exists && rootFacts.HasAnyMarkerFile(MarkerFiles)
+			? MatchResult
+			: SmartIgnoreResult.Empty;
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

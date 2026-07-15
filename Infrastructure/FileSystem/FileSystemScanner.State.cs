@@ -11,25 +11,33 @@ public sealed partial class FileSystemScanner
     private sealed class IgnoreSectionSnapshotLocalState
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> EffectiveExtensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts RawCounts;
         public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
     }
 
-    private sealed class ProjectWorkspaceScanLocalState(bool captureTreeInventory)
+    private sealed class ProjectWorkspaceScanLocalState(
+        bool captureTreeInventory,
+        bool captureRootScanBreakdown)
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> EffectiveExtensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts RawCounts;
         public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
         public List<ProjectTreeInventorySnapshot>? TreeInventories { get; } = captureTreeInventory ? [] : null;
+        public List<KeyValuePair<string, ProjectWorkspaceRootScanSnapshot>>? RootSnapshots { get; } =
+            captureRootScanBreakdown ? [] : null;
 
         public bool IsEmpty =>
             Extensions.Count == 0 &&
+            EffectiveExtensions.Count == 0 &&
             RawCounts.IsEmpty &&
             EffectiveCounts == IgnoreOptionCounts.Empty &&
             ControllerImpactCounts == IgnoreControllerImpactCounts.Empty &&
-            (TreeInventories is null || TreeInventories.Count == 0);
+            (TreeInventories is null || TreeInventories.Count == 0) &&
+            (RootSnapshots is null || RootSnapshots.Count == 0);
     }
 
     private sealed class ProjectTreeInventoryCapture
@@ -38,7 +46,7 @@ public sealed partial class FileSystemScanner
     }
 
     private sealed record RootSelectionScanPlan(
-        List<string> SelectedRootPaths,
+        List<FileSystemDirectoryEntry> SelectedRoots,
         List<FileSystemDirectoryEntry> DirectoryToggleCandidates,
         List<DirectoryScanFacts> ControllerImpactCandidates,
         bool RootAccessDenied,
@@ -77,7 +85,7 @@ public sealed partial class FileSystemScanner
     private readonly record struct FileScanFacts(
         string Name,
         string RelativePath,
-        string Extension,
+        int ExtensionStart,
         bool IsHidden,
         bool IsDot,
         bool IsEmpty,

@@ -143,7 +143,7 @@ public sealed class EffectiveIgnoreOptionCountsContractIntegrationTests
 			.Root;
 	}
 
-	private static int CountAsciiTreeLines(string rootPath, TreeNodeDescriptor root)
+	private static long CountAsciiTreeLines(string rootPath, TreeNodeDescriptor root)
 	{
 		var treeText = new TreeExportService().BuildFullTree(rootPath, root, TreeTextFormat.Ascii);
 		return ExportOutputMetricsCalculator.FromText(treeText).Lines;

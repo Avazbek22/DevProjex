@@ -1,5 +1,6 @@
 using DevProjex.Application.Models;
 using DevProjex.Avalonia.Collections;
+using DevProjex.Avalonia.Services;
 using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
@@ -12,7 +13,8 @@ public sealed partial class SelectionSyncCoordinator(
     Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, IgnoreRules> buildIgnoreRules,
     Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> getIgnoreOptionsAvailability,
     Func<string, bool> tryElevateAndRestart,
-    Func<string?> currentPathProvider)
+    Func<string?> currentPathProvider,
+    StatusOperationCoordinator? statusOperations = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -56,6 +58,10 @@ public sealed partial class SelectionSyncCoordinator(
     // Tracks whether UI selections changed after the last applied selection snapshot.
     // Apply uses it to avoid an unconditional second filesystem pass on large projects.
     private int _selectionRefreshDirty;
+    // Retain only the last stable option presentation. Never keep the tree inventory here:
+    // cancellation must be cheap and independent of workspace size.
+    private SelectionRefreshRollbackSnapshot? _stableSelectionSnapshot;
+    private SelectionRefreshRollbackSnapshot? _reversibleSelectionSnapshot;
     private readonly object _ignoreRulesBuildCacheSync = new();
     private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
     private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
@@ -193,7 +199,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         SetAllChecked(viewModel.RootFolders, isChecked, ref _suppressRootItemCheck);
         UpdateRootSelectionCache();
-        QueueLiveOptionsRefresh(currentPath);
+        QueueLiveOptionsRefresh(currentPath, SelectionRefreshOrigin.RootSelection);
     }
 
     public void HandleExtensionsAllChanged(bool isChecked)
@@ -209,7 +215,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         // Bulk extension toggles suppress individual item events, so refresh live
         // ignore counts explicitly to keep EmptyFolders aligned with tree semantics.
-        QueueLiveOptionsRefresh(currentPathProvider());
+        QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.ExtensionSelection);
     }
 
     public void HandleIgnoreAllChanged(bool isChecked, string? currentPath)
@@ -228,7 +234,7 @@ public sealed partial class SelectionSyncCoordinator(
         UpdateIgnoreSelectionCache();
         if (!string.IsNullOrEmpty(currentPath))
         {
-            QueueFullRefresh(currentPath);
+            QueueFullRefresh(currentPath, changedIgnoreOptionId: null);
         }
     }
 
@@ -251,8 +257,10 @@ public sealed partial class SelectionSyncCoordinator(
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
         var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, rootFolders);
         var extensionScanRules = BuildExtensionAvailabilityScanRules(ignoreRules);
-        var forceAllExtensionsChecked = !ShouldSuppressAllTogglesOverride() && viewModel.AllExtensionsChecked;
-        var includeDirectoryToggleProbeRoots = !ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked;
+        var forceAllExtensionsChecked =
+            !ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh();
+        var includeDirectoryToggleProbeRoots =
+            !ShouldSuppressAllTogglesOverride() && ResolveAllRootFoldersCheckedForRefresh();
         var includeControllerImpactProbeRoots = ShouldIncludeControllerImpactProbeRoots(selectedIgnoreOptions);
         var effectiveExtensionPolicy = BuildEffectiveExtensionPolicyForLiveCounts(forceAllExtensionsChecked);
         return Task.Run(async () =>
@@ -280,8 +288,8 @@ public sealed partial class SelectionSyncCoordinator(
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            var visibleExtensions = new List<string>(scan.Value.Extensions.Count);
-            var extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+            var visibleExtensions = new List<string>(scan.Value.VisibleExtensions.Count);
+            var extensionlessEntriesCount = SplitExtensions(scan.Value.VisibleExtensions, visibleExtensions);
             extensionlessEntriesCount = Math.Max(
                 extensionlessEntriesCount,
                 scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -305,8 +313,8 @@ public sealed partial class SelectionSyncCoordinator(
                     cancellationToken,
                     includeControllerImpactProbeRoots);
 
-                visibleExtensions = new List<string>(scan.Value.Extensions.Count);
-                extensionlessEntriesCount = SplitExtensions(scan.Value.Extensions, visibleExtensions);
+                visibleExtensions = new List<string>(scan.Value.VisibleExtensions.Count);
+                extensionlessEntriesCount = SplitExtensions(scan.Value.VisibleExtensions, visibleExtensions);
                 extensionlessEntriesCount = Math.Max(
                     extensionlessEntriesCount,
                     scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -342,14 +350,14 @@ public sealed partial class SelectionSyncCoordinator(
         var previousRootStates = SnapshotRootOptionStateCacheOrNull(hasPreviousSelections);
 
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
-        var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, null);
+        var discoveryRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, null);
         return Task.Run(async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (IsStalePathRequest(path)) return;
 
             // Root folder list does not require full extension scan.
-            var scan = scanOptions.GetRootFolders(path, ignoreRules, cancellationToken);
+            var scan = scanOptions.GetRootFolders(path, discoveryRules, cancellationToken);
             if (scan.RootAccessDenied)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -358,13 +366,19 @@ public sealed partial class SelectionSyncCoordinator(
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            var options = filterSelectionService.BuildRootFolderOptions(
+            var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, scan.Value);
+            var visibleRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
+                path,
                 scan.Value,
+                ignoreRules,
+                cancellationToken);
+            var options = filterSelectionService.BuildRootFolderOptions(
+                visibleRootFolders,
                 prev,
                 ignoreRules,
                 hasPreviousSelections,
                 previousRootStates);
-            options = ApplyMissingProfileSelectionsFallbackToRootFolders(options, scan.Value, ignoreRules);
+            options = ApplyMissingProfileSelectionsFallbackToRootFolders(options, visibleRootFolders, ignoreRules);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -464,6 +478,8 @@ public sealed partial class SelectionSyncCoordinator(
         await UpdateLiveOptionsFromRootSelectionCoreAsync(
             currentPath,
             expectedRequestVersion: null,
+            SelectionRefreshOrigin.Unknown,
+            changedIgnoreOptionId: null,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -481,6 +497,8 @@ public sealed partial class SelectionSyncCoordinator(
     private async Task UpdateLiveOptionsFromRootSelectionCoreAsync(
         string? currentPath,
         int? expectedRequestVersion,
+        SelectionRefreshOrigin origin,
+        IgnoreOptionId? changedIgnoreOptionId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(currentPath)) return;
@@ -503,6 +521,9 @@ public sealed partial class SelectionSyncCoordinator(
                 if (IsSupersededLiveOptionsRequest(expectedRequestVersion))
                     return null;
                 if (IsStalePathRequest(currentPath))
+                    return null;
+
+                if (TryRestoreKnownSelectionSnapshot(currentPath, origin, changedIgnoreOptionId))
                     return null;
 
                 return new LiveRefreshInput(
@@ -538,7 +559,7 @@ public sealed partial class SelectionSyncCoordinator(
                 if (IsStalePathRequest(currentPath))
                     return;
 
-                ApplySelectionRefreshSnapshot(snapshot);
+                ApplySelectionRefreshSnapshot(snapshot, retainPreviousSnapshot: true);
             });
         }
         finally
@@ -552,6 +573,7 @@ public sealed partial class SelectionSyncCoordinator(
         await RefreshRootAndDependentsCoreAsync(
             currentPath,
             expectedRequestVersion: null,
+            changedIgnoreOptionId: null,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -583,6 +605,7 @@ public sealed partial class SelectionSyncCoordinator(
     private async Task RefreshRootAndDependentsCoreAsync(
         string currentPath,
         int? expectedRequestVersion,
+        IgnoreOptionId? changedIgnoreOptionId,
         CancellationToken cancellationToken)
     {
         // Serialize refresh operations to prevent race conditions
@@ -612,6 +635,15 @@ public sealed partial class SelectionSyncCoordinator(
                 if (ShouldSkipRefreshForPreparedPath(currentPath))
                     return null;
 
+                // Queued full refreshes originate from ignore-option changes. A direct
+                // return to either of the two known states does not require another scan.
+                if (expectedRequestVersion.HasValue &&
+                    TryRestoreKnownSelectionSnapshot(
+                        currentPath,
+                        SelectionRefreshOrigin.IgnoreOption,
+                        changedIgnoreOptionId))
+                    return null;
+
                 // UI collections and selection caches are Avalonia-owned state. Capture and
                 // cache reset must happen on the UI thread; the expensive scan runs after this.
                 if (ShouldClearCachesForCurrentPath(currentPath))
@@ -619,7 +651,7 @@ public sealed partial class SelectionSyncCoordinator(
 
                 _session.LastLoadedPath = currentPath;
                 MarkSelectionRefreshDirty();
-                return CreateSelectionRefreshContext(currentPath);
+                return CreateSelectionRefreshContext(currentPath, captureTreeInventory: true);
             });
             if (context is null)
                 return;
@@ -649,7 +681,9 @@ public sealed partial class SelectionSyncCoordinator(
                 if (ShouldSkipRefreshForPreparedPath(currentPath))
                     return;
 
-                ApplySelectionRefreshSnapshot(snapshot);
+                ApplySelectionRefreshSnapshot(
+                    snapshot,
+                    retainPreviousSnapshot: expectedRequestVersion.HasValue);
 
                 // Consume prepared selection only after the matching snapshot is applied.
                 // Keeping this with the UI mutation prevents stale background refreshes from
@@ -752,6 +786,25 @@ public sealed partial class SelectionSyncCoordinator(
         }
     }
 
+    public bool CancelPendingRefreshes()
+    {
+        var shouldRestoreStableSelection = HasDirtySelectionRefresh();
+        lock (_backgroundRefreshSync)
+        {
+            _liveOptionsRefreshCts?.Cancel();
+            _fullRefreshRequestCts?.Cancel();
+            _liveOptionsRequestVersion = unchecked(_liveOptionsRequestVersion + 1);
+            _fullRefreshRequestVersion = unchecked(_fullRefreshRequestVersion + 1);
+        }
+
+        var snapshot = _stableSelectionSnapshot;
+        if (!shouldRestoreStableSelection || snapshot is null)
+            return false;
+
+        RestoreStableSelectionSnapshot(snapshot);
+        return true;
+    }
+
     /// <summary>
     /// Clears internal caches when switching to a new project folder.
     /// This helps release memory from the previous project.
@@ -767,6 +820,8 @@ public sealed partial class SelectionSyncCoordinator(
         _hasIgnoreOptionCounts = false;
         _ignoreOptionCounts = IgnoreOptionCounts.Empty;
         _ignoreControllerImpactCounts = IgnoreControllerImpactCounts.Empty;
+        _stableSelectionSnapshot = null;
+        _reversibleSelectionSnapshot = null;
 
         // Clear ignore options
         _ignoreOptions = [];
@@ -841,9 +896,13 @@ public sealed partial class SelectionSyncCoordinator(
                 return availability with
                 {
                     IncludeGitIgnore = availability.IncludeGitIgnore &&
-                                       _ignoreControllerImpactCounts.GitIgnore > 0,
+                                       ShouldKeepControllerVisible(
+                                           IgnoreOptionId.UseGitIgnore,
+                                           _ignoreControllerImpactCounts.GitIgnore),
                     IncludeSmartIgnore = availability.IncludeSmartIgnore &&
-                                         _ignoreControllerImpactCounts.SmartIgnore > 0,
+                                         ShouldKeepControllerVisible(
+                                             IgnoreOptionId.SmartIgnore,
+                                             _ignoreControllerImpactCounts.SmartIgnore),
                     IncludeHiddenFolders = _ignoreOptionCounts.HiddenFolders > 0,
                     HiddenFoldersCount = _ignoreOptionCounts.HiddenFolders,
                     IncludeHiddenFiles = _ignoreOptionCounts.HiddenFiles > 0,
@@ -876,6 +935,21 @@ public sealed partial class SelectionSyncCoordinator(
         {
             return CreateCountDrivenIgnoreAvailability(includeGitIgnore: false, includeSmartIgnore: false);
         }
+    }
+
+    private bool ShouldKeepControllerVisible(
+        IgnoreOptionId optionId,
+        int controllerImpactCount)
+    {
+        if (controllerImpactCount > 0)
+            return true;
+
+        // Controller toggles must stay reversible after an explicit user choice. Only the
+        // unchecked zero-impact state is forced visible; checked zero-impact profile state
+        // stays hidden so it cannot unexpectedly become an active runtime selection.
+        return _session.IgnoreOptionStateCacheIsComplete &&
+               _session.IgnoreOptions.OptionStateCache.TryGetValue(optionId, out var isChecked) &&
+               !isChecked;
     }
 
     private static IgnoreOptionsAvailability CreateCountDrivenIgnoreAvailability(
@@ -943,6 +1017,7 @@ public sealed partial class SelectionSyncCoordinator(
             hasPreviousSelections ? previousSelections : null,
             markStateCacheComplete: false);
         SyncIgnoreAllCheckbox();
+        SynchronizeStableIgnoreOptionLabels();
     }
 
     private static bool HasGitIgnore(string? rootPath)
@@ -1017,7 +1092,7 @@ public sealed partial class SelectionSyncCoordinator(
                 emptyValue: true);
             UpdateRootSelectionCache();
 
-            QueueLiveOptionsRefresh(currentPathProvider());
+            QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.RootSelection);
         }
         else if (viewModel.Extensions.Contains(option))
         {
@@ -1027,7 +1102,7 @@ public sealed partial class SelectionSyncCoordinator(
                 value => viewModel.AllExtensionsChecked = value);
 
             UpdateExtensionsSelectionCache();
-            QueueLiveOptionsRefresh(currentPathProvider());
+            QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.ExtensionSelection);
         }
     }
 
@@ -1035,6 +1110,7 @@ public sealed partial class SelectionSyncCoordinator(
     {
         if (_suppressIgnoreItemCheck) return;
 
+        var changedOption = sender as IgnoreOptionViewModel;
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = null;
 
@@ -1046,14 +1122,31 @@ public sealed partial class SelectionSyncCoordinator(
         var currentPath = currentPathProvider();
         if (!string.IsNullOrEmpty(currentPath))
         {
-            QueueFullRefresh(currentPath);
+            QueueRefreshForIgnoreOptionChange(currentPath, changedOption?.Id);
         }
+    }
+
+    private void QueueRefreshForIgnoreOptionChange(string currentPath, IgnoreOptionId? changedOptionId)
+    {
+        if (SelectionRefreshRoutingPolicy.CanUseLiveOptionsRefresh(changedOptionId))
+        {
+            QueueLiveOptionsRefresh(
+                currentPath,
+                SelectionRefreshOrigin.IgnoreOption,
+                changedOptionId);
+            return;
+        }
+
+        QueueFullRefresh(currentPath, changedOptionId);
     }
 
     /// <summary>
     /// Coalesces rapid root-selection changes and keeps only the latest live-options refresh.
     /// </summary>
-    private void QueueLiveOptionsRefresh(string? currentPath)
+    private void QueueLiveOptionsRefresh(
+        string? currentPath,
+        SelectionRefreshOrigin origin,
+        IgnoreOptionId? changedIgnoreOptionId = null)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
             return;
@@ -1062,6 +1155,7 @@ public sealed partial class SelectionSyncCoordinator(
         Task previousTask;
         Task queuedTask;
         CancellationToken token;
+        Action cancelAction;
         int version;
         lock (_backgroundRefreshSync)
         {
@@ -1075,8 +1169,15 @@ public sealed partial class SelectionSyncCoordinator(
 
             _liveOptionsRefreshCts = new CancellationTokenSource();
             token = _liveOptionsRefreshCts.Token;
+            cancelAction = _liveOptionsRefreshCts.Cancel;
             version = unchecked(++_liveOptionsRequestVersion);
-            queuedTask = RunQueuedLiveOptionsRefreshAsync(currentPath, version, token);
+            queuedTask = RunQueuedLiveOptionsRefreshAsync(
+                currentPath,
+                version,
+                origin,
+                changedIgnoreOptionId,
+                token,
+                cancelAction);
             _latestLiveOptionsRefreshTask = queuedTask;
         }
 
@@ -1087,7 +1188,7 @@ public sealed partial class SelectionSyncCoordinator(
     /// <summary>
     /// Coalesces rapid ignore-option changes and keeps only the latest full refresh request.
     /// </summary>
-    private void QueueFullRefresh(string? currentPath)
+    private void QueueFullRefresh(string? currentPath, IgnoreOptionId? changedIgnoreOptionId)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
             return;
@@ -1098,6 +1199,7 @@ public sealed partial class SelectionSyncCoordinator(
         Task invalidatedLiveTask;
         Task queuedTask;
         CancellationToken token;
+        Action cancelAction;
         int version;
         lock (_backgroundRefreshSync)
         {
@@ -1120,8 +1222,14 @@ public sealed partial class SelectionSyncCoordinator(
 
             _fullRefreshRequestCts = new CancellationTokenSource();
             token = _fullRefreshRequestCts.Token;
+            cancelAction = _fullRefreshRequestCts.Cancel;
             version = unchecked(++_fullRefreshRequestVersion);
-            queuedTask = RunQueuedFullRefreshAsync(currentPath, version, token);
+            queuedTask = RunQueuedFullRefreshAsync(
+                currentPath,
+                version,
+                changedIgnoreOptionId,
+                token,
+                cancelAction);
             _latestFullRefreshTask = queuedTask;
         }
 
@@ -1133,32 +1241,52 @@ public sealed partial class SelectionSyncCoordinator(
     private async Task RunQueuedLiveOptionsRefreshAsync(
         string currentPath,
         int version,
-        CancellationToken cancellationToken)
+        SelectionRefreshOrigin origin,
+        IgnoreOptionId? changedIgnoreOptionId,
+        CancellationToken cancellationToken,
+        Action cancelAction)
     {
         if (cancellationToken.IsCancellationRequested)
             return;
         if (version != Volatile.Read(ref _liveOptionsRequestVersion))
             return;
 
+        using var _ = PerformanceMetrics.Measure("SelectionRefresh.LiveOptions");
+        await using var statusLease = SelectionRefreshStatusLease.Start(
+            viewModel,
+            statusOperations,
+            cancelAction,
+            cancellationToken);
         await UpdateLiveOptionsFromRootSelectionCoreAsync(
             currentPath,
             version,
+            origin,
+            changedIgnoreOptionId,
             cancellationToken).ConfigureAwait(false);
     }
 
     private async Task RunQueuedFullRefreshAsync(
         string currentPath,
         int version,
-        CancellationToken cancellationToken)
+        IgnoreOptionId? changedIgnoreOptionId,
+        CancellationToken cancellationToken,
+        Action cancelAction)
     {
         if (cancellationToken.IsCancellationRequested)
             return;
         if (version != Volatile.Read(ref _fullRefreshRequestVersion))
             return;
 
+        using var _ = PerformanceMetrics.Measure("SelectionRefresh.Full");
+        await using var statusLease = SelectionRefreshStatusLease.Start(
+            viewModel,
+            statusOperations,
+            cancelAction,
+            cancellationToken);
         await RefreshRootAndDependentsCoreAsync(
             currentPath,
             version,
+            changedIgnoreOptionId,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -1217,7 +1345,19 @@ public sealed partial class SelectionSyncCoordinator(
             : IgnoreControllerImpactCounts.Empty;
         _hasIgnoreOptionCounts = hasIgnoreOptionCounts;
 
-        if (!SelectionOptionsMatch(viewModel.Extensions, options))
+        if (SelectionOptionIdentitiesMatch(viewModel.Extensions, options))
+        {
+            _suppressExtensionItemCheck = true;
+            try
+            {
+                UpdateSelectionOptionStates(viewModel.Extensions, options);
+            }
+            finally
+            {
+                _suppressExtensionItemCheck = false;
+            }
+        }
+        else
         {
             var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
             foreach (var option in options)
@@ -1228,7 +1368,7 @@ public sealed partial class SelectionSyncCoordinator(
             _suppressExtensionItemCheck = false;
         }
 
-        if (!ShouldSuppressAllTogglesOverride() && viewModel.AllExtensionsChecked)
+        if (!ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh())
             SetAllChecked(viewModel.Extensions, true, ref _suppressExtensionItemCheck);
 
         SyncAllCheckbox(viewModel.Extensions, ref _suppressExtensionAllCheck,
@@ -1239,7 +1379,19 @@ public sealed partial class SelectionSyncCoordinator(
 
     private void ApplyRootOptions(IReadOnlyList<SelectionOption> options)
     {
-        if (!SelectionOptionsMatch(viewModel.RootFolders, options))
+        if (SelectionOptionIdentitiesMatch(viewModel.RootFolders, options))
+        {
+            _suppressRootItemCheck = true;
+            try
+            {
+                UpdateSelectionOptionStates(viewModel.RootFolders, options);
+            }
+            finally
+            {
+                _suppressRootItemCheck = false;
+            }
+        }
+        else
         {
             var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
             foreach (var option in options)
@@ -1250,7 +1402,7 @@ public sealed partial class SelectionSyncCoordinator(
             _suppressRootItemCheck = false;
         }
 
-        if (!ShouldSuppressAllTogglesOverride() && viewModel.AllRootFoldersChecked)
+        if (!ShouldSuppressAllTogglesOverride() && ResolveAllRootFoldersCheckedForRefresh())
             SetAllChecked(viewModel.RootFolders, true, ref _suppressRootItemCheck);
 
         SyncAllCheckbox(viewModel.RootFolders, ref _suppressRootAllCheck,
@@ -1263,11 +1415,19 @@ public sealed partial class SelectionSyncCoordinator(
         IReadOnlyList<ResolvedIgnoreOptionState> options,
         IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
     {
-        var descriptors = new List<IgnoreOptionDescriptor>(options.Count);
-        foreach (var option in options)
-            descriptors.Add(new IgnoreOptionDescriptor(option.Id, option.Label, option.DefaultChecked));
-
-        if (!IgnoreOptionsMatch(viewModel.IgnoreOptions, options))
+        if (IgnoreOptionIdentitiesMatch(viewModel.IgnoreOptions, options))
+        {
+            _suppressIgnoreItemCheck = true;
+            try
+            {
+                UpdateIgnoreOptionStates(viewModel.IgnoreOptions, options);
+            }
+            finally
+            {
+                _suppressIgnoreItemCheck = false;
+            }
+        }
+        else
         {
             var optionViewModels = new List<IgnoreOptionViewModel>(options.Count);
             foreach (var option in options)
@@ -1284,13 +1444,22 @@ public sealed partial class SelectionSyncCoordinator(
             }
         }
 
-        _ignoreOptions = descriptors;
+        if (!IgnoreOptionDescriptorsMatch(_ignoreOptions, options))
+        {
+            var descriptors = new List<IgnoreOptionDescriptor>(options.Count);
+            foreach (var option in options)
+                descriptors.Add(new IgnoreOptionDescriptor(option.Id, option.Label, option.DefaultChecked));
+
+            _ignoreOptions = descriptors;
+        }
         _session.IgnoreOptions.ReplaceStateCache(stateCache);
         _session.IgnoreOptionStateCacheIsComplete = true;
         SyncIgnoreAllCheckbox();
     }
 
-    private void ApplySelectionRefreshSnapshot(SelectionRefreshSnapshot snapshot)
+    private void ApplySelectionRefreshSnapshot(
+        SelectionRefreshSnapshot snapshot,
+        bool retainPreviousSnapshot = false)
     {
         // A full/live selection snapshot is the authoritative count-driven ignore state.
         // Invalidate older standalone availability refreshes so they cannot overwrite it.
@@ -1300,7 +1469,7 @@ public sealed partial class SelectionSyncCoordinator(
             ApplyRootOptions(snapshot.RootOptions);
 
         ApplyExtensionOptions(
-            snapshot.ExtensionOptions,
+            snapshot.EffectiveExtensionOptions,
             snapshot.ExtensionlessEntriesCount,
             snapshot.IgnoreOptionCounts,
             snapshot.ControllerImpactCounts,
@@ -1308,6 +1477,426 @@ public sealed partial class SelectionSyncCoordinator(
 
         ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
         MarkSelectionRefreshClean();
+        var previousSnapshot = retainPreviousSnapshot ? _stableSelectionSnapshot : null;
+        var appliedSnapshot = CaptureStableSelectionSnapshot(snapshot);
+        _stableSelectionSnapshot = appliedSnapshot;
+        _reversibleSelectionSnapshot = previousSnapshot is not null &&
+                                       PathComparer.Default.Equals(previousSnapshot.Path, appliedSnapshot.Path)
+            ? previousSnapshot
+            : null;
+    }
+
+    private SelectionRefreshRollbackSnapshot CaptureStableSelectionSnapshot(SelectionRefreshSnapshot snapshot)
+    {
+        var rootOptions = ResolveStableSelectionOptions(
+            viewModel.RootFolders,
+            snapshot.RootOptions,
+            _stableSelectionSnapshot?.RootOptions);
+        var extensionOptions = ResolveStableSelectionOptions(
+            viewModel.Extensions,
+            snapshot.EffectiveExtensionOptions,
+            _stableSelectionSnapshot?.ExtensionOptions);
+
+        return new SelectionRefreshRollbackSnapshot(
+            _session.LastLoadedPath ?? currentPathProvider() ?? string.Empty,
+            rootOptions,
+            extensionOptions,
+            ResolveStableIgnoreOptions(snapshot.IgnoreOptions),
+            snapshot.ExtensionlessEntriesCount,
+            snapshot.HasIgnoreOptionCounts,
+            snapshot.IgnoreOptionCounts,
+            snapshot.ControllerImpactCounts,
+            snapshot.IgnoreOptionStateCache,
+            _session.RootFolders.SnapshotSelectedNames(),
+            new Dictionary<string, bool>(
+                _session.RootFolders.OptionStates,
+                PathComparer.Default),
+            _session.RootFolders.IsInitialized,
+            _session.RootFolders.HasFullState,
+            _session.Extensions.SnapshotSelectedNames(),
+            new Dictionary<string, bool>(
+                _session.Extensions.OptionStates,
+                StringComparer.OrdinalIgnoreCase),
+            _session.Extensions.IsInitialized,
+            _session.Extensions.HasFullState,
+            viewModel.AllRootFoldersChecked,
+            viewModel.AllExtensionsChecked,
+            viewModel.AllIgnoreChecked,
+            _session.IgnoreOptions.IsInitialized,
+            _session.IgnoreOptions.AllPreference,
+            _session.IgnoreOptionStateCacheIsComplete,
+            snapshot.RootOptions is not null);
+    }
+
+    private bool TryRestoreKnownSelectionSnapshot(
+        string currentPath,
+        SelectionRefreshOrigin origin,
+        IgnoreOptionId? changedIgnoreOptionId)
+    {
+        if (_stableSelectionSnapshot is { } stableSnapshot &&
+            CurrentSelectionMatchesSnapshot(currentPath, stableSnapshot))
+        {
+            // A superseded refresh may already have changed count labels while the
+            // checkbox state returned to stable. Reapply the authoritative presentation.
+            _stableSelectionSnapshot = RestoreStableSelectionSnapshot(stableSnapshot);
+            return true;
+        }
+
+        var reversibleSnapshot = _reversibleSelectionSnapshot;
+        var currentStableSnapshot = _stableSelectionSnapshot;
+        if (reversibleSnapshot is null ||
+            currentStableSnapshot is null ||
+            !CurrentSelectionCanRestoreReversibleSnapshot(
+                currentPath,
+                currentStableSnapshot,
+                reversibleSnapshot,
+                origin,
+                changedIgnoreOptionId))
+        {
+            return false;
+        }
+
+        var previousStableSnapshot = _stableSelectionSnapshot;
+        _stableSelectionSnapshot = RestoreStableSelectionSnapshot(reversibleSnapshot);
+        _reversibleSelectionSnapshot = previousStableSnapshot;
+        return true;
+    }
+
+    private bool CurrentSelectionMatchesSnapshot(
+        string currentPath,
+        SelectionRefreshRollbackSnapshot snapshot)
+    {
+        return PathComparer.Default.Equals(currentPath, snapshot.Path) &&
+               CurrentRootSelectionMatches(snapshot) &&
+               CurrentExtensionSelectionMatches(snapshot) &&
+               CurrentIgnoreSelectionMatches(snapshot);
+    }
+
+    private bool CurrentSelectionCanRestoreReversibleSnapshot(
+        string currentPath,
+        SelectionRefreshRollbackSnapshot stableSnapshot,
+        SelectionRefreshRollbackSnapshot reversibleSnapshot,
+        SelectionRefreshOrigin origin,
+        IgnoreOptionId? changedIgnoreOptionId)
+    {
+        if (!PathComparer.Default.Equals(currentPath, stableSnapshot.Path) ||
+            !PathComparer.Default.Equals(currentPath, reversibleSnapshot.Path))
+        {
+            return false;
+        }
+
+        if (origin == SelectionRefreshOrigin.IgnoreOption &&
+            !SelectionRefreshRoutingPolicy.CanUseLiveOptionsRefresh(changedIgnoreOptionId) &&
+            !reversibleSnapshot.HasAuthoritativeRootOptions)
+        {
+            // A live snapshot has no root inventory. Reusing it after a structural
+            // ignore reversal could restore roots discovered under different filters.
+            return false;
+        }
+
+        var rootMatchesKnownState = CurrentRootSelectionMatches(stableSnapshot) ||
+                                    CurrentRootSelectionMatches(reversibleSnapshot);
+        var extensionMatchesKnownState = CurrentExtensionSelectionMatches(stableSnapshot) ||
+                                         CurrentExtensionSelectionMatches(reversibleSnapshot);
+        var ignoreMatchesKnownState = CurrentIgnoreSelectionMatches(stableSnapshot) ||
+                                      CurrentIgnoreSelectionMatches(reversibleSnapshot);
+
+        // Restoring a whole snapshot is safe only when sections outside the initiating
+        // toggle have no conflicting explicit preferences in the two known states.
+        return origin switch
+        {
+            SelectionRefreshOrigin.RootSelection =>
+                CurrentRootSelectionMatches(reversibleSnapshot) &&
+                extensionMatchesKnownState &&
+                ignoreMatchesKnownState &&
+                ExtensionPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
+                IgnorePreferencesAreCompatible(stableSnapshot, reversibleSnapshot),
+            SelectionRefreshOrigin.ExtensionSelection =>
+                rootMatchesKnownState &&
+                CurrentExtensionSelectionMatches(reversibleSnapshot) &&
+                ignoreMatchesKnownState &&
+                RootPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
+                IgnorePreferencesAreCompatible(stableSnapshot, reversibleSnapshot),
+            SelectionRefreshOrigin.IgnoreOption =>
+                rootMatchesKnownState &&
+                extensionMatchesKnownState &&
+                RootPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
+                ExtensionPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
+                CurrentIgnoreSelectionMatchesReversal(
+                    stableSnapshot,
+                    reversibleSnapshot,
+                    changedIgnoreOptionId),
+            _ => false
+        };
+    }
+
+    private bool CurrentRootSelectionMatches(SelectionRefreshRollbackSnapshot snapshot)
+    {
+        return viewModel.AllRootFoldersChecked == snapshot.AllRootFoldersChecked &&
+               SelectionOptionStatesMatch(viewModel.RootFolders, snapshot.RootOptions) &&
+               SetStatesMatch(_session.RootFolders.SelectedNames, snapshot.SelectedRootFolders) &&
+               DictionaryStatesMatch(
+                   _session.RootFolders.OptionStates,
+                   snapshot.RootOptionStateCache) &&
+               _session.RootFolders.IsInitialized == snapshot.RootSelectionInitialized &&
+               _session.RootFolders.HasFullState == snapshot.RootOptionStateCacheIsComplete;
+    }
+
+    private bool CurrentExtensionSelectionMatches(SelectionRefreshRollbackSnapshot snapshot)
+    {
+        return viewModel.AllExtensionsChecked == snapshot.AllExtensionsChecked &&
+               SelectionOptionStatesMatch(viewModel.Extensions, snapshot.ExtensionOptions) &&
+               SetStatesMatch(_session.Extensions.SelectedNames, snapshot.SelectedExtensions) &&
+               DictionaryStatesMatch(
+                   _session.Extensions.OptionStates,
+                   snapshot.ExtensionOptionStateCache) &&
+               _session.Extensions.IsInitialized == snapshot.ExtensionSelectionInitialized &&
+               _session.Extensions.HasFullState == snapshot.ExtensionOptionStateCacheIsComplete;
+    }
+
+    private bool CurrentIgnoreSelectionMatches(SelectionRefreshRollbackSnapshot snapshot)
+    {
+        return viewModel.AllIgnoreChecked == snapshot.AllIgnoreChecked &&
+               IgnoreOptionCheckStatesMatch(viewModel.IgnoreOptions, snapshot.IgnoreOptions) &&
+               DictionaryStatesMatch(
+                   _session.IgnoreOptions.OptionStateCache,
+                   snapshot.IgnoreOptionStateCache) &&
+               _session.IgnoreOptions.IsInitialized == snapshot.IgnoreOptionsInitialized &&
+               _session.IgnoreOptions.AllPreference == snapshot.IgnoreAllPreference &&
+               _session.IgnoreOptionStateCacheIsComplete == snapshot.IgnoreOptionStateCacheIsComplete;
+    }
+
+    private bool CurrentIgnoreSelectionMatchesReversal(
+        SelectionRefreshRollbackSnapshot stableSnapshot,
+        SelectionRefreshRollbackSnapshot reversibleSnapshot,
+        IgnoreOptionId? changedIgnoreOptionId)
+    {
+        if (!changedIgnoreOptionId.HasValue)
+            return CurrentIgnoreSelectionMatches(reversibleSnapshot);
+
+        var changedId = changedIgnoreOptionId.Value;
+        if (!IgnoreOptionIdentitiesMatch(viewModel.IgnoreOptions, stableSnapshot.IgnoreOptions) ||
+            !reversibleSnapshot.IgnoreOptionStateCache.TryGetValue(changedId, out var reversedState) ||
+            !stableSnapshot.IgnoreOptionStateCache.ContainsKey(changedId) ||
+            viewModel.AllIgnoreChecked != reversibleSnapshot.AllIgnoreChecked ||
+            _session.IgnoreOptions.IsInitialized != reversibleSnapshot.IgnoreOptionsInitialized ||
+            _session.IgnoreOptions.AllPreference != reversibleSnapshot.IgnoreAllPreference ||
+            _session.IgnoreOptionStateCacheIsComplete != reversibleSnapshot.IgnoreOptionStateCacheIsComplete ||
+            _session.IgnoreOptions.OptionStateCache.Count != stableSnapshot.IgnoreOptionStateCache.Count)
+        {
+            return false;
+        }
+
+        foreach (var option in viewModel.IgnoreOptions)
+        {
+            var expectedState = option.Id == changedId
+                ? reversedState
+                : stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(option.Id);
+            if (!stableSnapshot.IgnoreOptionStateCache.ContainsKey(option.Id) ||
+                option.IsChecked != expectedState)
+            {
+                return false;
+            }
+        }
+
+        foreach (var (optionId, isChecked) in _session.IgnoreOptions.OptionStateCache)
+        {
+            var expectedState = optionId == changedId
+                ? reversedState
+                : stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(optionId);
+            if (!stableSnapshot.IgnoreOptionStateCache.ContainsKey(optionId) ||
+                isChecked != expectedState)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private SelectionRefreshRollbackSnapshot RestoreStableSelectionSnapshot(
+        SelectionRefreshRollbackSnapshot snapshot)
+    {
+        snapshot = RetainUnknownSelectionStates(snapshot);
+
+        _suppressRootAllCheck = true;
+        _suppressExtensionAllCheck = true;
+        _suppressIgnoreAllCheck = true;
+        try
+        {
+            viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
+            viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
+            viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
+        }
+        finally
+        {
+            _suppressRootAllCheck = false;
+            _suppressExtensionAllCheck = false;
+            _suppressIgnoreAllCheck = false;
+        }
+
+        Interlocked.Increment(ref _ignoreOptionsVersion);
+        ApplyRootOptions(snapshot.RootOptions);
+        ApplyExtensionOptions(
+            snapshot.ExtensionOptions,
+            snapshot.ExtensionlessEntriesCount,
+            snapshot.IgnoreOptionCounts,
+            snapshot.ControllerImpactCounts,
+            snapshot.HasIgnoreOptionCounts);
+        ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+
+        RestoreSelectionOptionCache(
+            _session.RootFolders,
+            snapshot.SelectedRootFolders,
+            snapshot.RootOptionStateCache,
+            snapshot.RootSelectionInitialized,
+            snapshot.RootOptionStateCacheIsComplete);
+        RestoreSelectionOptionCache(
+            _session.Extensions,
+            snapshot.SelectedExtensions,
+            snapshot.ExtensionOptionStateCache,
+            snapshot.ExtensionSelectionInitialized,
+            snapshot.ExtensionOptionStateCacheIsComplete);
+        _session.IgnoreOptions.IsInitialized = snapshot.IgnoreOptionsInitialized;
+        _session.IgnoreOptions.AllPreference = snapshot.IgnoreAllPreference;
+        _session.IgnoreOptionStateCacheIsComplete = snapshot.IgnoreOptionStateCacheIsComplete;
+        MarkSelectionRefreshClean();
+
+        lock (_ignoreRulesBuildCacheSync)
+            _ignoreRulesBuildCache = null;
+
+        return snapshot;
+    }
+
+    private SelectionRefreshRollbackSnapshot RetainUnknownSelectionStates(
+        SelectionRefreshRollbackSnapshot snapshot)
+    {
+        // Visible selections belong to the snapshot, while hidden option preferences
+        // must survive until another section makes those options visible again.
+        var rootStates = new Dictionary<string, bool>(
+            snapshot.RootOptionStateCache,
+            PathComparer.Default);
+        RetainUnknownSelectionStates(_session.RootFolders.OptionStates, rootStates);
+
+        var extensionStates = new Dictionary<string, bool>(
+            snapshot.ExtensionOptionStateCache,
+            StringComparer.OrdinalIgnoreCase);
+        RetainUnknownSelectionStates(
+            _session.Extensions.OptionStates,
+            extensionStates);
+
+        return snapshot with
+        {
+            RootOptionStateCache = rootStates,
+            ExtensionOptionStateCache = extensionStates
+        };
+    }
+
+    private static bool RootPreferencesAreCompatible(
+        SelectionRefreshRollbackSnapshot stableSnapshot,
+        SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
+        stableSnapshot.RootSelectionInitialized == reversibleSnapshot.RootSelectionInitialized &&
+        stableSnapshot.RootOptionStateCacheIsComplete == reversibleSnapshot.RootOptionStateCacheIsComplete &&
+        DictionaryStatesAreCompatible(
+            stableSnapshot.RootOptionStateCache,
+            reversibleSnapshot.RootOptionStateCache);
+
+    private static bool ExtensionPreferencesAreCompatible(
+        SelectionRefreshRollbackSnapshot stableSnapshot,
+        SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
+        stableSnapshot.ExtensionSelectionInitialized == reversibleSnapshot.ExtensionSelectionInitialized &&
+        stableSnapshot.ExtensionOptionStateCacheIsComplete == reversibleSnapshot.ExtensionOptionStateCacheIsComplete &&
+        DictionaryStatesAreCompatible(
+            stableSnapshot.ExtensionOptionStateCache,
+            reversibleSnapshot.ExtensionOptionStateCache);
+
+    private static bool IgnorePreferencesAreCompatible(
+        SelectionRefreshRollbackSnapshot stableSnapshot,
+        SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
+        stableSnapshot.IgnoreOptionsInitialized == reversibleSnapshot.IgnoreOptionsInitialized &&
+        stableSnapshot.IgnoreAllPreference == reversibleSnapshot.IgnoreAllPreference &&
+        stableSnapshot.IgnoreOptionStateCacheIsComplete == reversibleSnapshot.IgnoreOptionStateCacheIsComplete &&
+        DictionaryStatesAreCompatible(
+            stableSnapshot.IgnoreOptionStateCache,
+            reversibleSnapshot.IgnoreOptionStateCache);
+
+    private static void RetainUnknownSelectionStates(
+        IReadOnlyDictionary<string, bool> currentStates,
+        IDictionary<string, bool> targetStates)
+    {
+        foreach (var (name, isChecked) in currentStates)
+        {
+            if (targetStates.ContainsKey(name))
+                continue;
+
+            targetStates[name] = isChecked;
+        }
+    }
+
+    private static IReadOnlyList<SelectionOption> ResolveStableSelectionOptions(
+        IReadOnlyList<SelectionOptionViewModel> current,
+        IReadOnlyList<SelectionOption>? primaryCandidate,
+        IReadOnlyList<SelectionOption>? fallbackCandidate)
+    {
+        if (primaryCandidate is not null && SelectionOptionStatesMatch(current, primaryCandidate))
+            return primaryCandidate;
+        if (fallbackCandidate is not null && SelectionOptionStatesMatch(current, fallbackCandidate))
+            return fallbackCandidate;
+
+        var captured = new SelectionOption[current.Count];
+        for (var index = 0; index < current.Count; index++)
+            captured[index] = new SelectionOption(current[index].Name, current[index].IsChecked);
+
+        return captured;
+    }
+
+    private IReadOnlyList<ResolvedIgnoreOptionState> ResolveStableIgnoreOptions(
+        IReadOnlyList<ResolvedIgnoreOptionState> candidate)
+    {
+        if (IgnoreOptionStatesMatch(viewModel.IgnoreOptions, candidate))
+            return candidate;
+
+        var captured = new ResolvedIgnoreOptionState[viewModel.IgnoreOptions.Count];
+        for (var index = 0; index < viewModel.IgnoreOptions.Count; index++)
+        {
+            var option = viewModel.IgnoreOptions[index];
+            var descriptor = _ignoreOptions.First(current => current.Id == option.Id);
+            captured[index] = new ResolvedIgnoreOptionState(
+                option.Id,
+                option.Label,
+                descriptor.DefaultChecked,
+                option.IsChecked);
+        }
+
+        return captured;
+    }
+
+    private void SynchronizeStableIgnoreOptionLabels()
+    {
+        var stableSnapshot = _stableSelectionSnapshot;
+        if (stableSnapshot is null)
+            return;
+
+        ResolvedIgnoreOptionState[]? localizedOptions = null;
+        for (var index = 0; index < stableSnapshot.IgnoreOptions.Count; index++)
+        {
+            var stableOption = stableSnapshot.IgnoreOptions[index];
+            var currentOption = viewModel.IgnoreOptions.FirstOrDefault(option => option.Id == stableOption.Id);
+            if (currentOption is null ||
+                string.Equals(currentOption.Label, stableOption.Label, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            localizedOptions ??= stableSnapshot.IgnoreOptions.ToArray();
+            localizedOptions[index] = stableOption with { Label = currentOption.Label };
+        }
+
+        if (localizedOptions is not null)
+        {
+            _stableSelectionSnapshot = stableSnapshot with { IgnoreOptions = localizedOptions };
+            _reversibleSelectionSnapshot = null;
+        }
     }
 
     private bool HasDirtySelectionRefresh() =>
@@ -1334,7 +1923,7 @@ public sealed partial class SelectionSyncCoordinator(
             collection.Add(item);
     }
 
-    private static bool SelectionOptionsMatch(
+    private static bool SelectionOptionIdentitiesMatch(
         IReadOnlyList<SelectionOptionViewModel> current,
         IReadOnlyList<SelectionOption> next)
     {
@@ -1343,8 +1932,64 @@ public sealed partial class SelectionSyncCoordinator(
 
         for (var index = 0; index < next.Count; index++)
         {
-            if (!string.Equals(current[index].Name, next[index].Name, StringComparison.Ordinal) ||
-                current[index].IsChecked != next[index].IsChecked)
+            if (!string.Equals(current[index].Name, next[index].Name, StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool SelectionOptionStatesMatch(
+        IReadOnlyList<SelectionOptionViewModel> current,
+        IReadOnlyList<SelectionOption> candidate)
+    {
+        if (!SelectionOptionIdentitiesMatch(current, candidate))
+            return false;
+
+        for (var index = 0; index < candidate.Count; index++)
+        {
+            if (current[index].IsChecked != candidate[index].IsChecked)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static void UpdateSelectionOptionStates(
+        IReadOnlyList<SelectionOptionViewModel> current,
+        IReadOnlyList<SelectionOption> next)
+    {
+        for (var index = 0; index < next.Count; index++)
+            current[index].IsChecked = next[index].IsChecked;
+    }
+
+    private static bool IgnoreOptionIdentitiesMatch(
+        IReadOnlyList<IgnoreOptionViewModel> current,
+        IReadOnlyList<ResolvedIgnoreOptionState> next)
+    {
+        if (current.Count != next.Count)
+            return false;
+
+        for (var index = 0; index < next.Count; index++)
+        {
+            if (current[index].Id != next[index].Id)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IgnoreOptionStatesMatch(
+        IReadOnlyList<IgnoreOptionViewModel> current,
+        IReadOnlyList<ResolvedIgnoreOptionState> candidate)
+    {
+        if (!IgnoreOptionIdentitiesMatch(current, candidate))
+            return false;
+
+        for (var index = 0; index < candidate.Count; index++)
+        {
+            if (current[index].IsChecked != candidate[index].IsChecked ||
+                !string.Equals(current[index].Label, candidate[index].Label, StringComparison.Ordinal))
             {
                 return false;
             }
@@ -1353,8 +1998,89 @@ public sealed partial class SelectionSyncCoordinator(
         return true;
     }
 
-    private static bool IgnoreOptionsMatch(
+    private static bool IgnoreOptionCheckStatesMatch(
         IReadOnlyList<IgnoreOptionViewModel> current,
+        IReadOnlyList<ResolvedIgnoreOptionState> candidate)
+    {
+        if (!IgnoreOptionIdentitiesMatch(current, candidate))
+            return false;
+
+        for (var index = 0; index < candidate.Count; index++)
+        {
+            if (current[index].IsChecked != candidate[index].IsChecked)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool DictionaryStatesMatch<TKey>(
+        IReadOnlyDictionary<TKey, bool> current,
+        IReadOnlyDictionary<TKey, bool> candidate)
+        where TKey : notnull
+    {
+        if (current.Count != candidate.Count)
+            return false;
+
+        foreach (var (key, isChecked) in candidate)
+        {
+            if (!current.TryGetValue(key, out var currentState) || currentState != isChecked)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool DictionaryStatesAreCompatible<TKey>(
+        IReadOnlyDictionary<TKey, bool> left,
+        IReadOnlyDictionary<TKey, bool> right)
+        where TKey : notnull
+    {
+        foreach (var (key, leftState) in left)
+        {
+            if (right.TryGetValue(key, out var rightState) && leftState != rightState)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool SetStatesMatch<T>(IReadOnlySet<T> current, IReadOnlySet<T> candidate)
+    {
+        return current.Count == candidate.Count && current.SetEquals(candidate);
+    }
+
+    private static void RestoreSelectionOptionCache(
+        SelectionOptionStateCache cache,
+        IReadOnlySet<string> selectedNames,
+        IReadOnlyDictionary<string, bool> optionStates,
+        bool isInitialized,
+        bool hasFullState)
+    {
+        if (!isInitialized)
+        {
+            cache.RestoreDefaults(trimExcess: false);
+            return;
+        }
+
+        cache.RestoreProfile(
+            selectedNames,
+            hasFullState ? optionStates : null);
+    }
+
+    private static void UpdateIgnoreOptionStates(
+        IReadOnlyList<IgnoreOptionViewModel> current,
+        IReadOnlyList<ResolvedIgnoreOptionState> next)
+    {
+        for (var index = 0; index < next.Count; index++)
+        {
+            current[index].Label = next[index].Label;
+            current[index].IsChecked = next[index].IsChecked;
+        }
+    }
+
+    private static bool IgnoreOptionDescriptorsMatch(
+        IReadOnlyList<IgnoreOptionDescriptor> current,
         IReadOnlyList<ResolvedIgnoreOptionState> next)
     {
         if (current.Count != next.Count)
@@ -1366,7 +2092,7 @@ public sealed partial class SelectionSyncCoordinator(
             var nextOption = next[index];
             if (currentOption.Id != nextOption.Id ||
                 !string.Equals(currentOption.Label, nextOption.Label, StringComparison.Ordinal) ||
-                currentOption.IsChecked != nextOption.IsChecked)
+                currentOption.DefaultChecked != nextOption.DefaultChecked)
             {
                 return false;
             }
@@ -1410,8 +2136,8 @@ public sealed partial class SelectionSyncCoordinator(
         new(
             Path: path,
             PreparedSelectionMode: _session.PreparedMode,
-            AllRootFoldersChecked: viewModel.AllRootFoldersChecked,
-            AllExtensionsChecked: viewModel.AllExtensionsChecked,
+            AllRootFoldersChecked: ResolveAllRootFoldersCheckedForRefresh(),
+            AllExtensionsChecked: ResolveAllExtensionsCheckedForRefresh(),
             RootSelectionInitialized: _session.RootFolders.IsInitialized,
             RootSelectionCache: _session.RootFolders.SnapshotSelectedNames(),
             ExtensionsSelectionInitialized: _session.Extensions.IsInitialized,
@@ -1425,6 +2151,16 @@ public sealed partial class SelectionSyncCoordinator(
             ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
             IgnoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
             CaptureTreeInventory: captureTreeInventory);
+
+    // UI master checkboxes only describe visible rows; refresh policy also needs
+    // explicit states retained for rows temporarily hidden by another section.
+    private bool ResolveAllRootFoldersCheckedForRefresh() =>
+        viewModel.AllRootFoldersChecked &&
+        !_session.RootFolders.OptionStates.Values.Contains(false);
+
+    private bool ResolveAllExtensionsCheckedForRefresh() =>
+        viewModel.AllExtensionsChecked &&
+        !_session.Extensions.OptionStates.Values.Contains(false);
 
     private HashSet<IgnoreOptionId> SnapshotRuntimeSelectedIgnoreOptions()
     {
@@ -1543,9 +2279,9 @@ public sealed partial class SelectionSyncCoordinator(
 
     private static IgnoreRules BuildExtensionAvailabilityScanRules(IgnoreRules rules)
     {
-        // Extension availability must not depend on file-level toggles that can hide the
-        // very extensions required to keep those toggles visible. Otherwise options such as
-        // EmptyFiles or ExtensionlessFiles can disappear immediately after becoming checked.
+        // File-level rules are relaxed only for the internal availability state. The scanner
+        // also returns the effective set used by the visible UI, so ignored-only extensions
+        // never become no-op choices while toggle counters remain reversible.
         if (!rules.IgnoreHiddenFiles &&
             !rules.IgnoreDotFiles &&
             !rules.IgnoreEmptyFiles &&
@@ -1672,6 +2408,8 @@ public sealed partial class SelectionSyncCoordinator(
         }
         lock (_ignoreRulesBuildCacheSync)
             _ignoreRulesBuildCache = null;
+        _stableSelectionSnapshot = null;
+        _reversibleSelectionSnapshot = null;
 
         // Unsubscribe from collection change events
         if (_hookedRootFolders is not null && _rootFoldersCollectionChangedHandler is not null)

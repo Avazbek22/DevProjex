@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using Avalonia.Threading;
 using DevProjex.Application.Preview;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class MetricsPipelineWarmupTests
 {
     [AvaloniaFact]
@@ -33,7 +35,7 @@ public sealed class MetricsPipelineWarmupTests
             viewModel,
             isBackgroundMetricsActive: () => false,
             metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
-        using var pipeline = new MetricsPipeline(
+        var pipeline = new MetricsPipeline(
             viewModel,
             CreateLocalization(),
             analyzer,
@@ -46,29 +48,36 @@ public sealed class MetricsPipelineWarmupTests
             exportPathPresentationProvider: () => null,
             boundsWidthProvider: () => 1400);
 
-        await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
-            currentTree,
-            TestContext.Current.CancellationToken);
-        await WaitUntilAsync(
-            () => pipeline.HasStatusMetricsSnapshot,
-            TimeSpan.FromSeconds(5));
+        try
+        {
+            await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+                currentTree,
+                TestContext.Current.CancellationToken);
+            await WaitUntilAsync(
+                () => pipeline.HasStatusMetricsSnapshot,
+                TimeSpan.FromSeconds(5));
 
-        var renderedContent = await new SelectedContentExportService(new FileContentAnalyzer())
-            .BuildAsync(orderedPaths, TestContext.Current.CancellationToken);
-        var expectedMetrics = ExportOutputMetricsCalculator.FromText(renderedContent);
-        using var document = new InMemoryPreviewTextDocument("x");
+            var renderedContent = await new SelectedContentExportService(new FileContentAnalyzer())
+                .BuildAsync(orderedPaths, TestContext.Current.CancellationToken);
+            var expectedMetrics = ExportOutputMetricsCalculator.FromText(renderedContent);
+            using var document = new InMemoryPreviewTextDocument("x");
 
-        Assert.True(pipeline.HasCompleteBaseline);
-        Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
-        Assert.Equal(1, analyzer.GetMetricsCallCount(emptyFile));
-        Assert.Equal(1, analyzer.GetMetricsCallCount(deletedFile));
-        Assert.Equal(0, analyzer.GetMetricsCallCount(binaryFile));
-        Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
-            PreviewContentMode.Content,
-            document,
-            new PreviewSelectionRange(1, 0, 1, 1),
-            out var actualMetrics));
-        Assert.Equal(expectedMetrics, actualMetrics);
+            Assert.True(pipeline.HasCompleteBaseline);
+            Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+            Assert.Equal(1, analyzer.GetMetricsCallCount(emptyFile));
+            Assert.Equal(1, analyzer.GetMetricsCallCount(deletedFile));
+            Assert.Equal(0, analyzer.GetMetricsCallCount(binaryFile));
+            Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
+                PreviewContentMode.Content,
+                document,
+                new PreviewSelectionRange(1, 0, 1, 1),
+                out var actualMetrics));
+            Assert.Equal(expectedMetrics, actualMetrics);
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(pipeline.Dispose);
+        }
     }
 
     private static TreeNodeDescriptor CreateTree(

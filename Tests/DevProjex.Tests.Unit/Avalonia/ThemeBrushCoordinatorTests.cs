@@ -64,6 +64,7 @@ public sealed class ThemeBrushCoordinatorTests
 		var firstPanelBrush = GetBrush(harness.Window, "AppPanelBrush");
 		var firstMenuBrush = GetBrush(harness.Window, "MenuPopupBrush");
 		var firstPanelColor = firstPanelBrush.Color;
+		Assert.True(firstPanelColor.A < byte.MaxValue, "Transparent mode must publish a translucent panel material.");
 
 		harness.ViewModel.MaterialIntensity = 90;
 		harness.ViewModel.PanelContrast = 90;

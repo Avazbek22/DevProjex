@@ -212,6 +212,26 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
+    public void DirectoryBuildProps_DoesNotDisableReferenceAssembliesForCiBuilds()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var propsPath = Path.Combine(repositoryRoot, "Directory.Build.props");
+        var document = XDocument.Load(propsPath);
+
+        var ciReferenceAssemblyDisables = document
+            .Descendants()
+            .Where(static element => element.Name.LocalName == "ProduceReferenceAssembly")
+            .Where(static element => string.Equals(element.Value.Trim(), "false", StringComparison.OrdinalIgnoreCase))
+            .Where(static element => (element.Attribute("Condition")?.Value ?? string.Empty)
+                .Contains("CI", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        // Project-reference builds must keep SDK reference assemblies enabled. Disabling
+        // them makes downstream projects compile against bin output and can race on macOS CI.
+        Assert.Empty(ciReferenceAssemblyDisables);
+    }
+
+    [Fact]
     public void ReleaseValidationWorkflow_CatchesLinuxX11DbusStartupRegressions()
     {
         var repositoryRoot = ResolveRepositoryRoot();

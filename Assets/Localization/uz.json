@@ -205,6 +205,8 @@
   "Status.Operation.GettingUpdatesBranch": "Yangilash {0}",
   "Status.Operation.SwitchingBranch": "Tarmoqni almashtirish {0}",
   "Status.Operation.CalculatingData": "Ma'lumotlarni hisoblash",
+  "Status.Operation.UpdatingOptions": "Parametrlar yangilanmoqda",
+  "Status.Operation.ApplyingSettings": "Sozlamalar qo'llanilmoqda",
   "Status.Operation.PreparingPreview": "Ko'rib chiqish tayyorlanmoqda",
   "Status.Operation.PreparingOutput": "Natija tayyorlanmoqda",
   "Toast.Operation.PreviewCanceled": "Ko'rib chiqish tayyorlash bekor qilindi",

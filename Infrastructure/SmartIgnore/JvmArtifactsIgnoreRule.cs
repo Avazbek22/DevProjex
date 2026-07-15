@@ -4,7 +4,10 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Java/Kotlin/Gradle build output folders.
 /// Activates when Maven/Gradle markers are present in the scope root.
 /// </summary>
-public sealed class JvmArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
+public sealed class JvmArtifactsIgnoreRule :
+	ISmartIgnoreRule,
+	IProjectRootFactsSmartIgnoreRule,
+	ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
 		"pom.xml",
@@ -24,6 +27,11 @@ public sealed class JvmArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleD
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
 		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+
+	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
+		rootFacts.Exists && rootFacts.HasAnyMarkerFile(MarkerFiles)
+			? MatchResult
+			: SmartIgnoreResult.Empty;
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

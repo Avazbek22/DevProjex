@@ -169,9 +169,9 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 
 	private static void AssertMetric(JsonElement actual, ExportOutputMetrics expected)
 	{
-		Assert.Equal(expected.Lines, actual.GetProperty("lines").GetInt32());
-		Assert.Equal(expected.Chars, actual.GetProperty("chars").GetInt32());
-		Assert.Equal(expected.Tokens, actual.GetProperty("tokens").GetInt32());
+		Assert.Equal(expected.Lines, actual.GetProperty("lines").GetInt64());
+		Assert.Equal(expected.Chars, actual.GetProperty("chars").GetInt64());
+		Assert.Equal(expected.Tokens, actual.GetProperty("tokens").GetInt64());
 	}
 
 	private static CommandLineAutomationContext CreateContext(TextWriter output, TextWriter error) =>

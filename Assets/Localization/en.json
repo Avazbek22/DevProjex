@@ -205,6 +205,8 @@
   "Status.Operation.GettingUpdatesBranch": "Updating {0}",
   "Status.Operation.SwitchingBranch": "Switching branch {0}",
   "Status.Operation.CalculatingData": "Calculating data",
+  "Status.Operation.UpdatingOptions": "Updating options",
+  "Status.Operation.ApplyingSettings": "Applying settings",
   "Status.Operation.PreparingPreview": "Preparing preview",
   "Status.Operation.PreparingOutput": "Preparing output",
   "Toast.Operation.PreviewCanceled": "Preview preparation canceled",

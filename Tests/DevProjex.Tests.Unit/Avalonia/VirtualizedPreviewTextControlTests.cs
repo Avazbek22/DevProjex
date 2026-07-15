@@ -7,6 +7,15 @@ namespace DevProjex.Tests.Unit.Avalonia;
 [Collection("AvaloniaUI")]
 public sealed class VirtualizedPreviewTextControlTests
 {
+    [Fact]
+    public void DetachedConstruction_DoesNotRequirePlatformCursorFactory()
+    {
+        var control = new VirtualizedPreviewTextControl();
+
+        Assert.True(control.Focusable);
+        Assert.Null(control.Cursor);
+    }
+
     [AvaloniaFact]
     public void SelectAll_WithDocument_SelectsFullNormalizedTextAndRange()
     {
@@ -119,6 +128,43 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.True(largeLineHeight > smallLineHeight);
         Assert.Equal(1, control.GetLineNumberAtVerticalOffset(smallLineHeight + 0.1));
         Assert.Equal(2, control.GetLineNumberAtVerticalOffset(largeLineHeight + 0.1));
+    }
+
+    [AvaloniaFact]
+    public void HugeDocumentOffset_MapsToExpectedLineWithoutInt32CoordinateOverflow()
+    {
+        using var document = new SyntheticLargePreviewDocument(lineCount: 100_000_000);
+        var control = new VirtualizedPreviewTextControl
+        {
+            Document = document,
+            TopPadding = 10,
+            TextFontSize = 16
+        };
+        var lineHeight = InvokeResolveLineHeight(control);
+        var targetLine = 99_999_990;
+        var verticalOffset = control.TopPadding + ((targetLine - 1) * lineHeight) + (lineHeight / 2);
+
+        var actualLine = control.GetLineNumberAtVerticalOffset(verticalOffset);
+
+        Assert.Equal(targetLine, actualLine);
+    }
+
+    [Fact]
+    public void ViewportRelativeOrigin_RemainsSmallAtHundredMillionthLine()
+    {
+        const int firstVisibleLine = 99_999_990;
+        const double contentTopPadding = 10;
+        const double lineHeight = 18.5;
+        var viewportTop = contentTopPadding + ((firstVisibleLine - 1) * lineHeight) + 4.25;
+
+        var originY = VirtualizedPreviewTextControl.CalculateViewportRelativeLineOriginY(
+            firstVisibleLine,
+            contentTopPadding,
+            lineHeight,
+            viewportTop);
+
+        Assert.Equal(-4.25, originY, precision: 5);
+        Assert.InRange(originY, -lineHeight, 0);
     }
 
     [AvaloniaFact]
@@ -283,6 +329,25 @@ public sealed class VirtualizedPreviewTextControlTests
             control.TextBrush ?? Brushes.White);
 
         return formattedText.WidthIncludingTrailingWhitespace;
+    }
+
+    private sealed class SyntheticLargePreviewDocument(int lineCount) : IPreviewTextDocument
+    {
+        public int LineCount { get; } = lineCount;
+
+        public int MaxLineLength => 4;
+
+        public long CharacterCount => (long)LineCount * 5;
+
+        public IReadOnlyList<PreviewDocumentSection> Sections => [];
+
+        public string GetLineText(int lineNumber) => "test";
+
+        public string GetLineRangeText(int firstLine, int lastLine) => "test";
+
+        public void Dispose()
+        {
+        }
     }
 
 }

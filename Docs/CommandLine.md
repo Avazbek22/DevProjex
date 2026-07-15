@@ -51,6 +51,11 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--report [file]` | Writes a JSON analysis report. If `file` is omitted, DevProjex writes to the default report folder. Use `--report -` to write JSON to stdout. |
 | `--report-path <file>` | Writes a JSON analysis report to a specific file. |
 | `--report-format json` | Selects the report format. JSON is the v1 format. |
+| `--benchmark <folder>` | Runs the standard project report benchmark against a folder and exits without showing the window. |
+| `--benchmark-ui <folder>` | Runs the standard desktop UI benchmark against a folder. It opens real UI child processes, runs a deterministic preview/search/filter scenario, then exits. |
+| `--benchmark-output <file>` | Writes the detailed benchmark JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex benchmark folder. Applies to `--benchmark` and `--benchmark-ui`. |
+| `--session-metrics <folder>` | Opens the desktop app with a project folder and records low-overhead UI session metrics until the window exits. |
+| `--session-metrics-output <file>` | Writes the detailed session metrics JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex session metrics folder. |
 | `--export <mode>` | Exports project text and exits without showing the window. Supported modes: `tree`, `content`, `tree-content`. |
 | `--output <file\|->`, `-o <file\|->` | Writes export text to a specific file, or to stdout when `-` is used. If omitted, export writes to stdout. |
 | `--export-format ascii\|json\|xml\|md`, `--format ascii\|json\|xml\|md` | Selects tree format for `tree` and `tree-content` exports. Content remains plain text. |
@@ -59,7 +64,7 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--preview-mode tree\|content\|tree-content` | Selects the desktop preview content mode at startup and opens preview. |
 | `--tree-format ascii\|json\|xml\|md` | Selects the desktop tree format at startup. This is separate from headless `--format`. |
 | `--tree-filter <text>` | Opens the desktop tree filter with the provided query. |
-| `--preview-search <text>` | Opens preview search with the provided query. |
+| `--preview-search <text>` | Opens preview and the tree search bar with the provided query. |
 | `--include-root <name>`, `--roots <name>` | Includes one root folder. Can be repeated. |
 | `--include-extension <ext>`, `--ext <ext>` | Includes one extension. Can be repeated. `cs` and `.cs` are equivalent. |
 | `--ignore <name\|none>` | Uses exact ignore options for automation. Can be repeated. |
@@ -96,11 +101,33 @@ devprojex "/home/me/projects/app" --tree-filter Services
 devprojex "/home/me/projects/app" --preview-search ProjectAnalysisService
 ```
 
-`--preview-mode` implies `--preview`. `--preview-search` also implies `--preview` because the command is meant to show the project and search state immediately.
+`--preview-mode` implies `--preview`. `--preview-search` also implies `--preview` because the command is meant to show the project and tree search state immediately.
 
 `--tree-filter` and `--preview-search` cannot be combined. The desktop UI intentionally shows only one tree text tool at a time, so the CLI keeps that same rule instead of silently choosing one.
 
 Desktop startup options require either a project path or `--last`. They are not valid with `--no-ui`, `--silent`, or `--export`.
+
+## Session Metrics
+
+`--session-metrics <folder>` opens the normal desktop app and records one interactive session until the window closes:
+
+- CPU, working set, private memory, managed memory, and GC samples;
+- project load timing;
+- tree search and tree filter timing, match counts, and cache/fallback hints;
+- tree format and preview mode switches;
+- copy/export payload sizes;
+- scheduled and completed memory cleanup events.
+
+```bash
+devprojex --session-metrics "/home/me/projects/app" --preview --tree-format md
+devprojex --session-metrics "C:\Projects\App" --session-metrics-output "C:\Reports\devprojex-session.json"
+```
+
+The detailed JSON report is written automatically when the window closes. If `--session-metrics-output` is omitted, the report is saved under the user's local DevProjex session metrics folder.
+
+Search and filter text is not stored in the report. DevProjex records only the query length and a salted per-report fingerprint so repeated queries can be correlated inside one report without exposing the query itself.
+
+`--session-metrics` is a desktop UI mode. It can be combined with desktop startup options such as `--preview`, `--preview-mode`, `--tree-format`, `--tree-filter`, and `--preview-search`. It cannot be combined with `--path`, positional folders, `--last`, `--benchmark`, `--report`, `--export`, selection overrides, `--strict`, `--no-ui`, or `--silent`.
 
 ## Reports
 
@@ -136,6 +163,42 @@ devprojex --no-ui --path "/home/me/projects/app" --report -
 ```
 
 In that mode stdout contains only the JSON report. If `--strict` is also used and diagnostics are present, the JSON is still written to stdout before DevProjex returns a failure exit code and writes diagnostic messages to stderr.
+
+## Benchmark
+
+`--benchmark <folder>` runs one standard project report benchmark profile:
+
+- cold process runs: DevProjex starts itself as a child process with `--no-ui --path <folder> --report -`;
+- warm pipeline runs: the same report/analyze pipeline is executed repeatedly inside the current process;
+- stdout prints a short human-readable summary;
+- a detailed JSON report is saved automatically.
+
+```bash
+devprojex --benchmark "/home/me/projects/app"
+devprojex --benchmark "C:\Projects\App" --benchmark-output "C:\Reports\devprojex-benchmark.json"
+```
+
+The benchmark measures wall time, CPU time, process memory, managed memory and GC counts for warm runs, stdout/report size, exit codes, and captured errors for every run. The JSON report also records application/runtime/OS details and the exact child command line used for cold runs.
+
+`--benchmark` is intentionally one fixed scenario: project report analysis. It cannot be combined with `--path`, report/export options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
+
+## UI Benchmark
+
+`--benchmark-ui <folder>` runs one standard desktop UI benchmark profile:
+
+- cold UI process runs: DevProjex starts itself as child processes with `--session-metrics <folder>` and an internal deterministic UI script;
+- each child opens the real Avalonia window, loads the project, opens preview, switches tree formats and preview modes, applies tree search and tree filter, waits for idle, closes the window, and writes a session metrics report;
+- stdout prints a short human-readable summary;
+- a detailed JSON report aggregates the child session reports.
+
+```bash
+devprojex --benchmark-ui "/home/me/projects/app"
+devprojex --benchmark-ui "C:\Projects\App" --benchmark-output "C:\Reports\devprojex-ui-benchmark.json"
+```
+
+The UI benchmark measures child process wall time, CPU time, process memory, project load timing, scripted preview/search/filter timings, session CPU/memory/GC samples, exit codes, and captured errors. The JSON report also records application/runtime/OS details, the exact child command line, and paths to the raw session metrics reports.
+
+`--benchmark-ui` is intentionally one fixed scenario: standard desktop UI workflow. It cannot be combined with `--benchmark`, `--session-metrics`, `--path`, report/export options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
 
 ## Exports
 
@@ -187,9 +250,10 @@ When report and export are requested together, `--report-path` and `--output` mu
 
 Automation-friendly output is kept strict:
 
-- `stdout`: help text, version text, generated file paths, implicit or explicit JSON report payloads, or export payloads.
+- `stdout`: help text, version text, generated file paths, benchmark summaries, implicit or explicit JSON report payloads, or export payloads.
+- `stdout` for `--session-metrics`: a short line with the saved JSON report path after the desktop window closes.
 - `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
-- no UI is created for `--help`, `--version`, `--no-ui`, or `--export`.
+- no UI is created for `--help`, `--version`, `--no-ui`, `--export`, or `--benchmark`. `--session-metrics` opens one interactive UI session, and `--benchmark-ui` opens real UI child processes for repeatable UI measurement.
 - only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
 
 ## Windows Portable EXE Note
@@ -276,6 +340,18 @@ Print a JSON tree to stdout:
 
 ```bash
 devprojex "/home/me/projects/app" --export tree --format json
+```
+
+Print an XML tree to stdout:
+
+```bash
+devprojex "/home/me/projects/app" --export tree --format xml
+```
+
+Export Markdown tree and content to a file:
+
+```bash
+devprojex "/home/me/projects/app" --export tree-content --format md -o ./context.md
 ```
 
 Pipe the JSON report to stdout:

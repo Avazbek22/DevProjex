@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Integration;
 
+[Trait("Category", "LocalPerformance")]
 public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 {
 	[Fact]

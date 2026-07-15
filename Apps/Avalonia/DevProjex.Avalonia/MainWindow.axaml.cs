@@ -145,6 +145,7 @@ public partial class MainWindow : Window
     private TreeNodeDescriptor? _lastInteractiveFilteredRoot;
     private TreeNodeDescriptor? _lastInteractiveFilterBaseRoot;
     private string? _lastInteractiveFilterQuery;
+    private bool _lastInteractiveFilterUsedInMemory;
     private readonly Dictionary<string, TreeNodeDescriptor> _interactiveFilterQueryCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _interactiveFilterQueryCacheLru = [];
     private readonly Dictionary<string, LinkedListNode<string>> _interactiveFilterQueryCacheNodes = new(StringComparer.OrdinalIgnoreCase);
@@ -202,6 +203,7 @@ public partial class MainWindow : Window
     private int _filterApplyVersion;
     private SuspendedTreeToolMode _previewOnlySuspendedTreeToolMode;
     private CancellationTokenSource? _projectOperationCts;
+    private CancellationTokenSource? _applySettingsCts;
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private GitCloneWindow? _gitCloneWindow;
@@ -296,9 +298,12 @@ public partial class MainWindow : Window
     private const double StartupRevealHiddenOpacity = 0.0;
     private const double StartupRevealVisibleOpacity = 1.0;
     private static readonly TimeSpan StartupBackdropWarmupDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(90));
+    private static readonly TimeSpan StartupStoreLockTimeout = TimeSpan.FromMilliseconds(100);
     private PreviewToolbarLayoutMode _previewToolbarLayoutMode = PreviewToolbarLayoutMode.Wide;
     private bool _startupRevealGateActive;
     private bool _startupRevealCompleted;
+    private CancellationTokenSource? _windowLifetimeCts = new();
+    private int _startupSequenceStarted;
 
     // Preview generation
     private bool _previewScrollSyncActive;
@@ -319,6 +324,7 @@ public partial class MainWindow : Window
     // Real-time metrics calculation
     private CancellationTokenSource? _previewSelectionMetricsCts;
     private DispatcherTimer? _previewSelectionMetricsDebounceTimer;
+    private readonly TreeSelectionSnapshotCache _treeSelectionSnapshotCache = new();
 
     private int _previewSelectionMetricsVersion;
     private static readonly TimeSpan PreviewSelectionMetricsDebounceInterval = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80));
@@ -335,6 +341,7 @@ public partial class MainWindow : Window
     private readonly ReportPathResolver _reportPathResolver;
     private readonly ProjectAnalysisReportWriter _projectAnalysisReportWriter;
     private readonly ITerminalCommandSetupService _terminalCommandSetupService;
+    private readonly SessionMetricsRecorder _sessionMetrics;
 
     public MainWindow(
         CommandLineOptions startupOptions,
@@ -369,6 +376,7 @@ public partial class MainWindow : Window
         _reportPathResolver = services.ReportPathResolver;
         _projectAnalysisReportWriter = services.ProjectAnalysisReportWriter;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
+        _sessionMetrics = services.SessionMetricsRecorder;
         _recentProjectsStore = services.RecentProjectsStore;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
@@ -401,7 +409,8 @@ public partial class MainWindow : Window
             BuildIgnoreRules,
             GetIgnoreOptionsAvailability,
             TryElevateAndRestart,
-            () => _currentPath);
+            () => _currentPath,
+            _statusOperations);
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
@@ -412,10 +421,10 @@ public partial class MainWindow : Window
             _viewModel,
             services.TaskbarProgressService);
         _viewModel.SetToastItems(_toastService.Items);
-        EnsureAppStateStoresExist();
+        _sessionMetrics.SetIdleStateProvider(IsSessionMetricsIdle);
+        _sessionMetrics.Start(_startupOptions.SessionMetrics.Path, GetApplicationVersion());
         LoadRecentProjects();
         DataContext = _viewModel;
-        SubscribeToMetricsUpdates();
 
         InitializeComponent();
 
@@ -561,7 +570,8 @@ public partial class MainWindow : Window
         _searchCoordinator = new TreeSearchCoordinator(
             _viewModel,
             _treeView ?? throw new InvalidOperationException(),
-            ScheduleSearchMemoryCleanupAfterRender);
+            ScheduleSearchMemoryCleanupAfterRender,
+            _sessionMetrics);
         _filterCoordinator = new NameFilterCoordinator(
             ApplyFilterRealtimeWithToken,
             () => !string.IsNullOrWhiteSpace(_viewModel.NameFilter),
@@ -628,6 +638,7 @@ public partial class MainWindow : Window
                 _metrics.Recalculate(); // Update tree metrics when the selected tree format changes.
                 InvalidatePreviewCache();
                 SchedulePreviewRefresh();
+                _sessionMetrics.RecordTreeFormatChanged(GetCurrentTreeTextFormat());
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
             {
@@ -635,11 +646,17 @@ public partial class MainWindow : Window
                     UpdatePreviewSegmentThumbPosition(animate: false);
                 if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
                     _metrics.RenderStatusBarMetrics();
+                _sessionMetrics.RecordPreviewModeChanged(
+                    _viewModel.SelectedPreviewContentMode,
+                    _viewModel.IsAnyPreviewVisible);
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
             {
                 if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
                     _metrics.RenderStatusBarMetrics();
+                _sessionMetrics.RecordPreviewModeChanged(
+                    _viewModel.SelectedPreviewContentMode,
+                    _viewModel.IsAnyPreviewVisible);
             }
             else if (args.PropertyName is nameof(MainWindowViewModel.PreviewFontSize)
                      or nameof(MainWindowViewModel.SelectedFontFamily))
@@ -690,6 +707,8 @@ public partial class MainWindow : Window
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
+        CancelAndDispose(ref _windowLifetimeCts);
+        CompleteSessionMetricsRecording();
         FlushPersistedStateOnWindowClose();
 
         // Unsubscribe from window events
@@ -710,7 +729,6 @@ public partial class MainWindow : Window
             _viewModel.PropertyChanged -= _viewModelPropertyChangedHandler;
 
         // Unsubscribe from tree checkbox changes for metrics
-        UnsubscribeFromMetricsUpdates();
 
         // Unsubscribe from DragDrop events
         if (_dropZoneContainer is not null)
@@ -791,6 +809,42 @@ public partial class MainWindow : Window
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
             disposable.Dispose();
+
+        _sessionMetrics.Dispose();
+    }
+
+    private bool IsSessionMetricsIdle()
+        => IsVisible &&
+           !_viewModel.StatusBusy &&
+           !_viewModel.IsSearchInProgress &&
+           !_viewModel.IsFilterInProgress &&
+           !_viewModel.IsPreviewLoading &&
+           !_settingsAnimating &&
+           !_previewModeSwitchInProgress;
+
+    private void CompleteSessionMetricsRecording()
+    {
+        var completion = _sessionMetrics.Complete();
+        if (completion is null)
+            return;
+
+        if (completion.Success)
+        {
+            Console.Out.WriteLine($"DevProjex session metrics: {completion.NormalizedOutputPath}");
+            return;
+        }
+
+        Console.Error.WriteLine($"DevProjex: failed to write session metrics to {completion.NormalizedOutputPath}: {completion.ErrorMessage}");
+    }
+
+    private static string GetApplicationVersion()
+    {
+        var assembly = typeof(MainWindow).Assembly;
+        return assembly
+                   .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                   ?.InformationalVersion
+               ?? assembly.GetName().Version?.ToString()
+               ?? "unknown";
     }
 
     private void UpdateDropZoneAnimationState()
@@ -952,23 +1006,25 @@ public partial class MainWindow : Window
     internal static bool ShouldUseStartupRevealGate()
         => OperatingSystem.IsWindows();
 
-    private async Task RevealStartupWindowAfterCompositionWarmupAsync()
+    private async Task RevealStartupWindowAfterCompositionWarmupAsync(CancellationToken cancellationToken)
     {
         if (!_startupRevealGateActive || _startupRevealCompleted)
             return;
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await YieldUiAsync(DispatcherPriority.Render);
-            await WaitForNextAnimationFrameAsync();
-            await WaitForNextAnimationFrameAsync();
+            await WaitForNextAnimationFrameAsync(cancellationToken);
+            await WaitForNextAnimationFrameAsync(cancellationToken);
             await YieldUiAsync(DispatcherPriority.Loaded);
+            cancellationToken.ThrowIfCancellationRequested();
 
             // The Avalonia frame is ready at this point, but the native Windows backdrop
             // may still attach one beat later in published builds. This tiny pause hides
             // that platform-level transparent/square intermediate frame without changing
             // the steady-state UI.
-            await Task.Delay(StartupBackdropWarmupDelay);
+            await Task.Delay(StartupBackdropWarmupDelay, cancellationToken);
         }
         finally
         {
@@ -976,7 +1032,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task WaitForNextAnimationFrameAsync()
+    private async Task WaitForNextAnimationFrameAsync(CancellationToken cancellationToken)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         try
@@ -989,9 +1045,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        await Task.WhenAny(
+        var completedTask = await Task.WhenAny(
             completion.Task,
-            Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250))));
+            Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250)), cancellationToken));
+        await completedTask;
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private void CompleteStartupRevealGate()
@@ -1004,7 +1062,20 @@ public partial class MainWindow : Window
         Opacity = StartupRevealVisibleOpacity;
     }
 
-    private async void OnOpened(object? sender, EventArgs e)
+    private void OnOpened(object? sender, EventArgs e)
+    {
+        if (Interlocked.Exchange(ref _startupSequenceStarted, 1) != 0)
+            return;
+
+        Opened -= OnOpened;
+        var lifetime = _windowLifetimeCts;
+        if (lifetime is null)
+            return;
+
+        ObserveDetachedTask(RunStartupAsync(lifetime.Token), "MainWindowStartup");
+    }
+
+    private async Task RunStartupAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -1012,11 +1083,14 @@ public partial class MainWindow : Window
 
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
 
-            await RevealStartupWindowAfterCompositionWarmupAsync();
+            await RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            StartDeferredAppStateBootstrap(cancellationToken);
 
             if (_startupCommandLineErrors.Count > 0)
             {
                 await ShowErrorAsync(string.Join(Environment.NewLine, _startupCommandLineErrors.Select(static error => error.Message)));
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
             var startupProjectPath = ResolveStartupProjectPath();
@@ -1025,12 +1099,15 @@ public partial class MainWindow : Window
                 var startupLoadStopwatch = Stopwatch.StartNew();
                 var opened = await TryOpenFolderAsync(startupProjectPath, fromDialog: false);
                 startupLoadStopwatch.Stop();
+                cancellationToken.ThrowIfCancellationRequested();
 
                 if (opened)
                 {
                     await TryApplyStartupSelectionOverridesAsync();
                     await TryWriteStartupReportAsync(startupLoadStopwatch.Elapsed);
                     await TryApplyStartupUiOptionsAsync();
+                    if (await TryRunStartupUiBenchmarkScriptAsync())
+                        return;
                 }
             }
             else if (_startupOptions.Ui.OpenLastProject)
@@ -1039,34 +1116,36 @@ public partial class MainWindow : Window
             }
             else
             {
-                await TryShowAutomaticTerminalCommandPromptAsync();
+                await TryShowAutomaticTerminalCommandPromptAsync(cancellationToken);
             }
 
-            // Clean up stale cache from previous sessions (non-blocking background task)
-            _ = Task.Run(() =>
-            {
-                try
-                {
-                    _repoCacheService.CleanupStaleCacheOnStartup();
-                }
-                catch
-                {
-                    // Best effort - ignore errors
-                }
-            });
+            ObserveDetachedTask(
+                Task.Run(_repoCacheService.CleanupStaleCacheOnStartup, cancellationToken),
+                "CleanupStaleRepositoryCache");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Cancellation is handled by status operation fallback.
+            // Closing the window owns cancellation of the complete startup sequence.
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            if (!cancellationToken.IsCancellationRequested && IsVisible)
+                await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private void StartDeferredAppStateBootstrap(CancellationToken cancellationToken)
+    {
+        ObserveDetachedTask(
+            Task.Run(EnsureAppStateStoresExist, cancellationToken),
+            "EnsureAppStateStoresExist");
     }
 
     private string? ResolveStartupProjectPath()
     {
+        if (_startupOptions.SessionMetrics.Enabled)
+            return _startupOptions.SessionMetrics.Path;
+
         if (!string.IsNullOrWhiteSpace(_startupOptions.Path))
             return _startupOptions.Path;
 
@@ -1165,7 +1244,7 @@ public partial class MainWindow : Window
 
     private void InitializeUserSettings()
     {
-        _userSettingsDb = _userSettingsStore.Load();
+        _userSettingsDb = _userSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         ApplySavedLanguagePreference(_userSettingsDb.ViewSettings);
 
         if (!_userSettingsStore.TryParseKey(_userSettingsDb.LastSelected, out var theme, out var effect))
@@ -2126,12 +2205,22 @@ public partial class MainWindow : Window
 
     private void ApplySavedLanguagePreference(AppViewSettings settings)
     {
-        if (settings.PreferredLanguage is not AppLanguage preferredLanguage)
+        var startupLanguage = ResolveStartupLanguage(
+            _localization.CurrentLanguage,
+            _startupOptions.Language,
+            settings.PreferredLanguage);
+        if (startupLanguage == _localization.CurrentLanguage)
             return;
 
-        _localization.SetLanguage(preferredLanguage);
+        _localization.SetLanguage(startupLanguage);
         _viewModel.UpdateLocalization();
     }
+
+    internal static AppLanguage ResolveStartupLanguage(
+        AppLanguage currentLanguage,
+        AppLanguage? commandLineLanguage,
+        AppLanguage? preferredLanguage) =>
+        commandLineLanguage ?? preferredLanguage ?? currentLanguage;
 
     private void HandleThemePopoverStateChange()
     {
@@ -2222,23 +2311,35 @@ public partial class MainWindow : Window
         var predefinedFonts = new[]
             { "Consolas", "Courier New", "Fira Code", "Lucida Console", "Cascadia Code", "JetBrains Mono" };
 
-        var systemFonts = FontManager.Current?.SystemFonts?
-            .GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, FontFamily>(StringComparer.OrdinalIgnoreCase);
+        var systemFonts = FontManager.Current?.SystemFonts;
+        var predefinedFontSet = new HashSet<string>(predefinedFonts, StringComparer.OrdinalIgnoreCase);
+        var availablePredefinedFonts = new Dictionary<string, FontFamily>(StringComparer.OrdinalIgnoreCase);
+        if (systemFonts is not null)
+        {
+            foreach (var font in systemFonts)
+            {
+                if (predefinedFontSet.Contains(font.Name))
+                    availablePredefinedFonts.TryAdd(font.Name, font);
+
+                if (availablePredefinedFonts.Count == predefinedFonts.Length)
+                    break;
+            }
+        }
 
         _viewModel.FontFamilies.Add(FontFamily.Default);
 
         // Add only predefined fonts that exist on system
         foreach (var fontName in predefinedFonts)
         {
-            if (systemFonts.TryGetValue(fontName, out var font))
+            if (availablePredefinedFonts.TryGetValue(fontName, out var font))
                 _viewModel.FontFamilies.Add(font);
         }
 
-        if (_viewModel.FontFamilies.Count == 1)
+        if (_viewModel.FontFamilies.Count == 1 && systemFonts is not null)
         {
-            foreach (var font in systemFonts.Values.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
+            foreach (var font in systemFonts
+                         .DistinctBy(static font => font.Name, StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(static font => font.Name, StringComparer.OrdinalIgnoreCase))
                 _viewModel.FontFamilies.Add(font);
         }
 
@@ -2388,6 +2489,7 @@ public partial class MainWindow : Window
             var content = BuildTreeTextForSelection(selected, format);
 
             await SetClipboardTextAsync(content);
+            _sessionMetrics.RecordClipboard("tree", format, content.Length, success: true);
             _toastService.Show(_localization["Toast.Copy.Tree"]);
         }
         catch (Exception ex)
@@ -2435,6 +2537,7 @@ public partial class MainWindow : Window
             }
 
             await SetClipboardTextAsync(content);
+            _sessionMetrics.RecordClipboard("content", format: null, content.Length, success: true);
             CompleteStatusOperation(ref statusOperationId);
             _toastService.Show(_localization["Toast.Copy.Content"]);
         }
@@ -2471,6 +2574,7 @@ public partial class MainWindow : Window
                     CancellationToken.None,
                     pathPresentation));
             await SetClipboardTextAsync(content);
+            _sessionMetrics.RecordClipboard("tree-content", format, content.Length, success: true);
             CompleteStatusOperation(ref statusOperationId);
             _toastService.Show(_localization["Toast.Copy.TreeAndContent"]);
         }
@@ -2499,7 +2603,10 @@ public partial class MainWindow : Window
                 fileTypeChoices: CreateTreeExportFileTypeChoices(format));
 
             if (saved)
+            {
+                _sessionMetrics.RecordFileExport("tree", format, content.Length, success: true);
                 _toastService.Show(_localization["Toast.Export.Tree"]);
+            }
         }
         catch (Exception ex)
         {
@@ -2554,7 +2661,10 @@ public partial class MainWindow : Window
                 fileTypeChoices: [CreateTextFileType()]);
 
             if (saved)
+            {
+                _sessionMetrics.RecordFileExport("content", format: null, content.Length, success: true);
                 _toastService.Show(_localization["Toast.Export.Content"]);
+            }
         }
         catch (Exception ex)
         {
@@ -2599,7 +2709,10 @@ public partial class MainWindow : Window
                 fileTypeChoices: [CreateTextFileType()]);
 
             if (saved)
+            {
+                _sessionMetrics.RecordFileExport("tree-content", format, content.Length, success: true);
                 _toastService.Show(_localization["Toast.Export.TreeAndContent"]);
+            }
         }
         catch (Exception ex)
         {
@@ -4006,11 +4119,12 @@ public partial class MainWindow : Window
         if (!MemoryCleanupPolicy.ShouldRun(cleanupPlan, GC.GetTotalMemory(forceFullCollection: false)))
             return;
 
-        ScheduleBackgroundMemoryCleanupCore(cleanupPlan);
+        ScheduleBackgroundMemoryCleanupCore(reason, cleanupPlan);
     }
 
-    private void ScheduleBackgroundMemoryCleanupCore(MemoryCleanupPlan cleanupPlan)
+    private void ScheduleBackgroundMemoryCleanupCore(MemoryCleanupReason reason, MemoryCleanupPlan cleanupPlan)
     {
+        _sessionMetrics.RecordMemoryCleanupScheduled(reason);
         var cleanupCts = ReplaceCancellationSource(ref _backgroundMemoryCleanupCts);
 
         _ = Task.Run(async () =>
@@ -4034,7 +4148,9 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                var stopwatch = Stopwatch.StartNew();
                 ForceMemoryCleanup();
+                _sessionMetrics.RecordMemoryCleanupCompleted(reason, stopwatch.Elapsed);
             }
             catch (OperationCanceledException)
             {
@@ -5316,7 +5432,7 @@ public partial class MainWindow : Window
 
     private void LoadRecentProjects()
     {
-        _recentProjectsDb = _recentProjectsStore.Load();
+        _recentProjectsDb = _recentProjectsStore.LoadForStartup(StartupStoreLockTimeout);
         SyncRecentProjectsToViewModel();
     }
 
@@ -6182,6 +6298,7 @@ public partial class MainWindow : Window
 
     private async Task ApplyFilterRealtimeAsync(CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         var version = 0;
         try
         {
@@ -6208,30 +6325,22 @@ public partial class MainWindow : Window
             if (version != _filterApplyVersion)
                 return;
 
-            _viewModel.UpdateFilterMatchSummary(
-                hasQuery && _currentTree is not null
-                    ? NameFilterMatchCounter.CountMatchesUnderRoot(_currentTree.Root, query!)
-                    : 0);
-            _searchCoordinator.UpdateHighlights(query);
+            var matchCount = hasQuery ? ApplyNameFilterPresentation(query!) : 0;
+            if (!hasQuery)
+                _viewModel.UpdateFilterMatchSummary(0);
 
-            if (hasQuery)
-            {
-                using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-                {
-                    TreeSearchEngine.ApplySmartExpandForFilter(
-                        _viewModel.TreeNodes,
-                        query!,
-                        node => node.DisplayName,
-                        node => node.Children,
-                        (node, expanded) => node.IsExpanded = expanded);
-                }
-            }
-            else if (_filterExpansionSnapshot is not null)
+            if (!hasQuery && _filterExpansionSnapshot is not null)
             {
                 RestoreExpandedNodes(_filterExpansionSnapshot);
                 _filterExpansionSnapshot = null;
                 ResetInteractiveFilterCache();
             }
+
+            _sessionMetrics.RecordTreeFilter(
+                query,
+                matchCount,
+                stopwatch.Elapsed,
+                _lastInteractiveFilterUsedInMemory);
         }
         catch (OperationCanceledException)
         {
@@ -7042,36 +7151,58 @@ public partial class MainWindow : Window
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
+        var applyCts = ReplaceCancellationSource(ref _applySettingsCts);
+        var cancellationToken = applyCts.Token;
+        void CancelApply()
+        {
+            applyCts.Cancel();
+            _selectionCoordinator.CancelPendingRefreshes();
+            _refreshPipeline.CancelActiveRefresh();
+        }
+
         try
         {
-            // Font family follows WinForms behavior: applied only on Apply
-            var pending = _viewModel.PendingFontFamily;
-            if (pending is not null &&
-                !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                _viewModel.SelectedFontFamily = pending;
-            }
+            await using var statusLease = SelectionRefreshStatusLease.StartApplyingSettings(
+                _viewModel,
+                _statusOperations,
+                CancelApply,
+                cancellationToken);
 
-            // Apply must observe the latest converged section state. A user can click Apply
-            // while an earlier ignore refresh is still finishing; rebuilding the tree first
-            // would capture stale root-folder availability and keep newly revealed folders hidden.
-            await _selectionCoordinator.WaitForPendingRefreshesAsync();
-            await RefreshTreeAsync();
-            // Most checkbox changes already queue and apply a converged selection snapshot
-            // before Apply rebuilds the tree. Running another live refresh unconditionally
-            // doubles the expensive scan path on large projects, so only do it if a new
-            // selection change landed while the tree was rebuilding.
-            await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath);
-            await _selectionCoordinator.WaitForPendingRefreshesAsync();
-            _projectProfiles.PersistIfNeeded(_currentPath);
+            try
+            {
+                // Font family follows WinForms behavior: applied only on Apply
+                var pending = _viewModel.PendingFontFamily;
+                if (pending is not null &&
+                    !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    _viewModel.SelectedFontFamily = pending;
+                }
+
+                // Apply must observe the latest converged section state. A user can click Apply
+                // while an earlier ignore refresh is still finishing; rebuilding the tree first
+                // would capture stale root-folder availability and keep newly revealed folders hidden.
+                await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                await RefreshTreeAsync(cancellationToken: cancellationToken);
+                // Most checkbox changes already queue and apply a converged selection snapshot
+                // before Apply rebuilds the tree. Running another live refresh unconditionally
+                // doubles the expensive scan path on large projects, so only do it if a new
+                // selection change landed while the tree was rebuilding.
+                await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath, cancellationToken);
+                await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                _projectProfiles.PersistIfNeeded(_currentPath);
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancellation is handled by status operation fallback.
+            }
+            catch (Exception ex)
+            {
+                await ShowErrorAsync(ex.Message);
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Cancellation is handled by status operation fallback.
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync(ex.Message);
+            DisposeIfCurrent(ref _applySettingsCts, applyCts);
         }
     }
 
@@ -7088,6 +7219,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
+        var stopwatch = Stopwatch.StartNew();
         string normalizedPath;
         try
         {
@@ -7095,18 +7227,21 @@ public partial class MainWindow : Window
         }
         catch
         {
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "invalid-path");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
         if (!Directory.Exists(normalizedPath))
         {
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "folder-not-found");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
         if (!_scanOptions.CanReadRoot(normalizedPath))
         {
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
             if (TryElevateAndRestart(normalizedPath))
                 return false;
 
@@ -7115,8 +7250,17 @@ public partial class MainWindow : Window
             return false;
         }
 
-        await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
-        return true;
+        try
+        {
+            await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: true);
+            return true;
+        }
+        catch
+        {
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-failed");
+            throw;
+        }
     }
 
     private async Task TryApplyStartupSelectionOverridesAsync()
@@ -7176,6 +7320,191 @@ public partial class MainWindow : Window
 
         if (!string.IsNullOrWhiteSpace(ui.PreviewSearch))
             await ApplyStartupPreviewSearchAsync(ui.PreviewSearch!);
+    }
+
+    private async Task<bool> TryRunStartupUiBenchmarkScriptAsync()
+    {
+        if (!_startupOptions.UiBenchmarkScript.Enabled || !_viewModel.IsProjectLoaded)
+            return false;
+
+        try
+        {
+            switch (_startupOptions.UiBenchmarkScript.Script)
+            {
+                case StartupUiBenchmarkScript.Standard:
+                    await RunStandardUiBenchmarkScriptAsync();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _sessionMetrics.RecordUiBenchmarkStep("scenario.failed", TimeSpan.Zero, success: false, ex.GetType().Name);
+        }
+        finally
+        {
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(250));
+            Close();
+        }
+
+        return true;
+    }
+
+    private async Task RunStandardUiBenchmarkScriptAsync()
+    {
+        await RunUiBenchmarkStepAsync("startup.settle", async () =>
+        {
+            await _selectionCoordinator.WaitForPendingRefreshesAsync();
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromSeconds(1));
+        });
+
+        await RunUiBenchmarkStepAsync("preview.open", async () =>
+        {
+            await OpenPreviewModeAsync();
+            await WaitForUiBenchmarkConditionAsync(
+                () => _viewModel.IsPreviewMode && !_viewModel.IsPreviewLoading && !_previewPaneAnimating,
+                TimeSpan.FromSeconds(30),
+                "preview did not open");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromSeconds(1));
+        });
+
+        await RunUiBenchmarkStepAsync("tree-format.json", () => ApplyUiBenchmarkTreeFormatAsync(ExportFormat.Json));
+        await RunUiBenchmarkStepAsync("tree-format.xml", () => ApplyUiBenchmarkTreeFormatAsync(ExportFormat.Xml));
+        await RunUiBenchmarkStepAsync("tree-format.md", () => ApplyUiBenchmarkTreeFormatAsync(ExportFormat.Markdown));
+        await RunUiBenchmarkStepAsync("tree-format.ascii", () => ApplyUiBenchmarkTreeFormatAsync(ExportFormat.Ascii));
+
+        await RunUiBenchmarkStepAsync("preview-mode.content", () => ApplyUiBenchmarkPreviewModeAsync(PreviewContentMode.Content));
+        await RunUiBenchmarkStepAsync("preview-mode.tree-content", () => ApplyUiBenchmarkPreviewModeAsync(PreviewContentMode.TreeAndContent));
+        await RunUiBenchmarkStepAsync("preview-mode.tree", () => ApplyUiBenchmarkPreviewModeAsync(PreviewContentMode.Tree));
+
+        var searchQuery = ResolveUiBenchmarkQuery("service", "test", "src", "app");
+        await RunUiBenchmarkStepAsync("search.apply", async () =>
+        {
+            await ApplyStartupPreviewSearchAsync(searchQuery);
+            await WaitForUiBenchmarkConditionAsync(
+                () => _viewModel.SearchVisible &&
+                      string.Equals(_viewModel.SearchQuery, searchQuery, StringComparison.Ordinal) &&
+                      !_viewModel.IsSearchInProgress,
+                TimeSpan.FromSeconds(10),
+                "search did not apply");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        await RunUiBenchmarkStepAsync("search.navigate", async () =>
+        {
+            TryNavigateSearchMatches(1);
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        var filterQuery = ResolveUiBenchmarkQuery("test", "src", "service", "app");
+        await RunUiBenchmarkStepAsync("filter.apply", async () =>
+        {
+            await ApplyStartupTreeFilterAsync(filterQuery);
+            await WaitForUiBenchmarkConditionAsync(
+                () => _viewModel.FilterVisible &&
+                      string.Equals(_viewModel.NameFilter, filterQuery, StringComparison.Ordinal) &&
+                      !_viewModel.IsFilterInProgress,
+                TimeSpan.FromSeconds(20),
+                "filter did not apply");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        await RunUiBenchmarkStepAsync("filter.close", async () =>
+        {
+            await CloseFilterAsync(focusTree: false);
+            await WaitForUiBenchmarkConditionAsync(
+                () => !_viewModel.FilterVisible && string.IsNullOrEmpty(_viewModel.NameFilter),
+                TimeSpan.FromSeconds(10),
+                "filter did not close");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        await RunUiBenchmarkStepAsync("preview.close", async () =>
+        {
+            ClosePreviewMode();
+            await WaitForUiBenchmarkConditionAsync(
+                () => !_viewModel.IsPreviewMode && !_previewPaneAnimating && !_treePaneAnimating,
+                TimeSpan.FromSeconds(30),
+                "preview did not close");
+            await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+
+        await RunUiBenchmarkStepAsync("idle.settle", () => SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(1500)));
+    }
+
+    private async Task RunUiBenchmarkStepAsync(string stepName, Func<Task> action)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await action();
+            stopwatch.Stop();
+            _sessionMetrics.RecordUiBenchmarkStep(stepName, stopwatch.Elapsed, success: true);
+        }
+        catch
+        {
+            stopwatch.Stop();
+            _sessionMetrics.RecordUiBenchmarkStep(stepName, stopwatch.Elapsed, success: false);
+            throw;
+        }
+    }
+
+    private async Task ApplyUiBenchmarkTreeFormatAsync(ExportFormat format)
+    {
+        _viewModel.SelectedExportFormat = format;
+        await WaitForUiBenchmarkConditionAsync(
+            () => _viewModel.SelectedExportFormat == format && !_viewModel.IsPreviewLoading,
+            TimeSpan.FromSeconds(20),
+            $"tree format {format} did not settle");
+        await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+    }
+
+    private async Task ApplyUiBenchmarkPreviewModeAsync(PreviewContentMode mode)
+    {
+        await SwitchPreviewModeAsync(mode);
+        await WaitForUiBenchmarkConditionAsync(
+            () => _viewModel.SelectedPreviewContentMode == mode && !_viewModel.IsPreviewLoading && !_previewModeSwitchInProgress,
+            TimeSpan.FromSeconds(20),
+            $"preview mode {mode} did not settle");
+        await SettleUiBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+    }
+
+    private string ResolveUiBenchmarkQuery(params string[] candidates)
+    {
+        if (_currentTree?.Root is null)
+            return candidates[0];
+
+        foreach (var candidate in candidates)
+        {
+            if (NameFilterMatchCounter.CountMatchesUnderRoot(_currentTree.Root, candidate) > 0)
+                return candidate;
+        }
+
+        return candidates[0];
+    }
+
+    private static async Task WaitForUiBenchmarkConditionAsync(
+        Func<bool> condition,
+        TimeSpan timeout,
+        string timeoutMessage)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (condition())
+                return;
+
+            await YieldUiAsync(DispatcherPriority.Background);
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        throw new TimeoutException(timeoutMessage);
+    }
+
+    private static async Task SettleUiBenchmarkStepAsync(TimeSpan minimumDelay)
+    {
+        await WaitForPreviewRenderPassesAsync();
+        await Task.Delay(minimumDelay);
+        await YieldUiAsync(DispatcherPriority.Background);
     }
 
     private async Task ApplyStartupTreeFilterAsync(string query)
@@ -7287,12 +7616,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task TryShowAutomaticTerminalCommandPromptAsync()
+    private async Task TryShowAutomaticTerminalCommandPromptAsync(CancellationToken cancellationToken)
     {
         try
         {
             await YieldUiAsync(DispatcherPriority.Background);
-            var snapshot = _terminalCommandSetupService.Probe();
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = await Task.Run(_terminalCommandSetupService.Probe, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             var action = ResolveAutomaticTerminalCommandStartupAction(
                 _userSettingsDb.ViewSettings,
                 snapshot,
@@ -7300,12 +7631,18 @@ public partial class MainWindow : Window
 
             if (action == AutomaticTerminalCommandStartupAction.RepairSilently)
             {
-                _ = _terminalCommandSetupService.InstallOrRepair();
+                ObserveDetachedTask(
+                    Task.Run(_terminalCommandSetupService.InstallOrRepair, cancellationToken),
+                    "RepairTerminalCommand");
                 return;
             }
 
             if (action == AutomaticTerminalCommandStartupAction.ShowPrompt)
                 await ShowTerminalCommandSetupAsync(snapshot, isAutomaticPrompt: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -7771,8 +8108,13 @@ public partial class MainWindow : Window
         // startup costs on large projects. We now materialize only the root-visible level
         // during load and defer deeper branches until the UI actually needs them.
         var node = materializeChildrenNow || descriptor.Children.Count == 0
-            ? new TreeNodeViewModel(descriptor, parent, icon)
-            : new TreeNodeViewModel(descriptor, parent, icon, BuildDeferredChildViewModels);
+            ? new TreeNodeViewModel(descriptor, parent, icon, checkedChanged: OnTreeNodeCheckedChanged)
+            : new TreeNodeViewModel(
+                descriptor,
+                parent,
+                icon,
+                BuildDeferredChildViewModels,
+                OnTreeNodeCheckedChanged);
 
         if (!materializeChildrenNow || descriptor.Children.Count == 0)
             return node;
@@ -8246,12 +8588,7 @@ public partial class MainWindow : Window
     }
 
     private HashSet<string> GetCheckedPaths()
-    {
-        var selected = new HashSet<string>(PathComparer.Default);
-        foreach (var node in _viewModel.TreeNodes)
-            node.CollectCheckedPaths(selected);
-        return selected;
-    }
+        => _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
 
     private IReadOnlyList<string> BuildOrderedUniqueFilePaths(IReadOnlySet<string> selectedPaths)
     {
@@ -8410,18 +8747,9 @@ public partial class MainWindow : Window
 
     private bool IsBackgroundMetricsActive() => _metrics.IsBackgroundActive;
 
-    private void SubscribeToMetricsUpdates()
+    private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
     {
-        TreeNodeViewModel.GlobalCheckedChanged += OnTreeNodeCheckedChanged;
-    }
-
-    private void UnsubscribeFromMetricsUpdates()
-    {
-        TreeNodeViewModel.GlobalCheckedChanged -= OnTreeNodeCheckedChanged;
-    }
-
-    private void OnTreeNodeCheckedChanged(object? sender, EventArgs e)
-    {
+        _treeSelectionSnapshotCache.Invalidate();
         _metrics.ScheduleRecalculate();
         SchedulePreviewRefresh();
     }
@@ -8647,6 +8975,15 @@ public partial class MainWindow : Window
                 break;
             case StatusOperationType.PreviewBuild:
                 _previewPipeline.CancelActiveBuild();
+                break;
+            case StatusOperationType.SelectionRefresh:
+                if (_selectionCoordinator.CancelPendingRefreshes())
+                    _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
+                break;
+            case StatusOperationType.ApplySettings:
+                _applySettingsCts?.Cancel();
+                _selectionCoordinator.CancelPendingRefreshes();
+                _refreshPipeline.CancelActiveRefresh();
                 break;
             case StatusOperationType.MetricsCalculation:
                 // Metrics cancellation is handled below by dedicated fallback logic.

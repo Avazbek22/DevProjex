@@ -7,7 +7,8 @@ public sealed class TreeNodeViewModel(
     TreeNodeDescriptor descriptor,
     TreeNodeViewModel? parent,
     IImage? icon,
-    Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? childrenFactory = null)
+    Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? childrenFactory = null,
+    Action<TreeNodeViewModel>? checkedChanged = null)
     : ViewModelBase
 {
     private const double DefaultTreeIndentSize = 16;
@@ -27,12 +28,7 @@ public sealed class TreeNodeViewModel(
     private List<TreeNodeViewModel> _children = new(descriptor.Children.Count);
     private Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? _childrenFactory = childrenFactory;
     private bool _childrenInitialized = childrenFactory is null || descriptor.Children.Count == 0;
-
-    /// <summary>
-    /// Raised when checkbox state changes. Used for real-time metrics updates.
-    /// Only fires on user-initiated changes (not cascading updates from parent/children).
-    /// </summary>
-    public static event EventHandler? GlobalCheckedChanged;
+    private readonly Action<TreeNodeViewModel>? _checkedChanged = checkedChanged ?? parent?._checkedChanged;
 
     // Pre-allocate capacity based on descriptor children count
 
@@ -330,6 +326,13 @@ public sealed class TreeNodeViewModel(
 
     private void SetChecked(bool? value, bool updateChildren, bool updateParent)
     {
+        if (_isChecked == value)
+        {
+            if (value.HasValue)
+                _deferredChildCheckedState = value.Value;
+            return;
+        }
+
         _isChecked = value;
         RaisePropertyChanged(nameof(IsChecked));
 
@@ -348,8 +351,7 @@ public sealed class TreeNodeViewModel(
         if (updateParent)
         {
             Parent?.UpdateCheckedFromChildren();
-            // Fire global event for metrics recalculation (only on user-initiated top-level change)
-            GlobalCheckedChanged?.Invoke(this, EventArgs.Empty);
+            _checkedChanged?.Invoke(this);
         }
     }
 

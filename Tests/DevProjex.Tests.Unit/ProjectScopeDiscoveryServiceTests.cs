@@ -86,6 +86,86 @@ public sealed class ProjectScopeDiscoveryServiceTests
 	}
 
 	[Fact]
+	public void Discover_MonorepoMarker_ProbesKnownContainersBeyondDefaultDepth()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/domain/team/platform/api/package.json", "{}");
+		temp.CreateFile("apps/domain/team/platform/api/src/index.ts", "export {}");
+
+		var discovery = CreateDiscovery();
+		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.Contains(context.Scopes, scope => ScopeEndsWith(scope, "apps/domain/team/platform/api"));
+		Assert.True(context.HasAnyWithoutGitIgnore);
+	}
+
+	[Fact]
+	public void Discover_KnownContainerName_UsesAdaptiveProbeEvenWithoutRootMonorepoMarker()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("packages/tenant/team/platform/service/pyproject.toml", "[project]\nname = \"service\"\n");
+		temp.CreateFile("packages/tenant/team/platform/service/app.py", "print('ok')");
+
+		var discovery = CreateDiscovery();
+		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.Contains(context.Scopes, scope => ScopeEndsWith(scope, "packages/tenant/team/platform/service"));
+		Assert.True(context.HasAnyWithoutGitIgnore);
+	}
+
+	[Fact]
+	public void Discover_AdaptiveProbe_PrunesDependencyBuildAndCacheFolders()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/product/node_modules/pkg/package.json", "{}");
+		temp.CreateFile("apps/product/bin/tool/App.csproj", "<Project />");
+		temp.CreateFile("apps/product/.venv/project/pyproject.toml", "[project]");
+		temp.CreateFile("apps/product/service/package.json", "{}");
+
+		var discovery = CreateDiscovery();
+		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.Contains(context.Scopes, scope => ScopeEndsWith(scope, "apps/product/service"));
+		Assert.DoesNotContain(context.Scopes, scope => ScopeContains(scope, "node_modules"));
+		Assert.DoesNotContain(context.Scopes, scope => ScopeContains(scope, "bin/tool"));
+		Assert.DoesNotContain(context.Scopes, scope => ScopeContains(scope, ".venv/project"));
+	}
+
+	[Fact]
+	public void Discover_AdaptiveProbe_PrunesConfirmedLegacyPackageStoreButKeepsSourcePackages()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - packages/**\n  - services/**\n");
+		temp.CreateFile("services/api/package.json", "{}");
+		CreateLegacyNuGetPackageWithNestedMarker(temp, "Alpha.1.0.0", "lib");
+		CreateLegacyNuGetPackageWithNestedMarker(temp, "Beta.2.0.0", "ref");
+
+		var discovery = CreateDiscovery();
+		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.Contains(context.Scopes, scope => ScopeEndsWith(scope, "services/api"));
+		Assert.DoesNotContain(context.Scopes, scope => ScopeContains(scope, "packages/Alpha.1.0.0"));
+		Assert.DoesNotContain(context.Scopes, scope => ScopeContains(scope, "packages/Beta.2.0.0"));
+	}
+
+	[Fact]
+	public void Discover_TopLevelDependencyFolder_IsNotPromotedAsWorkspaceScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("node_modules/package.json", "{}");
+		temp.CreateFile("node_modules/pkg/package.json", "{}");
+		temp.CreateFile("src/package.json", "{}");
+
+		var discovery = CreateDiscovery();
+		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.Contains(context.Scopes, scope => ScopeEndsWith(scope, "src"));
+		Assert.DoesNotContain(context.Scopes, scope => ScopeContains(scope, "node_modules"));
+	}
+
+	[Fact]
 	public void Discover_SmartDescriptorMarkerFile_DetectsCustomProjectScope()
 	{
 		using var temp = new TemporaryDirectory();
@@ -115,6 +195,30 @@ public sealed class ProjectScopeDiscoveryServiceTests
 
 	private static ProjectScopeDiscoveryService CreateDiscovery() =>
 		new(new SmartIgnoreService([]));
+
+	private static bool ScopeEndsWith(ProjectScope scope, string relativePath) =>
+		scope.RootPath.EndsWith(Normalize(relativePath), StringComparison.OrdinalIgnoreCase);
+
+	private static bool ScopeContains(ProjectScope scope, string relativePath) =>
+		scope.RootPath.Contains(Normalize(relativePath), StringComparison.OrdinalIgnoreCase);
+
+	private static string Normalize(string relativePath) =>
+		relativePath
+			.Replace('/', Path.DirectorySeparatorChar)
+			.Replace('\\', Path.DirectorySeparatorChar);
+
+	private static void CreateLegacyNuGetPackageWithNestedMarker(
+		TemporaryDirectory temp,
+		string packageDirectoryName,
+		string layoutDirectoryName)
+	{
+		temp.CreateFile(
+			$"packages/{packageDirectoryName}/{packageDirectoryName}.nupkg",
+			"package");
+		temp.CreateFile(
+			$"packages/{packageDirectoryName}/{layoutDirectoryName}/package.json",
+			"{}");
+	}
 
 	private sealed class DescriptorOnlySmartIgnoreRule(
 		IEnumerable<string>? markerFiles = null,

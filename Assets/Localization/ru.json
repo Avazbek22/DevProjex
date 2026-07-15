@@ -205,6 +205,8 @@
   "Status.Operation.GettingUpdatesBranch": "Обновление {0}",
   "Status.Operation.SwitchingBranch": "Переключение ветки {0}",
   "Status.Operation.CalculatingData": "Подсчет данных",
+  "Status.Operation.UpdatingOptions": "Обновление параметров",
+  "Status.Operation.ApplyingSettings": "Применение параметров",
   "Status.Operation.PreparingPreview": "Подготовка превью",
   "Status.Operation.PreparingOutput": "Подготовка результата",
   "Toast.Operation.PreviewCanceled": "Подготовка превью отменена",

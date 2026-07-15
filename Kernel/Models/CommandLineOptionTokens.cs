@@ -8,6 +8,12 @@ public static class CommandLineOptionTokens
 	public const string Report = "--report";
 	public const string ReportPath = "--report-path";
 	public const string ReportFormat = "--report-format";
+	public const string Benchmark = "--benchmark";
+	public const string BenchmarkUi = "--benchmark-ui";
+	public const string BenchmarkOutput = "--benchmark-output";
+	public const string SessionMetrics = "--session-metrics";
+	public const string SessionMetricsOutput = "--session-metrics-output";
+	public const string UiBenchmarkScript = "--ui-benchmark-script";
 	public const string Export = "--export";
 	public const string Output = "--output";
 	public const string ShortOutput = "-o";
@@ -53,6 +59,11 @@ public static class CommandLineOptionTokens
 		Report,
 		ReportPath,
 		ReportFormat,
+		Benchmark,
+		BenchmarkUi,
+		BenchmarkOutput,
+		SessionMetrics,
+		SessionMetricsOutput,
 		Export,
 		Output,
 		ShortOutput,
@@ -81,7 +92,8 @@ public static class CommandLineOptionTokens
 	public static IReadOnlyList<string> InternalRelaunchTokens { get; } =
 	[
 		ElevationAttempted,
-		LegacyElevationAttempted
+		LegacyElevationAttempted,
+		UiBenchmarkScript
 	];
 
 	public static IReadOnlyList<string> PublicIgnoreOptionNames { get; } =

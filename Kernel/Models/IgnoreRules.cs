@@ -30,6 +30,8 @@ public sealed record IgnoreRules(
 
 	public bool UseGitIgnore { get; init; }
 	public bool UseSmartIgnore { get; init; }
+	public bool GitIgnoreCandidateMatchesActiveRules { get; init; }
+	public bool SmartIgnoreCandidateMatchesActiveRules { get; init; }
 	public bool IgnoreEmptyFolders { get; init; }
 	public bool IgnoreEmptyFiles { get; init; }
 	public bool IgnoreExtensionlessFiles { get; init; }
@@ -61,6 +63,12 @@ public sealed record IgnoreRules(
 	public IReadOnlySet<string>? SmartIgnoreCandidateFiles { get; init; }
 
 	public bool SmartIgnoreFollowsGitIgnore { get; init; }
+
+	public SmartArtifactIgnoreMatcher SmartArtifactIgnoreMatcher { get; init; } =
+		SmartArtifactIgnoreMatcher.Empty;
+
+	public SmartArtifactIgnoreMatcher SmartArtifactIgnoreCandidateMatcher { get; init; } =
+		SmartArtifactIgnoreMatcher.Empty;
 
 	public readonly record struct GitIgnoreEvaluation(bool IsIgnored, bool ShouldTraverseIgnoredDirectory)
 	{
@@ -274,7 +282,24 @@ public sealed record IgnoreRules(
 
 	public bool IsSmartIgnoredDirectory(string fullPath, string name)
 	{
-		if (!ShouldApplySmartIgnore(fullPath, isDirectory: true))
+		if (!UseSmartIgnore)
+			return false;
+
+		var appliesToProjectScope = ShouldApplySmartIgnoreCore(
+			fullPath,
+			isDirectory: true,
+			useCandidates: false);
+		// Only profiles explicitly marked portable may cross project-scope boundaries.
+		// Existing stack-adjacent fingerprints such as obj/bin stay scoped, preserving
+		// sibling visibility in mixed workspaces.
+		if (IsSmartArtifactIgnoredDirectory(
+				SmartArtifactIgnoreMatcher,
+				fullPath,
+				name,
+				portableOnly: !appliesToProjectScope))
+			return true;
+
+		if (!appliesToProjectScope)
 			return false;
 
 		if (!SmartIgnoredFolders.Contains(name))
@@ -294,7 +319,15 @@ public sealed record IgnoreRules(
 
 	public bool IsSmartIgnoredDirectoryCandidate(string fullPath, string name)
 	{
-		if (!ShouldApplySmartIgnoreCandidate(fullPath, isDirectory: true))
+		var appliesToProjectScope = ShouldApplySmartIgnoreCandidate(fullPath, isDirectory: true);
+		if (IsSmartArtifactIgnoredDirectory(
+				SmartArtifactIgnoreCandidateMatcher,
+				fullPath,
+				name,
+				portableOnly: !appliesToProjectScope))
+			return true;
+
+		if (!appliesToProjectScope)
 			return false;
 
 		var candidateFolders = SmartIgnoreCandidateFolders ?? SmartIgnoredFolders;
@@ -316,7 +349,13 @@ public sealed record IgnoreRules(
 
 	public bool IsSmartIgnoredFile(string fullPath, string name, bool shouldApplySmartIgnore)
 	{
-		if (!shouldApplySmartIgnore || !UseSmartIgnore)
+		if (!UseSmartIgnore)
+			return false;
+
+		if (SmartArtifactIgnoreMatcher.IsIgnoredFile(name))
+			return true;
+
+		if (!shouldApplySmartIgnore)
 			return false;
 
 		if (!SmartIgnoredFiles.Contains(name))
@@ -336,6 +375,9 @@ public sealed record IgnoreRules(
 
 	public bool IsSmartIgnoredFileCandidate(string fullPath, string name, bool shouldApplySmartIgnore)
 	{
+		if (SmartArtifactIgnoreCandidateMatcher.IsIgnoredFile(name))
+			return true;
+
 		if (!shouldApplySmartIgnore)
 			return false;
 
@@ -354,6 +396,25 @@ public sealed record IgnoreRules(
 		}
 
 		return false;
+	}
+
+	private static bool IsSmartArtifactIgnoredDirectory(
+		SmartArtifactIgnoreMatcher matcher,
+		string fullPath,
+		string name,
+		bool portableOnly)
+	{
+		if (!matcher.IsCandidateName(name))
+			return false;
+
+		// Signature results describe mutable filesystem state. IgnoreRules instances are
+		// reused by refresh pipelines, so retaining either a positive or negative result
+		// here would keep stale visibility after a build, restore, clean, or package update.
+		// Candidate-name and scope checks remain cached/constant; only the bounded local
+		// signature probe is intentionally repeated for each new filesystem observation.
+		return portableOnly
+			? matcher.IsPortableIgnoredDirectory(fullPath, name)
+			: matcher.IsIgnoredDirectory(fullPath, name);
 	}
 
 	private ScopedGitIgnoreMatcher[] GetApplicableGitIgnoreMatchers(

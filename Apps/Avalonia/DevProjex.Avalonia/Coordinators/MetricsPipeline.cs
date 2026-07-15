@@ -83,15 +83,15 @@ internal sealed class MetricsPipeline(
     private CancellationTokenSource? _recalculateMetricsCts;
     private volatile bool _isBackgroundMetricsActive;
     private int _metricsRecalcVersion;
-    private int _lastStatusTreeLines;
-    private int _lastStatusTreeChars;
-    private int _lastStatusTreeTokens;
-    private int _lastStatusContentLines;
-    private int _lastStatusContentChars;
-    private int _lastStatusContentTokens;
-    private int _lastStatusTreeAndContentContentLines;
-    private int _lastStatusTreeAndContentContentChars;
-    private int _lastStatusTreeAndContentContentTokens;
+    private long _lastStatusTreeLines;
+    private long _lastStatusTreeChars;
+    private long _lastStatusTreeTokens;
+    private long _lastStatusContentLines;
+    private long _lastStatusContentChars;
+    private long _lastStatusContentTokens;
+    private long _lastStatusTreeAndContentContentLines;
+    private long _lastStatusTreeAndContentContentChars;
+    private long _lastStatusTreeAndContentContentTokens;
     private bool _hasStatusMetricsSnapshot;
     private bool _hasTreeMetricsCache;
     private TreeMetricsCacheKey _treeMetricsCacheKey;
@@ -271,8 +271,8 @@ internal sealed class MetricsPipeline(
     }
 
     public void UpdateStatusBarMetrics(
-        int treeLines, int treeChars, int treeTokens,
-        int contentLines, int contentChars, int contentTokens,
+        long treeLines, long treeChars, long treeTokens,
+        long contentLines, long contentChars, long contentTokens,
         ExportOutputMetrics? treeAndContentContentMetrics = null)
     {
         _lastStatusTreeLines = treeLines;

@@ -28,8 +28,10 @@ Formatregeln:
 * Baum exportieren:
   * ASCII -> nur `.txt`.
   * JSON -> Standard `.json`, im Speichern-Dialog sind `.json` und `.txt` verfügbar.
-* Inhalt exportieren — immer Textformat des Inhalts, Datei `.txt` (ASCII/JSON-Schalter wirkt hier nicht).
-* Baum und Inhalt exportieren — immer Datei `.txt`; der ASCII/JSON-Schalter beeinflusst nur das Format des Baumblocks im Ergebnis.
+  * XML -> Standard `.xml`, im Speichern-Dialog sind `.xml` und `.txt` verfügbar.
+  * MD -> Standard `.md`, im Speichern-Dialog sind `.md` und `.txt` verfügbar.
+* Inhalt exportieren — immer Textformat des Inhalts, Datei `.txt` (der Baumformat-Schalter wirkt hier nicht).
+* Baum und Inhalt exportieren — immer Datei `.txt`; das gewählte Baumformat beeinflusst nur das Format des Baumblocks im Ergebnis.
 
 Exportdateien werden in UTF-8 ohne BOM geschrieben.
 
@@ -50,7 +52,7 @@ Regeln:
 * in die Liste werden nur lokale Ordner aufgenommen;
 * über DevProjex geklonte Git-Repositories werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Öffnen desselben Ordners verschiebt ihn nach oben;
-* es werden bis zu 10 letzte Ordner gespeichert;
+* es werden bis zu 15 letzte Ordner gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
 
 Für jeden Eintrag wird der kurze Ordnername angezeigt; der vollständige Pfad ist über einen Tooltip verfügbar.
@@ -70,6 +72,10 @@ Beispiele:
 * `devprojex . --export content` — Dateiinhalte im Terminal ausgeben.
 * `devprojex . --export tree-content` — Baum und Inhalte im Terminal ausgeben.
 * `devprojex . --export tree-content -o context.txt` — das Ergebnis in eine Datei speichern.
+* `devprojex --benchmark "C:\Projects\App"` — den Standard-Projektreport-Workflow messen.
+* `devprojex --last --preview` — das letzte Projekt direkt im Vorschaumodus öffnen.
+* `devprojex --benchmark-ui "C:\Projects\App"` — den Standard-UI-Workflow messen.
+* `devprojex --session-metrics "C:\Projects\App"` — UI-Sitzungsmetriken bis zum Schließen des Fensters aufzeichnen.
 
 Hinweise:
 * `.` bedeutet den aktuellen Terminal-Ordner;
@@ -104,11 +110,13 @@ Wenn Sie einen Eintrag auswählen, wird die URL automatisch in das Eingabefeld e
 Während eines aktiven Klonvorgangs wird die Liste vorübergehend ausgeblendet.
 
 ## 6) Kopieren
-### Baumformat-Schalter (ASCII/JSON)
+### Baumformat-Schalter (ASCII / JSON / XML / MD)
 Der Schalter legt das Baumdarstellungsformat für Operationen fest, bei denen der Baum im Ergebnis enthalten ist.
 
 * ASCII — Textbaum mit Zweigen.
 * JSON — strukturierter Baum in JSON.
+* XML — kompakter XML-Baum für Parser und Werkzeuge.
+* MD — verschachtelte Markdown-Liste für Dokumentation und AI-Prompts.
 
 Der Schalter beeinflusst:
 * Baum kopieren
@@ -123,7 +131,7 @@ Der Schalter beeinflusst nicht:
 ### Baum kopieren
 Kopiert den Projektbaum.
 Wenn Knoten markiert sind, wird der Baum aus der Auswahl gebaut; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert.
-Das Ergebnisformat wird vom ASCII/JSON-Schalter bestimmt.
+Das Ergebnisformat wird vom Baumformat-Schalter bestimmt.
 Tastenkürzel: Ctrl+Shift+C und Ctrl+Alt+C.
 
 ### Inhalt kopieren
@@ -138,19 +146,29 @@ Tastenkürzel: Ctrl+Alt+V.
 Kombiniert Baum und Inhalte:
 * Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum verwendet;
 * Inhalte nach denselben Regeln wie „Inhalt kopieren“;
-* das Format des Baumblocks wird vom ASCII/JSON-Schalter bestimmt.
+* das Format des Baumblocks wird vom Baumformat-Schalter bestimmt.
 Tastenkürzel: Ctrl+Shift+V.
 
-### JSON-Darstellung
-Im JSON-Modus wird eine strukturierte Baumdarstellung verwendet.
+### Baumdarstellungen
+Baumformate stellen denselben ausgewählten Projektbaum unterschiedlich dar.
 
-Baum (Baum kopieren / Baum exportieren):
+JSON:
 * `rootPath` — absoluter Wurzelpfad, mit `/` normalisiert.
 * `tree` — Inhalt des Wurzelordners.
 * Der JSON-Export verwendet dieses Baumformat: Arrays enthalten Dateien, Objekte enthalten Unterordner, `/` enthält Dateien des aktuellen Ordners, und `[]` steht für einen leeren Ordner.
 
+XML:
+* Wurzelknoten ist `<t r="...">`;
+* Ordner sind `<d n="...">`;
+* Dateien sind `<f>File.cs</f>`.
+
+MD:
+* beginnt mit `Root: ...`;
+* verwendet eine verschachtelte Markdown-Liste;
+* Ordner enden mit `/`.
+
 Baum + Inhalt:
-* JSON gilt für den Baumblock;
+* das gewählte Baumformat gilt für den Baumblock;
 * der Inhaltsblock bleibt Text;
 * Dateiüberschriften im Inhaltsblock verwenden relative Pfade mit `/`;
 * Export erfolgt als `.txt`.
@@ -305,7 +323,10 @@ Die Anwendung bildet Projektbereiche (Scopes), in denen die Ignore-Regeln gelten
 * Ordner der ersten Ebene
 * verschachtelte Projekt-Unterordner
 
-Die Suchtiefe für verschachtelte Projektbereiche ist fest: 2 Ebenen.
+Die Suche nach verschachtelten Projektbereichen ist begrenzt und hängt von der Ordnerstruktur ab.
+Für normale Projekte wird eine flache Suche verwendet. In erkannten Monorepos kann tiefer gesucht werden.
+Systemordner, Abhängigkeiten und bestätigte Build-Artefakte werden bei der Bereichssuche übersprungen.
+
 Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.gitignore` und Smart Ignore. Sobald ein Bereich gefunden wurde, werden die Regeln auf seinen Inhalt durch den normalen Baum-Scan angewendet.
 
 ### 12.2 „.gitignore verwenden“
@@ -315,9 +336,15 @@ Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.giti
 Bei Ordnern mit mehreren Projekten gilt die `.gitignore` eines Projekts nicht für benachbarte Projekte außerhalb seines Bereichs.
 
 ### 12.3 „Smart Ignore“
-* Wird nur angezeigt, wenn es sinnvoll ist.
-* Aktiviert: typische Build-/Tool-Artefakte werden zusätzlich ausgeblendet.
+* Wird nur angezeigt, wenn es den resultierenden Baum verändern kann.
+* Aktiviert: typische Build-Artefakte, Tool-Caches und Abhängigkeitsspeicher werden zusätzlich ausgeblendet.
 * Deaktiviert: Smart-Regeln werden nicht angewendet.
+
+Ein Ordner wird nicht allein wegen seines Namens ignoriert.
+Bei allgemeinen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `Library` wird zusätzlich der Inhalt geprüft.
+Enthält der Ordner normalen Quellcode, bleibt er sichtbar.
+
+Smart Ignore berücksichtigt die Struktur jedes erkannten Projekts und arbeitet getrennt innerhalb seines Bereichs.
 
 ### 12.4 Grundregeln
 Optionen:
@@ -340,7 +367,7 @@ Bei Deaktivierung werden beide abgeschaltet.
 
 2. Ein Projekt ohne `.gitignore`.
 „.gitignore verwenden“ wird nicht angezeigt.
-„Smart Ignore“ wird nur angezeigt, wenn es relevant ist.
+„Smart Ignore“ wird nur angezeigt, wenn es den aktuellen Baum beeinflussen kann.
 
 3. Mehrprojekt-Workspace: ein Teil mit `.gitignore`, ein Teil ohne.
 „.gitignore verwenden“ und „Smart Ignore“ werden angezeigt.
@@ -351,8 +378,8 @@ Smart Ignore (wenn aktiviert) ergänzt die Filterung in den gefundenen Bereichen
 „.gitignore verwenden“ wird angezeigt.
 „Smart Ignore“ wird nicht als separater Punkt angezeigt.
 
-5. Ordner ohne relevante Regeln.
-Wenn keine `.gitignore` gefunden wird und Smart Ignore nicht relevant ist, werden diese Punkte nicht angezeigt.
+5. Ordner ohne anwendbare Regeln.
+Wenn keine `.gitignore` gefunden wird und Smart Ignore den Baum nicht beeinflusst, werden diese Punkte nicht angezeigt.
 Es bleiben nur die grundlegenden Sichtbarkeitsregeln.
 
 ### 12.6 Leere Ordner
@@ -398,7 +425,7 @@ Wichtig:
 ### 13.2 Wie die Kennzahlen berechnet werden
 Baum-Kennzahlen:
 * werden aus der tatsächlichen Baum-Ausgabe berechnet, die von derselben Export-Pipeline erzeugt wird;
-* berücksichtigen das aktuelle ASCII/JSON-Format.
+* berücksichtigen das aktuelle Baumformat.
 
 Inhalt-Kennzahlen:
 * folgen denselben Regeln wie beim Kopieren/Exportieren von Inhalten;
@@ -410,7 +437,7 @@ Neu berechnet wird:
 * nach dem Öffnen/Aktualisieren eines Projekts;
 * nach dem Anwenden von Einstellungen (Ignore, Dateitypen, Root-Ordner);
 * bei Änderungen von Checkboxen im Baum (mit Debounce);
-* beim Umschalten ASCII/JSON (für Operationen mit Baum-Ausgabe).
+* beim Umschalten des Baumformats (für Operationen mit Baum-Ausgabe).
 * wenn die Hintergrundberechnung abgebrochen wird, werden die Zähler auf 0 gesetzt, bis die nächste vollständige Neuberechnung abgeschlossen ist.
 
 ## 14) Symbole
@@ -459,7 +486,8 @@ Fortschrittsmodi:
 Verhalten:
 * während der Hintergrundberechnung von Daten wird Prozentfortschritt angezeigt;
 * bei einigen Git-Operationen wird Prozent angezeigt, wenn die Fortschrittsquelle ihn liefert;
-* bei sehr schnellen Operationen kann der Fortschritt nur kurz sichtbar sein.
+* Aktualisierungen verfügbarer Optionen und das Anwenden von Einstellungen werden angezeigt, wenn die Operation merklich Zeit benötigt;
+* schnelle Operationen werden ohne Fortschrittsanzeige abgeschlossen.
 
 X-Schaltfläche (Abbrechen) in der Statusleiste:
 * führt eine Best-Effort-Abbruchanforderung für Operationen mit Abbruchunterstützung aus;

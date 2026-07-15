@@ -13,8 +13,8 @@ public static class PreviewSelectionMetricsCalculator
         if (normalizedRange.IsCollapsed)
             return ExportOutputMetrics.Empty;
 
-        var totalChars = 0;
-        var lineBreaks = 0;
+        long totalChars = 0;
+        long lineBreaks = 0;
 
         for (var lineNumber = normalizedRange.StartLine; lineNumber <= normalizedRange.EndLine; lineNumber++)
         {
@@ -47,6 +47,6 @@ public static class PreviewSelectionMetricsCalculator
             Tokens: EstimateTokens(totalChars));
     }
 
-    private static int EstimateTokens(int chars) =>
-        chars <= 0 ? 0 : (chars + 3) / 4;
+    private static long EstimateTokens(long chars) =>
+        chars <= 0 ? 0 : (chars / 4) + (chars % 4 == 0 ? 0 : 1);
 }

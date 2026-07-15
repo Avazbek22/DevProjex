@@ -111,12 +111,73 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		}
 	}
 
+	[Fact]
+	public async Task Process_BenchmarkCommand_WritesSummaryStdoutAndDetailedJsonReport()
+	{
+		using var runCountOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_BENCHMARK_RUNS", "1");
+		using var warmupOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_BENCHMARK_WARMUP", "0");
+		using var temp = new TemporaryDirectory();
+		var projectPath = SeedTerminalWorkspace(temp);
+		var outputPath = Path.Combine(temp.Path, "benchmark result", "result.json");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Benchmark, projectPath,
+			CommandLineOptionTokens.BenchmarkOutput, outputPath);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("DevProjex benchmark", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains($"Target: {Path.GetFullPath(projectPath).Replace('\\', '/')}", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("Cold process:", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("Warm pipeline:", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(Path.GetFullPath(outputPath).Replace('\\', '/'), result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"schemaVersion\"", result.Stdout, StringComparison.Ordinal);
+		Assert.True(File.Exists(outputPath));
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken));
+		var root = document.RootElement;
+		Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(Path.GetFullPath(projectPath).Replace('\\', '/'), root.GetProperty("targetPath").GetString());
+		Assert.Equal(Path.GetFullPath(outputPath).Replace('\\', '/'), root.GetProperty("outputPath").GetString());
+		Assert.False(root.GetProperty("hasFailures").GetBoolean());
+		Assert.Equal(1, root.GetProperty("configuration").GetProperty("runs").GetInt32());
+		Assert.Equal(0, root.GetProperty("configuration").GetProperty("warmup").GetInt32());
+		var executable = root.GetProperty("executable");
+		Assert.Contains(CommandLineOptionTokens.NoUi, ReadStringArray(executable.GetProperty("arguments")));
+		Assert.Contains(CommandLineOptionTokens.Report, ReadStringArray(executable.GetProperty("arguments")));
+		Assert.Contains(CommandLineOptionTokens.StandardOutputReportPath, ReadStringArray(executable.GetProperty("arguments")));
+		Assert.DoesNotContain(CommandLineOptionTokens.Benchmark, ReadStringArray(executable.GetProperty("arguments")));
+		var coldRun = Assert.Single(root.GetProperty("coldProcess").GetProperty("runs").EnumerateArray());
+		var warmRun = Assert.Single(root.GetProperty("warmPipeline").GetProperty("runs").EnumerateArray());
+		Assert.Equal(CommandLineExitCodes.Success, coldRun.GetProperty("exitCode").GetInt32());
+		Assert.Equal(CommandLineExitCodes.Success, warmRun.GetProperty("exitCode").GetInt32());
+		Assert.True(coldRun.GetProperty("stdoutBytes").GetInt32() > 0);
+		Assert.True(warmRun.GetProperty("stdoutBytes").GetInt32() > 0);
+		Assert.True(warmRun.GetProperty("allocatedBytes").GetInt64() > 0);
+		Assert.Equal(64, root.GetProperty("workload").GetProperty("fingerprint").GetString()!.Length);
+		Assert.Equal(64, executable.GetProperty("assemblySha256").GetString()!.Length);
+		Assert.True(root.GetProperty("metricsConsistent").GetBoolean());
+		Assert.Equal(0, root.GetProperty("coldProcess").GetProperty("warmupRuns").GetArrayLength());
+		Assert.Equal(0, root.GetProperty("warmPipeline").GetProperty("warmupRuns").GetArrayLength());
+	}
+
 	[Theory]
 	[InlineData("unknown-option", "Unknown option '--unknown'.")]
 	[InlineData("detached-format", "--output and --export-format require --export.")]
 	[InlineData("content-structured-format", "--export-format applies only to tree")]
 	[InlineData("report-and-export-stdout", "Cannot combine --report - with --export.")]
 	[InlineData("same-report-and-export-file", "--report-path and --output must point to different files.")]
+	[InlineData("benchmark-output-without-benchmark", "--benchmark-output requires --benchmark or --benchmark-ui.")]
+	[InlineData("benchmark-with-path", "Use --benchmark <folder> without --path or a positional folder.")]
+	[InlineData("benchmark-with-report", "--benchmark runs the standard project report benchmark")]
+	[InlineData("benchmark-ui-with-path", "Use --benchmark-ui <folder> without --path or a positional folder.")]
+	[InlineData("benchmark-ui-with-report", "--benchmark-ui runs the standard desktop UI benchmark")]
+	[InlineData("benchmark-ui-with-benchmark", "--benchmark-ui runs the standard desktop UI benchmark")]
+	[InlineData("ui-benchmark-script-without-session-metrics", "--ui-benchmark-script is an internal option and requires --session-metrics.")]
+	[InlineData("session-metrics-output-without-session-metrics", "--session-metrics-output requires --session-metrics.")]
+	[InlineData("session-metrics-with-path", "Use --session-metrics <folder> without --path or a positional folder.")]
+	[InlineData("session-metrics-with-no-ui", "--session-metrics opens the desktop app")]
+	[InlineData("session-metrics-stdout-output", "--session-metrics-output must point to a JSON file path")]
 	public async Task Process_UsageErrors_WriteOnlyStderrAndNeverCreateOutputFiles(string scenario, string expectedError)
 	{
 		using var temp = new TemporaryDirectory();
@@ -140,6 +201,9 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("silent", CommandLineOptionTokens.Silent)]
 	[InlineData("help", CommandLineOptionTokens.Help)]
 	[InlineData("version", CommandLineOptionTokens.Version)]
+	[InlineData("benchmark", CommandLineOptionTokens.Benchmark)]
+	[InlineData("benchmark-ui", CommandLineOptionTokens.BenchmarkUi)]
+	[InlineData("session-metrics", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("export", CommandLineOptionTokens.Export)]
 	[InlineData("report", CommandLineOptionTokens.Report)]
 	[InlineData("preview-search", CommandLineOptionTokens.PreviewSearch)]
@@ -163,6 +227,9 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("--silet", CommandLineOptionTokens.Silent)]
 	[InlineData("--preview-serch", CommandLineOptionTokens.PreviewSearch)]
 	[InlineData("--tree-fomat", CommandLineOptionTokens.TreeFormat)]
+	[InlineData("--benchmak", CommandLineOptionTokens.Benchmark)]
+	[InlineData("--benchmak-ui", CommandLineOptionTokens.BenchmarkUi)]
+	[InlineData("--session-metric", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
 	public async Task Process_OptionTyposWriteUsageErrorWithSuggestion(string value, string expectedSuggestion)
 	{
@@ -285,6 +352,58 @@ public sealed class CommandLineStdoutContractIntegrationTests
 				CommandLineOptionTokens.ReportPath, sharedPath,
 				CommandLineOptionTokens.Export, "tree",
 				CommandLineOptionTokens.Output, sharedPath
+			],
+			"benchmark-output-without-benchmark" =>
+			[
+				CommandLineOptionTokens.BenchmarkOutput, sharedPath
+			],
+			"benchmark-with-path" =>
+			[
+				CommandLineOptionTokens.Benchmark, projectPath,
+				CommandLineOptionTokens.Path, projectPath
+			],
+			"benchmark-with-report" =>
+			[
+				CommandLineOptionTokens.Benchmark, projectPath,
+				CommandLineOptionTokens.Report
+			],
+			"benchmark-ui-with-path" =>
+			[
+				CommandLineOptionTokens.BenchmarkUi, projectPath,
+				CommandLineOptionTokens.Path, projectPath
+			],
+			"benchmark-ui-with-report" =>
+			[
+				CommandLineOptionTokens.BenchmarkUi, projectPath,
+				CommandLineOptionTokens.Report
+			],
+			"benchmark-ui-with-benchmark" =>
+			[
+				CommandLineOptionTokens.BenchmarkUi, projectPath,
+				CommandLineOptionTokens.Benchmark, projectPath
+			],
+			"ui-benchmark-script-without-session-metrics" =>
+			[
+				CommandLineOptionTokens.UiBenchmarkScript, "standard"
+			],
+			"session-metrics-output-without-session-metrics" =>
+			[
+				CommandLineOptionTokens.SessionMetricsOutput, sharedPath
+			],
+			"session-metrics-with-path" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, projectPath,
+				CommandLineOptionTokens.Path, projectPath
+			],
+			"session-metrics-with-no-ui" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, projectPath,
+				CommandLineOptionTokens.NoUi
+			],
+			"session-metrics-stdout-output" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, projectPath,
+				CommandLineOptionTokens.SessionMetricsOutput, CommandLineOptionTokens.StandardOutputReportPath
 			],
 			_ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unknown stderr contract scenario.")
 		};
@@ -564,6 +683,11 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		return new CommandLineProcessResult(process.ExitCode, await stdoutTask, await stderrTask);
 	}
 
+	private static string[] ReadStringArray(JsonElement element) =>
+		element.EnumerateArray()
+			.Select(static item => item.GetString() ?? string.Empty)
+			.ToArray();
+
 	private static void TryKill(Process process)
 	{
 		try
@@ -585,4 +709,21 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	}
 
 	private sealed record CommandLineProcessResult(int ExitCode, string Stdout, string Stderr);
+
+	private sealed class TemporaryEnvironmentVariable : IDisposable
+	{
+		private readonly string _name;
+		private readonly string? _previousValue;
+
+		private TemporaryEnvironmentVariable(string name, string value)
+		{
+			_name = name;
+			_previousValue = Environment.GetEnvironmentVariable(name);
+			Environment.SetEnvironmentVariable(name, value);
+		}
+
+		public static TemporaryEnvironmentVariable Set(string name, string value) => new(name, value);
+
+		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
+	}
 }

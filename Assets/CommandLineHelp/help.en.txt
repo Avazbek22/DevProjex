@@ -17,6 +17,11 @@ Options:
                                   Use --report - to write JSON to stdout.
   --report-path <file>            Write a JSON analysis report to a specific file.
   --report-format json            Report format. JSON is the v1 format.
+  --benchmark <folder>            Run the standard project report benchmark.
+  --benchmark-ui <folder>         Run the standard desktop UI benchmark.
+  --benchmark-output <file>       Write the detailed benchmark JSON to a specific file.
+  --session-metrics <folder>      Open the desktop app and record UI session metrics until exit.
+  --session-metrics-output <file> Write the detailed session metrics JSON to a specific file.
   --export <mode>                 Export project text: tree, content, tree-content.
                                   Defaults to stdout when --output is omitted.
   --output, -o <file|->           Write export text to a file or stdout with -.
@@ -28,7 +33,7 @@ Options:
                                   Select the preview content mode at startup.
   --tree-format ascii|json|xml|md Select the desktop tree format at startup.
   --tree-filter <text>            Open the tree filter with this query.
-  --preview-search <text>         Open preview search with this query.
+  --preview-search <text>         Open preview and the tree search bar with this query.
   --include-root, --roots <name>  Include one root folder. Can be repeated.
   --include-extension, --ext <ext>
                                   Include one extension. Can be repeated.
@@ -61,6 +66,11 @@ Examples:
   devprojex --no-ui --path "/home/me/projects/app" --report --strict
   DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json"
   DevProjex --path "C:\Projects\App" --roots src --ext cs --ignore none --report
+  devprojex --benchmark "C:\Projects\App"
+  devprojex --benchmark-ui "C:\Projects\App"
+  devprojex --benchmark "/home/me/projects/app" --benchmark-output result.json
+  devprojex --session-metrics "C:\Projects\App" --preview --tree-format md
+  devprojex --session-metrics "/home/me/projects/app" --session-metrics-output session.json
 
 Notes:
   Windows Store command devprojex.exe starts the packaged DevProjex UI app.

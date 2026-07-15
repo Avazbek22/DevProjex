@@ -13,6 +13,10 @@ public sealed record CommandLineOptions(
 	public bool ShowHelp { get; init; }
 	public bool ShowVersion { get; init; }
 	public StartupReportOptions Report { get; init; } = StartupReportOptions.Disabled;
+	public StartupBenchmarkOptions Benchmark { get; init; } = StartupBenchmarkOptions.Disabled;
+	public StartupUiBenchmarkOptions UiBenchmark { get; init; } = StartupUiBenchmarkOptions.Disabled;
+	public StartupSessionMetricsOptions SessionMetrics { get; init; } = StartupSessionMetricsOptions.Disabled;
+	public StartupUiBenchmarkScriptOptions UiBenchmarkScript { get; init; } = StartupUiBenchmarkScriptOptions.Disabled;
 	public StartupExportOptions Export { get; init; } = StartupExportOptions.Disabled;
 	public StartupUiOptions Ui { get; init; } = StartupUiOptions.Default;
 	public IReadOnlyList<string> IncludeRootFolders { get; init; } = [];
@@ -38,6 +42,10 @@ public sealed record CommandLineOptions(
 		bool showHelp = false;
 		bool showVersion = false;
 		var report = StartupReportOptions.Disabled;
+		var benchmark = StartupBenchmarkOptions.Disabled;
+		var uiBenchmark = StartupUiBenchmarkOptions.Disabled;
+		var sessionMetrics = StartupSessionMetricsOptions.Disabled;
+		var uiBenchmarkScript = StartupUiBenchmarkScriptOptions.Disabled;
 		var export = StartupExportOptions.Disabled;
 		var ui = StartupUiOptions.Default;
 		var includeRootFolders = new List<string>();
@@ -227,6 +235,67 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
+			if (arg.Equals(CommandLineOptionTokens.Benchmark, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				benchmark = benchmark with { Enabled = true, Path = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.BenchmarkUi, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				uiBenchmark = uiBenchmark with { Enabled = true, Path = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.BenchmarkOutput, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				benchmark = benchmark with { OutputPath = value };
+				uiBenchmark = uiBenchmark with { OutputPath = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.SessionMetrics, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				sessionMetrics = sessionMetrics with { Enabled = true, Path = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.SessionMetricsOutput, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				sessionMetrics = sessionMetrics with { OutputPath = value };
+				continue;
+			}
+
+			if (arg.Equals(CommandLineOptionTokens.UiBenchmarkScript, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				if (!TryParseUiBenchmarkScript(value, out var script))
+				{
+					errors.Add(new CommandLineParseError("invalid-ui-benchmark-script", $"Unsupported UI benchmark script '{value}'.", arg));
+					continue;
+				}
+
+				uiBenchmarkScript = uiBenchmarkScript with { Enabled = true, Script = script };
+				continue;
+			}
+
 			if (arg.Equals(CommandLineOptionTokens.Export, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
@@ -336,7 +405,10 @@ public sealed record CommandLineOptions(
 			hasPositionalPath = true;
 		}
 
-		ValidateStartupUiOptions(path, ui, errors);
+		ValidateStartupUiOptions(path, ui, sessionMetrics, errors);
+		ValidateBenchmarkOptions(path, noUi, strict, report, benchmark, uiBenchmark, export, ui, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
+		ValidateUiBenchmarkOptions(path, noUi, strict, report, benchmark, uiBenchmark, sessionMetrics, uiBenchmarkScript, export, ui, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
+		ValidateSessionMetricsOptions(path, noUi, strict, report, benchmark, uiBenchmark, sessionMetrics, uiBenchmarkScript, export, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
 
 		var options = new CommandLineOptions(path, lang, elevationAttempted)
 		{
@@ -344,6 +416,10 @@ public sealed record CommandLineOptions(
 			ShowHelp = showHelp,
 			ShowVersion = showVersion,
 			Report = report,
+			Benchmark = benchmark,
+			UiBenchmark = uiBenchmark,
+			SessionMetrics = sessionMetrics,
+			UiBenchmarkScript = uiBenchmarkScript,
 			Export = export,
 			Ui = ui,
 			IncludeRootFolders = includeRootFolders.ToArray(),
@@ -394,6 +470,43 @@ public sealed record CommandLineOptions(
 				parts.Add(CommandLineOptionTokens.ReportFormat);
 				parts.Add(Report.Format.ToString().ToLowerInvariant());
 			}
+		}
+
+		if (Benchmark.Enabled)
+		{
+			parts.Add(CommandLineOptionTokens.Benchmark);
+			parts.Add(Quote(Benchmark.Path!));
+		}
+
+		if (UiBenchmark.Enabled)
+		{
+			parts.Add(CommandLineOptionTokens.BenchmarkUi);
+			parts.Add(Quote(UiBenchmark.Path!));
+		}
+
+		var benchmarkOutputPath = Benchmark.Enabled ? Benchmark.OutputPath : UiBenchmark.OutputPath;
+		if (!string.IsNullOrWhiteSpace(benchmarkOutputPath))
+		{
+			parts.Add(CommandLineOptionTokens.BenchmarkOutput);
+			parts.Add(Quote(benchmarkOutputPath!));
+		}
+
+		if (SessionMetrics.Enabled)
+		{
+			parts.Add(CommandLineOptionTokens.SessionMetrics);
+			parts.Add(Quote(SessionMetrics.Path!));
+		}
+
+		if (!string.IsNullOrWhiteSpace(SessionMetrics.OutputPath))
+		{
+			parts.Add(CommandLineOptionTokens.SessionMetricsOutput);
+			parts.Add(Quote(SessionMetrics.OutputPath!));
+		}
+
+		if (UiBenchmarkScript.Enabled)
+		{
+			parts.Add(CommandLineOptionTokens.UiBenchmarkScript);
+			parts.Add(FormatUiBenchmarkScript(UiBenchmarkScript.Script));
 		}
 
 		if (Export.Enabled)
@@ -845,6 +958,7 @@ public sealed record CommandLineOptions(
 	private static void ValidateStartupUiOptions(
 		string? path,
 		StartupUiOptions ui,
+		StartupSessionMetricsOptions sessionMetrics,
 		List<CommandLineParseError> errors)
 	{
 		if (ui.OpenLastProject && !string.IsNullOrWhiteSpace(path))
@@ -855,11 +969,22 @@ public sealed record CommandLineOptions(
 				CommandLineOptionTokens.Last));
 		}
 
-		if (ui.HasStartupActions && !ui.OpenLastProject && string.IsNullOrWhiteSpace(path))
+		if (ui.OpenLastProject && sessionMetrics.Enabled)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-session-metrics-last",
+				"Use either --session-metrics <folder> or --last, not both.",
+				CommandLineOptionTokens.SessionMetrics));
+		}
+
+		if (ui.HasStartupActions &&
+		    !ui.OpenLastProject &&
+		    string.IsNullOrWhiteSpace(path) &&
+		    !sessionMetrics.Enabled)
 		{
 			errors.Add(new CommandLineParseError(
 				"ui-startup-requires-project",
-				"UI startup options require --path, a positional folder, or --last.",
+				"UI startup options require --path, a positional folder, --last, or --session-metrics.",
 				null));
 		}
 
@@ -870,6 +995,173 @@ public sealed record CommandLineOptions(
 				"conflicting-search-and-filter",
 				"--tree-filter and --preview-search cannot be used together because the desktop UI shows only one tree text tool at a time.",
 				CommandLineOptionTokens.PreviewSearch));
+		}
+	}
+
+	private static bool TryParseUiBenchmarkScript(string value, out StartupUiBenchmarkScript script)
+	{
+		switch (NormalizeOptionName(value))
+		{
+			case "standard":
+			case "standard-ui":
+				script = StartupUiBenchmarkScript.Standard;
+				return true;
+			default:
+				script = default;
+				return false;
+		}
+	}
+
+	private static void ValidateBenchmarkOptions(
+		string? path,
+		bool noUi,
+		bool strict,
+		StartupReportOptions report,
+		StartupBenchmarkOptions benchmark,
+		StartupUiBenchmarkOptions uiBenchmark,
+		StartupExportOptions export,
+		StartupUiOptions ui,
+		IReadOnlyList<string> includeRootFolders,
+		IReadOnlyList<string> includeExtensions,
+		bool ignoreOptionsSpecified,
+		List<CommandLineParseError> errors)
+	{
+		if (!benchmark.Enabled)
+		{
+			if (!uiBenchmark.Enabled && !string.IsNullOrWhiteSpace(benchmark.OutputPath))
+			{
+				errors.Add(new CommandLineParseError(
+					"benchmark-output-requires-benchmark",
+					"--benchmark-output requires --benchmark or --benchmark-ui.",
+					CommandLineOptionTokens.BenchmarkOutput));
+			}
+
+			return;
+		}
+
+		if (!string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-benchmark-path",
+				"Use --benchmark <folder> without --path or a positional folder.",
+				CommandLineOptionTokens.Benchmark));
+		}
+
+		if (noUi || strict || report.Enabled || export.Enabled || export.HasOutputPath || export.FormatSpecified ||
+		    uiBenchmark.Enabled || ui.HasStartupActions || includeRootFolders.Count > 0 || includeExtensions.Count > 0 || ignoreOptionsSpecified)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-benchmark-options",
+				"--benchmark runs the standard project report benchmark and cannot be combined with UI benchmark, report, export, UI startup, selection, strict, --no-ui, or --silent options.",
+				CommandLineOptionTokens.Benchmark));
+		}
+	}
+
+	private static void ValidateUiBenchmarkOptions(
+		string? path,
+		bool noUi,
+		bool strict,
+		StartupReportOptions report,
+		StartupBenchmarkOptions benchmark,
+		StartupUiBenchmarkOptions uiBenchmark,
+		StartupSessionMetricsOptions sessionMetrics,
+		StartupUiBenchmarkScriptOptions uiBenchmarkScript,
+		StartupExportOptions export,
+		StartupUiOptions ui,
+		IReadOnlyList<string> includeRootFolders,
+		IReadOnlyList<string> includeExtensions,
+		bool ignoreOptionsSpecified,
+		List<CommandLineParseError> errors)
+	{
+		if (!uiBenchmark.Enabled)
+			return;
+
+		if (!string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-ui-benchmark-path",
+				"Use --benchmark-ui <folder> without --path or a positional folder.",
+				CommandLineOptionTokens.BenchmarkUi));
+		}
+
+		if (noUi || strict || report.Enabled || benchmark.Enabled || sessionMetrics.Enabled || uiBenchmarkScript.Enabled ||
+		    export.Enabled || export.HasOutputPath || export.FormatSpecified || ui.HasStartupActions ||
+		    includeRootFolders.Count > 0 || includeExtensions.Count > 0 || ignoreOptionsSpecified)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-ui-benchmark-options",
+				"--benchmark-ui runs the standard desktop UI benchmark and cannot be combined with report, export, benchmark, session metrics, UI startup, selection, strict, --no-ui, or --silent options.",
+				CommandLineOptionTokens.BenchmarkUi));
+		}
+	}
+
+	private static void ValidateSessionMetricsOptions(
+		string? path,
+		bool noUi,
+		bool strict,
+		StartupReportOptions report,
+		StartupBenchmarkOptions benchmark,
+		StartupUiBenchmarkOptions uiBenchmark,
+		StartupSessionMetricsOptions sessionMetrics,
+		StartupUiBenchmarkScriptOptions uiBenchmarkScript,
+		StartupExportOptions export,
+		IReadOnlyList<string> includeRootFolders,
+		IReadOnlyList<string> includeExtensions,
+		bool ignoreOptionsSpecified,
+		List<CommandLineParseError> errors)
+	{
+		if (!sessionMetrics.Enabled)
+		{
+			if (!string.IsNullOrWhiteSpace(sessionMetrics.OutputPath))
+			{
+				errors.Add(new CommandLineParseError(
+					"session-metrics-output-requires-session-metrics",
+					"--session-metrics-output requires --session-metrics.",
+					CommandLineOptionTokens.SessionMetricsOutput));
+			}
+
+			if (uiBenchmarkScript.Enabled)
+			{
+				errors.Add(new CommandLineParseError(
+					"ui-benchmark-script-requires-session-metrics",
+					"--ui-benchmark-script is an internal option and requires --session-metrics.",
+					CommandLineOptionTokens.UiBenchmarkScript));
+			}
+
+			return;
+		}
+
+		if (string.Equals(sessionMetrics.OutputPath?.Trim(), CommandLineOptionTokens.StandardOutputReportPath, StringComparison.Ordinal))
+		{
+			errors.Add(new CommandLineParseError(
+				"session-metrics-output-requires-file",
+				"--session-metrics-output must point to a JSON file path, not stdout.",
+				CommandLineOptionTokens.SessionMetricsOutput));
+		}
+
+		if (!string.IsNullOrWhiteSpace(path))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-session-metrics-path",
+				"Use --session-metrics <folder> without --path or a positional folder.",
+				CommandLineOptionTokens.SessionMetrics));
+		}
+
+		if (string.IsNullOrWhiteSpace(sessionMetrics.Path))
+		{
+			errors.Add(new CommandLineParseError(
+				"session-metrics-requires-path",
+				"--session-metrics requires a folder path.",
+				CommandLineOptionTokens.SessionMetrics));
+		}
+
+		if (noUi || strict || report.Enabled || benchmark.Enabled || uiBenchmark.Enabled || export.Enabled || export.HasOutputPath || export.FormatSpecified ||
+		    includeRootFolders.Count > 0 || includeExtensions.Count > 0 || ignoreOptionsSpecified)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-session-metrics-options",
+				"--session-metrics opens the desktop app and cannot be combined with report, export, benchmark, UI benchmark, selection, strict, --no-ui, or --silent options.",
+				CommandLineOptionTokens.SessionMetrics));
 		}
 	}
 
@@ -896,6 +1188,12 @@ public sealed record CommandLineOptions(
 		TreeTextFormat.Xml => "xml",
 		TreeTextFormat.Markdown => "md",
 		_ => format.ToString().ToLowerInvariant()
+	};
+
+	private static string FormatUiBenchmarkScript(StartupUiBenchmarkScript script) => script switch
+	{
+		StartupUiBenchmarkScript.Standard => "standard",
+		_ => script.ToString().ToLowerInvariant()
 	};
 
 	private static string NormalizeExtension(string value)
@@ -981,6 +1279,42 @@ public sealed record StartupReportOptions(
 public enum StartupReportFormat
 {
 	Json
+}
+
+public sealed record StartupBenchmarkOptions(
+	bool Enabled,
+	string? Path,
+	string? OutputPath)
+{
+	public static StartupBenchmarkOptions Disabled { get; } = new(false, null, null);
+}
+
+public sealed record StartupUiBenchmarkOptions(
+	bool Enabled,
+	string? Path,
+	string? OutputPath)
+{
+	public static StartupUiBenchmarkOptions Disabled { get; } = new(false, null, null);
+}
+
+public sealed record StartupSessionMetricsOptions(
+	bool Enabled,
+	string? Path,
+	string? OutputPath)
+{
+	public static StartupSessionMetricsOptions Disabled { get; } = new(false, null, null);
+}
+
+public sealed record StartupUiBenchmarkScriptOptions(
+	bool Enabled,
+	StartupUiBenchmarkScript Script)
+{
+	public static StartupUiBenchmarkScriptOptions Disabled { get; } = new(false, StartupUiBenchmarkScript.Standard);
+}
+
+public enum StartupUiBenchmarkScript
+{
+	Standard
 }
 
 public sealed record StartupExportOptions(

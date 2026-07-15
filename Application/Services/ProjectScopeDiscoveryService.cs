@@ -1,34 +1,97 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
-using System.IO.Enumeration;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace DevProjex.Application.Services;
 
-public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
+public sealed class ProjectScopeDiscoveryService(
+	SmartIgnoreService smartIgnore,
+	ProjectRootFactsProvider? rootFactsProvider = null)
 {
 	private const int ScopeCacheLimit = 128;
 	private static readonly TimeSpan ScopeCacheTtl = TimeSpan.FromSeconds(5);
-	private const int NestedProjectProbeMaxDepth = 2;
-	private const int NestedProjectProbeMaxDirectoriesPerScope = 256;
-	private static readonly EnumerationOptions TopLevelEnumerationOptions = new()
-	{
-		RecurseSubdirectories = false,
-		ReturnSpecialDirectories = false,
-		AttributesToSkip = 0,
-		IgnoreInaccessible = false
-	};
+	private const int DefaultNestedProjectProbeMaxDepth = 2;
+	private const int DefaultNestedProjectProbeMaxDirectoriesPerScope = 256;
+	private const int MonorepoNestedProjectProbeMaxDepth = 8;
+	private const int MonorepoNestedProjectProbeMaxDirectoriesPerScope = 1_000;
 
 	private static readonly FrozenSet<string> NonProjectScopeDirectoryNames = new[]
 	{
 		".git",
 		".hg",
 		".svn",
+		".github",
+		".gitlab",
+		".circleci",
 		".idea",
 		".vscode",
 		".vs",
 		".fleet"
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	private static readonly FrozenSet<string> ScopeDiscoveryPruneDirectoryNames = new[]
+	{
+		".git",
+		".hg",
+		".svn",
+		".github",
+		".gitlab",
+		".circleci",
+		".idea",
+		".vscode",
+		".vs",
+		".fleet",
+		"node_modules",
+		"bower_components",
+		"jspm_packages",
+		"vendor",
+		".bundle",
+		"bin",
+		"obj",
+		"build",
+		"dist",
+		"out",
+		"target",
+		".gradle",
+		".next",
+		".nuxt",
+		".cache",
+		".parcel-cache",
+		"coverage",
+		".nyc_output",
+		"tmp",
+		"temp",
+		"__pycache__",
+		".pytest_cache",
+		".mypy_cache",
+		".ruff_cache",
+		".tox",
+		".venv",
+		"venv",
+		"env"
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	private static readonly FrozenSet<string> MonorepoContainerDirectoryNames = new[]
+	{
+		"apps",
+		"packages",
+		"services",
+		"libs",
+		"modules",
+		"projects",
+		"tools",
+		"examples"
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	private static readonly FrozenSet<string> MonorepoMarkerFiles = new[]
+	{
+		"pnpm-workspace.yaml",
+		"nx.json",
+		"turbo.json",
+		"lerna.json",
+		"rush.json",
+		"go.work"
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	private static readonly FrozenSet<string> ProjectMarkerFiles = new[]
@@ -40,6 +103,10 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		"bun.lockb",
 		"bun.lock",
 		"pnpm-workspace.yaml",
+		"nx.json",
+		"turbo.json",
+		"lerna.json",
+		"rush.json",
 		"npm-shrinkwrap.json",
 		"pyproject.toml",
 		"requirements.txt",
@@ -78,15 +145,25 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 
 	private readonly object _scopeCacheSync = new();
 	private readonly Dictionary<string, ScopeCacheEntry> _scopeCache = new(PathStringComparer);
+	private readonly ProjectRootFactsProvider _rootFactsProvider = rootFactsProvider ?? smartIgnore.RootFactsProvider;
 
 	public ProjectScanContext Discover(
 		string rootPath,
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (string.IsNullOrWhiteSpace(rootPath))
 			return ProjectScanContext.Empty;
 
-		var normalizedRoot = Path.GetFullPath(rootPath);
+		string normalizedRoot;
+		try
+		{
+			normalizedRoot = Path.GetFullPath(rootPath);
+		}
+		catch
+		{
+			return ProjectScanContext.Empty;
+		}
+
 		var cacheKey = BuildScopeCacheKey(normalizedRoot, selectedRootFolders);
 		var now = DateTime.UtcNow;
 
@@ -99,7 +176,12 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			}
 		}
 
-		var context = BuildProjectScanContext(normalizedRoot, selectedRootFolders);
+		var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
+		var rootFacts = rootFactsCache.Get(normalizedRoot);
+		if (!rootFacts.Exists)
+			return ProjectScanContext.Empty;
+
+		var context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
 		lock (_scopeCacheSync)
 		{
 			_scopeCache[cacheKey] = new ScopeCacheEntry(now, context);
@@ -148,13 +230,19 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	}
 
 	private ProjectScanContext BuildProjectScanContext(
-		string rootPath,
-		IReadOnlyCollection<string>? selectedRootFolders)
+		ProjectRootFacts rootFacts,
+		IReadOnlyCollection<string>? selectedRootFolders,
+		ProjectRootFactsOperationCache rootFactsCache)
 	{
+		var rootPath = rootFacts.RootPath;
 		var hasExplicitRootSelection = selectedRootFolders is not null && selectedRootFolders.Count > 0;
-		var rootHasGitIgnore = HasGitIgnoreFile(rootPath);
-		var rootHasProjectMarker = HasProjectMarker(rootPath);
-		var candidateDirectories = ResolveCandidateDirectories(rootPath, selectedRootFolders);
+		var rootHasGitIgnore = rootFacts.HasGitIgnoreFile;
+		var rootHasProjectMarker = HasProjectMarker(rootFacts);
+		// Scope discovery is intentionally about project ownership, not artifact hiding.
+		// The generic artifact matcher handles dependency/build/cache folders later, after
+		// the selected roots are known. Keeping discovery conservative prevents home-folder
+		// and monorepo opens from turning dependency forests into fake project scopes.
+		var candidateDirectories = ResolveCandidateDirectories(rootFacts, selectedRootFolders);
 
 		if (candidateDirectories.Count == 0)
 		{
@@ -178,10 +266,17 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			static () => new List<ProjectScope>(),
 			(directoryPath, _, localCandidates) =>
 			{
-				var hasGitIgnore = HasGitIgnoreFile(directoryPath);
-				var hasMarker = HasProjectMarker(directoryPath);
-				if (ShouldSkipProjectScopeCandidate(directoryPath, hasGitIgnore, hasMarker))
+				var candidateFacts = rootFactsCache.Get(directoryPath);
+				var hasGitIgnore = candidateFacts.HasGitIgnoreFile;
+				var hasMarker = HasProjectMarker(candidateFacts);
+				if (ShouldSkipProjectScopeCandidate(
+					    directoryPath,
+					    hasGitIgnore,
+					    hasMarker,
+					    isExplicitRootSelection: hasExplicitRootSelection))
+				{
 					return localCandidates;
+				}
 
 				localCandidates.Add(new ProjectScope(
 					directoryPath,
@@ -200,7 +295,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			});
 
 		var candidates = SortScopes(scopedCandidates).ToArray();
-		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates);
+		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates, rootFactsCache);
 
 		if (hasExplicitRootSelection)
 		{
@@ -249,7 +344,8 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	}
 
 	private ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
-		IReadOnlyList<ProjectScope> candidates)
+		IReadOnlyList<ProjectScope> candidates,
+		ProjectRootFactsOperationCache rootFactsCache)
 	{
 		if (candidates.Count == 0)
 			return [];
@@ -264,16 +360,26 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			(candidate, _, localScopes) =>
 			{
 				localScopes.Add(candidate);
+				var candidateFacts = rootFactsCache.Get(candidate.RootPath);
+				var probe = ResolveNestedProjectProbe(candidateFacts);
 
 				foreach (var childPath in EnumerateDescendantDirectoriesSafe(
 							 candidate.RootPath,
-							 NestedProjectProbeMaxDepth,
-							 NestedProjectProbeMaxDirectoriesPerScope))
+							 probe.MaxDepth,
+							 probe.MaxDirectories,
+							 rootFactsCache))
 				{
-					var hasGitIgnore = HasGitIgnoreFile(childPath);
-					var hasMarker = HasProjectMarker(childPath);
-					if (ShouldSkipProjectScopeCandidate(childPath, hasGitIgnore, hasMarker))
+					var childFacts = rootFactsCache.Get(childPath);
+					var hasGitIgnore = childFacts.HasGitIgnoreFile;
+					var hasMarker = HasProjectMarker(childFacts);
+					if (ShouldSkipProjectScopeCandidate(
+						    childPath,
+						    hasGitIgnore,
+						    hasMarker,
+						    isExplicitRootSelection: false))
+					{
 						continue;
+					}
 					if (!hasGitIgnore && !hasMarker)
 						continue;
 
@@ -308,6 +414,30 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		return SortScopes(uniqueScopes.Values).ToArray();
 	}
 
+	private static NestedProjectProbe ResolveNestedProjectProbe(ProjectRootFacts candidateFacts)
+	{
+		var candidateName = GetDirectoryName(candidateFacts.RootPath);
+		var isKnownMonorepoContainer =
+			!string.IsNullOrWhiteSpace(candidateName) &&
+			MonorepoContainerDirectoryNames.Contains(candidateName);
+
+		// Keep the default probe intentionally shallow. Only obvious monorepo
+		// roots/containers get the wider BFS so normal folder opens do not turn
+		// into expensive dependency-style discovery scans. Smart artifact filtering is a
+		// later, cheaper layer; do not compensate for missed scopes by increasing this
+		// depth globally unless benchmarks prove it is safe for large user folders.
+		if (isKnownMonorepoContainer || HasMonorepoMarker(candidateFacts))
+		{
+			return new NestedProjectProbe(
+				MonorepoNestedProjectProbeMaxDepth,
+				MonorepoNestedProjectProbeMaxDirectoriesPerScope);
+		}
+
+		return new NestedProjectProbe(
+			DefaultNestedProjectProbeMaxDepth,
+			DefaultNestedProjectProbeMaxDirectoriesPerScope);
+	}
+
 	private static List<ProjectScope> SortScopes(IEnumerable<ProjectScope> scopes)
 	{
 		var result = new List<ProjectScope>(scopes);
@@ -315,10 +445,11 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		return result;
 	}
 
-	private static IEnumerable<string> EnumerateDescendantDirectoriesSafe(
+	private IEnumerable<string> EnumerateDescendantDirectoriesSafe(
 		string rootPath,
 		int maxDepth,
-		int maxDirectories)
+		int maxDirectories,
+		ProjectRootFactsOperationCache rootFactsCache)
 	{
 		if (maxDepth <= 0 || maxDirectories <= 0)
 			yield break;
@@ -333,7 +464,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 			if (currentDepth >= maxDepth)
 				continue;
 
-			var children = GetChildDirectoriesSafe(currentPath);
+			var children = GetChildDirectoriesSafe(rootFactsCache.Get(currentPath));
 
 			foreach (var childPath in children)
 			{
@@ -351,7 +482,7 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	}
 
 	private static List<string> ResolveCandidateDirectories(
-		string rootPath,
+		ProjectRootFacts rootFacts,
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
 		var uniqueCandidates = new HashSet<string>(PathStringComparer);
@@ -363,14 +494,16 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 				if (string.IsNullOrWhiteSpace(folderName))
 					continue;
 
-				var fullPath = Path.Combine(rootPath, folderName);
-				if (Directory.Exists(fullPath) && !IsReparsePointDirectory(fullPath))
-					uniqueCandidates.Add(Path.GetFullPath(fullPath));
+				if (rootFacts.TryGetDirectory(folderName, out var directory) &&
+				    !directory.IsReparsePoint)
+				{
+					uniqueCandidates.Add(Path.GetFullPath(directory.FullPath));
+				}
 			}
 		}
 		else
 		{
-			foreach (var dir in GetChildDirectoriesSafe(rootPath))
+			foreach (var dir in GetChildDirectoriesSafe(rootFacts))
 				uniqueCandidates.Add(Path.GetFullPath(dir));
 		}
 
@@ -379,29 +512,30 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		return candidates;
 	}
 
-	private static bool HasGitIgnoreFile(string directoryPath)
-	{
-		try
-		{
-			return File.Exists(Path.Combine(directoryPath, ".gitignore"));
-		}
-		catch
-		{
-			return false;
-		}
-	}
-
 	private static bool ShouldSkipProjectScopeCandidate(
 		string directoryPath,
 		bool hasGitIgnore,
-		bool hasProjectMarker)
+		bool hasProjectMarker,
+		bool isExplicitRootSelection)
 	{
-		if (hasProjectMarker)
-			return false;
-
 		var name = GetDirectoryName(directoryPath);
 		if (string.IsNullOrWhiteSpace(name))
 			return false;
+
+		if (!isExplicitRootSelection && ScopeDiscoveryPruneDirectoryNames.Contains(name))
+			return true;
+
+		if (hasProjectMarker)
+			return false;
+
+		// A confirmed generated/dependency layout must never become an independent
+		// project scope. The signature probe is bounded and name-gated, so ordinary
+		// source folders named packages, registry, build, or vendor remain discoverable.
+		if (!isExplicitRootSelection &&
+		    SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directoryPath, name))
+		{
+			return true;
+		}
 
 		if (NonProjectScopeDirectoryNames.Contains(name))
 			return true;
@@ -415,8 +549,16 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 	private static bool ShouldSkipProjectScopeTraversal(string directoryPath)
 	{
 		var name = GetDirectoryName(directoryPath);
-		return !string.IsNullOrWhiteSpace(name) &&
-			   NonProjectScopeDirectoryNames.Contains(name);
+		if (string.IsNullOrWhiteSpace(name))
+			return false;
+
+		if (ScopeDiscoveryPruneDirectoryNames.Contains(name))
+			return true;
+
+		// Prune only after local evidence proves an artifact store. This prevents
+		// wide package caches from consuming the nested-scope BFS budget while keeping
+		// source monorepo containers with the same names fully traversable.
+		return SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directoryPath, name);
 	}
 
 	private static string GetDirectoryName(string directoryPath)
@@ -427,106 +569,49 @@ public sealed class ProjectScopeDiscoveryService(SmartIgnoreService smartIgnore)
 		return Path.GetFileName(trimmedPath);
 	}
 
-	private bool HasProjectMarker(string directoryPath)
+	private bool HasProjectMarker(ProjectRootFacts rootFacts)
 	{
-		foreach (var markerFile in ProjectMarkerFiles)
-		{
-			try
-			{
-				if (File.Exists(Path.Combine(directoryPath, markerFile)))
-					return true;
-			}
-			catch
-			{
-				// Continue with other marker checks.
-			}
-		}
-
-		try
-		{
-			foreach (var file in EnumerateTopLevelFiles(directoryPath))
-			{
-				if (!string.IsNullOrWhiteSpace(file.Extension) &&
-				    ProjectMarkerExtensions.Contains(file.Extension))
-				{
-					return true;
-				}
-				if (smartIgnore.IsKnownProjectMarker(file.FileName, file.Extension))
-					return true;
-			}
-		}
-		catch
-		{
-			// Full enumeration is only a fallback path for extension/custom markers.
-			// Keep descriptor-specific marker files discoverable even on partial IO failures.
-			return smartIgnore.HasKnownProjectMarker(directoryPath);
-		}
-
-		return false;
+		return rootFacts.HasAnyMarkerFile(ProjectMarkerFiles) ||
+		       rootFacts.HasAnyFileExtension(ProjectMarkerExtensions) ||
+		       smartIgnore.HasKnownProjectMarker(rootFacts);
 	}
 
-	private static List<string> GetChildDirectoriesSafe(string rootPath)
+	private static bool HasMonorepoMarker(ProjectRootFacts rootFacts) =>
+		rootFacts.HasAnyMarkerFile(MonorepoMarkerFiles);
+
+	private static List<string> GetChildDirectoriesSafe(ProjectRootFacts rootFacts)
 	{
 		var directories = new List<string>();
-		try
+		if (!rootFacts.IsAccessible)
+			return directories;
+
+		foreach (var directory in rootFacts.Directories)
 		{
-			foreach (var directoryPath in EnumerateChildDirectories(rootPath))
-				directories.Add(directoryPath);
-		}
-		catch
-		{
-			// Scope discovery is best-effort: inaccessible children must not break project load.
+			if (!directory.IsReparsePoint)
+				directories.Add(directory.FullPath);
 		}
 
 		return directories;
 	}
 
-	private static IEnumerable<string> EnumerateChildDirectories(string rootPath)
+	private sealed class ProjectRootFactsOperationCache(ProjectRootFactsProvider provider)
 	{
-		var enumerable = new FileSystemEnumerable<string>(
-			rootPath,
-			static (ref FileSystemEntry entry) => entry.ToSpecifiedFullPath(),
-			TopLevelEnumerationOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
-			entry.IsDirectory && !IsReparsePoint(ref entry);
-		return enumerable;
-	}
+		private readonly ConcurrentDictionary<string, Lazy<ProjectRootFacts>> _facts = new(PathStringComparer);
 
-	private static IEnumerable<ProjectMarkerFileCandidate> EnumerateTopLevelFiles(string rootPath)
-	{
-		var enumerable = new FileSystemEnumerable<ProjectMarkerFileCandidate>(
-			rootPath,
-			static (ref FileSystemEntry entry) =>
-			{
-				var fileName = entry.FileName.ToString();
-				return new ProjectMarkerFileCandidate(fileName, Path.GetExtension(fileName));
-			},
-			TopLevelEnumerationOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
-			!entry.IsDirectory && !IsReparsePoint(ref entry);
-		return enumerable;
-	}
-
-	private static bool IsReparsePointDirectory(string directoryPath)
-	{
-		try
+		public ProjectRootFacts Get(string rootPath)
 		{
-			return Directory.Exists(directoryPath) &&
-				   File.GetAttributes(directoryPath).HasFlag(FileAttributes.ReparsePoint);
-		}
-		catch
-		{
-			return true;
+			return _facts.GetOrAdd(
+				rootPath,
+				static (path, factsProvider) => new Lazy<ProjectRootFacts>(
+					() => factsProvider.Get(path, forceRefresh: true),
+					LazyThreadSafetyMode.ExecutionAndPublication),
+				provider).Value;
 		}
 	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static bool IsReparsePoint(ref FileSystemEntry entry) =>
-		(entry.Attributes & FileAttributes.ReparsePoint) != 0;
 
 	private sealed record ScopeCacheEntry(DateTime CachedAtUtc, ProjectScanContext Context);
 
-	private readonly record struct ProjectMarkerFileCandidate(string FileName, string Extension);
+	private readonly record struct NestedProjectProbe(int MaxDepth, int MaxDirectories);
 }
 
 public sealed record ProjectScope(

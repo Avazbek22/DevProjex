@@ -1,3 +1,4 @@
+using Avalonia.Controls.Presenters;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
@@ -22,13 +23,22 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         try
         {
             var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+            var expectedStorePaths = new[]
+            {
+                Path.Combine(storeDirectory, "user-settings.json"),
+                Path.Combine(storeDirectory, "user-settings.json.bak"),
+                Path.Combine(storeDirectory, "recent-projects.json"),
+                Path.Combine(storeDirectory, "recent-projects.json.bak"),
+                Path.Combine(storeDirectory, "project-profiles.json"),
+                Path.Combine(storeDirectory, "project-profiles.json.bak")
+            };
 
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "user-settings.json")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "user-settings.json.bak")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "recent-projects.json")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "recent-projects.json.bak")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "project-profiles.json")));
-            Assert.True(File.Exists(Path.Combine(storeDirectory, "project-profiles.json.bak")));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => expectedStorePaths.All(File.Exists),
+                "deferred startup state-store bootstrap to create primary and backup files");
+
+            Assert.All(expectedStorePaths, path => Assert.True(File.Exists(path), path));
         }
         finally
         {
@@ -547,6 +557,43 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             var headerGap = ignoreHeaderBounds.Top - buttonBounds.Bottom;
             Assert.InRange(topGap, 0, 16);
             Assert.InRange(headerGap, 0, 16);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SettingsLists_PointerOverDoesNotHighlightVirtualizedRows()
+    {
+        using var project = UiTestProject.CreateWithRootExtensionIgnoreStressWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            foreach (var listName in new[] { "IgnoreOptionsList", "ExtensionsList", "RootFoldersList" })
+            {
+                var listBox = UiTestDriver.GetRequiredControl<ListBox>(window, listName);
+                var firstItem = Assert.IsAssignableFrom<object>(listBox.Items.FirstOrDefault());
+                listBox.ScrollIntoView(firstItem);
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+                var item = Assert.IsType<ListBoxItem>(
+                    listBox.GetVisualDescendants().OfType<ListBoxItem>().FirstOrDefault());
+
+                window.MouseMove(UiTestDriver.GetControlCenter(item, window), RawInputModifiers.None);
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+                var presenter = Assert.IsType<ContentPresenter>(
+                    item.GetVisualDescendants()
+                        .OfType<ContentPresenter>()
+                        .FirstOrDefault(control =>
+                            string.Equals(control.Name, "PART_ContentPresenter", StringComparison.Ordinal)));
+                var background = Assert.IsAssignableFrom<ISolidColorBrush>(presenter.Background);
+
+                Assert.True(item.IsPointerOver, $"Pointer did not enter settings list '{listName}'.");
+                Assert.Equal(Colors.Transparent, background.Color);
+            }
         }
         finally
         {

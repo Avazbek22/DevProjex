@@ -123,6 +123,32 @@ public sealed class IgnoreRulesServiceMixedWorkspaceMatrixTests
 		Assert.Contains("bin", rules.SmartIgnoredFolders);
 	}
 
+	[Fact]
+	public void Build_MixedWorkspace_UseGitIgnoreOnlyDoesNotActivateSmartArtifactsInNonGitScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("proj-git/.gitignore", "git_only/");
+		temp.CreateFile("proj-git/App.csproj", "<Project />");
+		var nonGitObj = temp.CreateFolder("proj-no-git/obj");
+		temp.CreateFile("proj-no-git/package.json", "{}");
+		temp.CreateFile("proj-no-git/obj/project.assets.json", "{}");
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+
+		var gitOnly = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+		var smartEnabled = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore]);
+
+		Assert.True(gitOnly.UseGitIgnore);
+		Assert.False(gitOnly.UseSmartIgnore);
+		Assert.False(gitOnly.SmartArtifactIgnoreMatcher.HasRules);
+		Assert.False(gitOnly.IsSmartIgnoredDirectory(nonGitObj, "obj"));
+		Assert.True(gitOnly.IsSmartIgnoredDirectoryCandidate(nonGitObj, "obj"));
+
+		Assert.False(smartEnabled.UseGitIgnore);
+		Assert.True(smartEnabled.UseSmartIgnore);
+		Assert.True(smartEnabled.SmartArtifactIgnoreMatcher.HasRules);
+		Assert.True(smartEnabled.IsSmartIgnoredDirectory(nonGitObj, "obj"));
+	}
+
 	private static IReadOnlyCollection<IgnoreOptionId> BuildSelectedOptions(int bits)
 	{
 		var selected = new List<IgnoreOptionId>(capacity: 6);

@@ -8,6 +8,43 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowIgnoreOptionsUiTests
 {
     [AvaloniaFact]
+    public async Task IgnoredNumericExtensions_AreNotOfferedUntilTheirOwningIgnoreRuleIsDisabled()
+    {
+        using var project = UiTestProject.CreateWithIgnoredNumericExtensions();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            Assert.Contains(viewModel.Extensions, option => option.Name == ".1770912967592");
+            Assert.Contains(viewModel.Extensions, option => option.Name == ".1770912967593");
+            Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".1770912967589");
+            Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".1770912967590");
+            Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".1770912967591");
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetViewModel(window).Extensions.Any(option => option.Name == ".1770912967589") &&
+                      UiTestDriver.GetViewModel(window).Extensions.Any(option => option.Name == ".1770912967590"),
+                "empty-file numeric extensions to become available");
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetViewModel(window).Extensions.All(option =>
+                    option.Name is not ".1770912967589" and not ".1770912967590"),
+                "empty-file numeric extensions to be removed again");
+
+            Assert.Contains(UiTestDriver.GetViewModel(window).Extensions, option => option.Name == ".1770912967593");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task NewWorkspace_WithDynamicIgnoreEntries_KeepsDynamicOptionsCheckedByDefault()
     {
         using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
@@ -231,6 +268,32 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task ExplicitUncheckedGitIgnoreController_RemainsVisibleWhenDotFilesMaskItsOnlyImpact()
+    {
+        using var project = UiTestProject.CreateWithGitIgnoreDotFileOnlyWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: false);
+
+            await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: false);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFiles, isChecked: true);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task CleanPythonSmartController_RemainsHiddenUntilSmartArtifactAppears()
     {
         using var project = UiTestProject.CreateWithCleanPythonSmartWorkspace();
@@ -251,6 +314,98 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.SmartIgnore,
                 visible: true,
                 isChecked: true);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TopLevelSmartArtifactController_RemainsVisibleWhenAllIgnoreRulesAreDisabled()
+    {
+        using var project = UiTestProject.CreateWithTopLevelSmartArtifactWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            Assert.DoesNotContain(
+                UiTestDriver.GetViewModel(window).RootFolders,
+                option => string.Equals(option.Name, "obj", StringComparison.OrdinalIgnoreCase));
+
+            await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: false);
+            Assert.Contains(
+                UiTestDriver.GetViewModel(window).RootFolders,
+                option => string.Equals(option.Name, "obj", StringComparison.OrdinalIgnoreCase) && option.IsChecked);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SmartIgnoreNegativeMatrix_RefreshAndToggleCyclePrunesOnlyNewProvenArtifact()
+    {
+        using var project = UiTestProject.CreateWithSmartIgnoreNegativeMatrixWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: false);
+            await AssertSmartIgnoreNegativeSourcePathsAsync(window);
+            await AssertExtensionStatesAsync(
+                window,
+                visibleChecked: [".cs", ".json", ".md", ".nupkg", ".php", ".txt"],
+                hidden: [".user"]);
+
+            WriteTextFile(project.RootPath, Path.Combine("obj", "project.assets.json"), "{}\n");
+            WriteTextFile(project.RootPath, "App.csproj.user", "local state\n");
+            await UiTestDriver.RefreshProjectAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await AssertSmartIgnoreNegativeSourcePathsAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: false, "obj", "project.assets.json");
+            await WaitForExtensionStateAsync(window, ".user", visible: false);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: false);
+            await AssertSmartIgnoreNegativeSourcePathsAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "obj", "project.assets.json");
+            await WaitForExtensionStateAsync(window, ".user", visible: true, isChecked: true);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await AssertSmartIgnoreNegativeSourcePathsAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: false, "obj", "project.assets.json");
+            await WaitForExtensionStateAsync(window, ".user", visible: false);
         }
         finally
         {
@@ -593,8 +748,14 @@ public sealed class MainWindowIgnoreOptionsUiTests
             // some of them off. The next refresh must preserve those manual choices.
             UiTestDriver.GetViewModel(secondWindow).Extensions.Single(option => option.Name == ".log").IsChecked = false;
             await UiTestDriver.WaitForSelectionRefreshIdleAsync(secondWindow);
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(secondWindow, "generated");
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                secondWindow,
+                IgnoreOptionId.EmptyFolders,
+                visible: true,
+                isChecked: true);
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(secondWindow, IgnoreOptionId.EmptyFolders);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(secondWindow);
+            await UiTestDriver.ClickRootFolderCheckBoxAsync(secondWindow, "generated");
             await ApplySettingsAndWaitForIgnoreRefreshAsync(secondWindow);
 
             MutateExternalRefreshWorkspaceSecondWave(project.RootPath);
@@ -1000,8 +1161,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
             await AssertExtensionStatesAsync(
                 window,
-                visibleChecked: [".dll", ".log", ".js", ".pyc", ".env"],
-                hidden: [".xml"]);
+                visibleChecked: [".dll", ".log", ".js", ".pyc"],
+                hidden: [".xml", ".env"]);
             await AssertNestedPolyglotTreeStateAsync(
                 window,
                 visiblePaths:
@@ -1329,6 +1490,125 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 ideaVisible: true,
                 pycacheVisible: true);
             await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            blockingScanner.Release();
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task IgnoreAllRefresh_CancelRestoresStableSelectionTreeAndMetricsBeforeLateScanCompletes()
+    {
+        using var project = UiTestProject.CreateWithRootExtensionIgnoreStressWorkspace();
+        using var blockingScanner = new SwitchableBlockingFileSystemScanner(
+            project.RootPath,
+            ignoreCancellation: true);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            configureServices: services => services with
+            {
+                ScanOptionsUseCase = new ScanOptionsUseCase(blockingScanner)
+            });
+
+        try
+        {
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var englishIgnoreLabels = viewModel.IgnoreOptions
+                .Select(static option => (option.Id, option.Label))
+                .ToArray();
+            await UiTestDriver.RaiseMenuItemClickAsync(
+                UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageRuMenuItem"));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !englishIgnoreLabels.SequenceEqual(
+                    viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label))),
+                "ignore option labels to be localized before the rollback baseline is exercised");
+
+            var stableRoots = viewModel.RootFolders
+                .Select(static option => (option.Name, option.IsChecked))
+                .ToArray();
+            var stableExtensions = viewModel.Extensions
+                .Select(static option => (option.Name, option.IsChecked))
+                .ToArray();
+            var stableIgnoreOptions = viewModel.IgnoreOptions
+                .Select(static option => (option.Id, option.Label, option.IsChecked))
+                .ToArray();
+            var stableTreeNodes = viewModel.TreeNodes.ToArray();
+            var stableAllRootsChecked = viewModel.AllRootFoldersChecked;
+            var stableAllExtensionsChecked = viewModel.AllExtensionsChecked;
+            var stableAllIgnoreChecked = viewModel.AllIgnoreChecked;
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(
+                window,
+                out var stableTreeMetrics,
+                out var stableContentMetrics));
+
+            blockingScanner.EnableBlocking();
+            await UiTestDriver.ClickAsync(
+                window,
+                UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+            Assert.True(
+                blockingScanner.WaitForBlockedCall(TimeSpan.FromSeconds(10)),
+                "The ignore-all refresh did not reach the controlled scanner block.");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => viewModel.StatusBusy &&
+                      string.Equals(
+                          viewModel.StatusOperationText,
+                          viewModel.StatusOperationUpdatingOptions,
+                          StringComparison.Ordinal),
+                "the blocked ignore-all refresh to expose its cancellation action");
+
+            Assert.False(viewModel.AllIgnoreChecked);
+            Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
+
+            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+
+            Assert.Equal(stableAllRootsChecked, viewModel.AllRootFoldersChecked);
+            Assert.Equal(stableAllExtensionsChecked, viewModel.AllExtensionsChecked);
+            Assert.Equal(stableAllIgnoreChecked, viewModel.AllIgnoreChecked);
+            Assert.Equal(
+                stableRoots,
+                viewModel.RootFolders.Select(static option => (option.Name, option.IsChecked)).ToArray());
+            Assert.Equal(
+                stableExtensions,
+                viewModel.Extensions.Select(static option => (option.Name, option.IsChecked)).ToArray());
+            Assert.Equal(
+                stableIgnoreOptions,
+                viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
+            Assert.Equal(stableTreeNodes.Length, viewModel.TreeNodes.Count);
+            for (var index = 0; index < stableTreeNodes.Length; index++)
+                Assert.Same(stableTreeNodes[index], viewModel.TreeNodes[index]);
+
+            // The scanner intentionally ignores cancellation. Releasing it verifies that the
+            // invalidated late result cannot overwrite the synchronously restored presentation.
+            blockingScanner.Release();
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+
+            Assert.Equal(
+                stableRoots,
+                viewModel.RootFolders.Select(static option => (option.Name, option.IsChecked)).ToArray());
+            Assert.Equal(
+                stableExtensions,
+                viewModel.Extensions.Select(static option => (option.Name, option.IsChecked)).ToArray());
+            Assert.Equal(
+                stableIgnoreOptions,
+                viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
+            Assert.Equal(stableAllRootsChecked, viewModel.AllRootFoldersChecked);
+            Assert.Equal(stableAllExtensionsChecked, viewModel.AllExtensionsChecked);
+            Assert.Equal(stableAllIgnoreChecked, viewModel.AllIgnoreChecked);
+            Assert.Equal(stableTreeNodes.Length, viewModel.TreeNodes.Count);
+            for (var index = 0; index < stableTreeNodes.Length; index++)
+                Assert.Same(stableTreeNodes[index], viewModel.TreeNodes[index]);
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(
+                window,
+                out var restoredTreeMetrics,
+                out var restoredContentMetrics));
+            Assert.Equal(stableTreeMetrics, restoredTreeMetrics);
+            Assert.Equal(stableContentMetrics, restoredContentMetrics);
         }
         finally
         {
@@ -1712,6 +1992,26 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await WaitForExtensionStateAsync(window, extension, visible: true, isChecked: true);
         foreach (var extension in hidden)
             await WaitForExtensionStateAsync(window, extension, visible: false);
+    }
+
+    private static async Task AssertSmartIgnoreNegativeSourcePathsAsync(MainWindow window)
+    {
+        string[][] visiblePaths =
+        [
+            ["obj-backup", "project.assets.json"],
+            ["build", "README.md"],
+            ["build", "docs", "CMakeCache.txt"],
+            ["vendor", "src", "autoload.php"],
+            ["packages", "Alpha", "Alpha.nupkg"],
+            ["m2-backup", "repository", "service", "package.json"],
+            ["cmake-build", "CMakeCache.txt"]
+        ];
+
+        await UiTestDriver.WaitForConditionAsync(
+            window,
+            () => visiblePaths.All(path => ProjectTreeContainsPath(window, path)),
+            "all source lookalikes in the Smart Ignore negative matrix to remain visible");
+        await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
     }
 
     private static async Task WaitForProjectTreePathStateAsync(

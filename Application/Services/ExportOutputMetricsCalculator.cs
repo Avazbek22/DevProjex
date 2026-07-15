@@ -15,9 +15,9 @@ public static class ExportOutputMetricsCalculator
 			return ExportOutputMetrics.Empty;
 
 		var stats = GetNormalizedTextStats(text.AsSpan());
-		int chars = stats.NormalizedChars;
-		int lines = stats.LineBreaks + 1;
-		int tokens = EstimateTokens(chars);
+		long chars = stats.NormalizedChars;
+		long lines = stats.LineBreaks + 1L;
+		long tokens = EstimateTokens(chars);
 
 		return new ExportOutputMetrics(lines, chars, tokens);
 	}
@@ -68,10 +68,12 @@ public static class ExportOutputMetricsCalculator
 	{
 		private const int NormalizedNewLineChars = 1;
 
-		private int _chars;
-		private int _lineBreaks;
-		private int _trailingLineBreakChars;
-		private int _trailingLineBreaks;
+		// Aggregate values can legitimately exceed Int32 for workspace-sized previews.
+		// Keep the per-file snapshot compact, but never narrow the combined output metrics.
+		private long _chars;
+		private long _lineBreaks;
+		private long _trailingLineBreakChars;
+		private long _trailingLineBreaks;
 		private bool _anyWritten;
 
 		public void AppendFile(ContentFileMetrics file)
@@ -188,10 +190,10 @@ public static class ExportOutputMetricsCalculator
 	private static void AppendLiteralLine(
 		string text,
 		int newLineChars,
-		ref int chars,
-		ref int lineBreaks,
-		ref int trailingLineBreakChars,
-		ref int trailingLineBreaks)
+		ref long chars,
+		ref long lineBreaks,
+		ref long trailingLineBreakChars,
+		ref long trailingLineBreaks)
 	{
 		AppendRenderedLine(
 			renderedChars: text.Length,
@@ -204,13 +206,13 @@ public static class ExportOutputMetricsCalculator
 	}
 
 	private static void AppendRenderedLine(
-		int renderedChars,
-		int internalLineBreaks,
+		long renderedChars,
+		long internalLineBreaks,
 		int newLineChars,
-		ref int chars,
-		ref int lineBreaks,
-		ref int trailingLineBreakChars,
-		ref int trailingLineBreaks)
+		ref long chars,
+		ref long lineBreaks,
+		ref long trailingLineBreakChars,
+		ref long trailingLineBreaks)
 	{
 		chars += renderedChars + newLineChars;
 		lineBreaks += internalLineBreaks + 1;
@@ -226,8 +228,8 @@ public static class ExportOutputMetricsCalculator
 		trailingLineBreaks = 1;
 	}
 
-	private static int EstimateTokens(int chars) =>
-		chars <= 0 ? 0 : (chars + 3) / 4;
+	private static long EstimateTokens(long chars) =>
+		chars <= 0 ? 0 : (chars / 4) + (chars % 4 == 0 ? 0 : 1);
 
 	private static NormalizedTextStats GetNormalizedTextStats(ReadOnlySpan<char> text)
 	{
@@ -277,7 +279,7 @@ public readonly record struct ContentFileMetrics(
 	int TrailingNewlineChars = 0,
 	int TrailingNewlineLineBreaks = 0);
 
-public readonly record struct ExportOutputMetrics(int Lines, int Chars, int Tokens)
+public readonly record struct ExportOutputMetrics(long Lines, long Chars, long Tokens)
 {
 	public static ExportOutputMetrics Empty { get; } = new(0, 0, 0);
 }

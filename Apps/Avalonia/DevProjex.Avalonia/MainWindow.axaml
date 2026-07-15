@@ -586,6 +586,7 @@
                             <ColumnDefinition Width="*" />
                           </Grid.ColumnDefinitions>
                           <StackPanel Grid.Column="1"
+                                      Name="TreeItemContent"
                                       Orientation="Horizontal"
                                       Background="Transparent"
                                       Spacing="{DynamicResource TreeItemSpacingResource}">

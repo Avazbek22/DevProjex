@@ -3,7 +3,8 @@ namespace DevProjex.Avalonia.Coordinators;
 public sealed class TreeSearchCoordinator(
     MainWindowViewModel viewModel,
     TreeView treeView,
-    Action? onSearchApplied = null)
+    Action? onSearchApplied = null,
+    ITreeSearchMetricsSink? metricsSink = null)
     : IDisposable
 {
     private enum BringIntoViewResult
@@ -53,6 +54,7 @@ public sealed class TreeSearchCoordinator(
     private int _indexedRootCount;
     private int _searchVersion;
     private int _bringIntoViewVersion;
+    private double? _searchNavigationTargetHorizontalOffset;
     private int _searchExpansionEpoch;
     private bool _searchExpansionStateInitialized;
     private const int SearchQueryCacheLimit = 8;
@@ -148,6 +150,7 @@ public sealed class TreeSearchCoordinator(
 
     public void UpdateSearchMatches(bool normalizeTreeWhenEmptyQuery = true)
     {
+        var stopwatch = Stopwatch.StartNew();
         viewModel.SetSearchInProgress(false);
 
         lock (_searchCtsLock)
@@ -177,17 +180,30 @@ public sealed class TreeSearchCoordinator(
             }
 
             ApplySearchResultCore(query, Array.Empty<TreeNodeViewModel>());
+            metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
+                query,
+                stopwatch.Elapsed,
+                TotalNodes: 0,
+                MatchCount: 0,
+                UsedCache: false));
             return;
         }
 
         EnsureSearchIndexCurrent();
         var source = CreateSearchSource(query);
-        var matches = TryGetCachedMatches(query, out var cachedMatches)
+        var usedCache = TryGetCachedMatches(query, out var cachedMatches);
+        var matches = usedCache
             ? cachedMatches
             : CollectMatches(source, query);
         if (!ReferenceEquals(matches, cachedMatches))
             CacheMatches(query, matches);
         ApplySearchResultCore(query, matches);
+        metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
+            query,
+            stopwatch.Elapsed,
+            source.Count,
+            matches.Count,
+            usedCache));
     }
 
     public bool HasMatches => _searchMatches.Count > 0;
@@ -285,6 +301,7 @@ public sealed class TreeSearchCoordinator(
 
         _searchMatchIndex = (_searchMatchIndex + step + _searchMatches.Count) % _searchMatches.Count;
         SelectSearchMatch();
+        metricsSink?.RecordTreeSearchNavigation(step, _searchMatchIndex + 1, _searchMatches.Count);
     }
 
     public bool TryNavigateForCurrentQuery(int step)
@@ -330,16 +347,19 @@ public sealed class TreeSearchCoordinator(
         }
 
         var node = _searchMatches[_searchMatchIndex];
+        _searchNavigationTargetHorizontalOffset = CaptureTreeHorizontalOffset();
         node.EnsureParentsExpanded();
         SelectTreeNode(node);
         UpdateCurrentSearchMatch(node);
         UpdateSearchMatchSummary();
-        BringNodeIntoView(node);
+        var bringIntoViewVersion = BringNodeIntoView(node);
         treeView.Focus();
+        RestoreTreeHorizontalOffsetAfterSearchNavigation(bringIntoViewVersion);
     }
 
     private async Task RunSearchAsync(int version, CancellationToken token)
     {
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             string query = string.Empty;
@@ -361,15 +381,26 @@ public sealed class TreeSearchCoordinator(
             if (string.IsNullOrWhiteSpace(query))
             {
                 await Dispatcher.UIThread.InvokeAsync(
-                    () => ApplySearchResultCore(query, Array.Empty<TreeNodeViewModel>()),
+                    () =>
+                    {
+                        ApplySearchResultCore(query, Array.Empty<TreeNodeViewModel>());
+                        metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
+                            query,
+                            stopwatch.Elapsed,
+                            TotalNodes: 0,
+                            MatchCount: 0,
+                            UsedCache: false));
+                    },
                     DispatcherPriority.Background);
                 return;
             }
 
             List<TreeNodeViewModel> matches;
+            var usedCache = false;
             if (TryGetCachedMatches(query, out var cachedMatches))
             {
                 matches = cachedMatches;
+                usedCache = true;
             }
             else
             {
@@ -383,6 +414,12 @@ public sealed class TreeSearchCoordinator(
                     return;
 
                 ApplySearchResultCore(query, matches);
+                metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
+                    query,
+                    stopwatch.Elapsed,
+                    sourceNodes?.Count ?? 0,
+                    matches.Count,
+                    usedCache));
             }, DispatcherPriority.Background);
         }
         catch (OperationCanceledException)
@@ -807,10 +844,11 @@ public sealed class TreeSearchCoordinator(
         }
     }
 
-    private void BringNodeIntoView(TreeNodeViewModel node)
+    private int BringNodeIntoView(TreeNodeViewModel node)
     {
         var version = Interlocked.Increment(ref _bringIntoViewVersion);
         TryBringNodeIntoViewWithRetries(node, version, attempt: 0);
+        return version;
     }
 
     private void SelectTreeNode(TreeNodeViewModel node)
@@ -1027,10 +1065,10 @@ public sealed class TreeSearchCoordinator(
     {
         if (TryGetContainer(node, out var directContainer) && directContainer is not null)
         {
+            BringContainerIntoViewForSearchNavigation(directContainer);
             if (IsContainerVisibleInViewport(directContainer))
                 return BringIntoViewResult.Visible;
 
-            directContainer.BringIntoView();
             return IsContainerVisibleInViewport(directContainer)
                 ? BringIntoViewResult.Visible
                 : BringIntoViewResult.Pending;
@@ -1041,12 +1079,61 @@ public sealed class TreeSearchCoordinator(
         if (TryGetNearestRealizedAncestorContainer(node, out var ancestorContainer) && ancestorContainer is not null)
         {
             if (!IsContainerVisibleInViewport(ancestorContainer))
-                ancestorContainer.BringIntoView();
+                BringContainerIntoViewForSearchNavigation(ancestorContainer);
 
             return BringIntoViewResult.Pending;
         }
 
         return BringIntoViewResult.NotFound;
+    }
+
+    private void BringContainerIntoViewForSearchNavigation(TreeViewItem container)
+    {
+        var scrollViewer = GetTreeScrollViewer();
+        if (scrollViewer is null)
+        {
+            container.BringIntoView();
+            return;
+        }
+
+        var containerTopLeft = container.TranslatePoint(default, scrollViewer);
+        if (containerTopLeft is null)
+            return;
+
+        var horizontalTarget = ResolveTreeItemHorizontalScrollTarget(container);
+        var horizontalTopLeft = horizontalTarget.TranslatePoint(default, scrollViewer) ?? containerTopLeft.Value;
+        var currentOffset = scrollViewer.Offset;
+        var baseOffsetX = _searchNavigationTargetHorizontalOffset ?? currentOffset.X;
+        var itemLeftAtBaseOffset = currentOffset.X + horizontalTopLeft.X - baseOffsetX;
+        var targetY = ResolveVerticalOffsetForSearchNavigation(
+            currentOffset.Y,
+            containerTopLeft.Value.Y,
+            containerTopLeft.Value.Y + container.Bounds.Height,
+            scrollViewer.Viewport.Height,
+            scrollViewer.Extent.Height);
+        var targetX = ResolveHorizontalOffsetForSearchNavigation(
+            baseOffsetX,
+            itemLeftAtBaseOffset,
+            itemLeftAtBaseOffset + horizontalTarget.Bounds.Width,
+            scrollViewer.Viewport.Width,
+            scrollViewer.Extent.Width);
+
+        _searchNavigationTargetHorizontalOffset = targetX;
+
+        if (Math.Abs(targetX - currentOffset.X) < 0.5 && Math.Abs(targetY - currentOffset.Y) < 0.5)
+            return;
+
+        scrollViewer.Offset = new Vector(targetX, targetY);
+    }
+
+    private static Control ResolveTreeItemHorizontalScrollTarget(TreeViewItem container)
+    {
+        // TreeViewItem can be a stretched row container. Horizontal search navigation must
+        // use the actual row content width, otherwise the tree may side-scroll even when
+        // the visible text/icon block already fits inside the narrow preview tree island.
+        return container.FindDescendantOfType<Control>(
+            includeSelf: false,
+            visual => visual is Control { Name: "TreeItemContent" }) ?? container;
     }
 
     private bool TryGetContainer(TreeNodeViewModel node, out TreeViewItem? container)
@@ -1080,9 +1167,7 @@ public sealed class TreeSearchCoordinator(
 
     private bool IsContainerVisibleInViewport(TreeViewItem container)
     {
-        var scrollViewer = treeView.FindDescendantOfType<ScrollViewer>(
-            includeSelf: false,
-            visual => visual is ScrollViewer);
+        var scrollViewer = GetTreeScrollViewer();
         if (scrollViewer is null)
             return true;
 
@@ -1096,6 +1181,111 @@ public sealed class TreeSearchCoordinator(
 
         const double tolerance = 1.0;
         return bottom >= -tolerance && top <= viewportHeight + tolerance;
+    }
+
+    private ScrollViewer? GetTreeScrollViewer() =>
+        treeView.FindDescendantOfType<ScrollViewer>(
+            includeSelf: false,
+            visual => visual is ScrollViewer);
+
+    private double? CaptureTreeHorizontalOffset() =>
+        GetTreeScrollViewer()?.Offset.X;
+
+    private void RestoreTreeHorizontalOffsetAfterSearchNavigation(int version)
+    {
+        var targetOffsetX = _searchNavigationTargetHorizontalOffset;
+        if (targetOffsetX is null)
+            return;
+
+        RestoreTreeHorizontalOffset(targetOffsetX.Value);
+
+        treeView.Dispatcher.Post(
+            () => RestoreTreeHorizontalOffsetIfCurrent(version),
+            DispatcherPriority.Render);
+        treeView.Dispatcher.Post(
+            () => RestoreTreeHorizontalOffsetIfCurrent(version),
+            DispatcherPriority.Loaded);
+        treeView.Dispatcher.Post(
+            () => RestoreTreeHorizontalOffsetIfCurrent(version),
+            DispatcherPriority.Background);
+    }
+
+    private void RestoreTreeHorizontalOffsetIfCurrent(int version)
+    {
+        if (version != Volatile.Read(ref _bringIntoViewVersion))
+            return;
+
+        var targetOffsetX = _searchNavigationTargetHorizontalOffset;
+        if (targetOffsetX is null)
+            return;
+
+        RestoreTreeHorizontalOffset(targetOffsetX.Value);
+    }
+
+    private void RestoreTreeHorizontalOffset(double preservedOffsetX)
+    {
+        var scrollViewer = GetTreeScrollViewer();
+        if (scrollViewer is null)
+            return;
+
+        var targetX = ResolveClampedTreeHorizontalOffset(
+            preservedOffsetX,
+            scrollViewer.Extent.Width,
+            scrollViewer.Viewport.Width);
+        if (Math.Abs(scrollViewer.Offset.X - targetX) < 0.5)
+            return;
+
+        scrollViewer.Offset = new Vector(targetX, scrollViewer.Offset.Y);
+    }
+
+    internal static double ResolveClampedTreeHorizontalOffset(
+        double preservedOffsetX,
+        double extentWidth,
+        double viewportWidth)
+    {
+        var maxX = Math.Max(0, extentWidth - viewportWidth);
+        return Math.Clamp(preservedOffsetX, 0, maxX);
+    }
+
+    internal static double ResolveHorizontalOffsetForSearchNavigation(
+        double currentOffsetX,
+        double itemLeft,
+        double itemRight,
+        double viewportWidth,
+        double extentWidth)
+    {
+        const double tolerance = 1.0;
+        if (viewportWidth <= 0 ||
+            itemLeft >= -tolerance && itemRight <= viewportWidth + tolerance)
+        {
+            return ResolveClampedTreeHorizontalOffset(currentOffsetX, extentWidth, viewportWidth);
+        }
+
+        var targetX = itemLeft < 0
+            ? currentOffsetX + itemLeft
+            : currentOffsetX + itemRight - viewportWidth;
+
+        return ResolveClampedTreeHorizontalOffset(targetX, extentWidth, viewportWidth);
+    }
+
+    internal static double ResolveVerticalOffsetForSearchNavigation(
+        double currentOffsetY,
+        double itemTop,
+        double itemBottom,
+        double viewportHeight,
+        double extentHeight)
+    {
+        // Avalonia BringIntoView can adjust both axes too eagerly. Search navigation uses
+        // explicit offsets so horizontal scrolling happens only when the target is clipped.
+        if (viewportHeight <= 0 || itemBottom >= 0 && itemTop <= viewportHeight)
+            return currentOffsetY;
+
+        var targetY = itemTop < 0
+            ? currentOffsetY + itemTop
+            : currentOffsetY + itemBottom - viewportHeight;
+
+        var maxY = Math.Max(0, extentHeight - viewportHeight);
+        return Math.Clamp(targetY, 0, maxY);
     }
 
     private (IBrush highlightBackground, IBrush highlightForeground, IBrush normalForeground, IBrush currentBackground)

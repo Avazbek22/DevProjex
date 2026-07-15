@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Application.Selection;
 
 namespace DevProjex.Application.Services;
 
@@ -11,6 +12,8 @@ public sealed class ProjectAnalysisService(
 	IFileContentAnalyzer fileContentAnalyzer,
 	Func<DateTimeOffset>? utcNowProvider = null)
 {
+	private const int MaximumConcurrentContentMetricReads = 4;
+	private const int ContentMetricBatchSize = 1024;
 	private readonly Func<DateTimeOffset> _utcNowProvider = utcNowProvider ?? (() => DateTimeOffset.UtcNow);
 
 	public async Task<ProjectAnalysisReport> AnalyzeAsync(
@@ -40,24 +43,83 @@ public sealed class ProjectAnalysisService(
 			useAllRootFoldersForDefaults: request.SelectedRootFolders is null,
 			request.SelectedIgnoreOptions,
 			cancellationToken);
-		var rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
-		var scan = scanOptions.Execute(new ScanOptionsRequest(rootPath, rules), cancellationToken);
+		var discoveryRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		ScanOptionsResult scan;
+		ProjectTreeInventorySnapshot? treeInventory = null;
+		IReadOnlyList<string> allowedRootFolders;
+		IgnoreRules rules;
+		if (request.SelectedRootFolders is null &&
+		    scanOptions.SupportsWorkspaceSnapshots &&
+		    buildTree.SupportsCompositeInventory)
+		{
+			var rootFolders = scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken);
+			var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, rootFolders.Value);
+			allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
+				rootPath,
+				rootFolders.Value,
+				rootProjectionRules,
+				cancellationToken);
+			rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
+			var allowedRootFolderSet = allowedRootFolders.ToHashSet(PathComparer.Default);
+			treeInventory = buildTree.ReadCompositeInventory(
+				rootPath,
+				allowedRootFolderSet,
+				discoveryRules,
+				rules,
+				cancellationToken);
 
-		var allowedRootFolders = request.SelectedRootFolders is null
-			? scan.RootFolders.ToArray()
-			: selectedRootFolders.ToArray();
+			var availableExtensions = new List<string>(
+				ProjectTreeInventoryExtensionDiscovery.GetVisibleExtensions(
+					treeInventory,
+					discoveryRules,
+					cancellationToken));
+			availableExtensions.Sort(StringComparer.OrdinalIgnoreCase);
+			scan = new ScanOptionsResult(
+				Extensions: availableExtensions,
+				RootFolders: allowedRootFolders,
+				RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
+				HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied);
+		}
+		else
+		{
+			scan = scanOptions.Execute(
+				new ScanOptionsRequest(rootPath, discoveryRules),
+				cancellationToken);
+			if (request.SelectedRootFolders is null)
+			{
+				var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, scan.RootFolders);
+				allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
+					rootPath,
+					scan.RootFolders,
+					rootProjectionRules,
+					cancellationToken);
+				scan = scan with { RootFolders = allowedRootFolders };
+			}
+			else
+			{
+				allowedRootFolders = selectedRootFolders.ToArray();
+			}
+			rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
+		}
+
 		var allowedExtensions = request.SelectedExtensions is null
 			? scan.Extensions.ToArray()
 			: NormalizeExtensions(request.SelectedExtensions).ToArray();
 
-		rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
-		var treeResult = buildTree.Execute(new BuildTreeRequest(
+		var treeRequest = new BuildTreeRequest(
 			rootPath,
 			new TreeFilterOptions(
 				AllowedExtensions: allowedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 				AllowedRootFolders: allowedRootFolders.ToHashSet(PathComparer.Default),
-				IgnoreRules: rules)),
-			cancellationToken);
+				IgnoreRules: rules));
+		var treeResult = treeInventory is null
+			? buildTree.Execute(treeRequest, cancellationToken)
+			: buildTree.ExecuteWithInventory(treeRequest, treeInventory, cancellationToken).Tree;
+		if (request.SelectedRootFolders is null)
+		{
+			allowedRootFolders = GetVisibleRootFolderNames(treeResult.Root);
+			scan = scan with { RootFolders = allowedRootFolders };
+		}
 		loadingStopwatch.Stop();
 
 		return new LoadedProjectAnalysisRequest(
@@ -71,6 +133,18 @@ public sealed class ProjectAnalysisService(
 			RootAccessDenied: scan.RootAccessDenied || treeResult.RootAccessDenied,
 			HadAccessDenied: scan.HadAccessDenied || treeResult.HadAccessDenied,
 			KnownLoadingElapsed: loadingStopwatch.Elapsed);
+	}
+
+	private static IReadOnlyList<string> GetVisibleRootFolderNames(TreeNodeDescriptor root)
+	{
+		var names = new List<string>();
+		foreach (var child in root.Children)
+		{
+			if (child.IsDirectory)
+				names.Add(child.DisplayName);
+		}
+
+		return names;
 	}
 
 	public async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
@@ -171,26 +245,50 @@ public sealed class ProjectAnalysisService(
 		if (orderedFilePaths is null || orderedFilePaths.Count == 0)
 			return ExportOutputMetrics.Empty;
 
-		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		foreach (var path in orderedFilePaths)
+		var parallelOptions = new ParallelOptions
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var metrics = await fileContentAnalyzer.GetTextFileMetricsAsync(path, cancellationToken)
-				.ConfigureAwait(false);
-			if (metrics is null)
-				continue;
+			MaxDegreeOfParallelism = Math.Min(
+				MaximumConcurrentContentMetricReads,
+				ScanParallelismPolicy.MaxDegreeOfParallelism),
+			CancellationToken = cancellationToken
+		};
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		var batchMetrics = new TextFileMetrics?[Math.Min(ContentMetricBatchSize, orderedFilePaths.Count)];
+		for (var batchStart = 0; batchStart < orderedFilePaths.Count; batchStart += batchMetrics.Length)
+		{
+			var batchCount = Math.Min(batchMetrics.Length, orderedFilePaths.Count - batchStart);
+			await Parallel.ForAsync(
+				0,
+				batchCount,
+				parallelOptions,
+				async (batchIndex, token) =>
+				{
+					batchMetrics[batchIndex] = await fileContentAnalyzer
+						.GetTextFileMetricsAsync(orderedFilePaths[batchStart + batchIndex], token)
+						.ConfigureAwait(false);
+				}).ConfigureAwait(false);
 
-			accumulator.AppendFile(new ContentFileMetrics(
-				Path: path,
-				SizeBytes: metrics.SizeBytes,
-				LineCount: metrics.LineCount,
-				CharCount: metrics.CharCount,
-				IsEmpty: metrics.IsEmpty,
-				IsWhitespaceOnly: metrics.IsWhitespaceOnly,
-				IsEstimated: metrics.IsEstimated,
-				CrLfPairCount: metrics.CrLfPairCount,
-				TrailingNewlineChars: metrics.TrailingNewlineChars,
-				TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+			for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var metrics = batchMetrics[batchIndex];
+				if (metrics is null)
+					continue;
+
+				accumulator.AppendFile(new ContentFileMetrics(
+					Path: orderedFilePaths[batchStart + batchIndex],
+					SizeBytes: metrics.SizeBytes,
+					LineCount: metrics.LineCount,
+					CharCount: metrics.CharCount,
+					IsEmpty: metrics.IsEmpty,
+					IsWhitespaceOnly: metrics.IsWhitespaceOnly,
+					IsEstimated: metrics.IsEstimated,
+					CrLfPairCount: metrics.CrLfPairCount,
+					TrailingNewlineChars: metrics.TrailingNewlineChars,
+					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+			}
+
+			Array.Clear(batchMetrics, 0, batchCount);
 		}
 
 		return accumulator.ToMetrics();

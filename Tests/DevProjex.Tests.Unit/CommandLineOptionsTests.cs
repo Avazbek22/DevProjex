@@ -45,6 +45,8 @@ public sealed class CommandLineOptionsTests
 		Assert.True(result.Options.Report.Enabled);
 		Assert.Equal("/tmp/report.json", result.Options.Report.Path);
 		Assert.Equal(StartupReportFormat.Json, result.Options.Report.Format);
+		Assert.False(result.Options.Benchmark.Enabled);
+		Assert.False(result.Options.SessionMetrics.Enabled);
 		Assert.True(result.Options.Export.Enabled);
 		Assert.Equal(StartupExportMode.TreeContent, result.Options.Export.Mode);
 		Assert.Equal("/tmp/context.txt", result.Options.Export.Path);
@@ -170,6 +172,9 @@ public sealed class CommandLineOptionsTests
 	[InlineData("silent", CommandLineOptionTokens.Silent)]
 	[InlineData("help", CommandLineOptionTokens.Help)]
 	[InlineData("version", CommandLineOptionTokens.Version)]
+	[InlineData("benchmark", CommandLineOptionTokens.Benchmark)]
+	[InlineData("benchmark-ui", CommandLineOptionTokens.BenchmarkUi)]
+	[InlineData("session-metrics", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("export", CommandLineOptionTokens.Export)]
 	[InlineData("report", CommandLineOptionTokens.Report)]
 	[InlineData("tree-format", CommandLineOptionTokens.TreeFormat)]
@@ -368,6 +373,194 @@ public sealed class CommandLineOptionsTests
 
 		AssertInvalid(result, "invalid-report-format");
 		Assert.True(result.Options.Report.Enabled);
+	}
+
+	[Fact]
+	public void Parse_ReadsBenchmarkPathAndOutput()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Benchmark, "/tmp/root",
+			CommandLineOptionTokens.BenchmarkOutput, "/tmp/result.json"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Benchmark.Enabled);
+		Assert.Equal("/tmp/root", result.Options.Benchmark.Path);
+		Assert.Equal("/tmp/result.json", result.Options.Benchmark.OutputPath);
+	}
+
+	[Fact]
+	public void Parse_ReadsInlineBenchmarkValues()
+	{
+		var result = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.Benchmark}=/tmp/root",
+			$"{CommandLineOptionTokens.BenchmarkOutput}=/tmp/result.json"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.Benchmark.Enabled);
+		Assert.Equal("/tmp/root", result.Options.Benchmark.Path);
+		Assert.Equal("/tmp/result.json", result.Options.Benchmark.OutputPath);
+	}
+
+	[Fact]
+	public void Parse_ReadsUiBenchmarkPathAndOutput()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.BenchmarkUi, "/tmp/root",
+			CommandLineOptionTokens.BenchmarkOutput, "/tmp/result.json"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.UiBenchmark.Enabled);
+		Assert.Equal("/tmp/root", result.Options.UiBenchmark.Path);
+		Assert.Equal("/tmp/result.json", result.Options.UiBenchmark.OutputPath);
+	}
+
+	[Fact]
+	public void Parse_ReadsInlineUiBenchmarkValues()
+	{
+		var result = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.BenchmarkUi}=/tmp/root",
+			$"{CommandLineOptionTokens.BenchmarkOutput}=/tmp/result.json"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.UiBenchmark.Enabled);
+		Assert.Equal("/tmp/root", result.Options.UiBenchmark.Path);
+		Assert.Equal("/tmp/result.json", result.Options.UiBenchmark.OutputPath);
+	}
+
+	[Fact]
+	public void Parse_RejectsBenchmarkOutputWithoutBenchmark()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.BenchmarkOutput, "/tmp/result.json"]);
+
+		AssertInvalid(result, "benchmark-output-requires-benchmark");
+	}
+
+	[Theory]
+	[InlineData("--path")]
+	[InlineData("positional")]
+	public void Parse_RejectsBenchmarkWithSeparateProjectTarget(string targetStyle)
+	{
+		var args = targetStyle == "--path"
+			? new[] { CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.Path, "/tmp/other" }
+			: new[] { CommandLineOptionTokens.Benchmark, "/tmp/root", "/tmp/other" };
+
+		var result = CommandLineOptions.Parse(args);
+
+		AssertInvalid(result, "conflicting-benchmark-path");
+	}
+
+	[Theory]
+	[InlineData("--no-ui")]
+	[InlineData("--silent")]
+	[InlineData("--strict")]
+	[InlineData("--report")]
+	[InlineData("--export")]
+	[InlineData("--include-root")]
+	[InlineData("--include-extension")]
+	[InlineData("--ignore")]
+	[InlineData("--preview")]
+	[InlineData("--tree-filter")]
+	public void Parse_RejectsBenchmarkWithNonStandardScenarioOptions(string option)
+	{
+		var args = option switch
+		{
+			"--export" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.Export, "tree"],
+			"--include-root" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.IncludeRoot, "src"],
+			"--include-extension" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.IncludeExtension, "cs"],
+			"--ignore" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone],
+			"--tree-filter" => [CommandLineOptionTokens.Benchmark, "/tmp/root", CommandLineOptionTokens.TreeFilter, "src"],
+			_ => new[] { CommandLineOptionTokens.Benchmark, "/tmp/root", option }
+		};
+
+		var result = CommandLineOptions.Parse(args);
+
+		AssertInvalid(result, "conflicting-benchmark-options");
+	}
+
+	[Theory]
+	[InlineData("--path")]
+	[InlineData("positional")]
+	public void Parse_RejectsUiBenchmarkWithSeparateProjectTarget(string targetStyle)
+	{
+		var args = targetStyle == "--path"
+			? new[] { CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.Path, "/tmp/other" }
+			: new[] { CommandLineOptionTokens.BenchmarkUi, "/tmp/root", "/tmp/other" };
+
+		var result = CommandLineOptions.Parse(args);
+
+		AssertInvalid(result, "conflicting-ui-benchmark-path");
+	}
+
+	[Theory]
+	[InlineData("--no-ui")]
+	[InlineData("--silent")]
+	[InlineData("--strict")]
+	[InlineData("--report")]
+	[InlineData("--export")]
+	[InlineData("--benchmark")]
+	[InlineData("--session-metrics")]
+	[InlineData("--ui-benchmark-script")]
+	[InlineData("--include-root")]
+	[InlineData("--include-extension")]
+	[InlineData("--ignore")]
+	[InlineData("--preview")]
+	[InlineData("--tree-filter")]
+	public void Parse_RejectsUiBenchmarkWithNonStandardScenarioOptions(string option)
+	{
+		var args = option switch
+		{
+			"--export" => [CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.Export, "tree"],
+			"--benchmark" => [CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.Benchmark, "/tmp/root"],
+			"--session-metrics" => [CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.SessionMetrics, "/tmp/root"],
+			"--ui-benchmark-script" => [CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.UiBenchmarkScript, "standard"],
+			"--include-root" => [CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.IncludeRoot, "src"],
+			"--include-extension" => [CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.IncludeExtension, "cs"],
+			"--ignore" => [CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone],
+			"--tree-filter" => [CommandLineOptionTokens.BenchmarkUi, "/tmp/root", CommandLineOptionTokens.TreeFilter, "src"],
+			_ => new[] { CommandLineOptionTokens.BenchmarkUi, "/tmp/root", option }
+		};
+
+		var result = CommandLineOptions.Parse(args);
+
+		AssertInvalid(result, "conflicting-ui-benchmark-options");
+	}
+
+	[Fact]
+	public void Parse_ReadsInternalUiBenchmarkScriptWithSessionMetrics()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+			CommandLineOptionTokens.SessionMetricsOutput, "/tmp/session.json",
+			CommandLineOptionTokens.UiBenchmarkScript, "standard"
+		]);
+
+		AssertValid(result);
+		Assert.True(result.Options.SessionMetrics.Enabled);
+		Assert.True(result.Options.UiBenchmarkScript.Enabled);
+		Assert.Equal(StartupUiBenchmarkScript.Standard, result.Options.UiBenchmarkScript.Script);
+	}
+
+	[Fact]
+	public void Parse_RejectsInternalUiBenchmarkScriptWithoutSessionMetrics()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.UiBenchmarkScript, "standard"]);
+
+		AssertInvalid(result, "ui-benchmark-script-requires-session-metrics");
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedInternalUiBenchmarkScript()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+			CommandLineOptionTokens.UiBenchmarkScript, "custom"
+		]);
+
+		AssertInvalid(result, "invalid-ui-benchmark-script");
 	}
 
 	[Theory]
@@ -573,6 +766,76 @@ public sealed class CommandLineOptionsTests
 		AssertValid(result);
 		Assert.Equal("Project Services=Core", result.Options.Ui.TreeFilter);
 		Assert.Equal(TreeTextFormat.Markdown, result.Options.Ui.TreeFormat);
+	}
+
+	[Fact]
+	public void Parse_SessionMetricsOpensUiProjectAndAllowsDesktopStartupOptions()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/root folder",
+			CommandLineOptionTokens.SessionMetricsOutput, "/tmp/reports/session metrics.json",
+			CommandLineOptionTokens.PreviewMode, "tree-content",
+			CommandLineOptionTokens.TreeFormat, "xml",
+			CommandLineOptionTokens.TreeFilter, "Services"
+		]);
+
+		AssertValid(result);
+		Assert.Null(result.Options.Path);
+		Assert.True(result.Options.SessionMetrics.Enabled);
+		Assert.Equal("/tmp/root folder", result.Options.SessionMetrics.Path);
+		Assert.Equal("/tmp/reports/session metrics.json", result.Options.SessionMetrics.OutputPath);
+		Assert.True(result.Options.Ui.OpenPreview);
+		Assert.Equal(StartupPreviewMode.TreeContent, result.Options.Ui.PreviewMode);
+		Assert.Equal(TreeTextFormat.Xml, result.Options.Ui.TreeFormat);
+		Assert.Equal("Services", result.Options.Ui.TreeFilter);
+	}
+
+	[Fact]
+	public void Parse_SessionMetricsInlineValuesMatchSeparatedValues()
+	{
+		var separated = CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+			CommandLineOptionTokens.SessionMetricsOutput, "/tmp/session.json",
+			CommandLineOptionTokens.Preview
+		]);
+		var inline = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.SessionMetrics}=/tmp/root",
+			$"{CommandLineOptionTokens.SessionMetricsOutput}=/tmp/session.json",
+			CommandLineOptionTokens.Preview
+		]);
+
+		AssertValid(separated);
+		AssertValid(inline);
+		AssertEquivalentOptions(separated.Options, inline.Options);
+	}
+
+	[Theory]
+	[InlineData("with-path")]
+	[InlineData("with-positional-path")]
+	[InlineData("with-last")]
+	[InlineData("with-no-ui")]
+	[InlineData("with-report")]
+	[InlineData("with-export")]
+	[InlineData("with-benchmark")]
+	[InlineData("with-ui-benchmark")]
+	[InlineData("with-selection")]
+	[InlineData("stdout-output")]
+	public void Parse_RejectsSessionMetricsConflicts(string scenario)
+	{
+		var result = CommandLineOptions.Parse(BuildSessionMetricsConflictArgs(scenario));
+
+		Assert.False(result.Success);
+		Assert.Contains(result.Errors, static error =>
+			error.Code.StartsWith("conflicting-session-metrics", StringComparison.Ordinal) ||
+			error.Code == "session-metrics-output-requires-file");
+	}
+
+	[Fact]
+	public void Parse_RejectsSessionMetricsOutputWithoutSessionMetrics()
+	{
+		var result = CommandLineOptions.Parse([CommandLineOptionTokens.SessionMetricsOutput, "/tmp/session.json"]);
+
+		AssertInvalid(result, "session-metrics-output-requires-session-metrics");
 	}
 
 	[Fact]
@@ -968,6 +1231,78 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void ToArguments_PreservesBenchmarkCommand()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			Benchmark = new StartupBenchmarkOptions(true, "/tmp/root folder", "/tmp/result folder/benchmark.json")
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--benchmark", args);
+		Assert.Contains("\"/tmp/root folder\"", args);
+		Assert.Contains("--benchmark-output", args);
+		Assert.Contains("\"/tmp/result folder/benchmark.json\"", args);
+	}
+
+	[Fact]
+	public void ToArguments_PreservesUiBenchmarkCommand()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			UiBenchmark = new StartupUiBenchmarkOptions(true, "/tmp/root folder", "/tmp/result folder/ui-benchmark.json")
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--benchmark-ui", args);
+		Assert.Contains("\"/tmp/root folder\"", args);
+		Assert.Contains("--benchmark-output", args);
+		Assert.Contains("\"/tmp/result folder/ui-benchmark.json\"", args);
+	}
+
+	[Fact]
+	public void ToArguments_PreservesSessionMetricsCommand()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			SessionMetrics = new StartupSessionMetricsOptions(true, "/tmp/root folder", "/tmp/result folder/session.json"),
+			Ui = StartupUiOptions.Default with
+			{
+				OpenPreview = true,
+				TreeFormat = TreeTextFormat.Markdown
+			}
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--session-metrics", args);
+		Assert.Contains("\"/tmp/root folder\"", args);
+		Assert.Contains("--session-metrics-output", args);
+		Assert.Contains("\"/tmp/result folder/session.json\"", args);
+		Assert.Contains("--preview", args);
+		Assert.Contains("--tree-format", args);
+		Assert.Contains("md", args);
+	}
+
+	[Fact]
+	public void ToArguments_PreservesInternalUiBenchmarkScriptCommand()
+	{
+		var options = CommandLineOptions.Empty with
+		{
+			SessionMetrics = new StartupSessionMetricsOptions(true, "/tmp/root folder", "/tmp/result folder/session.json"),
+			UiBenchmarkScript = new StartupUiBenchmarkScriptOptions(true, StartupUiBenchmarkScript.Standard)
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains("--session-metrics", args);
+		Assert.Contains("--ui-benchmark-script", args);
+		Assert.Contains("standard", args);
+	}
+
+	[Fact]
 	public void ToArguments_PreservesExplicitAsciiExportFormatForRelaunch()
 	{
 		var options = CommandLineOptions.Empty with
@@ -1161,6 +1496,62 @@ public sealed class CommandLineOptionsTests
 		AssertInvalid(result, "missing-value");
 	}
 
+	private static string[] BuildSessionMetricsConflictArgs(string scenario) =>
+		scenario switch
+		{
+			"with-path" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Path, "/tmp/root"
+			],
+			"with-positional-path" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				"/tmp/other"
+			],
+			"with-last" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Last
+			],
+			"with-no-ui" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.NoUi
+			],
+			"with-report" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Report
+			],
+			"with-export" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Export, "tree"
+			],
+			"with-benchmark" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Benchmark, "/tmp/root"
+			],
+			"with-ui-benchmark" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.BenchmarkUi, "/tmp/root"
+			],
+			"with-selection" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.Roots, "src"
+			],
+			"stdout-output" =>
+			[
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+				CommandLineOptionTokens.SessionMetricsOutput, CommandLineOptionTokens.StandardOutputReportPath
+			],
+			_ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unknown session metrics conflict scenario.")
+		};
+
 	private static void AssertValid(CommandLineParseResult result)
 	{
 		Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors.Select(static error => error.Message)));
@@ -1182,6 +1573,10 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(expected.ShowHelp, actual.ShowHelp);
 		Assert.Equal(expected.ShowVersion, actual.ShowVersion);
 		Assert.Equal(expected.Report, actual.Report);
+		Assert.Equal(expected.Benchmark, actual.Benchmark);
+		Assert.Equal(expected.UiBenchmark, actual.UiBenchmark);
+		Assert.Equal(expected.SessionMetrics, actual.SessionMetrics);
+		Assert.Equal(expected.UiBenchmarkScript, actual.UiBenchmarkScript);
 		Assert.Equal(expected.Export, actual.Export);
 		Assert.Equal(expected.Export.FormatSpecified, actual.Export.FormatSpecified);
 		Assert.Equal(expected.Ui, actual.Ui);
@@ -1212,6 +1607,9 @@ public sealed class CommandLineOptionsTests
 		{ CommandLineOptionTokens.Language, "ru" },
 		{ CommandLineOptionTokens.ReportPath, "/tmp/report.json" },
 		{ CommandLineOptionTokens.ReportFormat, "json" },
+		{ CommandLineOptionTokens.Benchmark, "/tmp/root" },
+		{ CommandLineOptionTokens.BenchmarkUi, "/tmp/root" },
+		{ CommandLineOptionTokens.SessionMetrics, "/tmp/root" },
 		{ CommandLineOptionTokens.Export, "tree-content" },
 		{ CommandLineOptionTokens.Output, "/tmp/context.txt" },
 		{ CommandLineOptionTokens.ShortOutput, "/tmp/context.txt" },
@@ -1230,6 +1628,12 @@ public sealed class CommandLineOptionsTests
 		CommandLineOptionTokens.Language,
 		CommandLineOptionTokens.ReportPath,
 		CommandLineOptionTokens.ReportFormat,
+		CommandLineOptionTokens.Benchmark,
+		CommandLineOptionTokens.BenchmarkUi,
+		CommandLineOptionTokens.BenchmarkOutput,
+		CommandLineOptionTokens.SessionMetrics,
+		CommandLineOptionTokens.SessionMetricsOutput,
+		CommandLineOptionTokens.UiBenchmarkScript,
 		CommandLineOptionTokens.Export,
 		CommandLineOptionTokens.Output,
 		CommandLineOptionTokens.ShortOutput,

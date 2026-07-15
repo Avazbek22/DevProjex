@@ -3,14 +3,15 @@ using DevProjex.Application.Services;
 using DevProjex.Application.Models;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 internal static class ProjectLoadWorkflowRefreshHarness
 {
-    public static WorkflowServices CreateServices()
+    public static WorkflowServices CreateServices(IFileSystemScanner? scanner = null)
     {
-        var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+        var scanOptions = new ScanOptionsUseCase(scanner ?? new FileSystemScanner());
         var filterSelectionService = new FilterOptionSelectionService();
         var ignoreOptionsService = ProjectLoadWorkflowRuntime.CreateIgnoreOptionsService();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
@@ -102,9 +103,21 @@ internal static class ProjectLoadWorkflowRefreshHarness
 
     public static SelectionRefreshContext BuildConvergedContext(
         string rootPath,
-        SelectionRefreshSnapshot snapshot)
+        SelectionRefreshSnapshot snapshot,
+        SelectionRefreshContext previousContext)
     {
-        return CreateContextFromSnapshot(rootPath, snapshot);
+        var context = CreateContextFromSnapshot(rootPath, snapshot);
+        return context with
+        {
+            RootOptionStateCache = MergeOptionStates(
+                previousContext.RootOptionStateCache,
+                snapshot.RootOptions,
+                PathComparer.Default),
+            ExtensionOptionStateCache = MergeOptionStates(
+                previousContext.ExtensionOptionStateCache,
+                snapshot.EffectiveExtensionOptions,
+                StringComparer.OrdinalIgnoreCase)
+        };
     }
 
     public static SelectionRefreshContext CreateContextFromSnapshot(
@@ -399,6 +412,24 @@ internal static class ProjectLoadWorkflowRefreshHarness
             cache[option.Name] = option.IsChecked;
 
         return cache;
+    }
+
+    private static Dictionary<string, bool> MergeOptionStates(
+        IReadOnlyDictionary<string, bool>? previousStates,
+        IEnumerable<SelectionOption>? visibleOptions,
+        StringComparer comparer)
+    {
+        var merged = previousStates is null
+            ? new Dictionary<string, bool>(comparer)
+            : new Dictionary<string, bool>(previousStates, comparer);
+
+        if (visibleOptions is null)
+            return merged;
+
+        foreach (var option in visibleOptions)
+            merged[option.Name] = option.IsChecked;
+
+        return merged;
     }
 
     private static Dictionary<string, bool> BuildExtensionOptionStateCache(

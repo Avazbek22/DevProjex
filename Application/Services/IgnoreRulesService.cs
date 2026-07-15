@@ -30,7 +30,12 @@ public sealed class IgnoreRulesService(
 		var requestedGitIgnore = availability.IncludeGitIgnore &&
 								 selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 
-		// Smart ignore is hidden for single-project gitignore scenario and follows UseGitIgnore toggle there.
+		// Hybrid ignore has two controller modes:
+		// - In mixed workspaces, .gitignore and Smart Ignore are independent because some
+		//   scopes may have repository rules while other scopes only have generated artifacts.
+		// - In a single .gitignore scope, Smart Ignore is intentionally hidden and follows
+		//   Use .gitignore. Users get one practical "respect project ignore policy" switch
+		//   instead of two overlapping switches that hide the same build output.
 		var smartIgnoreFollowsGitIgnore = !availability.IncludeSmartIgnore &&
 		                                  context.IsSingleScopeWithGitIgnore;
 		var useSmartIgnore = availability.IncludeSmartIgnore
@@ -51,6 +56,10 @@ public sealed class IgnoreRulesService(
 			? scopedMatchers[0].Matcher
 			: GitIgnoreMatcher.Empty;
 
+		// Candidate smart rules are built even when Smart Ignore is currently unchecked or
+		// hidden under Use .gitignore. The scanner uses candidates to measure whether a
+		// controller would affect the visible tree; without that evidence, a controller can
+		// hide its own root-level artifacts and then disappear from the UI.
 		var smartCandidate = availability.IncludeSmartIgnore || smartIgnoreFollowsGitIgnore
 			? BuildScopedSmartIgnore(context)
 			: ScopedSmartIgnoreBuildResult.Empty;
@@ -93,6 +102,8 @@ public sealed class IgnoreRulesService(
 			IgnoreExtensionlessFiles = selectedOptions.Contains(IgnoreOptionId.ExtensionlessFiles),
 			UseGitIgnore = useGitIgnore,
 			UseSmartIgnore = useSmartIgnore,
+			GitIgnoreCandidateMatchesActiveRules = useGitIgnore,
+			SmartIgnoreCandidateMatchesActiveRules = useSmartIgnore,
 			GitIgnoreMatcher = gitIgnoreMatcher,
 			ScopedGitIgnoreMatchers = scopedMatchers,
 			GitIgnoreCandidateMatcher = candidateGitIgnoreMatcher,
@@ -103,6 +114,10 @@ public sealed class IgnoreRulesService(
 			ScopedSmartIgnoreCandidateMatchers = smartCandidate.ScopedMatchers,
 			SmartIgnoreCandidateFolders = smartCandidate.FolderNames,
 			SmartIgnoreCandidateFiles = smartCandidate.FileNames,
+			SmartArtifactIgnoreMatcher = useSmartIgnore
+				? SmartArtifactIgnoreMatcher.Default
+				: SmartArtifactIgnoreMatcher.Empty,
+			SmartArtifactIgnoreCandidateMatcher = SmartArtifactIgnoreMatcher.Default,
 			SmartIgnoreFollowsGitIgnore = smartIgnoreFollowsGitIgnore
 		};
 	}
@@ -123,9 +138,15 @@ public sealed class IgnoreRulesService(
 		if (context.Scopes.Count == 0)
 			return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
 
+		// Runtime availability is broader than UI availability. The rule builder must be
+		// able to construct candidate matchers for impact probes even when the UI later
+		// decides a controller has zero visible effect and hides the checkbox.
 		var includeGitIgnore = context.HasAnyGitIgnore;
 		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore && context.HasAnyWithoutGitIgnore;
-		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
+		return new IgnoreOptionsAvailability(
+			includeGitIgnore,
+			includeSmartIgnore,
+			SmartIgnoreFollowsGitIgnore: context.IsSingleScopeWithGitIgnore);
 	}
 
 	private IgnoreOptionsAvailability BuildUiIgnoreOptionsAvailability(ProjectScanContext context)
@@ -133,11 +154,18 @@ public sealed class IgnoreRulesService(
 		if (context.Scopes.Count == 0)
 			return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
 
+		// UI availability is intentionally evidence-based. A Smart Ignore checkbox should
+		// appear only when there is a project marker, a rule-specific root artifact, or a
+		// signature-backed generic artifact candidate. That keeps clean workspaces quiet
+		// while still surfacing the option for messy polyglot folders.
 		var includeGitIgnore = context.HasAnyGitIgnore;
 		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore &&
 								 context.HasAnyWithoutGitIgnore &&
 								 HasRelevantSmartIgnoreCandidates(context);
-		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
+		return new IgnoreOptionsAvailability(
+			includeGitIgnore,
+			includeSmartIgnore,
+			SmartIgnoreFollowsGitIgnore: context.IsSingleScopeWithGitIgnore);
 	}
 
 	private bool HasRelevantSmartIgnoreCandidates(ProjectScanContext context)
@@ -150,6 +178,10 @@ public sealed class IgnoreRulesService(
 
 			if (scope.HasProjectMarker || HasSmartCandidatesInRootEntries(context, scope.RootPath))
 				return true;
+
+			var rootFacts = smartIgnore.RootFactsProvider.Get(scope.RootPath);
+			if (SmartArtifactIgnoreMatcher.Default.HasConfirmedArtifactDirectory(rootFacts))
+				return true;
 		}
 
 		return false;
@@ -161,21 +193,8 @@ public sealed class IgnoreRulesService(
 		if (smart.FolderNames.Count == 0)
 			return false;
 
-		try
-		{
-			foreach (var directory in Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly))
-			{
-				var name = Path.GetFileName(directory);
-				if (smart.FolderNames.Contains(name))
-					return true;
-			}
-		}
-		catch
-		{
-			// Best-effort check.
-		}
-
-		return false;
+		var rootFacts = smartIgnore.RootFactsProvider.Get(rootPath);
+		return rootFacts.HasAnyDirectoryName(smart.FolderNames);
 	}
 
 	private ScopedSmartIgnoreBuildResult BuildScopedSmartIgnore(ProjectScanContext context)
@@ -266,7 +285,7 @@ public sealed class IgnoreRulesService(
 
 		foreach (var scope in scopesWithGitIgnore)
 		{
-			var matcher = TryBuildGitIgnoreMatcher(scope.RootPath);
+			var matcher = TryBuildGitIgnoreMatcher(scope.RootPath, smartIgnore.RootFactsProvider.Get(scope.RootPath));
 			if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty))
 				continue;
 
@@ -279,24 +298,26 @@ public sealed class IgnoreRulesService(
 		IReadOnlyCollection<string>? selectedRootFolders) =>
 		_projectScopeDiscovery.Discover(rootPath, selectedRootFolders);
 
-	private static GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath)
+	private static GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath, ProjectRootFacts? rootFacts = null)
 	{
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (string.IsNullOrWhiteSpace(rootPath))
 			return GitIgnoreMatcher.Empty;
 
 		var gitIgnorePath = Path.Combine(rootPath, ".gitignore");
-		if (!File.Exists(gitIgnorePath))
+		if (rootFacts is not null && !rootFacts.HasGitIgnoreFile)
 			return GitIgnoreMatcher.Empty;
 
 		try
 		{
-			var hasSignature = TryGetGitIgnoreSignature(gitIgnorePath, out var cacheKey, out var signature);
-			if (hasSignature)
+			var cacheKey = Path.GetFullPath(gitIgnorePath);
+			var signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+
+			if (signature.HasValue)
 			{
 				lock (CacheSync)
 				{
 					if (GitIgnoreCache.TryGetValue(cacheKey, out var cached) &&
-						cached.Signature.Equals(signature))
+						cached.Signature.Equals(signature.GetValueOrDefault()))
 					{
 						return cached.Matcher;
 					}
@@ -304,11 +325,11 @@ public sealed class IgnoreRulesService(
 			}
 
 			var matcher = GitIgnoreMatcher.Build(rootPath, File.ReadLines(gitIgnorePath));
-			if (hasSignature)
+			if (signature.HasValue)
 			{
 				lock (CacheSync)
 				{
-					GitIgnoreCache[cacheKey] = new GitIgnoreCacheEntry(signature, matcher);
+					GitIgnoreCache[cacheKey] = new GitIgnoreCacheEntry(signature.GetValueOrDefault(), matcher);
 					if (GitIgnoreCache.Count > CacheLimit)
 						GitIgnoreCache.Clear();
 				}
@@ -322,49 +343,7 @@ public sealed class IgnoreRulesService(
 		}
 	}
 
-	private static bool TryGetGitIgnoreSignature(
-		string gitIgnorePath,
-		out string cacheKey,
-		out GitIgnoreSignature signature)
-	{
-		cacheKey = Path.GetFullPath(gitIgnorePath);
-		signature = default;
-
-		try
-		{
-			var linkInfo = new FileInfo(gitIgnorePath);
-			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
-			{
-				// A symlinked .gitignore is valid project input. Use target metadata for cache
-				// invalidation, but keep the link path as the cache key so rules stay scoped
-				// to the project root that owns the .gitignore entry.
-				var resolvedTarget = linkInfo.ResolveLinkTarget(returnFinalTarget: true);
-				if (resolvedTarget is not FileInfo targetInfo || !targetInfo.Exists)
-					return false;
-
-				targetInfo.Refresh();
-				signature = new GitIgnoreSignature(
-					targetInfo.LastWriteTimeUtc.Ticks,
-					targetInfo.Length,
-					linkInfo.LinkTarget ?? string.Empty);
-				return true;
-			}
-
-			signature = new GitIgnoreSignature(
-				linkInfo.LastWriteTimeUtc.Ticks,
-				linkInfo.Length,
-				LinkTarget: string.Empty);
-			return true;
-		}
-		catch
-		{
-			return false;
-		}
-	}
-
-	private readonly record struct GitIgnoreSignature(long LastWriteTicksUtc, long LengthBytes, string LinkTarget);
-
-	private sealed record GitIgnoreCacheEntry(GitIgnoreSignature Signature, GitIgnoreMatcher Matcher);
+	private sealed record GitIgnoreCacheEntry(ProjectRootFileSignature Signature, GitIgnoreMatcher Matcher);
 
 	private sealed record ScopedSmartIgnoreBuildResult(
 		IReadOnlySet<string> FolderNames,

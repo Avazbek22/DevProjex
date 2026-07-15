@@ -3,6 +3,66 @@ namespace DevProjex.Tests.Integration;
 public sealed class ProjectAnalysisServiceIntegrationTests
 {
 	[Fact]
+	public void Load_DefaultSelection_ReportsOnlyRootFoldersPresentInProjectedTree()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("App.csproj", "<Project />\n");
+		temp.CreateFile("root-noise.tmp", "not a directory\n");
+		temp.CreateFile(Path.Combine("src", "level-1", "level-2", "App.cs"), "class App {}\n");
+		Directory.CreateDirectory(Path.Combine(temp.Path, "ansel"));
+		foreach (var artifactRoot in new[] { "Infrastructure_artifacts_temp", "avaloniaTemp", "generated-temp" })
+		{
+			temp.CreateFile(
+				Path.Combine(artifactRoot, "temp-build", "obj", "Release", "net10.0", "Generated.g.cs"),
+				"generated\n");
+		}
+		var service = CreateService();
+
+		var loaded = service.Load(
+			new ProjectAnalysisRequest(temp.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(["src"], loaded.AvailableRootFolders);
+		Assert.Equal(["src"], loaded.SelectedRootFolders);
+		Assert.Equal(
+			loaded.AvailableRootFolders,
+			loaded.Tree.Root.Children
+				.Where(static child => child.IsDirectory)
+				.Select(static child => child.DisplayName));
+		Assert.Equal(
+			loaded.AvailableRootFolders.Count,
+			loaded.AvailableRootFolders.Distinct(PathComparer.Default).Count());
+	}
+
+	[Fact]
+	public void Load_ExplicitAllIgnoreOff_EmptyAndNestedRootsMatchProjectedTree()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("App.csproj", "<Project />\n");
+		temp.CreateFile(Path.Combine("src", "level-1", "level-2", "App.cs"), "class App {}\n");
+		Directory.CreateDirectory(Path.Combine(temp.Path, "ansel"));
+		temp.CreateFile(
+			Path.Combine("artifact-root", "temp-build", "obj", "Release", "net10.0", "Generated.g.cs"),
+			"generated\n");
+		var service = CreateService();
+
+		var loaded = service.Load(
+			new ProjectAnalysisRequest(
+				RootPath: temp.Path,
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+		var treeRoots = loaded.Tree.Root.Children
+			.Where(static child => child.IsDirectory)
+			.Select(static child => child.DisplayName)
+			.ToArray();
+
+		Assert.Equal(["ansel", "artifact-root", "src"], loaded.AvailableRootFolders.Order(PathComparer.Default));
+		Assert.Equal(loaded.AvailableRootFolders, loaded.SelectedRootFolders);
+		Assert.Equal(loaded.AvailableRootFolders, treeRoots);
+		Assert.Equal(treeRoots.Length, treeRoots.Distinct(PathComparer.Default).Count());
+	}
+
+	[Fact]
 	public async Task AnalyzeAsync_WithRootExtensionAndIgnoreOverrides_ReportsFilteredProject()
 	{
 		using var temp = new TemporaryDirectory();
@@ -144,7 +204,44 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 		Assert.Equal(1, report.Inventory.Tree.AccessDeniedDirectoryCount);
 	}
 
-	private static ProjectAnalysisService CreateService()
+	[Fact]
+	public async Task BuildReportFromTreeAsync_ReadsMetricsConcurrentlyAndPreservesFileOrder()
+	{
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 24)
+			.Select(index => temp.CreateFile($"src/File-{index:D2}.cs", $"class File{index} {{}}\n"))
+			.ToArray();
+		var root = new TreeNodeDescriptor(
+			DisplayName: "workspace",
+			FullPath: temp.Path,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: []);
+		var analyzer = new ConcurrentMetricsAnalyzer();
+		var service = CreateService(analyzer);
+
+		var report = await service.BuildReportFromTreeAsync(new LoadedProjectAnalysisRequest(
+			RootPath: temp.Path,
+			Tree: new BuildTreeResult(root, RootAccessDenied: false, HadAccessDenied: false, OrderedFilePaths: paths),
+			AvailableRootFolders: ["src"],
+			AvailableExtensions: [".cs"],
+			SelectedRootFolders: ["src"],
+			SelectedExtensions: [".cs"],
+			SelectedIgnoreOptions: [],
+			RootAccessDenied: false,
+			HadAccessDenied: false), TestContext.Current.CancellationToken);
+		var expected = ExportOutputMetricsCalculator.FromOrderedContentFiles(paths
+			.Select(ConcurrentMetricsAnalyzer.CreateExpectedMetrics)
+			.ToArray());
+
+		Assert.True(analyzer.MaximumConcurrency > 1);
+		Assert.Equal(expected.Lines, report.Metrics.Content.Lines);
+		Assert.Equal(expected.Chars, report.Metrics.Content.Chars);
+		Assert.Equal(expected.Tokens, report.Metrics.Content.Tokens);
+	}
+
+	private static ProjectAnalysisService CreateService(IFileContentAnalyzer? fileContentAnalyzer = null)
 	{
 		var localization = new LocalizationService(new TestLocalizationCatalog(), AppLanguage.En);
 		var scanner = new FileSystemScanner();
@@ -170,8 +267,90 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 			new IgnoreOptionsService(localization),
 			ignoreRules,
 			new TreeExportService(),
-			new FileContentAnalyzer(),
+			fileContentAnalyzer ?? new FileContentAnalyzer(),
 			utcNowProvider: () => new DateTimeOffset(2026, 6, 16, 10, 11, 12, TimeSpan.Zero));
+	}
+
+	private sealed class ConcurrentMetricsAnalyzer : IFileContentAnalyzer
+	{
+		private int _activeCalls;
+		private int _maximumConcurrency;
+
+		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+
+		public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public async Task<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			var concurrency = Interlocked.Increment(ref _activeCalls);
+			UpdateMaximumConcurrency(concurrency);
+			try
+			{
+				await Task.Delay(10, cancellationToken);
+				return CreateMetrics(path);
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _activeCalls);
+			}
+		}
+
+		public Task<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public Task<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public static ContentFileMetrics CreateExpectedMetrics(string path)
+		{
+			var metrics = CreateMetrics(path);
+			return new ContentFileMetrics(
+				path,
+				metrics.SizeBytes,
+				metrics.LineCount,
+				metrics.CharCount,
+				metrics.IsEmpty,
+				metrics.IsWhitespaceOnly,
+				metrics.IsEstimated,
+				metrics.CrLfPairCount,
+				metrics.TrailingNewlineChars,
+				metrics.TrailingNewlineLineBreaks);
+		}
+
+		private static TextFileMetrics CreateMetrics(string path)
+		{
+			var charCount = Path.GetFileName(path).Length + 5;
+			return new TextFileMetrics(
+				SizeBytes: charCount,
+				LineCount: 2,
+				CharCount: charCount,
+				IsEmpty: false,
+				IsWhitespaceOnly: false);
+		}
+
+		private void UpdateMaximumConcurrency(int concurrency)
+		{
+			var observed = Volatile.Read(ref _maximumConcurrency);
+			while (concurrency > observed)
+			{
+				var previous = Interlocked.CompareExchange(
+					ref _maximumConcurrency,
+					concurrency,
+					observed);
+				if (previous == observed)
+					return;
+
+				observed = previous;
+			}
+		}
 	}
 
 	private sealed class TestLocalizationCatalog : ILocalizationCatalog

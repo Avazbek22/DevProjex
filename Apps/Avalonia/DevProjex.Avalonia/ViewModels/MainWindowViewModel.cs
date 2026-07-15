@@ -1277,6 +1277,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string StatusOperationGettingUpdatesBranch { get; private set; } = string.Empty;
     public string StatusOperationSwitchingBranch { get; private set; } = string.Empty;
     public string StatusOperationCalculatingData { get; private set; } = string.Empty;
+    public string StatusOperationUpdatingOptions { get; private set; } = string.Empty;
+    public string StatusOperationApplyingSettings { get; private set; } = string.Empty;
     public string StatusOperationPreparingPreview { get; private set; } = string.Empty;
     public string ToastPreviewCanceled { get; private set; } = string.Empty;
 
@@ -1410,6 +1412,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusOperationGettingUpdatesBranch = _localization["Status.Operation.GettingUpdatesBranch"];
         StatusOperationSwitchingBranch = _localization["Status.Operation.SwitchingBranch"];
         StatusOperationCalculatingData = _localization["Status.Operation.CalculatingData"];
+        StatusOperationUpdatingOptions = _localization["Status.Operation.UpdatingOptions"];
+        StatusOperationApplyingSettings = _localization["Status.Operation.ApplyingSettings"];
         StatusOperationPreparingPreview = _localization["Status.Operation.PreparingPreview"];
         ToastPreviewCanceled = _localization["Toast.Operation.PreviewCanceled"];
 
@@ -1547,6 +1551,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(StatusOperationGettingUpdatesBranch));
         RaisePropertyChanged(nameof(StatusOperationSwitchingBranch));
         RaisePropertyChanged(nameof(StatusOperationCalculatingData));
+        RaisePropertyChanged(nameof(StatusOperationUpdatingOptions));
+        RaisePropertyChanged(nameof(StatusOperationApplyingSettings));
         RaisePropertyChanged(nameof(StatusOperationPreparingPreview));
         RaisePropertyChanged(nameof(ToastPreviewCanceled));
 

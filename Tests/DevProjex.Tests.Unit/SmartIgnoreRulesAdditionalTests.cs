@@ -71,4 +71,76 @@ public sealed class SmartIgnoreRulesAdditionalTests
 		Assert.Contains(".turbo", result.FolderNames, StringComparer.OrdinalIgnoreCase);
 		Assert.Contains(".svelte-kit", result.FolderNames, StringComparer.OrdinalIgnoreCase);
 	}
+
+	[Fact]
+	public void BuiltInFactsAwareRules_MatchLegacyPathEvaluationForMarkerProjects()
+	{
+		var cases = new[]
+		{
+			new RuleCase(new FrontendArtifactsIgnoreRule(), "package.json"),
+			new RuleCase(new DotNetArtifactsIgnoreRule(), "App.csproj"),
+			new RuleCase(new PythonArtifactsIgnoreRule(), "requirements.txt"),
+			new RuleCase(new JvmArtifactsIgnoreRule(), "settings.gradle"),
+			new RuleCase(new GoArtifactsIgnoreRule(), "go.mod"),
+			new RuleCase(new PhpArtifactsIgnoreRule(), "composer.json"),
+			new RuleCase(new RubyArtifactsIgnoreRule(), "Gemfile"),
+			new RuleCase(new RustArtifactsIgnoreRule(), "Cargo.toml")
+		};
+
+		foreach (var testCase in cases)
+		{
+			using var temp = new TemporaryDirectory();
+			temp.CreateFile(testCase.MarkerFile, string.Empty);
+			var facts = new ProjectRootFactsProvider(cacheLimit: 0).Get(temp.Path);
+
+			var legacy = testCase.Rule.Evaluate(temp.Path);
+			var factsAware = Assert.IsAssignableFrom<IProjectRootFactsSmartIgnoreRule>(testCase.Rule)
+				.Evaluate(facts);
+
+			AssertEquivalentResult(legacy, factsAware);
+		}
+	}
+
+	[Fact]
+	public void BuiltInFactsAwareRules_MatchLegacyPathEvaluationWithoutMarkers()
+	{
+		var rules = new ISmartIgnoreRule[]
+		{
+			new FrontendArtifactsIgnoreRule(),
+			new DotNetArtifactsIgnoreRule(),
+			new PythonArtifactsIgnoreRule(),
+			new JvmArtifactsIgnoreRule(),
+			new GoArtifactsIgnoreRule(),
+			new PhpArtifactsIgnoreRule(),
+			new RubyArtifactsIgnoreRule(),
+			new RustArtifactsIgnoreRule()
+		};
+
+		foreach (var rule in rules)
+		{
+			using var temp = new TemporaryDirectory();
+			temp.CreateFile("README.md", "docs");
+			var facts = new ProjectRootFactsProvider(cacheLimit: 0).Get(temp.Path);
+
+			var legacy = rule.Evaluate(temp.Path);
+			var factsAware = Assert.IsAssignableFrom<IProjectRootFactsSmartIgnoreRule>(rule)
+				.Evaluate(facts);
+
+			AssertEquivalentResult(legacy, factsAware);
+		}
+	}
+
+	private static void AssertEquivalentResult(
+		SmartIgnoreResult expected,
+		SmartIgnoreResult actual)
+	{
+		Assert.Equal(
+			expected.FolderNames.Order(StringComparer.OrdinalIgnoreCase),
+			actual.FolderNames.Order(StringComparer.OrdinalIgnoreCase));
+		Assert.Equal(
+			expected.FileNames.Order(StringComparer.OrdinalIgnoreCase),
+			actual.FileNames.Order(StringComparer.OrdinalIgnoreCase));
+	}
+
+	private sealed record RuleCase(ISmartIgnoreRule Rule, string MarkerFile);
 }

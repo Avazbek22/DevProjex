@@ -258,6 +258,11 @@ internal static class UiTestDriver
 
     public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "RootFoldersList",
+            GetViewModel(window).RootFolders.FirstOrDefault(option =>
+                string.Equals(option.Name, rootFolderName, StringComparison.Ordinal)));
         await ClickResolvedControlAsync(
             window,
             () => FindRootFolderCheckBox(window, rootFolderName),
@@ -266,6 +271,11 @@ internal static class UiTestDriver
 
     public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "ExtensionsList",
+            GetViewModel(window).Extensions.FirstOrDefault(option =>
+                string.Equals(option.Name, extensionName, StringComparison.Ordinal)));
         await ClickResolvedControlAsync(
             window,
             () => FindExtensionCheckBox(window, extensionName),
@@ -274,6 +284,10 @@ internal static class UiTestDriver
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "IgnoreOptionsList",
+            GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
         await ClickResolvedControlAsync(
             window,
             () => FindIgnoreOptionCheckBox(window, optionId),
@@ -1139,6 +1153,19 @@ internal static class UiTestDriver
             await WaitForSettledFramesAsync(frameCount: 6);
     }
 
+    private static async Task ScrollSettingsItemIntoViewAsync(
+        MainWindow window,
+        string listName,
+        object? item)
+    {
+        if (item is null)
+            return;
+
+        var list = GetRequiredControl<ListBox>(window, listName);
+        await window.Dispatcher.InvokeAsync(() => list.ScrollIntoView(item));
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
     private static async Task WaitForControlReadyForPointerAsync(MainWindow window, Control control)
     {
         await WaitForConditionAsync(
@@ -1460,7 +1487,7 @@ internal static class UiTestDriver
         }
     }
 
-    private static bool TryParseMetricNumber(string text, out int value)
+    private static bool TryParseMetricNumber(string text, out long value)
     {
         value = 0;
         if (string.IsNullOrWhiteSpace(text))
@@ -1486,7 +1513,7 @@ internal static class UiTestDriver
             // Integer status values use localized group separators only. We deliberately
             // keep digits and drop every separator so 4,698 / 4 698 / 4.698 all become 4698.
             normalized = string.Concat(normalized.Where(char.IsDigit));
-            if (normalized.Length == 0 || !int.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out value))
+            if (normalized.Length == 0 || !long.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out value))
                 return false;
 
             return true;
@@ -1518,7 +1545,11 @@ internal static class UiTestDriver
             return false;
         }
 
-        value = (int)Math.Round(parsed * multiplier, MidpointRounding.AwayFromZero);
+        var scaled = Math.Round(parsed * multiplier, MidpointRounding.AwayFromZero);
+        if (scaled < 0 || scaled > long.MaxValue)
+            return false;
+
+        value = (long)scaled;
         return true;
     }
 }

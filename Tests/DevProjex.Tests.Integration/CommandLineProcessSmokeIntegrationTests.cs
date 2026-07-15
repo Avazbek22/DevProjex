@@ -112,6 +112,41 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task UserLevelTerminalCommand_NoUiReportDoesNotAdvertiseIgnoredNumericExtensions()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("numeric extension project");
+		temp.CreateFile(Path.Combine("numeric extension project", "App.csproj"), "<Project />\n");
+		temp.CreateFile(Path.Combine("numeric extension project", "src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("numeric extension project", "empty.1770912967589"), string.Empty);
+		temp.CreateFile(Path.Combine("numeric extension project", "src", ".transient.1770912967590"), "dot payload\n");
+		temp.CreateFile(Path.Combine("numeric extension project", "src", "archive.1770912967591"), "visible payload\n");
+
+		var result = await RunUserLevelTerminalCommandAsync(
+			temp,
+			temp.Path,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreEmptyFiles,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFiles);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		var root = document.RootElement;
+		var availableExtensions = ReadStringArray(root.GetProperty("inventory").GetProperty("availableExtensions"));
+		var selectedExtensions = ReadStringArray(root.GetProperty("selection").GetProperty("selectedExtensions"));
+
+		Assert.Contains(".1770912967591", availableExtensions);
+		Assert.DoesNotContain(".1770912967589", availableExtensions);
+		Assert.DoesNotContain(".1770912967590", availableExtensions);
+		Assert.DoesNotContain(".1770912967589", selectedExtensions);
+		Assert.DoesNotContain(".1770912967590", selectedExtensions);
+		Assert.Equal(3, root.GetProperty("inventory").GetProperty("tree").GetProperty("fileCount").GetInt32());
+	}
+
+	[Fact]
 	public async Task UserLevelTerminalCommand_TreeContentJsonStdoutKeepsJsonTreeAndPlainTextContent()
 	{
 		using var temp = new TemporaryDirectory();
@@ -545,6 +580,8 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Contains(CommandLineOptionTokens.TreeFormat, result.Stdout, StringComparison.Ordinal);
 		Assert.Contains(CommandLineOptionTokens.TreeFilter, result.Stdout, StringComparison.Ordinal);
 		Assert.Contains(CommandLineOptionTokens.PreviewSearch, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.SessionMetrics, result.Stdout, StringComparison.Ordinal);
+		Assert.Contains(CommandLineOptionTokens.SessionMetricsOutput, result.Stdout, StringComparison.Ordinal);
 		Assert.Contains("ascii|json|xml|md", result.Stdout, StringComparison.Ordinal);
 	}
 
@@ -839,6 +876,361 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.DoesNotContain("bin", result.Stdout, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("obj", result.Stdout, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("Generated.g.cs", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportTreeToStdout_IgnoreOverrideControlsGitIgnoredDotFile()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", ".env\n");
+		temp.CreateFile("App.csproj", "<Project />\n");
+		temp.CreateFile("Program.cs", "Console.WriteLine(\"ok\");\n");
+		temp.CreateFile(".env", "SECRET=1\n");
+
+		var gitIgnoreOnly = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			".",
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreGitIgnore);
+		var allIgnoreOff = await RunAppWithWorkingDirectoryAsync(
+			temp.Path,
+			".",
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, gitIgnoreOnly.ExitCode);
+		Assert.Equal(string.Empty, gitIgnoreOnly.Stderr);
+		Assert.Contains("Program.cs", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain(".env", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+
+		Assert.Equal(CommandLineExitCodes.Success, allIgnoreOff.ExitCode);
+		Assert.Equal(string.Empty, allIgnoreOff.Stderr);
+		Assert.Contains("Program.cs", allIgnoreOff.Stdout, StringComparison.Ordinal);
+		Assert.Contains(".env", allIgnoreOff.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_SmartIgnoreOverrideHidesPortableArtifactsAndPreservesSourceContracts()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedPortableSmartIgnoreProject(temp);
+
+		var smartOnly = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+		var noIgnores = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, smartOnly.ExitCode);
+		Assert.Equal(string.Empty, smartOnly.Stderr);
+		Assert.Contains("App.cs", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.Contains("packages.config", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.Contains("App.sln.DotSettings", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("repositories.config", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Alpha.1.0.0", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("Beta.2.0.0", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("DotSettings.user", smartOnly.Stdout, StringComparison.Ordinal);
+
+		Assert.Equal(CommandLineExitCodes.Success, noIgnores.ExitCode);
+		Assert.Equal(string.Empty, noIgnores.Stderr);
+		Assert.Contains("repositories.config", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("Alpha.1.0.0.nupkg", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("Beta.2.0.0.nupkg", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("App.sln.DotSettings.user", noIgnores.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task UserLevelTerminalCommand_SmartIgnoreOverrideMatchesDirectProcessOutput()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("portable smart project");
+		SeedPortableSmartIgnoreProject(projectPath);
+
+		var result = await RunUserLevelTerminalCommandAsync(
+			temp,
+			temp.Path,
+			projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("App.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("packages.config", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("App.sln.DotSettings", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("repositories.config", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain(".nupkg", result.Stdout, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("DotSettings.user", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_NoUiReportSmartIgnoreExcludesArtifactInventoryAndKeepsSharedFiles()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedPortableSmartIgnoreProject(temp);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		var inventory = document.RootElement.GetProperty("inventory");
+		var availableExtensions = ReadStringArray(inventory.GetProperty("availableExtensions"));
+
+		Assert.Contains(".cs", availableExtensions);
+		Assert.Contains(".config", availableExtensions);
+		Assert.Contains(".DotSettings", availableExtensions);
+		Assert.DoesNotContain(".nupkg", availableExtensions);
+		Assert.DoesNotContain(".dll", availableExtensions);
+		Assert.DoesNotContain(".user", availableExtensions);
+		Assert.Equal(3, inventory.GetProperty("tree").GetProperty("fileCount").GetInt32());
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	[InlineData("md")]
+	public async Task Process_StructuredTreeFormatsApplySmartIgnoreBeforeSerialization(string format)
+	{
+		using var temp = new TemporaryDirectory();
+		SeedPortableSmartIgnoreProject(temp);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, format,
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("App.cs", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("packages.config", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("App.sln.DotSettings", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("repositories.config", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain(".nupkg", result.Stdout, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("DotSettings.user", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ContentExportSmartIgnoreAndNoneProduceOppositeArtifactPayloads()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedPortableSmartIgnoreProject(temp);
+
+		var smartOnly = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "content",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+		var noIgnores = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "content",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, smartOnly.ExitCode);
+		Assert.Equal(string.Empty, smartOnly.Stderr);
+		Assert.Contains("SOURCE_SENTINEL", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.Contains("SHARED_SETTINGS_SENTINEL", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("LOCAL_STATE_SENTINEL", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("REPOSITORY_SENTINEL", smartOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("PACKAGE_SENTINEL", smartOnly.Stdout, StringComparison.Ordinal);
+
+		Assert.Equal(CommandLineExitCodes.Success, noIgnores.ExitCode);
+		Assert.Equal(string.Empty, noIgnores.Stderr);
+		Assert.Contains("SOURCE_SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("SHARED_SETTINGS_SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("LOCAL_STATE_SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("REPOSITORY_SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("PACKAGE_SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("ascii")]
+	[InlineData("json")]
+	[InlineData("xml")]
+	[InlineData("md")]
+	public async Task Process_TreeContentAllFormatsApplySmartIgnoreToTreeAndContent(string format)
+	{
+		using var temp = new TemporaryDirectory();
+		SeedPortableSmartIgnoreProject(temp);
+		var expectedFiles = new[]
+		{
+			"App.sln.DotSettings",
+			"packages.config",
+			"src/App.cs"
+		};
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.Format, format,
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var (treePart, contentPart) = SplitTreeContentStdout(format, result.Stdout);
+		AssertTreeOnlyStdoutContract(treePart, format, temp.Path, expectedFiles);
+		Assert.Contains("SOURCE_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.Contains("SHARED_SETTINGS_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("LOCAL_STATE_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("REPOSITORY_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("PACKAGE_SENTINEL", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("DotSettings.user", treePart, StringComparison.Ordinal);
+		Assert.DoesNotContain("repositories.config", treePart, StringComparison.Ordinal);
+		Assert.DoesNotContain(".nupkg", treePart, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public async Task Process_SmartIgnorePortableStoreMatrixPrunesOnlyConfirmedStores()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("portable-store-matrix");
+		SeedPortableStoreMatrixProject(projectPath);
+		var sourceFiles = new[]
+		{
+			"source/_cacache/Cache.cs",
+			"source/modules-2/Modules.cs",
+			"source/packages/Domain.cs",
+			"source/registry/Registry.cs",
+			"source/repository/Repository.cs",
+			"src/App.cs"
+		};
+		var artifactFiles = new[]
+		{
+			".cargo/registry/index/config.json",
+			".gradle/caches/modules-2/files-2.1/acme.jar",
+			".m2/repository/acme/module.pom",
+			".npm/_cacache/content-v2/sha",
+			".nuget/packages/acme/Acme.nupkg"
+		};
+
+		var smartOnly = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+		var noIgnores = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, smartOnly.ExitCode);
+		Assert.Equal(string.Empty, smartOnly.Stderr);
+		AssertTreeOnlyStdoutContract(smartOnly.Stdout, "json", projectPath, sourceFiles);
+
+		Assert.Equal(CommandLineExitCodes.Success, noIgnores.ExitCode);
+		Assert.Equal(string.Empty, noIgnores.Stderr);
+		AssertTreeOnlyStdoutContract(
+			noIgnores.Stdout,
+			"json",
+			projectPath,
+			sourceFiles.Concat(artifactFiles).ToArray());
+	}
+
+	[Fact]
+	public async Task Process_SmartIgnoreNegativeMatrixPreservesEverySourceLookalikeAndPrunesOnlyProvenArtifacts()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("smart-ignore-negative-matrix");
+		SeedSmartIgnoreNegativeMatrixProject(projectPath);
+		var sourceFiles = new[]
+		{
+			"App.csproj",
+			"build/README.md",
+			"build/docs/CMakeCache.txt",
+			"cmake-build/CMakeCache.txt",
+			"m2-backup/repository/service/package.json",
+			"obj-backup/project.assets.json",
+			"packages/Alpha/Alpha.nupkg",
+			"src/App.cs",
+			"vendor/src/autoload.php"
+		};
+		var provenArtifactFiles = new[]
+		{
+			"App.csproj.user",
+			"obj/project.assets.json"
+		};
+
+		var smartOnly = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+		var noIgnores = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, smartOnly.ExitCode);
+		Assert.Equal(string.Empty, smartOnly.Stderr);
+		AssertTreeOnlyStdoutContract(smartOnly.Stdout, "json", projectPath, sourceFiles);
+
+		Assert.Equal(CommandLineExitCodes.Success, noIgnores.ExitCode);
+		Assert.Equal(string.Empty, noIgnores.Stderr);
+		AssertTreeOnlyStdoutContract(
+			noIgnores.Stdout,
+			"json",
+			projectPath,
+			sourceFiles.Concat(provenArtifactFiles).ToArray());
+	}
+
+	[Fact]
+	public async Task Process_SmartIgnoreXmlFileExportMatchesStdoutTreeContract()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("portable smart project");
+		SeedPortableSmartIgnoreProject(projectPath);
+		var outputPath = Path.Combine(temp.Path, "exports", "smart-tree.xml");
+		var expectedFiles = new[]
+		{
+			"App.sln.DotSettings",
+			"packages.config",
+			"src/App.cs"
+		};
+
+		var stdoutResult = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "xml",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+		var fileResult = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "xml",
+			CommandLineOptionTokens.Output, outputPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore);
+
+		Assert.Equal(CommandLineExitCodes.Success, stdoutResult.ExitCode);
+		Assert.Equal(string.Empty, stdoutResult.Stderr);
+		AssertTreeOnlyStdoutContract(stdoutResult.Stdout, "xml", projectPath, expectedFiles);
+
+		Assert.Equal(CommandLineExitCodes.Success, fileResult.ExitCode);
+		Assert.Equal(string.Empty, fileResult.Stderr);
+		Assert.Equal(Path.GetFullPath(outputPath), AssertSingleOutputLine(fileResult.Stdout));
+		Assert.True(File.Exists(outputPath));
+		var exported = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
+		AssertTreeOnlyStdoutContract(exported, "xml", projectPath, expectedFiles);
+		Assert.True(XNode.DeepEquals(XDocument.Parse(stdoutResult.Stdout), XDocument.Parse(exported)));
 	}
 
 	[Fact]
@@ -1894,6 +2286,53 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		WriteProjectFile(projectPath, "LICENSE", "license text\n");
 	}
 
+	private static void SeedPortableSmartIgnoreProject(TemporaryDirectory temp) =>
+		SeedPortableSmartIgnoreProject(temp.Path);
+
+	private static void SeedPortableSmartIgnoreProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, Path.Combine("src", "App.cs"), "// SOURCE_SENTINEL\nclass App {}\n");
+		WriteProjectFile(projectPath, "packages.config", "<packages />\n");
+		WriteProjectFile(projectPath, "App.sln.DotSettings", "SHARED_SETTINGS_SENTINEL\n");
+		WriteProjectFile(projectPath, "App.sln.DotSettings.user", "LOCAL_STATE_SENTINEL\n");
+		WriteProjectFile(projectPath, Path.Combine("packages", "repositories.config"), "REPOSITORY_SENTINEL\n");
+		WriteProjectFile(projectPath, Path.Combine("packages", "Alpha.1.0.0", "Alpha.1.0.0.nupkg"), "PACKAGE_SENTINEL\n");
+		WriteProjectFile(projectPath, Path.Combine("packages", "Alpha.1.0.0", "lib", "Alpha.dll"), "binary\n");
+		WriteProjectFile(projectPath, Path.Combine("packages", "Beta.2.0.0", "Beta.2.0.0.nupkg"), "package\n");
+		WriteProjectFile(projectPath, Path.Combine("packages", "Beta.2.0.0", "ref", "Beta.dll"), "binary\n");
+	}
+
+	private static void SeedPortableStoreMatrixProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, Path.Combine("src", "App.cs"), "class App {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "packages", "Domain.cs"), "class Domain {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "repository", "Repository.cs"), "class Repository {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "registry", "Registry.cs"), "class Registry {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "_cacache", "Cache.cs"), "class Cache {}\n");
+		WriteProjectFile(projectPath, Path.Combine("source", "modules-2", "Modules.cs"), "class Modules {}\n");
+		WriteProjectFile(projectPath, Path.Combine(".nuget", "packages", "acme", "Acme.nupkg"), "package\n");
+		WriteProjectFile(projectPath, Path.Combine(".m2", "repository", "acme", "module.pom"), "<project />\n");
+		WriteProjectFile(projectPath, Path.Combine(".cargo", "registry", "index", "config.json"), "{}\n");
+		WriteProjectFile(projectPath, Path.Combine(".npm", "_cacache", "content-v2", "sha"), "cache\n");
+		WriteProjectFile(projectPath, Path.Combine(".gradle", "caches", "modules-2", "files-2.1", "acme.jar"), "binary\n");
+	}
+
+	private static void SeedSmartIgnoreNegativeMatrixProject(string projectPath)
+	{
+		WriteProjectFile(projectPath, "App.csproj", "<Project />\n");
+		WriteProjectFile(projectPath, "App.csproj.user", "local state\n");
+		WriteProjectFile(projectPath, Path.Combine("src", "App.cs"), "class App {}\n");
+		WriteProjectFile(projectPath, Path.Combine("obj", "project.assets.json"), "{}\n");
+		WriteProjectFile(projectPath, Path.Combine("obj-backup", "project.assets.json"), "{}\n");
+		WriteProjectFile(projectPath, Path.Combine("build", "README.md"), "source build folder\n");
+		WriteProjectFile(projectPath, Path.Combine("build", "docs", "CMakeCache.txt"), "source documentation\n");
+		WriteProjectFile(projectPath, Path.Combine("vendor", "src", "autoload.php"), "<?php // source\n");
+		WriteProjectFile(projectPath, Path.Combine("packages", "Alpha", "Alpha.nupkg"), "single incomplete package\n");
+		Directory.CreateDirectory(Path.Combine(projectPath, "packages", "Alpha", "lib"));
+		WriteProjectFile(projectPath, Path.Combine("m2-backup", "repository", "service", "package.json"), "{}\n");
+		WriteProjectFile(projectPath, Path.Combine("cmake-build", "CMakeCache.txt"), "source fixture\n");
+	}
+
 	private static void SeedComplexUserProject(string projectPath)
 	{
 		WriteProjectFile(projectPath, ".gitignore", "[Bb]in/\n[Oo]bj/\n*.g.cs\n");
@@ -2016,6 +2455,9 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			: Path.Combine(appDirectory, CommandLineExecutableAliases.DisplayName);
 
 		Assert.True(File.Exists(appHostPath), $"Expected apphost executable at {appHostPath}.");
+		// The installed-command smoke tests validate wrapper semantics. They should not
+		// depend on whether the runner preserved the apphost execute bit in build output.
+		MakeExecutableIfUnix(appHostPath);
 		return appHostPath;
 	}
 

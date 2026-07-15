@@ -56,19 +56,17 @@ public sealed class SelectionOptionStateCache
         IsInitialized = true;
         HasFullState = true;
 
-        var selected = new HashSet<string>(_comparer);
+        SelectedNames.Clear();
         foreach (var option in options)
         {
             if (option.IsChecked)
-                selected.Add(option.Name);
+                SelectedNames.Add(option.Name);
 
             // Do not clear previous states here. Hidden options may be temporarily absent
             // because another section hides their evidence, and persistence must keep the
             // user's explicit choice until the option becomes visible again.
             OptionStates[option.Name] = option.IsChecked;
         }
-
-        SelectedNames = selected;
     }
 
     public HashSet<string> SnapshotSelectedNames() =>
