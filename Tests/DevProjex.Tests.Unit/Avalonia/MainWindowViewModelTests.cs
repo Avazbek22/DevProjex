@@ -194,6 +194,45 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.IsProjectLoaded);
     }
 
+    [Theory]
+    [InlineData(ProjectSourceType.LocalFolder, true, false)]
+    [InlineData(ProjectSourceType.GitClone, false, true)]
+    [InlineData(ProjectSourceType.ZipDownload, true, false)]
+    public void ProjectRefreshAvailability_FollowsLoadedSource(
+        ProjectSourceType sourceType,
+        bool canRefreshLocalProject,
+        bool canGetGitUpdates)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.ProjectSourceType = sourceType;
+
+        Assert.Equal(canRefreshLocalProject, viewModel.CanRefreshLocalProject);
+        Assert.Equal(canGetGitUpdates, viewModel.CanGetGitUpdates);
+
+        viewModel.IsProjectLoaded = false;
+
+        Assert.False(viewModel.CanRefreshLocalProject);
+        Assert.False(viewModel.CanGetGitUpdates);
+    }
+
+    [Fact]
+    public void ProjectSourceType_RaisesRefreshAvailabilityChanges()
+    {
+        var viewModel = CreateViewModel();
+        var raised = new HashSet<string>();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is not null)
+                raised.Add(args.PropertyName);
+        };
+
+        viewModel.ProjectSourceType = ProjectSourceType.GitClone;
+
+        Assert.Contains(nameof(MainWindowViewModel.CanRefreshLocalProject), raised);
+        Assert.Contains(nameof(MainWindowViewModel.CanGetGitUpdates), raised);
+    }
+
     [Fact]
     public void SettingsVisible_Changes()
     {

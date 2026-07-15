@@ -18,7 +18,10 @@
                   IsVisible="{Binding RecentFoldersMenuVisible}">
           <!-- Populated dynamically from the recent-projects store. -->
         </MenuItem>
-        <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
+        <MenuItem Name="RefreshMenuItem"
+                  Header="{Binding MenuFileRefresh}"
+                  Click="OnRefresh"
+                  IsEnabled="{Binding CanRefreshLocalProject}" />
         <MenuItem Header="{Binding MenuFileExport}" IsEnabled="{Binding IsProjectLoaded}">
           <MenuItem Header="{Binding MenuFileExportTree}" Click="OnExportTreeToFile" />
           <MenuItem Header="{Binding MenuFileExportContent}" Click="OnExportContentToFile" />
@@ -31,10 +34,13 @@
         <MenuItem Name="GitBranchMenuItem"
                   Classes="git-branch-menu"
                   Header="{Binding MenuGitBranch}"
-                  IsEnabled="{Binding IsGitMode}">
+                  IsEnabled="{Binding CanGetGitUpdates}">
           <!-- Branch items will be populated dynamically -->
         </MenuItem>
-        <MenuItem Header="{Binding MenuGitGetUpdates}" Click="OnGitGetUpdates" IsEnabled="{Binding IsGitMode}" />
+        <MenuItem Name="GitGetUpdatesMenuItem"
+                  Header="{Binding MenuGitGetUpdates}"
+                  Click="OnGitGetUpdates"
+                  IsEnabled="{Binding CanGetGitUpdates}" />
       </MenuItem>
       <MenuItem Header="{Binding MenuCopy}" IsEnabled="{Binding IsProjectLoaded}">
         <MenuItem Header="{Binding MenuCopyTree}" Click="OnCopyTree" />

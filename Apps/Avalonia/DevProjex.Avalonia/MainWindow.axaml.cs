@@ -2444,6 +2444,16 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
+        await ProjectRefreshRoutingPolicy.ExecuteAsync(
+            _viewModel.IsProjectLoaded,
+            _viewModel.ProjectSourceType,
+            ReloadCurrentProjectAsync,
+            GetGitUpdatesAsync);
+        e.Handled = true;
+    }
+
+    private async Task ReloadCurrentProjectAsync()
+    {
         CancelBackgroundMemoryCleanup();
         CancelPreviewRefresh();
         var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
@@ -5882,6 +5892,12 @@ public partial class MainWindow : Window
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
     {
+        await GetGitUpdatesAsync();
+        e.Handled = true;
+    }
+
+    private async Task GetGitUpdatesAsync()
+    {
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
 
@@ -5951,8 +5967,6 @@ public partial class MainWindow : Window
         {
             DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
-
-        e.Handled = true;
     }
 
     private async void OnGitBranchSwitch(object? sender, string branchName)

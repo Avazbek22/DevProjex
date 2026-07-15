@@ -301,6 +301,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(IsSearchFilterAvailable));
             RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
+            RaisePropertyChanged(nameof(CanRefreshLocalProject));
+            RaisePropertyChanged(nameof(CanGetGitUpdates));
         }
     }
 
@@ -795,10 +797,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _projectSourceType = value;
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(IsGitMode));
+            RaisePropertyChanged(nameof(CanRefreshLocalProject));
+            RaisePropertyChanged(nameof(CanGetGitUpdates));
         }
     }
 
     public bool IsGitMode => _projectSourceType == ProjectSourceType.GitClone;
+
+    public bool CanRefreshLocalProject => _isProjectLoaded && !IsGitMode;
+
+    public bool CanGetGitUpdates => _isProjectLoaded && IsGitMode;
 
     public string CurrentBranch
     {
