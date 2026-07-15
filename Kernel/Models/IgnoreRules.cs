@@ -35,6 +35,7 @@ public sealed record IgnoreRules(
 	public bool IgnoreEmptyFolders { get; init; }
 	public bool IgnoreEmptyFiles { get; init; }
 	public bool IgnoreExtensionlessFiles { get; init; }
+	public string? ExcludedRootFolderName { get; init; }
 
 	public GitIgnoreMatcher GitIgnoreMatcher { get; init; } = GitIgnoreMatcher.Empty;
 

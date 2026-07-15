@@ -895,6 +895,13 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			foreach (var directoryPath in Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				if (PathComparer.Default.Equals(
+					    Path.GetFileName(directoryPath),
+					    effectiveRules.ExcludedRootFolderName))
+				{
+					continue;
+				}
+
 				directoryPaths.Add(directoryPath);
 			}
 		}

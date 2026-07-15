@@ -1,10 +1,44 @@
-using DevProjex.Application.Models;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
 
 public sealed class SelectionRefreshRootTreeParityIntegrationTests
 {
+	[Fact]
+	public void FullRefresh_ManagedGitMetadataRoot_RemainsIsolatedWithoutChangingHybridSmartIgnore()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("App.csproj", "<Project />\n");
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine(".git", "objects", "pack.dat"), "git metadata\n");
+		temp.CreateFile(
+			Path.Combine("generated-temp", "temp-build", "obj", "Release", "net10.0", "Generated.g.cs"),
+			"generated\n");
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices(
+			transformRules: static rules => rules with { ExcludedRootFolderName = ".git" });
+
+		var smartEnabled = services.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path) with
+			{
+				CaptureTreeInventory = true
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(smartEnabled.IgnoreOptions, option =>
+			option.Id == IgnoreOptionId.SmartIgnore && option.IsChecked);
+		Assert.Equal(["src"], smartEnabled.RootOptions!.Select(static option => option.Name));
+		AssertRootOptionsMatchProjectedTree(temp.Path, services, smartEnabled);
+
+		var allIgnoreDisabled = RefreshWithAllIgnoreOptionsDisabled(temp.Path, services, smartEnabled);
+
+		Assert.DoesNotContain(allIgnoreDisabled.RootOptions!, option => option.Name == ".git");
+		Assert.Contains(allIgnoreDisabled.RootOptions!, option =>
+			option.Name == "generated-temp" && option.IsChecked);
+		Assert.Contains(allIgnoreDisabled.RootOptions!, option =>
+			option.Name == "src" && option.IsChecked);
+		AssertRootOptionsMatchProjectedTree(temp.Path, services, allIgnoreDisabled);
+	}
+
 	[Fact]
 	public void FullRefresh_RootProjection_ReusesPerRootScanWithoutSecondFilesystemTraversal()
 	{

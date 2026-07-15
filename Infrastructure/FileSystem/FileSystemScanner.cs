@@ -438,7 +438,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (extensionDiscoveryRules.UseGitIgnore != effectiveRules.UseGitIgnore ||
 		    extensionDiscoveryRules.UseSmartIgnore != effectiveRules.UseSmartIgnore ||
 		    extensionDiscoveryRules.IgnoreHiddenFolders != effectiveRules.IgnoreHiddenFolders ||
-		    extensionDiscoveryRules.IgnoreDotFolders != effectiveRules.IgnoreDotFolders)
+		    extensionDiscoveryRules.IgnoreDotFolders != effectiveRules.IgnoreDotFolders ||
+		    !PathComparer.Default.Equals(
+			    extensionDiscoveryRules.ExcludedRootFolderName,
+			    effectiveRules.ExcludedRootFolderName))
 		{
 			throw new ArgumentException(
 				"Extension discovery rules may differ from effective rules only by file-level ignore options and EmptyFolders.",
@@ -464,6 +467,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				cancellationToken.ThrowIfCancellationRequested();
 
 				var dirName = dir.Name;
+				if (PathComparer.Default.Equals(dirName, rules.ExcludedRootFolderName))
+					continue;
+
 				var directoryGitIgnore = useGitIgnore
 					? gitIgnoreContext.Evaluate(dir.FullPath, dir.RelativePath, isDirectory: true, dirName)
 					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
@@ -2705,7 +2711,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var selectedNames = new HashSet<string>(PathComparer.Default);
 		foreach (var selectedRootFolder in selectedRootFolders)
 		{
-			if (!IsSafeRelativeRootFolderName(selectedRootFolder))
+			if (!IsSafeRelativeRootFolderName(selectedRootFolder) ||
+			    PathComparer.Default.Equals(selectedRootFolder, effectiveRules.ExcludedRootFolderName))
 				continue;
 
 			selectedNames.Add(selectedRootFolder);
@@ -2719,6 +2726,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			foreach (var directory in FileSystemEntryEnumerator.EnumerateDirectories(rootPath))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				if (PathComparer.Default.Equals(directory.Name, effectiveRules.ExcludedRootFolderName))
+					continue;
 
 				if (selectedNames.Contains(directory.Name))
 				{

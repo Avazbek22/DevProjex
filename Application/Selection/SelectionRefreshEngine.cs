@@ -516,11 +516,30 @@ public sealed class SelectionRefreshEngine(
         }
 
 		PreserveMissingIgnoreSelections(previousSelections, visibleIds, stateCache);
+		RemoveTransientControllerDefaults(context, visibleIds, stateCache);
 		return new IgnoreOptionResolutionResult(
 			resolved,
 			stateCache,
 			BuildSelectedIgnoreOptionSet(stateCache, visibleIds));
-    }
+	}
+
+	private static void RemoveTransientControllerDefaults(
+		SelectionRefreshContext context,
+		IReadOnlySet<IgnoreOptionId> visibleIds,
+		Dictionary<IgnoreOptionId, bool> stateCache)
+	{
+		if (context.IgnoreSelectionInitialized || context.IgnoreOptionStateCacheIsComplete)
+			return;
+
+		// Warm discovery exposes structurally available controllers before the scanner has
+		// measured whether they affect anything. Do not persist those optimistic defaults
+		// when the measured UI intentionally hides them; otherwise Ignore All later turns
+		// never-visible controllers into explicit unchecked options.
+		if (!visibleIds.Contains(IgnoreOptionId.UseGitIgnore))
+			stateCache.Remove(IgnoreOptionId.UseGitIgnore);
+		if (!visibleIds.Contains(IgnoreOptionId.SmartIgnore))
+			stateCache.Remove(IgnoreOptionId.SmartIgnore);
+	}
 
     private static IReadOnlySet<IgnoreOptionId> BuildInitialFullRefreshIgnoreSelection(
         SelectionRefreshContext context,
@@ -1015,6 +1034,13 @@ public sealed class SelectionRefreshEngine(
         {
             if (visibleIds.Contains(id))
                 continue;
+
+			// Controllers are activated optimistically on the first pass so their candidate
+			// rules can measure real impact. A zero-impact controller was never presented to
+			// the user and must not become a "known unchecked" option after Ignore All is
+			// toggled. Explicit/profile states are already present in the cache and survive.
+			if (id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
+				continue;
 
             ref var cachedState = ref CollectionsMarshal.GetValueRefOrAddDefault(
                 stateCache,

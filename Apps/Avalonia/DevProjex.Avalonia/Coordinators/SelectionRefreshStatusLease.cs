@@ -1,5 +1,3 @@
-using Avalonia.Threading;
-
 namespace DevProjex.Avalonia.Coordinators;
 
 /// <summary>

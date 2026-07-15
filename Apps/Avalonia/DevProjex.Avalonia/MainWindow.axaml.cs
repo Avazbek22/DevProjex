@@ -8367,7 +8367,15 @@ public partial class MainWindow : Window
         IReadOnlyCollection<IgnoreOptionId> selectedOptions,
         IReadOnlyCollection<string>? selectedRootFolders)
     {
-        return _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+        var rules = _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+        if (!_viewModel.IsGitMode ||
+            string.IsNullOrWhiteSpace(_currentCachedRepoPath) ||
+            !PathComparer.Default.Equals(rootPath, _currentCachedRepoPath))
+        {
+            return rules;
+        }
+
+        return rules with { ExcludedRootFolderName = ".git" };
     }
 
     private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
