@@ -392,14 +392,33 @@ internal static class PreviewSelectionMetricsPolicy
 
 internal static class MetricsCalculationPolicy
 {
-    public static TimeSpan GetInitialWarmupStartDelay(bool settingsVisible)
+    // Covers the 700 ms layout-readiness fallback, reveal delay, animation and scheduler margin.
+    public static readonly TimeSpan InitialVisualReadyTimeout = TimeSpan.FromMilliseconds(1400);
+
+    public static async Task WaitForInitialVisualReadyAsync(
+        Task initialVisualReadyTask,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
-        // Warmup should start shortly after the first stable paint instead of waiting for the
-        // entire settings reveal choreography. The old "animation duration + extra delay" path
-        // improved cosmetics, but it also introduced noticeable latency before Calculating data.
-        return settingsVisible
-            ? TimeSpan.FromMilliseconds(40)
-            : TimeSpan.Zero;
+        if (initialVisualReadyTask.IsCompletedSuccessfully)
+            return;
+
+        try
+        {
+            await initialVisualReadyTask.WaitAsync(timeout, cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            // Visual choreography must never prevent metrics from eventually starting.
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A superseded visual transition should not cancel otherwise valid metrics work.
+        }
+        catch when (initialVisualReadyTask.IsFaulted)
+        {
+            // The animation task is observed separately; metrics can safely continue.
+        }
     }
 
     public static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
@@ -426,4 +445,15 @@ internal static class MetricsCalculationPolicy
         // a follow-up selection into a CPU saturation event.
         return Math.Clamp(processorCount - 1, 1, 8);
     }
+}
+
+internal static class SettingsPanelRevealPolicy
+{
+    // Width is the durable distinction between the first collapsed reveal and a refresh of an
+    // already displayed island. Do not reduce this to SettingsVisible: it is true in both cases.
+    public static bool ShouldRunInitialReveal(
+        bool settingsVisible,
+        bool settingsAnimating,
+        bool hasVisiblePanelWidth) =>
+        settingsVisible && !settingsAnimating && !hasVisiblePanelWidth;
 }

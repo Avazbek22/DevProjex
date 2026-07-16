@@ -192,16 +192,37 @@ internal sealed class MetricsPipeline(
         BuildTreeResult currentTree,
         CancellationToken cancellationToken)
     {
+        await InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+            currentTree,
+            Task.CompletedTask,
+            cancellationToken);
+    }
+
+    public async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+        BuildTreeResult currentTree,
+        Task initialVisualReadyTask,
+        CancellationToken cancellationToken)
+    {
         await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
+
+        // Do not prewarm files while the settings island is revealing. Even a single background
+        // reader competes with Avalonia's layout/render work on large projects and causes visible
+        // frame stalls. Refreshes pass a completed task here, so F5 keeps its immediate fast path.
+        await WaitForInitialVisualReadyAsync(initialVisualReadyTask, cancellationToken);
         await InitializeFileMetricsCacheAsync(currentTree, cancellationToken);
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     public async Task<TimeSpan> InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
         BuildTreeResult currentTree,
+        Task initialVisualReadyTask,
         CancellationToken cancellationToken)
     {
         await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
+
+        // Keep measured builds behaviorally identical to production: animation time is excluded
+        // from the metric, but no file-system warmup is allowed to overlap the initial reveal.
+        await WaitForInitialVisualReadyAsync(initialVisualReadyTask, cancellationToken);
 
         var stopwatch = Stopwatch.StartNew();
         await InitializeFileMetricsCacheAsync(currentTree, cancellationToken);
@@ -216,13 +237,6 @@ internal sealed class MetricsPipeline(
         cancellationToken.ThrowIfCancellationRequested();
 
         await YieldUiAsync(DispatcherPriority.Render);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var warmupDelay = UiTimingProfile.Scale(
-            MetricsCalculationPolicy.GetInitialWarmupStartDelay(viewModel.SettingsVisible));
-        if (warmupDelay > TimeSpan.Zero)
-            await Task.Delay(warmupDelay, cancellationToken);
-
         cancellationToken.ThrowIfCancellationRequested();
     }
 
@@ -346,7 +360,9 @@ internal sealed class MetricsPipeline(
         Recalculate();
     }
 
-    private async Task InitializeFileMetricsCacheAsync(BuildTreeResult currentTree, CancellationToken cancellationToken)
+    private async Task InitializeFileMetricsCacheAsync(
+        BuildTreeResult currentTree,
+        CancellationToken cancellationToken)
     {
         using var _ = PerformanceMetrics.Measure("InitializeFileMetricsCacheAsync");
 
@@ -581,6 +597,14 @@ internal sealed class MetricsPipeline(
             }
         });
     }
+
+    private static Task WaitForInitialVisualReadyAsync(
+        Task initialVisualReadyTask,
+        CancellationToken cancellationToken) =>
+        MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+            initialVisualReadyTask,
+            UiTimingProfile.Scale(MetricsCalculationPolicy.InitialVisualReadyTimeout),
+            cancellationToken);
 
     private async Task RecalculateIncompleteBaselineMetricsAsync(
         CancellationTokenSource recalcCts,

@@ -5,6 +5,25 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class MainWindowMetricsPolicyTests
 {
     [Theory]
+    [InlineData(true, false, false, true)]
+    [InlineData(true, false, true, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(false, false, false, false)]
+    public void ShouldRunInitialReveal_OnlyForVisibleCollapsedIdlePanel(
+        bool settingsVisible,
+        bool settingsAnimating,
+        bool hasVisiblePanelWidth,
+        bool expected)
+    {
+        var actual = SettingsPanelRevealPolicy.ShouldRunInitialReveal(
+            settingsVisible,
+            settingsAnimating,
+            hasVisiblePanelWidth);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Theory]
     [InlineData(false, false, false)]
     [InlineData(false, true, true)]
     [InlineData(true, false, true)]
@@ -53,15 +72,60 @@ public sealed class MainWindowMetricsPolicyTests
         Assert.Equal(expected, result);
     }
 
-    [Theory]
-    [InlineData(true, 40)]
-    [InlineData(false, 0)]
-    public void GetInitialWarmupStartDelay_ReturnsSmallPostPaintDelay(
-        bool settingsVisible,
-        int expectedDelayMilliseconds)
+    [Fact]
+    public void InitialVisualReadyTimeout_CoversWorstCaseSettingsRevealChoreography()
     {
-        var result = MetricsCalculationPolicy.GetInitialWarmupStartDelay(settingsVisible);
+        Assert.Equal(TimeSpan.FromMilliseconds(1400), MetricsCalculationPolicy.InitialVisualReadyTimeout);
+    }
 
-        Assert.Equal(TimeSpan.FromMilliseconds(expectedDelayMilliseconds), result);
+    [Fact]
+    public async Task WaitForInitialVisualReadyAsync_PendingTask_WaitsForCompletion()
+    {
+        var visualReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waitTask = MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+            visualReady.Task,
+            TimeSpan.FromSeconds(1),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(waitTask.IsCompleted);
+
+        visualReady.SetResult();
+        await waitTask;
+    }
+
+    [Fact]
+    public async Task WaitForInitialVisualReadyAsync_Timeout_AllowsBackgroundWorkToContinue()
+    {
+        var visualReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+            visualReady.Task,
+            TimeSpan.FromMilliseconds(10),
+            TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task WaitForInitialVisualReadyAsync_FaultedAnimation_AllowsBackgroundWorkToContinue()
+    {
+        var failedAnimation = Task.FromException(new InvalidOperationException("animation failed"));
+
+        await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+            failedAnimation,
+            TimeSpan.FromSeconds(1),
+            TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task WaitForInitialVisualReadyAsync_ProjectCancellation_StopsBackgroundWork()
+    {
+        var visualReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+                visualReady.Task,
+                TimeSpan.FromSeconds(1),
+                cancellation.Token));
     }
 }

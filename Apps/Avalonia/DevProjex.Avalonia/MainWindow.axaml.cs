@@ -230,6 +230,7 @@ public partial class MainWindow : Window
     private SettingsPanelView? _settingsPanel;
     private TranslateTransform? _settingsTransform;
     private bool _settingsAnimating;
+    private Task _settingsAnimationTask = Task.CompletedTask;
     private const double SearchToolbarMinWidth = 418.0;
     private const double FilterToolbarMinWidth = 338.0;
     // Minimum/default aligns the settings island edge with the top tree-format switcher.
@@ -3658,7 +3659,9 @@ public partial class MainWindow : Window
 
         var newVisible = !_viewModel.SettingsVisible;
         _viewModel.SettingsVisible = newVisible;
-        AnimateSettingsPanel(newVisible);
+        ObserveDetachedTask(
+            AnimateSettingsPanelAsync(newVisible),
+            "AnimateSettingsPanel");
     }
 
     private void OnTogglePreview(object? sender, RoutedEventArgs e)
@@ -4808,11 +4811,25 @@ public partial class MainWindow : Window
             _previewBar.Classes.Remove("preview-toolbar-suspended");
     }
 
-    private async void AnimateSettingsPanel(bool show)
+    private Task AnimateSettingsPanelAsync(bool show)
     {
-        if (_settingsIsland is null || _settingsTransform is null || _settingsContainer is null) return;
-        if (_settingsAnimating) return;
+        var settingsIsland = _settingsIsland;
+        var settingsTransform = _settingsTransform;
+        if (settingsIsland is null || settingsTransform is null || _settingsContainer is null)
+            return Task.CompletedTask;
 
+        if (_settingsAnimating)
+            return _settingsAnimationTask;
+
+        _settingsAnimationTask = RunSettingsPanelAnimationAsync(show, settingsIsland, settingsTransform);
+        return _settingsAnimationTask;
+    }
+
+    private async Task RunSettingsPanelAnimationAsync(
+        bool show,
+        Border settingsIsland,
+        TranslateTransform settingsTransform)
+    {
         var displayMode = GetCurrentDisplayMode();
         _settingsAnimating = true;
         try
@@ -4897,8 +4914,8 @@ public partial class MainWindow : Window
             }
 
             ApplySettingsPanelWidth(show ? targetVisibleWidth : 0.0, animate: true);
-            _settingsTransform.X = show ? 0.0 : targetVisibleWidth;
-            _settingsIsland.Opacity = show ? 1.0 : 0.0;
+            settingsTransform.X = show ? 0.0 : targetVisibleWidth;
+            settingsIsland.Opacity = show ? 1.0 : 0.0;
             await WaitForPanelAnimationAsync(SettingsPanelAnimationDuration);
 
             switch (displayMode)
@@ -8322,7 +8339,8 @@ public partial class MainWindow : Window
     {
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
-        StartDeferredSettingsPanelAnimation(cancellationToken);
+        var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(cancellationToken);
+        ObserveDetachedTask(settingsRevealTask, "AnimateSettingsPanelWhenTreeReady");
 #if DEVPROJEX_PROJECT_LOAD_TIMING
         var timing = _projectLoadTiming;
         if (timing is not null && !timing.HasLoadingElapsed)
@@ -8333,12 +8351,18 @@ public partial class MainWindow : Window
 
         ObserveDetachedTask(
             TrackProjectAnalysisTimingAsync(
-                _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(currentTree, cancellationToken),
+                _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
+                    currentTree,
+                    settingsRevealTask,
+                    cancellationToken),
                 timing),
             "InitializeFileMetricsCache");
 #else
         ObserveDetachedTask(
-            _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(currentTree, cancellationToken),
+            _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+                currentTree,
+                settingsRevealTask,
+                cancellationToken),
             "InitializeFileMetricsCache");
 #endif
     }
@@ -8372,21 +8396,29 @@ public partial class MainWindow : Window
     }
 #endif
 
-    private void StartDeferredSettingsPanelAnimation(CancellationToken cancellationToken)
+    private Task StartDeferredSettingsPanelAnimationAsync(CancellationToken cancellationToken)
     {
-        if (!_viewModel.SettingsVisible || _settingsAnimating)
-            return;
+        if (_settingsAnimating)
+            return _settingsAnimationTask;
 
-        ObserveDetachedTask(
-            AnimateSettingsPanelWhenTreeReadyAsync(cancellationToken),
-            "AnimateSettingsPanelWhenTreeReady");
+        // A visible-width island is already on screen (notably during F5). Treating it as a new
+        // reveal would delay metrics and make existing status values disappear and jump again.
+        if (!SettingsPanelRevealPolicy.ShouldRunInitialReveal(
+                _viewModel.SettingsVisible,
+                settingsAnimating: false,
+                HasVisibleSettingsPanelWidth()))
+        {
+            return Task.CompletedTask;
+        }
+
+        return AnimateSettingsPanelWhenTreeReadyAsync(cancellationToken);
     }
 
     private async Task AnimateSettingsPanelWhenTreeReadyAsync(CancellationToken cancellationToken)
     {
         await WaitForTreeRenderStabilizationAsync(cancellationToken);
-        if (_viewModel.SettingsVisible && !_settingsAnimating)
-            AnimateSettingsPanel(true);
+        if (_viewModel.SettingsVisible)
+            await AnimateSettingsPanelAsync(true);
     }
 
     private static async void ObserveDetachedTask(Task task, string operationName)
