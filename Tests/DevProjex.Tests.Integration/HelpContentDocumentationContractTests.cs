@@ -50,6 +50,18 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "Tanlangan til ilova qayta ishga tushirilganda saqlanadi" }
     };
 
+    public static TheoryData<string, string, string, string> CurrentBehaviorContracts => new()
+    {
+        { "help.ru.txt", "### 12.3 Гибридный Smart Ignore", "Blur", "последнему завершённому состоянию" },
+        { "help.en.txt", "### 12.3 Hybrid Smart Ignore", "Blur", "last completed state" },
+        { "help.de.txt", "### 12.3 Hybrides Smart Ignore", "Weichzeichnen", "letzten abgeschlossenen Zustand" },
+        { "help.fr.txt", "### 12.3 Smart Ignore hybride", "Flou", "dernier état terminé" },
+        { "help.it.txt", "### 12.3 Smart Ignore ibrido", "Sfocatura", "ultimo stato completato" },
+        { "help.kk.txt", "### 12.3 Гибридті Smart Ignore", "Бұлдырлату", "соңғы аяқталған күйіне" },
+        { "help.tg.txt", "### 12.3 Smart Ignore-и гибридӣ", "Тирагӣ", "ҳолати охирини анҷомёфта" },
+        { "help.uz.txt", "### 12.3 Gibrid Smart Ignore", "Xiralashtirish", "oxirgi yakunlangan holatiga" }
+    };
+
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
     {
         { "help.ru.txt", "JSON-экспорт использует такой формат дерева: массивы содержат файлы, объекты содержат подпапки, `/` содержит файлы текущей папки, а `[]` обозначает пустую папку." },
@@ -97,6 +109,29 @@ public sealed class HelpContentDocumentationContractTests
 
         Assert.Contains(expectedPersistenceText, languageSection, StringComparison.Ordinal);
         Assert.Contains(FindResetSettingsLabel(fileName), languageSection, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(CurrentBehaviorContracts))]
+    public void HelpContent_DescribesCurrentIgnoreRefreshAndThemeBehavior(
+        string fileName,
+        string expectedHybridHeading,
+        string expectedBlurLabel,
+        string expectedCancelRestoreText)
+    {
+        var content = ReadHelpFile(fileName);
+        var gitSection = ExtractSection(content, "## 5)", "## 6)");
+        var ignoreSection = ExtractSection(content, "## 12)", "## 13)");
+        var themeSection = ExtractSection(content, "## 15)", "## 16)");
+        var progressSection = ExtractSection(content, "## 18)", "## 19)");
+
+        Assert.Contains("F5", gitSection, StringComparison.Ordinal);
+        Assert.Contains("Projects / App", content, StringComparison.Ordinal);
+        Assert.Contains(expectedHybridHeading, ignoreSection, StringComparison.Ordinal);
+        Assert.Contains(expectedBlurLabel, themeSection, StringComparison.Ordinal);
+        Assert.DoesNotContain("Acrylic", themeSection, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Beta]", themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedCancelRestoreText, progressSection, StringComparison.Ordinal);
     }
 
     [Theory]

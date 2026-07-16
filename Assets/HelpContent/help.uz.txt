@@ -18,7 +18,7 @@ Issiq tugmalar:
 * Jildni ochish… — ildiz papkani ochish (Ctrl+O)
 * Yangi oyna — DevProjex’ning yangi mustaqil nusxasini ochish
 * So‘nggilar — yaqinda ochilgan lokal jildlar ro‘yxati
-* Yangilash — daraxtni qayta o‘qish va qayta qurish (F5)
+* Yangilash — lokal jildni qayta o‘qish va daraxtni qayta qurish (F5)
 * Faylga eksport:
   * Daraxtni eksport qilish
   * Mazmunni eksport qilish
@@ -55,7 +55,7 @@ Qoidalar:
 * 15 tagacha so‘nggi jild saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.
 
-Har bir element uchun jildning qisqa nomi ko‘rsatiladi, to‘liq yo‘l esa tooltip’da mavjud bo‘ladi.
+Har bir elementda yuqori jild va loyiha nomi ko‘rsatiladi, masalan `Projects / App`.
 
 ## 4) Terminaldan ishga tushirish
 DevProjex-ni terminaldan ishga tushirish mumkin.
@@ -93,7 +93,7 @@ Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
 `%TEMP%\DevProjex\RepoCache`
 
 * Tarmoq — mavjud tarmoqlar ro‘yxatini faol tarmoq belgisi bilan ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar tarmoq lokalda bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
-* Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset.
+* Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset. Git Clone loyihasida F5 xuddi shu amalni bajaradi; odatiy «Fayl → Yangilash» buyrug‘i o‘chirilgan bo‘ladi.
 
 ### Klonlash oynasi
 Git Clone oynasida URL maydoni ostida “So‘nggi repozitoriylar” ro‘yxati ko‘rsatilishi mumkin.
@@ -274,6 +274,10 @@ O‘ng tomonda mavjud:
 
 «E’tiborsiz qoldirish», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi va «Sozlamalarni qo‘llash» bosilgandan keyin qo‘llanadi.
 
+Belgilash katagi o‘zgargandan keyin ilova mavjud bandlar va ularning hisoblagichlarini fonda yangilashi mumkin. Yakuniy daraxt faqat «Sozlamalarni qo‘llash» bosilgandan keyin qayta quriladi.
+
+Mavjud parametrlarni yangilash status-bardagi X tugmasi bilan bekor qilinsa, tugallanmagan o‘zgarishlar qo‘llanmaydi va panel oxirgi yakunlangan holatiga qaytadi.
+
 Har bir ro‘yxatda Barchasi tugmasi bor.
 
 «Fayl turlari» bo‘yicha izoh:
@@ -302,8 +306,8 @@ Muhim:
 "Ignorlash" roʻyxati joriy yoʻl va tanlangan yuqori darajadagi papkalar asosida avtomatik shakllanadi.
 
 Variantlar tartibi:
-* Smart ignore (mavjud bo‘lsa)
-* .gitignore dan foydalanish (kamida bitta `.gitignore` topilsa)
+* Smart ignore (qo‘llanadigan bo‘lsa)
+* .gitignore dan foydalanish (qo‘llanadigan bo‘lsa)
 * Bo‘sh papkalar
 * Bo‘sh fayllar
 * Yashirin papkalar
@@ -312,8 +316,11 @@ Variantlar tartibi:
 * Boshida nuqtali fayllar
 * Kengaytmasiz fayllar
 
-Asosiy qoidalar bandlari (yashirin, nuqtali, bo‘sh, kengaytmasiz) faqat mos elementlar mavjud bo‘lganda ko‘rsatiladi.
-«E’tiborsiz qoldirish» ichidagi band birinchi marta mavjud bo‘lsa, u odatda yoqilgan bo‘ladi. Avval aniq o‘chirilgan band qayta mavjud bo‘lganda o‘sha holatini saqlaydi.
+Ro‘yxat joriy daraxt va faol qoidalarga bog‘liq. Asosiy band faqat natijani o‘zgartira olganda ko‘rsatiladi. Mos elementlar boshqa qoida bilan allaqachon yashirilgan bo‘lsa, band vaqtincha yo‘qolib, sozlamalar o‘zgargandan keyin yana paydo bo‘lishi mumkin.
+
+`.gitignore` va Smart Ignore bandlari ham daraxtga haqiqiy ta’sirini hisobga oladi. Aniq o‘chirilgan band uni qayta yoqish mumkin bo‘lishi uchun ko‘rinib turishi mumkin.
+
+Yangi band birinchi marta paydo bo‘lganda odatda yoqilgan bo‘ladi. Avvaldan ma’lum band ro‘yxatdan vaqtincha yo‘qolgan bo‘lsa ham, foydalanuvchining aniq tanlovini saqlaydi.
 
 ".gitignore dan foydalanish" ostidagi chiziq Git/Smart qoidalarni asosiy ko‘rinish qoidalaridan ajratadi.
 
@@ -335,16 +342,17 @@ Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga te
 
 Ko‘p loyihali papkada bir loyiha `.gitignore` qoidasi o‘z hududidan tashqaridagi qo‘shni loyihalarga qo‘llanmaydi.
 
-### 12.3 "Smart ignore"
-* Faqat yakuniy daraxtni o‘zgartira olsa ko‘rsatiladi.
-* Yoqilgan: odatiy build artefaktlari, vosita keshlari va bog‘liqlik omborlari qo‘shimcha yashiriladi.
-* O‘chirilgan: smart-qoidalar qo‘llanmaydi.
+### 12.3 Gibrid Smart Ignore
+Smart Ignore odatiy build artefaktlari, vosita keshlari va bog‘liqlik omborlarini yashiradi. U bir-birini to‘ldiradigan ikki usuldan foydalanadi:
 
-Papka faqat nomi sababli ignore qilinmaydi.
-`build`, `vendor`, `packages`, `cache`, `pkg` yoki `Library` kabi umumiy nomlar uchun papka mazmuni ham tekshiriladi.
-Agar papkada oddiy manba kodi bo‘lsa, u ko‘rinadigan bo‘lib qoladi.
+1. Loyiha qoidalari. `.csproj`, `package.json`, `pyproject.toml` yoki `Cargo.toml` kabi marker fayllar loyiha turini aniqlaydi. Shundan keyin tegishli stek qoidalari uning hududida qo‘llanadi.
+2. Artefaktlarni tekshirish. `build`, `vendor`, `packages`, `cache`, `pkg` yoki `Library` kabi noaniq nomlarda nomning o‘zi yetarli emas. Papka mazmuni uning build natijasi, kesh yoki bog‘liqlik ombori ekanini tasdiqlashi kerak.
 
-Smart Ignore har bir aniqlangan loyiha tuzilishini hisobga olib, uning hududida alohida ishlaydi.
+Aniqlangan loyihada standart artefakt papkasi loyiha turi va papka nomi birikmasi bo‘yicha taniladi. Bunday kontekstdan tashqarida Smart Ignore ehtiyotkor ishlaydi va oddiy papkani faqat o‘xshash nomi sababli yashirmaydi.
+
+Ayrim tasdiqlangan universal artefaktlar loyiha hududidan tashqarida ham yashirilishi mumkin. Bu bir loyiha qoidalarini qo‘shni manba papkalariga yoymasdan aralash ish jildlarini to‘g‘ri qayta ishlash imkonini beradi.
+
+Smart Ignore o‘chirilsa, ikkala usul ham o‘chiriladi.
 
 ### 12.4 Asosiy qoidalar
 Variantlar:
@@ -359,28 +367,18 @@ Variantlar:
 Band yoqilganda mos elementlar daraxtdan va nusxalash/eksport natijalaridan yashiriladi.
 Asosiy qoidalar `.gitignore` va Smart Ignore’dan alohida yoqiladi, ammo yakuniy natija har doim barcha faol filtrlardan keyingi joriy daraxt bo‘yicha hisoblanadi.
 
-### 12.5 Ichki ishlash: odatiy holatlar
-1. Bitta loyiha, `.gitignore` bor.
-Odatda faqat ".gitignore dan foydalanish" ko‘rinadi.
-Yoqilganda, `.gitignore` va Smart Ignore birga ishlaydi.
-O‘chirilganda, ikkalasi ham o‘chadi.
+### 12.5 `.gitignore` va Smart Ignore qanday birga ishlaydi
+1. Bitta hudud va `.gitignore` fayliga ega bitta loyiha.
+Odatda faqat ".gitignore dan foydalanish" ko‘rinadi. Bu tugma loyihaning umumiy ignore siyosatini boshqaradi: yoqilganda `.gitignore` va qo‘llanadigan Smart qoidalar birga ishlaydi, o‘chirilganda ikkala mexanizm ham to‘xtaydi.
 
-2. Bitta loyiha, `.gitignore` yo‘q.
-".gitignore dan foydalanish" ko‘rinmaydi.
-"Smart ignore" joriy daraxtga ta’sir qila olsa ko‘rinadi.
+2. `.gitignore` fayli yo‘q bitta loyiha.
+Smart Ignore daraxtga ta’sir qila olsa ko‘rinadi.
 
-3. Ko‘p loyihali workspace: bir qismida `.gitignore` bor, bir qismida yo‘q.
-".gitignore dan foydalanish" va "Smart ignore" ko‘rinadi.
-`.gitignore` o‘z hududida ishlaydi.
-Smart Ignore (yoqilgan bo‘lsa) aniqlangan hududlarda filtrlashni to‘ldiradi.
+3. Bir nechta loyihali ish jildi.
+`.gitignore` faqat o‘zi topilgan hududlarda qo‘llanadi. Smart Ignore alohida ko‘rinib, boshqa qo‘llanadigan hududlardagi qoidalarni to‘ldirishi mumkin. Bu holatda tugmalar mustaqil ishlaydi.
 
-4. Ko‘p loyihali workspace: barcha loyihalarda `.gitignore` bor.
-".gitignore dan foydalanish" ko‘rinadi.
-"Smart ignore" alohida variant sifatida ko‘rinmaydi.
-
-5. Qo‘llanadigan qoidalarsiz papka.
-Agar `.gitignore` topilmasa va Smart Ignore daraxtga ta’sir qilmasa, bu variantlar ko‘rsatilmaydi.
-Faqat asosiy ko‘rinish qoidalari qoladi.
+4. Qo‘llanadigan qoidalarsiz papka.
+`.gitignore` va Smart Ignore natijaga ta’sir qilmasa, bu bandlar ko‘rsatilmaydi. Faqat qo‘llanadigan asosiy qoidalar qoladi.
 
 ### 12.6 Bo‘sh papkalar
 Mantiqan bo‘sh papkalarni daraxtdan va nusxalash/eksport natijalaridan yashiradi.
@@ -394,8 +392,12 @@ Hajmi 0 bayt bo‘lgan bo‘sh fayllarni daraxtdan va nusxalash/eksport natijala
 Kengaytmasi yo‘q fayllarni (masalan: `Dockerfile`, `Makefile`, `README`) daraxtdan va nusxalash/eksport natijalaridan yashiradi.
 
 ### 12.9 «E’tiborsiz qoldirish» blokidagi hisoblagichlar
-Mavjud bandlar yonida son `(N)` formatida ko‘rsatiladi.
-Asosiy qoidalar uchun bu son joriy daraxt konfiguratsiyasida aynan shu qoida nechta elementni yashirishini ko‘rsatadi.
+Mavjud asosiy qoidalar yonida son `(N)` formatida ko‘rsatiladi.
+
+Hisoblagich diskdagi o‘xshash elementlarning umumiy sonini emas, joriy sozlamalar birikmasida aynan shu qoidaning bevosita hissasini ko‘rsatadi. Shu sababli bir bandni o‘zgartirish boshqa band hisoblagichini o‘zgartirishi mumkin: bitta element bir vaqtning o‘zida bir nechta ustma-ust qoidalar natijasi sifatida hisoblanmasligi kerak.
+
+Masalan, Windows’da `.git` papkasi ham nuqta bilan boshlanishi, ham yashirin bo‘lishi mumkin. Uni «Boshida nuqtali papkalar» yashirib turganda, u «Yashirin papkalar» natijasi sifatida alohida hisoblanmaydi.
+
 ## 13) Daraxt va metrikalar qanday hisoblanadi
 Natija quyidagilarga bog‘liq:
 * tanlangan yuqori darajadagi jildlar
@@ -448,18 +450,25 @@ Ikonka tanlash tartibi:
 4) aks holda — noma’lum
 
 ## 15) Mavzu va effektlar
-Tema popoveri quyilarni almashtiradi:
-* yorug'/qorong'i mavzu
-* Shaffof / Mica / Acrylic
-* intensivlik, blur, kontrast, chegara sozlamalari
+«Mavzu» bo‘limida yorug‘ yoki qorong‘i mavzu va bitta fon effektini tanlash mumkin:
+* Shaffoflik
+* Xiralashtirish
+* Mica
 
-[Beta] belgilari versiyalar oralig‘ida o‘zgarishi mumkin.
+Effektlar bir vaqtda ishlamaydi. Tanlangan effektni qayta bosish uni o‘chiradi va oddiy shaffof bo‘lmagan fonni qaytaradi.
+
+Mavjud sozlamalar:
+* Fon shaffofligi — Shaffoflik va Xiralashtirish rejimlarida mavjud.
+* Yuqori panel kontrasti — preview, qidiruv, filtr va daraxt formati buyruqlari joylashgan asosiy panelni sozlaydi.
+* Menyu shaffofligi — asosiy menyu va uning ichki menyulariga bir xil qo‘llanadi.
+* Chegaralar ko‘rinishi — interfeys chegaralarining qanchalik aniq ko‘rinishini sozlaydi.
+
+Mica platformaning tizim materialidan foydalanadi va fon shaffofligi uchun alohida sozlamaga ega emas. Tizim effektni qo‘llamasa, ilova xavfsiz shaffof bo‘lmagan ko‘rinishdan foydalanadi.
 
 ## 16) Yordam
 
 ### 16.1 Sozlamalarni tiklash
-Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) faqat interfeysning vizual sozlamalarini tiklaydi (tema, effektlar, ixcham rejim, daraxt animatsiyasi) va loyiha ma’lumotlarini o‘zgartirmaydi.
-Bu amal interfeys tilining saqlangan tanlovini ham tozalaydi.
+Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham rejim, daraxt animatsiyasi va interfeys tilini standart qiymatlarga qaytaradi. Loyiha profillari, tarix va diskdagi fayllar o‘zgartirilmaydi.
 
 ### 16.2 Ma’lumotlarni tiklash
 Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:
@@ -492,8 +501,9 @@ Xulq-atvor:
 Status-bardagi X (bekor qilish) tugmasi:
 * bekor qilishni qo‘llaydigan amallar uchun best-effort bekor qilishni bajaradi;
 * fon rejimidagi ma’lumot hisoblashni to‘xtatadi;
+* mavjud parametrlarni yangilash bekor qilinganda panelni oxirgi yakunlangan holatiga qaytaradi;
 * bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
 
 ## 19) Eslatmalar
-* Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
+* Standart holatda Xiralashtirish effektli qorong‘i mavzu ishlatiladi. Tizim effektni qo‘llamasa, ilova xavfsiz shaffof bo‘lmagan ko‘rinishdan foydalanadi.
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.

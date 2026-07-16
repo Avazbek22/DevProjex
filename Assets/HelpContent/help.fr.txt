@@ -18,7 +18,7 @@ Raccourcis :
 * Ouvrir le dossier… — ouvrir le dossier racine (Ctrl+O)
 * Nouvelle fenêtre — ouvrir une nouvelle instance indépendante de DevProjex
 * Récents — liste des dossiers locaux ouverts récemment
-* Actualiser — relire et reconstruire l’arborescence (F5)
+* Actualiser — relire un dossier local et reconstruire l’arborescence (F5)
 * Exporter vers un fichier :
   * Exporter l’arborescence
   * Exporter le contenu
@@ -55,7 +55,7 @@ Règles :
 * jusqu’à 15 derniers dossiers sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.
 
-Pour chaque élément, le nom court du dossier est affiché ; le chemin complet est disponible dans une info-bulle.
+Pour chaque élément, le dossier parent et le nom du projet sont affichés, par exemple `Projects / App`.
 
 ## 4) Lancement depuis le terminal
 DevProjex peut être lancé depuis le terminal.
@@ -93,7 +93,7 @@ Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’e
 `%TEMP%\DevProjex\RepoCache`
 
 * Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
-* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
+* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>. Pour un projet Git Clone, F5 effectue la même action ; la commande normale « Fichier → Actualiser » est désactivée.
 
 ### Fenêtre de clonage
 Dans la fenêtre Git Clone, une liste « Dépôts récents » peut apparaître sous le champ URL.
@@ -274,6 +274,10 @@ Limitations :
 
 Les changements dans « Ignorer », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
 
+Après la modification d’une case, l’application peut actualiser en arrière-plan les options disponibles et leurs compteurs. L’arborescence résultante n’est reconstruite qu’après un clic sur « Appliquer ».
+
+Si l’actualisation des options disponibles est annulée avec le bouton X de la barre d’état, les changements inachevés ne sont pas appliqués et le panneau revient à son dernier état terminé.
+
 Chaque liste a un bouton Tous.
 
 Remarque sur « Types de fichiers » :
@@ -302,8 +306,8 @@ Important :
 La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
 
 Ordre des options :
-* Smart ignore (si disponible)
-* Utiliser .gitignore (si au moins un `.gitignore` est trouvé)
+* Smart ignore (si applicable)
+* Utiliser .gitignore (si applicable)
 * Dossiers vides
 * Fichiers vides
 * Dossiers cachés
@@ -312,8 +316,11 @@ Ordre des options :
 * Fichiers commençant par un point
 * Fichiers sans extension
 
-Les options des règles de base (cachés, avec point, vides, sans extension) sont affichées uniquement si des éléments correspondants existent.
-Quand une option dans « Ignorer » devient disponible pour la première fois, elle est activée par défaut. Une option explicitement désactivée auparavant conserve cet état lorsqu’elle redevient disponible.
+La liste dépend de l’arborescence actuelle et des règles actives. Une option de base n’est affichée que si elle peut modifier le résultat. Si les éléments correspondants sont déjà masqués par une autre règle, l’option peut disparaître temporairement puis réapparaître après une modification des paramètres.
+
+Les options `.gitignore` et Smart Ignore tiennent également compte de leur effet réel sur l’arborescence. Une option explicitement désactivée peut rester visible afin de pouvoir être réactivée.
+
+Une nouvelle option est activée par défaut lors de sa première apparition. Une option déjà connue conserve le choix explicite de l’utilisateur, même si elle a temporairement disparu de la liste.
 
 La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
 
@@ -335,16 +342,17 @@ Cette limite concerne uniquement la détection des zones imbriquées pour `.giti
 
 Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
 
-### 12.3 « Smart ignore »
-* Affiché uniquement lorsqu’il peut modifier l’arbre résultant.
-* Activé : les artefacts de build, caches d’outils et magasins de dépendances courants sont masqués en plus.
-* Désactivé : les règles smart ne sont pas appliquées.
+### 12.3 Smart Ignore hybride
+Smart Ignore masque les artefacts de build courants, les caches d’outils et les magasins de dépendances. Il combine deux approches complémentaires :
 
-Un dossier n’est pas ignoré uniquement à cause de son nom.
-Pour les noms courants comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le contenu est également vérifié.
-Si le dossier contient des sources ordinaires, il reste visible.
+1. Règles de projet. Des fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml` déterminent le type de projet. Les règles de la technologie correspondante sont ensuite appliquées dans sa zone.
+2. Vérification des artefacts. Pour des noms ambigus comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le nom seul ne suffit pas. Le contenu du dossier doit confirmer qu’il s’agit d’un résultat de build, d’un cache ou d’un magasin de dépendances.
 
-Smart Ignore tient compte de la structure de chaque projet détecté et fonctionne séparément dans sa zone.
+Dans un projet reconnu, un dossier d’artefacts standard est identifié par la combinaison du type de projet et du nom du dossier. Hors de ce contexte, Smart Ignore reste prudent et ne masque pas un dossier ordinaire uniquement parce que son nom est similaire.
+
+Certains artefacts portables confirmés peuvent aussi être masqués hors d’une zone de projet formelle. Cela permet de traiter les espaces de travail mixtes sans étendre les règles d’un projet aux dossiers source voisins.
+
+Désactiver Smart Ignore désactive les deux approches.
 
 ### 12.4 Règles de base
 Options :
@@ -359,28 +367,18 @@ Options :
 Quand une option est activée, elle masque les éléments correspondants dans l’arbre et dans les résultats de copie/export.
 Les règles de base s’activent séparément de `.gitignore` et de Smart Ignore, mais le résultat final est toujours calculé à partir de l’arbre courant après application de tous les filtres actifs.
 
-### 12.5 Fonctionnement interne : cas typiques
-1. Projet unique avec `.gitignore`.
-En général, seule l’option « Utiliser .gitignore » est affichée.
-Quand elle est activée, `.gitignore` et Smart Ignore fonctionnent ensemble.
-Quand elle est désactivée, les deux sont désactivés.
+### 12.5 Interaction entre `.gitignore` et Smart Ignore
+1. Un projet avec une seule zone et un `.gitignore`.
+En général, seule l’option « Utiliser .gitignore » est affichée. Ce bouton contrôle la politique d’ignore commune du projet : lorsqu’il est activé, `.gitignore` et les règles Smart applicables fonctionnent ensemble ; lorsqu’il est désactivé, les deux mécanismes sont arrêtés.
 
-2. Projet unique sans `.gitignore`.
-« Utiliser .gitignore » n’est pas affiché.
-« Smart ignore » n’est affiché que s’il peut affecter l’arbre courant.
+2. Un projet sans `.gitignore`.
+Smart Ignore est affiché s’il peut modifier l’arborescence.
 
-3. Espace multi-projets, certains projets ont `.gitignore`, d’autres non.
-« Utiliser .gitignore » et « Smart ignore » sont affichés.
-`.gitignore` agit dans sa propre zone.
-Smart Ignore (s’il est activé) complète le filtrage dans les zones détectées.
+3. Un espace de travail contenant plusieurs projets.
+`.gitignore` ne s’applique que dans les zones où il est trouvé. Smart Ignore peut apparaître séparément et compléter les règles dans les autres zones applicables. Dans ce cas, les boutons fonctionnent indépendamment.
 
-4. Espace multi-projets, tous les projets ont `.gitignore`.
-« Utiliser .gitignore » est affiché.
-« Smart ignore » n’est pas affiché comme option séparée.
-
-5. Dossier sans règles applicables.
-Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’affecte pas l’arbre, ces options sont masquées.
-Seules les règles de visibilité de base restent actives.
+4. Un dossier sans règles applicables.
+Si `.gitignore` et Smart Ignore ne modifient pas le résultat, ces options sont masquées. Seules les règles de base applicables restent affichées.
 
 ### 12.6 Dossiers vides
 Masque les dossiers logiquement vides dans l’arbre et dans les résultats de copie/export.
@@ -394,8 +392,12 @@ Masque les fichiers vides de taille 0 octet dans l’arbre et dans les résultat
 Masque les fichiers sans extension (par exemple : `Dockerfile`, `Makefile`, `README`) dans l’arbre et dans les résultats de copie/export.
 
 ### 12.9 Compteurs dans le bloc « Ignorer »
-Le nombre est affiché à côté des options disponibles au format `(N)`.
-Pour les règles de base, ce nombre indique combien d’éléments sont masqués précisément par cette règle dans la configuration actuelle de l’arbre.
+Le nombre est affiché à côté des règles de base disponibles au format `(N)`.
+
+Un compteur indique la contribution directe de cette règle avec la combinaison actuelle de paramètres, et non le nombre total d’éléments similaires sur le disque. Modifier une option peut donc changer le compteur d’une autre : un élément ne doit pas être compté à la fois comme résultat de plusieurs règles qui se recouvrent.
+
+Par exemple, sous Windows, le dossier `.git` peut à la fois commencer par un point et être caché. Tant que « Dossiers commençant par un point » le masque, il n’est pas compté séparément comme résultat de « Dossiers cachés ».
+
 ## 13) Comment l'arbre et les métriques sont calculés
 Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
@@ -448,18 +450,25 @@ Ordre de sélection :
 4) sinon — inconnu
 
 ## 15) Thème et effets
-Le popover de thème permet :
-* thème clair/sombre
-* Transparent / Mica / Acrylic
-* intensité, flou, contraste, bordures
+La section « Thème » permet de choisir un thème clair ou sombre et un effet d’arrière-plan :
+* Transparence
+* Flou
+* Mica
 
-Les éléments [Beta] peuvent évoluer entre versions.
+Les effets sont mutuellement exclusifs. Un nouveau clic sur l’effet sélectionné le désactive et rétablit un arrière-plan opaque normal.
+
+Paramètres disponibles :
+* Transparence de l’arrière-plan — disponible pour Transparence et Flou.
+* Contraste de la barre supérieure — règle la barre principale contenant les commandes d’aperçu, de recherche, de filtre et de format d’arborescence.
+* Transparence des menus — s’applique de la même manière au menu principal et à ses sous-menus.
+* Visibilité des bordures — règle l’intensité des bordures de l’interface.
+
+Mica utilise le matériau système de la plateforme et ne possède pas de réglage séparé pour la transparence de l’arrière-plan. Si un effet n’est pas pris en charge par le système, l’application utilise un affichage opaque sûr.
 
 ## 16) Aide
 
 ### 16.1 Réinitialiser les paramètres
-Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) réinitialise uniquement les paramètres visuels de l’interface (thème, effets, mode compact, animation de l'arborescence) et ne modifie pas les données du projet.
-Cette action efface aussi le choix de langue de l’interface enregistré.
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, de l’animation de l’arborescence et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
 
 ### 16.2 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
@@ -492,8 +501,9 @@ Comportement :
 Bouton X (annuler) dans la barre d’état :
 * exécute une annulation best-effort pour les opérations qui prennent en charge l’annulation ;
 * arrête le calcul de données en arrière-plan ;
+* lors de l’annulation d’une actualisation des options disponibles, rétablit le dernier état terminé du panneau ;
 * pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
 
 ## 19) Notes
-* Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
+* Par défaut, le thème sombre avec l’effet Flou est utilisé. Si l’effet n’est pas pris en charge par le système, l’application utilise un affichage opaque sûr.
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.

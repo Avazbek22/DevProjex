@@ -18,7 +18,7 @@ Scorciatoie:
 * Apri cartella… — apri la cartella radice (Ctrl+O)
 * Nuova finestra — apri una nuova istanza indipendente di DevProjex
 * Recenti — elenco delle cartelle locali aperte di recente
-* Aggiorna — rileggi e ricostruisci l’albero (F5)
+* Aggiorna — rileggi una cartella locale e ricostruisci l’albero (F5)
 * Esporta su file:
   * Esporta albero
   * Esporta contenuto
@@ -55,7 +55,7 @@ Regole:
 * vengono conservate fino a 15 cartelle recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
 
-Per ogni elemento viene mostrato il nome breve della cartella; il percorso completo è disponibile in un tooltip.
+Per ogni elemento vengono mostrati la cartella padre e il nome del progetto, ad esempio `Projects / App`.
 
 ## 4) Avvio dal terminale
 DevProjex può essere avviato dal terminale.
@@ -93,7 +93,7 @@ La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
 `%TEMP%\DevProjex\RepoCache`
 
 * Branch — mostra l’elenco dei branch disponibili con indicazione di quello attivo; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste in locale, viene scaricato (fetch) e creato localmente.
-* Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
+* Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>. Per un progetto Git Clone, F5 esegue la stessa azione; il normale comando «File → Aggiorna» è disattivato.
 
 ### Finestra di clonazione
 Nella finestra Git Clone può comparire sotto il campo URL un elenco «Repository recenti».
@@ -274,6 +274,10 @@ A destra sono disponibili:
 
 Le modifiche in « Ignora », « Tipi di file » e « Cartelle di primo livello » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
 
+Dopo la modifica di una casella, l’app può aggiornare in background le opzioni disponibili e i relativi contatori. L’albero risultante viene ricostruito solo dopo aver premuto « Applica ».
+
+Se l’aggiornamento delle opzioni disponibili viene annullato con il pulsante X nella barra di stato, le modifiche incomplete non vengono applicate e il pannello torna all’ultimo stato completato.
+
 Ogni lista ha il toggle Tutti.
 
 Nota su « Tipi di file »:
@@ -302,8 +306,8 @@ Importante:
 L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
 
 Ordine delle opzioni:
-* Smart ignore (se disponibile)
-* Usa .gitignore (se viene trovato almeno un `.gitignore`)
+* Smart ignore (se applicabile)
+* Usa .gitignore (se applicabile)
 * Cartelle vuote
 * File vuoti
 * Cartelle nascoste
@@ -312,8 +316,11 @@ Ordine delle opzioni:
 * File con punto iniziale
 * File senza estensione
 
-Le opzioni delle regole base (nascosti, con punto, vuoti, senza estensione) vengono mostrate solo se esistono elementi corrispondenti.
-Quando un’opzione in « Ignora » diventa disponibile per la prima volta, viene attivata per impostazione predefinita. Un’opzione disattivata esplicitamente in precedenza mantiene quello stato quando torna disponibile.
+L’elenco dipende dall’albero corrente e dalle regole attive. Un’opzione di base viene mostrata solo quando può modificare il risultato. Se gli elementi corrispondenti sono già nascosti da un’altra regola, l’opzione può scomparire temporaneamente e riapparire dopo una modifica delle impostazioni.
+
+Anche le opzioni `.gitignore` e Smart Ignore tengono conto del loro effetto reale sull’albero. Un’opzione disattivata esplicitamente può rimanere visibile per poter essere riattivata.
+
+Una nuova opzione viene attivata per impostazione predefinita alla prima comparsa. Un’opzione già nota mantiene la scelta esplicita dell’utente, anche se è temporaneamente scomparsa dall’elenco.
 
 La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
 
@@ -335,16 +342,17 @@ Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e
 
 Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
 
-### 12.3 « Smart ignore »
-* Viene mostrato solo quando può modificare l’albero risultante.
-* Attivo: nasconde anche i tipici artefatti di build, le cache degli strumenti e gli archivi delle dipendenze.
-* Disattivo: le regole smart non vengono applicate.
+### 12.3 Smart Ignore ibrido
+Smart Ignore nasconde i tipici artefatti di build, le cache degli strumenti e gli archivi delle dipendenze. Usa due approcci complementari:
 
-Una cartella non viene ignorata solo per il suo nome.
-Per nomi comuni come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` viene controllato anche il contenuto.
-Se la cartella contiene normali file sorgente, rimane visibile.
+1. Regole di progetto. File marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml` identificano il tipo di progetto. Le regole dello stack corrispondente vengono quindi applicate nel relativo ambito.
+2. Verifica degli artefatti. Per nomi ambigui come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library`, il nome da solo non basta. Il contenuto della cartella deve confermare che si tratta di un risultato di build, una cache o un archivio di dipendenze.
 
-Smart Ignore considera la struttura di ogni progetto rilevato e opera separatamente nel relativo ambito.
+In un progetto riconosciuto, una cartella standard di artefatti viene identificata dalla combinazione del tipo di progetto e del nome della cartella. Fuori da questo contesto, Smart Ignore rimane prudente e non nasconde una cartella normale solo perché il nome è simile.
+
+Alcuni artefatti portabili confermati possono essere nascosti anche fuori da un ambito di progetto formale. Questo permette di gestire workspace misti senza estendere le regole di un progetto alle cartelle sorgente vicine.
+
+Disattivando Smart Ignore vengono disattivati entrambi gli approcci.
 
 ### 12.4 Regole base
 Opzioni:
@@ -359,28 +367,18 @@ Opzioni:
 Quando un’opzione è attiva, nasconde gli elementi corrispondenti nell’albero e nei risultati di copia/esportazione.
 Le regole di base vengono attivate separatamente da `.gitignore` e Smart Ignore, ma il risultato finale viene sempre calcolato sull’albero corrente dopo l’applicazione di tutti i filtri attivi.
 
-### 12.5 Comportamento interno: casi tipici
-1. Progetto singolo con `.gitignore`.
-Di norma viene mostrato solo « Usa .gitignore ».
-Quando è attivo, `.gitignore` e Smart Ignore lavorano insieme.
-Quando è disattivo, entrambi vengono disattivati.
+### 12.5 Come interagiscono `.gitignore` e Smart Ignore
+1. Un progetto con un solo ambito e un `.gitignore`.
+Di norma viene mostrato solo « Usa .gitignore ». Questo interruttore controlla la politica di ignore comune del progetto: quando è attivo, `.gitignore` e le regole Smart applicabili lavorano insieme; quando è disattivo, entrambi i meccanismi sono spenti.
 
-2. Progetto singolo senza `.gitignore`.
-« Usa .gitignore » non viene mostrato.
-« Smart ignore » viene mostrato solo se può influire sull’albero corrente.
+2. Un progetto senza `.gitignore`.
+Smart Ignore viene mostrato se può influire sull’albero.
 
-3. Workspace multi-progetto, alcuni progetti con `.gitignore`, altri senza.
-Vengono mostrati « Usa .gitignore » e « Smart ignore ».
-`.gitignore` opera nel proprio ambito.
-Smart Ignore (se attivo) completa il filtraggio negli ambiti rilevati.
+3. Un workspace con più progetti.
+`.gitignore` si applica solo negli ambiti in cui viene trovato. Smart Ignore può comparire separatamente e completare le regole negli altri ambiti applicabili. In questo caso gli interruttori funzionano in modo indipendente.
 
-4. Workspace multi-progetto, tutti i progetti hanno `.gitignore`.
-Viene mostrato « Usa .gitignore ».
-« Smart ignore » non viene mostrato come opzione separata.
-
-5. Cartella senza regole applicabili.
-Se non viene trovato `.gitignore` e Smart Ignore non influisce sull’albero, queste opzioni non vengono mostrate.
-Restano solo le regole base di visibilità.
+4. Una cartella senza regole applicabili.
+Se `.gitignore` e Smart Ignore non influiscono sul risultato, queste opzioni non vengono mostrate. Restano solo le regole di base applicabili.
 
 ### 12.6 Cartelle vuote
 Nasconde le cartelle logicamente vuote dall’albero e dai risultati di copia/esportazione.
@@ -394,8 +392,12 @@ Nasconde i file vuoti di dimensione 0 byte dall’albero e dai risultati di copi
 Nasconde i file senza estensione (ad esempio: `Dockerfile`, `Makefile`, `README`) dall’albero e dai risultati di copia/esportazione.
 
 ### 12.9 Contatori nel blocco « Ignora »
-Vicino alle opzioni disponibili viene mostrato il numero nel formato `(N)`.
-Per le regole di base, questo numero mostra quanti elementi vengono nascosti proprio da quella regola nella configurazione corrente dell’albero.
+Vicino alle regole di base disponibili viene mostrato il numero nel formato `(N)`.
+
+Un contatore mostra il contributo diretto di quella regola con la combinazione corrente di impostazioni, non il numero totale di elementi simili sul disco. Modificare un’opzione può quindi cambiare il contatore di un’altra: un elemento non deve essere contato contemporaneamente come risultato di più regole sovrapposte.
+
+Ad esempio, su Windows la cartella `.git` può avere sia un punto iniziale sia l’attributo nascosto. Finché « Cartelle con punto iniziale » la nasconde, non viene contata separatamente come risultato di « Cartelle nascoste ».
+
 ## 13) Come vengono calcolati albero e metriche
 Il risultato dipende da:
 * cartelle di primo livello selezionate
@@ -448,18 +450,25 @@ Ordine di scelta:
 4) altrimenti — sconosciuto
 
 ## 15) Tema ed effetti
-Il popover del tema permette di scegliere:
-* tema chiaro/scuro
-* Trasparente / Mica / Acrylic
-* intensità, blur, contrasto, bordi
+La sezione «Tema» permette di scegliere un tema chiaro o scuro e un effetto di sfondo:
+* Trasparenza
+* Sfocatura
+* Mica
 
-Gli elementi [Beta] possono cambiare tra versioni.
+Gli effetti si escludono a vicenda. Un nuovo clic sull’effetto selezionato lo disattiva e ripristina un normale sfondo opaco.
+
+Impostazioni disponibili:
+* Trasparenza dello sfondo — disponibile per Trasparenza e Sfocatura.
+* Contrasto barra superiore — regola la barra principale con i comandi di anteprima, ricerca, filtro e formato dell’albero.
+* Trasparenza dei menu — si applica allo stesso modo al menu principale e ai relativi sottomenu.
+* Visibilità dei bordi — regola quanto sono evidenti i bordi dell’interfaccia.
+
+Mica usa il materiale di sistema della piattaforma e non ha un’impostazione separata per la trasparenza dello sfondo. Se un effetto non è supportato dal sistema, l’app usa una visualizzazione opaca sicura.
 
 ## 16) Aiuto
 
 ### 16.1 Ripristina impostazioni
-Ripristina impostazioni (Aiuto → Ripristina impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
-Questa azione azzera anche la lingua dell’interfaccia salvata.
+Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, animazione dell’albero e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.
 
 ### 16.2 Ripristina dati
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
@@ -492,8 +501,9 @@ Comportamento:
 Pulsante X (annulla) nella barra di stato:
 * esegue annullamento best-effort per operazioni che supportano l’annullamento;
 * interrompe il calcolo dati in background;
+* quando viene annullato un aggiornamento delle opzioni disponibili, riporta il pannello all’ultimo stato completato;
 * per operazioni senza supporto annullamento, ferma l’indicazione nella barra di stato, mentre l’operazione può comunque terminare in background.
 
 ## 19) Note
-* Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
+* Per impostazione predefinita viene usato il tema scuro con Sfocatura. Se l’effetto non è supportato dal sistema, l’app usa una visualizzazione opaca sicura.
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.

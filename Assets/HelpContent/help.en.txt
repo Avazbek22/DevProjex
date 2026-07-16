@@ -18,7 +18,7 @@ Hotkeys:
 * Open folder… — open root folder (Ctrl+O)
 * New window — open a new independent DevProjex instance
 * Recent — list of recently opened local folders
-* Refresh — rescan and rebuild the tree (F5)
+* Refresh — rescan a local folder and rebuild the tree (F5)
 * Export to file:
   * Export tree
   * Export content
@@ -55,7 +55,7 @@ Rules:
 * up to 15 recent folders are stored;
 * history is preserved between app launches.
 
-Each item shows the short folder name, and the full path is available in a tooltip.
+Each item shows the parent folder and project name, for example `Projects / App`.
 
 ## 4) Launch from terminal
 DevProjex can be launched from the terminal.
@@ -93,7 +93,7 @@ The cache is stored in the system temp folder. On Windows it is usually:
 `%TEMP%\DevProjex\RepoCache`
 
 * Branch — shows the list of available branches with the active one marked; switching updates the tree to the selected branch. If the branch already exists locally, switching is offline (no update). If it does not exist locally, it is fetched and created.
-* Get updates — updates only the current branch: fetch and reset to origin/<branch>.
+* Get updates — updates only the current branch: fetch and reset to origin/<branch>. For a Git Clone project, F5 performs the same action; the regular “File → Refresh” command is disabled.
 
 ### Clone window
 In the Git Clone window, a “Recent repositories” list can appear below the URL field.
@@ -274,6 +274,10 @@ Available on the right:
 
 Changes in “Ignore options”, “Extensions”, and “Root folders” are staged in the panel and applied after clicking “Apply settings”.
 
+After a checkbox changes, the app may update available options and their counts in the background. The resulting tree is rebuilt only after clicking “Apply settings”.
+
+If an available-options update is canceled with the X button in the status bar, unfinished changes are not applied and the panel returns to its last completed state.
+
 Each list has an All toggle.
 
 Note about "Extensions":
@@ -302,8 +306,8 @@ Important:
 The "Ignore" list is built automatically from the current path and selected top-level folders.
 
 Option order:
-* Smart ignore (when available)
-* Use .gitignore (when at least one `.gitignore` is found)
+* Smart ignore (when applicable)
+* Use .gitignore (when applicable)
 * Empty folders
 * Empty files
 * Hidden folders
@@ -312,8 +316,11 @@ Option order:
 * Dot-prefixed files
 * Files without extension
 
-Basic-rule options (hidden, dot-prefixed, empty, extensionless) are shown only when matching elements exist.
-When an option in "Ignore" becomes available for the first time, it is enabled by default. An option explicitly disabled earlier keeps that state when it becomes available again.
+The list depends on the current tree and active rules. A basic option is shown only when it can change the result. If matching elements are already hidden by another rule, the option may temporarily disappear and return after the settings change.
+
+The `.gitignore` and Smart Ignore options also account for their actual effect on the tree. An explicitly disabled option may remain visible so it can be enabled again.
+
+A new option is enabled by default when it first appears. A known option keeps the user's explicit choice even if it temporarily disappeared from the list.
 
 The separator under "Use .gitignore" splits Git/Smart rules from basic visibility rules.
 
@@ -335,16 +342,17 @@ This limit only controls discovery of nested scopes for `.gitignore` and Smart I
 
 For multi-project folders, one project's `.gitignore` is not applied to neighboring projects outside its scope.
 
-### 12.3 "Smart ignore"
-* Shown only when it can change the resulting tree.
-* Enabled: common build artifacts, tool caches, and dependency stores are additionally hidden.
-* Disabled: smart rules are not applied.
+### 12.3 Hybrid Smart Ignore
+Smart Ignore hides common build artifacts, tool caches, and dependency stores. It uses two complementary approaches:
 
-A folder is not ignored only because of its name.
-For common names such as `build`, `vendor`, `packages`, `cache`, `pkg`, or `Library`, the contents are also checked.
-If the folder contains regular source files, it remains visible.
+1. Project rules. Marker files such as `.csproj`, `package.json`, `pyproject.toml`, or `Cargo.toml` identify the project type. Rules for that stack are then applied inside its scope.
+2. Artifact verification. For ambiguous names such as `build`, `vendor`, `packages`, `cache`, `pkg`, or `Library`, the name alone is not enough. The folder contents must confirm that it is build output, a cache, or a dependency store.
 
-Smart Ignore considers the structure of each detected project and works separately inside its scope.
+In a recognized project, a standard artifact folder is identified by the combination of project type and folder name. Outside that context, Smart Ignore remains conservative and does not hide an ordinary folder only because its name looks similar.
+
+Some confirmed portable artifacts can also be hidden outside a formal project scope. This handles mixed workspaces without extending one project's rules to neighboring source folders.
+
+Disabling Smart Ignore turns off both approaches.
 
 ### 12.4 Basic rules
 Options:
@@ -359,28 +367,18 @@ Options:
 When enabled, an option hides matching elements from the tree and from copy/export results.
 Basic rules are enabled separately from `.gitignore` and Smart Ignore, but the final result is always calculated from the current tree after all active filters are applied.
 
-### 12.5 Internal behavior: common cases
-1. Single project with `.gitignore`.
-Usually only "Use .gitignore" is shown.
-When enabled, `.gitignore` and Smart Ignore work together.
-When disabled, both `.gitignore` and Smart Ignore are disabled.
+### 12.5 How `.gitignore` and Smart Ignore work together
+1. One project with one scope and a `.gitignore`.
+Usually only “Use .gitignore” is shown. This switch controls the project's combined ignore policy: when enabled, `.gitignore` and applicable Smart rules work together; when disabled, both mechanisms are off.
 
-2. Single project without `.gitignore`.
-"Use .gitignore" is not shown.
-"Smart ignore" is shown only when it can affect the current tree.
+2. One project without a `.gitignore`.
+Smart Ignore is shown if it can affect the tree.
 
-3. Multi-project workspace, some projects have `.gitignore`, some do not.
-Both "Use .gitignore" and "Smart ignore" are shown.
-`.gitignore` works inside its own scopes.
-Smart Ignore (when enabled) complements filtering in detected scopes.
+3. A workspace with multiple projects.
+`.gitignore` applies only in scopes where it is found. Smart Ignore may appear separately and complement the rules in other applicable scopes. The switches operate independently in this case.
 
-4. Multi-project workspace, all projects have `.gitignore`.
-"Use .gitignore" is shown.
-"Smart ignore" is not shown as a separate option.
-
-5. Folder without applicable rules.
-If no `.gitignore` is found and Smart Ignore does not affect the tree, these options are hidden.
-Only basic visibility rules remain.
+4. A folder without applicable rules.
+If `.gitignore` and Smart Ignore do not affect the result, these options are hidden. Only applicable basic rules remain.
 
 ### 12.6 Empty folders
 Hides logically empty folders from the tree and from copy/export results.
@@ -394,8 +392,12 @@ Hides empty files with size 0 bytes from the tree and from copy/export results.
 Hides files without extension (for example: `Dockerfile`, `Makefile`, `README`) from the tree and from copy/export results.
 
 ### 12.9 Counters in the "Ignore" block
-Counts are shown near available options in the `(N)` format.
-For basic rules, this count shows how many elements are hidden by that specific rule in the current tree configuration.
+Counts are shown next to available basic rules in the `(N)` format.
+
+A count shows the direct contribution of that rule under the current combination of settings, not the total number of similar items on disk. Changing one option can therefore change another option's count: one item must not be counted as the result of several overlapping rules at once.
+
+For example, on Windows the `.git` folder may be both dot-prefixed and hidden. While “Dot-prefixed folders” hides it, it is not counted separately as a result of “Hidden folders”.
+
 ## 13) How the tree and metrics are calculated
 Result depends on:
 * selected Root folders
@@ -448,18 +450,25 @@ Icon selection order:
 4) otherwise — unknown
 
 ## 15) Theme and effects
-Theme popover lets you switch:
-* light/dark theme
-* Transparent / Mica / Acrylic
-* intensity, blur, contrast, border settings
+The Theme section lets you select a light or dark theme and one background effect:
+* Transparency
+* Blur
+* Mica
 
-Items marked [Beta] may change between versions.
+Effects are mutually exclusive. Clicking the selected effect again disables it and restores a regular opaque background.
+
+Available settings:
+* Background transparency — available for Transparency and Blur.
+* Top panel contrast — adjusts the main panel containing Preview, Search, Filter, and tree-format commands.
+* Menu transparency — applies equally to the main menu and its submenus.
+* Border visibility — adjusts how strongly interface borders are shown.
+
+Mica uses the platform's system material and has no separate background-transparency setting. If an effect is not supported by the system, the app uses a safe opaque fallback.
 
 ## 16) Help
 
 ### 16.1 Reset settings
-Reset settings (Help → Reset settings) resets only visual interface settings (theme, effects, Compact mode, Tree animation) and does not modify project data.
-Reset settings also clears the saved interface language selection.
+Reset settings (Help → Reset settings) restores the default theme, effects, Compact mode, Tree animation, and interface language. Project profiles, history, and files on disk are not changed.
 
 ### 16.2 Reset data
 Reset data (Help → Reset data) removes saved local-project parameter profiles:
@@ -492,8 +501,9 @@ Behavior:
 X button (cancel) in the status bar:
 * performs best-effort cancellation for operations that support cancellation;
 * stops background data calculation;
+* when an available-options update is canceled, returns the panel to its last completed state;
 * for operations without cancellation support, it stops status-bar indication, while the operation itself may still finish in background.
 
 ## 19) Notes
-* By default, dark theme and transparency effects are enabled (if supported).
+* By default, the dark theme with Blur is used. If the effect is not supported by the system, the app uses a safe opaque fallback.
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.
