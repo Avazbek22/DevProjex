@@ -109,7 +109,7 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                     return false;
 
                 using var _ = heldLock;
-                if (IsFutureDocument(fileSet.PrimaryPath))
+                if (ContainsFutureDocument(fileSet))
                     return false;
                 var latest = LoadInternal(fileSet, persistReset: false);
                 foreach (var key in changedPresetKeys.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -159,7 +159,7 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                     return false;
 
                 using var _ = heldLock;
-                if (IsFutureDocument(fileSet.PrimaryPath))
+                if (ContainsFutureDocument(fileSet))
                     return false;
                 return TrySaveInternal(fileSet, NormalizeCurrent(document));
             }
@@ -194,6 +194,9 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
     private ThemeSettingsDocument LoadInternal(JsonStoreFileSet fileSet, bool persistReset)
     {
+        if (ContainsFutureDocument(fileSet))
+            return CreateFactoryDefaults();
+
         var primaryStatus = TryReadCurrent(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite);
         if (primaryStatus == ThemeDocumentReadStatus.Current)
         {
@@ -275,6 +278,9 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
     private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
     {
+        if (ContainsFutureDocument(fileSet))
+            return true;
+
         var status = TryReadCurrent(fileSet.PrimaryPath, out var primary, out var requiresRewrite);
         if (status == ThemeDocumentReadStatus.Future)
             return true;
@@ -399,30 +405,11 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
     private static string GetKey(ThemeVariant theme, ThemeEffectMode effect) => $"{theme}.{effect}";
 
-    private static bool IsFutureDocument(string path)
-    {
-        if (!File.Exists(path))
-            return false;
-
-        try
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
-            var root = document.RootElement;
-            var schemaVersion = root.TryGetProperty("schemaVersion", out var schemaElement) &&
-                                schemaElement.TryGetInt32(out var schema)
-                ? schema
-                : 0;
-            var defaultsRevision = root.TryGetProperty("defaultsRevision", out var revisionElement) &&
-                                   revisionElement.TryGetInt32(out var revision)
-                ? revision
-                : 0;
-            return schemaVersion > CurrentSchemaVersion || defaultsRevision > CurrentDefaultsRevision;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool ContainsFutureDocument(JsonStoreFileSet fileSet) =>
+        JsonStorePersistence.ContainsFutureDocument(
+            fileSet,
+            CurrentSchemaVersion,
+            CurrentDefaultsRevision);
 
     private static bool TryParseKeyStatic(string? key, out ThemeVariant theme, out ThemeEffectMode effect)
     {

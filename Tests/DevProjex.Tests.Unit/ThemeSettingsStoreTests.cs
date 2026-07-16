@@ -196,6 +196,77 @@ public sealed class ThemeSettingsStoreTests
         Assert.Equal(originalJson, File.ReadAllText(store.GetPath()));
     }
 
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("corrupt")]
+    [InlineData("current")]
+    public void FutureDocumentInBackup_BlocksRecoveryEnsureAndEveryWrite(string primaryState)
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var primaryPath = store.GetPath();
+        var backupPath = primaryPath + ".bak";
+        const string futureJson = """
+        {
+          "schemaVersion": 999,
+          "defaultsRevision": 999,
+          "selectedPreset": "Future.Effect",
+          "presets": { "Future.Effect": { "futureProperty": true } }
+        }
+        """;
+
+        var primaryJson = primaryState switch
+        {
+            "corrupt" => "{ invalid-primary",
+            "current" => JsonSerializer.Serialize(
+                new ThemeSettingsDocument
+                {
+                    SchemaVersion = ThemeSettingsStore.CurrentSchemaVersion,
+                    DefaultsRevision = ThemeSettingsStore.CurrentDefaultsRevision,
+                    SelectedPreset = "Light.Mica",
+                    Presets = new Dictionary<string, ThemePreset>()
+                },
+                SerializerOptions),
+            _ => null
+        };
+        if (primaryJson is not null)
+            WriteJson(primaryPath, primaryJson);
+        WriteJson(backupPath, futureJson);
+
+        var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+
+        Assert.False(store.TrySave(loaded));
+        Assert.False(store.TryPersistChanges(loaded, ["Dark.Acrylic"], "Dark.Acrylic"));
+        Assert.True(store.EnsureStorageExists());
+        Assert.Equal(primaryJson is not null, File.Exists(primaryPath));
+        if (primaryJson is not null)
+            Assert.Equal(primaryJson, File.ReadAllText(primaryPath));
+        Assert.Equal(futureJson, File.ReadAllText(backupPath));
+    }
+
+    [Fact]
+    public void FutureDefaultsRevisionInBackup_IsProtectedWithoutFutureSchemaVersion()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var backupPath = store.GetPath() + ".bak";
+        const string futureJson = """
+        {
+          "schemaVersion": 1,
+          "defaultsRevision": 999,
+          "selectedPreset": "Future.Defaults",
+          "presets": {}
+        }
+        """;
+        WriteJson(backupPath, futureJson);
+
+        var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+
+        Assert.False(store.TrySave(loaded));
+        Assert.False(File.Exists(store.GetPath()));
+        Assert.Equal(futureJson, File.ReadAllText(backupPath));
+    }
+
     [Fact]
     public void CurrentDocument_NormalizesInvalidValuesAddsMissingPresetsAndRemovesUnknownKeys()
     {

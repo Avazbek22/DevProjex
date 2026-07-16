@@ -80,7 +80,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                     return false;
 
                 using var _ = heldLock;
-                if (HasFutureSchema(fileSet.PrimaryPath))
+                if (HasFutureSchema(fileSet))
                     return false;
                 return TrySaveInternal(fileSet, Normalize(database));
             }
@@ -102,7 +102,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                     return false;
 
                 using var _ = heldLock;
-                if (HasFutureSchema(fileSet.PrimaryPath))
+                if (HasFutureSchema(fileSet))
                     return false;
                 var latest = LoadInternal(fileSet);
                 latest.ViewSettings = NormalizeViewSettings(database.ViewSettings);
@@ -142,7 +142,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private UserSettingsDb LoadInternal(JsonStoreFileSet fileSet)
     {
-        if (HasFutureSchema(fileSet.PrimaryPath))
+        if (HasFutureSchema(fileSet))
             return CreateDefaultDb();
 
         if (TryRead(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite))
@@ -175,7 +175,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
     {
-        if (HasFutureSchema(fileSet.PrimaryPath))
+        if (HasFutureSchema(fileSet))
             return true;
 
         if (TryRead(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite))
@@ -200,23 +200,8 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         ViewSettings = DefaultViewSettings
     };
 
-    private static bool HasFutureSchema(string path)
-    {
-        if (!File.Exists(path))
-            return false;
-
-        try
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
-            return document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion) &&
-                   schemaVersion.TryGetInt32(out var value) &&
-                   value > CurrentSchemaVersion;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool HasFutureSchema(JsonStoreFileSet fileSet) =>
+        JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion);
 
     private static bool TrySaveInternal(JsonStoreFileSet fileSet, UserSettingsDb database)
         => JsonStorePersistence.TryWriteAtomic(fileSet, database, SerializerOptions);

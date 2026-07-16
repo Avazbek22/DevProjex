@@ -198,6 +198,44 @@ public sealed class UserSettingsStoreTests
         Assert.Equal(futureJson, File.ReadAllText(store.GetPath()));
     }
 
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("corrupt")]
+    [InlineData("current")]
+    public void FutureSchemaInBackup_BlocksRecoveryEnsureAndEveryWrite(string primaryState)
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        var primaryPath = store.GetPath();
+        var backupPath = primaryPath + ".bak";
+        const string futureJson = """
+        { "schemaVersion": 999, "futureProperty": "keep-backup" }
+        """;
+
+        var primaryJson = primaryState switch
+        {
+            "corrupt" => "{ invalid-primary",
+            "current" => """
+                         { "schemaVersion": 6, "viewSettings": { "isCompactMode": true } }
+                         """,
+            _ => null
+        };
+        if (primaryJson is not null)
+            WriteJson(primaryPath, primaryJson);
+        WriteJson(backupPath, futureJson);
+
+        var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+        loaded.ViewSettings = loaded.ViewSettings with { IsTreeAnimationEnabled = true };
+
+        Assert.False(store.TrySave(loaded));
+        Assert.False(store.TryPersistViewSettings(loaded));
+        Assert.True(store.EnsureStorageExists());
+        Assert.Equal(primaryJson is not null, File.Exists(primaryPath));
+        if (primaryJson is not null)
+            Assert.Equal(primaryJson, File.ReadAllText(primaryPath));
+        Assert.Equal(futureJson, File.ReadAllText(backupPath));
+    }
+
     [Fact]
     public async Task IndependentInstances_ConcurrentSaves_LeaveOneCompleteValidSnapshot()
     {
