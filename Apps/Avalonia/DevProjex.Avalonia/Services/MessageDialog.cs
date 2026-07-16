@@ -26,6 +26,7 @@ public static class MessageDialog
         string message,
         string confirmButtonText = "Да",
         string cancelButtonText = "Отмена",
+        double width = 520,
         double height = 260)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -36,7 +37,7 @@ public static class MessageDialog
             themeVariant,
             brushes,
             BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
-            width: 520,
+            width: width,
             height: height);
 
         dialog.Closed += (_, _) => completion.TrySetResult(false);

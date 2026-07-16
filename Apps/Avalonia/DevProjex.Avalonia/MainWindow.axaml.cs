@@ -5385,7 +5385,8 @@ public partial class MainWindow : Window
             _localization["Dialog.ResetSettings.Title"],
             _localization["Dialog.ResetSettings.Message"],
             _localization["Dialog.ResetSettings.Confirm"],
-            _localization["Dialog.Cancel"]);
+            _localization["Dialog.Cancel"],
+            height: 180);
 
         if (!confirmed)
         {
@@ -5554,6 +5555,7 @@ public partial class MainWindow : Window
                 _localization.Format("Dialog.RecentFolderUnavailable.Message", path),
                 _localization["Dialog.RecentFolderUnavailable.Remove"],
                 _localization["Dialog.RecentFolderUnavailable.Keep"],
+                width: 450,
                 height: 180);
 
             if (shouldRemove)
