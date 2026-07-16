@@ -21,12 +21,17 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     private SolidColorBrush? _mainMenuStripBrush;
     private SolidColorBrush? _mainMenuPopupBrush;
     private SolidColorBrush? _accentBrush;
+    private readonly HashSet<string> _publishedResourceKeys = new(StringComparer.Ordinal);
     private int _dynamicUpdateScheduled;
     private bool _disposed;
 
     public void HandleSubmenuOpened(object? sender, RoutedEventArgs e)
     {
         if (e.Source is not MenuItem menuItem)
+            return;
+
+        var mainMenu = menuProvider();
+        if (mainMenu is null || !menuItem.GetLogicalAncestors().Contains(mainMenu))
             return;
 
         window.Dispatcher.Post(() =>
@@ -65,6 +70,9 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             window.TransparencyLevelHint =
             [
                 WindowTransparencyLevel.Mica,
+                WindowTransparencyLevel.AcrylicBlur,
+                WindowTransparencyLevel.Blur,
+                WindowTransparencyLevel.Transparent,
                 WindowTransparencyLevel.None
             ];
 
@@ -77,6 +85,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             [
                 WindowTransparencyLevel.AcrylicBlur,
                 WindowTransparencyLevel.Blur,
+                WindowTransparencyLevel.Transparent,
                 WindowTransparencyLevel.None
             ];
 
@@ -114,71 +123,39 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
         var theme = app.ActualThemeVariant ?? ThemeVariant.Dark;
         var isDark = theme == ThemeVariant.Dark;
-        var effect = !viewModel.HasAnyEffect
-            ? ThemeEffectMode.Solid
-            : viewModel.IsMicaEnabled
-                ? ThemeEffectMode.Mica
-                : viewModel.IsAcrylicEnabled
-                    ? ThemeEffectMode.Acrylic
-                    : ThemeEffectMode.Transparent;
+        var effect = viewModel.ActiveThemeEffect;
         var palette = ThemePaletteCalculator.Calculate(
             isDark,
             effect,
             viewModel.MaterialIntensity,
             viewModel.PanelContrast,
-            viewModel.MenuChildIntensity,
+            viewModel.MenuTransparency,
             viewModel.BorderStrength);
 
         // Mutate existing brush colors instead of allocating new instances
-        var bgColor = palette.Background;
-        _backgroundBrush ??= new SolidColorBrush(bgColor);
-        _backgroundBrush.Color = bgColor;
-        UpdateResource("AppBackgroundBrush", _backgroundBrush);
+        UpdateBrushResource("AppBackgroundBrush", ref _backgroundBrush, palette.Background);
+        UpdateBrushResource("AppPanelBrush", ref _panelBrush, palette.Panel);
+        UpdateBrushResource("MainMenuStripBrush", ref _mainMenuStripBrush, palette.MainMenuStrip);
+        var mainMenuPopupPublished = UpdateBrushResource(
+            "MainMenuPopupBrush",
+            ref _mainMenuPopupBrush,
+            palette.MainMenuPopup);
+        UpdateBrushResource("MenuPopupBrush", _currentMenuBrush, palette.Menu);
+        UpdateBrushResource("MenuChildPopupBrush", _currentMenuChildBrush, palette.MenuChild);
+        UpdateBrushResource("MenuHoverBrush", _currentMenuHoverBrush, palette.MenuHover);
+        UpdateBrushResource("MenuPressedBrush", _currentMenuPressedBrush, palette.MenuPressed);
+        UpdateBrushResource("MenuChildHoverBrush", _currentMenuChildHoverBrush, palette.MenuHover);
+        UpdateBrushResource("MenuChildPressedBrush", _currentMenuChildPressedBrush, palette.MenuPressed);
+        var borderPublished = UpdateBrushResource("AppBorderBrush", _currentBorderBrush, palette.Border);
+        UpdateBrushResource("AppAccentBrush", ref _accentBrush, palette.Accent);
 
-        var panelColor = palette.Panel;
-        _panelBrush ??= new SolidColorBrush(panelColor);
-        _panelBrush.Color = panelColor;
-        UpdateResource("AppPanelBrush", _panelBrush);
+        if (_transparencyFallbackBrush.Color != palette.TransparencyFallback)
+            _transparencyFallbackBrush.Color = palette.TransparencyFallback;
+        if (!ReferenceEquals(window.TransparencyBackgroundFallback, _transparencyFallbackBrush))
+            window.TransparencyBackgroundFallback = _transparencyFallbackBrush;
 
-        var mainMenuStripColor = palette.MainMenuStrip;
-        _mainMenuStripBrush ??= new SolidColorBrush(mainMenuStripColor);
-        _mainMenuStripBrush.Color = mainMenuStripColor;
-        UpdateResource("MainMenuStripBrush", _mainMenuStripBrush);
-
-        var mainMenuPopupColor = palette.MainMenuPopup;
-        _mainMenuPopupBrush ??= new SolidColorBrush(mainMenuPopupColor);
-        _mainMenuPopupBrush.Color = mainMenuPopupColor;
-        UpdateResource("MainMenuPopupBrush", _mainMenuPopupBrush);
-
-        var menuColor = palette.Menu;
-        _currentMenuBrush.Color = menuColor;
-        UpdateResource("MenuPopupBrush", _currentMenuBrush);
-
-        var menuChildColor = palette.MenuChild;
-        _currentMenuChildBrush.Color = menuChildColor;
-        UpdateResource("MenuChildPopupBrush", _currentMenuChildBrush);
-
-        _currentMenuHoverBrush.Color = palette.MenuHover;
-        _currentMenuPressedBrush.Color = palette.MenuPressed;
-        _currentMenuChildHoverBrush.Color = palette.MenuHover;
-        _currentMenuChildPressedBrush.Color = palette.MenuPressed;
-
-        UpdateResource("MenuHoverBrush", _currentMenuHoverBrush);
-        UpdateResource("MenuPressedBrush", _currentMenuPressedBrush);
-        UpdateResource("MenuChildHoverBrush", _currentMenuChildHoverBrush);
-        UpdateResource("MenuChildPressedBrush", _currentMenuChildPressedBrush);
-
-        _currentBorderBrush.Color = palette.Border;
-        UpdateResource("AppBorderBrush", _currentBorderBrush);
-
-        _accentBrush ??= new SolidColorBrush(palette.Accent);
-        _accentBrush.Color = palette.Accent;
-        UpdateResource("AppAccentBrush", _accentBrush);
-
-        _transparencyFallbackBrush.Color = palette.TransparencyFallback;
-        window.TransparencyBackgroundFallback = _transparencyFallbackBrush;
-
-        ApplyMenuBrushesDirect();
+        if (mainMenuPopupPublished || borderPublished)
+            ApplyMenuBrushesDirect();
     }
 
     public void ApplyMenuBrushesDirect()
@@ -199,7 +176,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             PopupBackdropConfigurator.TryApply(
                 popup.Child,
                 window,
-                viewModel.HasAnyEffect,
+                viewModel.ActiveThemeEffect,
                 PopupBackdropTransparencyFallback.Transparent);
 
             if (popup.Child is not Border border)
@@ -261,6 +238,25 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         }
     }
 
+    private bool UpdateBrushResource(string key, ref SolidColorBrush? brush, Color color)
+    {
+        brush ??= new SolidColorBrush(color);
+        return UpdateBrushResource(key, brush, color);
+    }
+
+    private bool UpdateBrushResource(string key, SolidColorBrush brush, Color color)
+    {
+        var colorChanged = brush.Color != color;
+        if (colorChanged)
+            brush.Color = color;
+
+        var published = _publishedResourceKeys.Add(key);
+        if (published)
+            UpdateResource(key, brush);
+
+        return published;
+    }
+
     public void Dispose()
     {
         _disposed = true;
@@ -270,5 +266,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         _mainMenuStripBrush = null;
         _mainMenuPopupBrush = null;
         _accentBrush = null;
+        _publishedResourceKeys.Clear();
     }
 }

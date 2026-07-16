@@ -45,6 +45,9 @@
           <Slider x:Name="BackgroundTransparencySlider"
                   Minimum="0"
                   Maximum="100"
+                  SmallChange="1"
+                  LargeChange="10"
+                  AutomationProperties.Name="{Binding ThemeBackgroundTransparency}"
                   Value="{Binding MaterialIntensity}" />
         </StackPanel>
       </StackPanel>
@@ -56,6 +59,9 @@
           <Slider x:Name="PanelContrastSlider"
                   Minimum="0"
                   Maximum="100"
+                  SmallChange="1"
+                  LargeChange="10"
+                  AutomationProperties.Name="{Binding ThemePanelContrast}"
                   Value="{Binding PanelContrast}" />
         </StackPanel>
         <StackPanel Spacing="2" IsVisible="{Binding HasAnyEffect}">
@@ -63,13 +69,19 @@
           <Slider x:Name="MenuTransparencySlider"
                   Minimum="0"
                   Maximum="100"
-                  Value="{Binding MenuChildIntensity}" />
+                  SmallChange="1"
+                  LargeChange="10"
+                  AutomationProperties.Name="{Binding ThemeMenuTransparency}"
+                  Value="{Binding MenuTransparency}" />
         </StackPanel>
         <StackPanel Spacing="2">
           <TextBlock Text="{Binding ThemeBorderVisibility}" FontSize="12" Margin="0,4,0,-14"/>
           <Slider x:Name="BorderVisibilitySlider"
                   Minimum="0"
                   Maximum="100"
+                  SmallChange="1"
+                  LargeChange="10"
+                  AutomationProperties.Name="{Binding ThemeBorderVisibility}"
                   Value="{Binding BorderStrength}" />
         </StackPanel>
       </StackPanel>

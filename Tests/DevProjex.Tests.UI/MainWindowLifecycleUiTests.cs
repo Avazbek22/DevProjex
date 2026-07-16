@@ -118,7 +118,7 @@ public sealed class MainWindowLifecycleUiTests
 			viewModel.MaterialIntensity = 85;
 			viewModel.PanelContrast = 80;
 			viewModel.BorderStrength = 75;
-			viewModel.MenuChildIntensity = 70;
+			viewModel.MenuTransparency = 70;
 			viewModel.BlurRadius = 65;
 			viewModel.StatusBusy = true;
 			viewModel.StatusProgressValue = 42;

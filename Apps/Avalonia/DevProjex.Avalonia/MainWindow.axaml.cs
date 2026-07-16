@@ -162,6 +162,7 @@ public partial class MainWindow : Window
     private ExportPathPresentation? _cachedPathPresentation;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
+    private int _applyingThemePresetDepth;
     private bool _awaitingSystemDialogActivation;
     private TaskCompletionSource<bool>? _systemDialogActivationTcs;
     private UserSettingsDb _userSettingsDb = new();
@@ -623,14 +624,16 @@ public partial class MainWindow : Window
             else if (args.PropertyName is nameof(MainWindowViewModel.MaterialIntensity)
                      or nameof(MainWindowViewModel.PanelContrast)
                      or nameof(MainWindowViewModel.BorderStrength)
-                     or nameof(MainWindowViewModel.MenuChildIntensity))
+                     or nameof(MainWindowViewModel.MenuTransparency))
             {
-                _themePresetSession?.MarkDirty();
+                if (Volatile.Read(ref _applyingThemePresetDepth) == 0)
+                    _themePresetSession?.MarkDirty();
                 _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.BlurRadius))
             {
-                _themePresetSession?.MarkDirty();
+                if (Volatile.Read(ref _applyingThemePresetDepth) == 0)
+                    _themePresetSession?.MarkDirty();
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
@@ -879,7 +882,9 @@ public partial class MainWindow : Window
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
-        // Defer update to let theme resources settle first
+        _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
+
+        // Defer update to let theme resources settle first.
         Dispatcher.Post(
             RefreshThemeHighlightsForActiveQuery,
             DispatcherPriority.Background);
@@ -1288,11 +1293,19 @@ public partial class MainWindow : Window
 
     private void ApplyPresetValues(ThemePreset preset)
     {
-        _viewModel.MaterialIntensity = preset.MaterialIntensity;
-        _viewModel.BlurRadius = preset.BlurRadius;
-        _viewModel.PanelContrast = preset.PanelContrast;
-        _viewModel.MenuChildIntensity = preset.MenuChildIntensity;
-        _viewModel.BorderStrength = preset.BorderStrength;
+        Interlocked.Increment(ref _applyingThemePresetDepth);
+        try
+        {
+            _viewModel.MaterialIntensity = preset.MaterialIntensity;
+            _viewModel.BlurRadius = preset.BlurRadius;
+            _viewModel.PanelContrast = preset.PanelContrast;
+            _viewModel.MenuTransparency = preset.MenuChildIntensity;
+            _viewModel.BorderStrength = preset.BorderStrength;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _applyingThemePresetDepth);
+        }
     }
 
     private void ApplyPresetForSelection(ThemePresetVariant theme, ThemePresetEffect effect)
@@ -2251,7 +2264,7 @@ public partial class MainWindow : Window
             MaterialIntensity = _viewModel.MaterialIntensity,
             BlurRadius = _viewModel.BlurRadius,
             PanelContrast = _viewModel.PanelContrast,
-            MenuChildIntensity = _viewModel.MenuChildIntensity,
+            MenuChildIntensity = _viewModel.MenuTransparency,
             BorderStrength = _viewModel.BorderStrength
         };
     }
@@ -2275,7 +2288,7 @@ public partial class MainWindow : Window
             PreferredLanguage = _userSettingsDb.ViewSettings?.PreferredLanguage
         };
 
-        _userSettingsStore.Save(_userSettingsDb);
+        _userSettingsStore.TryPersistViewSettings(_userSettingsDb);
     }
 
     private void SaveCurrentLanguageSetting()
@@ -2286,7 +2299,7 @@ public partial class MainWindow : Window
             PreferredLanguage = _localization.CurrentLanguage
         };
 
-        _userSettingsStore.Save(_userSettingsDb);
+        _userSettingsStore.TryPersistViewSettings(_userSettingsDb);
     }
 
     private void SetLanguageAndPersist(AppLanguage language)
@@ -3022,7 +3035,7 @@ public partial class MainWindow : Window
         PopupBackdropConfigurator.TryApply(
             toolTip,
             GetTopLevel(this),
-            _viewModel.HasAnyEffect,
+            _viewModel.ActiveThemeEffect,
             PopupBackdropTransparencyFallback.Transparent);
     }
 
@@ -5201,18 +5214,6 @@ public partial class MainWindow : Window
         _themeBrushCoordinator.UpdateDynamicThemeBrushes();
     }
 
-    private void OnToggleMica(object? sender, RoutedEventArgs e)
-    {
-        _viewModel.IsMicaEnabled = !_viewModel.IsMicaEnabled;
-        _themeBrushCoordinator.UpdateTransparencyEffect();
-    }
-
-    private void OnToggleAcrylic(object? sender, RoutedEventArgs e)
-    {
-        _viewModel.IsAcrylicEnabled = !_viewModel.IsAcrylicEnabled;
-        _themeBrushCoordinator.UpdateTransparencyEffect();
-    }
-
     private void OnToggleCompactMode(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.CanToggleCompactMode)
@@ -5362,7 +5363,7 @@ public partial class MainWindow : Window
         {
             IsTerminalCommandPromptDismissed = true
         };
-        _userSettingsStore.Save(_userSettingsDb);
+        _userSettingsStore.TryPersistViewSettings(_userSettingsDb);
     }
 
     internal static bool ShouldPersistTerminalCommandPromptDismissal(TerminalCommandDialogResult dialogResult)

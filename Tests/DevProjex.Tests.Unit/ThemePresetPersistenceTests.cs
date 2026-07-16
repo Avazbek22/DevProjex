@@ -33,7 +33,7 @@ public sealed class ThemePresetPersistenceTests
     }
 
     [Fact]
-    public void Load_SchemaTwoDocument_AddsSolidPresetsWithoutChangingLegacyValues()
+    public void Load_SchemaTwoDocument_AddsSolidPresetsAndPreservesLegacyAppearance()
     {
         using var temp = new TemporaryDirectory();
         var store = new UserSettingsStore(() => temp.Path);
@@ -53,7 +53,12 @@ public sealed class ThemePresetPersistenceTests
 
         Assert.True(migrated.SchemaVersion > legacyDatabase.SchemaVersion);
         Assert.Equal("Light.Mica", migrated.LastSelected);
-        Assert.Equal(legacyPreset, migrated.Presets["Light.Mica"]);
+        var migratedPreset = migrated.Presets["Light.Mica"];
+        Assert.Equal(legacyPreset.MaterialIntensity, migratedPreset.MaterialIntensity);
+        Assert.Equal(legacyPreset.BlurRadius, migratedPreset.BlurRadius);
+        Assert.Equal(legacyPreset.MenuChildIntensity, migratedPreset.MenuChildIntensity);
+        Assert.Equal(legacyPreset.BorderStrength, migratedPreset.BorderStrength);
+        AssertLegacySurfaceAlphasPreserved(legacyPreset, migratedPreset);
         Assert.Equal(ThemeEffectMode.Solid, migrated.Presets["Light.Solid"].Effect);
         Assert.Equal(ThemeEffectMode.Solid, migrated.Presets["Dark.Solid"].Effect);
         Assert.Equal(8, migrated.Presets.Count);
@@ -84,11 +89,16 @@ public sealed class ThemePresetPersistenceTests
 
         var migrated = store.Load();
 
-        Assert.Equal(4, migrated.SchemaVersion);
+        Assert.Equal(5, migrated.SchemaVersion);
         Assert.Equal("Dark.Acrylic", migrated.LastSelected);
-        Assert.Equal(
-            legacyTransparent with { Effect = ThemeEffectMode.Acrylic, BlurRadius = 0 },
-            migrated.Presets["Dark.Acrylic"]);
+        var migratedAcrylic = migrated.Presets["Dark.Acrylic"];
+        Assert.Equal(ThemeEffectMode.Acrylic, migratedAcrylic.Effect);
+        Assert.Equal(0, migratedAcrylic.BlurRadius);
+        Assert.Equal(legacyTransparent.MenuChildIntensity, migratedAcrylic.MenuChildIntensity);
+        Assert.Equal(legacyTransparent.BorderStrength, migratedAcrylic.BorderStrength);
+        AssertLegacySurfaceAlphasPreserved(
+            legacyTransparent with { Effect = ThemeEffectMode.Acrylic },
+            migratedAcrylic);
         Assert.Equal(0, migrated.Presets["Dark.Transparent"].BlurRadius);
     }
 
@@ -116,8 +126,51 @@ public sealed class ThemePresetPersistenceTests
         var migrated = store.Load();
 
         Assert.Equal("Light.Mica", migrated.LastSelected);
-        Assert.Equal(existingBlur, migrated.Presets["Light.Acrylic"]);
+        var migratedAcrylic = migrated.Presets["Light.Acrylic"];
+        Assert.Equal(existingBlur.BlurRadius, migratedAcrylic.BlurRadius);
+        Assert.Equal(existingBlur.MenuChildIntensity, migratedAcrylic.MenuChildIntensity);
+        Assert.Equal(existingBlur.BorderStrength, migratedAcrylic.BorderStrength);
+        AssertLegacySurfaceAlphasPreserved(existingBlur, migratedAcrylic);
         Assert.Equal(0, migrated.Presets["Light.Transparent"].BlurRadius);
+    }
+
+    [Fact]
+    public void Load_SchemaFourPalette_MigratesOnceAndPreservesEveryVisibleSurfaceAlpha()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        var legacyTransparent = CreatePreset(ThemeVariant.Dark, ThemeEffectMode.Transparent, 0) with
+        {
+            MaterialIntensity = 60.86261980830672,
+            PanelContrast = 51.59744408945688
+        };
+        var legacyMica = CreatePreset(ThemeVariant.Light, ThemeEffectMode.Mica, 0) with
+        {
+            MaterialIntensity = 73,
+            PanelContrast = 67
+        };
+        WriteDatabase(store.GetPath(), new UserSettingsDb
+        {
+            SchemaVersion = 4,
+            LastSelected = "Dark.Transparent",
+            Presets = new Dictionary<string, ThemePreset>
+            {
+                ["Dark.Transparent"] = legacyTransparent,
+                ["Light.Mica"] = legacyMica
+            }
+        });
+
+        var migrated = store.Load();
+
+        Assert.Equal(5, migrated.SchemaVersion);
+        AssertLegacySurfaceAlphasPreserved(legacyTransparent, migrated.Presets["Dark.Transparent"]);
+        AssertLegacySurfaceAlphasPreserved(legacyMica, migrated.Presets["Light.Mica"]);
+        Assert.NotEqual(legacyTransparent.MaterialIntensity, migrated.Presets["Dark.Transparent"].MaterialIntensity);
+        Assert.NotEqual(legacyMica.PanelContrast, migrated.Presets["Light.Mica"].PanelContrast);
+
+        var reloaded = new UserSettingsStore(() => temp.Path).Load();
+        Assert.Equal(migrated.Presets["Dark.Transparent"], reloaded.Presets["Dark.Transparent"]);
+        Assert.Equal(migrated.Presets["Light.Mica"], reloaded.Presets["Light.Mica"]);
     }
 
     [Fact]
@@ -271,6 +324,59 @@ public sealed class ThemePresetPersistenceTests
         Assert.True(session.IsDirty);
     }
 
+    [Fact]
+    public void Session_StaleInstancesEditingDifferentPresets_MergeWithoutLostUpdates()
+    {
+        using var temp = new TemporaryDirectory();
+        var firstStore = new UserSettingsStore(() => temp.Path);
+        var secondStore = new UserSettingsStore(() => temp.Path);
+        var firstSession = new ThemePresetSession(firstStore, firstStore.Load());
+        var secondSession = new ThemePresetSession(secondStore, secondStore.Load());
+        var editedTransparent = CreatePreset(ThemeVariant.Dark, ThemeEffectMode.Transparent, 12);
+        var editedMica = CreatePreset(ThemeVariant.Light, ThemeEffectMode.Mica, 52);
+
+        firstSession.MarkDirty();
+        Assert.True(firstSession.Persist(editedTransparent));
+
+        secondSession.Select(ThemeVariant.Light, ThemeEffectMode.Mica, secondSession.CurrentPreset);
+        secondSession.MarkDirty();
+        Assert.True(secondSession.Persist(editedMica));
+
+        var reloaded = new UserSettingsStore(() => temp.Path).Load();
+        Assert.Equal(editedTransparent, reloaded.Presets["Dark.Transparent"]);
+        Assert.Equal(editedMica, reloaded.Presets["Light.Mica"]);
+        Assert.Equal("Light.Mica", reloaded.LastSelected);
+    }
+
+    [Fact]
+    public void Store_StaleViewSettingsWrite_PreservesNewerThemePreset()
+    {
+        using var temp = new TemporaryDirectory();
+        var themeStore = new UserSettingsStore(() => temp.Path);
+        var viewStore = new UserSettingsStore(() => temp.Path);
+        var themeDatabase = themeStore.Load();
+        var staleViewDatabase = viewStore.Load();
+        var editedMica = CreatePreset(ThemeVariant.Dark, ThemeEffectMode.Mica, 31);
+        themeStore.SetPreset(themeDatabase, ThemeVariant.Dark, ThemeEffectMode.Mica, editedMica);
+
+        Assert.True(themeStore.TryPersistThemeChanges(
+            themeDatabase,
+            ["Dark.Mica"],
+            "Dark.Mica"));
+
+        staleViewDatabase.ViewSettings = staleViewDatabase.ViewSettings with
+        {
+            IsCompactMode = true,
+            PreferredLanguage = AppLanguage.Ru
+        };
+        Assert.True(viewStore.TryPersistViewSettings(staleViewDatabase));
+
+        var reloaded = new UserSettingsStore(() => temp.Path).Load();
+        Assert.Equal(editedMica, reloaded.Presets["Dark.Mica"]);
+        Assert.True(reloaded.ViewSettings.IsCompactMode);
+        Assert.Equal(AppLanguage.Ru, reloaded.ViewSettings.PreferredLanguage);
+    }
+
     private static ThemePreset CreatePreset(ThemeVariant theme, ThemeEffectMode effect, double seed)
     {
         return new ThemePreset
@@ -293,6 +399,53 @@ public sealed class ThemePresetPersistenceTests
         preset.MenuChildIntensity,
         preset.BorderStrength
     ];
+
+    private static void AssertLegacySurfaceAlphasPreserved(ThemePreset legacy, ThemePreset migrated)
+    {
+        var legacyPanelAlpha = CalculateLegacyPanelAlpha(legacy);
+        var migratedPanelAlpha = CalculateMigratedPanelAlpha(migrated);
+        Assert.Equal(legacyPanelAlpha, migratedPanelAlpha);
+
+        if (legacy.Effect == ThemeEffectMode.Solid)
+            return;
+
+        var legacyStripAlpha = CalculateAlpha(legacyPanelAlpha, 240, legacy.PanelContrast);
+        var migratedStripAlpha = CalculateAlpha(migratedPanelAlpha, byte.MaxValue, migrated.PanelContrast);
+        Assert.Equal(legacyStripAlpha, migratedStripAlpha);
+    }
+
+    private static byte CalculateLegacyPanelAlpha(ThemePreset preset)
+    {
+        if (preset.Effect == ThemeEffectMode.Solid)
+            return byte.MaxValue;
+        if (preset.Effect == ThemeEffectMode.Mica)
+            return preset.Theme == ThemeVariant.Dark ? (byte)112 : (byte)150;
+
+        var normalized = Math.Clamp(preset.MaterialIntensity / 100, 0, 1);
+        var backgroundAlpha = (byte)Math.Clamp(
+            Math.Round(byte.MaxValue * (1 - normalized)) + 22,
+            90,
+            byte.MaxValue);
+        return (byte)Math.Max(60, backgroundAlpha - 12);
+    }
+
+    private static byte CalculateMigratedPanelAlpha(ThemePreset preset)
+    {
+        if (preset.Effect == ThemeEffectMode.Solid)
+            return byte.MaxValue;
+        if (preset.Effect == ThemeEffectMode.Mica)
+            return preset.Theme == ThemeVariant.Dark ? (byte)112 : (byte)150;
+
+        var normalized = Math.Clamp(preset.MaterialIntensity / 100, 0, 1);
+        var backgroundAlpha = (byte)Math.Round(byte.MaxValue + ((90 - byte.MaxValue) * normalized));
+        return (byte)Math.Max(60, backgroundAlpha - 12);
+    }
+
+    private static byte CalculateAlpha(byte start, byte end, double percentage)
+    {
+        var normalized = Math.Clamp(percentage / 100, 0, 1);
+        return (byte)Math.Round(start + ((end - start) * normalized));
+    }
 
     private static void WriteDatabase(string path, UserSettingsDb database)
     {

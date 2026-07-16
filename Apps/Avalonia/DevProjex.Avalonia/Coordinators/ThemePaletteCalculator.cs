@@ -78,10 +78,7 @@ internal static class ThemePaletteCalculator
             case ThemeEffectMode.Acrylic:
             case ThemeEffectMode.Transparent:
             default:
-                backgroundAlpha = (byte)Math.Clamp(
-                    Math.Round(255 * (1.0 - material)) + 22,
-                    90,
-                    255);
+                backgroundAlpha = CalculateAlpha(byte.MaxValue, 90, material);
                 const int minAlphaGap = 12;
                 panelAlpha = (byte)Math.Max(60, backgroundAlpha - minAlphaGap);
                 mainMenuStripAlpha = CalculateMainMenuStripAlpha(panelAlpha, contrast);
@@ -127,13 +124,15 @@ internal static class ThemePaletteCalculator
 
     private static byte CalculateMainMenuStripAlpha(byte baseSurfaceAlpha, double contrast)
     {
-        const byte maxSurfaceAlpha = 240;
-        return (byte)Math.Round(baseSurfaceAlpha + ((maxSurfaceAlpha - baseSurfaceAlpha) * contrast));
+        return CalculateAlpha(baseSurfaceAlpha, byte.MaxValue, contrast);
     }
 
     private static byte CalculateMainMenuPopupAlpha(byte baseMenuAlpha, double transparency)
     {
         const byte minimumMenuAlpha = 72;
-        return (byte)Math.Round(baseMenuAlpha + ((minimumMenuAlpha - baseMenuAlpha) * transparency));
+        return CalculateAlpha(baseMenuAlpha, minimumMenuAlpha, transparency);
     }
+
+    private static byte CalculateAlpha(byte start, byte end, double progress)
+        => (byte)Math.Round(start + ((end - start) * progress));
 }

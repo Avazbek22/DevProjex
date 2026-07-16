@@ -1,5 +1,7 @@
 ﻿namespace DevProjex.Tests.Unit.Avalonia;
 
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+
 public sealed class MainWindowViewModelTests
 {
     private static MainWindowViewModel CreateViewModel(IReadOnlyDictionary<string, string>? strings = null)
@@ -1016,6 +1018,24 @@ public sealed class MainWindowViewModelTests
         Assert.True(viewModel.IsAcrylicEnabled);
     }
 
+    [Theory]
+    [InlineData(false, false, false, ThemeEffectMode.Solid)]
+    [InlineData(true, false, false, ThemeEffectMode.Transparent)]
+    [InlineData(false, true, false, ThemeEffectMode.Mica)]
+    [InlineData(false, false, true, ThemeEffectMode.Acrylic)]
+    public void SetThemeEffects_ExposesUnambiguousActiveEffect(
+        bool transparent,
+        bool mica,
+        bool acrylic,
+        ThemeEffectMode expected)
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.SetThemeEffects(transparent, mica, acrylic);
+
+        Assert.Equal(expected, viewModel.ActiveThemeEffect);
+    }
+
     [Fact]
     public void HasAnyEffect_TrueWhenAnyEffectEnabled()
     {
@@ -1181,23 +1201,35 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void MenuChildIntensity_ChangesBeyondThreshold()
+    public void MenuTransparency_ChangesBeyondThreshold()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.MenuChildIntensity = 70;
+        viewModel.MenuTransparency = 70;
 
-        Assert.Equal(70, viewModel.MenuChildIntensity);
+        Assert.Equal(70, viewModel.MenuTransparency);
     }
 
     [Fact]
-    public void MenuChildIntensity_AllowsNegativeValues()
+    public void MenuTransparency_AllowsNegativeValues()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.MenuChildIntensity = -3;
+        viewModel.MenuTransparency = -3;
 
-        Assert.Equal(-3, viewModel.MenuChildIntensity);
+        Assert.Equal(-3, viewModel.MenuTransparency);
+    }
+
+    [Fact]
+    public void MenuChildIntensity_CompatibilityAliasMirrorsMenuTransparency()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.MenuChildIntensity = 42;
+
+        Assert.Equal(42, viewModel.MenuTransparency);
+        viewModel.MenuTransparency = 73;
+        Assert.Equal(73, viewModel.MenuChildIntensity);
     }
 
     [Theory]

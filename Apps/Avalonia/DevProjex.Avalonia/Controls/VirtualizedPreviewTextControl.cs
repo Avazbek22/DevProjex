@@ -1440,7 +1440,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         PopupBackdropConfigurator.TryApply(
             _contextMenu,
             TopLevel.GetTopLevel(this),
-            viewModel.HasAnyEffect,
+            viewModel.ActiveThemeEffect,
             PopupBackdropTransparencyFallback.Transparent);
     }
 

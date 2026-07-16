@@ -4,8 +4,10 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 {
-    private const int CurrentSchemaVersion = 4;
+    private const int CurrentSchemaVersion = 5;
     private const double LegacyBlurEnabledThreshold = 0.0001;
+    private const byte MinimumBackgroundAlpha = 90;
+    private const byte LegacyMaximumMenuStripAlpha = 240;
     private const string FolderName = "DevProjex";
     private const string FileName = "user-settings.json";
 
@@ -101,6 +103,78 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         }
     }
 
+    public bool TryPersistThemeChanges(
+        UserSettingsDb database,
+        IReadOnlyCollection<string> changedPresetKeys,
+        string lastSelected)
+    {
+        lock (_sync)
+        {
+            try
+            {
+                var fileSet = GetFileSet();
+                if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+                    return false;
+
+                using var _ = heldLock;
+                var latest = LoadInternal(fileSet);
+                foreach (var key in changedPresetKeys.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!TryParseKey(key, out var theme, out var effect) ||
+                        !database.Presets.TryGetValue(key, out var preset) ||
+                        preset is null)
+                    {
+                        continue;
+                    }
+
+                    SetPreset(latest, theme, effect, preset);
+                }
+
+                if (TryParseKey(lastSelected, out var selectedTheme, out var selectedEffect))
+                    latest.LastSelected = GetKey(selectedTheme, selectedEffect);
+
+                var normalized = Normalize(latest);
+                if (!TrySaveInternal(fileSet, normalized))
+                    return false;
+
+                CopyDatabaseState(normalized, database);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    public bool TryPersistViewSettings(UserSettingsDb database)
+    {
+        lock (_sync)
+        {
+            try
+            {
+                var fileSet = GetFileSet();
+                if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+                    return false;
+
+                using var _ = heldLock;
+                var latest = LoadInternal(fileSet);
+                latest.ViewSettings = database.ViewSettings ?? DefaultViewSettings;
+                var normalized = Normalize(latest);
+                if (!TrySaveInternal(fileSet, normalized))
+                    return false;
+
+                database.SchemaVersion = normalized.SchemaVersion;
+                database.ViewSettings = normalized.ViewSettings;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
     public ThemePreset GetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect)
     {
         var key = GetKey(theme, effect);
@@ -168,6 +242,8 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         db.ViewSettings ??= DefaultViewSettings;
         if (sourceSchemaVersion < 4)
             MigrateLegacyTransparentBlur(db);
+        if (sourceSchemaVersion < 5)
+            MigrateLegacyPaletteRanges(db);
 
         db.SchemaVersion = CurrentSchemaVersion;
         db.ViewSettings = db.ViewSettings with
@@ -229,6 +305,46 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Effect = ThemeEffectMode.Transparent,
                 BlurRadius = 0
             };
+        }
+    }
+
+    private static void MigrateLegacyPaletteRanges(UserSettingsDb db)
+    {
+        foreach (var theme in Enum.GetValues<ThemeVariant>())
+        {
+            foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+            {
+                var key = GetKey(theme, effect);
+                if (!db.Presets.TryGetValue(key, out var preset) || preset is null)
+                    continue;
+
+                var materialIntensity = preset.MaterialIntensity;
+                var panelContrast = preset.PanelContrast;
+                if (effect is ThemeEffectMode.Transparent or ThemeEffectMode.Acrylic &&
+                    double.IsFinite(materialIntensity))
+                {
+                    materialIntensity = ConvertLegacyMaterialIntensity(materialIntensity);
+                }
+
+                if (effect != ThemeEffectMode.Solid &&
+                    double.IsFinite(preset.MaterialIntensity) &&
+                    double.IsFinite(panelContrast))
+                {
+                    panelContrast = ConvertLegacyPanelContrast(
+                        theme,
+                        effect,
+                        preset.MaterialIntensity,
+                        panelContrast);
+                }
+
+                db.Presets[key] = preset with
+                {
+                    Theme = theme,
+                    Effect = effect,
+                    MaterialIntensity = materialIntensity,
+                    PanelContrast = panelContrast
+                };
+            }
         }
     }
 
@@ -327,7 +443,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             {
                 Theme = ThemeVariant.Light,
                 Effect = ThemeEffectMode.Transparent,
-                MaterialIntensity = 78.43450479233228,
+                MaterialIntensity = 100,
                 BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
@@ -357,7 +473,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             {
                 Theme = ThemeVariant.Light,
                 Effect = ThemeEffectMode.Acrylic,
-                MaterialIntensity = 75.87859424920129,
+                MaterialIntensity = 100,
                 BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
@@ -367,9 +483,9 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             {
                 Theme = ThemeVariant.Dark,
                 Effect = ThemeEffectMode.Transparent,
-                MaterialIntensity = 60.86261980830672,
+                MaterialIntensity = 80.6060606060606,
                 BlurRadius = 0,
-                PanelContrast = 51.59744408945688,
+                PanelContrast = 46.2068965517241,
                 MenuChildIntensity = 0,
                 BorderStrength = 31.789137380191697
             },
@@ -397,7 +513,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             {
                 Theme = ThemeVariant.Dark,
                 Effect = ThemeEffectMode.Acrylic,
-                MaterialIntensity = 73.00319488817892,
+                MaterialIntensity = 99.3939393939394,
                 BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
@@ -447,6 +563,60 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private static double NormalizePercentage(double value, double fallback)
         => double.IsFinite(value) ? Math.Clamp(value, 0, 100) : fallback;
+
+    private static double ConvertLegacyMaterialIntensity(double value)
+    {
+        var legacyAlpha = CalculateLegacyBackgroundAlpha(value);
+        return ((byte.MaxValue - legacyAlpha) / (double)(byte.MaxValue - MinimumBackgroundAlpha)) * 100;
+    }
+
+    private static double ConvertLegacyPanelContrast(
+        ThemeVariant theme,
+        ThemeEffectMode effect,
+        double legacyMaterialIntensity,
+        double legacyPanelContrast)
+    {
+        var panelAlpha = CalculateLegacyPanelAlpha(theme, effect, legacyMaterialIntensity);
+        if (panelAlpha == byte.MaxValue)
+            return 0;
+
+        var normalizedContrast = Math.Clamp(legacyPanelContrast / 100, 0, 1);
+        var legacyStripAlpha = Math.Round(
+            panelAlpha + ((LegacyMaximumMenuStripAlpha - panelAlpha) * normalizedContrast));
+        return Math.Clamp(
+            ((legacyStripAlpha - panelAlpha) / (byte.MaxValue - panelAlpha)) * 100,
+            0,
+            100);
+    }
+
+    private static byte CalculateLegacyPanelAlpha(
+        ThemeVariant theme,
+        ThemeEffectMode effect,
+        double legacyMaterialIntensity)
+    {
+        if (effect == ThemeEffectMode.Mica)
+            return theme == ThemeVariant.Dark ? (byte)112 : (byte)150;
+
+        var backgroundAlpha = CalculateLegacyBackgroundAlpha(legacyMaterialIntensity);
+        return (byte)Math.Max(60, backgroundAlpha - 12);
+    }
+
+    private static byte CalculateLegacyBackgroundAlpha(double materialIntensity)
+    {
+        var normalized = Math.Clamp(materialIntensity / 100, 0, 1);
+        return (byte)Math.Clamp(
+            Math.Round(byte.MaxValue * (1 - normalized)) + 22,
+            MinimumBackgroundAlpha,
+            byte.MaxValue);
+    }
+
+    private static void CopyDatabaseState(UserSettingsDb source, UserSettingsDb destination)
+    {
+        destination.SchemaVersion = source.SchemaVersion;
+        destination.Presets = source.Presets;
+        destination.LastSelected = source.LastSelected;
+        destination.ViewSettings = source.ViewSettings;
+    }
 
     private static bool TrySaveInternal(JsonStoreFileSet fileSet, UserSettingsDb db)
         => JsonStorePersistence.TryWriteAtomic(fileSet, db, SerializerOptions);

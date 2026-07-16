@@ -213,15 +213,19 @@ public sealed class UserSettingsStoreTests
 		}
 
 		var reloadedPreset = loaded.Presets["Dark.Transparent"];
-		Assert.Equal(customPreset.MaterialIntensity, reloadedPreset.MaterialIntensity);
 		Assert.Equal(0, reloadedPreset.BlurRadius);
-		Assert.Equal(customPreset.PanelContrast, reloadedPreset.PanelContrast);
 		Assert.Equal(customPreset.MenuChildIntensity, reloadedPreset.MenuChildIntensity);
 		Assert.Equal(customPreset.BorderStrength, reloadedPreset.BorderStrength);
+		AssertLegacyPresetAppearancePreserved(customPreset, reloadedPreset);
 		Assert.Equal("Dark.Acrylic", loaded.LastSelected);
-		Assert.Equal(
-			customPreset with { Effect = ThemeEffectMode.Acrylic, BlurRadius = 0 },
-			loaded.Presets["Dark.Acrylic"]);
+		var acrylicPreset = loaded.Presets["Dark.Acrylic"];
+		Assert.Equal(ThemeEffectMode.Acrylic, acrylicPreset.Effect);
+		Assert.Equal(0, acrylicPreset.BlurRadius);
+		Assert.Equal(customPreset.MenuChildIntensity, acrylicPreset.MenuChildIntensity);
+		Assert.Equal(customPreset.BorderStrength, acrylicPreset.BorderStrength);
+		AssertLegacyPresetAppearancePreserved(
+			customPreset with { Effect = ThemeEffectMode.Acrylic },
+			acrylicPreset);
 	}
 
 	[Fact]
@@ -406,15 +410,20 @@ public sealed class UserSettingsStoreTests
 
 		var loaded = store.Load();
 
-		Assert.Equal(11, loaded.Presets["Light.Transparent"].MaterialIntensity);
-		Assert.Equal(0, loaded.Presets["Light.Transparent"].BlurRadius);
-		Assert.Equal(33, loaded.Presets["Light.Transparent"].PanelContrast);
-		Assert.Equal(44, loaded.Presets["Light.Transparent"].MenuChildIntensity);
-		Assert.Equal(55, loaded.Presets["Light.Transparent"].BorderStrength);
+		var transparentPreset = loaded.Presets["Light.Transparent"];
+		Assert.Equal(0, transparentPreset.BlurRadius);
+		Assert.Equal(44, transparentPreset.MenuChildIntensity);
+		Assert.Equal(55, transparentPreset.BorderStrength);
+		AssertLegacyPresetAppearancePreserved(custom, transparentPreset);
 		Assert.Equal("Light.Acrylic", loaded.LastSelected);
-		Assert.Equal(
-			custom with { Effect = ThemeEffectMode.Acrylic, BlurRadius = 0 },
-			loaded.Presets["Light.Acrylic"]);
+		var acrylicPreset = loaded.Presets["Light.Acrylic"];
+		Assert.Equal(ThemeEffectMode.Acrylic, acrylicPreset.Effect);
+		Assert.Equal(0, acrylicPreset.BlurRadius);
+		Assert.Equal(44, acrylicPreset.MenuChildIntensity);
+		Assert.Equal(55, acrylicPreset.BorderStrength);
+		AssertLegacyPresetAppearancePreserved(
+			custom with { Effect = ThemeEffectMode.Acrylic },
+			acrylicPreset);
 	}
 
 	[Fact]
@@ -1518,6 +1527,32 @@ public sealed class UserSettingsStoreTests
 	{
 		return (preset.MaterialIntensity, preset.BlurRadius, preset.PanelContrast,
 			preset.MenuChildIntensity, preset.BorderStrength);
+	}
+
+	private static void AssertLegacyPresetAppearancePreserved(ThemePreset legacy, ThemePreset migrated)
+	{
+		var normalizedLegacyMaterial = Math.Clamp(legacy.MaterialIntensity / 100, 0, 1);
+		var legacyBackgroundAlpha = (byte)Math.Clamp(
+			Math.Round(byte.MaxValue * (1 - normalizedLegacyMaterial)) + 22,
+			90,
+			byte.MaxValue);
+		var legacyPanelAlpha = (byte)Math.Max(60, legacyBackgroundAlpha - 12);
+		var normalizedMigratedMaterial = Math.Clamp(migrated.MaterialIntensity / 100, 0, 1);
+		var migratedBackgroundAlpha = (byte)Math.Round(
+			byte.MaxValue + ((90 - byte.MaxValue) * normalizedMigratedMaterial));
+		var migratedPanelAlpha = (byte)Math.Max(60, migratedBackgroundAlpha - 12);
+
+		Assert.Equal(legacyBackgroundAlpha, migratedBackgroundAlpha);
+		Assert.Equal(legacyPanelAlpha, migratedPanelAlpha);
+		Assert.Equal(
+			CalculateAlpha(legacyPanelAlpha, 240, legacy.PanelContrast),
+			CalculateAlpha(migratedPanelAlpha, byte.MaxValue, migrated.PanelContrast));
+	}
+
+	private static byte CalculateAlpha(byte start, byte end, double percentage)
+	{
+		var normalized = Math.Clamp(percentage / 100, 0, 1);
+		return (byte)Math.Round(start + ((end - start) * normalized));
 	}
 
 	#endregion

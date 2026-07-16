@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Media;
 using DevProjex.Avalonia.Services;
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -16,7 +17,7 @@ public sealed class PopupBackdropConfiguratorTests
         var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
             popupLevel,
             host,
-            enableBackdrop: true,
+            ThemeEffectMode.Acrylic,
             PopupBackdropTransparencyFallback.Transparent);
 
         Assert.True(applied);
@@ -38,7 +39,7 @@ public sealed class PopupBackdropConfiguratorTests
         var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
             popupLevel,
             host,
-            enableBackdrop: true,
+            ThemeEffectMode.Acrylic,
             PopupBackdropTransparencyFallback.None);
 
         Assert.True(applied);
@@ -65,7 +66,7 @@ public sealed class PopupBackdropConfiguratorTests
         var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
             popupLevel,
             host,
-            enableBackdrop: true,
+            ThemeEffectMode.Mica,
             PopupBackdropTransparencyFallback.None);
 
         Assert.True(applied);
@@ -95,7 +96,7 @@ public sealed class PopupBackdropConfiguratorTests
         var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
             popupLevel,
             host,
-            enableBackdrop: false,
+            ThemeEffectMode.Solid,
             PopupBackdropTransparencyFallback.Transparent);
 
         Assert.True(applied);
@@ -111,11 +112,36 @@ public sealed class PopupBackdropConfiguratorTests
         var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
             host,
             host,
-            enableBackdrop: true,
+            ThemeEffectMode.Acrylic,
             PopupBackdropTransparencyFallback.Transparent);
 
         Assert.False(applied);
         Assert.Empty(host.TransparencyLevelHint);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TryApplyToTopLevel_TransparentEffect_NeverRequestsBlur(bool useTransparentFallback)
+    {
+        var popupLevel = new Window();
+        var fallback = useTransparentFallback
+            ? PopupBackdropTransparencyFallback.Transparent
+            : PopupBackdropTransparencyFallback.None;
+
+        var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
+            popupLevel,
+            new Window(),
+            ThemeEffectMode.Transparent,
+            fallback);
+
+        Assert.True(applied);
+        AssertTransparencyHints(
+            popupLevel,
+            WindowTransparencyLevel.Transparent,
+            WindowTransparencyLevel.None);
+        Assert.DoesNotContain(WindowTransparencyLevel.Blur, popupLevel.TransparencyLevelHint);
+        Assert.DoesNotContain(WindowTransparencyLevel.AcrylicBlur, popupLevel.TransparencyLevelHint);
     }
 
     private static void AssertTransparencyHints(Window window, params WindowTransparencyLevel[] expected)

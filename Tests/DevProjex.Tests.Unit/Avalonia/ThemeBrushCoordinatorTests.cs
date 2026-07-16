@@ -19,7 +19,13 @@ public sealed class ThemeBrushCoordinatorTests
 		using var mica = CreateHarness();
 		mica.ViewModel.IsMicaEnabled = true;
 		mica.Coordinator.UpdateTransparencyEffect();
-		AssertTransparencyHints(mica.Window, WindowTransparencyLevel.Mica, WindowTransparencyLevel.None);
+		AssertTransparencyHints(
+			mica.Window,
+			WindowTransparencyLevel.Mica,
+			WindowTransparencyLevel.AcrylicBlur,
+			WindowTransparencyLevel.Blur,
+			WindowTransparencyLevel.Transparent,
+			WindowTransparencyLevel.None);
 
 		using var acrylic = CreateHarness();
 		acrylic.ViewModel.IsAcrylicEnabled = true;
@@ -28,6 +34,7 @@ public sealed class ThemeBrushCoordinatorTests
 			acrylic.Window,
 			WindowTransparencyLevel.AcrylicBlur,
 			WindowTransparencyLevel.Blur,
+			WindowTransparencyLevel.Transparent,
 			WindowTransparencyLevel.None);
 
 		using var transparentWithoutBlur = CreateHarness();
@@ -181,7 +188,33 @@ public sealed class ThemeBrushCoordinatorTests
 		var highContrast = ThemePaletteCalculator.Calculate(isDark, effect, 63, 100, 37, 52);
 
 		Assert.NotEqual(lowContrast.MainMenuStrip, highContrast.MainMenuStrip);
+		Assert.Equal(lowContrast.Panel.A, lowContrast.MainMenuStrip.A);
+		Assert.Equal(byte.MaxValue, highContrast.MainMenuStrip.A);
 		Assert.Equal(lowContrast with { MainMenuStrip = highContrast.MainMenuStrip }, highContrast);
+	}
+
+	[Theory]
+	[InlineData(false, ThemeEffectMode.Transparent)]
+	[InlineData(true, ThemeEffectMode.Transparent)]
+	[InlineData(false, ThemeEffectMode.Acrylic)]
+	[InlineData(true, ThemeEffectMode.Acrylic)]
+	public void Calculate_MaterialIntensityUsesEntireRangeWithoutDeadZones(
+		bool isDark,
+		ThemeEffectMode effect)
+	{
+		var previousAlpha = ThemePaletteCalculator.Calculate(isDark, effect, 0, 50, 50, 50).Background.A;
+		Assert.Equal(byte.MaxValue, previousAlpha);
+
+		for (var intensity = 1; intensity <= 100; intensity++)
+		{
+			var current = ThemePaletteCalculator.Calculate(isDark, effect, intensity, 50, 50, 50);
+			Assert.True(
+				current.Background.A < previousAlpha,
+				$"Background alpha did not decrease at {intensity} for {(isDark ? "Dark" : "Light")}.{effect}.");
+			previousAlpha = current.Background.A;
+		}
+
+		Assert.Equal((byte)90, previousAlpha);
 	}
 
 	[Theory]
@@ -219,7 +252,7 @@ public sealed class ThemeBrushCoordinatorTests
 		harness.ViewModel.MaterialIntensity = 63;
 		harness.ViewModel.BlurRadius = 29;
 		harness.ViewModel.PanelContrast = 41;
-		harness.ViewModel.MenuChildIntensity = 17;
+		harness.ViewModel.MenuTransparency = 17;
 		harness.ViewModel.BorderStrength = 52;
 
 		foreach (var effect in Enum.GetValues<ThemeEffectMode>())

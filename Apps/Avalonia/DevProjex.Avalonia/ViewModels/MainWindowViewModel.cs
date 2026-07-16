@@ -1,4 +1,5 @@
 using DevProjex.Avalonia.Collections;
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 
 namespace DevProjex.Avalonia.ViewModels;
 
@@ -89,7 +90,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private double _blurRadius;
     private double _panelContrast = 50;
     private double _borderStrength = 50;
-    private double _menuChildIntensity = 50;
+    private double _menuTransparency = 50;
 
     private bool _themePopoverOpen;
     private bool _helpPopoverOpen;
@@ -666,6 +667,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Computed: any effect is enabled
     public bool HasAnyEffect => _isTransparentEnabled || _isMicaEnabled || _isAcrylicEnabled;
 
+    public ThemeEffectMode ActiveThemeEffect => !HasAnyEffect
+        ? ThemeEffectMode.Solid
+        : _isMicaEnabled
+            ? ThemeEffectMode.Mica
+            : _isAcrylicEnabled
+                ? ThemeEffectMode.Acrylic
+                : ThemeEffectMode.Transparent;
+
     public bool ShowBackgroundTransparencySlider => _isTransparentEnabled || _isAcrylicEnabled;
 
     // Retained for binding compatibility with older views.
@@ -680,6 +689,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(IsAcrylicEnabled));
         RaisePropertyChanged(nameof(IsTransparentEnabled));
         RaisePropertyChanged(nameof(HasAnyEffect));
+        RaisePropertyChanged(nameof(ActiveThemeEffect));
         RaisePropertyChanged(nameof(ShowBackgroundTransparencySlider));
         RaisePropertyChanged(nameof(ShowTransparencySliders));
         RaisePropertyChanged(nameof(ShowBlurSlider));
@@ -958,16 +968,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // MenuChildIntensity: controls the effect intensity for dropdown/child menu elements
-    public double MenuChildIntensity
+    public double MenuTransparency
     {
-        get => _menuChildIntensity;
+        get => _menuTransparency;
         set
         {
-            if (Math.Abs(_menuChildIntensity - value) < 0.1) return;
-            _menuChildIntensity = value;
+            if (Math.Abs(_menuTransparency - value) < 0.1) return;
+            _menuTransparency = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(MenuChildIntensity));
         }
+    }
+
+    // Compatibility alias for the schema-4 property name.
+    public double MenuChildIntensity
+    {
+        get => MenuTransparency;
+        set => MenuTransparency = value;
     }
 
     // Applied font (TreeView reads it from here)
