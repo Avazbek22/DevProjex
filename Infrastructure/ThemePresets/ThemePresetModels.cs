@@ -4,7 +4,8 @@ public enum ThemeEffectMode
 {
     Transparent,
     Mica,
-    Acrylic
+    Acrylic,
+    Solid
 }
 
 public enum ThemeVariant

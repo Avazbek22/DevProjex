@@ -1,5 +1,6 @@
 using Avalonia.LogicalTree;
 using DevProjex.Avalonia.Services;
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -112,152 +113,56 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
         var theme = app.ActualThemeVariant ?? ThemeVariant.Dark;
         var isDark = theme == ThemeVariant.Dark;
-
-        var baseBg = isDark ? Color.Parse("#121214") : Color.Parse("#FFFFFF");
-        var basePanel = isDark ? Color.Parse("#17171A") : Color.Parse("#F3F3F3");
-
-        var material = Math.Clamp(viewModel.MaterialIntensity / 100.0, 0.0, 1.0);
-        var contrast = Math.Clamp(viewModel.PanelContrast / 100.0, 0.0, 1.0);
-        var borderStrength = Math.Clamp(viewModel.BorderStrength / 100.0, 0.0, 1.0);
-        var menuChild = Math.Clamp(viewModel.MenuChildIntensity / 100.0, 0.0, 1.0);
-        var blur = Math.Clamp(viewModel.BlurRadius / 100.0, 0.0, 1.0);
-
-        Color bgBase = baseBg;
-        Color panelBase = basePanel;
-
-        byte bgAlpha;
-        byte panelAlpha;
-        byte borderAlpha;
-        byte menuAlpha;
-        byte menuChildAlpha = 255;
-        Color menuBase = panelBase;
-        Color menuChildBase = panelBase;
-        if (!viewModel.HasAnyEffect)
-        {
-            bgAlpha = 255;
-            panelAlpha = 255;
-            menuAlpha = 255;
-            menuChildAlpha = 255;
-        }
-        else if (viewModel.IsMicaEnabled)
-        {
-            var micaStrength = Math.Pow(material, 0.7);
-
-            bgAlpha = (byte)Math.Round(255 * (1.0 - (micaStrength * 0.9)));
-
-            var panelMinAlpha = bgAlpha;
-            var panelMaxAlpha = 170 + (contrast * 70);
-            panelAlpha = (byte)Math.Clamp(
-                panelMinAlpha + (panelMaxAlpha - panelMinAlpha) * contrast - (micaStrength * 60),
-                panelMinAlpha,
-                255);
-
-            menuAlpha = (byte)Math.Clamp(panelAlpha + 35, 160, 255);
-            menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 140, 255);
-
-            if (isDark)
-            {
-                bgBase = Color.Parse("#0D0E10");
-                panelBase = Color.Parse("#14161A");
-            }
-            else
-            {
-                bgBase = Color.Parse("#FFFFFF");
-                panelBase = Color.Parse("#F7F7F7");
-            }
-        }
-        else if (viewModel.IsAcrylicEnabled)
-        {
-            bgAlpha = (byte)Math.Round(240 - (material * 200));
-            panelAlpha = (byte)Math.Round(235 - (material * 150));
-
-            panelAlpha = (byte)Math.Clamp(panelAlpha + (contrast * 40), 70, 255);
-
-            menuAlpha = (byte)Math.Clamp(panelAlpha + 30, 150, 255);
-            menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 130, 255);
-        }
-        else
-        {
-            bgAlpha = (byte)Math.Round(255 * (1.0 - material));
-
-            var blurVisibility = Math.Pow(blur, 2.2);
-
-            var panelBaseAlpha = 90 + (contrast * 130);
-            panelAlpha = (byte)Math.Clamp(panelBaseAlpha + (blurVisibility * 25), 70, 255);
-
-            menuAlpha = (byte)Math.Clamp(panelAlpha + 45, 170, 255);
-            menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 150, 255);
-        }
-
-        if (viewModel.HasAnyEffect)
-        {
-            // Keep window surface denser than content islands and preserve visible submenu contrast response.
-            bgAlpha = (byte)Math.Clamp(bgAlpha + 22, 90, 255);
-
-            const int minAlphaGap = 12;
-            var maxPanelAlpha = Math.Max(60, bgAlpha - minAlphaGap);
-            panelAlpha = (byte)Math.Clamp(panelAlpha, 60, maxPanelAlpha);
-
-            if (isDark)
-            {
-                menuAlpha = (byte)Math.Clamp(panelAlpha + 28 + (contrast * 16), 120, 255);
-                var submenuDelta = 10 + (menuChild * 80);
-                menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 45, 255);
-            }
-            else
-            {
-                // Light theme requires lower alpha and subtle cool tint to make blur/material visible.
-                menuAlpha = (byte)Math.Clamp(panelAlpha + 12 + (contrast * 8), 96, 215);
-                var submenuDelta = 12 + (menuChild * 72);
-                menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 72, 205);
-
-                menuBase = Color.Parse("#F8FBFF");
-                menuChildBase = Color.Parse("#F2F7FD");
-            }
-        }
-
-        borderAlpha = (byte)Math.Round(255 * borderStrength);
+        var effect = !viewModel.HasAnyEffect
+            ? ThemeEffectMode.Solid
+            : viewModel.IsMicaEnabled
+                ? ThemeEffectMode.Mica
+                : viewModel.IsAcrylicEnabled
+                    ? ThemeEffectMode.Acrylic
+                    : ThemeEffectMode.Transparent;
+        var palette = ThemePaletteCalculator.Calculate(
+            isDark,
+            effect,
+            viewModel.MaterialIntensity,
+            viewModel.BlurRadius,
+            viewModel.PanelContrast,
+            viewModel.MenuChildIntensity,
+            viewModel.BorderStrength);
 
         // Mutate existing brush colors instead of allocating new instances
-        var bgColor = Color.FromArgb(bgAlpha, bgBase.R, bgBase.G, bgBase.B);
+        var bgColor = palette.Background;
         _backgroundBrush ??= new SolidColorBrush(bgColor);
         _backgroundBrush.Color = bgColor;
         UpdateResource("AppBackgroundBrush", _backgroundBrush);
 
-        var panelColor = Color.FromArgb(panelAlpha, panelBase.R, panelBase.G, panelBase.B);
+        var panelColor = palette.Panel;
         _panelBrush ??= new SolidColorBrush(panelColor);
         _panelBrush.Color = panelColor;
         UpdateResource("AppPanelBrush", _panelBrush);
 
-        var menuColor = Color.FromArgb(menuAlpha, menuBase.R, menuBase.G, menuBase.B);
+        var menuColor = palette.Menu;
         _currentMenuBrush.Color = menuColor;
         UpdateResource("MenuPopupBrush", _currentMenuBrush);
 
-        var menuChildColor = Color.FromArgb(menuChildAlpha, menuChildBase.R, menuChildBase.G, menuChildBase.B);
+        var menuChildColor = palette.MenuChild;
         _currentMenuChildBrush.Color = menuChildColor;
         UpdateResource("MenuChildPopupBrush", _currentMenuChildBrush);
 
-        var hoverColor = isDark ? Color.Parse("#343B46") : Color.Parse("#DCE7F4");
-        var pressedColor = isDark ? Color.Parse("#3B4452") : Color.Parse("#CFDDF0");
-
-        _currentMenuHoverBrush.Color = hoverColor;
-        _currentMenuPressedBrush.Color = pressedColor;
-        _currentMenuChildHoverBrush.Color = hoverColor;
-        _currentMenuChildPressedBrush.Color = pressedColor;
+        _currentMenuHoverBrush.Color = palette.MenuHover;
+        _currentMenuPressedBrush.Color = palette.MenuPressed;
+        _currentMenuChildHoverBrush.Color = palette.MenuHover;
+        _currentMenuChildPressedBrush.Color = palette.MenuPressed;
 
         UpdateResource("MenuHoverBrush", _currentMenuHoverBrush);
         UpdateResource("MenuPressedBrush", _currentMenuPressedBrush);
         UpdateResource("MenuChildHoverBrush", _currentMenuChildHoverBrush);
         UpdateResource("MenuChildPressedBrush", _currentMenuChildPressedBrush);
 
-        var borderBase = isDark ? Color.Parse("#505050") : Color.Parse("#C0C0C0");
-        var borderColor = Color.FromArgb(borderAlpha, borderBase.R, borderBase.G, borderBase.B);
-        _currentBorderBrush.Color = borderColor;
+        _currentBorderBrush.Color = palette.Border;
         UpdateResource("AppBorderBrush", _currentBorderBrush);
 
-        var accentColor = isDark ? Color.Parse("#2D8CFF") : Color.Parse("#0078D4");
-        _accentBrush ??= new SolidColorBrush(accentColor);
-        _accentBrush.Color = accentColor;
+        _accentBrush ??= new SolidColorBrush(palette.Accent);
+        _accentBrush.Color = palette.Accent;
         UpdateResource("AppAccentBrush", _accentBrush);
 
         ApplyMenuBrushesDirect();

@@ -978,6 +978,44 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void SetThemeEffects_PublishesOnlyTheFinalConvergedState()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SetThemeEffects(transparent: true, mica: false, acrylic: false);
+        var observedStates = new List<(bool Transparent, bool Mica, bool Acrylic)>();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(MainWindowViewModel.IsTransparentEnabled)
+                or nameof(MainWindowViewModel.IsMicaEnabled)
+                or nameof(MainWindowViewModel.IsAcrylicEnabled))
+            {
+                observedStates.Add((
+                    viewModel.IsTransparentEnabled,
+                    viewModel.IsMicaEnabled,
+                    viewModel.IsAcrylicEnabled));
+            }
+        };
+
+        viewModel.SetThemeEffects(transparent: false, mica: true, acrylic: false);
+
+        Assert.NotEmpty(observedStates);
+        Assert.All(observedStates, state => Assert.Equal((false, true, false), state));
+    }
+
+    [Fact]
+    public void SetThemeEffects_MultipleActiveEffects_ThrowsWithoutChangingState()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SetThemeEffects(transparent: false, mica: false, acrylic: true);
+
+        Assert.Throws<ArgumentException>(() =>
+            viewModel.SetThemeEffects(transparent: true, mica: true, acrylic: false));
+        Assert.False(viewModel.IsTransparentEnabled);
+        Assert.False(viewModel.IsMicaEnabled);
+        Assert.True(viewModel.IsAcrylicEnabled);
+    }
+
+    [Fact]
     public void HasAnyEffect_TrueWhenAnyEffectEnabled()
     {
         var viewModel = CreateViewModel();

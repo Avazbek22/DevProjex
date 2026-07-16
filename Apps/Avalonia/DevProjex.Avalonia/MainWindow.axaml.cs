@@ -19,6 +19,7 @@ using UserSettingsDb = DevProjex.Infrastructure.ThemePresets.UserSettingsDb;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
 using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
 using ThemePresetEffect = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+using ThemePresetSession = DevProjex.Infrastructure.ThemePresets.ThemePresetSession;
 using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
 
 namespace DevProjex.Avalonia;
@@ -164,6 +165,7 @@ public partial class MainWindow : Window
     private bool _awaitingSystemDialogActivation;
     private TaskCompletionSource<bool>? _systemDialogActivationTcs;
     private UserSettingsDb _userSettingsDb = new();
+    private ThemePresetSession? _themePresetSession;
     private ThemePresetVariant _currentThemeVariant = ThemePresetVariant.Dark;
     private ThemePresetEffect _currentEffectMode = ThemePresetEffect.Transparent;
 
@@ -622,9 +624,15 @@ public partial class MainWindow : Window
                      or nameof(MainWindowViewModel.PanelContrast)
                      or nameof(MainWindowViewModel.BorderStrength)
                      or nameof(MainWindowViewModel.MenuChildIntensity))
+            {
+                _themePresetSession?.MarkDirty();
                 _themeBrushCoordinator.UpdateDynamicThemeBrushes();
+            }
             else if (args.PropertyName == nameof(MainWindowViewModel.BlurRadius))
+            {
+                _themePresetSession?.MarkDirty();
                 _themeBrushCoordinator.UpdateTransparencyEffect();
+            }
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
@@ -1247,11 +1255,9 @@ public partial class MainWindow : Window
         _userSettingsDb = _userSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         ApplySavedLanguagePreference(_userSettingsDb.ViewSettings);
 
-        if (!_userSettingsStore.TryParseKey(_userSettingsDb.LastSelected, out var theme, out var effect))
-        {
-            theme = ThemePresetVariant.Dark;
-            effect = ThemePresetEffect.Transparent;
-        }
+        _themePresetSession = new ThemePresetSession(_userSettingsStore, _userSettingsDb);
+        var theme = _themePresetSession.CurrentTheme;
+        var effect = _themePresetSession.CurrentEffect;
 
         _currentThemeVariant = theme;
         _currentEffectMode = effect;
@@ -1266,14 +1272,17 @@ public partial class MainWindow : Window
     {
         switch (effect)
         {
+            case ThemePresetEffect.Solid:
+                _viewModel.SetThemeEffects(transparent: false, mica: false, acrylic: false);
+                break;
             case ThemePresetEffect.Mica:
-                _viewModel.IsMicaEnabled = true;
+                _viewModel.SetThemeEffects(transparent: false, mica: true, acrylic: false);
                 break;
             case ThemePresetEffect.Acrylic:
-                _viewModel.IsAcrylicEnabled = true;
+                _viewModel.SetThemeEffects(transparent: false, mica: false, acrylic: true);
                 break;
             default:
-                _viewModel.IsTransparentEnabled = true;
+                _viewModel.SetThemeEffects(transparent: true, mica: false, acrylic: false);
                 break;
         }
     }
@@ -1289,9 +1298,13 @@ public partial class MainWindow : Window
 
     private void ApplyPresetForSelection(ThemePresetVariant theme, ThemePresetEffect effect)
     {
+        if (_themePresetSession is null)
+            return;
+
+        var preset = _themePresetSession.Select(theme, effect, CreateCurrentThemePreset());
         _currentThemeVariant = theme;
         _currentEffectMode = effect;
-        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
+        ApplyPresetValues(preset);
     }
 
     private void ApplyViewSettings(AppViewSettings settings)
@@ -2225,33 +2238,31 @@ public partial class MainWindow : Window
     private void HandleThemePopoverStateChange()
     {
         if (_wasThemePopoverOpen && !_viewModel.ThemePopoverOpen)
-            SaveCurrentThemePreset();
+            PersistCurrentThemePreset();
 
         _wasThemePopoverOpen = _viewModel.ThemePopoverOpen;
     }
 
-    private void SaveCurrentThemePreset()
+    private ThemePreset CreateCurrentThemePreset()
     {
-        var theme = GetSelectedThemeVariant();
-        var effect = GetEffectModeForSave();
-
-        _currentThemeVariant = theme;
-        _currentEffectMode = effect;
-
-        var preset = new ThemePreset
+        return new ThemePreset
         {
-            Theme = theme,
-            Effect = effect,
+            Theme = _currentThemeVariant,
+            Effect = _currentEffectMode,
             MaterialIntensity = _viewModel.MaterialIntensity,
             BlurRadius = _viewModel.BlurRadius,
             PanelContrast = _viewModel.PanelContrast,
             MenuChildIntensity = _viewModel.MenuChildIntensity,
             BorderStrength = _viewModel.BorderStrength
         };
+    }
 
-        _userSettingsStore.SetPreset(_userSettingsDb, theme, effect, preset);
-        _userSettingsDb.LastSelected = $"{theme}.{effect}";
-        _userSettingsStore.Save(_userSettingsDb);
+    private void PersistCurrentThemePreset()
+    {
+        if (_themePresetSession is not { IsDirty: true } session)
+            return;
+
+        session.Persist(CreateCurrentThemePreset());
     }
 
     private void SaveCurrentViewSettings()
@@ -2294,15 +2305,9 @@ public partial class MainWindow : Window
             return ThemePresetEffect.Mica;
         if (_viewModel.IsAcrylicEnabled)
             return ThemePresetEffect.Acrylic;
-        return ThemePresetEffect.Transparent;
-    }
-
-    private ThemePresetEffect GetEffectModeForSave()
-    {
-        if (_viewModel.HasAnyEffect)
-            return GetSelectedEffectMode();
-
-        return _currentEffectMode;
+        return _viewModel.IsTransparentEnabled
+            ? ThemePresetEffect.Transparent
+            : ThemePresetEffect.Solid;
     }
 
     private void InitializeFonts()
@@ -5254,27 +5259,24 @@ public partial class MainWindow : Window
     private void OnSetTransparentMode(object? sender, RoutedEventArgs e)
     {
         _viewModel.ToggleTransparent();
+        ApplyPresetForSelection(GetSelectedThemeVariant(), GetSelectedEffectMode());
         _themeBrushCoordinator.UpdateTransparencyEffect();
-        if (_viewModel.IsTransparentEnabled)
-            ApplyPresetForSelection(GetSelectedThemeVariant(), ThemePresetEffect.Transparent);
         e.Handled = true;
     }
 
     private void OnSetMicaMode(object? sender, RoutedEventArgs e)
     {
         _viewModel.ToggleMica();
+        ApplyPresetForSelection(GetSelectedThemeVariant(), GetSelectedEffectMode());
         _themeBrushCoordinator.UpdateTransparencyEffect();
-        if (_viewModel.IsMicaEnabled)
-            ApplyPresetForSelection(GetSelectedThemeVariant(), ThemePresetEffect.Mica);
         e.Handled = true;
     }
 
     private void OnSetAcrylicMode(object? sender, RoutedEventArgs e)
     {
         _viewModel.ToggleAcrylic();
+        ApplyPresetForSelection(GetSelectedThemeVariant(), GetSelectedEffectMode());
         _themeBrushCoordinator.UpdateTransparencyEffect();
-        if (_viewModel.IsAcrylicEnabled)
-            ApplyPresetForSelection(GetSelectedThemeVariant(), ThemePresetEffect.Acrylic);
         e.Handled = true;
     }
 
@@ -5417,23 +5419,27 @@ public partial class MainWindow : Window
     /// </summary>
     private void ResetThemeSettings()
     {
-        _userSettingsDb = _userSettingsStore.ResetToDefaults();
+        var resetDatabase = _userSettingsStore.ResetToDefaults();
+        var resetSession = new ThemePresetSession(_userSettingsStore, resetDatabase);
+        var theme = resetSession.CurrentTheme;
+        var effect = resetSession.CurrentEffect;
 
-        // Reparse last selected to get current theme variant and effect
-        if (!_userSettingsStore.TryParseKey(_userSettingsDb.LastSelected, out var theme, out var effect))
-        {
-            theme = ThemePresetVariant.Dark;
-            effect = ThemePresetEffect.Transparent;
-        }
+        if (global::Avalonia.Application.Current is { } app)
+            app.RequestedThemeVariant = theme == ThemePresetVariant.Dark
+                ? ThemeVariant.Dark
+                : ThemeVariant.Light;
 
         _currentThemeVariant = theme;
         _currentEffectMode = effect;
+        _viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
+        ApplyEffectMode(effect);
 
-        // Apply default preset values to ViewModel
-        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
-        ApplyViewSettings(_userSettingsDb.ViewSettings);
+        ApplyPresetValues(resetSession.CurrentPreset);
+        ApplyViewSettings(resetDatabase.ViewSettings);
 
-        // Refresh visual effects
+        _userSettingsDb = resetDatabase;
+        _themePresetSession = resetSession;
+
         _themeBrushCoordinator.UpdateTransparencyEffect();
         _themeBrushCoordinator.UpdateDynamicThemeBrushes();
     }
@@ -7225,6 +7231,8 @@ public partial class MainWindow : Window
         // Give persistence one last synchronous chance before the process exits.
         // This protects against transient IO failures that would otherwise make the UI look correct
         // during the session but leave no durable snapshot for the next launch.
+        PersistCurrentThemePreset();
+
         if (_recentProjectsDb.RecentFolders.Count > 0 || _recentProjectsDb.RecentRepositories.Count > 0)
             _recentProjectsStore.TryPersist(_recentProjectsDb);
 

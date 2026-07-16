@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Styling;
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -78,6 +79,88 @@ public sealed class ThemeBrushCoordinatorTests
 		Assert.IsType<SolidColorBrush>(harness.Window.Resources["AppBorderBrush"]);
 	}
 
+	[Fact]
+	public void Calculate_EveryThemeEffectAndBoundaryValue_ProducesValidLayerOrdering()
+	{
+		var boundaryValues = new[] { -25d, 0d, 50d, 100d, 125d };
+
+		foreach (var isDark in new[] { false, true })
+		{
+			foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+			{
+				foreach (var value in boundaryValues)
+				{
+					var palette = ThemePaletteCalculator.Calculate(
+						isDark,
+						effect,
+						value,
+						value,
+						value,
+						value,
+						value);
+
+					Assert.Equal((byte)Math.Round(255 * Math.Clamp(value / 100, 0, 1)), palette.Border.A);
+					if (effect == ThemeEffectMode.Solid)
+					{
+						Assert.Equal(byte.MaxValue, palette.Background.A);
+						Assert.Equal(byte.MaxValue, palette.Panel.A);
+						Assert.Equal(byte.MaxValue, palette.Menu.A);
+						Assert.Equal(byte.MaxValue, palette.MenuChild.A);
+					}
+					else
+					{
+						Assert.InRange(palette.Background.A, (byte)90, byte.MaxValue);
+						Assert.True(
+							palette.Panel.A <= palette.Background.A - 12,
+							$"Panel ordering failed for {(isDark ? "Dark" : "Light")}.{effect} at {value}.");
+					}
+				}
+			}
+		}
+	}
+
+	[Fact]
+	public void Calculate_SolidMode_UsesExactOpaqueThemeColors()
+	{
+		var dark = ThemePaletteCalculator.Calculate(true, ThemeEffectMode.Solid, 37, 48, 59, 61, 72);
+		var light = ThemePaletteCalculator.Calculate(false, ThemeEffectMode.Solid, 37, 48, 59, 61, 72);
+
+		Assert.Equal(Color.Parse("#FF121214"), dark.Background);
+		Assert.Equal(Color.Parse("#FF17171A"), dark.Panel);
+		Assert.Equal(Color.Parse("#FF17171A"), dark.Menu);
+		Assert.Equal(Color.Parse("#FFFFFFFF"), light.Background);
+		Assert.Equal(Color.Parse("#FFF3F3F3"), light.Panel);
+		Assert.Equal(Color.Parse("#FFF3F3F3"), light.Menu);
+	}
+
+	[AvaloniaFact]
+	public void UpdateDynamicThemeBrushes_EveryEffectPublishesCalculatedPalette()
+	{
+		var app = global::Avalonia.Application.Current;
+		Assert.NotNull(app);
+		app!.RequestedThemeVariant = ThemeVariant.Dark;
+		using var harness = CreateHarness();
+		harness.ViewModel.MaterialIntensity = 63;
+		harness.ViewModel.BlurRadius = 29;
+		harness.ViewModel.PanelContrast = 41;
+		harness.ViewModel.MenuChildIntensity = 17;
+		harness.ViewModel.BorderStrength = 52;
+
+		foreach (var effect in Enum.GetValues<ThemeEffectMode>())
+		{
+			SetEffect(harness.ViewModel, effect);
+			harness.Coordinator.UpdateDynamicThemeBrushes();
+			var isDark = app.ActualThemeVariant == ThemeVariant.Dark;
+			var expected = ThemePaletteCalculator.Calculate(isDark, effect, 63, 29, 41, 17, 52);
+
+			Assert.Equal(expected.Background, GetBrush(harness.Window, "AppBackgroundBrush").Color);
+			Assert.Equal(expected.Panel, GetBrush(harness.Window, "AppPanelBrush").Color);
+			Assert.Equal(expected.Menu, GetBrush(harness.Window, "MenuPopupBrush").Color);
+			Assert.Equal(expected.MenuChild, GetBrush(harness.Window, "MenuChildPopupBrush").Color);
+			Assert.Equal(expected.Border, GetBrush(harness.Window, "AppBorderBrush").Color);
+		}
+	}
+
 	[AvaloniaFact]
 	public void Dispose_DropsCoordinatorOwnedNullableBrushReferences()
 	{
@@ -113,6 +196,14 @@ public sealed class ThemeBrushCoordinatorTests
 	private static void AssertTransparencyHints(Window window, params WindowTransparencyLevel[] expected)
 	{
 		Assert.Equal(expected, window.TransparencyLevelHint.ToArray());
+	}
+
+	private static void SetEffect(MainWindowViewModel viewModel, ThemeEffectMode effect)
+	{
+		viewModel.SetThemeEffects(
+			transparent: effect == ThemeEffectMode.Transparent,
+			mica: effect == ThemeEffectMode.Mica,
+			acrylic: effect == ThemeEffectMode.Acrylic);
 	}
 
 	private static object? GetPrivateFieldValue(object instance, string fieldName)

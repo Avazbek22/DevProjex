@@ -1454,11 +1454,11 @@ public sealed class UserSettingsStoreTests
 		Assert.True(root.TryGetProperty("presets", out var presets));
 		Assert.Equal(JsonValueKind.Object, presets.ValueKind);
 
-		// Count presets (should be 6: 2 themes × 3 effects)
+		// Count presets (2 themes x 4 effects)
 		int count = 0;
 		foreach (var _ in presets.EnumerateObject())
 			count++;
-		Assert.Equal(6, count);
+		Assert.Equal(Enum.GetValues<ThemeVariant>().Length * Enum.GetValues<ThemeEffectMode>().Length, count);
 	}
 
 	[Fact]

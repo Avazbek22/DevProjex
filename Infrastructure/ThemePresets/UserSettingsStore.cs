@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
     private const string FolderName = "DevProjex";
     private const string FileName = "user-settings.json";
 
@@ -24,6 +24,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         IsTerminalCommandPromptDismissed = false,
         PreferredLanguage = null
     };
+    private static readonly Dictionary<string, ThemePreset> DefaultPresets = CreateDefaultPresetsCore();
     private readonly Func<string> _appDataPathProvider =
         appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
     private readonly object _sync = new();
@@ -79,11 +80,35 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     public void Save(UserSettingsDb db) => TrySave(db);
 
+    public bool TrySave(UserSettingsDb db)
+    {
+        lock (_sync)
+        {
+            try
+            {
+                var fileSet = GetFileSet();
+                if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+                    return false;
+
+                using var _ = heldLock;
+                return TrySaveInternal(fileSet, Normalize(db));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
     public ThemePreset GetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect)
     {
         var key = GetKey(theme, effect);
         if (db.Presets.TryGetValue(key, out var preset) && preset is not null)
-            return preset;
+        {
+            var normalized = NormalizePreset(preset, CreateDefaultPreset(theme, effect), theme, effect);
+            db.Presets[key] = normalized;
+            return normalized;
+        }
 
         var created = CreateDefaultPreset(theme, effect);
         db.Presets[key] = created;
@@ -93,7 +118,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
     public void SetPreset(UserSettingsDb db, ThemeVariant theme, ThemeEffectMode effect, ThemePreset preset)
     {
         var key = GetKey(theme, effect);
-        db.Presets[key] = preset;
+        db.Presets[key] = NormalizePreset(preset, CreateDefaultPreset(theme, effect), theme, effect);
     }
 
     /// <summary>
@@ -124,10 +149,10 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         if (parts.Length != 2)
             return false;
 
-        if (!Enum.TryParse(parts[0], true, out ThemeVariant parsedTheme))
+        if (!Enum.TryParse(parts[0], true, out ThemeVariant parsedTheme) || !Enum.IsDefined(parsedTheme))
             return false;
 
-        if (!Enum.TryParse(parts[1], true, out ThemeEffectMode parsedEffect))
+        if (!Enum.TryParse(parts[1], true, out ThemeEffectMode parsedEffect) || !Enum.IsDefined(parsedEffect))
             return false;
 
         theme = parsedTheme;
@@ -149,11 +174,22 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
         foreach (var preset in CreateDefaultPresets())
         {
-            if (!db.Presets.ContainsKey(preset.Key))
+            if (!db.Presets.TryGetValue(preset.Key, out var currentPreset) || currentPreset is null)
+            {
                 db.Presets[preset.Key] = preset.Value;
+                continue;
+            }
+
+            db.Presets[preset.Key] = NormalizePreset(
+                currentPreset,
+                preset.Value,
+                preset.Value.Theme,
+                preset.Value.Effect);
         }
 
-        if (string.IsNullOrWhiteSpace(db.LastSelected) || !db.Presets.ContainsKey(db.LastSelected))
+        if (string.IsNullOrWhiteSpace(db.LastSelected) ||
+            !db.Presets.ContainsKey(db.LastSelected) ||
+            !TryParseKey(db.LastSelected, out _, out _))
             db.LastSelected = GetKey(ThemeVariant.Dark, ThemeEffectMode.Transparent);
 
         return db;
@@ -243,7 +279,10 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         return db;
     }
 
-    private Dictionary<string, ThemePreset> CreateDefaultPresets()
+    private static Dictionary<string, ThemePreset> CreateDefaultPresets()
+        => new(DefaultPresets, StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, ThemePreset> CreateDefaultPresetsCore()
     {
         return new Dictionary<string, ThemePreset>(StringComparer.OrdinalIgnoreCase)
         {
@@ -251,6 +290,16 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             {
                 Theme = ThemeVariant.Light,
                 Effect = ThemeEffectMode.Transparent,
+                MaterialIntensity = 78.43450479233228,
+                BlurRadius = 30,
+                PanelContrast = 0,
+                MenuChildIntensity = 0,
+                BorderStrength = 53.19488817891374
+            },
+            [GetKey(ThemeVariant.Light, ThemeEffectMode.Solid)] = new ThemePreset
+            {
+                Theme = ThemeVariant.Light,
+                Effect = ThemeEffectMode.Solid,
                 MaterialIntensity = 78.43450479233228,
                 BlurRadius = 30,
                 PanelContrast = 0,
@@ -287,6 +336,16 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 MenuChildIntensity = 0,
                 BorderStrength = 31.789137380191697
             },
+            [GetKey(ThemeVariant.Dark, ThemeEffectMode.Solid)] = new ThemePreset
+            {
+                Theme = ThemeVariant.Dark,
+                Effect = ThemeEffectMode.Solid,
+                MaterialIntensity = 60.86261980830672,
+                BlurRadius = 29.233226837060705,
+                PanelContrast = 51.59744408945688,
+                MenuChildIntensity = 0,
+                BorderStrength = 31.789137380191697
+            },
             [GetKey(ThemeVariant.Dark, ThemeEffectMode.Mica)] = new ThemePreset
             {
                 Theme = ThemeVariant.Dark,
@@ -310,33 +369,47 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         };
     }
 
-    private ThemePreset CreateDefaultPreset(ThemeVariant theme, ThemeEffectMode effect)
-    {
-        var defaults = CreateDefaultPresets();
-        return defaults[GetKey(theme, effect)];
-    }
+    private static ThemePreset CreateDefaultPreset(ThemeVariant theme, ThemeEffectMode effect)
+        => DefaultPresets[GetKey(theme, effect)];
 
-    private string GetKey(ThemeVariant theme, ThemeEffectMode effect) => $"{theme}.{effect}";
+    private static string GetKey(ThemeVariant theme, ThemeEffectMode effect) => $"{theme}.{effect}";
 
-    private void TrySave(UserSettingsDb db)
+    private static ThemePreset NormalizePreset(
+        ThemePreset preset,
+        ThemePreset fallback,
+        ThemeVariant theme,
+        ThemeEffectMode effect)
     {
-        lock (_sync)
+        var materialIntensity = NormalizePercentage(preset.MaterialIntensity, fallback.MaterialIntensity);
+        var blurRadius = NormalizePercentage(preset.BlurRadius, fallback.BlurRadius);
+        var panelContrast = NormalizePercentage(preset.PanelContrast, fallback.PanelContrast);
+        var menuChildIntensity = NormalizePercentage(preset.MenuChildIntensity, fallback.MenuChildIntensity);
+        var borderStrength = NormalizePercentage(preset.BorderStrength, fallback.BorderStrength);
+        if (preset.Theme == theme &&
+            preset.Effect == effect &&
+            preset.MaterialIntensity.Equals(materialIntensity) &&
+            preset.BlurRadius.Equals(blurRadius) &&
+            preset.PanelContrast.Equals(panelContrast) &&
+            preset.MenuChildIntensity.Equals(menuChildIntensity) &&
+            preset.BorderStrength.Equals(borderStrength))
         {
-            try
-            {
-                var fileSet = GetFileSet();
-                if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
-                    return;
-
-                using var _ = heldLock;
-                TrySaveInternal(fileSet, Normalize(db));
-            }
-            catch
-            {
-                // Ignore persistence errors.
-            }
+            return preset;
         }
+
+        return preset with
+        {
+            Theme = theme,
+            Effect = effect,
+            MaterialIntensity = materialIntensity,
+            BlurRadius = blurRadius,
+            PanelContrast = panelContrast,
+            MenuChildIntensity = menuChildIntensity,
+            BorderStrength = borderStrength
+        };
     }
+
+    private static double NormalizePercentage(double value, double fallback)
+        => double.IsFinite(value) ? Math.Clamp(value, 0, 100) : fallback;
 
     private static bool TrySaveInternal(JsonStoreFileSet fileSet, UserSettingsDb db)
         => JsonStorePersistence.TryWriteAtomic(fileSet, db, SerializerOptions);

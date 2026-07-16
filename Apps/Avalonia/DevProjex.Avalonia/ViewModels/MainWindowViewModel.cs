@@ -682,6 +682,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(ShowBlurSlider));
     }
 
+    public void SetThemeEffects(bool transparent, bool mica, bool acrylic)
+    {
+        if ((transparent ? 1 : 0) + (mica ? 1 : 0) + (acrylic ? 1 : 0) > 1)
+            throw new ArgumentException("Only one theme effect can be active at a time.");
+
+        if (_isTransparentEnabled == transparent &&
+            _isMicaEnabled == mica &&
+            _isAcrylicEnabled == acrylic)
+        {
+            return;
+        }
+
+        _isTransparentEnabled = transparent;
+        _isMicaEnabled = mica;
+        _isAcrylicEnabled = acrylic;
+        RaiseEffectPropertiesChanged();
+    }
+
     private void RaisePreviewStatePropertiesChanged()
     {
         RaisePropertyChanged(nameof(IsAnyPreviewVisible));
@@ -706,52 +724,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void ToggleTransparent()
     {
         if (_isTransparentEnabled)
-        {
-            // Disable all effects
-            _isTransparentEnabled = false;
-        }
+            SetThemeEffects(transparent: false, mica: false, acrylic: false);
         else
-        {
-            // Enable transparent, disable others
-            _isTransparentEnabled = true;
-            _isMicaEnabled = false;
-            _isAcrylicEnabled = false;
-        }
-        RaiseEffectPropertiesChanged();
+            SetThemeEffects(transparent: true, mica: false, acrylic: false);
     }
 
     public void ToggleMica()
     {
         if (_isMicaEnabled)
-        {
-            // Disable all effects
-            _isMicaEnabled = false;
-        }
+            SetThemeEffects(transparent: false, mica: false, acrylic: false);
         else
-        {
-            // Enable mica, disable others
-            _isMicaEnabled = true;
-            _isTransparentEnabled = false;
-            _isAcrylicEnabled = false;
-        }
-        RaiseEffectPropertiesChanged();
+            SetThemeEffects(transparent: false, mica: true, acrylic: false);
     }
 
     public void ToggleAcrylic()
     {
         if (_isAcrylicEnabled)
-        {
-            // Disable all effects
-            _isAcrylicEnabled = false;
-        }
+            SetThemeEffects(transparent: false, mica: false, acrylic: false);
         else
-        {
-            // Enable acrylic, disable others
-            _isAcrylicEnabled = true;
-            _isTransparentEnabled = false;
-            _isMicaEnabled = false;
-        }
-        RaiseEffectPropertiesChanged();
+            SetThemeEffects(transparent: false, mica: false, acrylic: true);
     }
 
     public bool ThemePopoverOpen
