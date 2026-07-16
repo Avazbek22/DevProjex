@@ -603,7 +603,9 @@ internal sealed class MetricsPipeline(
         CancellationToken cancellationToken) =>
         MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
             initialVisualReadyTask,
-            UiTimingProfile.Scale(MetricsCalculationPolicy.InitialVisualReadyTimeout),
+            // This is a safety deadline, not animation pacing. Scaling it for fast UI tests can
+            // expire the gate under runner load and start file IO while the reveal is still active.
+            MetricsCalculationPolicy.InitialVisualReadyTimeout,
             cancellationToken);
 
     private async Task RecalculateIncompleteBaselineMetricsAsync(
