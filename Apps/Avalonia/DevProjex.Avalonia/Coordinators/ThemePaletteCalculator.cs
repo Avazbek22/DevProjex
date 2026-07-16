@@ -35,14 +35,14 @@ internal static class ThemePaletteCalculator
     public static ThemePalette Calculate(
         bool isDark,
         ThemeEffectMode effect,
-        double materialIntensity,
+        double backgroundTransparency,
         double panelContrast,
         double menuTransparency,
-        double borderStrength)
+        double borderVisibility)
     {
-        var material = Math.Clamp(materialIntensity / 100.0, 0.0, 1.0);
+        var material = Math.Clamp(backgroundTransparency / 100.0, 0.0, 1.0);
         var contrast = Math.Clamp(panelContrast / 100.0, 0.0, 1.0);
-        var normalizedBorderStrength = Math.Clamp(borderStrength / 100.0, 0.0, 1.0);
+        var normalizedBorderVisibility = Math.Clamp(borderVisibility / 100.0, 0.0, 1.0);
         var normalizedMenuTransparency = Math.Clamp(menuTransparency / 100.0, 0.0, 1.0);
         var backgroundBase = isDark ? DarkBackground : LightBackground;
         var panelBase = isDark ? DarkPanel : LightPanel;
@@ -105,7 +105,7 @@ internal static class ThemePaletteCalculator
             menuChildBase = LightMenuChild;
         }
 
-        var borderAlpha = (byte)Math.Round(255 * normalizedBorderStrength);
+        var borderAlpha = (byte)Math.Round(255 * normalizedBorderVisibility);
         var borderBase = isDark ? DarkBorder : LightBorder;
 
         return new ThemePalette(

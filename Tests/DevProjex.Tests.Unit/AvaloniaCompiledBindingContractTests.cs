@@ -112,13 +112,13 @@ public sealed class AvaloniaCompiledBindingContractTests
 		Assert.Equal(
 			["TransparentEffectCheckBox", "BlurEffectCheckBox", "MicaEffectCheckBox"],
 			namedEffectControls);
-		Assert.Contains(sliderBindings, binding => binding.Contains("MaterialIntensity", StringComparison.Ordinal));
+		Assert.Contains(sliderBindings, binding => binding.Contains("BackgroundTransparency", StringComparison.Ordinal));
 		Assert.Contains(sliderBindings, binding => binding.Contains("MenuTransparency", StringComparison.Ordinal));
-		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("MenuChildIntensity", StringComparison.Ordinal));
+		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("MaterialIntensity", StringComparison.Ordinal));
 		Assert.Contains(
 			root.Descendants(avaloniaNamespace + "Slider"),
 			slider => slider.Attribute(xamlNamespace + "Name")?.Value == "MenuTransparencySlider");
-		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("BlurRadius", StringComparison.Ordinal));
+		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("BorderStrength", StringComparison.Ordinal));
 		Assert.Empty(root.Descendants(avaloniaNamespace + "Expander"));
 	}
 

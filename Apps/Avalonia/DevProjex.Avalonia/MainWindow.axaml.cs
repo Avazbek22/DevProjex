@@ -16,6 +16,8 @@ using DevProjex.Infrastructure.Reports;
 using DevProjex.Infrastructure.TerminalCommands;
 using UserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
 using UserSettingsDb = DevProjex.Infrastructure.ThemePresets.UserSettingsDb;
+using ThemeSettingsStore = DevProjex.Infrastructure.ThemePresets.ThemeSettingsStore;
+using ThemeSettingsDocument = DevProjex.Infrastructure.ThemePresets.ThemeSettingsDocument;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
 using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
 using ThemePresetEffect = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
@@ -120,6 +122,7 @@ public partial class MainWindow : Window
     private readonly IElevationService _elevation;
     private readonly IAppInstanceLauncher _appInstanceLauncher;
     private readonly UserSettingsStore _userSettingsStore;
+    private readonly ThemeSettingsStore _themeSettingsStore;
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
@@ -166,6 +169,7 @@ public partial class MainWindow : Window
     private bool _awaitingSystemDialogActivation;
     private TaskCompletionSource<bool>? _systemDialogActivationTcs;
     private UserSettingsDb _userSettingsDb = new();
+    private ThemeSettingsDocument _themeSettingsDocument = new();
     private ThemePresetSession? _themePresetSession;
     private ThemePresetVariant _currentThemeVariant = ThemePresetVariant.Dark;
     private ThemePresetEffect _currentEffectMode = ThemePresetEffect.Transparent;
@@ -372,6 +376,7 @@ public partial class MainWindow : Window
         _elevation = services.Elevation;
         _appInstanceLauncher = services.AppInstanceLauncher;
         _userSettingsStore = services.UserSettingsStore;
+        _themeSettingsStore = services.ThemeSettingsStore;
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
@@ -621,19 +626,14 @@ public partial class MainWindow : Window
                     return;
                 _filterCoordinator.OnNameFilterChanged();
             }
-            else if (args.PropertyName is nameof(MainWindowViewModel.MaterialIntensity)
+            else if (args.PropertyName is nameof(MainWindowViewModel.BackgroundTransparency)
                      or nameof(MainWindowViewModel.PanelContrast)
-                     or nameof(MainWindowViewModel.BorderStrength)
+                     or nameof(MainWindowViewModel.BorderVisibility)
                      or nameof(MainWindowViewModel.MenuTransparency))
             {
                 if (Volatile.Read(ref _applyingThemePresetDepth) == 0)
                     _themePresetSession?.MarkDirty();
                 _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
-            }
-            else if (args.PropertyName == nameof(MainWindowViewModel.BlurRadius))
-            {
-                if (Volatile.Read(ref _applyingThemePresetDepth) == 0)
-                    _themePresetSession?.MarkDirty();
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
@@ -706,6 +706,7 @@ public partial class MainWindow : Window
             // Keep all user-facing state documents present from startup so the app can
             // recover from partial external cleanup without waiting for a later save path.
             _userSettingsStore.EnsureStorageExists();
+            _themeSettingsStore.EnsureStorageExists();
             _recentProjectsStore.EnsureStorageExists();
             _projectProfiles.EnsureStorageExists();
         }
@@ -1250,7 +1251,10 @@ public partial class MainWindow : Window
 
         _viewModel.IsDarkTheme = _currentThemeVariant == ThemePresetVariant.Dark;
         ApplyEffectMode(_currentEffectMode);
-        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, _currentThemeVariant, _currentEffectMode));
+        ApplyPresetValues(_themeSettingsStore.GetPreset(
+            _themeSettingsDocument,
+            _currentThemeVariant,
+            _currentEffectMode));
         _themeBrushCoordinator.UpdateTransparencyEffect();
     }
 
@@ -1259,7 +1263,8 @@ public partial class MainWindow : Window
         _userSettingsDb = _userSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         ApplySavedLanguagePreference(_userSettingsDb.ViewSettings);
 
-        _themePresetSession = new ThemePresetSession(_userSettingsStore, _userSettingsDb);
+        _themeSettingsDocument = _themeSettingsStore.LoadForStartup(StartupStoreLockTimeout);
+        _themePresetSession = new ThemePresetSession(_themeSettingsStore, _themeSettingsDocument);
         var theme = _themePresetSession.CurrentTheme;
         var effect = _themePresetSession.CurrentEffect;
 
@@ -1267,7 +1272,7 @@ public partial class MainWindow : Window
         _currentEffectMode = effect;
         _viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
         ApplyEffectMode(effect);
-        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
+        ApplyPresetValues(_themeSettingsStore.GetPreset(_themeSettingsDocument, theme, effect));
         ApplyViewSettings(_userSettingsDb.ViewSettings);
         _wasThemePopoverOpen = _viewModel.ThemePopoverOpen;
     }
@@ -1296,11 +1301,10 @@ public partial class MainWindow : Window
         Interlocked.Increment(ref _applyingThemePresetDepth);
         try
         {
-            _viewModel.MaterialIntensity = preset.MaterialIntensity;
-            _viewModel.BlurRadius = preset.BlurRadius;
+            _viewModel.BackgroundTransparency = preset.BackgroundTransparency;
             _viewModel.PanelContrast = preset.PanelContrast;
-            _viewModel.MenuTransparency = preset.MenuChildIntensity;
-            _viewModel.BorderStrength = preset.BorderStrength;
+            _viewModel.MenuTransparency = preset.MenuTransparency;
+            _viewModel.BorderVisibility = preset.BorderVisibility;
         }
         finally
         {
@@ -2259,13 +2263,10 @@ public partial class MainWindow : Window
     {
         return new ThemePreset
         {
-            Theme = _currentThemeVariant,
-            Effect = _currentEffectMode,
-            MaterialIntensity = _viewModel.MaterialIntensity,
-            BlurRadius = _viewModel.BlurRadius,
+            BackgroundTransparency = _viewModel.BackgroundTransparency,
             PanelContrast = _viewModel.PanelContrast,
-            MenuChildIntensity = _viewModel.MenuTransparency,
-            BorderStrength = _viewModel.BorderStrength
+            MenuTransparency = _viewModel.MenuTransparency,
+            BorderVisibility = _viewModel.BorderVisibility
         };
     }
 
@@ -2283,7 +2284,6 @@ public partial class MainWindow : Window
         {
             IsCompactMode = _viewModel.IsCompactMode,
             IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled,
-            IsAdvancedIgnoreCountsEnabled = AdvancedIgnoreCountsAlwaysEnabled,
             IsTerminalCommandPromptDismissed = _userSettingsDb.ViewSettings?.IsTerminalCommandPromptDismissed ?? false,
             PreferredLanguage = _userSettingsDb.ViewSettings?.PreferredLanguage
         };
@@ -5419,8 +5419,8 @@ public partial class MainWindow : Window
     /// </summary>
     private void ResetThemeSettings()
     {
-        var resetDatabase = _userSettingsStore.ResetToDefaults();
-        var resetSession = new ThemePresetSession(_userSettingsStore, resetDatabase);
+        var resetDocument = _themeSettingsStore.ResetToDefaults();
+        var resetSession = new ThemePresetSession(_themeSettingsStore, resetDocument);
         var theme = resetSession.CurrentTheme;
         var effect = resetSession.CurrentEffect;
 
@@ -5435,9 +5435,7 @@ public partial class MainWindow : Window
         ApplyEffectMode(effect);
 
         ApplyPresetValues(resetSession.CurrentPreset);
-        ApplyViewSettings(resetDatabase.ViewSettings);
-
-        _userSettingsDb = resetDatabase;
+        _themeSettingsDocument = resetDocument;
         _themePresetSession = resetSession;
 
         _themeBrushCoordinator.UpdateTransparencyEffect();

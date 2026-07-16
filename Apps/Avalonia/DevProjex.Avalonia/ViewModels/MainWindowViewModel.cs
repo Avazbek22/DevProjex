@@ -84,12 +84,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private IPreviewTextDocument? _previewDocument;
     private int _previewLineCount = 1;
 
-    // Theme intensity sliders (0-100)
-    // MaterialIntensity: single slider controlling overall effect (transparency, depth, material feel)
-    private double _materialIntensity = 65;
-    private double _blurRadius;
+    private double _backgroundTransparency = 65;
     private double _panelContrast = 50;
-    private double _borderStrength = 50;
+    private double _borderVisibility = 50;
     private double _menuTransparency = 50;
 
     private bool _themePopoverOpen;
@@ -677,12 +674,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowBackgroundTransparencySlider => _isTransparentEnabled || _isAcrylicEnabled;
 
-    // Retained for binding compatibility with older views.
-    public bool ShowTransparencySliders => ShowBackgroundTransparencySlider;
-
-    // Blur is selected as an effect rather than configured as a numeric radius.
-    public bool ShowBlurSlider => false;
-
     private void RaiseEffectPropertiesChanged()
     {
         RaisePropertyChanged(nameof(IsMicaEnabled));
@@ -691,8 +682,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HasAnyEffect));
         RaisePropertyChanged(nameof(ActiveThemeEffect));
         RaisePropertyChanged(nameof(ShowBackgroundTransparencySlider));
-        RaisePropertyChanged(nameof(ShowTransparencySliders));
-        RaisePropertyChanged(nameof(ShowBlurSlider));
     }
 
     public void SetThemeEffects(bool transparent, bool mica, bool acrylic)
@@ -922,26 +911,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AboutPopoverMaxHeight = maxAboutHeight;
     }
 
-    // Material intensity: single slider for overall effect strength (transparency, depth, material feel)
-    public double MaterialIntensity
+    public double BackgroundTransparency
     {
-        get => _materialIntensity;
+        get => _backgroundTransparency;
         set
         {
-            if (Math.Abs(_materialIntensity - value) < 0.1) return;
-            _materialIntensity = value;
-            RaisePropertyChanged();
-        }
-    }
-
-    // Kept for settings-schema compatibility. Native backdrop APIs do not expose a blur radius.
-    public double BlurRadius
-    {
-        get => _blurRadius;
-        set
-        {
-            if (Math.Abs(_blurRadius - value) < 0.1) return;
-            _blurRadius = value;
+            if (Math.Abs(_backgroundTransparency - value) < 0.1) return;
+            _backgroundTransparency = value;
             RaisePropertyChanged();
         }
     }
@@ -957,13 +933,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public double BorderStrength
+    public double BorderVisibility
     {
-        get => _borderStrength;
+        get => _borderVisibility;
         set
         {
-            if (Math.Abs(_borderStrength - value) < 0.1) return;
-            _borderStrength = value;
+            if (Math.Abs(_borderVisibility - value) < 0.1) return;
+            _borderVisibility = value;
             RaisePropertyChanged();
         }
     }
@@ -976,15 +952,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Math.Abs(_menuTransparency - value) < 0.1) return;
             _menuTransparency = value;
             RaisePropertyChanged();
-            RaisePropertyChanged(nameof(MenuChildIntensity));
         }
-    }
-
-    // Compatibility alias for the schema-4 property name.
-    public double MenuChildIntensity
-    {
-        get => MenuTransparency;
-        set => MenuTransparency = value;
     }
 
     // Applied font (TreeView reads it from here)
@@ -1239,15 +1207,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeTransparentLabel { get; private set; } = string.Empty;
     public string ThemeMicaLabel { get; private set; } = string.Empty;
     public string ThemeBlurLabel { get; private set; } = string.Empty;
-    public string ThemeAcrylicLabel { get; private set; } = string.Empty;
     public string ThemeBackgroundTransparency { get; private set; } = string.Empty;
-    public string ThemeMaterialIntensity { get; private set; } = string.Empty;
-    public string ThemeBlurRadius { get; private set; } = string.Empty;
     public string ThemePanelContrast { get; private set; } = string.Empty;
     public string ThemeBorderVisibility { get; private set; } = string.Empty;
-    public string ThemeBorderStrength { get; private set; } = string.Empty;
     public string ThemeMenuTransparency { get; private set; } = string.Empty;
-    public string ThemeMenuChildIntensity { get; private set; } = string.Empty;
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
     public string SettingsAllIgnore { get; private set; } = string.Empty;
@@ -1479,15 +1442,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ThemeTransparentLabel = _localization["Theme.Transparent"];
         ThemeMicaLabel = _localization["Theme.Mica"];
         ThemeBlurLabel = _localization["Theme.Blur"];
-        ThemeAcrylicLabel = ThemeBlurLabel;
         ThemeBackgroundTransparency = _localization["Theme.BackgroundTransparency"];
-        ThemeMaterialIntensity = ThemeBackgroundTransparency;
-        ThemeBlurRadius = _localization["Theme.BlurRadius"];
         ThemePanelContrast = _localization["Theme.PanelContrast"];
         ThemeBorderVisibility = _localization["Theme.BorderVisibility"];
-        ThemeBorderStrength = ThemeBorderVisibility;
         ThemeMenuTransparency = _localization["Theme.MenuTransparency"];
-        ThemeMenuChildIntensity = ThemeMenuTransparency;
 
         RaisePropertyChanged(nameof(MenuFile));
         RaisePropertyChanged(nameof(MenuFileOpen));
@@ -1592,15 +1550,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(ThemeTransparentLabel));
         RaisePropertyChanged(nameof(ThemeMicaLabel));
         RaisePropertyChanged(nameof(ThemeBlurLabel));
-        RaisePropertyChanged(nameof(ThemeAcrylicLabel));
         RaisePropertyChanged(nameof(ThemeBackgroundTransparency));
-        RaisePropertyChanged(nameof(ThemeMaterialIntensity));
-        RaisePropertyChanged(nameof(ThemeBlurRadius));
         RaisePropertyChanged(nameof(ThemePanelContrast));
         RaisePropertyChanged(nameof(ThemeBorderVisibility));
-        RaisePropertyChanged(nameof(ThemeBorderStrength));
         RaisePropertyChanged(nameof(ThemeMenuTransparency));
-        RaisePropertyChanged(nameof(ThemeMenuChildIntensity));
 
         // Git localization
         RaisePropertyChanged(nameof(MenuGitClone));

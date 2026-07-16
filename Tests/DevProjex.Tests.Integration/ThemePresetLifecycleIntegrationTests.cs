@@ -8,8 +8,10 @@ public sealed class ThemePresetLifecycleIntegrationTests
     public void EditSwitchReturnSolidAndRestart_PreservesEveryRequestedState()
     {
         using var temp = new TemporaryDirectory();
-        var store = new UserSettingsStore(() => temp.Path);
+        var store = new ThemeSettingsStore(() => temp.Path);
         var session = new ThemePresetSession(store, store.Load());
+        var current = session.CurrentPreset;
+        session.Select(ThemeVariant.Dark, ThemeEffectMode.Transparent, current);
         var transparent = CreatePreset(ThemeVariant.Dark, ThemeEffectMode.Transparent, 12);
 
         session.Select(ThemeVariant.Dark, ThemeEffectMode.Mica, transparent);
@@ -26,7 +28,7 @@ public sealed class ThemePresetLifecycleIntegrationTests
         Assert.Equal(transparent, restoredTransparent);
         Assert.True(session.Persist(solid));
 
-        var reloadedStore = new UserSettingsStore(() => temp.Path);
+        var reloadedStore = new ThemeSettingsStore(() => temp.Path);
         var reloadedSession = new ThemePresetSession(reloadedStore, reloadedStore.Load());
         Assert.Equal(ThemeVariant.Dark, reloadedSession.CurrentTheme);
         Assert.Equal(ThemeEffectMode.Solid, reloadedSession.CurrentEffect);
@@ -40,13 +42,10 @@ public sealed class ThemePresetLifecycleIntegrationTests
     {
         return new ThemePreset
         {
-            Theme = theme,
-            Effect = effect,
-            MaterialIntensity = seed,
-            BlurRadius = seed + 1,
-            PanelContrast = seed + 2,
-            MenuChildIntensity = seed + 3,
-            BorderStrength = seed + 4
+            BackgroundTransparency = seed,
+            PanelContrast = seed + 1,
+            MenuTransparency = seed + 2,
+            BorderVisibility = seed + 3
         };
     }
 }

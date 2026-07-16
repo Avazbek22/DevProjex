@@ -37,17 +37,10 @@ public sealed class ThemeBrushCoordinatorTests
 			WindowTransparencyLevel.Transparent,
 			WindowTransparencyLevel.None);
 
-		using var transparentWithoutBlur = CreateHarness();
-		transparentWithoutBlur.ViewModel.IsTransparentEnabled = true;
-		transparentWithoutBlur.ViewModel.BlurRadius = 0;
-		transparentWithoutBlur.Coordinator.UpdateTransparencyEffect();
-		AssertTransparencyHints(transparentWithoutBlur.Window, WindowTransparencyLevel.Transparent, WindowTransparencyLevel.None);
-
-		using var transparentWithBlur = CreateHarness();
-		transparentWithBlur.ViewModel.IsTransparentEnabled = true;
-		transparentWithBlur.ViewModel.BlurRadius = 75;
-		transparentWithBlur.Coordinator.UpdateTransparencyEffect();
-		AssertTransparencyHints(transparentWithBlur.Window, WindowTransparencyLevel.Transparent, WindowTransparencyLevel.None);
+		using var transparent = CreateHarness();
+		transparent.ViewModel.IsTransparentEnabled = true;
+		transparent.Coordinator.UpdateTransparencyEffect();
+		AssertTransparencyHints(transparent.Window, WindowTransparencyLevel.Transparent, WindowTransparencyLevel.None);
 	}
 
 	[AvaloniaFact]
@@ -58,7 +51,7 @@ public sealed class ThemeBrushCoordinatorTests
 		app!.RequestedThemeVariant = ThemeVariant.Dark;
 		using var harness = CreateHarness();
 		harness.ViewModel.IsTransparentEnabled = true;
-		harness.ViewModel.MaterialIntensity = 20;
+		harness.ViewModel.BackgroundTransparency = 20;
 
 		harness.Coordinator.UpdateDynamicThemeBrushes();
 
@@ -71,7 +64,7 @@ public sealed class ThemeBrushCoordinatorTests
 		var firstMainMenuStripColor = firstMainMenuStripBrush.Color;
 		Assert.True(firstPanelColor.A < byte.MaxValue, "Transparent mode must publish a translucent panel material.");
 
-		harness.ViewModel.MaterialIntensity = 90;
+		harness.ViewModel.BackgroundTransparency = 90;
 		harness.ViewModel.PanelContrast = 90;
 		harness.Coordinator.UpdateDynamicThemeBrushes();
 
@@ -198,7 +191,7 @@ public sealed class ThemeBrushCoordinatorTests
 	[InlineData(true, ThemeEffectMode.Transparent)]
 	[InlineData(false, ThemeEffectMode.Acrylic)]
 	[InlineData(true, ThemeEffectMode.Acrylic)]
-	public void Calculate_MaterialIntensityUsesEntireRangeWithoutDeadZones(
+	public void Calculate_BackgroundTransparencyUsesEntireRangeWithoutDeadZones(
 		bool isDark,
 		ThemeEffectMode effect)
 	{
@@ -249,11 +242,10 @@ public sealed class ThemeBrushCoordinatorTests
 		Assert.NotNull(app);
 		app!.RequestedThemeVariant = ThemeVariant.Dark;
 		using var harness = CreateHarness();
-		harness.ViewModel.MaterialIntensity = 63;
-		harness.ViewModel.BlurRadius = 29;
+		harness.ViewModel.BackgroundTransparency = 63;
 		harness.ViewModel.PanelContrast = 41;
 		harness.ViewModel.MenuTransparency = 17;
-		harness.ViewModel.BorderStrength = 52;
+		harness.ViewModel.BorderVisibility = 52;
 
 		foreach (var effect in Enum.GetValues<ThemeEffectMode>())
 		{

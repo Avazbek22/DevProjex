@@ -29,14 +29,12 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void Constructor_Defaults_ShowBackgroundTransparencyWithoutNumericBlur()
+    public void Constructor_Defaults_ShowBackgroundTransparencyForTransparentEffect()
     {
         var viewModel = CreateViewModel();
 
         Assert.True(viewModel.HasAnyEffect);
         Assert.True(viewModel.ShowBackgroundTransparencySlider);
-        Assert.True(viewModel.ShowTransparencySliders);
-        Assert.False(viewModel.ShowBlurSlider);
     }
 
     [Theory]
@@ -1048,29 +1046,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void ShowTransparencySliders_TrueWhenAnyEffectEnabled()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.IsTransparentEnabled = false;
-
-        viewModel.IsAcrylicEnabled = true;
-
-        Assert.True(viewModel.ShowTransparencySliders);
-    }
-
-    [Fact]
-    public void ShowTransparencySliders_FalseWhenNoEffects()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.IsTransparentEnabled = false;
-
-        viewModel.IsAcrylicEnabled = false;
-        viewModel.IsMicaEnabled = false;
-
-        Assert.False(viewModel.ShowTransparencySliders);
-    }
-
-    [Fact]
     public void ShowBackgroundTransparencySlider_TrueForTransparentAndBlur()
     {
         var viewModel = CreateViewModel();
@@ -1086,17 +1061,6 @@ public sealed class MainWindowViewModelTests
         viewModel.IsAcrylicEnabled = true;
 
         Assert.True(viewModel.ShowBackgroundTransparencySlider);
-    }
-
-    [Fact]
-    public void ShowBlurSlider_RemainsHiddenForEveryEffect()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.IsTransparentEnabled = false;
-
-        viewModel.IsAcrylicEnabled = true;
-
-        Assert.False(viewModel.ShowBlurSlider);
     }
 
     [Fact]
@@ -1121,43 +1085,23 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void MaterialIntensity_ChangesBeyondThreshold()
+    public void BackgroundTransparency_ChangesBeyondThreshold()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.MaterialIntensity = 80;
+        viewModel.BackgroundTransparency = 80;
 
-        Assert.Equal(80, viewModel.MaterialIntensity);
+        Assert.Equal(80, viewModel.BackgroundTransparency);
     }
 
     [Fact]
-    public void MaterialIntensity_AllowsNegativeValues()
+    public void BackgroundTransparency_AllowsNegativeValues()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.MaterialIntensity = -5;
+        viewModel.BackgroundTransparency = -5;
 
-        Assert.Equal(-5, viewModel.MaterialIntensity);
-    }
-
-    [Fact]
-    public void BlurRadius_ChangesBeyondThreshold()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.BlurRadius = 40;
-
-        Assert.Equal(40, viewModel.BlurRadius);
-    }
-
-    [Fact]
-    public void BlurRadius_AllowsNegativeValues()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.BlurRadius = -10;
-
-        Assert.Equal(-10, viewModel.BlurRadius);
+        Assert.Equal(-5, viewModel.BackgroundTransparency);
     }
 
     [Fact]
@@ -1181,23 +1125,23 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void BorderStrength_ChangesBeyondThreshold()
+    public void BorderVisibility_ChangesBeyondThreshold()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.BorderStrength = 70;
+        viewModel.BorderVisibility = 70;
 
-        Assert.Equal(70, viewModel.BorderStrength);
+        Assert.Equal(70, viewModel.BorderVisibility);
     }
 
     [Fact]
-    public void BorderStrength_AllowsNegativeValues()
+    public void BorderVisibility_AllowsNegativeValues()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.BorderStrength = -2;
+        viewModel.BorderVisibility = -2;
 
-        Assert.Equal(-2, viewModel.BorderStrength);
+        Assert.Equal(-2, viewModel.BorderVisibility);
     }
 
     [Fact]
@@ -1218,18 +1162,6 @@ public sealed class MainWindowViewModelTests
         viewModel.MenuTransparency = -3;
 
         Assert.Equal(-3, viewModel.MenuTransparency);
-    }
-
-    [Fact]
-    public void MenuChildIntensity_CompatibilityAliasMirrorsMenuTransparency()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.MenuChildIntensity = 42;
-
-        Assert.Equal(42, viewModel.MenuTransparency);
-        viewModel.MenuTransparency = 73;
-        Assert.Equal(73, viewModel.MenuChildIntensity);
     }
 
     [Theory]

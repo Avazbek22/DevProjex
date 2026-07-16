@@ -48,7 +48,7 @@
                   SmallChange="1"
                   LargeChange="10"
                   AutomationProperties.Name="{Binding ThemeBackgroundTransparency}"
-                  Value="{Binding MaterialIntensity}" />
+                  Value="{Binding BackgroundTransparency}" />
         </StackPanel>
       </StackPanel>
 
@@ -82,7 +82,7 @@
                   SmallChange="1"
                   LargeChange="10"
                   AutomationProperties.Name="{Binding ThemeBorderVisibility}"
-                  Value="{Binding BorderStrength}" />
+                  Value="{Binding BorderVisibility}" />
         </StackPanel>
       </StackPanel>
     </StackPanel>

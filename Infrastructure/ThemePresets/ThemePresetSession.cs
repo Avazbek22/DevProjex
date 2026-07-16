@@ -2,26 +2,26 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class ThemePresetSession
 {
-    private readonly UserSettingsStore _store;
+    private readonly ThemeSettingsStore _store;
     private readonly HashSet<string> _changedPresetKeys = new(StringComparer.OrdinalIgnoreCase);
 
-    public ThemePresetSession(UserSettingsStore store, UserSettingsDb database)
+    public ThemePresetSession(ThemeSettingsStore store, ThemeSettingsDocument database)
     {
         _store = store;
         Database = database;
 
-        if (!_store.TryParseKey(database.LastSelected, out var theme, out var effect))
+        if (!_store.TryParseKey(database.SelectedPreset, out var theme, out var effect))
         {
             theme = ThemeVariant.Dark;
-            effect = ThemeEffectMode.Transparent;
+            effect = ThemeEffectMode.Acrylic;
         }
 
         CurrentTheme = theme;
         CurrentEffect = effect;
-        Database.LastSelected = GetSelectionKey(theme, effect);
+        Database.SelectedPreset = GetSelectionKey(theme, effect);
     }
 
-    public UserSettingsDb Database { get; }
+    public ThemeSettingsDocument Database { get; }
     public ThemeVariant CurrentTheme { get; private set; }
     public ThemeEffectMode CurrentEffect { get; private set; }
     public bool IsDirty { get; private set; }
@@ -34,7 +34,7 @@ public sealed class ThemePresetSession
         CaptureCurrentIfChanged(currentValues);
         CurrentTheme = theme;
         CurrentEffect = effect;
-        Database.LastSelected = GetSelectionKey(theme, effect);
+        Database.SelectedPreset = GetSelectionKey(theme, effect);
         IsDirty = true;
         return _store.GetPreset(Database, theme, effect);
     }
@@ -42,7 +42,7 @@ public sealed class ThemePresetSession
     public void CaptureCurrent(ThemePreset currentValues)
     {
         StoreCurrentPreset(currentValues, forceChanged: true);
-        Database.LastSelected = GetSelectionKey(CurrentTheme, CurrentEffect);
+        Database.SelectedPreset = GetSelectionKey(CurrentTheme, CurrentEffect);
         IsDirty = true;
     }
 
@@ -58,7 +58,7 @@ public sealed class ThemePresetSession
             return true;
 
         CaptureCurrentIfChanged(currentValues);
-        if (!_store.TryPersistThemeChanges(Database, _changedPresetKeys, Database.LastSelected))
+        if (!_store.TryPersistChanges(Database, _changedPresetKeys, Database.SelectedPreset))
             return false;
 
         _changedPresetKeys.Clear();
@@ -69,7 +69,7 @@ public sealed class ThemePresetSession
     private void CaptureCurrentIfChanged(ThemePreset currentValues)
     {
         StoreCurrentPreset(currentValues, forceChanged: false);
-        Database.LastSelected = GetSelectionKey(CurrentTheme, CurrentEffect);
+        Database.SelectedPreset = GetSelectionKey(CurrentTheme, CurrentEffect);
     }
 
     private void StoreCurrentPreset(ThemePreset currentValues, bool forceChanged)

@@ -76,6 +76,7 @@ public static class AvaloniaCompositionRoot
         // previous runs cannot leak into the current window state and make workflow
         // scenarios nondeterministic on CI.
         var userSettingsStore = new UserSettingsStore(appDataPathProvider);
+        var themeSettingsStore = new ThemeSettingsStore(appDataPathProvider);
         var recentProjectsStore = new RecentProjectsStore(appDataPathProvider);
         var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
         var gitRepositoryService = new GitRepositoryService();
@@ -89,6 +90,7 @@ public static class AvaloniaCompositionRoot
             Localization: localization,
             HelpContentProvider: helpContentProvider,
             UserSettingsStore: userSettingsStore,
+            ThemeSettingsStore: themeSettingsStore,
             RecentProjectsStore: recentProjectsStore,
             ProjectProfileStore: projectProfileStore,
             AppInstanceLauncher: appInstanceLauncher,

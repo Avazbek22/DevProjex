@@ -115,11 +115,10 @@ public sealed class MainWindowLifecycleUiTests
 		{
 			viewModel.SearchQuery = "late search";
 			viewModel.NameFilter = "late filter";
-			viewModel.MaterialIntensity = 85;
+			viewModel.BackgroundTransparency = 85;
 			viewModel.PanelContrast = 80;
-			viewModel.BorderStrength = 75;
+			viewModel.BorderVisibility = 75;
 			viewModel.MenuTransparency = 70;
-			viewModel.BlurRadius = 65;
 			viewModel.StatusBusy = true;
 			viewModel.StatusProgressValue = 42;
 			viewModel.SelectedExportFormat = ExportFormat.Json;

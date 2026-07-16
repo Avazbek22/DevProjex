@@ -8,6 +8,7 @@ public sealed record AvaloniaAppServices(
     LocalizationService Localization,
     HelpContentProvider HelpContentProvider,
     UserSettingsStore UserSettingsStore,
+    ThemeSettingsStore ThemeSettingsStore,
     RecentProjectsStore RecentProjectsStore,
     IProjectProfileStore ProjectProfileStore,
     IAppInstanceLauncher AppInstanceLauncher,

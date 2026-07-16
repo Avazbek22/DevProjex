@@ -127,10 +127,10 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         var palette = ThemePaletteCalculator.Calculate(
             isDark,
             effect,
-            viewModel.MaterialIntensity,
+            viewModel.BackgroundTransparency,
             viewModel.PanelContrast,
             viewModel.MenuTransparency,
-            viewModel.BorderStrength);
+            viewModel.BorderVisibility);
 
         // Mutate existing brush colors instead of allocating new instances
         UpdateBrushResource("AppBackgroundBrush", ref _backgroundBrush, palette.Background);
