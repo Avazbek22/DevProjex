@@ -15,9 +15,12 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     private SolidColorBrush _currentMenuChildHoverBrush = new(Colors.Gray);
     private SolidColorBrush _currentMenuChildPressedBrush = new(Colors.DimGray);
     private SolidColorBrush _currentBorderBrush = new(Colors.Gray);
+    private readonly SolidColorBrush _transparencyFallbackBrush = new(Colors.Black);
     private SolidColorBrush? _backgroundBrush;
     private SolidColorBrush? _panelBrush;
     private SolidColorBrush? _accentBrush;
+    private int _dynamicUpdateScheduled;
+    private bool _disposed;
 
     public void HandleSubmenuOpened(object? sender, RoutedEventArgs e)
     {
@@ -43,6 +46,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     public void UpdateTransparencyEffect()
     {
         CompositionBackdropCornerRadiusCoordinator.UseSharpCornersForDecoratedWindow();
+        UpdateDynamicThemeBrushes();
 
         if (!viewModel.HasAnyEffect)
         {
@@ -51,7 +55,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
                 WindowTransparencyLevel.None
             ];
 
-            UpdateDynamicThemeBrushes();
             return;
         }
 
@@ -60,11 +63,9 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             window.TransparencyLevelHint =
             [
                 WindowTransparencyLevel.Mica,
-                WindowTransparencyLevel.Blur,
                 WindowTransparencyLevel.None
             ];
 
-            UpdateDynamicThemeBrushes();
             return;
         }
 
@@ -74,40 +75,38 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             [
                 WindowTransparencyLevel.AcrylicBlur,
                 WindowTransparencyLevel.Blur,
-                WindowTransparencyLevel.Transparent,
                 WindowTransparencyLevel.None
             ];
 
-            UpdateDynamicThemeBrushes();
             return;
         }
 
-        var blur = Math.Clamp(viewModel.BlurRadius / 100.0, 0.0, 1.0);
+        window.TransparencyLevelHint =
+        [
+            WindowTransparencyLevel.Transparent,
+            WindowTransparencyLevel.None
+        ];
 
-        if (blur <= 0.0001)
-        {
-            window.TransparencyLevelHint =
-            [
-                WindowTransparencyLevel.Transparent,
-                WindowTransparencyLevel.None
-            ];
-        }
-        else
-        {
-            window.TransparencyLevelHint =
-            [
-                WindowTransparencyLevel.AcrylicBlur,
-                WindowTransparencyLevel.Blur,
-                WindowTransparencyLevel.Transparent,
-                WindowTransparencyLevel.None
-            ];
-        }
+    }
 
-        UpdateDynamicThemeBrushes();
+    public void ScheduleDynamicThemeBrushUpdate()
+    {
+        if (_disposed || Interlocked.Exchange(ref _dynamicUpdateScheduled, 1) != 0)
+            return;
+
+        window.Dispatcher.Post(() =>
+        {
+            if (Interlocked.Exchange(ref _dynamicUpdateScheduled, 0) != 0 && !_disposed)
+                UpdateDynamicThemeBrushes();
+        }, DispatcherPriority.Render);
     }
 
     public void UpdateDynamicThemeBrushes()
     {
+        Volatile.Write(ref _dynamicUpdateScheduled, 0);
+        if (_disposed)
+            return;
+
         if (global::Avalonia.Application.Current is not { } app)
             return;
 
@@ -124,7 +123,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             isDark,
             effect,
             viewModel.MaterialIntensity,
-            viewModel.BlurRadius,
             viewModel.PanelContrast,
             viewModel.MenuChildIntensity,
             viewModel.BorderStrength);
@@ -164,6 +162,9 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         _accentBrush ??= new SolidColorBrush(palette.Accent);
         _accentBrush.Color = palette.Accent;
         UpdateResource("AppAccentBrush", _accentBrush);
+
+        _transparencyFallbackBrush.Color = palette.TransparencyFallback;
+        window.TransparencyBackgroundFallback = _transparencyFallbackBrush;
 
         ApplyMenuBrushesDirect();
     }
@@ -254,6 +255,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
     public void Dispose()
     {
+        _disposed = true;
         // Null out brush references to break any resource dictionary ties
         _backgroundBrush = null;
         _panelBrush = null;

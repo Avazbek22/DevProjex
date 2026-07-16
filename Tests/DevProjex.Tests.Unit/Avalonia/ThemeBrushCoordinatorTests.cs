@@ -19,7 +19,7 @@ public sealed class ThemeBrushCoordinatorTests
 		using var mica = CreateHarness();
 		mica.ViewModel.IsMicaEnabled = true;
 		mica.Coordinator.UpdateTransparencyEffect();
-		AssertTransparencyHints(mica.Window, WindowTransparencyLevel.Mica, WindowTransparencyLevel.Blur, WindowTransparencyLevel.None);
+		AssertTransparencyHints(mica.Window, WindowTransparencyLevel.Mica, WindowTransparencyLevel.None);
 
 		using var acrylic = CreateHarness();
 		acrylic.ViewModel.IsAcrylicEnabled = true;
@@ -28,7 +28,6 @@ public sealed class ThemeBrushCoordinatorTests
 			acrylic.Window,
 			WindowTransparencyLevel.AcrylicBlur,
 			WindowTransparencyLevel.Blur,
-			WindowTransparencyLevel.Transparent,
 			WindowTransparencyLevel.None);
 
 		using var transparentWithoutBlur = CreateHarness();
@@ -41,12 +40,7 @@ public sealed class ThemeBrushCoordinatorTests
 		transparentWithBlur.ViewModel.IsTransparentEnabled = true;
 		transparentWithBlur.ViewModel.BlurRadius = 75;
 		transparentWithBlur.Coordinator.UpdateTransparencyEffect();
-		AssertTransparencyHints(
-			transparentWithBlur.Window,
-			WindowTransparencyLevel.AcrylicBlur,
-			WindowTransparencyLevel.Blur,
-			WindowTransparencyLevel.Transparent,
-			WindowTransparencyLevel.None);
+		AssertTransparencyHints(transparentWithBlur.Window, WindowTransparencyLevel.Transparent, WindowTransparencyLevel.None);
 	}
 
 	[AvaloniaFact]
@@ -77,6 +71,23 @@ public sealed class ThemeBrushCoordinatorTests
 		Assert.NotEqual(firstPanelColor, firstPanelBrush.Color);
 		Assert.IsType<SolidColorBrush>(app.Resources["AppAccentBrush"]);
 		Assert.IsType<SolidColorBrush>(harness.Window.Resources["AppBorderBrush"]);
+		var fallback = Assert.IsType<SolidColorBrush>(harness.Window.TransparencyBackgroundFallback);
+		Assert.Equal(byte.MaxValue, fallback.Color.A);
+	}
+
+	[AvaloniaFact]
+	public void ScheduleDynamicThemeBrushUpdate_CoalescesPendingWorkAndImmediateUpdateSupersedesIt()
+	{
+		using var harness = CreateHarness();
+
+		harness.Coordinator.ScheduleDynamicThemeBrushUpdate();
+		harness.Coordinator.ScheduleDynamicThemeBrushUpdate();
+
+		Assert.Equal(1, GetPrivateFieldValue(harness.Coordinator, "_dynamicUpdateScheduled"));
+
+		harness.Coordinator.UpdateDynamicThemeBrushes();
+
+		Assert.Equal(0, GetPrivateFieldValue(harness.Coordinator, "_dynamicUpdateScheduled"));
 	}
 
 	[Fact]
@@ -96,7 +107,6 @@ public sealed class ThemeBrushCoordinatorTests
 						value,
 						value,
 						value,
-						value,
 						value);
 
 					Assert.Equal((byte)Math.Round(255 * Math.Clamp(value / 100, 0, 1)), palette.Border.A);
@@ -107,6 +117,11 @@ public sealed class ThemeBrushCoordinatorTests
 						Assert.Equal(byte.MaxValue, palette.Menu.A);
 						Assert.Equal(byte.MaxValue, palette.MenuChild.A);
 					}
+					else if (effect == ThemeEffectMode.Mica)
+					{
+						Assert.Equal(0, palette.Background.A);
+						Assert.InRange(palette.Panel.A, (byte)112, (byte)224);
+					}
 					else
 					{
 						Assert.InRange(palette.Background.A, (byte)90, byte.MaxValue);
@@ -114,6 +129,8 @@ public sealed class ThemeBrushCoordinatorTests
 							palette.Panel.A <= palette.Background.A - 12,
 							$"Panel ordering failed for {(isDark ? "Dark" : "Light")}.{effect} at {value}.");
 					}
+
+					Assert.Equal(byte.MaxValue, palette.TransparencyFallback.A);
 				}
 			}
 		}
@@ -122,8 +139,8 @@ public sealed class ThemeBrushCoordinatorTests
 	[Fact]
 	public void Calculate_SolidMode_UsesExactOpaqueThemeColors()
 	{
-		var dark = ThemePaletteCalculator.Calculate(true, ThemeEffectMode.Solid, 37, 48, 59, 61, 72);
-		var light = ThemePaletteCalculator.Calculate(false, ThemeEffectMode.Solid, 37, 48, 59, 61, 72);
+		var dark = ThemePaletteCalculator.Calculate(true, ThemeEffectMode.Solid, 37, 59, 61, 72);
+		var light = ThemePaletteCalculator.Calculate(false, ThemeEffectMode.Solid, 37, 59, 61, 72);
 
 		Assert.Equal(Color.Parse("#FF121214"), dark.Background);
 		Assert.Equal(Color.Parse("#FF17171A"), dark.Panel);
@@ -131,6 +148,18 @@ public sealed class ThemeBrushCoordinatorTests
 		Assert.Equal(Color.Parse("#FFFFFFFF"), light.Background);
 		Assert.Equal(Color.Parse("#FFF3F3F3"), light.Panel);
 		Assert.Equal(Color.Parse("#FFF3F3F3"), light.Menu);
+	}
+
+	[Fact]
+	public void Calculate_MicaUsesNativeBackdropWithoutSyntheticWindowOverlay()
+	{
+		var lowIntensity = ThemePaletteCalculator.Calculate(true, ThemeEffectMode.Mica, 0, 42, 17, 58);
+		var highIntensity = ThemePaletteCalculator.Calculate(true, ThemeEffectMode.Mica, 100, 42, 17, 58);
+
+		Assert.Equal(lowIntensity, highIntensity);
+		Assert.Equal(Colors.Transparent, lowIntensity.Background);
+		Assert.NotEqual(0, lowIntensity.Panel.A);
+		Assert.Equal(Color.Parse("#FF121214"), lowIntensity.TransparencyFallback);
 	}
 
 	[AvaloniaFact]
@@ -151,13 +180,16 @@ public sealed class ThemeBrushCoordinatorTests
 			SetEffect(harness.ViewModel, effect);
 			harness.Coordinator.UpdateDynamicThemeBrushes();
 			var isDark = app.ActualThemeVariant == ThemeVariant.Dark;
-			var expected = ThemePaletteCalculator.Calculate(isDark, effect, 63, 29, 41, 17, 52);
+			var expected = ThemePaletteCalculator.Calculate(isDark, effect, 63, 41, 17, 52);
 
 			Assert.Equal(expected.Background, GetBrush(harness.Window, "AppBackgroundBrush").Color);
 			Assert.Equal(expected.Panel, GetBrush(harness.Window, "AppPanelBrush").Color);
 			Assert.Equal(expected.Menu, GetBrush(harness.Window, "MenuPopupBrush").Color);
 			Assert.Equal(expected.MenuChild, GetBrush(harness.Window, "MenuChildPopupBrush").Color);
 			Assert.Equal(expected.Border, GetBrush(harness.Window, "AppBorderBrush").Color);
+			Assert.Equal(
+				expected.TransparencyFallback,
+				Assert.IsType<SolidColorBrush>(harness.Window.TransparencyBackgroundFallback).Color);
 		}
 	}
 

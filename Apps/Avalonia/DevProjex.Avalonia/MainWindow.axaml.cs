@@ -626,12 +626,11 @@ public partial class MainWindow : Window
                      or nameof(MainWindowViewModel.MenuChildIntensity))
             {
                 _themePresetSession?.MarkDirty();
-                _themeBrushCoordinator.UpdateDynamicThemeBrushes();
+                _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.BlurRadius))
             {
                 _themePresetSession?.MarkDirty();
-                _themeBrushCoordinator.UpdateTransparencyEffect();
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();

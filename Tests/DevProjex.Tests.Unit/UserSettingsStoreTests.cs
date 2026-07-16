@@ -214,10 +214,14 @@ public sealed class UserSettingsStoreTests
 
 		var reloadedPreset = loaded.Presets["Dark.Transparent"];
 		Assert.Equal(customPreset.MaterialIntensity, reloadedPreset.MaterialIntensity);
-		Assert.Equal(customPreset.BlurRadius, reloadedPreset.BlurRadius);
+		Assert.Equal(0, reloadedPreset.BlurRadius);
 		Assert.Equal(customPreset.PanelContrast, reloadedPreset.PanelContrast);
 		Assert.Equal(customPreset.MenuChildIntensity, reloadedPreset.MenuChildIntensity);
 		Assert.Equal(customPreset.BorderStrength, reloadedPreset.BorderStrength);
+		Assert.Equal("Dark.Acrylic", loaded.LastSelected);
+		Assert.Equal(
+			customPreset with { Effect = ThemeEffectMode.Acrylic, BlurRadius = 0 },
+			loaded.Presets["Dark.Acrylic"]);
 	}
 
 	[Fact]
@@ -403,10 +407,14 @@ public sealed class UserSettingsStoreTests
 		var loaded = store.Load();
 
 		Assert.Equal(11, loaded.Presets["Light.Transparent"].MaterialIntensity);
-		Assert.Equal(22, loaded.Presets["Light.Transparent"].BlurRadius);
+		Assert.Equal(0, loaded.Presets["Light.Transparent"].BlurRadius);
 		Assert.Equal(33, loaded.Presets["Light.Transparent"].PanelContrast);
 		Assert.Equal(44, loaded.Presets["Light.Transparent"].MenuChildIntensity);
 		Assert.Equal(55, loaded.Presets["Light.Transparent"].BorderStrength);
+		Assert.Equal("Light.Acrylic", loaded.LastSelected);
+		Assert.Equal(
+			custom with { Effect = ThemeEffectMode.Acrylic, BlurRadius = 0 },
+			loaded.Presets["Light.Acrylic"]);
 	}
 
 	[Fact]

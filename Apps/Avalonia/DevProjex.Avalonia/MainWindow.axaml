@@ -11,7 +11,7 @@
         Icon="avares://DevProjex/AppIcon/app.ico"
         Width="1200" Height="800"
         MinWidth="850" MinHeight="600"
-        TransparencyLevelHint="Mica, AcrylicBlur, Blur"
+        TransparencyLevelHint="None"
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TreeViewItem" x:DataType="vm:TreeNodeViewModel">

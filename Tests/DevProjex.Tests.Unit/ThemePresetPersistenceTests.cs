@@ -64,6 +64,63 @@ public sealed class ThemePresetPersistenceTests
     }
 
     [Fact]
+    public void Load_SchemaThreeActiveTransparentBlur_MigratesSelectionAndValuesToBlur()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        var legacyTransparent = CreatePreset(ThemeVariant.Dark, ThemeEffectMode.Transparent, 37) with
+        {
+            BlurRadius = 64
+        };
+        WriteDatabase(store.GetPath(), new UserSettingsDb
+        {
+            SchemaVersion = 3,
+            LastSelected = "Dark.Transparent",
+            Presets = new Dictionary<string, ThemePreset>
+            {
+                ["Dark.Transparent"] = legacyTransparent
+            }
+        });
+
+        var migrated = store.Load();
+
+        Assert.Equal(4, migrated.SchemaVersion);
+        Assert.Equal("Dark.Acrylic", migrated.LastSelected);
+        Assert.Equal(
+            legacyTransparent with { Effect = ThemeEffectMode.Acrylic, BlurRadius = 0 },
+            migrated.Presets["Dark.Acrylic"]);
+        Assert.Equal(0, migrated.Presets["Dark.Transparent"].BlurRadius);
+    }
+
+    [Fact]
+    public void Load_SchemaThreeInactiveTransparentBlur_PreservesSelectedAndExistingBlurPreset()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        var legacyTransparent = CreatePreset(ThemeVariant.Light, ThemeEffectMode.Transparent, 21) with
+        {
+            BlurRadius = 52
+        };
+        var existingBlur = CreatePreset(ThemeVariant.Light, ThemeEffectMode.Acrylic, 83);
+        WriteDatabase(store.GetPath(), new UserSettingsDb
+        {
+            SchemaVersion = 3,
+            LastSelected = "Light.Mica",
+            Presets = new Dictionary<string, ThemePreset>
+            {
+                ["Light.Transparent"] = legacyTransparent,
+                ["Light.Acrylic"] = existingBlur
+            }
+        });
+
+        var migrated = store.Load();
+
+        Assert.Equal("Light.Mica", migrated.LastSelected);
+        Assert.Equal(existingBlur, migrated.Presets["Light.Acrylic"]);
+        Assert.Equal(0, migrated.Presets["Light.Transparent"].BlurRadius);
+    }
+
+    [Fact]
     public void SetPreset_RepairsMetadataAndEveryInvalidPercentage()
     {
         using var temp = new TemporaryDirectory();

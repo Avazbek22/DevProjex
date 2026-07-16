@@ -27,13 +27,14 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void Constructor_Defaults_ShowTransparencyAndBlur()
+    public void Constructor_Defaults_ShowBackgroundTransparencyWithoutNumericBlur()
     {
         var viewModel = CreateViewModel();
 
         Assert.True(viewModel.HasAnyEffect);
+        Assert.True(viewModel.ShowBackgroundTransparencySlider);
         Assert.True(viewModel.ShowTransparencySliders);
-        Assert.True(viewModel.ShowBlurSlider);
+        Assert.False(viewModel.ShowBlurSlider);
     }
 
     [Theory]
@@ -1050,21 +1051,25 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void ShowBlurSlider_TrueOnlyWhenTransparentEnabled()
+    public void ShowBackgroundTransparencySlider_TrueForTransparentAndBlur()
     {
         var viewModel = CreateViewModel();
         viewModel.IsTransparentEnabled = false;
         viewModel.IsMicaEnabled = true;
 
-        Assert.False(viewModel.ShowBlurSlider);
+        Assert.False(viewModel.ShowBackgroundTransparencySlider);
 
         viewModel.IsTransparentEnabled = true;
 
-        Assert.True(viewModel.ShowBlurSlider);
+        Assert.True(viewModel.ShowBackgroundTransparencySlider);
+
+        viewModel.IsAcrylicEnabled = true;
+
+        Assert.True(viewModel.ShowBackgroundTransparencySlider);
     }
 
     [Fact]
-    public void ShowBlurSlider_FalseWhenAcrylicEnabled()
+    public void ShowBlurSlider_RemainsHiddenForEveryEffect()
     {
         var viewModel = CreateViewModel();
         viewModel.IsTransparentEnabled = false;
@@ -1334,17 +1339,17 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void EffectToggle_SwitchesShowBlurSlider()
+    public void EffectToggle_SwitchesBackgroundTransparencySlider()
     {
         var viewModel = CreateViewModel();
 
         viewModel.ToggleMica();
 
-        Assert.False(viewModel.ShowBlurSlider);
+        Assert.False(viewModel.ShowBackgroundTransparencySlider);
 
         viewModel.ToggleTransparent();
 
-        Assert.True(viewModel.ShowBlurSlider);
+        Assert.True(viewModel.ShowBackgroundTransparencySlider);
     }
 
     [Fact]

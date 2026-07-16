@@ -10,7 +10,8 @@ internal readonly record struct ThemePalette(
     Color MenuHover,
     Color MenuPressed,
     Color Border,
-    Color Accent);
+    Color Accent,
+    Color TransparencyFallback);
 
 internal static class ThemePaletteCalculator
 {
@@ -18,9 +19,6 @@ internal static class ThemePaletteCalculator
     private static readonly Color LightBackground = Color.Parse("#FFFFFF");
     private static readonly Color DarkPanel = Color.Parse("#17171A");
     private static readonly Color LightPanel = Color.Parse("#F3F3F3");
-    private static readonly Color DarkMicaBackground = Color.Parse("#0D0E10");
-    private static readonly Color DarkMicaPanel = Color.Parse("#14161A");
-    private static readonly Color LightMicaPanel = Color.Parse("#F7F7F7");
     private static readonly Color LightMenu = Color.Parse("#F8FBFF");
     private static readonly Color LightMenuChild = Color.Parse("#F2F7FD");
     private static readonly Color DarkMenuHover = Color.Parse("#343B46");
@@ -36,7 +34,6 @@ internal static class ThemePaletteCalculator
         bool isDark,
         ThemeEffectMode effect,
         double materialIntensity,
-        double blurRadius,
         double panelContrast,
         double menuChildIntensity,
         double borderStrength)
@@ -45,7 +42,6 @@ internal static class ThemePaletteCalculator
         var contrast = Math.Clamp(panelContrast / 100.0, 0.0, 1.0);
         var normalizedBorderStrength = Math.Clamp(borderStrength / 100.0, 0.0, 1.0);
         var menuChild = Math.Clamp(menuChildIntensity / 100.0, 0.0, 1.0);
-        var blur = Math.Clamp(blurRadius / 100.0, 0.0, 1.0);
         var hasEffect = effect != ThemeEffectMode.Solid;
 
         var backgroundBase = isDark ? DarkBackground : LightBackground;
@@ -66,41 +62,27 @@ internal static class ThemePaletteCalculator
                 menuChildAlpha = 255;
                 break;
             case ThemeEffectMode.Mica:
-            {
-                var micaStrength = Math.Pow(material, 0.7);
-                backgroundAlpha = (byte)Math.Round(255 * (1.0 - (micaStrength * 0.9)));
-                var panelMinAlpha = backgroundAlpha;
-                var panelMaxAlpha = 170 + (contrast * 70);
-                panelAlpha = (byte)Math.Clamp(
-                    panelMinAlpha + (panelMaxAlpha - panelMinAlpha) * contrast - (micaStrength * 60),
-                    panelMinAlpha,
-                    255);
-                menuAlpha = (byte)Math.Clamp(panelAlpha + 35, 160, 255);
-                menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 140, 255);
-                backgroundBase = isDark ? DarkMicaBackground : LightBackground;
-                panelBase = isDark ? DarkMicaPanel : LightMicaPanel;
+                // Mica is the native window base. Only content surfaces are tinted here.
+                backgroundAlpha = 0;
+                backgroundBase = Colors.Transparent;
+                panelAlpha = (byte)Math.Round(isDark
+                    ? 112 + (contrast * 88)
+                    : 150 + (contrast * 74));
+                menuAlpha = (byte)Math.Clamp(panelAlpha + (isDark ? 28 : 12), 96, 255);
+                menuChildAlpha = (byte)Math.Clamp(menuAlpha - (12 + (menuChild * 72)), 72, 255);
                 break;
-            }
             case ThemeEffectMode.Acrylic:
-                backgroundAlpha = (byte)Math.Round(240 - (material * 200));
-                panelAlpha = (byte)Math.Round(235 - (material * 150));
-                panelAlpha = (byte)Math.Clamp(panelAlpha + (contrast * 40), 70, 255);
-                menuAlpha = (byte)Math.Clamp(panelAlpha + 30, 150, 255);
-                menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 130, 255);
-                break;
+            case ThemeEffectMode.Transparent:
             default:
-            {
                 backgroundAlpha = (byte)Math.Round(255 * (1.0 - material));
-                var blurVisibility = Math.Pow(blur, 2.2);
                 var panelBaseAlpha = 90 + (contrast * 130);
-                panelAlpha = (byte)Math.Clamp(panelBaseAlpha + (blurVisibility * 25), 70, 255);
+                panelAlpha = (byte)Math.Clamp(panelBaseAlpha, 70, 255);
                 menuAlpha = (byte)Math.Clamp(panelAlpha + 45, 170, 255);
                 menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 150, 255);
                 break;
-            }
         }
 
-        if (hasEffect)
+        if (hasEffect && effect != ThemeEffectMode.Mica)
         {
             // Keep the window surface denser than content islands for readable material layers.
             backgroundAlpha = (byte)Math.Clamp(backgroundAlpha + 22, 90, 255);
@@ -124,6 +106,11 @@ internal static class ThemePaletteCalculator
                 menuChildBase = LightMenuChild;
             }
         }
+        else if (effect == ThemeEffectMode.Mica && !isDark)
+        {
+            menuBase = LightMenu;
+            menuChildBase = LightMenuChild;
+        }
 
         var borderAlpha = (byte)Math.Round(255 * normalizedBorderStrength);
         var borderBase = isDark ? DarkBorder : LightBorder;
@@ -136,6 +123,7 @@ internal static class ThemePaletteCalculator
             isDark ? DarkMenuHover : LightMenuHover,
             isDark ? DarkMenuPressed : LightMenuPressed,
             Color.FromArgb(borderAlpha, borderBase.R, borderBase.G, borderBase.B),
-            isDark ? DarkAccent : LightAccent);
+            isDark ? DarkAccent : LightAccent,
+            isDark ? DarkBackground : LightBackground);
     }
 }

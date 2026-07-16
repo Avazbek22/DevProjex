@@ -4,7 +4,8 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
+    private const double LegacyBlurEnabledThreshold = 0.0001;
     private const string FolderName = "DevProjex";
     private const string FileName = "user-settings.json";
 
@@ -162,9 +163,13 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private UserSettingsDb Normalize(UserSettingsDb db)
     {
-        db.SchemaVersion = CurrentSchemaVersion;
+        var sourceSchemaVersion = db.SchemaVersion;
         db.Presets ??= new Dictionary<string, ThemePreset>();
         db.ViewSettings ??= DefaultViewSettings;
+        if (sourceSchemaVersion < 4)
+            MigrateLegacyTransparentBlur(db);
+
+        db.SchemaVersion = CurrentSchemaVersion;
         db.ViewSettings = db.ViewSettings with
         {
             // The UI toggle was removed, but older settings files can still contain false.
@@ -193,6 +198,38 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             db.LastSelected = GetKey(ThemeVariant.Dark, ThemeEffectMode.Transparent);
 
         return db;
+    }
+
+    private static void MigrateLegacyTransparentBlur(UserSettingsDb db)
+    {
+        foreach (var theme in Enum.GetValues<ThemeVariant>())
+        {
+            var transparentKey = GetKey(theme, ThemeEffectMode.Transparent);
+            if (!db.Presets.TryGetValue(transparentKey, out var transparentPreset) || transparentPreset is null)
+                continue;
+
+            var usedNativeBlur = double.IsFinite(transparentPreset.BlurRadius) &&
+                                 transparentPreset.BlurRadius > LegacyBlurEnabledThreshold;
+            if (usedNativeBlur && string.Equals(db.LastSelected, transparentKey, StringComparison.OrdinalIgnoreCase))
+            {
+                var blurKey = GetKey(theme, ThemeEffectMode.Acrylic);
+                db.Presets[blurKey] = transparentPreset with
+                {
+                    Theme = theme,
+                    Effect = ThemeEffectMode.Acrylic,
+                    BlurRadius = 0
+                };
+                db.LastSelected = blurKey;
+            }
+
+            // From schema 4 onward Transparent never requests a blurred backdrop.
+            db.Presets[transparentKey] = transparentPreset with
+            {
+                Theme = theme,
+                Effect = ThemeEffectMode.Transparent,
+                BlurRadius = 0
+            };
+        }
     }
 
     private JsonStoreFileSet GetFileSet()
@@ -291,7 +328,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Theme = ThemeVariant.Light,
                 Effect = ThemeEffectMode.Transparent,
                 MaterialIntensity = 78.43450479233228,
-                BlurRadius = 30,
+                BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
                 BorderStrength = 53.19488817891374
@@ -301,7 +338,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Theme = ThemeVariant.Light,
                 Effect = ThemeEffectMode.Solid,
                 MaterialIntensity = 78.43450479233228,
-                BlurRadius = 30,
+                BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
                 BorderStrength = 53.19488817891374
@@ -311,7 +348,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Theme = ThemeVariant.Light,
                 Effect = ThemeEffectMode.Mica,
                 MaterialIntensity = 100,
-                BlurRadius = 30,
+                BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
                 BorderStrength = 57.66773162939298
@@ -321,7 +358,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Theme = ThemeVariant.Light,
                 Effect = ThemeEffectMode.Acrylic,
                 MaterialIntensity = 75.87859424920129,
-                BlurRadius = 30,
+                BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
                 BorderStrength = 100
@@ -331,7 +368,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Theme = ThemeVariant.Dark,
                 Effect = ThemeEffectMode.Transparent,
                 MaterialIntensity = 60.86261980830672,
-                BlurRadius = 29.233226837060705,
+                BlurRadius = 0,
                 PanelContrast = 51.59744408945688,
                 MenuChildIntensity = 0,
                 BorderStrength = 31.789137380191697
@@ -341,7 +378,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Theme = ThemeVariant.Dark,
                 Effect = ThemeEffectMode.Solid,
                 MaterialIntensity = 60.86261980830672,
-                BlurRadius = 29.233226837060705,
+                BlurRadius = 0,
                 PanelContrast = 51.59744408945688,
                 MenuChildIntensity = 0,
                 BorderStrength = 31.789137380191697
@@ -351,7 +388,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Theme = ThemeVariant.Dark,
                 Effect = ThemeEffectMode.Mica,
                 MaterialIntensity = 100,
-                BlurRadius = 30,
+                BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
                 BorderStrength = 35.94249201277955
@@ -361,7 +398,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 Theme = ThemeVariant.Dark,
                 Effect = ThemeEffectMode.Acrylic,
                 MaterialIntensity = 73.00319488817892,
-                BlurRadius = 30,
+                BlurRadius = 0,
                 PanelContrast = 0,
                 MenuChildIntensity = 0,
                 BorderStrength = 26.677316293929714

@@ -84,6 +84,54 @@ public sealed class AvaloniaCompiledBindingContractTests
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsRepeater"));
 	}
 
+	[Fact]
+	public void ThemePopover_ExposesOnlyMeaningfulEffectControls()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"Views",
+			"ThemePopoverView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var xamlNamespace = XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
+		var namedEffectControls = root
+			.Descendants(avaloniaNamespace + "CheckBox")
+			.Select(element => element.Attribute(xamlNamespace + "Name")?.Value)
+			.Where(name => name?.EndsWith("EffectCheckBox", StringComparison.Ordinal) == true)
+			.OfType<string>()
+			.ToArray();
+		var sliderBindings = root
+			.Descendants(avaloniaNamespace + "Slider")
+			.Select(element => element.Attribute("Value")?.Value ?? string.Empty)
+			.ToArray();
+
+		Assert.Equal(
+			["TransparentEffectCheckBox", "BlurEffectCheckBox", "MicaEffectCheckBox"],
+			namedEffectControls);
+		Assert.Contains(sliderBindings, binding => binding.Contains("MaterialIntensity", StringComparison.Ordinal));
+		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("BlurRadius", StringComparison.Ordinal));
+		Assert.Empty(root.Descendants(avaloniaNamespace + "Expander"));
+	}
+
+	[Fact]
+	public void MainWindow_StartsWithoutSpeculativeBackdropBeforePresetLoading()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+
+		Assert.Equal("None", root.Attribute("TransparencyLevelHint")?.Value);
+	}
+
 	private static string FindRepositoryRoot()
 	{
 		var directory = AppContext.BaseDirectory;

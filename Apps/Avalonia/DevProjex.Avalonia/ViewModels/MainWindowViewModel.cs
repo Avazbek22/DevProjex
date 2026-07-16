@@ -86,7 +86,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Theme intensity sliders (0-100)
     // MaterialIntensity: single slider controlling overall effect (transparency, depth, material feel)
     private double _materialIntensity = 65;
-    private double _blurRadius = 30;
+    private double _blurRadius;
     private double _panelContrast = 50;
     private double _borderStrength = 50;
     private double _menuChildIntensity = 50;
@@ -666,11 +666,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Computed: any effect is enabled
     public bool HasAnyEffect => _isTransparentEnabled || _isMicaEnabled || _isAcrylicEnabled;
 
-    // Computed: show transparency-related sliders (only when any effect is active)
-    public bool ShowTransparencySliders => HasAnyEffect;
+    public bool ShowBackgroundTransparencySlider => _isTransparentEnabled || _isAcrylicEnabled;
 
-    // Computed: show blur slider only in Transparent mode (Mica/Acrylic have built-in blur)
-    public bool ShowBlurSlider => _isTransparentEnabled;
+    // Retained for binding compatibility with older views.
+    public bool ShowTransparencySliders => ShowBackgroundTransparencySlider;
+
+    // Blur is selected as an effect rather than configured as a numeric radius.
+    public bool ShowBlurSlider => false;
 
     private void RaiseEffectPropertiesChanged()
     {
@@ -678,6 +680,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(IsAcrylicEnabled));
         RaisePropertyChanged(nameof(IsTransparentEnabled));
         RaisePropertyChanged(nameof(HasAnyEffect));
+        RaisePropertyChanged(nameof(ShowBackgroundTransparencySlider));
         RaisePropertyChanged(nameof(ShowTransparencySliders));
         RaisePropertyChanged(nameof(ShowBlurSlider));
     }
@@ -921,7 +924,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // BlurRadius: controls blur intensity in Transparent mode (0=no blur, 100=max blur ~64px)
+    // Kept for settings-schema compatibility. Native backdrop APIs do not expose a blur radius.
     public double BlurRadius
     {
         get => _blurRadius;
@@ -1218,10 +1221,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeDarkLabel { get; private set; } = string.Empty;
     public string ThemeTransparentLabel { get; private set; } = string.Empty;
     public string ThemeMicaLabel { get; private set; } = string.Empty;
+    public string ThemeBlurLabel { get; private set; } = string.Empty;
     public string ThemeAcrylicLabel { get; private set; } = string.Empty;
+    public string ThemeBackgroundTransparency { get; private set; } = string.Empty;
     public string ThemeMaterialIntensity { get; private set; } = string.Empty;
     public string ThemeBlurRadius { get; private set; } = string.Empty;
     public string ThemePanelContrast { get; private set; } = string.Empty;
+    public string ThemeBorderVisibility { get; private set; } = string.Empty;
     public string ThemeBorderStrength { get; private set; } = string.Empty;
     public string ThemeMenuChildIntensity { get; private set; } = string.Empty;
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
@@ -1454,12 +1460,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ThemeDarkLabel = _localization["Theme.Dark"];
         ThemeTransparentLabel = _localization["Theme.Transparent"];
         ThemeMicaLabel = _localization["Theme.Mica"];
-        ThemeAcrylicLabel = _localization["Theme.Acrylic"];
-        ThemeMaterialIntensity = _localization["Theme.MaterialIntensity"];
-        ThemeBlurRadius = _localization["Theme.BlurRadius"] + " [Beta]";
+        ThemeBlurLabel = _localization["Theme.Blur"];
+        ThemeAcrylicLabel = ThemeBlurLabel;
+        ThemeBackgroundTransparency = _localization["Theme.BackgroundTransparency"];
+        ThemeMaterialIntensity = ThemeBackgroundTransparency;
+        ThemeBlurRadius = _localization["Theme.BlurRadius"];
         ThemePanelContrast = _localization["Theme.PanelContrast"];
-        ThemeBorderStrength = _localization["Theme.BorderStrength"];
-        ThemeMenuChildIntensity = _localization["Theme.MenuChildIntensity"] + " [Beta]";
+        ThemeBorderVisibility = _localization["Theme.BorderVisibility"];
+        ThemeBorderStrength = ThemeBorderVisibility;
+        ThemeMenuChildIntensity = _localization["Theme.MenuChildIntensity"];
 
         RaisePropertyChanged(nameof(MenuFile));
         RaisePropertyChanged(nameof(MenuFileOpen));
@@ -1563,10 +1572,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(ThemeDarkLabel));
         RaisePropertyChanged(nameof(ThemeTransparentLabel));
         RaisePropertyChanged(nameof(ThemeMicaLabel));
+        RaisePropertyChanged(nameof(ThemeBlurLabel));
         RaisePropertyChanged(nameof(ThemeAcrylicLabel));
+        RaisePropertyChanged(nameof(ThemeBackgroundTransparency));
         RaisePropertyChanged(nameof(ThemeMaterialIntensity));
         RaisePropertyChanged(nameof(ThemeBlurRadius));
         RaisePropertyChanged(nameof(ThemePanelContrast));
+        RaisePropertyChanged(nameof(ThemeBorderVisibility));
         RaisePropertyChanged(nameof(ThemeBorderStrength));
         RaisePropertyChanged(nameof(ThemeMenuChildIntensity));
 
