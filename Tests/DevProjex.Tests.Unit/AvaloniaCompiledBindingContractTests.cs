@@ -151,6 +151,32 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void ThemeStyles_UnavailableRecentFolderRemainsEnabledButVisuallyMuted()
+	{
+		var styleFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var style = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Style"),
+			element => element.Attribute("Selector")?.Value == "MenuItem.recent-folder-unavailable");
+
+		var opacity = Assert.Single(
+			style.Elements(avaloniaNamespace + "Setter"),
+			element => element.Attribute("Property")?.Value == "Opacity");
+		Assert.Equal("0.5", opacity.Attribute("Value")?.Value);
+		Assert.DoesNotContain(
+			style.Elements(avaloniaNamespace + "Setter"),
+			element => element.Attribute("Property")?.Value == "IsEnabled");
+	}
+
+	[Fact]
 	public void MainWindow_StartsWithoutSpeculativeBackdropBeforePresetLoading()
 	{
 		var viewFile = Path.Combine(

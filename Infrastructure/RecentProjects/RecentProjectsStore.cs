@@ -4,8 +4,9 @@ namespace DevProjex.Infrastructure.RecentProjects;
 
 public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null)
 {
-	private const int CurrentSchemaVersion = 1;
+	private const int CurrentSchemaVersion = 2;
 	private const int MaxRecentFolders = 15;
+	private const int MaxRecentFolderRemovals = 64;
 	private const int MaxRecentRepositories = 7;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "recent-projects.json";
@@ -103,7 +104,8 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 					{
 						Path = value,
 						OpenedUtc = openedUtc
-					});
+					},
+					CreateFolderOpenedUtc(inMemoryState, inMemoryNormalizedPath));
 				return inMemoryState;
 			}
 
@@ -126,7 +128,8 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				{
 					Path = value,
 					OpenedUtc = openedUtc
-				});
+				},
+				CreateFolderOpenedUtc(state, normalizedPath));
 
 			TrySave(fileSet, state);
 			return state;
@@ -180,6 +183,25 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 					OpenedUtc = openedUtc
 				});
 
+			TrySave(fileSet, state);
+			return state;
+		}
+	}
+
+	public RecentProjectsDb RemoveFolder(RecentProjectsDb? db, string path)
+	{
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+			{
+				var inMemoryState = SanitizeState(fileSet, MergeStates(CreateDefaultDb(), db));
+				return ApplyFolderRemoval(fileSet, inMemoryState, path);
+			}
+
+			using var _ = heldLock;
+			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
+			state = ApplyFolderRemoval(fileSet, state, path);
 			TrySave(fileSet, state);
 			return state;
 		}
@@ -258,6 +280,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		{
 			SchemaVersion = CurrentSchemaVersion,
 			RecentFolders = [],
+			RecentFolderRemovals = [],
 			RecentRepositories = []
 		};
 	}
@@ -266,9 +289,15 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	{
 		db.SchemaVersion = CurrentSchemaVersion;
 		db.RecentFolders ??= [];
+		db.RecentFolderRemovals ??= [];
 		db.RecentRepositories ??= [];
 
-		db.RecentFolders = NormalizeFolders(db.RecentFolders);
+		db.RecentFolderRemovals = NormalizeFolderRemovals(db.RecentFolderRemovals);
+		var removalTimes = new Dictionary<string, DateTimeOffset>(PathComparer.Default);
+		foreach (var removal in db.RecentFolderRemovals)
+			removalTimes[removal.Path] = removal.RemovedUtc;
+
+		db.RecentFolders = NormalizeFolders(db.RecentFolders, removalTimes);
 		db.RecentRepositories = NormalizeRepositories(db.RecentRepositories);
 		return db;
 	}
@@ -298,12 +327,16 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		var merged = CreateDefaultDb();
 		merged.RecentFolders.AddRange(snapshot.RecentFolders);
 		merged.RecentFolders.AddRange(current.RecentFolders);
+		merged.RecentFolderRemovals.AddRange(snapshot.RecentFolderRemovals);
+		merged.RecentFolderRemovals.AddRange(current.RecentFolderRemovals);
 		merged.RecentRepositories.AddRange(snapshot.RecentRepositories);
 		merged.RecentRepositories.AddRange(current.RecentRepositories);
 		return Normalize(merged);
 	}
 
-	private static List<RecentFolderEntry> NormalizeFolders(IEnumerable<RecentFolderEntry> entries)
+	private static List<RecentFolderEntry> NormalizeFolders(
+		IEnumerable<RecentFolderEntry> entries,
+		IReadOnlyDictionary<string, DateTimeOffset> removalTimes)
 	{
 		var ordered = entries
 			.Where(static entry => entry is not null && TryNormalizeFolderPath(entry.Path, out _))
@@ -313,6 +346,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				OpenedUtc = entry.OpenedUtc <= DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : entry.OpenedUtc
 			})
 			.Where(static entry => !IsRepoCachePath(entry.Path))
+			.Where(entry => !removalTimes.TryGetValue(entry.Path, out var removedUtc) || entry.OpenedUtc > removedUtc)
 			.OrderByDescending(static entry => entry.OpenedUtc)
 			.ToList();
 
@@ -326,6 +360,35 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 
 		if (unique.Count > MaxRecentFolders)
 			unique.RemoveRange(MaxRecentFolders, unique.Count - MaxRecentFolders);
+
+		return unique;
+	}
+
+	private static List<RecentFolderRemovalEntry> NormalizeFolderRemovals(
+		IEnumerable<RecentFolderRemovalEntry> entries)
+	{
+		var ordered = entries
+			.Where(static entry => entry is not null && TryNormalizeFolderPath(entry.Path, out _))
+			.Select(static entry => new RecentFolderRemovalEntry
+			{
+				Path = PathUtility.Normalize(entry.Path),
+				RemovedUtc = entry.RemovedUtc <= DateTimeOffset.UnixEpoch
+					? DateTimeOffset.UtcNow
+					: entry.RemovedUtc
+			})
+			.OrderByDescending(static entry => entry.RemovedUtc)
+			.ToList();
+
+		var unique = new List<RecentFolderRemovalEntry>();
+		var seen = new HashSet<string>(PathComparer.Default);
+		foreach (var entry in ordered)
+		{
+			if (seen.Add(entry.Path))
+				unique.Add(entry);
+		}
+
+		if (unique.Count > MaxRecentFolderRemovals)
+			unique.RemoveRange(MaxRecentFolderRemovals, unique.Count - MaxRecentFolderRemovals);
 
 		return unique;
 	}
@@ -363,14 +426,61 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		IEqualityComparer<string> comparer,
 		Func<TEntry, string> keySelector,
 		Func<string, string> comparisonKeySelector,
-		Func<string, DateTimeOffset, TEntry> factory)
+		Func<string, DateTimeOffset, TEntry> factory,
+		DateTimeOffset? openedUtc = null)
 	{
 		var normalizedComparisonKey = comparisonKeySelector(normalizedValue);
 		entries.RemoveAll(entry => comparer.Equals(comparisonKeySelector(keySelector(entry)), normalizedComparisonKey));
-		entries.Insert(0, factory(normalizedValue, DateTimeOffset.UtcNow));
+		entries.Insert(0, factory(normalizedValue, openedUtc ?? DateTimeOffset.UtcNow));
 
 		if (entries.Count > limit)
 			entries.RemoveRange(limit, entries.Count - limit);
+	}
+
+	private static RecentProjectsDb ApplyFolderRemoval(
+		JsonStoreFileSet fileSet,
+		RecentProjectsDb state,
+		string path)
+	{
+		if (!TryNormalizeFolderPath(path, out var normalizedPath) || IsIgnoredFolderPath(fileSet, normalizedPath))
+			return state;
+
+		// A persisted removal timestamp prevents another window's stale snapshot from
+		// resurrecting the entry while still allowing a newer explicit open to restore it.
+		var removedUtc = DateTimeOffset.UtcNow;
+		foreach (var entry in state.RecentFolders)
+		{
+			if (PathComparer.Default.Equals(entry.Path, normalizedPath) && entry.OpenedUtc >= removedUtc)
+				removedUtc = entry.OpenedUtc.AddTicks(1);
+		}
+
+		foreach (var removal in state.RecentFolderRemovals)
+		{
+			if (PathComparer.Default.Equals(removal.Path, normalizedPath) && removal.RemovedUtc >= removedUtc)
+				removedUtc = removal.RemovedUtc.AddTicks(1);
+		}
+
+		state.RecentFolders.RemoveAll(entry => PathComparer.Default.Equals(entry.Path, normalizedPath));
+		state.RecentFolderRemovals.RemoveAll(entry => PathComparer.Default.Equals(entry.Path, normalizedPath));
+		state.RecentFolderRemovals.Add(new RecentFolderRemovalEntry
+		{
+			Path = normalizedPath,
+			RemovedUtc = removedUtc
+		});
+
+		return SanitizeState(fileSet, state);
+	}
+
+	private static DateTimeOffset CreateFolderOpenedUtc(RecentProjectsDb state, string normalizedPath)
+	{
+		var openedUtc = DateTimeOffset.UtcNow;
+		foreach (var removal in state.RecentFolderRemovals)
+		{
+			if (PathComparer.Default.Equals(removal.Path, normalizedPath) && removal.RemovedUtc >= openedUtc)
+				openedUtc = removal.RemovedUtc.AddTicks(1);
+		}
+
+		return openedUtc;
 	}
 
 	private bool TrySave(JsonStoreFileSet fileSet, RecentProjectsDb db)

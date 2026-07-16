@@ -127,6 +127,8 @@ public partial class MainWindow : Window
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
     private readonly RecentProjectsStore _recentProjectsStore;
+    private readonly RecentFolderAvailabilityService _recentFolderAvailabilityService;
+    private readonly HashSet<string> _unavailableRecentFolderPaths = new(PathComparer.Default);
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
@@ -216,6 +218,7 @@ public partial class MainWindow : Window
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
+    private Task? _recentFolderAvailabilityRefreshTask;
     private Border? _dropZoneContainer;
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     private ProjectLoadTiming? _projectLoadTiming;
@@ -386,6 +389,7 @@ public partial class MainWindow : Window
         _terminalCommandSetupService = services.TerminalCommandSetupService;
         _sessionMetrics = services.SessionMetricsRecorder;
         _recentProjectsStore = services.RecentProjectsStore;
+        _recentFolderAvailabilityService = services.RecentFolderAvailabilityService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _statusOperations = new StatusOperationCoordinator(
@@ -5486,6 +5490,7 @@ public partial class MainWindow : Window
     private void OnRecentMenuSubmenuOpened(object? sender, RoutedEventArgs e)
     {
         RefreshRecentFoldersMenu();
+        StartRecentFolderAvailabilityRefresh();
     }
 
     private void RefreshRecentFoldersMenu()
@@ -5515,6 +5520,9 @@ public partial class MainWindow : Window
             };
 
             ToolTip.SetTip(item, null);
+            SetRecentFolderMenuItemAvailability(
+                item,
+                !_unavailableRecentFolderPaths.Contains(recentFolder.Value));
             item.Click += OnRecentFolderMenuItemClick;
             recentMenuItem.Items.Add(item);
         }
@@ -5525,12 +5533,116 @@ public partial class MainWindow : Window
         if (sender is not MenuItem { Tag: string path })
             return;
 
+        var lifetimeToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+        bool isAvailable;
+        try
+        {
+            isAvailable = await _recentFolderAvailabilityService.IsAvailableAsync(path, lifetimeToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        UpdateRecentFolderAvailability(path, isAvailable);
+        ApplyRecentFolderAvailabilityToMenu();
+        if (!isAvailable)
+        {
+            var shouldRemove = await MessageDialog.ShowConfirmationAsync(
+                this,
+                _localization["Dialog.RecentFolderUnavailable.Title"],
+                _localization.Format("Dialog.RecentFolderUnavailable.Message", path),
+                _localization["Dialog.RecentFolderUnavailable.Remove"],
+                _localization["Dialog.RecentFolderUnavailable.Keep"],
+                height: 180);
+
+            if (shouldRemove)
+                RemoveRecentFolder(path);
+            return;
+        }
+
         await TryOpenFolderAsync(path, fromDialog: true);
+    }
+
+    private void StartRecentFolderAvailabilityRefresh()
+    {
+        if (_recentFolderAvailabilityRefreshTask is { IsCompleted: false } ||
+            _windowLifetimeCts is not { } lifetime)
+        {
+            return;
+        }
+
+        var refreshTask = RefreshRecentFolderAvailabilityAsync(lifetime.Token);
+        _recentFolderAvailabilityRefreshTask = refreshTask;
+        ObserveDetachedTask(refreshTask, "RefreshRecentFolderAvailability");
+    }
+
+    private async Task RefreshRecentFolderAvailabilityAsync(CancellationToken cancellationToken)
+    {
+        var paths = _viewModel.RecentFolders
+            .Select(static folder => folder.Value)
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            _unavailableRecentFolderPaths.Clear();
+            return;
+        }
+
+        var availability = await _recentFolderAvailabilityService.CheckAsync(paths, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _unavailableRecentFolderPaths.IntersectWith(paths);
+        foreach (var (path, isAvailable) in availability)
+            UpdateRecentFolderAvailability(path, isAvailable);
+
+        ApplyRecentFolderAvailabilityToMenu();
+    }
+
+    private void ApplyRecentFolderAvailabilityToMenu()
+    {
+        if (_topMenuBar?.RecentMenuItemControl is not { } recentMenuItem)
+            return;
+
+        foreach (var item in recentMenuItem.Items.OfType<MenuItem>())
+        {
+            if (item.Tag is string path)
+            {
+                SetRecentFolderMenuItemAvailability(
+                    item,
+                    !_unavailableRecentFolderPaths.Contains(path));
+            }
+        }
+    }
+
+    private void UpdateRecentFolderAvailability(string path, bool isAvailable)
+    {
+        if (isAvailable)
+            _unavailableRecentFolderPaths.Remove(path);
+        else
+            _unavailableRecentFolderPaths.Add(path);
+    }
+
+    private static void SetRecentFolderMenuItemAvailability(MenuItem item, bool isAvailable)
+    {
+        const string unavailableClass = "recent-folder-unavailable";
+        if (isAvailable)
+            item.Classes.Remove(unavailableClass);
+        else if (!item.Classes.Contains(unavailableClass))
+            item.Classes.Add(unavailableClass);
+    }
+
+    private void RemoveRecentFolder(string path)
+    {
+        _recentProjectsDb = _recentProjectsStore.RemoveFolder(_recentProjectsDb, path);
+        _unavailableRecentFolderPaths.Remove(path);
+        SyncRecentProjectsToViewModel();
+        RefreshRecentFoldersMenu();
     }
 
     private void RecordRecentFolder(string path)
     {
         _recentProjectsDb = _recentProjectsStore.AddFolder(_recentProjectsDb, path);
+        _unavailableRecentFolderPaths.Remove(path);
         SyncRecentProjectsToViewModel();
         RefreshRecentFoldersMenu();
     }
@@ -7231,8 +7343,12 @@ public partial class MainWindow : Window
         // during the session but leave no durable snapshot for the next launch.
         PersistCurrentThemePreset();
 
-        if (_recentProjectsDb.RecentFolders.Count > 0 || _recentProjectsDb.RecentRepositories.Count > 0)
+        if (_recentProjectsDb.RecentFolders.Count > 0 ||
+            _recentProjectsDb.RecentFolderRemovals.Count > 0 ||
+            _recentProjectsDb.RecentRepositories.Count > 0)
+        {
             _recentProjectsStore.TryPersist(_recentProjectsDb);
+        }
 
         _projectProfiles.FlushPending();
     }

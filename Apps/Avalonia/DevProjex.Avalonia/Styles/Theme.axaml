@@ -913,6 +913,10 @@
         <Setter Property="Margin" Value="2" />
     </Style>
 
+    <Style Selector="MenuItem.recent-folder-unavailable">
+        <Setter Property="Opacity" Value="0.5" />
+    </Style>
+
     <Style Selector="MenuItem /template/ Border#PART_LayoutRoot">
         <Setter Property="CornerRadius" Value="6" />
     </Style>
