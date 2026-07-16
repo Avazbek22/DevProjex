@@ -231,6 +231,7 @@ public partial class MainWindow : Window
     private TranslateTransform? _settingsTransform;
     private bool _settingsAnimating;
     private Task _settingsAnimationTask = Task.CompletedTask;
+    private Task _postLoadVisualReadyTask = Task.CompletedTask;
     private const double SearchToolbarMinWidth = 418.0;
     private const double FilterToolbarMinWidth = 338.0;
     // Minimum/default aligns the settings island edge with the top tree-format switcher.
@@ -5964,9 +5965,21 @@ public partial class MainWindow : Window
             await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
             RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? url : result.RepositoryUrl);
 
-            // Load branches if Git mode
-            if (result.SourceType == ProjectSourceType.GitClone)
-                await RefreshGitBranchesAsync(result.LocalPath);
+            // Branch discovery resumes on the UI thread to publish its collection and menu.
+            // Keep it behind the same reveal barrier as metrics so clone-only post-load work
+            // cannot steal frames from the initial settings animation.
+            if (result.SourceType == ProjectSourceType.GitClone &&
+                PathComparer.Default.Equals(_currentPath, result.LocalPath))
+            {
+                var visualReadyTask = _postLoadVisualReadyTask;
+                await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+                    visualReadyTask,
+                    MetricsCalculationPolicy.InitialVisualReadyTimeout,
+                    cancellationToken);
+
+                if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
+                    await RefreshGitBranchesAsync(result.LocalPath, cancellationToken);
+            }
 
             if (_currentPath == result.LocalPath)
             {
@@ -8340,6 +8353,7 @@ public partial class MainWindow : Window
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(cancellationToken);
+        _postLoadVisualReadyTask = settingsRevealTask;
         ObserveDetachedTask(settingsRevealTask, "AnimateSettingsPanelWhenTreeReady");
 #if DEVPROJEX_PROJECT_LOAD_TIMING
         var timing = _projectLoadTiming;
