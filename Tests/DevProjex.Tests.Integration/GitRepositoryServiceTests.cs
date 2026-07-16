@@ -195,8 +195,10 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         var result = await _service.CloneAsync(TestRepoUrl, targetDir, progress, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, $"Clone failed: {result.ErrorMessage}");
-        // Git may or may not report progress depending on output - just verify operation succeeded
-        // Progress reports are optional (git stderr output may be empty for fast operations)
+        Assert.Contains(
+            progress.Reports,
+            static report => report.EndsWith('%') &&
+                             int.TryParse(report.AsSpan(0, report.Length - 1), out _));
     }
 
     [Fact]

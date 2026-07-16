@@ -71,11 +71,12 @@ public sealed class GitRepositoryService : IGitRepositoryService
             // Note: progress status is set by caller to show localized message
             // We only report dynamic progress (git output with percentages)
 
-            // SHALLOW CLONE: --depth 1 downloads only 1 commit for speed
-            // This is intentional - we're a read-only viewer, not a full git client
+            // Git suppresses transfer progress when stderr is redirected. --progress is required
+            // here so a long clone cannot look frozen while the external process is still active.
+            // SHALLOW CLONE: --depth 1 downloads only 1 commit for speed.
             var result = await RunGitCommandAsync(
                 null,
-                $"clone --depth 1 \"{url}\" \"{targetDirectory}\"",
+                $"clone --progress --depth 1 \"{url}\" \"{targetDirectory}\"",
                 cancellationToken,
                 progress);
 
