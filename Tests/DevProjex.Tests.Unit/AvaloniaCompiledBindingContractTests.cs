@@ -113,8 +113,40 @@ public sealed class AvaloniaCompiledBindingContractTests
 			["TransparentEffectCheckBox", "BlurEffectCheckBox", "MicaEffectCheckBox"],
 			namedEffectControls);
 		Assert.Contains(sliderBindings, binding => binding.Contains("MaterialIntensity", StringComparison.Ordinal));
+		Assert.Contains(sliderBindings, binding => binding.Contains("MenuChildIntensity", StringComparison.Ordinal));
+		Assert.Contains(
+			root.Descendants(avaloniaNamespace + "Slider"),
+			slider => slider.Attribute(xamlNamespace + "Name")?.Value == "MenuTransparencySlider");
 		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("BlurRadius", StringComparison.Ordinal));
 		Assert.Empty(root.Descendants(avaloniaNamespace + "Expander"));
+	}
+
+	[Fact]
+	public void ThemeStyles_MainMenuUsesDedicatedPopupBrushAtEveryDepth()
+	{
+		var styleFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var styles = root.Descendants(avaloniaNamespace + "Style").ToArray();
+
+		AssertStyleBackground(
+			styles,
+			"Menu.main-menu-strip MenuItem /template/ Popup > Border",
+			"MainMenuPopupBrush",
+			avaloniaNamespace);
+		AssertStyleBackground(styles, "ContextMenu", "MenuPopupBrush", avaloniaNamespace);
+		AssertStyleBackground(
+			styles,
+			"MenuItem MenuItem /template/ Popup > Border",
+			"MenuChildPopupBrush",
+			avaloniaNamespace);
 	}
 
 	[Fact]
@@ -148,5 +180,19 @@ public sealed class AvaloniaCompiledBindingContractTests
 		}
 
 		throw new InvalidOperationException("Repository root not found.");
+	}
+
+	private static void AssertStyleBackground(
+		IEnumerable<XElement> styles,
+		string selector,
+		string brushKey,
+		XNamespace avaloniaNamespace)
+	{
+		var style = Assert.Single(styles, element => element.Attribute("Selector")?.Value == selector);
+		var backgroundSetter = Assert.Single(
+			style.Elements(avaloniaNamespace + "Setter"),
+			element => element.Attribute("Property")?.Value == "Background");
+
+		Assert.Contains(brushKey, backgroundSetter.Attribute("Value")?.Value, StringComparison.Ordinal);
 	}
 }

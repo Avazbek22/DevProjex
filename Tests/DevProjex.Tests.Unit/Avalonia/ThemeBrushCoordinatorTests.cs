@@ -58,6 +58,7 @@ public sealed class ThemeBrushCoordinatorTests
 		var firstBackgroundBrush = GetBrush(harness.Window, "AppBackgroundBrush");
 		var firstPanelBrush = GetBrush(harness.Window, "AppPanelBrush");
 		var firstMainMenuStripBrush = GetBrush(harness.Window, "MainMenuStripBrush");
+		var firstMainMenuPopupBrush = GetBrush(harness.Window, "MainMenuPopupBrush");
 		var firstMenuBrush = GetBrush(harness.Window, "MenuPopupBrush");
 		var firstPanelColor = firstPanelBrush.Color;
 		var firstMainMenuStripColor = firstMainMenuStripBrush.Color;
@@ -70,6 +71,7 @@ public sealed class ThemeBrushCoordinatorTests
 		Assert.Same(firstBackgroundBrush, GetBrush(harness.Window, "AppBackgroundBrush"));
 		Assert.Same(firstPanelBrush, GetBrush(harness.Window, "AppPanelBrush"));
 		Assert.Same(firstMainMenuStripBrush, GetBrush(harness.Window, "MainMenuStripBrush"));
+		Assert.Same(firstMainMenuPopupBrush, GetBrush(harness.Window, "MainMenuPopupBrush"));
 		Assert.Same(firstMenuBrush, GetBrush(harness.Window, "MenuPopupBrush"));
 		Assert.NotEqual(firstPanelColor, firstPanelBrush.Color);
 		Assert.NotEqual(firstMainMenuStripColor, firstMainMenuStripBrush.Color);
@@ -182,6 +184,31 @@ public sealed class ThemeBrushCoordinatorTests
 		Assert.Equal(lowContrast with { MainMenuStrip = highContrast.MainMenuStrip }, highContrast);
 	}
 
+	[Theory]
+	[InlineData(false, ThemeEffectMode.Transparent)]
+	[InlineData(true, ThemeEffectMode.Transparent)]
+	[InlineData(false, ThemeEffectMode.Acrylic)]
+	[InlineData(true, ThemeEffectMode.Acrylic)]
+	[InlineData(false, ThemeEffectMode.Mica)]
+	[InlineData(true, ThemeEffectMode.Mica)]
+	public void Calculate_MenuTransparencyChangesOnlyMainMenuPopup(bool isDark, ThemeEffectMode effect)
+	{
+		var opaque = ThemePaletteCalculator.Calculate(isDark, effect, 63, 41, 0, 52);
+		var transparent = ThemePaletteCalculator.Calculate(isDark, effect, 63, 41, 100, 52);
+		var previousAlpha = opaque.MainMenuPopup.A;
+
+		for (var transparency = 10; transparency <= 100; transparency += 10)
+		{
+			var current = ThemePaletteCalculator.Calculate(isDark, effect, 63, 41, transparency, 52);
+			Assert.True(current.MainMenuPopup.A < previousAlpha);
+			previousAlpha = current.MainMenuPopup.A;
+		}
+
+		Assert.True(transparent.MainMenuPopup.A < opaque.MainMenuPopup.A);
+		Assert.Equal((byte)72, transparent.MainMenuPopup.A);
+		Assert.Equal(opaque with { MainMenuPopup = transparent.MainMenuPopup }, transparent);
+	}
+
 	[AvaloniaFact]
 	public void UpdateDynamicThemeBrushes_EveryEffectPublishesCalculatedPalette()
 	{
@@ -205,6 +232,7 @@ public sealed class ThemeBrushCoordinatorTests
 			Assert.Equal(expected.Background, GetBrush(harness.Window, "AppBackgroundBrush").Color);
 			Assert.Equal(expected.Panel, GetBrush(harness.Window, "AppPanelBrush").Color);
 			Assert.Equal(expected.MainMenuStrip, GetBrush(harness.Window, "MainMenuStripBrush").Color);
+			Assert.Equal(expected.MainMenuPopup, GetBrush(harness.Window, "MainMenuPopupBrush").Color);
 			Assert.Equal(expected.Menu, GetBrush(harness.Window, "MenuPopupBrush").Color);
 			Assert.Equal(expected.MenuChild, GetBrush(harness.Window, "MenuChildPopupBrush").Color);
 			Assert.Equal(expected.Border, GetBrush(harness.Window, "AppBorderBrush").Color);
@@ -225,6 +253,7 @@ public sealed class ThemeBrushCoordinatorTests
 		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_backgroundBrush"));
 		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_panelBrush"));
 		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_mainMenuStripBrush"));
+		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_mainMenuPopupBrush"));
 		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_accentBrush"));
 	}
 

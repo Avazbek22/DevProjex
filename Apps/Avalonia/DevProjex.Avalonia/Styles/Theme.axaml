@@ -43,6 +43,7 @@
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="MainMenuStripBrush" Color="{StaticResource AppPanelColor}" />
+    <SolidColorBrush x:Key="MainMenuPopupBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="AppBorderBrush" Color="{StaticResource AppBorderColor}" />
     <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource AppAccentColor}" />
     <SolidColorBrush x:Key="AppAccentHoverBrush" Color="{StaticResource AppAccentHoverColor}" />
@@ -120,6 +121,7 @@
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="MainMenuStripBrush" Color="{StaticResource AppPanelColor}" />
+    <SolidColorBrush x:Key="MainMenuPopupBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="AppBorderBrush" Color="{StaticResource AppBorderColor}" />
     <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource AppAccentColor}" />
     <SolidColorBrush x:Key="AppAccentHoverBrush" Color="{StaticResource AppAccentHoverColor}" />
@@ -1004,6 +1006,11 @@
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Padding" Value="4" />
+    </Style>
+
+    <!-- The main menu uses one material at every popup depth. -->
+    <Style Selector="Menu.main-menu-strip MenuItem /template/ Popup > Border">
+        <Setter Property="Background" Value="{DynamicResource MainMenuPopupBrush}" />
     </Style>
 
     <Style Selector="MenuItem.git-branch-menu-scrollable /template/ Popup > Border">

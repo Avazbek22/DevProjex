@@ -1229,6 +1229,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemePanelContrast { get; private set; } = string.Empty;
     public string ThemeBorderVisibility { get; private set; } = string.Empty;
     public string ThemeBorderStrength { get; private set; } = string.Empty;
+    public string ThemeMenuTransparency { get; private set; } = string.Empty;
     public string ThemeMenuChildIntensity { get; private set; } = string.Empty;
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
@@ -1468,7 +1469,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ThemePanelContrast = _localization["Theme.PanelContrast"];
         ThemeBorderVisibility = _localization["Theme.BorderVisibility"];
         ThemeBorderStrength = ThemeBorderVisibility;
-        ThemeMenuChildIntensity = _localization["Theme.MenuChildIntensity"];
+        ThemeMenuTransparency = _localization["Theme.MenuTransparency"];
+        ThemeMenuChildIntensity = ThemeMenuTransparency;
 
         RaisePropertyChanged(nameof(MenuFile));
         RaisePropertyChanged(nameof(MenuFileOpen));
@@ -1580,6 +1582,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(ThemePanelContrast));
         RaisePropertyChanged(nameof(ThemeBorderVisibility));
         RaisePropertyChanged(nameof(ThemeBorderStrength));
+        RaisePropertyChanged(nameof(ThemeMenuTransparency));
         RaisePropertyChanged(nameof(ThemeMenuChildIntensity));
 
         // Git localization

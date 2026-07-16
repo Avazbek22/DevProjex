@@ -59,8 +59,8 @@
                   Value="{Binding PanelContrast}" />
         </StackPanel>
         <StackPanel Spacing="2" IsVisible="{Binding HasAnyEffect}">
-          <TextBlock Text="{Binding ThemeMenuChildIntensity}" FontSize="12" Margin="0,4,0,-14"/>
-          <Slider x:Name="MenuChildIntensitySlider"
+          <TextBlock Text="{Binding ThemeMenuTransparency}" FontSize="12" Margin="0,4,0,-14"/>
+          <Slider x:Name="MenuTransparencySlider"
                   Minimum="0"
                   Maximum="100"
                   Value="{Binding MenuChildIntensity}" />

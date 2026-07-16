@@ -19,6 +19,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     private SolidColorBrush? _backgroundBrush;
     private SolidColorBrush? _panelBrush;
     private SolidColorBrush? _mainMenuStripBrush;
+    private SolidColorBrush? _mainMenuPopupBrush;
     private SolidColorBrush? _accentBrush;
     private int _dynamicUpdateScheduled;
     private bool _disposed;
@@ -144,6 +145,11 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         _mainMenuStripBrush.Color = mainMenuStripColor;
         UpdateResource("MainMenuStripBrush", _mainMenuStripBrush);
 
+        var mainMenuPopupColor = palette.MainMenuPopup;
+        _mainMenuPopupBrush ??= new SolidColorBrush(mainMenuPopupColor);
+        _mainMenuPopupBrush.Color = mainMenuPopupColor;
+        UpdateResource("MainMenuPopupBrush", _mainMenuPopupBrush);
+
         var menuColor = palette.Menu;
         _currentMenuBrush.Color = menuColor;
         UpdateResource("MenuPopupBrush", _currentMenuBrush);
@@ -188,8 +194,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
     private void ApplyBrushesToMenuItemPopup(MenuItem menuItem)
     {
-        var isChildMenu = menuItem.Parent is MenuItem;
-
         foreach (var popup in menuItem.GetVisualDescendants().OfType<Popup>().Where(p => p.IsOpen))
         {
             PopupBackdropConfigurator.TryApply(
@@ -201,7 +205,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             if (popup.Child is not Border border)
                 continue;
 
-            border.Background = isChildMenu ? _currentMenuChildBrush : _currentMenuBrush;
+            border.Background = _mainMenuPopupBrush;
             border.BorderBrush = _currentBorderBrush;
             border.BorderThickness = new Thickness(1);
             border.CornerRadius = new CornerRadius(8);
@@ -213,12 +217,10 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
     private void UpdateMenuItemPopup(MenuItem menuItem)
     {
-        var isChildMenu = menuItem.Parent is MenuItem;
-
         var popup = menuItem.GetVisualDescendants().OfType<Popup>().FirstOrDefault();
         if (popup?.Child is Border border)
         {
-            border.Background = isChildMenu ? _currentMenuChildBrush : _currentMenuBrush;
+            border.Background = _mainMenuPopupBrush;
             border.BorderBrush = _currentBorderBrush;
         }
 
@@ -227,7 +229,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             var subPopup = subItem.GetVisualDescendants().OfType<Popup>().FirstOrDefault();
             if (subPopup?.Child is Border subBorder)
             {
-                subBorder.Background = _currentMenuChildBrush;
+                subBorder.Background = _mainMenuPopupBrush;
                 subBorder.BorderBrush = _currentBorderBrush;
             }
         }
@@ -266,6 +268,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         _backgroundBrush = null;
         _panelBrush = null;
         _mainMenuStripBrush = null;
+        _mainMenuPopupBrush = null;
         _accentBrush = null;
     }
 }

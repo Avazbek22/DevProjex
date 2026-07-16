@@ -6,6 +6,7 @@ internal readonly record struct ThemePalette(
     Color Background,
     Color Panel,
     Color MainMenuStrip,
+    Color MainMenuPopup,
     Color Menu,
     Color MenuChild,
     Color MenuHover,
@@ -36,13 +37,13 @@ internal static class ThemePaletteCalculator
         ThemeEffectMode effect,
         double materialIntensity,
         double panelContrast,
-        double menuChildIntensity,
+        double menuTransparency,
         double borderStrength)
     {
         var material = Math.Clamp(materialIntensity / 100.0, 0.0, 1.0);
         var contrast = Math.Clamp(panelContrast / 100.0, 0.0, 1.0);
         var normalizedBorderStrength = Math.Clamp(borderStrength / 100.0, 0.0, 1.0);
-        var menuChild = Math.Clamp(menuChildIntensity / 100.0, 0.0, 1.0);
+        var normalizedMenuTransparency = Math.Clamp(menuTransparency / 100.0, 0.0, 1.0);
         var backgroundBase = isDark ? DarkBackground : LightBackground;
         var panelBase = isDark ? DarkPanel : LightPanel;
         var menuBase = panelBase;
@@ -50,6 +51,7 @@ internal static class ThemePaletteCalculator
         byte backgroundAlpha;
         byte panelAlpha;
         byte mainMenuStripAlpha;
+        byte mainMenuPopupAlpha;
         byte menuAlpha;
         byte menuChildAlpha;
 
@@ -59,6 +61,7 @@ internal static class ThemePaletteCalculator
                 backgroundAlpha = 255;
                 panelAlpha = 255;
                 mainMenuStripAlpha = 255;
+                mainMenuPopupAlpha = 255;
                 menuAlpha = 255;
                 menuChildAlpha = 255;
                 break;
@@ -69,7 +72,8 @@ internal static class ThemePaletteCalculator
                 panelAlpha = isDark ? (byte)112 : (byte)150;
                 mainMenuStripAlpha = CalculateMainMenuStripAlpha(panelAlpha, contrast);
                 menuAlpha = (byte)Math.Clamp(panelAlpha + (isDark ? 28 : 12), 96, 255);
-                menuChildAlpha = (byte)Math.Clamp(menuAlpha - (12 + (menuChild * 72)), 72, 255);
+                mainMenuPopupAlpha = CalculateMainMenuPopupAlpha(menuAlpha, normalizedMenuTransparency);
+                menuChildAlpha = (byte)Math.Clamp(menuAlpha - 12, 72, 255);
                 break;
             case ThemeEffectMode.Acrylic:
             case ThemeEffectMode.Transparent:
@@ -85,15 +89,15 @@ internal static class ThemePaletteCalculator
                 if (isDark)
                 {
                     menuAlpha = (byte)Math.Clamp(panelAlpha + 28, 120, 255);
-                    var submenuDelta = 10 + (menuChild * 80);
-                    menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 45, 255);
+                    menuChildAlpha = (byte)Math.Clamp(menuAlpha - 10, 45, 255);
                 }
                 else
                 {
                     menuAlpha = (byte)Math.Clamp(panelAlpha + 12, 96, 215);
-                    var submenuDelta = 12 + (menuChild * 72);
-                    menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 72, 205);
+                    menuChildAlpha = (byte)Math.Clamp(menuAlpha - 12, 72, 205);
                 }
+
+                mainMenuPopupAlpha = CalculateMainMenuPopupAlpha(menuAlpha, normalizedMenuTransparency);
                 break;
         }
 
@@ -111,6 +115,7 @@ internal static class ThemePaletteCalculator
             Color.FromArgb(backgroundAlpha, backgroundBase.R, backgroundBase.G, backgroundBase.B),
             Color.FromArgb(panelAlpha, panelBase.R, panelBase.G, panelBase.B),
             Color.FromArgb(mainMenuStripAlpha, panelBase.R, panelBase.G, panelBase.B),
+            Color.FromArgb(mainMenuPopupAlpha, menuBase.R, menuBase.G, menuBase.B),
             Color.FromArgb(menuAlpha, menuBase.R, menuBase.G, menuBase.B),
             Color.FromArgb(menuChildAlpha, menuChildBase.R, menuChildBase.G, menuChildBase.B),
             isDark ? DarkMenuHover : LightMenuHover,
@@ -124,5 +129,11 @@ internal static class ThemePaletteCalculator
     {
         const byte maxSurfaceAlpha = 240;
         return (byte)Math.Round(baseSurfaceAlpha + ((maxSurfaceAlpha - baseSurfaceAlpha) * contrast));
+    }
+
+    private static byte CalculateMainMenuPopupAlpha(byte baseMenuAlpha, double transparency)
+    {
+        const byte minimumMenuAlpha = 72;
+        return (byte)Math.Round(baseMenuAlpha + ((minimumMenuAlpha - baseMenuAlpha) * transparency));
     }
 }
