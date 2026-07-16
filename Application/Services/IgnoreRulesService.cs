@@ -16,9 +16,48 @@ public sealed class IgnoreRulesService(
 	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
 		? StringComparer.Ordinal
 		: StringComparer.OrdinalIgnoreCase;
+	private static readonly StringComparison PathStringComparison = OperatingSystem.IsLinux()
+		? StringComparison.Ordinal
+		: StringComparison.OrdinalIgnoreCase;
 
 	public IgnoreRules Build(string rootPath, IReadOnlyCollection<IgnoreOptionId> selectedOptions) =>
 		Build(rootPath, selectedOptions, selectedRootFolders: null);
+
+	public void InvalidateCaches(string rootPath)
+	{
+		_projectScopeDiscovery.Invalidate(rootPath);
+		InvalidateGitIgnoreMatchers(rootPath);
+	}
+
+	public bool RevalidateCaches(string rootPath, CancellationToken cancellationToken = default)
+	{
+		var reusedDiscovery = _projectScopeDiscovery.Revalidate(rootPath, cancellationToken);
+		if (!reusedDiscovery)
+			InvalidateGitIgnoreMatchers(rootPath);
+		return reusedDiscovery;
+	}
+
+	private static void InvalidateGitIgnoreMatchers(string rootPath)
+	{
+		string normalizedRoot;
+		try
+		{
+			normalizedRoot = Path.GetFullPath(rootPath);
+		}
+		catch
+		{
+			return;
+		}
+
+		lock (CacheSync)
+		{
+			foreach (var cachePath in GitIgnoreCache.Keys.ToArray())
+			{
+				if (IsSameOrDescendantPath(cachePath, normalizedRoot))
+					GitIgnoreCache.Remove(cachePath);
+			}
+		}
+	}
 
 	public IgnoreRules Build(
 		string rootPath,
@@ -310,7 +349,12 @@ public sealed class IgnoreRulesService(
 		try
 		{
 			var cacheKey = Path.GetFullPath(gitIgnorePath);
-			var signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+			var signature = rootFacts?.GitIgnoreSignature;
+			if (!signature.HasValue ||
+			    !ProjectRootFactsProvider.HasMatchingFileMetadata(gitIgnorePath, signature.GetValueOrDefault()))
+			{
+				signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+			}
 
 			if (signature.HasValue)
 			{
@@ -344,6 +388,20 @@ public sealed class IgnoreRulesService(
 	}
 
 	private sealed record GitIgnoreCacheEntry(ProjectRootFileSignature Signature, GitIgnoreMatcher Matcher);
+
+	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
+	{
+		if (PathStringComparer.Equals(candidatePath, rootPath))
+			return true;
+		if (!candidatePath.StartsWith(rootPath, PathStringComparison))
+			return false;
+
+		return candidatePath.Length > rootPath.Length &&
+		       IsDirectorySeparator(candidatePath[rootPath.Length]);
+	}
+
+	private static bool IsDirectorySeparator(char value) =>
+		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
 
 	private sealed record ScopedSmartIgnoreBuildResult(
 		IReadOnlySet<string> FolderNames,

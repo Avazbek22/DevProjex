@@ -577,6 +577,13 @@ public sealed partial class SelectionSyncCoordinator(
             cancellationToken).ConfigureAwait(false);
     }
 
+    public void InvalidateFileSystemCaches()
+    {
+        _selectionRefreshEngine.InvalidateCaches();
+        lock (_ignoreRulesBuildCacheSync)
+            _ignoreRulesBuildCache = null;
+    }
+
     public async Task<SelectionRefreshSnapshot?> BuildRootAndDependentsSnapshotAsync(
         string currentPath,
         CancellationToken cancellationToken = default)
@@ -1257,12 +1264,23 @@ public sealed partial class SelectionSyncCoordinator(
             statusOperations,
             cancelAction,
             cancellationToken);
-        await UpdateLiveOptionsFromRootSelectionCoreAsync(
-            currentPath,
-            version,
-            origin,
-            changedIgnoreOptionId,
-            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await UpdateLiveOptionsFromRootSelectionCoreAsync(
+                currentPath,
+                version,
+                origin,
+                changedIgnoreOptionId,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            await RestoreStableSelectionAfterFailedRefreshAsync(
+                currentPath,
+                version,
+                isFullRefresh: false).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private async Task RunQueuedFullRefreshAsync(
@@ -1283,11 +1301,49 @@ public sealed partial class SelectionSyncCoordinator(
             statusOperations,
             cancelAction,
             cancellationToken);
-        await RefreshRootAndDependentsCoreAsync(
-            currentPath,
-            version,
-            changedIgnoreOptionId,
-            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await RefreshRootAndDependentsCoreAsync(
+                currentPath,
+                version,
+                changedIgnoreOptionId,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            await RestoreStableSelectionAfterFailedRefreshAsync(
+                currentPath,
+                version,
+                isFullRefresh: true).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task RestoreStableSelectionAfterFailedRefreshAsync(
+        string currentPath,
+        int version,
+        bool isFullRefresh)
+    {
+        await RunOnUiThreadAsync(() =>
+        {
+            var isCurrentRequest = isFullRefresh
+                ? version == Volatile.Read(ref _fullRefreshRequestVersion)
+                : version == Volatile.Read(ref _liveOptionsRequestVersion);
+            if (!isCurrentRequest || IsStalePathRequest(currentPath))
+                return false;
+
+            if (_stableSelectionSnapshot is { } snapshot &&
+                PathComparer.Default.Equals(snapshot.Path, currentPath))
+            {
+                _stableSelectionSnapshot = RestoreStableSelectionSnapshot(snapshot);
+            }
+            else
+            {
+                MarkSelectionRefreshClean();
+            }
+
+            return true;
+        }).ConfigureAwait(false);
     }
 
     private static void SyncAllCheckbox<T>(

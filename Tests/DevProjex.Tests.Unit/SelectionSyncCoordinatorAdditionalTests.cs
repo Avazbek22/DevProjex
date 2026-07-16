@@ -730,6 +730,92 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.Contains(viewModel.Extensions, option => option.Name == ".txt");
 	}
 
+	[AvaloniaTheory]
+	[InlineData(IgnoreOptionId.HiddenFiles)]
+	[InlineData(IgnoreOptionId.DotFolders)]
+	public async Task PublicRefreshQueue_CurrentFault_RestoresStableSelectionPresentation(
+		IgnoreOptionId optionId)
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			BeforeRootSelectionSnapshot = _ => throw new IOException("Synthetic refresh failure.")
+		};
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		HookAllOptionListeners(coordinator, viewModel);
+
+		viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked = false;
+
+		await Assert.ThrowsAsync<IOException>(() =>
+			coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken));
+
+		Assert.True(viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.Equal(
+			"EmptyFolders (433)",
+			viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+		Assert.Equal(["src"], viewModel.RootFolders.Select(static option => option.Name));
+		Assert.Equal([".cs"], viewModel.Extensions.Select(static option => option.Name));
+	}
+
+	[AvaloniaTheory]
+	[InlineData(IgnoreOptionId.HiddenFiles)]
+	[InlineData(IgnoreOptionId.DotFolders)]
+	public async Task CancelPendingRefreshes_LiveAndFullLateResults_CannotOverwriteStablePresentation(
+		IgnoreOptionId optionId)
+	{
+		const string path = @"C:\Project";
+		using var scanStarted = new ManualResetEventSlim();
+		using var releaseScan = new ManualResetEventSlim();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			RootSelectionSnapshot = CreateDriftedRootSelectionScanData(),
+			BeforeRootSelectionSnapshot = _ =>
+			{
+				scanStarted.Set();
+				if (!releaseScan.Wait(TimeSpan.FromSeconds(3)))
+					throw new TimeoutException("The controlled selection scan was not released.");
+			}
+		};
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+		HookAllOptionListeners(coordinator, viewModel);
+
+		try
+		{
+			viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked = false;
+			Assert.True(await Task.Run(
+				() => scanStarted.Wait(TimeSpan.FromSeconds(2)),
+				TestContext.Current.CancellationToken));
+
+			Assert.True(coordinator.CancelPendingRefreshes());
+			Assert.False(coordinator.CancelPendingRefreshes());
+			Assert.True(viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked);
+			Assert.Equal(
+				"EmptyFolders (433)",
+				viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).Label);
+
+			releaseScan.Set();
+			await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+			Assert.True(viewModel.IgnoreOptions.Single(option => option.Id == optionId).IsChecked);
+			Assert.True(viewModel.AllIgnoreChecked);
+			Assert.Equal(["src"], viewModel.RootFolders.Select(static option => option.Name));
+			Assert.Equal([".cs"], viewModel.Extensions.Select(static option => option.Name));
+		}
+		finally
+		{
+			releaseScan.Set();
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task PublicRefreshQueue_RapidIgnoreReversal_CancelsStaleScanAndKeepsStableSnapshot()
 	{

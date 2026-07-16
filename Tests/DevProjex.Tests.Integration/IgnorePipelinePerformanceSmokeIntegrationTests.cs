@@ -10,7 +10,7 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		var elapsed = MeasureIgnoreSnapshot(temp.Path);
 
 		Assert.True(
-			elapsed < TimeSpan.FromSeconds(30),
+			elapsed < TimeSpan.FromSeconds(5),
 			$"10k ignore snapshot smoke exceeded budget: {elapsed}.");
 	}
 
@@ -32,7 +32,7 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		var retainedBytes = Math.Max(0, GC.GetTotalMemory(forceFullCollection: true) - baselineBytes);
 
 		Assert.True(
-			retainedBytes < 128L * 1024 * 1024,
+			retainedBytes < 64L * 1024 * 1024,
 			$"Repeated ignore scans retained too much managed memory: {retainedBytes:N0} bytes.");
 	}
 

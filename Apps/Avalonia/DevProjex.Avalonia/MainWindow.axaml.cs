@@ -2488,7 +2488,10 @@ public partial class MainWindow : Window
             cancelAction: () => refreshCts.Cancel());
         try
         {
-            await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
+            await ReloadProjectAsync(
+                cancellationToken,
+                applyStoredProfile: true,
+                reuseUnchangedDiscoveryCaches: true);
             _statusOperations.Complete(statusOperationId);
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.RefreshProject);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
@@ -5948,43 +5951,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Successfully cloned - open the project
-            _gitCloneWindow?.Close();
-            _gitCloneWindow = null;
-            _viewModel.GitCloneInProgress = false;
-            _viewModel.ProjectSourceType = result.SourceType;
-            _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
-
-            // Save repository name and URL for display
-            _currentProjectDisplayName = result.RepositoryName;
-            _currentRepositoryUrl = result.RepositoryUrl;
-
-            // Save cache path for cleanup when project is closed or replaced
-            _currentCachedRepoPath = targetPath;
-
-            await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
-            RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? url : result.RepositoryUrl);
-
-            // Branch discovery resumes on the UI thread to publish its collection and menu.
-            // Keep it behind the same reveal barrier as metrics so clone-only post-load work
-            // cannot steal frames from the initial settings animation.
-            if (result.SourceType == ProjectSourceType.GitClone &&
-                PathComparer.Default.Equals(_currentPath, result.LocalPath))
-            {
-                var visualReadyTask = _postLoadVisualReadyTask;
-                await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
-                    visualReadyTask,
-                    MetricsCalculationPolicy.InitialVisualReadyTimeout,
-                    cancellationToken);
-
-                if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
-                    await RefreshGitBranchesAsync(result.LocalPath, cancellationToken);
-            }
-
-            if (_currentPath == result.LocalPath)
-            {
-                _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
-            }
+            await ApplySuccessfulGitCloneAsync(result, targetPath, url, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -6015,6 +5982,48 @@ public partial class MainWindow : Window
         }
 
         e.Handled = true;
+    }
+
+    internal async Task ApplySuccessfulGitCloneAsync(
+        GitCloneResult result,
+        string cachePath,
+        string requestedUrl,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _gitCloneWindow?.Close();
+        _gitCloneWindow = null;
+        _viewModel.GitCloneInProgress = false;
+        _viewModel.ProjectSourceType = result.SourceType;
+        _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
+        _currentProjectDisplayName = result.RepositoryName;
+        _currentRepositoryUrl = result.RepositoryUrl;
+        _currentCachedRepoPath = cachePath;
+
+        var opened = await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
+        if (!opened || !PathComparer.Default.Equals(_currentPath, result.LocalPath))
+            return;
+
+        RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? requestedUrl : result.RepositoryUrl);
+
+        // Clone-only branch discovery stays behind the reveal barrier so it cannot compete
+        // with the settings animation or make the clone completion appear frozen.
+        if (result.SourceType == ProjectSourceType.GitClone)
+        {
+            var visualReadyTask = _postLoadVisualReadyTask;
+            await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+                visualReadyTask,
+                MetricsCalculationPolicy.InitialVisualReadyTimeout,
+                cancellationToken);
+
+            if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
+                await RefreshGitBranchesAsync(result.LocalPath, cancellationToken);
+        }
+
+        if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
+            _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
     }
 
     private void OnGitCloneCancel(object? sender, RoutedEventArgs e)
@@ -7896,10 +7905,28 @@ public partial class MainWindow : Window
 
     private async Task ReloadProjectAsync(
         CancellationToken cancellationToken = default,
-        bool applyStoredProfile = false)
+        bool applyStoredProfile = false,
+        bool reuseUnchangedDiscoveryCaches = false)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
         cancellationToken.ThrowIfCancellationRequested();
+
+        // A no-change F5 validates only directories previously inspected by scope discovery.
+        // Structural changes, project switches and git operations still force a complete rebuild.
+        var canReuseIgnoreRuleCaches = false;
+        if (reuseUnchangedDiscoveryCaches)
+        {
+            canReuseIgnoreRuleCaches = await Task.Run(
+                () => _ignoreRulesService.RevalidateCaches(_currentPath, cancellationToken),
+                cancellationToken);
+        }
+        else
+        {
+            _ignoreRulesService.InvalidateCaches(_currentPath);
+        }
+
+        if (!canReuseIgnoreRuleCaches)
+            _selectionCoordinator.InvalidateFileSystemCaches();
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
         var timing = new ProjectLoadTiming();

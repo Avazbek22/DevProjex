@@ -25,6 +25,12 @@ public sealed class SelectionRefreshEngine(
     private readonly object _ignoreRulesBuildCacheSync = new();
     private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
 
+	public void InvalidateCaches()
+	{
+		lock (_ignoreRulesBuildCacheSync)
+			_ignoreRulesBuildCache = null;
+	}
+
     public SelectionRefreshSnapshot ComputeFullRefreshSnapshot(
         SelectionRefreshContext context,
         CancellationToken cancellationToken)

@@ -142,6 +142,9 @@ public sealed class ProjectScopeDiscoveryService(
 	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
 		? StringComparer.Ordinal
 		: StringComparer.OrdinalIgnoreCase;
+	private static readonly StringComparison PathStringComparison = OperatingSystem.IsLinux()
+		? StringComparison.Ordinal
+		: StringComparison.OrdinalIgnoreCase;
 
 	private readonly object _scopeCacheSync = new();
 	private readonly Dictionary<string, ScopeCacheEntry> _scopeCache = new(PathStringComparer);
@@ -182,15 +185,125 @@ public sealed class ProjectScopeDiscoveryService(
 			return ProjectScanContext.Empty;
 
 		var context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
+		var discoveryStamp = rootFactsCache.CreateDiscoveryStamp(context.Scopes);
 		lock (_scopeCacheSync)
 		{
-			_scopeCache[cacheKey] = new ScopeCacheEntry(now, context);
+			_scopeCache[cacheKey] = new ScopeCacheEntry(now, context, discoveryStamp);
 			if (_scopeCache.Count > ScopeCacheLimit)
 				_scopeCache.Clear();
 		}
 
 		return context;
 	}
+
+	public void Invalidate(string rootPath)
+	{
+		string normalizedRoot;
+		try
+		{
+			normalizedRoot = Path.GetFullPath(rootPath);
+		}
+		catch
+		{
+			return;
+		}
+
+		lock (_scopeCacheSync)
+		{
+			foreach (var cacheKey in _scopeCache.Keys.ToArray())
+			{
+				if (PathStringComparer.Equals(cacheKey, normalizedRoot) ||
+				    cacheKey.StartsWith(normalizedRoot + "::", PathStringComparison))
+				{
+					_scopeCache.Remove(cacheKey);
+				}
+			}
+		}
+
+		_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+	}
+
+	public bool Revalidate(string rootPath, CancellationToken cancellationToken = default)
+	{
+		// Repeated F5 refreshes validate the topology already inspected by discovery instead
+		// of repeating its bounded recursive probes. Any mismatch discards every related cache
+		// entry so a structural change can never be combined with a partially stale scope graph.
+		cancellationToken.ThrowIfCancellationRequested();
+		string normalizedRoot;
+		try
+		{
+			normalizedRoot = Path.GetFullPath(rootPath);
+		}
+		catch
+		{
+			return false;
+		}
+
+		KeyValuePair<string, ScopeCacheEntry>[] candidates;
+		lock (_scopeCacheSync)
+		{
+			candidates = _scopeCache
+				.Where(pair => IsCacheKeyForRoot(pair.Key, normalizedRoot))
+				.ToArray();
+		}
+
+		if (candidates.Length == 0)
+			return false;
+
+		var observedWriteTimes = new Dictionary<string, long?>(PathStringComparer);
+		var observedGitIgnoreSignatures = new Dictionary<string, ProjectRootFileSignature?>(PathStringComparer);
+		var allCurrent = true;
+		foreach (var candidate in candidates)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (candidate.Value.DiscoveryStamp.IsCurrent(
+				    observedWriteTimes,
+				    observedGitIgnoreSignatures,
+				    cancellationToken))
+			{
+				continue;
+			}
+
+			allCurrent = false;
+			break;
+		}
+		var now = DateTime.UtcNow;
+		var retainedPaths = new HashSet<string>(PathStringComparer);
+
+		lock (_scopeCacheSync)
+		{
+			foreach (var candidate in candidates)
+			{
+				if (!_scopeCache.TryGetValue(candidate.Key, out var current) ||
+				    !ReferenceEquals(current, candidate.Value))
+				{
+					continue;
+				}
+
+				if (!allCurrent)
+				{
+					_scopeCache.Remove(candidate.Key);
+					continue;
+				}
+
+				_scopeCache[candidate.Key] = current with { CachedAtUtc = now };
+				current.DiscoveryStamp.AddPathsTo(retainedPaths);
+			}
+		}
+
+		if (!allCurrent)
+		{
+			_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+			return false;
+		}
+
+		_rootFactsProvider.RefreshCacheLifetime(retainedPaths);
+		return true;
+	}
+
+	private static bool IsCacheKeyForRoot(string cacheKey, string normalizedRoot) =>
+		PathStringComparer.Equals(cacheKey, normalizedRoot) ||
+		cacheKey.StartsWith(normalizedRoot + "::", PathStringComparison);
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static string BuildScopeCacheKey(
@@ -597,19 +710,126 @@ public sealed class ProjectScopeDiscoveryService(
 	private sealed class ProjectRootFactsOperationCache(ProjectRootFactsProvider provider)
 	{
 		private readonly ConcurrentDictionary<string, Lazy<ProjectRootFacts>> _facts = new(PathStringComparer);
+		private readonly ConcurrentDictionary<string, long> _directoryWriteTimes = new(PathStringComparer);
 
 		public ProjectRootFacts Get(string rootPath)
 		{
-			return _facts.GetOrAdd(
+			var facts = _facts.GetOrAdd(
 				rootPath,
 				static (path, factsProvider) => new Lazy<ProjectRootFacts>(
 					() => factsProvider.Get(path, forceRefresh: true),
 					LazyThreadSafetyMode.ExecutionAndPublication),
 				provider).Value;
+
+			if (facts.Exists && TryGetDirectoryWriteTime(rootPath, out var writeTimeTicks))
+				_directoryWriteTimes.TryAdd(rootPath, writeTimeTicks);
+
+			return facts;
+		}
+
+		public ScopeDiscoveryStamp CreateDiscoveryStamp(IReadOnlyList<ProjectScope> scopes)
+		{
+			var gitIgnoreScopePaths = scopes
+				.Where(static scope => scope.HasGitIgnore)
+				.Select(static scope => scope.RootPath)
+				.ToHashSet(PathStringComparer);
+
+			return new ScopeDiscoveryStamp(
+				_directoryWriteTimes
+					.OrderBy(static pair => pair.Key, PathComparer.Default)
+					.Select(static pair => new DirectoryWriteStamp(pair.Key, pair.Value))
+					.ToArray(),
+				_facts
+					.Select(static pair => new { pair.Key, Facts = pair.Value.Value })
+					.Where(pair => gitIgnoreScopePaths.Contains(pair.Key) && pair.Facts.GitIgnoreSignature.HasValue)
+					.OrderBy(static pair => pair.Key, PathComparer.Default)
+					.Select(static pair => new GitIgnoreWriteStamp(
+						Path.Combine(pair.Key, ".gitignore"),
+						pair.Facts.GitIgnoreSignature.GetValueOrDefault()))
+					.ToArray());
 		}
 	}
 
-	private sealed record ScopeCacheEntry(DateTime CachedAtUtc, ProjectScanContext Context);
+	private static bool TryGetDirectoryWriteTime(string path, out long writeTimeTicks)
+	{
+		try
+		{
+			var directory = new DirectoryInfo(path);
+			if (!directory.Exists)
+			{
+				writeTimeTicks = 0;
+				return false;
+			}
+
+			writeTimeTicks = directory.LastWriteTimeUtc.Ticks;
+			return true;
+		}
+		catch
+		{
+			writeTimeTicks = 0;
+			return false;
+		}
+	}
+
+	private sealed record ScopeDiscoveryStamp(
+		IReadOnlyList<DirectoryWriteStamp> Directories,
+		IReadOnlyList<GitIgnoreWriteStamp> GitIgnoreFiles)
+	{
+		// Directory timestamps detect additions/removals without re-enumeration. Content hashes
+		// cover .gitignore rewrites because changing file contents need not update its parent.
+		public void AddPathsTo(ISet<string> paths)
+		{
+			foreach (var directory in Directories)
+				paths.Add(directory.Path);
+		}
+
+		public bool IsCurrent(
+			IDictionary<string, long?> observedWriteTimes,
+			IDictionary<string, ProjectRootFileSignature?> observedGitIgnoreSignatures,
+			CancellationToken cancellationToken)
+		{
+			foreach (var directory in Directories)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!observedWriteTimes.TryGetValue(directory.Path, out var observed))
+				{
+					observed = TryGetDirectoryWriteTime(directory.Path, out var writeTimeTicks)
+						? writeTimeTicks
+						: null;
+					observedWriteTimes[directory.Path] = observed;
+				}
+
+				if (observed != directory.LastWriteTimeTicks)
+					return false;
+			}
+
+			foreach (var gitIgnoreFile in GitIgnoreFiles)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!observedGitIgnoreSignatures.TryGetValue(gitIgnoreFile.Path, out var observed))
+				{
+					observed = ProjectRootFactsProvider.TryGetFileSignature(gitIgnoreFile.Path);
+					observedGitIgnoreSignatures[gitIgnoreFile.Path] = observed;
+				}
+
+				if (!observed.HasValue ||
+				    !observed.GetValueOrDefault().Equals(gitIgnoreFile.Signature))
+				{
+					return false;
+				}
+			}
+
+			return Directories.Count > 0;
+		}
+	}
+
+	private readonly record struct DirectoryWriteStamp(string Path, long LastWriteTimeTicks);
+	private readonly record struct GitIgnoreWriteStamp(string Path, ProjectRootFileSignature Signature);
+
+	private sealed record ScopeCacheEntry(
+		DateTime CachedAtUtc,
+		ProjectScanContext Context,
+		ScopeDiscoveryStamp DiscoveryStamp);
 
 	private readonly record struct NestedProjectProbe(int MaxDepth, int MaxDirectories);
 }

@@ -616,6 +616,102 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task RefreshProject_NewGitIgnoreInExistingScope_BypassesHotDiscoveryCacheImmediately()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: false);
+
+            WriteTextFile(project.RootPath, ".gitignore", "*.log\n");
+            WriteTextFile(project.RootPath, Path.Combine("logs", "runtime.log"), "ignored immediately\n");
+            await UiTestDriver.RefreshProjectAsync(window);
+
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: false);
+            await WaitForProjectTreePathStateAsync(window, exists: false, "logs", "runtime.log");
+            await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SuccessfulCloneCommit_LoadsManagedIgnoreBoundaryThroughProductionPath()
+    {
+        using var initialProject = UiTestProject.CreateWithDynamicIgnoreEntries();
+        using var clonedProject = UiTestProject.CreateWithManagedGitCloneContentWorkspace();
+        WriteTextFile(clonedProject.RootPath, "App.csproj", "<Project />\n");
+        WriteTextFile(clonedProject.RootPath, ".gitignore", "logs/\n");
+        WriteTextFile(clonedProject.RootPath, Path.Combine("logs", "runtime.log"), "git ignored\n");
+        WriteTextFile(clonedProject.RootPath, Path.Combine("obj", "project.assets.json"), "{}\n");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(initialProject);
+
+        try
+        {
+            var result = new GitCloneResult(
+                Success: true,
+                LocalPath: clonedProject.RootPath,
+                SourceType: ProjectSourceType.GitClone,
+                DefaultBranch: "main",
+                RepositoryName: "managed-ignore-probe",
+                RepositoryUrl: "https://example.test/managed-ignore-probe.git",
+                ErrorMessage: null);
+            await window.Dispatcher.InvokeAsync(() =>
+                window.ApplySuccessfulGitCloneAsync(
+                    result,
+                    clonedProject.RootPath,
+                    result.RepositoryUrl!,
+                    TestContext.Current.CancellationToken));
+
+            Assert.Equal(ProjectSourceType.GitClone, UiTestDriver.GetViewModel(window).ProjectSourceType);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: false);
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "HEAD");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "logs", "runtime.log");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "obj", "project.assets.json");
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.UseGitIgnore);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "HEAD");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "logs", "runtime.log");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "obj", "project.assets.json");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task ReopenProject_WithPersistedFullState_PreservesUncheckedItemsAndChecksNewEntries()
     {
         using var project = UiTestProject.CreateWithExternalRefreshMutationWorkspace();
