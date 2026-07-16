@@ -18,6 +18,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     private readonly SolidColorBrush _transparencyFallbackBrush = new(Colors.Black);
     private SolidColorBrush? _backgroundBrush;
     private SolidColorBrush? _panelBrush;
+    private SolidColorBrush? _mainMenuStripBrush;
     private SolidColorBrush? _accentBrush;
     private int _dynamicUpdateScheduled;
     private bool _disposed;
@@ -137,6 +138,11 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         _panelBrush ??= new SolidColorBrush(panelColor);
         _panelBrush.Color = panelColor;
         UpdateResource("AppPanelBrush", _panelBrush);
+
+        var mainMenuStripColor = palette.MainMenuStrip;
+        _mainMenuStripBrush ??= new SolidColorBrush(mainMenuStripColor);
+        _mainMenuStripBrush.Color = mainMenuStripColor;
+        UpdateResource("MainMenuStripBrush", _mainMenuStripBrush);
 
         var menuColor = palette.Menu;
         _currentMenuBrush.Color = menuColor;
@@ -259,6 +265,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         // Null out brush references to break any resource dictionary ties
         _backgroundBrush = null;
         _panelBrush = null;
+        _mainMenuStripBrush = null;
         _accentBrush = null;
     }
 }

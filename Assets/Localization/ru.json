@@ -61,7 +61,7 @@
   "Theme.BorderVisibility": "Видимость границ",
   "Theme.MaterialIntensity": "Общий эффект",
   "Theme.BlurRadius": "Размытость",
-  "Theme.PanelContrast": "Контраст панелей",
+  "Theme.PanelContrast": "Контраст верхней панели",
   "Theme.MenuChildIntensity": "Контраст подменю",
   "Theme.BorderStrength": "Толщина границ",
   "Menu.Search": "Поиск",

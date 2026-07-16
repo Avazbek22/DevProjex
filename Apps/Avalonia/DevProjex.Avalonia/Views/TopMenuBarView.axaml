@@ -7,7 +7,12 @@
              x:CompileBindings="True">
   <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
     <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
-    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,210,0">
+    <Menu Name="MainMenu"
+          Classes="main-menu-strip"
+          Grid.Column="0"
+          Grid.ColumnSpan="4"
+          Margin="0"
+          Padding="0,0,210,0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Name="OpenNewWindowMenuItem"
