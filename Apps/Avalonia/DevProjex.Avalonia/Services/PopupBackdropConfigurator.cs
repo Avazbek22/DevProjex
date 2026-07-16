@@ -10,11 +10,6 @@ internal enum PopupBackdropTransparencyFallback
 
 internal static class PopupBackdropConfigurator
 {
-    private static readonly WindowTransparencyLevel[] NoEffectHints =
-    [
-        WindowTransparencyLevel.None
-    ];
-
     private static readonly WindowTransparencyLevel[] TransparentHints =
     [
         WindowTransparencyLevel.Transparent,
@@ -68,9 +63,9 @@ internal static class PopupBackdropConfigurator
             }
 
             popupLevel.TransparencyLevelHint = ResolveEffectHints(effect, fallback);
-
-            if (effect != ThemeEffectMode.Solid)
-                popupLevel.Background = Brushes.Transparent;
+            // The top-level host must stay transparent even for an opaque Solid surface;
+            // otherwise its rectangular background leaks outside the rounded child border.
+            popupLevel.Background = Brushes.Transparent;
 
             return true;
         }
@@ -87,7 +82,7 @@ internal static class PopupBackdropConfigurator
     {
         return effect switch
         {
-            ThemeEffectMode.Solid => NoEffectHints,
+            ThemeEffectMode.Solid => TransparentHints,
             ThemeEffectMode.Transparent => TransparentHints,
             _ => fallback == PopupBackdropTransparencyFallback.Transparent
                 ? EffectHintsWithTransparentFallback

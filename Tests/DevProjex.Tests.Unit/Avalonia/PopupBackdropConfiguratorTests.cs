@@ -84,24 +84,55 @@ public sealed class PopupBackdropConfiguratorTests
         }
     }
 
-    [AvaloniaFact]
-    public void TryApplyToTopLevel_WithoutEffect_KeepsHostBackgroundUntouched()
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TryApplyToTopLevel_Solid_UsesTransparentHostWithoutRequestingBackdrop(
+        bool useTransparentFallback)
     {
         var popupLevel = new Window
         {
             Background = Brushes.Blue
         };
         var host = new Window();
+        var fallback = useTransparentFallback
+            ? PopupBackdropTransparencyFallback.Transparent
+            : PopupBackdropTransparencyFallback.None;
 
         var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
             popupLevel,
             host,
             ThemeEffectMode.Solid,
-            PopupBackdropTransparencyFallback.Transparent);
+            fallback);
 
         Assert.True(applied);
-        AssertTransparencyHints(popupLevel, WindowTransparencyLevel.None);
-        Assert.Same(Brushes.Blue, popupLevel.Background);
+        AssertTransparencyHints(
+            popupLevel,
+            WindowTransparencyLevel.Transparent,
+            WindowTransparencyLevel.None);
+        Assert.DoesNotContain(WindowTransparencyLevel.Blur, popupLevel.TransparencyLevelHint);
+        Assert.DoesNotContain(WindowTransparencyLevel.AcrylicBlur, popupLevel.TransparencyLevelHint);
+        Assert.Same(Brushes.Transparent, popupLevel.Background);
+    }
+
+    [AvaloniaFact]
+    public void TryApplyToTopLevel_Solid_DoesNotEnableNativeBackdropRadius()
+    {
+        var expectedRadius = CompositionBackdropCornerRadiusCoordinator.BorderlessDialogBackdropCornerRadius;
+        var options = new Win32PlatformOptions
+        {
+            WinUICompositionBackdropCornerRadius = expectedRadius
+        };
+        CompositionBackdropCornerRadiusCoordinator.Attach(options);
+
+        var applied = PopupBackdropConfigurator.TryApplyToTopLevel(
+            new Window(),
+            new Window(),
+            ThemeEffectMode.Solid,
+            PopupBackdropTransparencyFallback.None);
+
+        Assert.True(applied);
+        Assert.Equal(expectedRadius, options.WinUICompositionBackdropCornerRadius);
     }
 
     [AvaloniaFact]
@@ -142,6 +173,7 @@ public sealed class PopupBackdropConfiguratorTests
             WindowTransparencyLevel.None);
         Assert.DoesNotContain(WindowTransparencyLevel.Blur, popupLevel.TransparencyLevelHint);
         Assert.DoesNotContain(WindowTransparencyLevel.AcrylicBlur, popupLevel.TransparencyLevelHint);
+        Assert.Same(Brushes.Transparent, popupLevel.Background);
     }
 
     private static void AssertTransparencyHints(Window window, params WindowTransparencyLevel[] expected)

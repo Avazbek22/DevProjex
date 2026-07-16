@@ -150,10 +150,16 @@ public sealed class ThemeBrushCoordinatorTests
 
 		Assert.Equal(Color.Parse("#FF121214"), dark.Background);
 		Assert.Equal(Color.Parse("#FF17171A"), dark.Panel);
+		Assert.Equal(Color.Parse("#FF17171A"), dark.MainMenuStrip);
+		Assert.Equal(Color.Parse("#FF17171A"), dark.MainMenuPopup);
 		Assert.Equal(Color.Parse("#FF17171A"), dark.Menu);
+		Assert.Equal(Color.Parse("#FF17171A"), dark.MenuChild);
 		Assert.Equal(Color.Parse("#FFFFFFFF"), light.Background);
 		Assert.Equal(Color.Parse("#FFF3F3F3"), light.Panel);
+		Assert.Equal(Color.Parse("#FFF3F3F3"), light.MainMenuStrip);
+		Assert.Equal(Color.Parse("#FFF3F3F3"), light.MainMenuPopup);
 		Assert.Equal(Color.Parse("#FFF3F3F3"), light.Menu);
+		Assert.Equal(Color.Parse("#FFF3F3F3"), light.MenuChild);
 	}
 
 	[Fact]
