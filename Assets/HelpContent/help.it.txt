@@ -342,7 +342,7 @@ Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e
 
 Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
 
-### 12.3 Smart Ignore ibrido
+### 12.3 Come funziona Smart Ignore
 Smart Ignore nasconde i tipici artefatti di build, le cache degli strumenti e gli archivi delle dipendenze. Usa due approcci complementari:
 
 1. Regole di progetto. File marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml` identificano il tipo di progetto. Le regole dello stack corrispondente vengono quindi applicate nel relativo ambito.

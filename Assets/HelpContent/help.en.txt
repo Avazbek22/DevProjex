@@ -342,7 +342,7 @@ This limit only controls discovery of nested scopes for `.gitignore` and Smart I
 
 For multi-project folders, one project's `.gitignore` is not applied to neighboring projects outside its scope.
 
-### 12.3 Hybrid Smart Ignore
+### 12.3 How Smart Ignore works
 Smart Ignore hides common build artifacts, tool caches, and dependency stores. It uses two complementary approaches:
 
 1. Project rules. Marker files such as `.csproj`, `package.json`, `pyproject.toml`, or `Cargo.toml` identify the project type. Rules for that stack are then applied inside its scope.

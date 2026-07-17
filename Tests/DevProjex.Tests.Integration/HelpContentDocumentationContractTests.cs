@@ -50,16 +50,16 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "Tanlangan til ilova qayta ishga tushirilganda saqlanadi" }
     };
 
-    public static TheoryData<string, string, string, string> CurrentBehaviorContracts => new()
+    public static TheoryData<string, string, string, string, string> CurrentBehaviorContracts => new()
     {
-        { "help.ru.txt", "### 12.3 Гибридный Smart Ignore", "Blur", "последнему завершённому состоянию" },
-        { "help.en.txt", "### 12.3 Hybrid Smart Ignore", "Blur", "last completed state" },
-        { "help.de.txt", "### 12.3 Hybrides Smart Ignore", "Weichzeichnen", "letzten abgeschlossenen Zustand" },
-        { "help.fr.txt", "### 12.3 Smart Ignore hybride", "Flou", "dernier état terminé" },
-        { "help.it.txt", "### 12.3 Smart Ignore ibrido", "Sfocatura", "ultimo stato completato" },
-        { "help.kk.txt", "### 12.3 Гибридті Smart Ignore", "Бұлдырлату", "соңғы аяқталған күйіне" },
-        { "help.tg.txt", "### 12.3 Smart Ignore-и гибридӣ", "Тирагӣ", "ҳолати охирини анҷомёфта" },
-        { "help.uz.txt", "### 12.3 Gibrid Smart Ignore", "Xiralashtirish", "oxirgi yakunlangan holatiga" }
+        { "help.ru.txt", "### 12.3 Как работает «Умный игнор»", "гибрид", "Blur", "последнему завершённому состоянию" },
+        { "help.en.txt", "### 12.3 How Smart Ignore works", "hybrid", "Blur", "last completed state" },
+        { "help.de.txt", "### 12.3 So funktioniert Smart Ignore", "hybrid", "Weichzeichnen", "letzten abgeschlossenen Zustand" },
+        { "help.fr.txt", "### 12.3 Fonctionnement de Smart Ignore", "hybride", "Flou", "dernier état terminé" },
+        { "help.it.txt", "### 12.3 Come funziona Smart Ignore", "ibrido", "Sfocatura", "ultimo stato completato" },
+        { "help.kk.txt", "### 12.3 Smart Ignore қалай жұмыс істейді", "гибрид", "Бұлдырлату", "соңғы аяқталған күйіне" },
+        { "help.tg.txt", "### 12.3 Тарзи кори Smart Ignore", "гибрид", "Тирагӣ", "ҳолати охирини анҷомёфта" },
+        { "help.uz.txt", "### 12.3 Smart Ignore qanday ishlaydi", "gibrid", "Xiralashtirish", "oxirgi yakunlangan holatiga" }
     };
 
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
@@ -115,7 +115,8 @@ public sealed class HelpContentDocumentationContractTests
     [MemberData(nameof(CurrentBehaviorContracts))]
     public void HelpContent_DescribesCurrentIgnoreRefreshAndThemeBehavior(
         string fileName,
-        string expectedHybridHeading,
+        string expectedSmartIgnoreHeading,
+        string forbiddenInternalTerm,
         string expectedBlurLabel,
         string expectedCancelRestoreText)
     {
@@ -127,7 +128,8 @@ public sealed class HelpContentDocumentationContractTests
 
         Assert.Contains("F5", gitSection, StringComparison.Ordinal);
         Assert.Contains("Projects / App", content, StringComparison.Ordinal);
-        Assert.Contains(expectedHybridHeading, ignoreSection, StringComparison.Ordinal);
+        Assert.Contains(expectedSmartIgnoreHeading, ignoreSection, StringComparison.Ordinal);
+        Assert.DoesNotContain(forbiddenInternalTerm, ignoreSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(expectedBlurLabel, themeSection, StringComparison.Ordinal);
         Assert.DoesNotContain("Acrylic", themeSection, StringComparison.Ordinal);
         Assert.DoesNotContain("[Beta]", themeSection, StringComparison.Ordinal);

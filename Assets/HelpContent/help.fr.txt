@@ -342,7 +342,7 @@ Cette limite concerne uniquement la détection des zones imbriquées pour `.giti
 
 Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
 
-### 12.3 Smart Ignore hybride
+### 12.3 Fonctionnement de Smart Ignore
 Smart Ignore masque les artefacts de build courants, les caches d’outils et les magasins de dépendances. Il combine deux approches complémentaires :
 
 1. Règles de projet. Des fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml` déterminent le type de projet. Les règles de la technologie correspondante sont ensuite appliquées dans sa zone.

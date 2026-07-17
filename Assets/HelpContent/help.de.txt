@@ -342,7 +342,7 @@ Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.giti
 
 Bei Ordnern mit mehreren Projekten gilt die `.gitignore` eines Projekts nicht für benachbarte Projekte außerhalb seines Bereichs.
 
-### 12.3 Hybrides Smart Ignore
+### 12.3 So funktioniert Smart Ignore
 Smart Ignore blendet typische Build-Artefakte, Tool-Caches und Abhängigkeitsspeicher aus. Dazu werden zwei Ansätze kombiniert:
 
 1. Projektregeln. Markerdateien wie `.csproj`, `package.json`, `pyproject.toml` oder `Cargo.toml` bestimmen den Projekttyp. Danach werden die Regeln des entsprechenden Stacks innerhalb seines Bereichs angewendet.

@@ -342,7 +342,7 @@ Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga te
 
 Ko‘p loyihali papkada bir loyiha `.gitignore` qoidasi o‘z hududidan tashqaridagi qo‘shni loyihalarga qo‘llanmaydi.
 
-### 12.3 Gibrid Smart Ignore
+### 12.3 Smart Ignore qanday ishlaydi
 Smart Ignore odatiy build artefaktlari, vosita keshlari va bog‘liqlik omborlarini yashiradi. U bir-birini to‘ldiradigan ikki usuldan foydalanadi:
 
 1. Loyiha qoidalari. `.csproj`, `package.json`, `pyproject.toml` yoki `Cargo.toml` kabi marker fayllar loyiha turini aniqlaydi. Shundan keyin tegishli stek qoidalari uning hududida qo‘llanadi.
