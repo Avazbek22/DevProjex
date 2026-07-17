@@ -58,10 +58,10 @@ public sealed class GitIgnoreMatcher
 
         foreach (var raw in lines)
         {
-            if (string.IsNullOrWhiteSpace(raw))
+            if (raw is null)
                 continue;
 
-            var line = raw.Trim();
+            var line = TrimUnescapedTrailingSpaces(raw);
             if (line.Length == 0 || line.StartsWith('#'))
                 continue;
 
@@ -78,7 +78,15 @@ public sealed class GitIgnoreMatcher
                     continue;
             }
 
-            line = line.Replace('\\', '/').Trim();
+            // Git defines a terminal backslash as an invalid pattern. Ignoring only that
+            // line keeps a damaged entry from disabling every valid rule in the file.
+            if (HasUnescapedTrailingBackslash(line))
+                continue;
+
+            var hasEscapes = line.Contains('\\');
+            if (line.Contains('[') && HasUnterminatedCharacterClass(line))
+                continue;
+
             var directoryOnly = line.EndsWith('/');
             if (directoryOnly)
                 line = line.TrimEnd('/');
@@ -95,16 +103,25 @@ public sealed class GitIgnoreMatcher
 
             var hasSlash = line.Contains('/');
             var matchByNameOnly = !anchored && !hasSlash && !directoryOnly;
+            var relativeToMatcherRoot = anchored || hasSlash;
 
-            var matchKind = GetRuleMatchKind(line, anchored, directoryOnly, matchByNameOnly);
+            var matchKind = GetRuleMatchKind(line, relativeToMatcherRoot, directoryOnly, matchByNameOnly, hasEscapes);
             Regex? pattern = null;
             if (matchKind == RuleMatchKind.Regex)
             {
                 var globRegex = GlobToRegex(line);
                 var regexPattern = matchByNameOnly
                     ? $"^{globRegex}$"
-                    : BuildPathRegex(globRegex, anchored, directoryOnly);
-                pattern = new Regex(regexPattern, regexOptions);
+                    : BuildPathRegex(globRegex, relativeToMatcherRoot, directoryOnly);
+                try
+                {
+                    pattern = new Regex(regexPattern, regexOptions);
+                }
+                catch (ArgumentException)
+                {
+                    // A malformed pattern must never invalidate the remaining scope.
+                    continue;
+                }
             }
 
             rules.Add(new Rule(
@@ -314,9 +331,9 @@ public sealed class GitIgnoreMatcher
         return relativePath.Length > 0 || allowRoot;
     }
 
-    private static string BuildPathRegex(string globRegex, bool anchored, bool directoryOnly)
+    private static string BuildPathRegex(string globRegex, bool relativeToMatcherRoot, bool directoryOnly)
     {
-        var prefix = anchored ? "^" : "^(?:.*/)?";
+        var prefix = relativeToMatcherRoot ? "^" : "^(?:.*/)?";
         // Directory-only rules must match directories (or their descendants), not plain files.
         var suffix = directoryOnly ? "/.*$" : "$";
         return $"{prefix}{globRegex}{suffix}";
@@ -324,24 +341,25 @@ public sealed class GitIgnoreMatcher
 
     private static RuleMatchKind GetRuleMatchKind(
         string pattern,
-        bool anchored,
+        bool relativeToMatcherRoot,
         bool directoryOnly,
-        bool matchByNameOnly)
+        bool matchByNameOnly,
+        bool hasEscapes)
     {
         // Literal rules dominate real .gitignore files. Keeping them out of Regex
         // reduces allocations at build time and avoids a Regex call for every path.
-        if (pattern.AsSpan().IndexOfAny(GlobSpecialChars) >= 0)
+        if (hasEscapes || pattern.AsSpan().IndexOfAny(GlobSpecialChars) >= 0)
             return RuleMatchKind.Regex;
 
         if (matchByNameOnly)
             return RuleMatchKind.NameLiteral;
 
         if (directoryOnly)
-            return anchored
+            return relativeToMatcherRoot
                 ? RuleMatchKind.AnchoredDirectoryLiteral
                 : RuleMatchKind.UnanchoredDirectoryLiteral;
 
-        return anchored
+        return relativeToMatcherRoot
             ? RuleMatchKind.AnchoredPathLiteral
             : RuleMatchKind.UnanchoredPathLiteral;
     }
@@ -351,32 +369,9 @@ public sealed class GitIgnoreMatcher
         // Pre-size StringBuilder based on typical expansion factor
         var sb = new StringBuilder(pattern.Length * 2);
         var span = pattern.AsSpan();
-        var inCharClass = false;
-
         for (var i = 0; i < span.Length; i++)
         {
             var current = span[i];
-
-            if (inCharClass)
-            {
-                // Inside character class - pass through most characters,
-                // but handle closing bracket and escape special regex chars
-                if (current == ']')
-                {
-                    sb.Append(']');
-                    inCharClass = false;
-                }
-                else if (current == '\\' && i + 1 < span.Length)
-                {
-                    // Escape sequence in character class
-                    sb.Append('\\').Append(span[++i]);
-                }
-                else
-                {
-                    sb.Append(current);
-                }
-                continue;
-            }
 
             switch (current)
             {
@@ -406,21 +401,21 @@ public sealed class GitIgnoreMatcher
                     sb.Append("[^/]");
                     break;
                 case '[':
-                    // Start of character class - preserve it for regex
-                    sb.Append('[');
-                    inCharClass = true;
+                    var closingBracket = FindCharacterClassEnd(span, i + 1);
+                    if (closingBracket < 0)
+                    {
+                        sb.Append(@"\[");
+                        break;
+                    }
+
+                    AppendCharacterClass(sb, span[(i + 1)..closingBracket]);
+                    i = closingBracket;
                     break;
-                case '.':
-                case '(':
-                case ')':
-                case '+':
-                case '|':
-                case '^':
-                case '$':
-                case '{':
-                case '}':
-                case ']':
                 case '\\':
+                    if (i + 1 < span.Length)
+                        AppendEscapedRegexCharacter(sb, span[++i], insideCharacterClass: false);
+                    break;
+                case '.' or '(' or ')' or '+' or '|' or '^' or '$' or '{' or '}' or ']':
                     sb.Append('\\').Append(current);
                     break;
                 default:
@@ -432,14 +427,151 @@ public sealed class GitIgnoreMatcher
         return sb.ToString();
     }
 
+    private static int FindCharacterClassEnd(ReadOnlySpan<char> pattern, int start)
+    {
+        var index = start;
+        if (index < pattern.Length && pattern[index] is '!' or '^')
+            index++;
+        if (index < pattern.Length && pattern[index] == ']')
+            index++;
+
+        for (; index < pattern.Length; index++)
+        {
+            if (pattern[index] == '\\' && index + 1 < pattern.Length)
+            {
+                index++;
+                continue;
+            }
+
+            if (pattern[index] == ']')
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static void AppendCharacterClass(StringBuilder builder, ReadOnlySpan<char> content)
+    {
+        builder.Append('[');
+        var index = 0;
+        if (index < content.Length && content[index] is '!' or '^')
+        {
+            builder.Append('^');
+            index++;
+        }
+
+        if (index < content.Length && content[index] == ']')
+        {
+            builder.Append(@"\]");
+            index++;
+        }
+
+        for (; index < content.Length; index++)
+        {
+            var current = content[index];
+            if (current == '\\' && index + 1 < content.Length)
+            {
+                AppendEscapedRegexCharacter(builder, content[++index], insideCharacterClass: true);
+                continue;
+            }
+
+            if (current is '[' or '^')
+                builder.Append('\\');
+            builder.Append(current);
+        }
+
+        builder.Append(']');
+    }
+
+    private static void AppendEscapedRegexCharacter(
+        StringBuilder builder,
+        char value,
+        bool insideCharacterClass)
+    {
+        if (value is '.' or '^' or '$' or '|' or '(' or ')' or '[' or ']' or '{' or '}' or '*' or '+' or '?' or '\\' ||
+            insideCharacterClass && value == '-')
+        {
+            builder.Append('\\');
+        }
+
+        builder.Append(value);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string ComputeStaticPrefix(string pattern)
     {
-        // Use SIMD-optimized search for glob special characters
         var span = pattern.AsSpan();
-        var idx = span.IndexOfAny(GlobSpecialChars);
-        var prefix = idx < 0 ? pattern : pattern[..idx];
-        return prefix.Trim('/');
+        if (!span.Contains('\\'))
+        {
+            var specialIndex = span.IndexOfAny(GlobSpecialChars);
+            var prefix = specialIndex < 0 ? pattern : pattern[..specialIndex];
+            return prefix.Trim('/');
+        }
+
+        var builder = new StringBuilder(pattern.Length);
+        for (var index = 0; index < span.Length; index++)
+        {
+            var current = span[index];
+            if (current == '\\' && index + 1 < span.Length)
+            {
+                builder.Append(span[++index]);
+                continue;
+            }
+
+            if (current is '*' or '?' or '[')
+                break;
+
+            builder.Append(current);
+        }
+
+        return builder.ToString().Trim('/');
+    }
+
+    private static string TrimUnescapedTrailingSpaces(string value)
+    {
+        var end = value.Length;
+        while (end > 0 && value[end - 1] == ' ')
+        {
+            var backslashCount = 0;
+            for (var index = end - 2; index >= 0 && value[index] == '\\'; index--)
+                backslashCount++;
+            if ((backslashCount & 1) != 0)
+                break;
+
+            end--;
+        }
+
+        return end == value.Length ? value : value[..end];
+    }
+
+    private static bool HasUnescapedTrailingBackslash(string value)
+    {
+        var backslashCount = 0;
+        for (var index = value.Length - 1; index >= 0 && value[index] == '\\'; index--)
+            backslashCount++;
+        return (backslashCount & 1) != 0;
+    }
+
+    private static bool HasUnterminatedCharacterClass(ReadOnlySpan<char> pattern)
+    {
+        for (var index = 0; index < pattern.Length; index++)
+        {
+            if (pattern[index] == '\\' && index + 1 < pattern.Length)
+            {
+                index++;
+                continue;
+            }
+
+            if (pattern[index] != '[')
+                continue;
+
+            var closingBracket = FindCharacterClassEnd(pattern, index + 1);
+            if (closingBracket < 0)
+                return true;
+            index = closingBracket;
+        }
+
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
