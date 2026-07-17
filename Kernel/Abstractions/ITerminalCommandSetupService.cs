@@ -6,5 +6,7 @@ public interface ITerminalCommandSetupService
 
 	TerminalCommandInstallResult InstallOrRepair();
 
+	TerminalCommandPathSetupResult ConfigurePath();
+
 	TerminalCommandInstallResult Reinstall();
 }

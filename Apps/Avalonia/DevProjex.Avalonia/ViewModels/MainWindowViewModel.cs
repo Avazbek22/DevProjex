@@ -75,6 +75,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
     private PreviewContentMode _selectedPreviewContentMode = PreviewContentMode.Tree;
     private bool _isMicaEnabled;
+    private bool _isMicaAvailable = true;
     private bool _isAcrylicEnabled;
     private bool _isTransparentEnabled = true;
     private PreviewWorkspaceMode _previewWorkspaceMode;
@@ -691,6 +692,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(ShowBackgroundTransparencySlider));
     }
 
+    public bool IsMicaAvailable
+    {
+        get => _isMicaAvailable;
+        private set
+        {
+            if (_isMicaAvailable == value) return;
+            _isMicaAvailable = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public void SetMicaAvailability(bool isAvailable)
+    {
+        IsMicaAvailable = isAvailable;
+        if (!isAvailable && _isMicaEnabled)
+            SetThemeEffects(transparent: false, mica: false, acrylic: true);
+    }
+
     public void SetThemeEffects(bool transparent, bool mica, bool acrylic)
     {
         if ((transparent ? 1 : 0) + (mica ? 1 : 0) + (acrylic ? 1 : 0) > 1)
@@ -740,6 +759,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void ToggleMica()
     {
+        if (!IsMicaAvailable)
+            return;
+
         if (_isMicaEnabled)
             SetThemeEffects(transparent: false, mica: false, acrylic: false);
         else

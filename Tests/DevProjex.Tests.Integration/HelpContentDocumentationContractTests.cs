@@ -26,16 +26,16 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "### Daraxt shrifti", "«E’tiborsiz qoldirish», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi" }
     };
 
-    public static TheoryData<string, string> IgnoreScopeContracts => new()
+    public static TheoryData<string, string, string> IgnoreScopeContracts => new()
     {
-        { "help.ru.txt", "Это ограничение относится только к обнаружению вложенных областей для `.gitignore` и Smart Ignore" },
-        { "help.en.txt", "This limit only controls discovery of nested scopes for `.gitignore` and Smart Ignore" },
-        { "help.de.txt", "Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.gitignore` und Smart Ignore" },
-        { "help.fr.txt", "Cette limite concerne uniquement la détection des zones imbriquées pour `.gitignore` et Smart Ignore" },
-        { "help.it.txt", "Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e Smart Ignore" },
-        { "help.kk.txt", "Бұл шектеу тек `.gitignore` және Smart Ignore үшін ішкі аймақтарды табуға қатысты" },
-        { "help.tg.txt", "Ин маҳдудият танҳо ба ёфтани минтақаҳои дохилӣ барои `.gitignore` ва Smart Ignore дахл дорад" },
-        { "help.uz.txt", "Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga tegishli" }
+        { "help.ru.txt", "Поиск новых проектных областей ограничен", "После обнаружения области Smart Ignore применяется ко всему её поддереву без ограничения глубины" },
+        { "help.en.txt", "Project scope discovery is bounded", "After a scope is found, Smart Ignore applies to its entire subtree without a depth limit" },
+        { "help.de.txt", "Die Erkennung neuer Projektbereiche ist begrenzt", "Nach der Erkennung gilt Smart Ignore ohne Tiefenbegrenzung für den gesamten Unterbaum des Bereichs" },
+        { "help.fr.txt", "La détection de nouvelles zones de projet est limitée", "Une fois la zone détectée, Smart Ignore s’applique à tout son sous-arbre sans limite de profondeur" },
+        { "help.it.txt", "La ricerca di nuove aree di progetto è limitata", "Dopo il rilevamento, Smart Ignore si applica all’intero sottoalbero senza limite di profondità" },
+        { "help.kk.txt", "жаңа жоба аймақтарын іздеу шектелген", "Аймақ табылғаннан кейін Smart Ignore оның бүкіл ішкі ағашына тереңдік шектеуінсіз қолданылады" },
+        { "help.tg.txt", "Ҷустуҷӯи минтақаҳои нави лоиҳа маҳдуд аст", "Баъд аз ёфтани минтақа Smart Ignore ба тамоми зердарахти он бе маҳдудияти амиқӣ татбиқ мешавад" },
+        { "help.uz.txt", "yangi loyiha hududlarini izlash cheklangan", "Hudud topilgach, Smart Ignore uning butun ichki daraxtiga chuqurlik cheklovisiz qo‘llanadi" }
     };
 
     public static TheoryData<string, string> LanguagePersistenceContracts => new()
@@ -52,14 +52,14 @@ public sealed class HelpContentDocumentationContractTests
 
     public static TheoryData<string, string, string, string, string> CurrentBehaviorContracts => new()
     {
-        { "help.ru.txt", "### 12.3 Как работает «Умный игнор»", "гибрид", "Blur", "последнему завершённому состоянию" },
-        { "help.en.txt", "### 12.3 How Smart Ignore works", "hybrid", "Blur", "last completed state" },
-        { "help.de.txt", "### 12.3 So funktioniert Smart Ignore", "hybrid", "Weichzeichnen", "letzten abgeschlossenen Zustand" },
-        { "help.fr.txt", "### 12.3 Fonctionnement de Smart Ignore", "hybride", "Flou", "dernier état terminé" },
-        { "help.it.txt", "### 12.3 Come funziona Smart Ignore", "ibrido", "Sfocatura", "ultimo stato completato" },
-        { "help.kk.txt", "### 12.3 Smart Ignore қалай жұмыс істейді", "гибрид", "Бұлдырлату", "соңғы аяқталған күйіне" },
-        { "help.tg.txt", "### 12.3 Тарзи кори Smart Ignore", "гибрид", "Тирагӣ", "ҳолати охирини анҷомёфта" },
-        { "help.uz.txt", "### 12.3 Smart Ignore qanday ishlaydi", "gibrid", "Xiralashtirish", "oxirgi yakunlangan holatiga" }
+        { "help.ru.txt", "### 12.2 Умный игнор", "гибрид", "Blur", "последнему завершённому состоянию" },
+        { "help.en.txt", "### 12.2 Smart Ignore", "hybrid", "Blur", "last completed state" },
+        { "help.de.txt", "### 12.2 Smart Ignore", "hybrid", "Weichzeichnen", "letzten abgeschlossenen Zustand" },
+        { "help.fr.txt", "### 12.2 Smart Ignore", "hybride", "Flou", "dernier état terminé" },
+        { "help.it.txt", "### 12.2 Smart Ignore", "ibrido", "Sfocatura", "ultimo stato completato" },
+        { "help.kk.txt", "### 12.2 Smart Ignore", "гибрид", "Бұлдырлату", "соңғы аяқталған күйіне" },
+        { "help.tg.txt", "### 12.2 Smart Ignore", "гибрид", "Тирагӣ", "ҳолати охирини анҷомёфта" },
+        { "help.uz.txt", "### 12.2 Smart Ignore", "gibrid", "Xiralashtirish", "oxirgi yakunlangan holatiga" }
     };
 
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
@@ -89,13 +89,15 @@ public sealed class HelpContentDocumentationContractTests
     [MemberData(nameof(IgnoreScopeContracts))]
     public void HelpContent_IgnoreScopeDepth_ClarifiesDiscoveryOnlyLimit(
         string fileName,
-        string expectedClarification)
+        string expectedBoundedDiscoveryText,
+        string expectedUnlimitedApplicationText)
     {
         var content = ReadHelpFile(fileName);
         var ignoreSection = ExtractSection(content, "## 12)", "## 13)");
 
         Assert.Contains("2", ignoreSection, StringComparison.Ordinal);
-        Assert.Contains(expectedClarification, ignoreSection, StringComparison.Ordinal);
+        Assert.Contains(expectedBoundedDiscoveryText, ignoreSection, StringComparison.Ordinal);
+        Assert.Contains(expectedUnlimitedApplicationText, ignoreSection, StringComparison.Ordinal);
     }
 
     [Theory]

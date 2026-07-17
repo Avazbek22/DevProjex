@@ -12,6 +12,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 	[InlineData(TerminalCommandSetupState.HomeDirectoryUnavailable, false, false)]
 	[InlineData(TerminalCommandSetupState.NotInstalled, true, false)]
 	[InlineData(TerminalCommandSetupState.Installed, false, false)]
+	[InlineData(TerminalCommandSetupState.InstalledPathMissing, false, false)]
 	[InlineData(TerminalCommandSetupState.Stale, false, true)]
 	[InlineData(TerminalCommandSetupState.ConflictingCommand, false, false)]
 	[InlineData(TerminalCommandSetupState.PermissionDenied, false, false)]
@@ -32,7 +33,10 @@ public sealed class TerminalCommandSetupDialogTextTests
 			UserBinDirectoryIsInPath: false,
 			CanInstall: canInstall,
 			CanRepair: canRepair,
-			ShellProfileHint: "Add ~/.local/bin to PATH.");
+			ShellProfileHint: "Add ~/.local/bin to PATH.",
+			PathSetupCommand: state == TerminalCommandSetupState.InstalledPathMissing
+				? "fish_add_path $HOME/.local/bin"
+				: null);
 
 		var text = TerminalCommandSetupDialogText.Create(localization, snapshot);
 
@@ -42,6 +46,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 		Assert.False(text.Body.StartsWith("Dialog.", StringComparison.Ordinal));
 		Assert.Equal(canInstall || canRepair || snapshot.CanReinstall, text.ShowInstallButton);
 		var expectedCopyButton = state is
+			TerminalCommandSetupState.InstalledPathMissing or
 			TerminalCommandSetupState.ManagedByOperatingSystem or
 			TerminalCommandSetupState.UnsupportedOnCurrentPackage;
 		Assert.Equal(expectedCopyButton, text.ShowCopyButton);
@@ -54,6 +59,11 @@ public sealed class TerminalCommandSetupDialogTextTests
 		{
 			Assert.Equal("devprojex", text.CommandToCopy);
 			Assert.Empty(text.CommandLine);
+		}
+		else if (state == TerminalCommandSetupState.InstalledPathMissing)
+		{
+			Assert.Equal("fish_add_path $HOME/.local/bin", text.CommandToCopy);
+			Assert.Equal(text.CommandToCopy, text.CommandLine);
 		}
 		else
 		{
@@ -136,7 +146,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 		Assert.Contains("devprojex --help", text.CommandLine, StringComparison.Ordinal);
 		Assert.True(text.ShowInstallButton);
 		Assert.False(text.ShowCopyButton);
-		Assert.Equal("Enable", text.InstallButtonText);
+		Assert.Equal("Set up terminal launch", text.InstallButtonText);
 		Assert.Contains("Command file", text.Details, StringComparison.Ordinal);
 	}
 
@@ -175,12 +185,12 @@ public sealed class TerminalCommandSetupDialogTextTests
 	}
 
 	[Fact]
-	public void Create_InstalledUnixWrapperOutsidePath_ShowsOnlyActionablePathHint()
+	public void Create_InstalledUnixWrapperOutsidePath_ShowsCompactPathRecoveryActions()
 	{
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
 		var snapshot = new TerminalCommandSetupSnapshot(
 			CommandLineExecutableAliases.UnixCommand,
-			TerminalCommandSetupState.Installed,
+			TerminalCommandSetupState.InstalledPathMissing,
 			CommandPath: "/home/me/.local/bin/devprojex",
 			TargetExecutablePath: "/opt/DevProjex/DevProjex",
 			InstalledTargetExecutablePath: "/opt/DevProjex/DevProjex",
@@ -188,12 +198,18 @@ public sealed class TerminalCommandSetupDialogTextTests
 			UserBinDirectoryIsInPath: false,
 			CanInstall: false,
 			CanRepair: false,
-			ShellProfileHint: "Add ~/.local/bin to PATH.");
+			ShellProfileHint: "Add ~/.local/bin to PATH.",
+			PathSetupCommand: "fish_add_path $HOME/.local/bin");
 
 		var text = TerminalCommandSetupDialogText.Create(localization, snapshot);
 
 		Assert.False(text.ShowInstallButton);
-		Assert.Contains("not available through PATH", text.Body, StringComparison.Ordinal);
+		Assert.True(text.ShowCopyButton);
+		Assert.True(text.IsPathSetup);
+		Assert.Equal("fish_add_path $HOME/.local/bin", text.CommandToCopy);
+		Assert.Equal(text.CommandToCopy, text.CommandLine);
+		Assert.Contains("missing from PATH", text.Body, StringComparison.Ordinal);
+		Assert.Contains("automatically", text.Body, StringComparison.Ordinal);
 		Assert.Contains("Add ~/.local/bin to PATH.", text.Details, StringComparison.Ordinal);
 		Assert.DoesNotContain("/opt/DevProjex/DevProjex", text.Details, StringComparison.Ordinal);
 		Assert.DoesNotContain("Command file", text.Details, StringComparison.Ordinal);

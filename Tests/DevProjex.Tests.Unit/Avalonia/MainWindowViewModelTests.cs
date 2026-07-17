@@ -979,6 +979,21 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void SetMicaAvailability_WhenUnavailable_ConvertsMicaToBlurAndBlocksRetoggle()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsMicaEnabled = true;
+
+        viewModel.SetMicaAvailability(false);
+        viewModel.ToggleMica();
+
+        Assert.False(viewModel.IsMicaAvailable);
+        Assert.False(viewModel.IsMicaEnabled);
+        Assert.True(viewModel.IsAcrylicEnabled);
+        Assert.Equal(ThemeEffectMode.Acrylic, viewModel.ActiveThemeEffect);
+    }
+
+    [Fact]
     public void SetThemeEffects_PublishesOnlyTheFinalConvergedState()
     {
         var viewModel = CreateViewModel();

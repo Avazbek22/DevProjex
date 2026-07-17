@@ -134,6 +134,7 @@ public partial class MainWindow : Window
     private readonly TreeSearchCoordinator _searchCoordinator;
     private readonly NameFilterCoordinator _filterCoordinator;
     private readonly ThemeBrushCoordinator _themeBrushCoordinator;
+    private readonly bool _isMicaSupported = ThemeEffectPlatformSupport.IsMicaSupportedOnCurrentPlatform();
     private readonly SelectionSyncCoordinator _selectionCoordinator;
     private readonly StatusOperationCoordinator _statusOperations;
     private readonly MetricsPipeline _metrics;
@@ -455,6 +456,7 @@ public partial class MainWindow : Window
         }
 
         InitializeUserSettings();
+        _viewModel.SetMicaAvailability(_isMicaSupported);
 
         _viewModel.UpdateHelpPopoverMaxSize(Bounds.Size);
         PropertyChanged += OnWindowPropertyChanged;
@@ -1297,7 +1299,7 @@ public partial class MainWindow : Window
         _themeSettingsDocument = _themeSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         _themePresetSession = new ThemePresetSession(_themeSettingsStore, _themeSettingsDocument);
         var theme = _themePresetSession.CurrentTheme;
-        var effect = _themePresetSession.CurrentEffect;
+        var effect = ThemeEffectPlatformSupport.Normalize(_themePresetSession.CurrentEffect, _isMicaSupported);
 
         _currentThemeVariant = theme;
         _currentEffectMode = effect;
@@ -5386,31 +5388,64 @@ public partial class MainWindow : Window
         TerminalCommandSetupSnapshot snapshot,
         bool isAutomaticPrompt)
     {
-        var dialogResult = await TerminalCommandSetupDialog.ShowAsync(this, _localization, snapshot, isAutomaticPrompt);
-        if (ShouldPersistTerminalCommandPromptDismissal(dialogResult))
-            SaveTerminalCommandPromptDismissed();
-
-        if (dialogResult.Action is not (TerminalCommandDialogAction.InstallOrRepair or
-            TerminalCommandDialogAction.Reinstall))
-            return;
-
-        var installResult = await Task.Run(() =>
-            dialogResult.Action == TerminalCommandDialogAction.Reinstall
-                ? _terminalCommandSetupService.Reinstall()
-                : _terminalCommandSetupService.InstallOrRepair());
-        if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
+        while (true)
         {
-            await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
-            return;
-        }
-
-        if (dialogResult.Action == TerminalCommandDialogAction.Reinstall)
-        {
-            await MessageDialog.ShowAsync(
+            var dialogResult = await TerminalCommandSetupDialog.ShowAsync(
                 this,
-                _localization["Dialog.TerminalCommand.Title"],
-                _localization["Dialog.TerminalCommand.ReconfigureSucceeded"],
-                height: 120);
+                _localization,
+                snapshot,
+                isAutomaticPrompt);
+            if (ShouldPersistTerminalCommandPromptDismissal(dialogResult))
+                SaveTerminalCommandPromptDismissed();
+
+            if (dialogResult.Action == TerminalCommandDialogAction.ConfigurePath)
+            {
+                var pathResult = await Task.Run(_terminalCommandSetupService.ConfigurePath);
+                if (pathResult.Success)
+                    return;
+
+                await ShowErrorAsync(pathResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                snapshot = pathResult.Snapshot;
+                isAutomaticPrompt = false;
+                continue;
+            }
+
+            if (dialogResult.Action is not (TerminalCommandDialogAction.InstallOrRepair or
+                TerminalCommandDialogAction.Reinstall))
+                return;
+
+            var installResult = await Task.Run(() =>
+                dialogResult.Action == TerminalCommandDialogAction.Reinstall
+                    ? _terminalCommandSetupService.Reinstall()
+                    : _terminalCommandSetupService.InstallOrRepair());
+            if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
+            {
+                await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                return;
+            }
+
+            if (installResult.Snapshot.State == TerminalCommandSetupState.InstalledPathMissing)
+            {
+                var pathResult = await Task.Run(_terminalCommandSetupService.ConfigurePath);
+                if (pathResult.Success)
+                    return;
+
+                await ShowErrorAsync(pathResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                snapshot = pathResult.Snapshot;
+                isAutomaticPrompt = false;
+                continue;
+            }
+
+            if (dialogResult.Action == TerminalCommandDialogAction.Reinstall)
+            {
+                await MessageDialog.ShowAsync(
+                    this,
+                    _localization["Dialog.TerminalCommand.Title"],
+                    _localization["Dialog.TerminalCommand.ReconfigureSucceeded"],
+                    height: 120);
+            }
+
+            return;
         }
     }
 
@@ -5435,7 +5470,8 @@ public partial class MainWindow : Window
         // Choosing install, repair, or reinstall is not a dismissal. If the setup attempt fails,
         // the next startup should still be allowed to offer setup again.
         return dialogResult.Action is not (TerminalCommandDialogAction.InstallOrRepair or
-                   TerminalCommandDialogAction.Reinstall) &&
+                   TerminalCommandDialogAction.Reinstall or
+                   TerminalCommandDialogAction.ConfigurePath) &&
                (dialogResult.DontShowAgain || dialogResult.Action == TerminalCommandDialogAction.DismissPrompt);
     }
 
@@ -7848,9 +7884,20 @@ public partial class MainWindow : Window
 
             if (action == AutomaticTerminalCommandStartupAction.RepairSilently)
             {
-                ObserveDetachedTask(
-                    Task.Run(_terminalCommandSetupService.InstallOrRepair, cancellationToken),
-                    "RepairTerminalCommand");
+                var repairResult = await Task.Run(
+                    _terminalCommandSetupService.InstallOrRepair,
+                    cancellationToken);
+                if (repairResult.Success &&
+                    TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(
+                        _userSettingsDb.ViewSettings,
+                        repairResult.Snapshot,
+                        !string.IsNullOrWhiteSpace(_startupOptions.Path)))
+                {
+                    await ShowTerminalCommandSetupAsync(
+                        repairResult.Snapshot,
+                        isAutomaticPrompt: true);
+                }
+
                 return;
             }
 

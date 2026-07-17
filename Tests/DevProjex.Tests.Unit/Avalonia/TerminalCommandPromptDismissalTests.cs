@@ -14,6 +14,8 @@ public sealed class TerminalCommandPromptDismissalTests
 	[InlineData((int)TerminalCommandDialogAction.InstallOrRepair, true, false)]
 	[InlineData((int)TerminalCommandDialogAction.Reinstall, false, false)]
 	[InlineData((int)TerminalCommandDialogAction.Reinstall, true, false)]
+	[InlineData((int)TerminalCommandDialogAction.ConfigurePath, false, false)]
+	[InlineData((int)TerminalCommandDialogAction.ConfigurePath, true, false)]
 	public void ShouldPersistTerminalCommandPromptDismissal_OnlyPersistsRealDismissals(
 		int actionValue,
 		bool dontShowAgain,

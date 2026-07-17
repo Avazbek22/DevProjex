@@ -70,7 +70,7 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
 
 		Assert.True(result.Success);
-		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
+		Assert.Equal(TerminalCommandSetupState.InstalledPathMissing, result.Snapshot.State);
 		Assert.False(result.Snapshot.UserBinDirectoryIsInPath);
 		Assert.Contains(".local/bin", result.Snapshot.ShellProfileHint, StringComparison.Ordinal);
 		Assert.True(File.Exists(commandPath));
@@ -79,6 +79,45 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 		var mode = File.GetUnixFileMode(commandPath);
 #pragma warning restore CA1416
 		Assert.True((mode & UnixFileMode.UserExecute) == UnixFileMode.UserExecute);
+	}
+
+	[Fact]
+	public void UnixFirstRunJourney_CreatesLauncherConfiguresShellAndConvergesToInstalled()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var processPath = Path.Combine(temp.Path, "system-bin");
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.Linux,
+			HomeDirectoryProvider = () => temp.Path,
+			PathVariableProvider = () => processPath,
+			ProcessPathVariableWriter = value => processPath = value,
+			ShellPathProvider = () => "/bin/bash",
+			ExecutablePathProvider = () => target,
+			PathListSeparator = ':'
+		});
+
+		var before = service.Probe();
+		var install = service.InstallOrRepair();
+		var configurePath = service.ConfigurePath();
+		var after = service.Probe();
+		var profilePath = Path.Combine(temp.Path, ".bashrc");
+		var profileAfterFirstRun = File.ReadAllText(profilePath);
+		var repeatedConfiguration = service.ConfigurePath();
+
+		Assert.Equal(TerminalCommandSetupState.NotInstalled, before.State);
+		Assert.True(install.Success, install.ErrorMessage);
+		Assert.Equal(TerminalCommandSetupState.InstalledPathMissing, install.Snapshot.State);
+		Assert.True(configurePath.Success, configurePath.ErrorMessage);
+		Assert.Equal(TerminalCommandSetupState.Installed, configurePath.Snapshot.State);
+		Assert.Equal(TerminalCommandSetupState.Installed, after.State);
+		Assert.True(after.IsReady);
+		Assert.Contains(Path.Combine(temp.Path, ".local", "bin"), processPath, StringComparison.Ordinal);
+		Assert.Contains("# DevProjex terminal PATH", profileAfterFirstRun, StringComparison.Ordinal);
+		Assert.Contains("export PATH=\"$HOME/.local/bin:$PATH\"", profileAfterFirstRun, StringComparison.Ordinal);
+		Assert.True(repeatedConfiguration.Success, repeatedConfiguration.ErrorMessage);
+		Assert.Equal(profileAfterFirstRun, File.ReadAllText(profilePath));
 	}
 
 	[Fact]

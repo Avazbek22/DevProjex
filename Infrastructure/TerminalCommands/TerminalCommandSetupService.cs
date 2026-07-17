@@ -20,6 +20,10 @@ public sealed record TerminalCommandSetupServiceOptions
 		() => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 	public Func<string?> PathVariableProvider { get; init; } =
 		() => Environment.GetEnvironmentVariable("PATH");
+	public Action<string> ProcessPathVariableWriter { get; init; } =
+		value => Environment.SetEnvironmentVariable("PATH", value);
+	public Func<string?> ShellPathProvider { get; init; } =
+		() => Environment.GetEnvironmentVariable("SHELL");
 	public Func<string?> UserPathVariableProvider { get; init; } =
 		() => Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User);
 	public Func<string?> MachinePathVariableProvider { get; init; } =
@@ -36,11 +40,12 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	: ITerminalCommandSetupService
 {
 	private const string UnixWrapperMarker = "# DevProjex terminal command wrapper";
+	private const string UnixPathMarker = "# DevProjex terminal PATH";
+	private const string PosixPathSetupLine = "export PATH=\"$HOME/.local/bin:$PATH\"";
+	private const string FishPathSetupLine = "fish_add_path \"$HOME/.local/bin\"";
 	private const string WindowsLauncherMarker = "rem DevProjex terminal command wrapper";
 	private const string UnixTargetPrefix = "# target: ";
 	private const string WindowsTargetPrefix = "rem target: ";
-	private const string ShellProfileHint =
-		"Add export PATH=\"$HOME/.local/bin:$PATH\" to your shell profile if ~/.local/bin is not already in PATH.";
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
@@ -66,6 +71,46 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	public TerminalCommandInstallResult InstallOrRepair() => InstallOrRepair(forceReinstall: false);
 
+	public TerminalCommandPathSetupResult ConfigurePath()
+	{
+		var initial = Probe();
+		if (_options.Platform is not (TerminalCommandHostPlatform.Linux or TerminalCommandHostPlatform.MacOS))
+			return PathSetupFailed(initial, "PATH setup is only supported for Linux and macOS launchers.");
+
+		if (initial.State == TerminalCommandSetupState.Installed)
+			return new TerminalCommandPathSetupResult(true, initial);
+
+		if (initial.State != TerminalCommandSetupState.InstalledPathMissing ||
+		    string.IsNullOrWhiteSpace(initial.UserBinDirectory))
+		{
+			return PathSetupFailed(initial, "The terminal launcher must be installed before PATH can be configured.");
+		}
+
+		var home = SafeGetHomeDirectory();
+		if (string.IsNullOrWhiteSpace(home))
+			return PathSetupFailed(initial, "The user home directory is unavailable.");
+
+		try
+		{
+			var profile = ResolveUnixShellProfile(home);
+			EnsureShellProfileContainsPathSetup(profile);
+			EnsureCurrentProcessPathContains(initial.UserBinDirectory);
+			return new TerminalCommandPathSetupResult(true, Probe());
+		}
+		catch (UnauthorizedAccessException ex)
+		{
+			return PathSetupFailed(initial, ex.Message);
+		}
+		catch (IOException ex)
+		{
+			return PathSetupFailed(initial, ex.Message);
+		}
+		catch (Exception ex)
+		{
+			return PathSetupFailed(initial, ex.Message);
+		}
+	}
+
 	public TerminalCommandInstallResult Reinstall() => InstallOrRepair(forceReinstall: true);
 
 	private TerminalCommandInstallResult InstallOrRepair(bool forceReinstall)
@@ -84,7 +129,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 					: null);
 		}
 
-		if (initial.State == TerminalCommandSetupState.Installed && !forceReinstall)
+		if (!forceReinstall &&
+		    (initial.State is TerminalCommandSetupState.Installed or TerminalCommandSetupState.InstalledPathMissing))
 		{
 			return new TerminalCommandInstallResult(
 				Success: true,
@@ -172,11 +218,14 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				}
 			}
 
+			var launcherWasInstalled = refreshed.State is
+				TerminalCommandSetupState.Installed or
+				TerminalCommandSetupState.InstalledPathMissing;
 			return new TerminalCommandInstallResult(
-				Success: refreshed.State == TerminalCommandSetupState.Installed,
+				Success: launcherWasInstalled,
 				Outcome: outcome,
 				Snapshot: refreshed,
-				ErrorMessage: refreshed.State == TerminalCommandSetupState.Installed
+				ErrorMessage: launcherWasInstalled
 					? null
 					: "The command file was written but the command is still not reported as installed.");
 		}
@@ -438,7 +487,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		var commandPath = Path.Combine(userBinDirectory, CommandLineExecutableAliases.UnixCommand);
 		var targetPath = SafeGetExecutablePath();
 		var isUserBinInPath = IsDirectoryInPath(userBinDirectory);
-		var shellProfileHint = isUserBinInPath ? null : ShellProfileHint;
+		var shellProfileHint = isUserBinInPath ? null : BuildUnixShellProfileHint();
+		var pathSetupCommand = isUserBinInPath ? null : BuildUnixPathSetupCommand();
 
 		if (string.IsNullOrWhiteSpace(targetPath))
 		{
@@ -493,7 +543,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				isUserBinInPath,
 				canInstall: true,
 				canRepair: false,
-				shellProfileHint);
+				shellProfileHint,
+				pathSetupCommand);
 		}
 
 		var installedTargetPath = ReadManagedWrapperTarget(commandPath);
@@ -518,8 +569,11 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		    isCurrentWrapper &&
 		    hasExecutableMode)
 		{
+			var installedState = isUserBinInPath
+				? TerminalCommandSetupState.Installed
+				: TerminalCommandSetupState.InstalledPathMissing;
 			return UnixSnapshot(
-				TerminalCommandSetupState.Installed,
+				installedState,
 				commandPath,
 				targetPath,
 				installedTargetPath,
@@ -527,7 +581,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				isUserBinInPath,
 				canInstall: false,
 				canRepair: false,
-				shellProfileHint);
+				shellProfileHint,
+				pathSetupCommand);
 		}
 
 		return UnixSnapshot(
@@ -566,7 +621,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		bool isUserBinInPath,
 		bool canInstall,
 		bool canRepair,
-		string? shellProfileHint) =>
+		string? shellProfileHint,
+		string? pathSetupCommand = null) =>
 		new(
 			CommandName: CommandLineExecutableAliases.UnixCommand,
 			State: state,
@@ -577,7 +633,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			UserBinDirectoryIsInPath: isUserBinInPath,
 			CanInstall: canInstall,
 			CanRepair: canRepair,
-			ShellProfileHint: shellProfileHint);
+			ShellProfileHint: shellProfileHint,
+			PathSetupCommand: pathSetupCommand);
 
 	private static TerminalCommandSetupSnapshot WindowsPortableSnapshot(
 		TerminalCommandSetupState state,
@@ -618,6 +675,11 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			Snapshot: failed,
 			ErrorMessage: message);
 	}
+
+	private static TerminalCommandPathSetupResult PathSetupFailed(
+		TerminalCommandSetupSnapshot snapshot,
+		string message) =>
+		new(false, snapshot, message);
 
 	private string? ReadManagedWrapperTarget(string commandPath)
 	{
@@ -1006,6 +1068,113 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			process?.Dispose();
 		}
 	}
+
+	private string BuildUnixShellProfileHint()
+	{
+		var profile = GetUnixShellName() switch
+		{
+			"bash" => "~/.bashrc",
+			"zsh" => "~/.zshrc",
+			"fish" => "the Fish user environment",
+			_ => "your shell profile"
+		};
+
+		return $"Add ~/.local/bin to PATH in {profile}, then open a new terminal.";
+	}
+
+	private string BuildUnixPathSetupCommand() => GetUnixShellName() switch
+	{
+		"fish" => FishPathSetupLine,
+		"bash" => BuildPosixProfileCommand("$HOME/.bashrc"),
+		"zsh" => BuildPosixProfileCommand("$HOME/.zshrc"),
+		_ => BuildPosixProfileCommand("$HOME/.profile")
+	};
+
+	private static string BuildPosixProfileCommand(string profilePath) =>
+		$"grep -qxF '{PosixPathSetupLine}' \"{profilePath}\" 2>/dev/null || " +
+		$"printf '\\n{PosixPathSetupLine}\\n' >> \"{profilePath}\"";
+
+	private UnixShellProfile ResolveUnixShellProfile(string home) => GetUnixShellName() switch
+	{
+		"bash" => new UnixShellProfile(Path.Combine(home, ".bashrc"), PosixPathSetupLine),
+		"zsh" => new UnixShellProfile(Path.Combine(home, ".zshrc"), PosixPathSetupLine),
+		"fish" => new UnixShellProfile(
+			Path.Combine(home, ".config", "fish", "config.fish"),
+			FishPathSetupLine),
+		_ => new UnixShellProfile(Path.Combine(home, ".profile"), PosixPathSetupLine)
+	};
+
+	private static void EnsureShellProfileContainsPathSetup(UnixShellProfile profile)
+	{
+		// Edit a fixed profile line directly: setup must not execute shell text or rewrite user content.
+		var directory = Path.GetDirectoryName(profile.Path);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		using var stream = new FileStream(
+			profile.Path,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.Read);
+		using var reader = new StreamReader(
+			stream,
+			Encoding.UTF8,
+			detectEncodingFromByteOrderMarks: true,
+			leaveOpen: true);
+		var content = reader.ReadToEnd();
+		if (ContainsProfileLine(content, profile.SetupLine))
+			return;
+
+		var prefix = content.Length > 0 && !content.EndsWith('\n') ? "\n" : string.Empty;
+		var marker = ContainsProfileLine(content, UnixPathMarker)
+			? string.Empty
+			: UnixPathMarker + "\n";
+		var addition = prefix + marker + profile.SetupLine + "\n";
+		var bytes = reader.CurrentEncoding.GetBytes(addition);
+
+		stream.Position = stream.Length;
+		stream.Write(bytes);
+		stream.Flush(flushToDisk: true);
+	}
+
+	private static bool ContainsProfileLine(string content, string expectedLine)
+	{
+		foreach (var line in content.Split('\n'))
+		{
+			if (string.Equals(line.Trim(), expectedLine, StringComparison.Ordinal))
+				return true;
+		}
+
+		return false;
+	}
+
+	private void EnsureCurrentProcessPathContains(string userBinDirectory)
+	{
+		// New terminals read the profile; updating this process lets the immediate probe converge too.
+		var currentPath = SafeGetPathVariable();
+		if (IsDirectoryInPathValue(userBinDirectory, currentPath))
+			return;
+
+		var separator = _options.PathListSeparator ?? ':';
+		var updatedPath = string.IsNullOrWhiteSpace(currentPath)
+			? userBinDirectory
+			: userBinDirectory + separator + currentPath;
+		_options.ProcessPathVariableWriter(updatedPath);
+	}
+
+	private string GetUnixShellName()
+	{
+		try
+		{
+			return Path.GetFileName(_options.ShellPathProvider())?.ToLowerInvariant() ?? string.Empty;
+		}
+		catch
+		{
+			return string.Empty;
+		}
+	}
+
+	private sealed record UnixShellProfile(string Path, string SetupLine);
 
 	private static ProcessStartInfo CreateLauncherValidationStartInfo(string commandPath)
 	{

@@ -33,6 +33,7 @@
                     Click="OnSetAcrylicMode" />
           <CheckBox x:Name="MicaEffectCheckBox"
                     Content="{Binding ThemeMicaLabel}"
+                    IsVisible="{Binding IsMicaAvailable}"
                     IsChecked="{Binding IsMicaEnabled, Mode=OneWay}"
                     Click="OnSetMicaMode" />
         </StackPanel>

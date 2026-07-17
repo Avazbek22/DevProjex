@@ -117,6 +117,32 @@ public sealed class TerminalCommandAutomaticPromptGateTests
 	}
 
 	[Fact]
+	public void ShouldShowAutomaticTerminalCommandPrompt_ShowsForInstalledUnixLauncherMissingFromPath()
+	{
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.InstalledPathMissing,
+			CommandPath: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: "/opt/DevProjex/DevProjex",
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: false,
+			CanInstall: false,
+			CanRepair: false,
+			ShellProfileHint: "Add ~/.local/bin to PATH.",
+			PathSetupCommand: "fish_add_path $HOME/.local/bin");
+
+		Assert.True(MainWindow.ShouldShowAutomaticTerminalCommandPrompt(
+			new AppViewSettings(),
+			snapshot,
+			startedWithProjectPath: false));
+		Assert.False(MainWindow.ShouldShowAutomaticTerminalCommandPrompt(
+			new AppViewSettings { IsTerminalCommandPromptDismissed = true },
+			snapshot,
+			startedWithProjectPath: false));
+	}
+
+	[Fact]
 	public void ResolveAutomaticTerminalCommandStartupAction_DoesNotRepairStaleTestHost()
 	{
 		var snapshot = new TerminalCommandSetupSnapshot(
