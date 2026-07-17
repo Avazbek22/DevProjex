@@ -290,9 +290,10 @@ public sealed record IgnoreRules(
 			fullPath,
 			isDirectory: true,
 			useCandidates: false);
-		// Only profiles explicitly marked portable may cross project-scope boundaries.
-		// Existing stack-adjacent fingerprints such as obj/bin stay scoped, preserving
-		// sibling visibility in mixed workspaces.
+		// Hybrid contract: stack descriptors and stack-adjacent fingerprints remain inside
+		// their discovered project scope. Only signature-confirmed portable dependency
+		// stores may cross that boundary, so user-level package caches are removed without
+		// treating ordinary sibling folders named bin, obj, packages, or build as artifacts.
 		if (IsSmartArtifactIgnoredDirectory(
 				SmartArtifactIgnoreMatcher,
 				fullPath,

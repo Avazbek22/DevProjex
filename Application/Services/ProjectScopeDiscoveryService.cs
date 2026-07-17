@@ -412,6 +412,8 @@ public sealed class ProjectScopeDiscoveryService(
 
 		if (hasExplicitRootSelection)
 		{
+			// A marked opened root still owns its selected child folders. Dropping the root
+			// scope here disables its stack rules whenever the UI supplies explicit roots.
 			var rootLooksLikeProject = rootHasGitIgnore || rootHasProjectMarker;
 			var selectedScopes = new List<ProjectScope>(expandedCandidates.Length + (rootLooksLikeProject ? 1 : 0));
 			if (rootLooksLikeProject)
@@ -892,6 +894,8 @@ public sealed record ProjectScanContext(
 				break;
 		}
 
+		// "Single" is deliberately literal. If any sibling scope exists, Git Ignore and
+		// Smart Ignore must remain independent even when every discovered scope has .gitignore.
 		var isSingleScopeWithGitIgnore = scopesArray.Length == 1 && scopesArray[0].HasGitIgnore;
 
 		return new ProjectScanContext(

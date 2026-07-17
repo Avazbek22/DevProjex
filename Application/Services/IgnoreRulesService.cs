@@ -75,6 +75,8 @@ public sealed class IgnoreRulesService(
 		// - In a single .gitignore scope, Smart Ignore is intentionally hidden and follows
 		//   Use .gitignore. Users get one practical "respect project ignore policy" switch
 		//   instead of two overlapping switches that hide the same build output.
+		// This is a product contract, not a UI shortcut. Replacing it with a uniform
+		// "selected Smart Ignore only" rule breaks cloned repositories and changes their tree.
 		var smartIgnoreFollowsGitIgnore = !availability.IncludeSmartIgnore &&
 		                                  context.IsSingleScopeWithGitIgnore;
 		var useSmartIgnore = availability.IncludeSmartIgnore
@@ -238,6 +240,9 @@ public sealed class IgnoreRulesService(
 
 	private ScopedSmartIgnoreBuildResult BuildScopedSmartIgnore(ProjectScanContext context)
 	{
+		// Merged name sets are only fast candidate indexes. Scoped matchers remain the
+		// authority for ownership; matching the merged names globally leaks one stack's
+		// artifacts into sibling projects that merely reuse the same folder name.
 		var mergeSync = new object();
 		var folderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var fileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
