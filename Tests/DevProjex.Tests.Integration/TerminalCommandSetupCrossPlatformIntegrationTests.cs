@@ -95,7 +95,8 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 			ProcessPathVariableWriter = value => processPath = value,
 			ShellPathProvider = () => "/bin/bash",
 			ExecutablePathProvider = () => target,
-			PathListSeparator = ':'
+			// The journey simulates Unix behavior over real host paths on every CI operating system.
+			PathListSeparator = Path.PathSeparator
 		});
 
 		var before = service.Probe();

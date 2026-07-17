@@ -1618,7 +1618,8 @@ public sealed class TerminalCommandSetupServiceTests
 			ProcessPathVariableWriter = pathWriter,
 			ShellPathProvider = () => shellPath,
 			ExecutablePathProvider = () => executablePath,
-			PathListSeparator = ':'
+			// The simulation uses real host paths, so their list separator must match the host filesystem.
+			PathListSeparator = Path.PathSeparator
 		});
 	}
 
