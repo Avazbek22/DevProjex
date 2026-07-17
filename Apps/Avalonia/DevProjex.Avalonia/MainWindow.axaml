@@ -395,6 +395,11 @@
                      Fill="{DynamicResource DropZoneInnerBrush}"
                      Margin="1" />
 
+          <Rectangle RadiusX="20" RadiusY="20"
+                     Fill="#000000"
+                     Opacity="{Binding DropZoneShadeOpacity}"
+                     Margin="1" />
+
           <!-- Content -->
           <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,1.7*"
                 Margin="40">

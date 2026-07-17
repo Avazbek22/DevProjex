@@ -427,6 +427,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _isDarkTheme = value;
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(IsLightTheme));
+            RaisePropertyChanged(nameof(DropZoneShadeOpacity));
         }
     }
 
@@ -672,6 +673,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? ThemeEffectMode.Acrylic
                 : ThemeEffectMode.Transparent;
 
+    public double DropZoneShadeOpacity =>
+        !_isDarkTheme && ActiveThemeEffect is ThemeEffectMode.Solid or ThemeEffectMode.Mica
+            ? 0.06
+            : 0.15;
+
     public bool ShowBackgroundTransparencySlider => _isTransparentEnabled || _isAcrylicEnabled;
 
     private void RaiseEffectPropertiesChanged()
@@ -681,6 +687,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(IsTransparentEnabled));
         RaisePropertyChanged(nameof(HasAnyEffect));
         RaisePropertyChanged(nameof(ActiveThemeEffect));
+        RaisePropertyChanged(nameof(DropZoneShadeOpacity));
         RaisePropertyChanged(nameof(ShowBackgroundTransparencySlider));
     }
 

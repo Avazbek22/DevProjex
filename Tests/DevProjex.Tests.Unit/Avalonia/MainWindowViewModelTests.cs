@@ -1034,6 +1034,47 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(expected, viewModel.ActiveThemeEffect);
     }
 
+    [Theory]
+    [InlineData(false, ThemeEffectMode.Solid, 0.06)]
+    [InlineData(false, ThemeEffectMode.Mica, 0.06)]
+    [InlineData(false, ThemeEffectMode.Transparent, 0.15)]
+    [InlineData(false, ThemeEffectMode.Acrylic, 0.15)]
+    [InlineData(true, ThemeEffectMode.Solid, 0.15)]
+    [InlineData(true, ThemeEffectMode.Mica, 0.15)]
+    [InlineData(true, ThemeEffectMode.Transparent, 0.15)]
+    [InlineData(true, ThemeEffectMode.Acrylic, 0.15)]
+    public void DropZoneShadeOpacity_AdaptsToThemeSurface(
+        bool isDark,
+        ThemeEffectMode effect,
+        double expectedOpacity)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsDarkTheme = isDark;
+        viewModel.SetThemeEffects(
+            transparent: effect == ThemeEffectMode.Transparent,
+            mica: effect == ThemeEffectMode.Mica,
+            acrylic: effect == ThemeEffectMode.Acrylic);
+
+        Assert.Equal(expectedOpacity, viewModel.DropZoneShadeOpacity);
+    }
+
+    [Fact]
+    public void DropZoneShadeOpacity_NotifiesWhenThemeOrEffectChanges()
+    {
+        var viewModel = CreateViewModel();
+        var notifications = 0;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.DropZoneShadeOpacity))
+                notifications++;
+        };
+
+        viewModel.IsDarkTheme = false;
+        viewModel.SetThemeEffects(transparent: false, mica: true, acrylic: false);
+
+        Assert.Equal(2, notifications);
+    }
+
     [Fact]
     public void HasAnyEffect_TrueWhenAnyEffectEnabled()
     {
