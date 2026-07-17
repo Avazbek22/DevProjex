@@ -41,7 +41,9 @@ public static class ProjectTreeInventoryRootFolderProjection
                 rootEntryIndexes[child.Name] = childIndex;
         }
 
-        var gitIgnoreContext = rules.CreateGitIgnoreScanContext(inventoryRoot.FullPath);
+        var gitIgnoreContext = rules.CreateGitIgnoreScanContext(
+            inventoryRoot.FullPath,
+            inventory.DiscoveredGitIgnoreMatchers);
         var pendingDirectories = new Stack<int>();
         List<SelectionOption>? projectedOptions = null;
         HashSet<string>? emptyFolderOwnedRoots = null;
@@ -104,7 +106,7 @@ public static class ProjectTreeInventoryRootFolderProjection
             cancellationToken.ThrowIfCancellationRequested();
             var directoryIndex = pendingDirectories.Pop();
             ref readonly var directory = ref inventory.GetEntryRef(directoryIndex);
-            var gitIgnore = rules.UseGitIgnore
+            var gitIgnore = rules.IsGitIgnoreTraversalEnabled
                 ? gitIgnoreContext.Evaluate(
                     directory.FullPath,
                     directory.RelativePath,
@@ -143,7 +145,7 @@ public static class ProjectTreeInventoryRootFolderProjection
                     continue;
                 }
 
-                var fileGitIgnore = rules.UseGitIgnore
+                var fileGitIgnore = rules.IsGitIgnoreTraversalEnabled
                     ? gitIgnoreContext.Evaluate(
                         child.FullPath,
                         child.RelativePath,

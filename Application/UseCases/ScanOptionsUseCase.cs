@@ -78,6 +78,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 
 		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var ignoreCounts = IgnoreOptionCounts.Empty;
+		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
 		var mergeLock = new object();
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
@@ -91,6 +92,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 			foreach (var ext in rootFiles.Value.Extensions)
 				extensions.Add(ext);
 			ignoreCounts = ignoreCounts.Add(rootFiles.Value.IgnoreOptionCounts);
+			controllerImpactCounts = controllerImpactCounts.Add(rootFiles.Value.ControllerImpactCounts);
 
 			if (rootFiles.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootFiles.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
@@ -116,6 +118,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 							localAccumulator.Extensions.Add(ext);
 						localAccumulator.IgnoreOptionCounts =
 							localAccumulator.IgnoreOptionCounts.Add(result.Value.IgnoreOptionCounts);
+						localAccumulator.ControllerImpactCounts =
+							localAccumulator.ControllerImpactCounts.Add(result.Value.ControllerImpactCounts);
 
 						if (result.RootAccessDenied) Interlocked.Exchange(ref rootAccessDenied, 1);
 						if (result.HadAccessDenied) Interlocked.Exchange(ref hadAccessDenied, 1);
@@ -125,13 +129,15 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 					localAccumulator =>
 					{
 						if (localAccumulator.Extensions.Count == 0 &&
-						    localAccumulator.IgnoreOptionCounts == IgnoreOptionCounts.Empty)
+						    localAccumulator.IgnoreOptionCounts == IgnoreOptionCounts.Empty &&
+						    localAccumulator.ControllerImpactCounts == IgnoreControllerImpactCounts.Empty)
 							return;
 
 						lock (mergeLock)
 						{
 							extensions.UnionWith(localAccumulator.Extensions);
 							ignoreCounts = ignoreCounts.Add(localAccumulator.IgnoreOptionCounts);
+							controllerImpactCounts = controllerImpactCounts.Add(localAccumulator.ControllerImpactCounts);
 						}
 					});
 			}
@@ -184,7 +190,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		}
 
 		return new ScanResult<ExtensionsScanData>(
-			new ExtensionsScanData(extensions, ignoreCounts),
+			new ExtensionsScanData(extensions, ignoreCounts, controllerImpactCounts),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1);
 	}
@@ -824,6 +830,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 	{
 		public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
 		public IgnoreOptionCounts IgnoreOptionCounts { get; set; } = IgnoreOptionCounts.Empty;
+		public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
 	}
 
 	private sealed class LocalIgnoreSectionSnapshotAccumulator
@@ -1003,7 +1010,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		if (rules.IsSmartIgnoredDirectory(directoryPath, name))
 			return true;
 
-		if (!rules.UseGitIgnore)
+		if (!rules.IsGitIgnoreTraversalEnabled)
 			return false;
 
 		var gitIgnore = rules.EvaluateGitIgnore(directoryPath, isDirectory: true, name);

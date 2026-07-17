@@ -29,6 +29,17 @@ public sealed class GitIgnoreMatcher
 
     public bool HasNegationRules => _hasNegationRules;
 
+    public bool IsRootPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || _normalizedRootPath.Length == 0)
+            return false;
+
+        return string.Equals(
+            NormalizePath(path).TrimEnd('/'),
+            _normalizedRootPath,
+            _pathComparison);
+    }
+
     public readonly record struct IgnoreEvaluation(bool HasMatch, bool IsIgnored);
 
     public static GitIgnoreMatcher Build(string rootPath, IEnumerable<string> lines)
@@ -136,9 +147,20 @@ public sealed class GitIgnoreMatcher
         return EvaluateRelativeCore(NormalizeRelativePath(relativePath), isDirectory, name);
     }
 
-    private IgnoreEvaluation EvaluateRelativeCore(string relativePath, bool isDirectory, string name)
+    internal IgnoreEvaluation EvaluateRelativeNormalized(
+        ReadOnlySpan<char> relativePath,
+        bool isDirectory,
+        string name)
     {
-        var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath) : name;
+        if (_rules.Count == 0 || relativePath.IsWhiteSpace())
+            return default;
+
+        return EvaluateRelativeCore(relativePath, isDirectory, name);
+    }
+
+    private IgnoreEvaluation EvaluateRelativeCore(ReadOnlySpan<char> relativePath, bool isDirectory, string name)
+    {
+        var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath).ToString() : name;
         var ignored = false;
         var hasMatch = false;
 
@@ -157,7 +179,12 @@ public sealed class GitIgnoreMatcher
         // Skip this optimization if there are negation rules - they might un-ignore specific files
         if (!ignored && isDirectory && !HasNegationRules)
         {
-            var testChildPath = relativePath + "/_";
+            Span<char> testChildPath = relativePath.Length <= 510
+                ? stackalloc char[relativePath.Length + 2]
+                : new char[relativePath.Length + 2];
+            relativePath.CopyTo(testChildPath);
+            testChildPath[^2] = '/';
+            testChildPath[^1] = '_';
             foreach (var rule in _rules)
             {
                 if (rule.DirectoryOnly || rule.MatchByNameOnly)
@@ -199,7 +226,14 @@ public sealed class GitIgnoreMatcher
         return ShouldTraverseIgnoredDirectoryRelativeCore(NormalizeRelativePath(relativePath), name);
     }
 
-    private bool ShouldTraverseIgnoredDirectoryRelativeCore(string relativePath, string name)
+    internal bool ShouldTraverseIgnoredDirectoryRelativeNormalized(ReadOnlySpan<char> relativePath, string name)
+    {
+        return HasNegationRules &&
+               !relativePath.IsWhiteSpace() &&
+               ShouldTraverseIgnoredDirectoryRelativeCore(relativePath, name);
+    }
+
+    private bool ShouldTraverseIgnoredDirectoryRelativeCore(ReadOnlySpan<char> relativePath, string name)
     {
         // If the directory itself is ignored by an explicit directory rule (e.g. "bin/"),
         // name-only negation (e.g. "!Directory.Build.rsp") cannot re-include descendants
@@ -225,26 +259,27 @@ public sealed class GitIgnoreMatcher
             if (rule.StaticPrefix.Length == 0)
                 return true;
 
-            var rulePrefixWithSlash = $"{rule.StaticPrefix}/";
-            var relativeWithSlash = $"{relativePath}/";
-
             // Negation target is inside this directory
-            if (rulePrefixWithSlash.StartsWith(relativeWithSlash, _pathComparison))
+            if (rule.StaticPrefix.Length > relativePath.Length &&
+                rule.StaticPrefix[relativePath.Length] == '/' &&
+                rule.StaticPrefix.AsSpan(0, relativePath.Length).Equals(relativePath, _pathComparison))
                 return true;
 
             // This directory is inside the negation target path
-            if (relativeWithSlash.StartsWith(rulePrefixWithSlash, _pathComparison))
+            if (relativePath.Length > rule.StaticPrefix.Length &&
+                relativePath[rule.StaticPrefix.Length] == '/' &&
+                relativePath[..rule.StaticPrefix.Length].Equals(rule.StaticPrefix.AsSpan(), _pathComparison))
                 return true;
 
             // Exact match
-            if (string.Equals(rule.StaticPrefix, relativePath, _pathComparison))
+            if (relativePath.Equals(rule.StaticPrefix.AsSpan(), _pathComparison))
                 return true;
         }
 
         return false;
     }
 
-    private bool IsIgnoredByDirectoryRule(string relativePath, string name)
+    private bool IsIgnoredByDirectoryRule(ReadOnlySpan<char> relativePath, string name)
     {
         foreach (var rule in _rules)
         {
@@ -448,49 +483,58 @@ public sealed class GitIgnoreMatcher
         string StaticPrefix)
     {
         public bool IsMatch(
-            string relativePath,
+            ReadOnlySpan<char> relativePath,
             string normalizedName,
             bool isDirectory,
             StringComparison comparison) =>
             MatchKind switch
             {
                 RuleMatchKind.NameLiteral => string.Equals(normalizedName, LiteralPattern, comparison),
-                RuleMatchKind.AnchoredPathLiteral => string.Equals(relativePath, LiteralPattern, comparison),
+                RuleMatchKind.AnchoredPathLiteral => relativePath.Equals(LiteralPattern.AsSpan(), comparison),
                 RuleMatchKind.UnanchoredPathLiteral => MatchesUnanchoredPathLiteral(relativePath, LiteralPattern, comparison),
                 RuleMatchKind.AnchoredDirectoryLiteral => MatchesAnchoredDirectoryLiteral(relativePath, LiteralPattern, isDirectory, comparison),
                 RuleMatchKind.UnanchoredDirectoryLiteral => MatchesUnanchoredDirectoryLiteral(relativePath, LiteralPattern, isDirectory, comparison),
-                _ => Pattern!.IsMatch(GetRegexTarget(relativePath, normalizedName, isDirectory))
+                _ => MatchesRegex(relativePath, normalizedName, isDirectory)
             };
 
-        private string GetRegexTarget(string relativePath, string normalizedName, bool isDirectory) =>
-            MatchByNameOnly
-                ? normalizedName
-                : DirectoryOnly && isDirectory
-                    ? relativePath + "/"
-                    : relativePath;
+        private bool MatchesRegex(ReadOnlySpan<char> relativePath, string normalizedName, bool isDirectory)
+        {
+            if (MatchByNameOnly)
+                return Pattern!.IsMatch(normalizedName);
+
+            if (!DirectoryOnly || !isDirectory)
+                return Pattern!.IsMatch(relativePath);
+
+            Span<char> directoryPath = relativePath.Length <= 511
+                ? stackalloc char[relativePath.Length + 1]
+                : new char[relativePath.Length + 1];
+            relativePath.CopyTo(directoryPath);
+            directoryPath[^1] = '/';
+            return Pattern!.IsMatch(directoryPath);
+        }
 
         private static bool MatchesUnanchoredPathLiteral(
-            string relativePath,
+            ReadOnlySpan<char> relativePath,
             string literalPattern,
             StringComparison comparison) =>
-            string.Equals(relativePath, literalPattern, comparison) ||
+            relativePath.Equals(literalPattern.AsSpan(), comparison) ||
             HasPathSegmentSuffix(relativePath, literalPattern, comparison);
 
         private static bool MatchesAnchoredDirectoryLiteral(
-            string relativePath,
+            ReadOnlySpan<char> relativePath,
             string literalPattern,
             bool isDirectory,
             StringComparison comparison) =>
-            isDirectory && string.Equals(relativePath, literalPattern, comparison) ||
+            isDirectory && relativePath.Equals(literalPattern.AsSpan(), comparison) ||
             StartsWithDirectorySegment(relativePath, literalPattern, comparison);
 
         private static bool MatchesUnanchoredDirectoryLiteral(
-            string relativePath,
+            ReadOnlySpan<char> relativePath,
             string literalPattern,
             bool isDirectory,
             StringComparison comparison)
         {
-            if (string.Equals(relativePath, literalPattern, comparison) ||
+            if (relativePath.Equals(literalPattern.AsSpan(), comparison) ||
                 HasPathSegmentSuffix(relativePath, literalPattern, comparison))
             {
                 return isDirectory;
@@ -503,7 +547,7 @@ public sealed class GitIgnoreMatcher
         }
 
         private static bool HasPathSegmentSuffix(
-            string relativePath,
+            ReadOnlySpan<char> relativePath,
             string literalPattern,
             StringComparison comparison)
         {
@@ -512,30 +556,31 @@ public sealed class GitIgnoreMatcher
 
             var start = relativePath.Length - literalPattern.Length;
             return relativePath[start - 1] == '/' &&
-                   relativePath.AsSpan(start).Equals(literalPattern.AsSpan(), comparison);
+                   relativePath[start..].Equals(literalPattern.AsSpan(), comparison);
         }
 
         private static bool StartsWithDirectorySegment(
-            string relativePath,
+            ReadOnlySpan<char> relativePath,
             string literalPattern,
             StringComparison comparison)
         {
             return relativePath.Length > literalPattern.Length &&
                    relativePath[literalPattern.Length] == '/' &&
-                   relativePath.AsSpan(0, literalPattern.Length).Equals(literalPattern.AsSpan(), comparison);
+                   relativePath[..literalPattern.Length].Equals(literalPattern.AsSpan(), comparison);
         }
 
         private static bool ContainsDirectorySegment(
-            string relativePath,
+            ReadOnlySpan<char> relativePath,
             string literalPattern,
             StringComparison comparison)
         {
             var searchStart = 0;
             while (searchStart < relativePath.Length)
             {
-                var index = relativePath.IndexOf(literalPattern, searchStart, comparison);
-                if (index < 0)
+                var localIndex = relativePath[searchStart..].IndexOf(literalPattern.AsSpan(), comparison);
+                if (localIndex < 0)
                     return false;
+                var index = searchStart + localIndex;
 
                 var hasLeadingSeparator = index > 0 && relativePath[index - 1] == '/';
                 var nextIndex = index + literalPattern.Length;

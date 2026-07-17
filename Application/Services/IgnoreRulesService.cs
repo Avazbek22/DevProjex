@@ -66,8 +66,10 @@ public sealed class IgnoreRulesService(
 	{
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
 		var availability = BuildRuntimeIgnoreOptionsAvailability(context);
-		var requestedGitIgnore = availability.IncludeGitIgnore &&
-								 selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
+		// A nested .gitignore can be discovered by the scanner after bounded project-scope
+		// discovery has completed. An explicit/default selection must therefore activate the
+		// traversal controller even when no prebuilt scope matcher exists yet.
+		var requestedGitIgnore = selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 
 		// Hybrid ignore has two controller modes:
 		// - In mixed workspaces, .gitignore and Smart Ignore are independent because some
@@ -142,6 +144,7 @@ public sealed class IgnoreRulesService(
 			IgnoreEmptyFiles = selectedOptions.Contains(IgnoreOptionId.EmptyFiles),
 			IgnoreExtensionlessFiles = selectedOptions.Contains(IgnoreOptionId.ExtensionlessFiles),
 			UseGitIgnore = useGitIgnore,
+			EnableGitIgnoreTraversal = requestedGitIgnore,
 			UseSmartIgnore = useSmartIgnore,
 			GitIgnoreCandidateMatchesActiveRules = useGitIgnore,
 			SmartIgnoreCandidateMatchesActiveRules = useSmartIgnore,
