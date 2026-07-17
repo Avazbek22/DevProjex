@@ -231,7 +231,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("build/keep.txt", "keep");
 		temp.CreateFile("build/drop.log", "drop");
 
-		var matcher = GitIgnoreMatcher.Build(temp.Path, ["build/", "!build/keep.txt"]);
+		var matcher = GitIgnoreMatcher.Build(temp.Path, ["build/*", "!build/keep.txt"]);
 		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>())
 		{
 			UseGitIgnore = true,

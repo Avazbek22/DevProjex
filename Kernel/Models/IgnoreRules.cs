@@ -234,6 +234,7 @@ public sealed record IgnoreRules(
 		var hasMatch = false;
 		var ignored = false;
 		var hasNegationAwareScope = false;
+		var reIncludedIgnoredPath = false;
 
 		foreach (var scoped in scopedMatchers)
 		{
@@ -245,13 +246,23 @@ public sealed record IgnoreRules(
 				continue;
 
 			hasMatch = true;
+			if (ignored && !evaluation.IsIgnored)
+				reIncludedIgnoredPath = true;
 			ignored = evaluation.IsIgnored;
 		}
 
-		if (!hasMatch || !ignored)
+		if (!hasMatch)
 			return GitIgnoreEvaluation.NotIgnored;
+		if (!ignored)
+		{
+			return reIncludedIgnoredPath && HasExplicitlyIgnoredAncestor(fullPath, scopedMatchers)
+				? new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false)
+				: GitIgnoreEvaluation.NotIgnored;
+		}
 
 		if (!isDirectory || !hasNegationAwareScope)
+			return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
+		if (EvaluateRulesOnlyAcrossScopes(scopedMatchers, fullPath, isDirectory: true, name).IsIgnored)
 			return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 
 		foreach (var scoped in scopedMatchers)
@@ -261,6 +272,60 @@ public sealed record IgnoreRules(
 		}
 
 		return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
+	}
+
+	private GitIgnoreMatcher.IgnoreEvaluation EvaluateGitIgnoreRulesOnly(
+		string fullPath,
+		bool isDirectory,
+		string name,
+		bool useCandidates)
+	{
+		var scopedMatchers = GetScopedGitIgnoreMatchers(useCandidates);
+		if (scopedMatchers.Count == 0)
+			return GetGitIgnoreMatcher(useCandidates).EvaluateRulesOnly(fullPath, isDirectory, name);
+
+		return EvaluateRulesOnlyAcrossScopes(
+			GetApplicableGitIgnoreMatchers(fullPath, isDirectory, useCandidates),
+			fullPath,
+			isDirectory,
+			name);
+	}
+
+	private static GitIgnoreMatcher.IgnoreEvaluation EvaluateRulesOnlyAcrossScopes(
+		IReadOnlyList<ScopedGitIgnoreMatcher> scopedMatchers,
+		string fullPath,
+		bool isDirectory,
+		string name)
+	{
+		var hasMatch = false;
+		var ignored = false;
+		foreach (var scoped in scopedMatchers)
+		{
+			var evaluation = scoped.Matcher.EvaluateRulesOnly(fullPath, isDirectory, name);
+			if (!evaluation.HasMatch)
+				continue;
+
+			hasMatch = true;
+			ignored = evaluation.IsIgnored;
+		}
+
+		return new GitIgnoreMatcher.IgnoreEvaluation(hasMatch, ignored);
+	}
+
+	private static bool HasExplicitlyIgnoredAncestor(
+		string fullPath,
+		IReadOnlyList<ScopedGitIgnoreMatcher> scopedMatchers)
+	{
+		for (var parent = Path.GetDirectoryName(fullPath);
+		     !string.IsNullOrWhiteSpace(parent);
+		     parent = Path.GetDirectoryName(parent))
+		{
+			var name = Path.GetFileName(parent);
+			if (EvaluateRulesOnlyAcrossScopes(scopedMatchers, parent, isDirectory: true, name).IsIgnored)
+				return true;
+		}
+
+		return false;
 	}
 
 	public bool IsGitIgnored(string fullPath, bool isDirectory, string name)
@@ -721,10 +786,25 @@ public sealed record IgnoreRules(
 						name);
 			}
 
+			var reIncludedIgnoredPath = false;
 			if (_additionalScopes is not null)
-				evaluation = _additionalScopes.Evaluate(relativePath, isDirectory, name, evaluation);
+			{
+				evaluation = _additionalScopes.Evaluate(
+					relativePath,
+					isDirectory,
+					name,
+					evaluation,
+					out reIncludedIgnoredPath);
+			}
+
+			if (!evaluation.IsIgnored && reIncludedIgnoredPath &&
+			    HasExplicitlyIgnoredAncestor(fullPath, relativePath))
+			{
+				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
+			}
 
 			if (isDirectory && evaluation.IsIgnored && !evaluation.ShouldTraverseIgnoredDirectory &&
+			    !EvaluateRulesOnly(fullPath, relativePath, isDirectory: true, name).IsIgnored &&
 			    (_rules.HasGitIgnoreTraversalCandidate(fullPath, name, _useCandidates) ||
 			     _additionalScopes?.HasTraversalCandidate(relativePath, name) == true))
 			{
@@ -732,6 +812,61 @@ public sealed record IgnoreRules(
 			}
 
 			return evaluation;
+		}
+
+		private GitIgnoreMatcher.IgnoreEvaluation EvaluateRulesOnly(
+			string fullPath,
+			string relativePath,
+			bool isDirectory,
+			string name)
+		{
+			GitIgnoreMatcher.IgnoreEvaluation evaluation;
+			if (_relativeMatcher is null)
+			{
+				evaluation = _evaluateRulesFallback
+					? _rules.EvaluateGitIgnoreRulesOnly(fullPath, isDirectory, name, _useCandidates)
+					: default;
+			}
+			else
+			{
+				var matcherRelativePath = BuildMatcherRelativePath(relativePath);
+				evaluation = matcherRelativePath.Length == 0
+					? default
+					: _relativeMatcher.EvaluateRelativeRulesOnlyNormalized(
+						matcherRelativePath.AsSpan(),
+						isDirectory,
+						name);
+			}
+
+			return _additionalScopes?.EvaluateRulesOnly(relativePath, isDirectory, name, evaluation) ?? evaluation;
+		}
+
+		private bool HasExplicitlyIgnoredAncestor(string fullPath, string relativePath)
+		{
+			var ancestorFullPath = fullPath;
+			var ancestorRelativePath = relativePath;
+			while (true)
+			{
+				var separatorIndex = ancestorRelativePath.LastIndexOf('/');
+				if (separatorIndex < 0)
+					return false;
+
+				ancestorRelativePath = ancestorRelativePath[..separatorIndex];
+				ancestorFullPath = Path.GetDirectoryName(ancestorFullPath) ?? string.Empty;
+				if (ancestorFullPath.Length == 0)
+					return false;
+
+				var ancestorName = Path.GetFileName(ancestorFullPath);
+				if (EvaluateRulesOnly(
+					    ancestorFullPath,
+					    ancestorRelativePath,
+					    isDirectory: true,
+					    ancestorName)
+				    .IsIgnored)
+				{
+					return true;
+				}
+			}
 		}
 
 		private string BuildMatcherRelativePath(string scanRelativePath)
@@ -776,9 +911,20 @@ public sealed record IgnoreRules(
 				string scanRelativePath,
 				bool isDirectory,
 				string name,
-				GitIgnoreEvaluation inherited)
+				GitIgnoreEvaluation inherited,
+				out bool reIncludedIgnoredPath)
 			{
-				var evaluation = _parent?.Evaluate(scanRelativePath, isDirectory, name, inherited) ?? inherited;
+				var evaluation = inherited;
+				reIncludedIgnoredPath = false;
+				if (_parent is not null)
+			{
+					evaluation = _parent.Evaluate(
+						scanRelativePath,
+						isDirectory,
+						name,
+						inherited,
+						out reIncludedIgnoredPath);
+				}
 				if (!TryGetMatcherRelativePath(scanRelativePath, out var matcherRelativePath))
 					return evaluation;
 
@@ -788,12 +934,35 @@ public sealed record IgnoreRules(
 					name);
 				if (local.HasMatch)
 				{
+					if (evaluation.IsIgnored && !local.IsIgnored)
+						reIncludedIgnoredPath = true;
 					evaluation = local.IsIgnored
 						? new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false)
 						: GitIgnoreEvaluation.NotIgnored;
 				}
 
 				return evaluation;
+			}
+
+			public GitIgnoreMatcher.IgnoreEvaluation EvaluateRulesOnly(
+				string scanRelativePath,
+				bool isDirectory,
+				string name,
+				GitIgnoreMatcher.IgnoreEvaluation inherited)
+			{
+				var evaluation = _parent?.EvaluateRulesOnly(
+					scanRelativePath,
+					isDirectory,
+					name,
+					inherited) ?? inherited;
+				if (!TryGetMatcherRelativePath(scanRelativePath, out var matcherRelativePath))
+					return evaluation;
+
+				var local = _scopedMatcher.Matcher.EvaluateRelativeRulesOnlyNormalized(
+					matcherRelativePath,
+					isDirectory,
+					name);
+				return local.HasMatch ? local : evaluation;
 			}
 
 			public bool HasTraversalCandidate(string scanRelativePath, string name)

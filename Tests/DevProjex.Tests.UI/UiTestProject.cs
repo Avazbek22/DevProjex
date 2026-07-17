@@ -229,6 +229,29 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithHierarchicalGitIgnoreCombatWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("repo", ".gitignore"), "*.rootdrop\n!keep.rootdrop\n[unterminated\n");
+            WriteFile(rootPath, Path.Combine("repo", "drop.rootdrop"), "ROOT-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "keep.rootdrop"), "ROOT-KEEP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", ".gitignore"), "!module-keep.rootdrop\n*.moddrop\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "module-keep.rootdrop"), "MODULE-KEEP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "drop.moddrop"), "MODULE-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", ".gitignore"), "!rescue.moddrop\n*.deepdrop\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "rescue.moddrop"), "CHILD-RESCUE-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "drop.deepdrop"), "CHILD-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "grand", ".gitignore"), "!visible.deepdrop\n*.lastdrop\ninvalid\\\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "grand", "visible.deepdrop"), "GRAND-KEEP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "grand", "drop.lastdrop"), "GRAND-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "grand", "invalid", "visible.txt"), "MALFORMED-RULE-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "sibling", ".gitignore"), "*.siblingdrop\n");
+            WriteFile(rootPath, Path.Combine("repo", "sibling", "drop.siblingdrop"), "SIBLING-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "outside", "visible.siblingdrop"), "SIBLING-ISOLATION-SENTINEL\n");
+        });
+    }
+
     public static UiTestProject CreateWithRootExtensionIgnoreStressWorkspace()
     {
         return Create(static rootPath =>

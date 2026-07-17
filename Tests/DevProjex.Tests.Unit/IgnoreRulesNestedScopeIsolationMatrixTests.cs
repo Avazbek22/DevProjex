@@ -5,13 +5,13 @@ public sealed class IgnoreRulesNestedScopeIsolationMatrixTests
 	public static IEnumerable<object[]> ComplexHierarchyCases()
 	{
 		yield return [ "root-target-hidden", "workspace/web-app/target", true, true ];
-		yield return [ "web-target-unignored-by-child", "workspace/web-app/target/web-keep", true, false ];
-		yield return [ "web-target-child-file-unignored", "workspace/web-app/target/web-keep/app.dll", false, false ];
+		yield return [ "web-target-child-negation-cannot-bypass-parent", "workspace/web-app/target/web-keep", true, true ];
+		yield return [ "web-target-child-file-stays-hidden", "workspace/web-app/target/web-keep/app.dll", false, true ];
 		yield return [ "sibling-target-stays-hidden", "workspace/service-dotnet/target", true, true ];
 		yield return [ "root-tmp-hidden", "workspace/web-app/src/random.tmp", false, true ];
 		yield return [ "root-name-negation-unhides", "workspace/web-app/src/global.keep.tmp", false, false ];
 		yield return [ "web-generated-hidden", "workspace/web-app/generated", true, true ];
-		yield return [ "web-generated-keep-unhidden", "workspace/web-app/generated/keep.txt", false, false ];
+		yield return [ "web-generated-keep-stays-hidden-with-parent", "workspace/web-app/generated/keep.txt", false, true ];
 		yield return [ "sibling-generated-not-affected", "workspace/service-dotnet/generated", true, false ];
 		yield return [ "web-cache-hidden", "workspace/web-app/src/hot.cache", false, true ];
 		yield return [ "web-cache-unhidden-by-negation", "workspace/web-app/src/web.cache", false, false ];

@@ -356,6 +356,46 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		Assert.DoesNotContain("bundle.js", gitAndSmart.Stdout, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_TreeContentHonorsEveryNestedGitIgnoreScope()
+	{
+		using var temp = new TemporaryDirectory();
+		SeedHierarchicalGitIgnoreWorkspace(temp);
+
+		var result = await RunAutomationAsync(
+			temp.Path,
+			CommandLineOptionTokens.Export,
+			"tree-content",
+			CommandLineOptionTokens.Ignore,
+			CommandLineOptionTokens.IgnoreGitIgnore);
+
+		AssertCommandSucceeded(result);
+		foreach (var visibleSentinel in new[]
+		         {
+			         "ROOT-KEEP-SENTINEL",
+			         "MODULE-KEEP-SENTINEL",
+			         "CHILD-RESCUE-SENTINEL",
+			         "GRAND-KEEP-SENTINEL",
+			         "MALFORMED-RULE-SENTINEL",
+			         "SIBLING-ISOLATION-SENTINEL"
+		         })
+		{
+			Assert.Contains(visibleSentinel, result.Stdout, StringComparison.Ordinal);
+		}
+
+		foreach (var ignoredSentinel in new[]
+		         {
+			         "ROOT-DROP-SENTINEL",
+			         "MODULE-DROP-SENTINEL",
+			         "CHILD-DROP-SENTINEL",
+			         "GRAND-DROP-SENTINEL",
+			         "SIBLING-DROP-SENTINEL"
+		         })
+		{
+			Assert.DoesNotContain(ignoredSentinel, result.Stdout, StringComparison.Ordinal);
+		}
+	}
+
 	[Theory]
 	[MemberData(nameof(SingleIgnoreOptionExportCases))]
 	public async Task RunUtilityOrHeadlessAsync_SingleIgnoreOptionOverrideHidesOnlyExpectedTreeEntries(
@@ -1038,6 +1078,26 @@ public sealed class CommandLineAutomationRunnerIntegrationTests
 		temp.CreateFile(Path.Combine("web-app", "package.json"), "{}\n");
 		temp.CreateFile(Path.Combine("web-app", "src", "WebApp.cs"), "class WebApp {}\n");
 		temp.CreateFile(Path.Combine("web-app", "node_modules", "bundle.js"), "bundle\n");
+	}
+
+	private static void SeedHierarchicalGitIgnoreWorkspace(TemporaryDirectory temp)
+	{
+		temp.CreateFile("repo/.gitignore", "*.rootdrop\n!keep.rootdrop\n[unterminated\n");
+		temp.CreateFile("repo/drop.rootdrop", "ROOT-DROP-SENTINEL\n");
+		temp.CreateFile("repo/keep.rootdrop", "ROOT-KEEP-SENTINEL\n");
+		temp.CreateFile("repo/module/.gitignore", "!module-keep.rootdrop\n*.moddrop\n");
+		temp.CreateFile("repo/module/module-keep.rootdrop", "MODULE-KEEP-SENTINEL\n");
+		temp.CreateFile("repo/module/drop.moddrop", "MODULE-DROP-SENTINEL\n");
+		temp.CreateFile("repo/module/child/.gitignore", "!rescue.moddrop\n*.deepdrop\n");
+		temp.CreateFile("repo/module/child/rescue.moddrop", "CHILD-RESCUE-SENTINEL\n");
+		temp.CreateFile("repo/module/child/drop.deepdrop", "CHILD-DROP-SENTINEL\n");
+		temp.CreateFile("repo/module/child/grand/.gitignore", "!visible.deepdrop\n*.lastdrop\ninvalid\\\n");
+		temp.CreateFile("repo/module/child/grand/visible.deepdrop", "GRAND-KEEP-SENTINEL\n");
+		temp.CreateFile("repo/module/child/grand/drop.lastdrop", "GRAND-DROP-SENTINEL\n");
+		temp.CreateFile("repo/module/child/grand/invalid/visible.txt", "MALFORMED-RULE-SENTINEL\n");
+		temp.CreateFile("repo/sibling/.gitignore", "*.siblingdrop\n");
+		temp.CreateFile("repo/sibling/drop.siblingdrop", "SIBLING-DROP-SENTINEL\n");
+		temp.CreateFile("repo/outside/visible.siblingdrop", "SIBLING-ISOLATION-SENTINEL\n");
 	}
 
 	private static void SeedFullIgnoreOverrideWorkspace(TemporaryDirectory temp)

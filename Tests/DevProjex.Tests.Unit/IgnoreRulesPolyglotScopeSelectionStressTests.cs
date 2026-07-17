@@ -42,7 +42,7 @@ public sealed class IgnoreRulesPolyglotScopeSelectionStressTests
 			("rust-target-file", "workspace/rust-core/target/debug/app.dll", false, true),
 			("rust-source", "workspace/rust-core/src/main.rs", false, false),
 			("web-generated-dir", "workspace/web-app/generated", true, true),
-			("web-generated-keep", "workspace/web-app/generated/keep.txt", false, false),
+			("web-generated-keep-stays-hidden-with-parent", "workspace/web-app/generated/keep.txt", false, true),
 			("web-node-modules-dir", "workspace/web-app/node_modules", true, true),
 			("web-source", "workspace/web-app/src/main.tsx", false, false),
 			("web-cache-negation", "workspace/web-app/src/keep.cache", false, false),

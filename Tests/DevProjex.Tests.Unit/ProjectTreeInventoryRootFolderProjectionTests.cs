@@ -73,7 +73,7 @@ public sealed class ProjectTreeInventoryRootFolderProjectionTests
     }
 
     [Fact]
-    public void RemoveCheckedRootsWithoutVisibleStructure_EmptyFoldersVisible_KeepsTraversableGitIgnoredRootHidden()
+    public void RemoveCheckedRootsWithoutVisibleStructure_EmptyFoldersVisible_KeepsExplicitlyGitIgnoredRootHidden()
     {
         var rootPath = CreateSyntheticRootPath();
         var inventory = BuildInventory(rootPath, DirectoryNode("project", FileNode("drop.txt")));
@@ -90,7 +90,7 @@ public sealed class ProjectTreeInventoryRootFolderProjectionTests
             .Evaluate(projectPath, "project", isDirectory: true, "project");
 
         Assert.True(gitIgnore.IsIgnored);
-        Assert.True(gitIgnore.ShouldTraverseIgnoredDirectory);
+        Assert.False(gitIgnore.ShouldTraverseIgnoredDirectory);
 
         var projected = ProjectTreeInventoryRootFolderProjection.RemoveCheckedRootsWithoutVisibleStructure(
             inventory,
@@ -103,7 +103,7 @@ public sealed class ProjectTreeInventoryRootFolderProjectionTests
     }
 
     [Fact]
-    public void RemoveCheckedRootsWithoutVisibleStructure_TraversableGitIgnoredRoot_IsNotOwnedByEmptyFolders()
+    public void RemoveCheckedRootsWithoutVisibleStructure_ExplicitlyGitIgnoredRoot_IsNotOwnedByEmptyFolders()
     {
         var rootPath = CreateSyntheticRootPath();
         var inventory = BuildInventory(rootPath, DirectoryNode("project", FileNode("drop.txt")));

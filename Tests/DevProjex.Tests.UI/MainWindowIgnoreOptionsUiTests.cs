@@ -1285,6 +1285,39 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task HierarchicalGitIgnore_ToggleAndRefreshKeepFourScopesAtomic()
+    {
+        using var project = UiTestProject.CreateWithHierarchicalGitIgnoreCombatWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await AssertHierarchicalGitIgnoreTreeStateAsync(window, gitIgnoreEnabled: true);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.UseGitIgnore, isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await AssertHierarchicalGitIgnoreTreeStateAsync(window, gitIgnoreEnabled: false);
+
+            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.UseGitIgnore, isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await AssertHierarchicalGitIgnoreTreeStateAsync(window, gitIgnoreEnabled: true);
+
+            await UiTestDriver.RefreshProjectAsync(window);
+            await AssertHierarchicalGitIgnoreTreeStateAsync(window, gitIgnoreEnabled: true);
+            await AssertIgnoreOptionsStayStableAsync(window);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PythonProjectWithIdeaGitIgnore_DoesNotExposeGitIgnoreOptionAcrossSmartAndDotToggles()
     {
         using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
@@ -2013,6 +2046,34 @@ public sealed class MainWindowIgnoreOptionsUiTests
             isChecked: dotChecked);
         await WaitForProjectTreePathStateAsync(window, exists: ideaVisible, ".idea", "workspace.xml");
         await WaitForProjectTreePathStateAsync(window, exists: pycacheVisible, "src", "__pycache__", "app.pyc");
+    }
+
+    private static async Task AssertHierarchicalGitIgnoreTreeStateAsync(
+        MainWindow window,
+        bool gitIgnoreEnabled)
+    {
+        string[][] alwaysVisiblePaths =
+        [
+            ["repo", "keep.rootdrop"],
+            ["repo", "module", "module-keep.rootdrop"],
+            ["repo", "module", "child", "rescue.moddrop"],
+            ["repo", "module", "child", "grand", "visible.deepdrop"],
+            ["repo", "module", "child", "grand", "invalid", "visible.txt"],
+            ["repo", "outside", "visible.siblingdrop"]
+        ];
+        string[][] gitIgnoredPaths =
+        [
+            ["repo", "drop.rootdrop"],
+            ["repo", "module", "drop.moddrop"],
+            ["repo", "module", "child", "drop.deepdrop"],
+            ["repo", "module", "child", "grand", "drop.lastdrop"],
+            ["repo", "sibling", "drop.siblingdrop"]
+        ];
+
+        foreach (var path in alwaysVisiblePaths)
+            await WaitForProjectTreePathStateAsync(window, exists: true, path);
+        foreach (var path in gitIgnoredPaths)
+            await WaitForProjectTreePathStateAsync(window, exists: !gitIgnoreEnabled, path);
     }
 
     private static async Task AssertIgnoreOptionsStayStableAsync(MainWindow window)

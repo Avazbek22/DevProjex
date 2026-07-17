@@ -175,20 +175,39 @@ public sealed class GitIgnoreMatcher
         return EvaluateRelativeCore(relativePath, isDirectory, name);
     }
 
+    internal IgnoreEvaluation EvaluateRulesOnly(string fullPath, bool isDirectory, string name)
+    {
+        if (!TryGetRelativePath(fullPath, out var relativePath))
+            return default;
+
+        var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath) : name;
+        return EvaluateRules(relativePath.AsSpan(), isDirectory, normalizedName);
+    }
+
+    internal IgnoreEvaluation EvaluateRelativeRulesOnlyNormalized(
+        ReadOnlySpan<char> relativePath,
+        bool isDirectory,
+        string name)
+    {
+        if (_rules.Count == 0 || relativePath.IsWhiteSpace())
+            return default;
+
+        var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath).ToString() : name;
+        return EvaluateRules(relativePath, isDirectory, normalizedName);
+    }
+
     private IgnoreEvaluation EvaluateRelativeCore(ReadOnlySpan<char> relativePath, bool isDirectory, string name)
     {
         var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath).ToString() : name;
-        var ignored = false;
-        var hasMatch = false;
+        var evaluation = EvaluateRules(relativePath, isDirectory, normalizedName);
+        var ignored = evaluation.IsIgnored;
+        var hasMatch = evaluation.HasMatch;
 
-        foreach (var rule in _rules)
-        {
-            if (!rule.IsMatch(relativePath, normalizedName, isDirectory, _pathComparison))
-                continue;
-
-            ignored = !rule.IsNegation;
-            hasMatch = true;
-        }
+        // Git cannot re-include a path while one of its parent directories remains excluded.
+        // Keep this off the common path: ancestor evaluation is needed only after a negation
+        // changed a matching path back to visible.
+        if (!ignored && hasMatch && HasNegationRules && HasIgnoredAncestor(relativePath))
+            ignored = true;
 
         // For directories: if not directly ignored, check if all contents would be ignored
         // Pattern like **/bin/* ignores contents but not the directory itself
@@ -217,6 +236,44 @@ public sealed class GitIgnoreMatcher
         }
 
         return new IgnoreEvaluation(hasMatch, ignored);
+    }
+
+    private IgnoreEvaluation EvaluateRules(
+        ReadOnlySpan<char> relativePath,
+        bool isDirectory,
+        string normalizedName)
+    {
+        var ignored = false;
+        var hasMatch = false;
+        foreach (var rule in _rules)
+        {
+            if (!rule.IsMatch(relativePath, normalizedName, isDirectory, _pathComparison))
+                continue;
+
+            ignored = !rule.IsNegation;
+            hasMatch = true;
+        }
+
+        return new IgnoreEvaluation(hasMatch, ignored);
+    }
+
+    private bool HasIgnoredAncestor(ReadOnlySpan<char> relativePath)
+    {
+        var segmentStart = 0;
+        for (var index = 0; index < relativePath.Length; index++)
+        {
+            if (relativePath[index] != '/')
+                continue;
+
+            var ancestor = relativePath[..index];
+            var ancestorName = relativePath[segmentStart..index].ToString();
+            if (EvaluateRules(ancestor, isDirectory: true, ancestorName).IsIgnored)
+                return true;
+
+            segmentStart = index + 1;
+        }
+
+        return false;
     }
 
     public bool IsIgnored(string fullPath, bool isDirectory, string name)
@@ -252,10 +309,11 @@ public sealed class GitIgnoreMatcher
 
     private bool ShouldTraverseIgnoredDirectoryRelativeCore(ReadOnlySpan<char> relativePath, string name)
     {
-        // If the directory itself is ignored by an explicit directory rule (e.g. "bin/"),
-        // name-only negation (e.g. "!Directory.Build.rsp") cannot re-include descendants
-        // unless a path-based negation re-includes the directory chain.
-        var ignoredByDirectoryRule = IsIgnoredByDirectoryRule(relativePath, name);
+        // A real directory match cannot be bypassed by a negation aimed only at a child.
+        // Synthetic directory hiding for patterns such as "bin/*" is different: the
+        // directory itself is still traversable, so a later child negation can apply.
+        if (EvaluateRules(relativePath, isDirectory: true, name).IsIgnored)
+            return false;
 
         foreach (var rule in _rules)
         {
@@ -263,13 +321,9 @@ public sealed class GitIgnoreMatcher
                 continue;
 
             // Name-only negation rules (like !keep.txt) can match files anywhere
-            // unless the parent directory is excluded by an explicit directory rule.
+            // because an explicitly excluded directory already returned above.
             if (rule.MatchByNameOnly)
-            {
-                if (!ignoredByDirectoryRule)
-                    return true;
-                continue;
-            }
+                return true;
 
             // Path-based negation rules with no static prefix (like !**/*.txt)
             // could match anywhere, so we must traverse
@@ -290,20 +344,6 @@ public sealed class GitIgnoreMatcher
 
             // Exact match
             if (relativePath.Equals(rule.StaticPrefix.AsSpan(), _pathComparison))
-                return true;
-        }
-
-        return false;
-    }
-
-    private bool IsIgnoredByDirectoryRule(ReadOnlySpan<char> relativePath, string name)
-    {
-        foreach (var rule in _rules)
-        {
-            if (rule.IsNegation || !rule.DirectoryOnly)
-                continue;
-
-            if (rule.IsMatch(relativePath, name, isDirectory: true, _pathComparison))
                 return true;
         }
 

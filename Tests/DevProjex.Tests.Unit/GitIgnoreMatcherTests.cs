@@ -408,11 +408,11 @@ public sealed class GitIgnoreMatcherTests
 	}
 
 	[Fact]
-	public void ShouldTraverseIgnoredDirectory_ReturnsTrueWhenNegationTargetsDescendantPath()
+	public void ShouldTraverseIgnoredDirectory_ReturnsFalseWhenOnlyDescendantIsNegated()
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", ["build/", "!build/keep.txt"]);
 
-		Assert.True(matcher.ShouldTraverseIgnoredDirectory("/repo/build", "build"));
+		Assert.False(matcher.ShouldTraverseIgnoredDirectory("/repo/build", "build"));
 		Assert.False(matcher.ShouldTraverseIgnoredDirectory("/repo/other", "other"));
 	}
 
@@ -913,7 +913,7 @@ public sealed class GitIgnoreMatcherTests
 	}
 
 	[Fact]
-	public void IsIgnored_OrderMatters_FirstIgnoreThenUnignore()
+	public void IsIgnored_ChildNegationCannotBypassExcludedParentDirectory()
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", [
 			"logs/",
@@ -921,6 +921,19 @@ public sealed class GitIgnoreMatcherTests
 		]);
 
 		Assert.True(matcher.IsIgnored("/repo/logs", true, "logs"));
+		Assert.True(matcher.IsIgnored("/repo/logs/keep.log", false, "keep.log"));
+	}
+
+	[Fact]
+	public void IsIgnored_ChildNegationWorksWhenParentDirectoryRemainsTraversable()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", [
+			"logs/*",
+			"!logs/keep.log"
+		]);
+
+		Assert.False(matcher.IsIgnored("/repo/logs", true, "logs"));
+		Assert.True(matcher.IsIgnored("/repo/logs/debug.log", false, "debug.log"));
 		Assert.False(matcher.IsIgnored("/repo/logs/keep.log", false, "keep.log"));
 	}
 
@@ -939,11 +952,11 @@ public sealed class GitIgnoreMatcherTests
 	}
 
 	[Fact]
-	public void ShouldTraverseIgnoredDirectory_LiteralPathNegationTargetsDescendant()
+	public void ShouldTraverseIgnoredDirectory_LiteralChildNegationDoesNotReincludeParent()
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", ["logs/", "!logs/keep.log"]);
 
-		Assert.True(matcher.ShouldTraverseIgnoredDirectory("/repo/logs", "logs"));
+		Assert.False(matcher.ShouldTraverseIgnoredDirectory("/repo/logs", "logs"));
 		Assert.False(matcher.ShouldTraverseIgnoredDirectory("/repo/cache", "cache"));
 	}
 
@@ -965,7 +978,7 @@ public sealed class GitIgnoreMatcherTests
 		Assert.True(matcher.IsIgnored("/repo/debug.log", false, "debug.log"));
 		Assert.False(matcher.IsIgnored("/repo/error.log", false, "error.log"));
 		Assert.True(matcher.IsIgnored("/repo/build", true, "build"));
-		Assert.False(matcher.IsIgnored("/repo/build/important.dll", false, "important.dll"));
+		Assert.True(matcher.IsIgnored("/repo/build/important.dll", false, "important.dll"));
 	}
 
 	#endregion
