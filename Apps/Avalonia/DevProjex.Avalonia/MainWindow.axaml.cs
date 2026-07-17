@@ -220,6 +220,7 @@ public partial class MainWindow : Window
     private RecentProjectsDb _recentProjectsDb = new();
     private Task? _recentFolderAvailabilityRefreshTask;
     private Border? _dropZoneContainer;
+    private bool _dropZoneAcceptsCurrentDrag;
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     private ProjectLoadTiming? _projectLoadTiming;
 #endif
@@ -447,6 +448,7 @@ public partial class MainWindow : Window
         if (_dropZoneContainer is not null)
         {
             _dropZoneContainer.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            _dropZoneContainer.AddHandler(DragDrop.DragOverEvent, OnDropZoneDragOver);
             _dropZoneContainer.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
             _dropZoneContainer.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
             UpdateDropZoneAnimationState();
@@ -751,6 +753,7 @@ public partial class MainWindow : Window
         if (_dropZoneContainer is not null)
         {
             _dropZoneContainer.RemoveHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            _dropZoneContainer.RemoveHandler(DragDrop.DragOverEvent, OnDropZoneDragOver);
             _dropZoneContainer.RemoveHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
             _dropZoneContainer.RemoveHandler(DragDrop.DropEvent, OnDropZoneDrop);
         }
@@ -1195,19 +1198,39 @@ public partial class MainWindow : Window
 
     private void OnDropZoneDragEnter(object? sender, DragEventArgs e)
     {
-        var hasFolder = e.DataTransfer.Contains(DataFormat.File);
+        string? folder = null;
+        try
+        {
+            folder = ResolveDropFolderPath(
+                e.DataTransfer.TryGetFiles()?.Select(item => item.TryGetLocalPath()) ?? []);
+        }
+        catch
+        {
+            // Some platform storage providers can fail while materializing a dragged item.
+        }
 
-        e.DragEffects = hasFolder ? DragDropEffects.Copy : DragDropEffects.None;
+        _dropZoneAcceptsCurrentDrag = !string.IsNullOrWhiteSpace(folder);
+        e.DragEffects = ResolveDropEffect(_dropZoneAcceptsCurrentDrag);
 
-        // Add visual feedback class
         if (sender is Border border)
         {
-            border.Classes.Add("drag-over");
+            if (_dropZoneAcceptsCurrentDrag)
+                border.Classes.Add("drag-over");
+            else
+                border.Classes.Remove("drag-over");
         }
+    }
+
+    private void OnDropZoneDragOver(object? sender, DragEventArgs e)
+    {
+        // The native no-drop cursor is updated from DragOver, which fires while the pointer moves.
+        e.DragEffects = ResolveDropEffect(_dropZoneAcceptsCurrentDrag);
     }
 
     private void OnDropZoneDragLeave(object? sender, DragEventArgs e)
     {
+        _dropZoneAcceptsCurrentDrag = false;
+
         // Remove visual feedback class
         if (sender is Border border)
         {
@@ -1217,6 +1240,8 @@ public partial class MainWindow : Window
 
     private async void OnDropZoneDrop(object? sender, DragEventArgs e)
     {
+        _dropZoneAcceptsCurrentDrag = false;
+
         // Remove visual feedback class
         if (sender is Border border)
         {
@@ -1229,9 +1254,9 @@ public partial class MainWindow : Window
             if (files is null) return;
 
             var localPaths = files
-                .Select(f => f.TryGetLocalPath())
-                .ToList();
+                .Select(f => f.TryGetLocalPath());
             var folder = ResolveDropFolderPath(localPaths);
+            e.DragEffects = ResolveDropEffect(!string.IsNullOrWhiteSpace(folder));
 
             if (!string.IsNullOrWhiteSpace(folder))
             {
@@ -8499,19 +8524,13 @@ public partial class MainWindow : Window
 
     private static string? ResolveDropFolderPath(IEnumerable<string?> localPaths)
     {
-        var pathList = localPaths.ToList();
+        return localPaths.FirstOrDefault(path =>
+            !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
+    }
 
-        var folder = pathList
-            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
-        if (!string.IsNullOrWhiteSpace(folder))
-            return folder;
-
-        var file = pathList
-            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
-
-        return string.IsNullOrWhiteSpace(file)
-            ? null
-            : Path.GetDirectoryName(file);
+    private static DragDropEffects ResolveDropEffect(bool hasFolder)
+    {
+        return hasFolder ? DragDropEffects.Copy : DragDropEffects.None;
     }
 
     private static string BuildWindowTitle(
