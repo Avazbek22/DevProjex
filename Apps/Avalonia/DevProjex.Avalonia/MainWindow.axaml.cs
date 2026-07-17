@@ -5390,13 +5390,26 @@ public partial class MainWindow : Window
         if (ShouldPersistTerminalCommandPromptDismissal(dialogResult))
             SaveTerminalCommandPromptDismissed();
 
-        if (dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair)
+        if (dialogResult.Action is not (TerminalCommandDialogAction.InstallOrRepair or
+            TerminalCommandDialogAction.Reinstall))
             return;
 
-        var installResult = _terminalCommandSetupService.InstallOrRepair();
+        var installResult = await Task.Run(() =>
+            dialogResult.Action == TerminalCommandDialogAction.Reinstall
+                ? _terminalCommandSetupService.Reinstall()
+                : _terminalCommandSetupService.InstallOrRepair());
         if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
         {
             await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+            return;
+        }
+
+        if (dialogResult.Action == TerminalCommandDialogAction.Reinstall)
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                _localization["Dialog.TerminalCommand.Title"],
+                _localization["Dialog.TerminalCommand.ReconfigureSucceeded"]);
         }
     }
 
@@ -5418,9 +5431,10 @@ public partial class MainWindow : Window
 
     internal static bool ShouldPersistTerminalCommandPromptDismissal(TerminalCommandDialogResult dialogResult)
     {
-        // Choosing install/repair is not a dismissal. If the install attempt fails,
+        // Choosing install, repair, or reinstall is not a dismissal. If the setup attempt fails,
         // the next startup should still be allowed to offer setup again.
-        return dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair &&
+        return dialogResult.Action is not (TerminalCommandDialogAction.InstallOrRepair or
+                   TerminalCommandDialogAction.Reinstall) &&
                (dialogResult.DontShowAgain || dialogResult.Action == TerminalCommandDialogAction.DismissPrompt);
     }
 

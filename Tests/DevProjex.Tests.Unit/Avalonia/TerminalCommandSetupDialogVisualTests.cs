@@ -3,6 +3,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Interactivity;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -161,6 +162,40 @@ public sealed class TerminalCommandSetupDialogVisualTests
 		Assert.Contains("\n\n", ReadTextBlockText(message), StringComparison.Ordinal);
 		Assert.Equal(2, commandRuns.Length);
 		Assert.All(commandRuns, run => Assert.Equal(FontWeight.Bold, run.FontWeight));
+	}
+
+	[AvaloniaFact]
+	public async Task BuildContent_InstalledManagedLauncher_UsesExplicitReinstallAction()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.Installed,
+			CommandPath: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: "/opt/DevProjex/DevProjex",
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: true,
+			CanInstall: false,
+			CanRepair: false,
+			ShellProfileHint: null);
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot);
+		var completion = new TaskCompletionSource<TerminalCommandDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var content = InvokeBuildContent(
+			new Window(),
+			localization,
+			text,
+			snapshot,
+			isAutomaticPrompt: false,
+			new CheckBox(),
+			completion);
+		var reinstallButton = FindDescendants<Button>(content)
+			.Single(button => string.Equals(button.Content?.ToString(), "Set up again", StringComparison.Ordinal));
+
+		reinstallButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+		var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+		Assert.Equal(TerminalCommandDialogAction.Reinstall, result.Action);
 	}
 
 	private static object? CaptureResource(IResourceDictionary resources, string key, out bool exists)

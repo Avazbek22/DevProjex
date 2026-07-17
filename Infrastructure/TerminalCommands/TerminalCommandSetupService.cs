@@ -27,6 +27,8 @@ public sealed record TerminalCommandSetupServiceOptions
 	public Action<string> UserPathVariableWriter { get; init; } =
 		value => Environment.SetEnvironmentVariable("PATH", value, EnvironmentVariableTarget.User);
 	public Func<string?> ExecutablePathProvider { get; init; } = TerminalCommandSetupService.GetCurrentExecutablePath;
+	public Func<string, TimeSpan, TerminalCommandValidationResult> LauncherValidator { get; init; } =
+		TerminalCommandSetupService.ValidateLauncher;
 	public char? PathListSeparator { get; init; }
 }
 
@@ -41,6 +43,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		"Add export PATH=\"$HOME/.local/bin:$PATH\" to your shell profile if ~/.local/bin is not already in PATH.";
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
+	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
 
 	private readonly TerminalCommandSetupServiceOptions _options = options ?? new TerminalCommandSetupServiceOptions();
 
@@ -61,10 +64,27 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 	}
 
-	public TerminalCommandInstallResult InstallOrRepair()
+	public TerminalCommandInstallResult InstallOrRepair() => InstallOrRepair(forceReinstall: false);
+
+	public TerminalCommandInstallResult Reinstall() => InstallOrRepair(forceReinstall: true);
+
+	private TerminalCommandInstallResult InstallOrRepair(bool forceReinstall)
 	{
 		var initial = Probe();
-		if (initial.State is TerminalCommandSetupState.Installed or TerminalCommandSetupState.ManagedByOperatingSystem)
+		if (initial.State == TerminalCommandSetupState.ManagedByOperatingSystem)
+		{
+			return new TerminalCommandInstallResult(
+				Success: !forceReinstall,
+				Outcome: forceReinstall
+					? TerminalCommandInstallOutcome.NotSupported
+					: TerminalCommandInstallOutcome.AlreadyInstalled,
+				Snapshot: initial,
+				ErrorMessage: forceReinstall
+					? "The terminal command is managed by the operating system and cannot be reinstalled by DevProjex."
+					: null);
+		}
+
+		if (initial.State == TerminalCommandSetupState.Installed && !forceReinstall)
 		{
 			return new TerminalCommandInstallResult(
 				Success: true,
@@ -81,7 +101,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				ErrorMessage: "A non-DevProjex command already exists at the target command path.");
 		}
 
-		if (!initial.IsActionable || string.IsNullOrWhiteSpace(initial.CommandPath) ||
+		if ((!initial.IsActionable && !(forceReinstall && initial.CanReinstall)) ||
+		    string.IsNullOrWhiteSpace(initial.CommandPath) ||
 		    string.IsNullOrWhiteSpace(initial.TargetExecutablePath))
 		{
 			return new TerminalCommandInstallResult(
@@ -112,6 +133,19 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			File.WriteAllText(tempPath, BuildCommandFileContent(targetPath), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 			if (_options.Platform is not TerminalCommandHostPlatform.Windows)
 				TrySetUnixExecutableMode(tempPath);
+
+			// Recheck ownership immediately before replacement so a foreign command is
+			// never overwritten after the initial probe.
+			if (File.Exists(commandPath) && ReadManagedWrapperTarget(commandPath) is null)
+			{
+				var conflict = initial with { State = TerminalCommandSetupState.ConflictingCommand, CanInstall = false, CanRepair = false };
+				return new TerminalCommandInstallResult(
+					Success: false,
+					Outcome: TerminalCommandInstallOutcome.ConflictingCommand,
+					Snapshot: conflict,
+					ErrorMessage: "The command path changed and is no longer managed by DevProjex.");
+			}
+
 			File.Move(tempPath, commandPath, overwrite: true);
 			if (_options.Platform is TerminalCommandHostPlatform.Windows)
 				EnsureWindowsUserBinDirectoryIsInPath(initial.UserBinDirectory);
@@ -119,9 +153,24 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				TrySetUnixExecutableMode(commandPath);
 
 			var refreshed = Probe();
-			var outcome = initial.State == TerminalCommandSetupState.Stale
-				? TerminalCommandInstallOutcome.Repaired
-				: TerminalCommandInstallOutcome.Created;
+			var outcome = forceReinstall
+				? TerminalCommandInstallOutcome.Reinstalled
+				: initial.State == TerminalCommandSetupState.Stale
+					? TerminalCommandInstallOutcome.Repaired
+					: TerminalCommandInstallOutcome.Created;
+
+			if (forceReinstall && refreshed.State == TerminalCommandSetupState.Installed)
+			{
+				var validation = _options.LauncherValidator(commandPath, LauncherValidationTimeout);
+				if (!validation.Success)
+				{
+					return new TerminalCommandInstallResult(
+						Success: false,
+						Outcome: TerminalCommandInstallOutcome.Failed,
+						Snapshot: refreshed,
+						ErrorMessage: validation.ErrorMessage ?? "The terminal launcher did not pass its functional check.");
+				}
+			}
 
 			return new TerminalCommandInstallResult(
 				Success: refreshed.State == TerminalCommandSetupState.Installed,
@@ -320,7 +369,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				canRepair: false);
 		}
 
-		var isCurrentLauncher = IsCurrentWindowsLauncher(commandPath);
+		var isCurrentLauncher = IsCurrentWindowsLauncher(commandPath, targetPath);
 		if (AreSamePath(installedTargetPath, targetPath) &&
 		    File.Exists(installedTargetPath) &&
 		    isUserBinInPath &&
@@ -348,16 +397,14 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			canRepair: true);
 	}
 
-	private static bool IsCurrentWindowsLauncher(string commandPath)
+	private static bool IsCurrentWindowsLauncher(string commandPath, string targetPath)
 	{
 		try
 		{
-			var content = File.ReadAllText(commandPath);
-			return content.Contains("set \"DEVPROJEX_DLL=", StringComparison.OrdinalIgnoreCase) &&
-			       content.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", StringComparison.OrdinalIgnoreCase) &&
-			       content.Contains("\"%DEVPROJEX_EXE%\" %*", StringComparison.OrdinalIgnoreCase) &&
-			       content.Contains("exit /b %ERRORLEVEL%", StringComparison.OrdinalIgnoreCase) &&
-			       !content.Contains("start /wait", StringComparison.OrdinalIgnoreCase);
+			return string.Equals(
+				File.ReadAllText(commandPath),
+				BuildWindowsLauncherContent(targetPath),
+				StringComparison.Ordinal);
 		}
 		catch (IOException)
 		{
@@ -464,7 +511,12 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				shellProfileHint);
 		}
 
-		if (AreSamePath(installedTargetPath, targetPath) && File.Exists(installedTargetPath))
+		var isCurrentWrapper = IsCurrentUnixWrapper(commandPath, targetPath);
+		var hasExecutableMode = HasUnixExecutableMode(commandPath);
+		if (AreSamePath(installedTargetPath, targetPath) &&
+		    File.Exists(installedTargetPath) &&
+		    isCurrentWrapper &&
+		    hasExecutableMode)
 		{
 			return UnixSnapshot(
 				TerminalCommandSetupState.Installed,
@@ -611,6 +663,40 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private static bool IsManagedWrapperMarker(string? value) =>
 		string.Equals(value, UnixWrapperMarker, StringComparison.Ordinal) ||
 		string.Equals(value, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase);
+
+	private static bool IsCurrentUnixWrapper(string commandPath, string targetPath)
+	{
+		try
+		{
+			return string.Equals(
+				File.ReadAllText(commandPath),
+				BuildWrapperContent(targetPath),
+				StringComparison.Ordinal);
+		}
+		catch (IOException)
+		{
+			return false;
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return false;
+		}
+	}
+
+	private static bool HasUnixExecutableMode(string commandPath)
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			return true;
+
+		try
+		{
+			return File.GetUnixFileMode(commandPath).HasFlag(UnixFileMode.UserExecute);
+		}
+		catch
+		{
+			return false;
+		}
+	}
 
 	private bool IsDirectoryInPath(string directory)
 	{
@@ -880,6 +966,86 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		_options.Platform == TerminalCommandHostPlatform.Windows
 			? BuildWindowsLauncherContent(targetPath)
 			: BuildWrapperContent(targetPath);
+
+	internal static TerminalCommandValidationResult ValidateLauncher(string commandPath, TimeSpan timeout)
+	{
+		Process? process = null;
+		try
+		{
+			var startInfo = CreateLauncherValidationStartInfo(commandPath);
+			process = new Process { StartInfo = startInfo };
+			if (!process.Start())
+				return new TerminalCommandValidationResult(false, "The terminal launcher process could not be started.");
+
+			var standardOutput = process.StandardOutput.ReadToEndAsync();
+			var standardError = process.StandardError.ReadToEndAsync();
+			var completion = Task.WhenAll(process.WaitForExitAsync(), standardOutput, standardError);
+			if (!completion.Wait(timeout))
+			{
+				TryKillProcess(process);
+				return new TerminalCommandValidationResult(false, "The terminal launcher validation timed out.");
+			}
+
+			if (process.ExitCode == 0)
+				return new TerminalCommandValidationResult(true);
+
+			var error = standardError.Result.Trim();
+			return new TerminalCommandValidationResult(
+				false,
+				string.IsNullOrWhiteSpace(error)
+					? $"The terminal launcher exited with code {process.ExitCode}."
+					: error);
+		}
+		catch (Exception ex)
+		{
+			TryKillProcess(process);
+			return new TerminalCommandValidationResult(false, ex.Message);
+		}
+		finally
+		{
+			process?.Dispose();
+		}
+	}
+
+	private static ProcessStartInfo CreateLauncherValidationStartInfo(string commandPath)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+
+		if (OperatingSystem.IsWindows() && commandPath.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
+		{
+			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+			startInfo.Arguments = $"/d /c \"\"{commandPath}\" --version\"";
+		}
+		else
+		{
+			startInfo.FileName = commandPath;
+			startInfo.ArgumentList.Add("--version");
+		}
+
+		return startInfo;
+	}
+
+	private static void TryKillProcess(Process? process)
+	{
+		if (process is null)
+			return;
+
+		try
+		{
+			if (!process.HasExited)
+				process.Kill(entireProcessTree: true);
+		}
+		catch
+		{
+			// Process cleanup is best effort after validation failure or timeout.
+		}
+	}
 
 }
 

@@ -255,6 +255,86 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void Reinstall_WindowsPortableInstalledLauncher_RewritesAndValidatesManagedCommand()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		File.WriteAllText(commandPath, TerminalCommandSetupService.BuildWindowsLauncherContent(target));
+		var validationCount = 0;
+		var service = CreateWindowsPortableService(
+			temp.Path,
+			processPath: string.Empty,
+			() => userBin,
+			_ => throw new InvalidOperationException("Installed PATH must not be rewritten."),
+			target,
+			launcherValidator: (path, timeout) =>
+			{
+				validationCount++;
+				Assert.Equal(NormalizeForPathListAssert(commandPath), NormalizeForPathListAssert(path));
+				Assert.Equal(TimeSpan.FromSeconds(5), timeout);
+				return new TerminalCommandValidationResult(true);
+			});
+
+		var result = service.Reinstall();
+
+		Assert.True(result.Success, result.ErrorMessage);
+		Assert.Equal(TerminalCommandInstallOutcome.Reinstalled, result.Outcome);
+		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
+		Assert.Equal(1, validationCount);
+		Assert.Equal(TerminalCommandSetupService.BuildWindowsLauncherContent(target), File.ReadAllText(commandPath));
+	}
+
+	[Fact]
+	public void Reinstall_FunctionalValidationFailure_ReturnsFailureWithoutDestroyingManagedLauncher()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		File.WriteAllText(commandPath, TerminalCommandSetupService.BuildWindowsLauncherContent(target));
+		var service = CreateWindowsPortableService(
+			temp.Path,
+			processPath: string.Empty,
+			() => userBin,
+			_ => throw new InvalidOperationException("Installed PATH must not be rewritten."),
+			target,
+			launcherValidator: (_, _) => new TerminalCommandValidationResult(false, "synthetic validation failure"));
+
+		var result = service.Reinstall();
+
+		Assert.False(result.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.Failed, result.Outcome);
+		Assert.Contains("synthetic validation failure", result.ErrorMessage, StringComparison.Ordinal);
+		Assert.Equal(TerminalCommandSetupState.Installed, service.Probe().State);
+		Assert.Equal(TerminalCommandSetupService.BuildWindowsLauncherContent(target), File.ReadAllText(commandPath));
+	}
+
+	[Fact]
+	public void Reinstall_OperatingSystemManagedAlias_IsRejectedWithoutValidation()
+	{
+		var validationCount = 0;
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = TerminalCommandHostPlatform.Windows,
+			IsWindowsPackagedApp = () => true,
+			LauncherValidator = (_, _) =>
+			{
+				validationCount++;
+				return new TerminalCommandValidationResult(true);
+			}
+		});
+
+		var result = service.Reinstall();
+
+		Assert.False(result.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.NotSupported, result.Outcome);
+		Assert.Equal(TerminalCommandSetupState.ManagedByOperatingSystem, result.Snapshot.State);
+		Assert.Equal(0, validationCount);
+	}
+
+	[Fact]
 	public void InstallOrRepair_WindowsPortableBuild_MovesLauncherBeforeWindowsAppsAlias()
 	{
 		using var temp = new TemporaryDirectory();
@@ -867,7 +947,7 @@ public sealed class TerminalCommandSetupServiceTests
 		var install = service.InstallOrRepair();
 
 		Assert.Equal(TerminalCommandSetupState.Installed, snapshot.State);
-		Assert.True(snapshot.IsReady);
+		Assert.False(snapshot.IsReady);
 		Assert.False(snapshot.UserBinDirectoryIsInPath);
 		Assert.Contains(".local/bin", snapshot.ShellProfileHint, StringComparison.Ordinal);
 		Assert.True(install.Success);
@@ -875,7 +955,7 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
-	public void Probe_UnixLegacyManagedWrapperWithoutShebang_IsStillRecognized()
+	public void Probe_UnixLegacyManagedWrapperWithoutShebang_ReturnsRepairableStale()
 	{
 		using var temp = new TemporaryDirectory();
 		var target = temp.CreateFile("app/DevProjex", "fake executable");
@@ -888,8 +968,69 @@ public sealed class TerminalCommandSetupServiceTests
 
 		var snapshot = service.Probe();
 
-		Assert.Equal(TerminalCommandSetupState.Installed, snapshot.State);
-		Assert.True(snapshot.IsReady);
+		Assert.Equal(TerminalCommandSetupState.Stale, snapshot.State);
+		Assert.True(snapshot.CanRepair);
+		Assert.False(snapshot.IsReady);
+	}
+
+	[Fact]
+	public void Probe_UnixManagedWrapperWithCorruptedBody_ReturnsRepairableStale()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(
+			wrapperPath,
+			"#!/bin/sh\n# DevProjex terminal command wrapper\n# target: " + target + "\necho broken\n");
+		var service = CreateService(TerminalCommandHostPlatform.Linux, temp.Path, userBin, target);
+
+		var snapshot = service.Probe();
+
+		Assert.Equal(TerminalCommandSetupState.Stale, snapshot.State);
+		Assert.True(snapshot.CanRepair);
+	}
+
+	[Fact]
+	public void ValidateLauncher_DotnetHostCompletesVersionCheck()
+	{
+		var result = TerminalCommandSetupService.ValidateLauncher("dotnet", TimeSpan.FromSeconds(5));
+
+		Assert.True(result.Success, result.ErrorMessage);
+	}
+
+	[Fact]
+	public void ValidateLauncher_WindowsCommandPathWithSpaces_CompletesVersionCheck()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var commandPath = Path.GetFullPath(temp.CreateFile(
+			"folder with spaces/devprojex.cmd",
+			"@echo off\r\ndotnet --version\r\nexit /b %ERRORLEVEL%\r\n"));
+
+		var result = TerminalCommandSetupService.ValidateLauncher(commandPath, TimeSpan.FromSeconds(5));
+
+		Assert.True(result.Success, result.ErrorMessage);
+	}
+
+	[Fact]
+	public void ValidateLauncher_UnixWrapperWithExecutableTarget_CompletesVersionCheck()
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app with spaces/DevProjex", "#!/bin/sh\necho 1.0.0\n");
+		var wrapper = temp.CreateFile("bin/devprojex", TerminalCommandSetupService.BuildWrapperContent(target));
+		var executableMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+		File.SetUnixFileMode(target, executableMode);
+		File.SetUnixFileMode(wrapper, executableMode);
+
+		var result = TerminalCommandSetupService.ValidateLauncher(wrapper, TimeSpan.FromSeconds(5));
+
+		Assert.True(result.Success, result.ErrorMessage);
 	}
 
 	[Fact]
@@ -1267,7 +1408,8 @@ public sealed class TerminalCommandSetupServiceTests
 		Func<string?> userPathProvider,
 		Action<string> userPathWriter,
 		string executablePath,
-		Func<string?>? machinePathProvider = null)
+		Func<string?>? machinePathProvider = null,
+		Func<string, TimeSpan, TerminalCommandValidationResult>? launcherValidator = null)
 	{
 		return new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
 		{
@@ -1280,6 +1422,7 @@ public sealed class TerminalCommandSetupServiceTests
 			MachinePathVariableProvider = machinePathProvider ?? (() => string.Empty),
 			UserPathVariableWriter = userPathWriter,
 			ExecutablePathProvider = () => executablePath,
+			LauncherValidator = launcherValidator ?? ((_, _) => new TerminalCommandValidationResult(true)),
 			PathListSeparator = ';'
 		});
 	}

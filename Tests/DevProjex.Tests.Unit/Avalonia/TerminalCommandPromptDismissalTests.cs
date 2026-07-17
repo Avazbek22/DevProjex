@@ -12,6 +12,8 @@ public sealed class TerminalCommandPromptDismissalTests
 	[InlineData((int)TerminalCommandDialogAction.DismissPrompt, true, true)]
 	[InlineData((int)TerminalCommandDialogAction.InstallOrRepair, false, false)]
 	[InlineData((int)TerminalCommandDialogAction.InstallOrRepair, true, false)]
+	[InlineData((int)TerminalCommandDialogAction.Reinstall, false, false)]
+	[InlineData((int)TerminalCommandDialogAction.Reinstall, true, false)]
 	public void ShouldPersistTerminalCommandPromptDismissal_OnlyPersistsRealDismissals(
 		int actionValue,
 		bool dontShowAgain,
@@ -27,6 +29,7 @@ public sealed class TerminalCommandPromptDismissalTests
 	[InlineData((int)TerminalCommandInstallOutcome.AlreadyInstalled)]
 	[InlineData((int)TerminalCommandInstallOutcome.Created)]
 	[InlineData((int)TerminalCommandInstallOutcome.Repaired)]
+	[InlineData((int)TerminalCommandInstallOutcome.Reinstalled)]
 	public void ResolveTerminalCommandPostInstallUiAction_SuccessDoesNotShowFollowUpDialog(int outcomeValue)
 	{
 		var result = new TerminalCommandInstallResult(

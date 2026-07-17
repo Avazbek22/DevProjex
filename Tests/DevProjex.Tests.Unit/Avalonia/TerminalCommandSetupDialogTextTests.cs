@@ -38,12 +38,9 @@ public sealed class TerminalCommandSetupDialogTextTests
 
 		Assert.False(string.IsNullOrWhiteSpace(text.Title));
 		Assert.False(string.IsNullOrWhiteSpace(text.Body));
-		if (state == TerminalCommandSetupState.Installed)
-			Assert.Empty(text.Details);
-		else
-			Assert.False(string.IsNullOrWhiteSpace(text.Details));
+		Assert.False(string.IsNullOrWhiteSpace(text.Details));
 		Assert.False(text.Body.StartsWith("Dialog.", StringComparison.Ordinal));
-		Assert.Equal(canInstall || canRepair, text.ShowInstallButton);
+		Assert.Equal(canInstall || canRepair || snapshot.CanReinstall, text.ShowInstallButton);
 		var expectedCopyButton = state is
 			TerminalCommandSetupState.ManagedByOperatingSystem or
 			TerminalCommandSetupState.UnsupportedOnCurrentPackage;
@@ -166,6 +163,8 @@ public sealed class TerminalCommandSetupDialogTextTests
 		Assert.Empty(text.Details);
 		Assert.Empty(text.CommandLine);
 		Assert.False(text.ShowCopyButton);
+		Assert.True(text.ShowInstallButton);
+		Assert.Equal("Настроить заново", text.InstallButtonText);
 		Assert.Equal("devprojex", text.CommandToCopy);
 		Assert.Contains("devprojex", combined, StringComparison.Ordinal);
 		Assert.Contains("devprojex --help", combined, StringComparison.Ordinal);
@@ -173,6 +172,31 @@ public sealed class TerminalCommandSetupDialogTextTests
 		Assert.DoesNotContain("Команда для проверки", combined, StringComparison.Ordinal);
 		Assert.DoesNotContain("Файл приложения", combined, StringComparison.Ordinal);
 		Assert.DoesNotContain("Сейчас указывает", combined, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Create_InstalledUnixWrapperOutsidePath_ShowsOnlyActionablePathHint()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.Installed,
+			CommandPath: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: "/opt/DevProjex/DevProjex",
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: false,
+			CanInstall: false,
+			CanRepair: false,
+			ShellProfileHint: "Add ~/.local/bin to PATH.");
+
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot);
+
+		Assert.False(text.ShowInstallButton);
+		Assert.Contains("not available through PATH", text.Body, StringComparison.Ordinal);
+		Assert.Contains("Add ~/.local/bin to PATH.", text.Details, StringComparison.Ordinal);
+		Assert.DoesNotContain("/opt/DevProjex/DevProjex", text.Details, StringComparison.Ordinal);
+		Assert.DoesNotContain("Command file", text.Details, StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -7,6 +7,7 @@ internal enum TerminalCommandDialogAction
 {
 	None,
 	InstallOrRepair,
+	Reinstall,
 	DismissPrompt
 }
 
@@ -154,7 +155,9 @@ internal static class TerminalCommandSetupDialog
 			installButton.Click += (_, _) =>
 			{
 				completion.TrySetResult(new TerminalCommandDialogResult(
-					TerminalCommandDialogAction.InstallOrRepair,
+					snapshot.CanReinstall
+						? TerminalCommandDialogAction.Reinstall
+						: TerminalCommandDialogAction.InstallOrRepair,
 					dontShowAgain.IsChecked == true));
 				(TopLevel.GetTopLevel(buttonPanel) as Window)?.Close();
 			};
@@ -298,9 +301,11 @@ internal static class TerminalCommandSetupDialogText
 			? string.Empty
 			: localization.Format("Dialog.TerminalCommand.CommandLine", commandToCopy);
 		var showCopyButton = !isAutomaticPrompt && ShouldShowCopyButton(snapshot, commandToCopy);
-		var installText = snapshot.CanRepair
-			? localization["Dialog.TerminalCommand.Repair"]
-			: localization["Dialog.TerminalCommand.Enable"];
+		var installText = snapshot.CanReinstall
+			? localization["Dialog.TerminalCommand.Reconfigure"]
+			: snapshot.CanRepair
+				? localization["Dialog.TerminalCommand.Repair"]
+				: localization["Dialog.TerminalCommand.Enable"];
 
 		return new TerminalCommandDialogText(
 			title,
@@ -310,7 +315,7 @@ internal static class TerminalCommandSetupDialogText
 			commandToCopy,
 			showCopyButton,
 			installText,
-			snapshot.IsActionable);
+			snapshot.IsActionable || snapshot.CanReinstall);
 	}
 
 	private static bool ShouldShowCopyButton(TerminalCommandSetupSnapshot snapshot, string commandToCopy)
@@ -350,6 +355,9 @@ internal static class TerminalCommandSetupDialogText
 		    snapshot.IsActionable)
 			return localization["Dialog.TerminalCommand.AutomaticPrompt.Body"];
 
+		if (snapshot.State == TerminalCommandSetupState.Installed && !snapshot.UserBinDirectoryIsInPath)
+			return localization["Dialog.TerminalCommand.Body.InstalledPathMissing"];
+
 		return snapshot.State switch
 		{
 			TerminalCommandSetupState.ManagedByOperatingSystem =>
@@ -377,7 +385,11 @@ internal static class TerminalCommandSetupDialogText
 	private static string GetDetails(LocalizationService localization, TerminalCommandSetupSnapshot snapshot)
 	{
 		if (snapshot.State == TerminalCommandSetupState.Installed)
-			return string.Empty;
+		{
+			return string.IsNullOrWhiteSpace(snapshot.ShellProfileHint)
+				? string.Empty
+				: localization.Format("Dialog.TerminalCommand.Detail.PathHint", snapshot.ShellProfileHint);
+		}
 
 		var lines = new List<string>();
 
