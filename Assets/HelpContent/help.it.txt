@@ -1,4 +1,4 @@
-﻿## 1) Cos’è e a cosa serve
+## 1) Cos’è e a cosa serve
 DevProjex prepara rapidamente il contesto del progetto: mostra la struttura di cartelle/file, permette di selezionare gli elementi e copiare l’albero e/o il contenuto dei file negli appunti. Utile per code review, supporto, formazione e condivisione della struttura con un assistente AI.
 
 Importante: l’app è solo in lettura e non modifica i file.
@@ -303,100 +303,50 @@ Importante:
 * i punti già noti mantengono la scelta esplicita dell’utente: nuovi file di un tipo disattivato non riattivano quel tipo.
 
 ## 12) Ignora
-L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
+Il blocco «Ignora» controlla quali file e cartelle vengono esclusi dall’albero, dal contenuto, dalla copia e dall’esportazione.
 
-Ordine delle opzioni:
-* Smart ignore (se applicabile)
-* Usa .gitignore (se applicabile)
-* Cartelle vuote
-* File vuoti
-* Cartelle nascoste
-* File nascosti
-* Cartelle con punto iniziale
-* File con punto iniziale
-* File senza estensione
+Un elemento viene mostrato solo se la cartella di primo livello e il tipo di file sono selezionati e nessuna regola attiva lo esclude. Le regole si sommano: se almeno una nasconde un elemento, un’altra non può renderlo visibile.
 
-L’elenco dipende dall’albero corrente e dalle regole attive. Un’opzione di base viene mostrata solo quando può modificare il risultato. Se gli elementi corrispondenti sono già nascosti da un’altra regola, l’opzione può scomparire temporaneamente e riapparire dopo una modifica delle impostazioni.
+### 12.1 Regole disponibili
+In base al contenuto del progetto possono comparire Smart Ignore, «Usa .gitignore», cartelle e file vuoti, nascosti o con punto iniziale e file senza estensione.
 
-Anche le opzioni `.gitignore` e Smart Ignore tengono conto del loro effetto reale sull’albero. Un’opzione disattivata esplicitamente può rimanere visibile per poter essere riattivata.
+Un’opzione appare quando può modificare l’albero corrente. L’elenco può quindi cambiare dopo la modifica di un’altra regola, di una cartella di primo livello o di un tipo di file. Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
 
-Una nuova opzione viene attivata per impostazione predefinita alla prima comparsa. Un’opzione già nota mantiene la scelta esplicita dell’utente, anche se è temporaneamente scomparsa dall’elenco.
+### 12.2 Smart Ignore
+Smart Ignore nasconde dipendenze, risultati di build, cache e altri artefatti di servizio. DevProjex identifica il tipo di progetto dalla struttura e da file marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml`. Le regole dello stack rilevato restano nell’area del progetto e non si estendono ai progetti vicini di un altro stack.
 
-La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
+Per nomi ambigui come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` viene verificato anche il contenuto. Una normale cartella dell’utente non viene quindi nascosta solo per il nome. Alcuni archivi di dipendenze e cartelle di servizio possono essere riconosciuti dalla loro struttura caratteristica anche fuori da un progetto rilevato esplicitamente.
 
-### 12.1 Ambito delle regole
-L’app costruisce ambiti di progetto (scope) in cui applicare le regole di ignore:
-* radice (se la radice contiene `.gitignore` o un marker di progetto)
-* cartelle di primo livello
-* sottocartelle di progetto annidate
+La ricerca di nuove aree di progetto è limitata per evitare l’analisi ripetuta di ogni directory in una grande cartella utente. Le strutture normali usano una ricerca poco profonda, mentre i monorepo riconosciuti vengono esaminati più in profondità. Dopo il rilevamento, Smart Ignore si applica all’intero sottoalbero senza limite di profondità.
 
-La ricerca degli ambiti di progetto annidati è limitata e dipende dalla struttura della cartella.
-Per i progetti normali viene usata una ricerca poco profonda. Nei monorepo riconosciuti la ricerca può essere più profonda.
-Le cartelle di sistema, le dipendenze e gli artefatti di build confermati vengono ignorati durante la ricerca degli ambiti.
+### 12.3 Usa .gitignore
+Quando è attiva, l’opzione applica ogni `.gitignore` raggiungibile, non solo quello nella radice. Ogni file agisce sulla cartella che lo contiene e su tutte le sottocartelle accessibili, ma non sulle cartelle superiori o adiacenti.
 
-Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e Smart Ignore. Una volta trovato un ambito, le regole vengono applicate al suo contenuto tramite la normale scansione dell’albero.
+Per un percorso, le regole vengono valutate dal `.gitignore` padre verso quelli più profondi; nello stesso file, dall’alto verso il basso. L’ultima regola corrispondente determina il risultato Git.
 
-### 12.2 « Usa .gitignore »
-* Attivo: le regole `.gitignore` sono applicate negli ambiti rilevati.
-* Disattivo: le regole `.gitignore` sono completamente disattivate.
+Una regola che inizia con `!` annulla solo una precedente esclusione Git nella propria area. Non può ripristinare un file finché la cartella padre rimane esclusa. Un `.gitignore` dentro una cartella completamente esclusa e irraggiungibile non viene valutato.
 
-Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
+Una riga errata o non supportata viene ignorata singolarmente; le altre regole valide continuano a funzionare. L’opzione comprende solo i file `.gitignore` dell’albero di lavoro. `.git/info/exclude`, le regole Git globali e lo stato dell’indice Git non vengono applicati.
 
-### 12.3 Come funziona Smart Ignore
-Smart Ignore nasconde i tipici artefatti di build, le cache degli strumenti e gli archivi delle dipendenze. Usa due approcci complementari:
+### 12.4 Relazione tra .gitignore e Smart Ignore
+In un progetto con una sola area e un proprio `.gitignore`, l’interfaccia mostra di solito solo «Usa .gitignore». In questo caso l’opzione attiva sia `.gitignore` sia le regole Smart Ignore applicabili. In uno spazio di lavoro con più progetti, le opzioni possono apparire separatamente e funzionare in modo indipendente nelle rispettive aree.
 
-1. Regole di progetto. File marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml` identificano il tipo di progetto. Le regole dello stack corrispondente vengono quindi applicate nel relativo ambito.
-2. Verifica degli artefatti. Per nomi ambigui come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library`, il nome da solo non basta. Il contenuto della cartella deve confermare che si tratta di un risultato di build, una cache o un archivio di dipendenze.
+Una negazione Git con `!` annulla solo il risultato Git; non prevale su Smart Ignore o su una regola di base. Non esiste quindi una regola globalmente «più forte»: un elemento deve superare tutti i meccanismi attivi per restare visibile.
 
-In un progetto riconosciuto, una cartella standard di artefatti viene identificata dalla combinazione del tipo di progetto e del nome della cartella. Fuori da questo contesto, Smart Ignore rimane prudente e non nasconde una cartella normale solo perché il nome è simile.
+### 12.5 Regole di base
+Le regole per il punto iniziale controllano il nome; quelle per gli elementi nascosti controllano l’attributo di sistema Hidden. A seconda della piattaforma possono riguardare lo stesso elemento oppure elementi diversi.
 
-Alcuni artefatti portabili confermati possono essere nascosti anche fuori da un ambito di progetto formale. Questo permette di gestire workspace misti senza estendere le regole di un progetto alle cartelle sorgente vicine.
+«File vuoti» nasconde i file di 0 byte. «File senza estensione» nasconde, ad esempio, `Dockerfile`, `Makefile` e `README`.
 
-Disattivando Smart Ignore vengono disattivati entrambi gli approcci.
+«Cartelle vuote» nasconde le cartelle logicamente vuote. Una cartella è logicamente vuota quando, dopo i tipi di file selezionati e tutte le altre regole, non rimangono file o sottocartelle visibili. Il relativo contatore può quindi cambiare quando viene modificata un’altra regola.
 
-### 12.4 Regole base
-Opzioni:
-* Cartelle nascoste
-* File nascosti
-* Cartelle con punto iniziale
-* File con punto iniziale
-* Cartelle vuote
-* File vuoti
-* File senza estensione
+### 12.6 Contatori
+Un contatore mostra il contributo diretto della regola con le impostazioni correnti, non il numero fisico di elementi simili sul disco. Lo stesso elemento non viene attribuito contemporaneamente a più contatori sovrapposti.
 
-Quando un’opzione è attiva, nasconde gli elementi corrispondenti nell’albero e nei risultati di copia/esportazione.
-Le regole di base vengono attivate separatamente da `.gitignore` e Smart Ignore, ma il risultato finale viene sempre calcolato sull’albero corrente dopo l’applicazione di tutti i filtri attivi.
+L’ordine stabile di attribuzione è: per le cartelle, `.gitignore`, Smart Ignore, punto iniziale, attributo Hidden; per i file, `.gitignore`, Smart Ignore, punto iniziale, nessuna estensione, file vuoto, attributo Hidden. Questo ordine riguarda solo i contatori. Per la visibilità è sufficiente che un qualsiasi meccanismo attivo escluda l’elemento.
 
-### 12.5 Come interagiscono `.gitignore` e Smart Ignore
-1. Un progetto con un solo ambito e un `.gitignore`.
-Di norma viene mostrato solo « Usa .gitignore ». Questo interruttore controlla la politica di ignore comune del progetto: quando è attivo, `.gitignore` e le regole Smart applicabili lavorano insieme; quando è disattivo, entrambi i meccanismi sono spenti.
-
-2. Un progetto senza `.gitignore`.
-Smart Ignore viene mostrato se può influire sull’albero.
-
-3. Un workspace con più progetti.
-`.gitignore` si applica solo negli ambiti in cui viene trovato. Smart Ignore può comparire separatamente e completare le regole negli altri ambiti applicabili. In questo caso gli interruttori funzionano in modo indipendente.
-
-4. Una cartella senza regole applicabili.
-Se `.gitignore` e Smart Ignore non influiscono sul risultato, queste opzioni non vengono mostrate. Restano solo le regole di base applicabili.
-
-### 12.6 Cartelle vuote
-Nasconde le cartelle logicamente vuote dall’albero e dai risultati di copia/esportazione.
-Una cartella logicamente vuota è una cartella nella quale non restano discendenti visibili dopo l’applicazione delle regole di visibilità correnti, di `.gitignore`, di Smart Ignore e dei tipi di file selezionati.
-Se la cartella stessa non è nascosta da altre regole, la sua rimozione dall’albero è controllata proprio da questa opzione.
-
-### 12.7 File vuoti
-Nasconde i file vuoti di dimensione 0 byte dall’albero e dai risultati di copia/esportazione.
-
-### 12.8 File senza estensione
-Nasconde i file senza estensione (ad esempio: `Dockerfile`, `Makefile`, `README`) dall’albero e dai risultati di copia/esportazione.
-
-### 12.9 Contatori nel blocco « Ignora »
-Vicino alle regole di base disponibili viene mostrato il numero nel formato `(N)`.
-
-Un contatore mostra il contributo diretto di quella regola con la combinazione corrente di impostazioni, non il numero totale di elementi simili sul disco. Modificare un’opzione può quindi cambiare il contatore di un’altra: un elemento non deve essere contato contemporaneamente come risultato di più regole sovrapposte.
-
-Ad esempio, su Windows la cartella `.git` può avere sia un punto iniziale sia l’attributo nascosto. Finché « Cartelle con punto iniziale » la nasconde, non viene contata separatamente come risultato di « Cartelle nascoste ».
+### 12.7 Applicazione delle modifiche
+Le caselle aggiornano prima le opzioni disponibili e i contatori. L’albero finale viene ricostruito dopo «Applica impostazioni». Se la preparazione viene annullata, DevProjex torna all’ultimo stato completato; le regole calcolate solo in parte non vengono applicate.
 
 ## 13) Come vengono calcolati albero e metriche
 Il risultato dipende da:

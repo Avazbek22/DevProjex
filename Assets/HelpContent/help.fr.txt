@@ -1,4 +1,4 @@
-﻿## 1) Qu’est‑ce que c’est et pourquoi
+## 1) Qu’est‑ce que c’est et pourquoi
 DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour code review, support, formation et partage de structure avec un assistant IA.
 
 Important : l’application est en lecture seule et ne modifie jamais les fichiers.
@@ -303,100 +303,50 @@ Important :
 * les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
 
 ## 12) Ignorer
-La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
+Le bloc « Ignorer » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
 
-Ordre des options :
-* Smart ignore (si applicable)
-* Utiliser .gitignore (si applicable)
-* Dossiers vides
-* Fichiers vides
-* Dossiers cachés
-* Fichiers cachés
-* Dossiers commençant par un point
-* Fichiers commençant par un point
-* Fichiers sans extension
+Un élément n’est affiché que si son dossier de premier niveau et son type de fichier sont sélectionnés et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
 
-La liste dépend de l’arborescence actuelle et des règles actives. Une option de base n’est affichée que si elle peut modifier le résultat. Si les éléments correspondants sont déjà masqués par une autre règle, l’option peut disparaître temporairement puis réapparaître après une modification des paramètres.
+### 12.1 Règles disponibles
+Selon le contenu du projet, Smart Ignore, « Utiliser .gitignore », les dossiers et fichiers vides, cachés ou commençant par un point, ainsi que les fichiers sans extension peuvent être proposés.
 
-Les options `.gitignore` et Smart Ignore tiennent également compte de leur effet réel sur l’arborescence. Une option explicitement désactivée peut rester visible afin de pouvoir être réactivée.
+Une option apparaît lorsqu’elle peut modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle, d’un dossier de premier niveau ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
 
-Une nouvelle option est activée par défaut lors de sa première apparition. Une option déjà connue conserve le choix explicite de l’utilisateur, même si elle a temporairement disparu de la liste.
+### 12.2 Smart Ignore
+Smart Ignore masque les dépendances, résultats de build, caches et autres artefacts de service. DevProjex identifie le type du projet à partir de sa structure et de fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml`. Les règles de la technologie reconnue restent dans la zone du projet et ne s’étendent pas aux projets voisins d’une autre technologie.
 
-La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
+Pour les noms ambigus comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le contenu est également vérifié. Un dossier utilisateur ordinaire n’est donc pas masqué uniquement à cause de son nom. Certains magasins de dépendances et dossiers de service peuvent aussi être reconnus hors d’un projet explicite grâce à leur structure caractéristique.
 
-### 12.1 Portée des règles
-L’application construit des zones de projet (scopes) où les règles d’ignore sont appliquées :
-* racine (si la racine contient `.gitignore` ou un marqueur de projet)
-* dossiers du premier niveau
-* sous-dossiers de projet imbriqués
+La détection de nouvelles zones de projet est limitée afin d’éviter une analyse répétée de chaque dossier dans un grand répertoire utilisateur. La recherche reste peu profonde dans une structure normale et va plus loin dans un monorepo reconnu. Une fois la zone détectée, Smart Ignore s’applique à tout son sous-arbre sans limite de profondeur.
 
-La recherche des zones de projet imbriquées est limitée et dépend de la structure du dossier.
-Une recherche peu profonde est utilisée pour les projets ordinaires. La recherche peut aller plus loin dans les monorepos reconnus.
-Les dossiers système, les dépendances et les artefacts de build confirmés sont ignorés pendant la recherche des zones.
+### 12.3 Utiliser .gitignore
+Lorsqu’elle est activée, l’option applique chaque `.gitignore` accessible, et pas seulement celui de la racine. Chaque fichier s’applique à son propre dossier et à tous ses sous-dossiers accessibles, jamais aux dossiers parents ou voisins.
 
-Cette limite concerne uniquement la détection des zones imbriquées pour `.gitignore` et Smart Ignore. Une fois la zone trouvée, les règles sont appliquées à son contenu par le parcours normal de l’arbre.
+Pour un chemin donné, les règles sont évaluées du `.gitignore` parent vers les fichiers plus profonds ; dans un même fichier, de haut en bas. La dernière règle correspondante détermine le résultat Git.
 
-### 12.2 « Utiliser .gitignore »
-* Activé : les règles `.gitignore` sont appliquées dans les zones détectées.
-* Désactivé : les règles `.gitignore` sont entièrement désactivées.
+Une règle commençant par `!` annule uniquement une exclusion Git antérieure dans sa zone. Elle ne peut pas restaurer un fichier tant que son dossier parent reste exclu. Un `.gitignore` situé dans un dossier entièrement exclu et inaccessible n’est pas évalué.
 
-Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
+Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude`, les règles Git globales et l’état de l’index Git ne sont pas appliqués.
 
-### 12.3 Fonctionnement de Smart Ignore
-Smart Ignore masque les artefacts de build courants, les caches d’outils et les magasins de dépendances. Il combine deux approches complémentaires :
+### 12.4 Relation entre .gitignore et Smart Ignore
+Dans un projet ayant une seule zone et son propre `.gitignore`, l’interface affiche généralement uniquement « Utiliser .gitignore ». Cette option active alors à la fois `.gitignore` et les règles Smart Ignore applicables. Dans un espace de travail contenant plusieurs projets, les deux options peuvent être affichées séparément et fonctionner indépendamment dans leurs zones.
 
-1. Règles de projet. Des fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml` déterminent le type de projet. Les règles de la technologie correspondante sont ensuite appliquées dans sa zone.
-2. Vérification des artefacts. Pour des noms ambigus comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le nom seul ne suffit pas. Le contenu du dossier doit confirmer qu’il s’agit d’un résultat de build, d’un cache ou d’un magasin de dépendances.
+Une négation Git avec `!` annule uniquement le résultat Git. Elle ne remplace ni Smart Ignore ni une règle de base. Il n’existe donc pas de règle globalement « plus forte » : un élément doit passer tous les mécanismes actifs pour rester visible.
 
-Dans un projet reconnu, un dossier d’artefacts standard est identifié par la combinaison du type de projet et du nom du dossier. Hors de ce contexte, Smart Ignore reste prudent et ne masque pas un dossier ordinaire uniquement parce que son nom est similaire.
+### 12.5 Règles de base
+Les règles « commençant par un point » vérifient le nom ; les règles « caché » vérifient l’attribut système Hidden. Selon la plateforme, elles peuvent viser le même élément ou des éléments différents.
 
-Certains artefacts portables confirmés peuvent aussi être masqués hors d’une zone de projet formelle. Cela permet de traiter les espaces de travail mixtes sans étendre les règles d’un projet aux dossiers source voisins.
+« Fichiers vides » masque les fichiers de 0 octet. « Fichiers sans extension » masque par exemple `Dockerfile`, `Makefile` et `README`.
 
-Désactiver Smart Ignore désactive les deux approches.
+« Dossiers vides » masque les dossiers logiquement vides. Un dossier est logiquement vide lorsqu’aucun fichier ou sous-dossier visible ne reste après l’application des types sélectionnés et de toutes les autres règles. Son compteur peut donc changer lorsqu’une autre règle est modifiée.
 
-### 12.4 Règles de base
-Options :
-* Dossiers cachés
-* Fichiers cachés
-* Dossiers commençant par un point
-* Fichiers commençant par un point
-* Dossiers vides
-* Fichiers vides
-* Fichiers sans extension
+### 12.6 Compteurs
+Un compteur indique la contribution directe d’une règle avec les paramètres actuels, et non le nombre physique d’éléments similaires sur le disque. Un élément n’est pas attribué simultanément à plusieurs compteurs qui se recouvrent.
 
-Quand une option est activée, elle masque les éléments correspondants dans l’arbre et dans les résultats de copie/export.
-Les règles de base s’activent séparément de `.gitignore` et de Smart Ignore, mais le résultat final est toujours calculé à partir de l’arbre courant après application de tous les filtres actifs.
+L’ordre stable d’attribution est : pour les dossiers, `.gitignore`, Smart Ignore, nom commençant par un point, attribut Hidden ; pour les fichiers, `.gitignore`, Smart Ignore, nom commençant par un point, absence d’extension, fichier vide, attribut Hidden. Cet ordre ne concerne que les compteurs. Pour la visibilité, tout mécanisme actif peut exclure l’élément.
 
-### 12.5 Interaction entre `.gitignore` et Smart Ignore
-1. Un projet avec une seule zone et un `.gitignore`.
-En général, seule l’option « Utiliser .gitignore » est affichée. Ce bouton contrôle la politique d’ignore commune du projet : lorsqu’il est activé, `.gitignore` et les règles Smart applicables fonctionnent ensemble ; lorsqu’il est désactivé, les deux mécanismes sont arrêtés.
-
-2. Un projet sans `.gitignore`.
-Smart Ignore est affiché s’il peut modifier l’arborescence.
-
-3. Un espace de travail contenant plusieurs projets.
-`.gitignore` ne s’applique que dans les zones où il est trouvé. Smart Ignore peut apparaître séparément et compléter les règles dans les autres zones applicables. Dans ce cas, les boutons fonctionnent indépendamment.
-
-4. Un dossier sans règles applicables.
-Si `.gitignore` et Smart Ignore ne modifient pas le résultat, ces options sont masquées. Seules les règles de base applicables restent affichées.
-
-### 12.6 Dossiers vides
-Masque les dossiers logiquement vides dans l’arbre et dans les résultats de copie/export.
-Un dossier logiquement vide est un dossier dans lequel il ne reste plus aucun descendant visible après application des règles de visibilité actuelles, de `.gitignore`, de Smart Ignore et des types de fichiers sélectionnés.
-Si le dossier lui-même n’est pas masqué par d’autres règles, sa suppression de l’arbre est contrôlée précisément par cette option.
-
-### 12.7 Fichiers vides
-Masque les fichiers vides de taille 0 octet dans l’arbre et dans les résultats de copie/export.
-
-### 12.8 Fichiers sans extension
-Masque les fichiers sans extension (par exemple : `Dockerfile`, `Makefile`, `README`) dans l’arbre et dans les résultats de copie/export.
-
-### 12.9 Compteurs dans le bloc « Ignorer »
-Le nombre est affiché à côté des règles de base disponibles au format `(N)`.
-
-Un compteur indique la contribution directe de cette règle avec la combinaison actuelle de paramètres, et non le nombre total d’éléments similaires sur le disque. Modifier une option peut donc changer le compteur d’une autre : un élément ne doit pas être compté à la fois comme résultat de plusieurs règles qui se recouvrent.
-
-Par exemple, sous Windows, le dossier `.git` peut à la fois commencer par un point et être caché. Tant que « Dossiers commençant par un point » le masque, il n’est pas compté séparément comme résultat de « Dossiers cachés ».
+### 12.7 Application des modifications
+Les cases à cocher mettent d’abord à jour les options disponibles et leurs compteurs. L’arbre final est reconstruit après « Appliquer les paramètres ». Si la préparation est annulée, DevProjex revient au dernier état entièrement terminé ; aucune règle partiellement calculée n’est appliquée.
 
 ## 13) Comment l'arbre et les métriques sont calculés
 Le résultat dépend de :

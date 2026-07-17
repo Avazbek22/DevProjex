@@ -303,11 +303,20 @@ Important:
 * options already seen keep the user's explicit choice: new files of a disabled type do not enable that type again.
 
 ## 12) Ignore
-The "Ignore" list is built automatically from the current path and selected top-level folders.
+The "Ignore" block controls which files and folders are excluded from the tree, content, copy, and export results.
 
-Option order:
-* Smart ignore (when applicable)
-* Use .gitignore (when applicable)
+An item is shown only when all of these conditions are met:
+* its top-level folder is selected;
+* its file type is selected, if the file has a type;
+* no enabled ignore rule excludes it.
+
+Ignore rules are cumulative. If at least one enabled rule hides an item, another rule cannot make it visible.
+
+### 12.1 Available rules
+Depending on the project contents, the following options may be shown:
+
+* Smart Ignore
+* Use .gitignore
 * Empty folders
 * Empty files
 * Hidden folders
@@ -316,87 +325,85 @@ Option order:
 * Dot-prefixed files
 * Files without extension
 
-The list depends on the current tree and active rules. A basic option is shown only when it can change the result. If matching elements are already hidden by another rule, the option may temporarily disappear and return after the settings change.
+An option is shown when its rule can change the current tree. The list may therefore change after switching another rule, a top-level folder, or a file type.
 
-The `.gitignore` and Smart Ignore options also account for their actual effect on the tree. An explicitly disabled option may remain visible so it can be enabled again.
+A new option is enabled by default when it first appears. A known option keeps the user's choice even if it temporarily disappears from the list.
 
-A new option is enabled by default when it first appears. A known option keeps the user's explicit choice even if it temporarily disappeared from the list.
+### 12.2 Smart Ignore
+Smart Ignore hides dependencies, build output, caches, and other project service artifacts.
 
-The separator under "Use .gitignore" splits Git/Smart rules from basic visibility rules.
+DevProjex first identifies the project type from its structure and marker files, for example:
 
-### 12.1 Rule scope
-The app builds project scopes where ignore rules are applied:
-* root (if root has `.gitignore` or a project marker)
-* first-level folders
-* nested project subfolders
+* `.csproj`
+* `package.json`
+* `pyproject.toml`
+* `Cargo.toml`
 
-Nested project scope discovery is bounded and depends on the folder structure.
-Regular projects use shallow discovery. Recognized monorepos can be searched more deeply.
-Service folders, dependencies, and confirmed build artifacts are skipped during scope discovery.
+Rules for the corresponding stack are then applied inside the detected project scope. For example, .NET rules do not extend into a neighboring Python or JavaScript project.
 
-This limit only controls discovery of nested scopes for `.gitignore` and Smart Ignore. Once a scope is found, rules are applied to that scope's contents through the normal tree scan.
+A folder name alone is not always enough. Ambiguous names such as `build`, `vendor`, `packages`, `cache`, `pkg`, or `Library` are also verified by their contents. This prevents an ordinary user folder from being hidden only because it has a similar name.
 
-### 12.2 "Use .gitignore"
-* Enabled: `.gitignore` rules are applied in detected scopes.
-* Disabled: `.gitignore` rules are fully disabled.
+Some dependency stores and service directories can be recognized by their characteristic internal structure even outside an explicitly detected project.
 
-For multi-project folders, one project's `.gitignore` is not applied to neighboring projects outside its scope.
+Project scope discovery is bounded so loading a large user folder does not become a full repeated analysis of every directory. Regular structures use shallow discovery, while recognized monorepos are searched more deeply. After a scope is found, Smart Ignore applies to its entire subtree without a depth limit.
 
-### 12.3 How Smart Ignore works
-Smart Ignore hides common build artifacts, tool caches, and dependency stores. It uses two complementary approaches:
+### 12.3 Use .gitignore
+When enabled, DevProjex applies every reachable `.gitignore`, not only the file at the root of the opened folder.
 
-1. Project rules. Marker files such as `.csproj`, `package.json`, `pyproject.toml`, or `Cargo.toml` identify the project type. Rules for that stack are then applied inside its scope.
-2. Artifact verification. For ambiguous names such as `build`, `vendor`, `packages`, `cache`, `pkg`, or `Library`, the name alone is not enough. The folder contents must confirm that it is build output, a cache, or a dependency store.
+Each `.gitignore` applies:
 
-In a recognized project, a standard artifact folder is identified by the combination of project type and folder name. Outside that context, Smart Ignore remains conservative and does not hide an ordinary folder only because its name looks similar.
+* to the folder that contains it;
+* to all accessible folders below it;
+* only inside that scope.
 
-Some confirmed portable artifacts can also be hidden outside a formal project scope. This handles mixed workspaces without extending one project's rules to neighboring source folders.
+Rules from a nested `.gitignore` do not affect parent or sibling folders.
 
-Disabling Smart Ignore turns off both approaches.
+For a particular path, rules are processed from the parent `.gitignore` toward deeper files. Within one file, rules are processed from top to bottom. The last matching rule determines the Git result.
 
-### 12.4 Basic rules
-Options:
-* Hidden folders
-* Hidden files
-* Dot-prefixed folders
-* Dot-prefixed files
-* Empty folders
-* Empty files
-* Files without extension
+A rule starting with `!` cancels an earlier Git exclusion only within its scope. It cannot restore a file while its parent folder remains excluded. A `.gitignore` inside a fully excluded and unreachable folder does not participate in evaluation.
 
-When enabled, an option hides matching elements from the tree and from copy/export results.
-Basic rules are enabled separately from `.gitignore` and Smart Ignore, but the final result is always calculated from the current tree after all active filters are applied.
+A malformed or unsupported line is skipped independently. Other valid rules in that file and rules in neighboring scopes continue to work.
 
-### 12.5 How `.gitignore` and Smart Ignore work together
-1. One project with one scope and a `.gitignore`.
-Usually only “Use .gitignore” is shown. This switch controls the project's combined ignore policy: when enabled, `.gitignore` and applicable Smart rules work together; when disabled, both mechanisms are off.
+This option covers working-tree `.gitignore` files only. Rules from `.git/info/exclude`, global Git configuration, and Git index state are not applied.
 
-2. One project without a `.gitignore`.
-Smart Ignore is shown if it can affect the tree.
+### 12.4 Relationship between .gitignore and Smart Ignore
+For a project with one scope and its own `.gitignore`, the interface usually shows only "Use .gitignore". In this mode, it controls the project's combined policy by enabling both `.gitignore` rules and applicable Smart Ignore rules.
 
-3. A workspace with multiple projects.
-`.gitignore` applies only in scopes where it is found. Smart Ignore may appear separately and complement the rules in other applicable scopes. The switches operate independently in this case.
+In a workspace with multiple projects, the options may be shown separately. In that case, `.gitignore` and Smart Ignore are enabled independently for the applicable scopes.
 
-4. A folder without applicable rules.
-If `.gitignore` and Smart Ignore do not affect the result, these options are hidden. Only applicable basic rules remain.
+A Git negation rule starting with `!` cancels only a Git result. It does not override Smart Ignore or a basic rule. For example, a file restored by `!` remains hidden if Smart Ignore or "Empty files" excludes it.
 
-### 12.6 Empty folders
-Hides logically empty folders from the tree and from copy/export results.
-A logically empty folder is a folder that has no visible descendants after the current visibility rules, `.gitignore`, Smart Ignore, and selected file types are applied.
-If the folder itself is not hidden by other rules, removing it from the tree is controlled by this option.
+There is therefore no shared "stronger rule" between `.gitignore`, Smart Ignore, and the basic rules. An item must pass every enabled mechanism to remain visible.
 
-### 12.7 Empty files
-Hides empty files with size 0 bytes from the tree and from copy/export results.
+### 12.5 Basic rules
+"Dot-prefixed folders" and "Dot-prefixed files" inspect the item name.
 
-### 12.8 Files without extension
-Hides files without extension (for example: `Dockerfile`, `Makefile`, `README`) from the tree and from copy/export results.
+"Hidden folders" and "Hidden files" inspect the system hidden attribute. On some platforms, a dot-prefixed name and the system attribute may describe the same item or different items.
 
-### 12.9 Counters in the "Ignore" block
-Counts are shown next to available basic rules in the `(N)` format.
+"Empty files" hides files whose size is 0 bytes.
 
-A count shows the direct contribution of that rule under the current combination of settings, not the total number of similar items on disk. Changing one option can therefore change another option's count: one item must not be counted as the result of several overlapping rules at once.
+"Files without extension" hides files such as `Dockerfile`, `Makefile`, and `README`.
 
-For example, on Windows the `.git` folder may be both dot-prefixed and hidden. While “Dot-prefixed folders” hides it, it is not counted separately as a result of “Hidden folders”.
+"Empty folders" hides logically empty folders. A folder is logically empty when no visible file or subfolder remains after the selected file types and all other rules are applied.
+
+The empty-folder count can therefore change after another rule is switched: hiding files can make their containing folders logically empty.
+
+### 12.6 Counters
+The count next to a rule shows its direct contribution under the current settings, not the physical number of similar items on disk.
+
+One item is not attributed to several overlapping counters at the same time. For example, the `.git` folder may have both a dot-prefixed name and the system Hidden attribute, but its exclusion is attributed to only one rule.
+
+A stable order is used to select the owner of an exclusion:
+
+* folders: `.gitignore`, Smart Ignore, dot-prefixed name, system Hidden attribute;
+* files: `.gitignore`, Smart Ignore, dot-prefixed name, no extension, empty file, system Hidden attribute.
+
+This order affects counters only. Final visibility follows a simpler rule: an item is hidden if any enabled mechanism excludes it.
+
+### 12.7 Applying changes
+Switching checkboxes first updates the available settings and counters in the panel. The final tree is rebuilt after "Apply settings" is selected.
+
+If settings preparation is cancelled, DevProjex returns the panel to the last fully completed state. Partially calculated rules are not applied.
 
 ## 13) How the tree and metrics are calculated
 Result depends on:

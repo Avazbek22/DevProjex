@@ -1,4 +1,4 @@
-﻿## 1) Nima va nima uchun
+## 1) Nima va nima uchun
 DevProjex loyiha kontekstini tez tayyorlaydi: papka/fayl tuzilmasini ko‘rsatadi, elementlarni belgilash va daraxtni va/yoki fayl mazmunini buferga nusxalash imkonini beradi. Code review, qo‘llab‑quvvatlash, o‘qitish va loyiha tuzilmasini AI‑yordamchiga berish uchun qulay.
 
 Muhim: ilova faqat o‘qish rejimida ishlaydi va fayllarni o‘zgartirmaydi.
@@ -303,100 +303,50 @@ Muhim:
 * avvaldan ma’lum bandlar foydalanuvchining aniq tanlovini saqlaydi: o‘chirilgan turdagi yangi fayllar bu turni qayta yoqmaydi.
 
 ## 12) Ignorlash
-"Ignorlash" roʻyxati joriy yoʻl va tanlangan yuqori darajadagi papkalar asosida avtomatik shakllanadi.
+«Ignorlash» bloki daraxt, kontent, nusxalash va eksportdan qaysi fayl hamda papkalar chiqarilishini boshqaradi.
 
-Variantlar tartibi:
-* Smart ignore (qo‘llanadigan bo‘lsa)
-* .gitignore dan foydalanish (qo‘llanadigan bo‘lsa)
-* Bo‘sh papkalar
-* Bo‘sh fayllar
-* Yashirin papkalar
-* Yashirin fayllar
-* Boshida nuqtali papkalar
-* Boshida nuqtali fayllar
-* Kengaytmasiz fayllar
+Element faqat uning yuqori darajadagi papkasi va fayl turi tanlangan, shuningdek hech bir faol qoida uni yashirmagan bo‘lsa ko‘rsatiladi. Qoidalar birgalikda ishlaydi: kamida bittasi elementni yashirsa, boshqa qoida uni ko‘rsata olmaydi.
 
-Ro‘yxat joriy daraxt va faol qoidalarga bog‘liq. Asosiy band faqat natijani o‘zgartira olganda ko‘rsatiladi. Mos elementlar boshqa qoida bilan allaqachon yashirilgan bo‘lsa, band vaqtincha yo‘qolib, sozlamalar o‘zgargandan keyin yana paydo bo‘lishi mumkin.
+### 12.1 Mavjud qoidalar
+Loyiha mazmuniga qarab Smart Ignore, «.gitignore dan foydalanish», bo‘sh, yashirin yoki nuqta bilan boshlanuvchi papka va fayllar hamda kengaytmasiz fayllar ko‘rsatilishi mumkin.
 
-`.gitignore` va Smart Ignore bandlari ham daraxtga haqiqiy ta’sirini hisobga oladi. Aniq o‘chirilgan band uni qayta yoqish mumkin bo‘lishi uchun ko‘rinib turishi mumkin.
+Band joriy daraxtni o‘zgartira olganda paydo bo‘ladi. Shu sababli boshqa qoida, yuqori darajadagi papka yoki fayl turi almashtirilganda ro‘yxat o‘zgarishi mumkin. Yangi band birinchi paydo bo‘lganda odatda yoqiladi; avvaldan ma’lum band vaqtincha yo‘qolsa ham foydalanuvchi tanlovini saqlaydi.
 
-Yangi band birinchi marta paydo bo‘lganda odatda yoqilgan bo‘ladi. Avvaldan ma’lum band ro‘yxatdan vaqtincha yo‘qolgan bo‘lsa ham, foydalanuvchining aniq tanlovini saqlaydi.
+### 12.2 Smart Ignore
+Smart Ignore bog‘liqliklar, build natijalari, keshlar va boshqa xizmat artefaktlarini yashiradi. DevProjex loyiha turini tuzilma va `.csproj`, `package.json`, `pyproject.toml`, `Cargo.toml` kabi marker fayllar orqali aniqlaydi. Tegishli stek qoidalari faqat topilgan loyiha hududida ishlaydi va qo‘shni boshqa stek loyihasiga yoyilmaydi.
 
-".gitignore dan foydalanish" ostidagi chiziq Git/Smart qoidalarni asosiy ko‘rinish qoidalaridan ajratadi.
+`build`, `vendor`, `packages`, `cache`, `pkg`, `Library` kabi noaniq nomlarda papka mazmuni ham tekshiriladi. Oddiy foydalanuvchi papkasi faqat nomi sababli yashirilmaydi. Ayrim bog‘liqlik omborlari va xizmat papkalari aniq topilgan loyihadan tashqarida ham ichki tuzilishi orqali tanilishi mumkin.
 
-### 12.1 Qoidalar qo‘llanadigan hudud
-Ilova ignore qoidalari ishlaydigan loyiha hududlarini (scope) tuzadi:
-* root (agar root’da `.gitignore` yoki loyiha belgisi bo‘lsa)
-* birinchi darajadagi papkalar
-* ichki loyiha papkalari
+Katta foydalanuvchi papkasidagi har bir katalogni qayta tahlil qilmaslik uchun yangi loyiha hududlarini izlash cheklangan. Oddiy tuzilma sayoz, tanilgan monorepo esa chuqurroq tekshiriladi. Hudud topilgach, Smart Ignore uning butun ichki daraxtiga chuqurlik cheklovisiz qo‘llanadi.
 
-Ichki loyiha hududlarini qidirish cheklangan va papka tuzilishiga bog‘liq.
-Oddiy loyihalarda sayoz qidiruv ishlatiladi. Aniqlangan monorepo ichida qidiruv chuqurroq bajarilishi mumkin.
-Xizmat papkalari, bog‘liqliklar va tasdiqlangan build artefaktlari hududlarni qidirishda o‘tkazib yuboriladi.
+### 12.3 .gitignore dan foydalanish
+Yoqilganda DevProjex faqat root faylini emas, barcha yetib boriladigan `.gitignore` fayllarini qo‘llaydi. Har bir fayl o‘z papkasi va uning barcha ochiq ichki papkalariga ta’sir qiladi, lekin ota yoki qo‘shni papkalarga emas.
 
-Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga tegishli. Hudud topilgach, qoidalar uning ichidagi kontentga oddiy daraxt skani orqali qo‘llanadi.
+Muayyan yo‘l uchun qoidalar ota `.gitignore` faylidan chuqurroq fayllarga, bitta fayl ichida esa yuqoridan pastga qarab ishlanadi. Oxirgi mos qoida Git natijasini belgilaydi.
 
-### 12.2 ".gitignore dan foydalanish"
-* Yoqilgan: `.gitignore` qoidalari aniqlangan hududlarda qo‘llanadi.
-* O‘chirilgan: `.gitignore` qoidalari to‘liq o‘chiriladi.
+`!` bilan boshlangan qoida faqat o‘z hududidagi oldingi Git istisnosini bekor qiladi. Ota papka hali ham chiqarilgan bo‘lsa, faylni qaytara olmaydi. To‘liq chiqarilgan va yetib bo‘lmaydigan papka ichidagi `.gitignore` ishlanmaydi.
 
-Ko‘p loyihali papkada bir loyiha `.gitignore` qoidasi o‘z hududidan tashqaridagi qo‘shni loyihalarga qo‘llanmaydi.
+Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘g‘ri qoidalar ishlashda davom etadi. Bu band faqat ishchi daraxtdagi `.gitignore` fayllariga tegishli; `.git/info/exclude`, global Git qoidalari va Git index holati qo‘llanmaydi.
 
-### 12.3 Smart Ignore qanday ishlaydi
-Smart Ignore odatiy build artefaktlari, vosita keshlari va bog‘liqlik omborlarini yashiradi. U bir-birini to‘ldiradigan ikki usuldan foydalanadi:
+### 12.4 .gitignore va Smart Ignore aloqasi
+Bitta hudud va o‘z `.gitignore` fayliga ega loyihada interfeys odatda faqat «.gitignore dan foydalanish» bandini ko‘rsatadi. Bu rejimda u `.gitignore` va mos Smart Ignore qoidalarini birga yoqadi. Bir nechta loyihali ish jildida ikkala band alohida ko‘rinib, o‘z hududlarida mustaqil ishlashi mumkin.
 
-1. Loyiha qoidalari. `.csproj`, `package.json`, `pyproject.toml` yoki `Cargo.toml` kabi marker fayllar loyiha turini aniqlaydi. Shundan keyin tegishli stek qoidalari uning hududida qo‘llanadi.
-2. Artefaktlarni tekshirish. `build`, `vendor`, `packages`, `cache`, `pkg` yoki `Library` kabi noaniq nomlarda nomning o‘zi yetarli emas. Papka mazmuni uning build natijasi, kesh yoki bog‘liqlik ombori ekanini tasdiqlashi kerak.
+`!` Git inkori faqat Git natijasini bekor qiladi; Smart Ignore yoki asosiy qoidani yengmaydi. Umumiy «kuchliroq» qoida yo‘q: element ko‘rinishi uchun barcha faol mexanizmlardan o‘tishi kerak.
 
-Aniqlangan loyihada standart artefakt papkasi loyiha turi va papka nomi birikmasi bo‘yicha taniladi. Bunday kontekstdan tashqarida Smart Ignore ehtiyotkor ishlaydi va oddiy papkani faqat o‘xshash nomi sababli yashirmaydi.
+### 12.5 Asosiy qoidalar
+Nuqta bilan boshlanish qoidalari nomni, yashirin element qoidalari esa tizimdagi Hidden atributini tekshiradi. Platformaga qarab ular bir xil yoki turli elementlarga tegishli bo‘lishi mumkin.
 
-Ayrim tasdiqlangan universal artefaktlar loyiha hududidan tashqarida ham yashirilishi mumkin. Bu bir loyiha qoidalarini qo‘shni manba papkalariga yoymasdan aralash ish jildlarini to‘g‘ri qayta ishlash imkonini beradi.
+«Bo‘sh fayllar» 0 baytli fayllarni, «Kengaytmasiz fayllar» esa `Dockerfile`, `Makefile`, `README` kabi fayllarni yashiradi.
 
-Smart Ignore o‘chirilsa, ikkala usul ham o‘chiriladi.
+«Bo‘sh papkalar» mantiqan bo‘sh papkalarni yashiradi. Tanlangan fayl turlari va barcha boshqa qoidalar qo‘llangach ko‘rinadigan fayl yoki ichki papka qolmasa, papka mantiqan bo‘sh hisoblanadi. Shu sababli boshqa qoida o‘zgarganda uning hisoblagichi ham o‘zgarishi mumkin.
 
-### 12.4 Asosiy qoidalar
-Variantlar:
-* Yashirin papkalar
-* Yashirin fayllar
-* Boshida nuqtali papkalar
-* Boshida nuqtali fayllar
-* Bo‘sh papkalar
-* Bo‘sh fayllar
-* Kengaytmasiz fayllar
+### 12.6 Hisoblagichlar
+Hisoblagich diskdagi fizik sonni emas, joriy sozlamalarda qoidaning bevosita hissasini ko‘rsatadi. Bir element bir vaqtning o‘zida bir nechta ustma-ust hisoblagichga yozilmaydi.
 
-Band yoqilganda mos elementlar daraxtdan va nusxalash/eksport natijalaridan yashiriladi.
-Asosiy qoidalar `.gitignore` va Smart Ignore’dan alohida yoqiladi, ammo yakuniy natija har doim barcha faol filtrlardan keyingi joriy daraxt bo‘yicha hisoblanadi.
+Barqaror tartib: papkalar uchun `.gitignore`, Smart Ignore, nomdagi nuqta, Hidden atributi; fayllar uchun `.gitignore`, Smart Ignore, nomdagi nuqta, kengaytma yo‘qligi, bo‘sh fayl, Hidden atributi. Bu tartib faqat hisoblagichlarga ta’sir qiladi. Ko‘rinish uchun istalgan faol mexanizm elementni chiqarishi mumkin.
 
-### 12.5 `.gitignore` va Smart Ignore qanday birga ishlaydi
-1. Bitta hudud va `.gitignore` fayliga ega bitta loyiha.
-Odatda faqat ".gitignore dan foydalanish" ko‘rinadi. Bu tugma loyihaning umumiy ignore siyosatini boshqaradi: yoqilganda `.gitignore` va qo‘llanadigan Smart qoidalar birga ishlaydi, o‘chirilganda ikkala mexanizm ham to‘xtaydi.
-
-2. `.gitignore` fayli yo‘q bitta loyiha.
-Smart Ignore daraxtga ta’sir qila olsa ko‘rinadi.
-
-3. Bir nechta loyihali ish jildi.
-`.gitignore` faqat o‘zi topilgan hududlarda qo‘llanadi. Smart Ignore alohida ko‘rinib, boshqa qo‘llanadigan hududlardagi qoidalarni to‘ldirishi mumkin. Bu holatda tugmalar mustaqil ishlaydi.
-
-4. Qo‘llanadigan qoidalarsiz papka.
-`.gitignore` va Smart Ignore natijaga ta’sir qilmasa, bu bandlar ko‘rsatilmaydi. Faqat qo‘llanadigan asosiy qoidalar qoladi.
-
-### 12.6 Bo‘sh papkalar
-Mantiqan bo‘sh papkalarni daraxtdan va nusxalash/eksport natijalaridan yashiradi.
-Mantiqan bo‘sh papka — joriy ko‘rinish qoidalari, `.gitignore`, Smart Ignore va tanlangan fayl turlari qo‘llangandan keyin ichida ko‘rinadigan avlodlar qolmaydigan papka.
-Agar papkaning o‘zi boshqa qoidalar bilan yashirilmagan bo‘lsa, uni daraxtdan olib tashlash aynan shu band bilan boshqariladi.
-
-### 12.7 Bo‘sh fayllar
-Hajmi 0 bayt bo‘lgan bo‘sh fayllarni daraxtdan va nusxalash/eksport natijalaridan yashiradi.
-
-### 12.8 Kengaytmasiz fayllar
-Kengaytmasi yo‘q fayllarni (masalan: `Dockerfile`, `Makefile`, `README`) daraxtdan va nusxalash/eksport natijalaridan yashiradi.
-
-### 12.9 «E’tiborsiz qoldirish» blokidagi hisoblagichlar
-Mavjud asosiy qoidalar yonida son `(N)` formatida ko‘rsatiladi.
-
-Hisoblagich diskdagi o‘xshash elementlarning umumiy sonini emas, joriy sozlamalar birikmasida aynan shu qoidaning bevosita hissasini ko‘rsatadi. Shu sababli bir bandni o‘zgartirish boshqa band hisoblagichini o‘zgartirishi mumkin: bitta element bir vaqtning o‘zida bir nechta ustma-ust qoidalar natijasi sifatida hisoblanmasligi kerak.
-
-Masalan, Windows’da `.git` papkasi ham nuqta bilan boshlanishi, ham yashirin bo‘lishi mumkin. Uni «Boshida nuqtali papkalar» yashirib turganda, u «Yashirin papkalar» natijasi sifatida alohida hisoblanmaydi.
+### 12.7 O‘zgarishlarni qo‘llash
+Belgilarni almashtirish avval mavjud parametrlar va hisoblagichlarni yangilaydi. Yakuniy daraxt «Sozlamalarni qo‘llash» bosilgach qayta quriladi. Tayyorlash bekor qilinsa, DevProjex oxirgi to‘liq tugallangan holatga qaytadi; qisman hisoblangan qoidalar qo‘llanmaydi.
 
 ## 13) Daraxt va metrikalar qanday hisoblanadi
 Natija quyidagilarga bog‘liq:

@@ -1,4 +1,4 @@
-﻿## 1) Was ist das und wozu
+## 1) Was ist das und wozu
 DevProjex bereitet den Projektkontext schnell auf: zeigt die Ordner/Dateistruktur, erlaubt das Markieren von Elementen und das Kopieren des Baums und/oder von Dateiinhalten in die Zwischenablage. Nützlich für Code‑Reviews, Support, Schulung und das Teilen der Struktur mit einem KI‑Assistenten.
 
 Wichtig: Die App arbeitet nur lesend und ändert keine Dateien.
@@ -302,101 +302,51 @@ Wichtig:
 * wenn nach Aktualisieren oder erneutem Öffnen ein neuer Ordner der obersten Ebene, ein neuer Dateityp oder eine neue Option in „Ignorieren“ erscheint, ist dieser Punkt standardmäßig aktiviert;
 * bereits bekannte Punkte behalten die ausdrückliche Auswahl des Benutzers: neue Dateien eines deaktivierten Typs aktivieren diesen Typ nicht erneut.
 
-## 12) Ignore
-Die Liste „Ignorieren“ wird automatisch aus dem aktuellen Pfad und den ausgewählten Ordnern der obersten Ebene aufgebaut.
+## 12) Ignorieren
+Der Block „Ignorieren“ steuert, welche Dateien und Ordner aus Baum, Inhalt, Kopier- und Exportergebnissen ausgeschlossen werden.
 
-Reihenfolge der Optionen:
-* Smart Ignore (wenn anwendbar)
-* .gitignore verwenden (wenn anwendbar)
-* Leere Ordner
-* Leere Dateien
-* Versteckte Ordner
-* Versteckte Dateien
-* Ordner mit führendem Punkt
-* Dateien mit führendem Punkt
-* Dateien ohne Erweiterung
+Ein Element wird nur angezeigt, wenn sein Ordner der obersten Ebene und sein Dateityp ausgewählt sind und keine aktivierte Ignore-Regel es ausschließt. Die Regeln wirken gemeinsam: Blendet mindestens eine Regel ein Element aus, kann eine andere Regel es nicht wieder sichtbar machen.
 
-Die Liste hängt vom aktuellen Baum und den aktiven Regeln ab. Eine Grundoption wird nur angezeigt, wenn sie das Ergebnis verändern kann. Sind passende Elemente bereits durch eine andere Regel ausgeblendet, kann die Option vorübergehend verschwinden und nach einer Änderung der Einstellungen wieder erscheinen.
+### 12.1 Verfügbare Regeln
+Je nach Projektinhalt können Smart Ignore, „.gitignore verwenden“, leere, versteckte oder mit Punkt beginnende Ordner und Dateien sowie Dateien ohne Erweiterung angezeigt werden.
 
-Die Optionen `.gitignore` und Smart Ignore berücksichtigen ebenfalls ihre tatsächliche Wirkung auf den Baum. Eine ausdrücklich deaktivierte Option kann sichtbar bleiben, damit sie wieder aktiviert werden kann.
+Eine Option erscheint, wenn sie den aktuellen Baum verändern kann. Die Liste kann sich daher nach dem Umschalten einer anderen Regel, eines Ordners der obersten Ebene oder eines Dateityps ändern. Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert; eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend verschwindet.
 
-Eine neue Option ist bei ihrem ersten Erscheinen standardmäßig aktiviert. Eine bekannte Option behält die ausdrückliche Auswahl des Benutzers, auch wenn sie vorübergehend aus der Liste verschwunden war.
+### 12.2 Smart Ignore
+Smart Ignore blendet Abhängigkeiten, Build-Ausgaben, Caches und andere Projektartefakte aus. DevProjex erkennt den Projekttyp anhand der Struktur und Markerdateien wie `.csproj`, `package.json`, `pyproject.toml` oder `Cargo.toml`. Die Regeln des entsprechenden Stacks gelten nur innerhalb des erkannten Projektbereichs und nicht für benachbarte Projekte anderer Stacks.
 
-Die Trennlinie unter „.gitignore verwenden“ trennt Git/Smart-Regeln von den grundlegenden Sichtbarkeitsregeln.
+Bei mehrdeutigen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `Library` wird zusätzlich der Ordnerinhalt geprüft. Ein gewöhnlicher Benutzerordner wird daher nicht allein wegen seines Namens ausgeblendet. Einige Abhängigkeitsspeicher und Systemordner lassen sich anhand ihrer charakteristischen Struktur auch außerhalb eines ausdrücklich erkannten Projekts bestimmen.
 
-### 12.1 Geltungsbereich der Regeln
-Die Anwendung bildet Projektbereiche (Scopes), in denen die Ignore-Regeln gelten:
-* Wurzelordner (wenn im Root `.gitignore` oder ein Projektmarker vorhanden ist)
-* Ordner der ersten Ebene
-* verschachtelte Projekt-Unterordner
+Die Erkennung neuer Projektbereiche ist begrenzt, damit große Benutzerordner nicht vollständig wiederholt analysiert werden. Normale Strukturen werden flach, erkannte Monorepos tiefer durchsucht. Nach der Erkennung gilt Smart Ignore ohne Tiefenbegrenzung für den gesamten Unterbaum des Bereichs.
 
-Die Suche nach verschachtelten Projektbereichen ist begrenzt und hängt von der Ordnerstruktur ab.
-Für normale Projekte wird eine flache Suche verwendet. In erkannten Monorepos kann tiefer gesucht werden.
-Systemordner, Abhängigkeiten und bestätigte Build-Artefakte werden bei der Bereichssuche übersprungen.
+### 12.3 .gitignore verwenden
+Wenn aktiviert, berücksichtigt DevProjex jede erreichbare `.gitignore`, nicht nur die Datei im Wurzelordner. Jede Datei gilt für ihren eigenen Ordner und alle erreichbaren Unterordner, jedoch nicht für übergeordnete oder benachbarte Ordner.
 
-Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.gitignore` und Smart Ignore. Sobald ein Bereich gefunden wurde, werden die Regeln auf seinen Inhalt durch den normalen Baum-Scan angewendet.
+Für einen Pfad werden die Regeln von der übergeordneten zur tieferen `.gitignore` ausgewertet; innerhalb einer Datei von oben nach unten. Die letzte passende Regel bestimmt das Git-Ergebnis.
 
-### 12.2 „.gitignore verwenden“
-* Aktiviert: `.gitignore`-Regeln werden in den gefundenen Bereichen angewendet.
-* Deaktiviert: `.gitignore`-Regeln werden vollständig abgeschaltet.
+Eine Regel mit `!` hebt nur einen früheren Git-Ausschluss in ihrem Bereich auf. Sie kann keine Datei zurückholen, solange deren übergeordneter Ordner ausgeschlossen bleibt. Eine `.gitignore` in einem vollständig ausgeschlossenen und unerreichbaren Ordner wird nicht ausgewertet.
 
-Bei Ordnern mit mehreren Projekten gilt die `.gitignore` eines Projekts nicht für benachbarte Projekte außerhalb seines Bereichs.
+Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude`, globale Git-Regeln und der Git-Index werden nicht berücksichtigt.
 
-### 12.3 So funktioniert Smart Ignore
-Smart Ignore blendet typische Build-Artefakte, Tool-Caches und Abhängigkeitsspeicher aus. Dazu werden zwei Ansätze kombiniert:
+### 12.4 Zusammenspiel von .gitignore und Smart Ignore
+Bei einem Projekt mit einem Bereich und eigener `.gitignore` zeigt die Oberfläche meist nur „.gitignore verwenden“. Dann aktiviert diese Option sowohl `.gitignore` als auch passende Smart-Ignore-Regeln. In einem Workspace mit mehreren Projekten können beide Optionen getrennt erscheinen und unabhängig für ihre Bereiche arbeiten.
 
-1. Projektregeln. Markerdateien wie `.csproj`, `package.json`, `pyproject.toml` oder `Cargo.toml` bestimmen den Projekttyp. Danach werden die Regeln des entsprechenden Stacks innerhalb seines Bereichs angewendet.
-2. Artefaktprüfung. Bei mehrdeutigen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `Library` reicht der Name allein nicht aus. Der Ordnerinhalt muss bestätigen, dass es sich um ein Build-Ergebnis, einen Cache oder einen Abhängigkeitsspeicher handelt.
+Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam. Es gibt daher keine gemeinsame „stärkere“ Regel: Ein Element bleibt nur sichtbar, wenn es alle aktivierten Mechanismen durchläuft.
 
-In einem erkannten Projekt wird ein Standard-Artefaktordner anhand der Kombination aus Projekttyp und Ordnername bestimmt. Außerhalb dieses Kontexts bleibt Smart Ignore zurückhaltend und blendet einen normalen Ordner nicht nur wegen eines ähnlichen Namens aus.
+### 12.5 Grundregeln
+Regeln für führende Punkte prüfen den Namen; Regeln für versteckte Elemente prüfen das Hidden-Systemattribut. Beides kann je nach Plattform dasselbe oder verschiedene Elemente betreffen.
 
-Einige bestätigte portable Artefakte können auch außerhalb eines formalen Projektbereichs ausgeblendet werden. So lassen sich gemischte Workspaces verarbeiten, ohne die Regeln eines Projekts auf benachbarte Quellordner auszudehnen.
+„Leere Dateien“ blendet Dateien mit 0 Byte aus. „Dateien ohne Erweiterung“ betrifft beispielsweise `Dockerfile`, `Makefile` und `README`.
 
-Durch Deaktivieren von Smart Ignore werden beide Ansätze abgeschaltet.
+„Leere Ordner“ blendet logisch leere Ordner aus. Ein Ordner ist logisch leer, wenn nach Anwendung der ausgewählten Dateitypen und aller anderen Regeln keine sichtbaren Dateien oder Unterordner verbleiben. Deshalb kann sich sein Zähler ändern, wenn eine andere Regel umgeschaltet wird.
 
-### 12.4 Grundregeln
-Optionen:
-* Versteckte Ordner
-* Versteckte Dateien
-* Ordner mit führendem Punkt
-* Dateien mit führendem Punkt
-* Leere Ordner
-* Leere Dateien
-* Dateien ohne Erweiterung
+### 12.6 Zähler
+Ein Zähler zeigt den direkten Beitrag einer Regel unter den aktuellen Einstellungen, nicht die physische Anzahl ähnlicher Elemente auf dem Datenträger. Ein Element wird nicht gleichzeitig mehreren überlappenden Zählern zugeordnet.
 
-Wenn aktiviert, blendet eine Option die passenden Elemente im Baum sowie in Kopier-/Exportergebnissen aus.
-Die Grundregeln werden getrennt von `.gitignore` und Smart Ignore aktiviert, aber das Endergebnis wird immer anhand des aktuellen Baums nach Anwendung aller aktiven Filter berechnet.
+Die feste Zuordnung lautet: für Ordner `.gitignore`, Smart Ignore, führender Punkt, Hidden-Attribut; für Dateien `.gitignore`, Smart Ignore, führender Punkt, keine Erweiterung, leere Datei, Hidden-Attribut. Diese Reihenfolge betrifft nur die Zähler. Für die Sichtbarkeit genügt jeder aktivierte Mechanismus, der das Element ausschließt.
 
-### 12.5 Zusammenspiel von `.gitignore` und Smart Ignore
-1. Ein Projekt mit einem Bereich und einer `.gitignore`.
-Meist wird nur „.gitignore verwenden“ angezeigt. Dieser Schalter steuert die gemeinsame Ignore-Richtlinie des Projekts: Bei Aktivierung arbeiten `.gitignore` und passende Smart-Regeln zusammen, bei Deaktivierung sind beide Mechanismen ausgeschaltet.
-
-2. Ein Projekt ohne `.gitignore`.
-Smart Ignore wird angezeigt, wenn es den Baum beeinflussen kann.
-
-3. Ein Workspace mit mehreren Projekten.
-`.gitignore` gilt nur in den Bereichen, in denen sie gefunden wurde. Smart Ignore kann separat erscheinen und die Regeln in anderen anwendbaren Bereichen ergänzen. Die Schalter arbeiten in diesem Fall unabhängig voneinander.
-
-4. Ein Ordner ohne anwendbare Regeln.
-Wenn `.gitignore` und Smart Ignore das Ergebnis nicht beeinflussen, werden diese Optionen nicht angezeigt. Es bleiben nur anwendbare Grundregeln.
-
-### 12.6 Leere Ordner
-Blendet logisch leere Ordner im Baum sowie in Kopier-/Exportergebnissen aus.
-Ein logisch leerer Ordner ist ein Ordner, in dem nach Anwendung der aktuellen Sichtbarkeitsregeln, von `.gitignore`, Smart Ignore und der ausgewählten Dateitypen keine sichtbaren Nachfolger mehr verbleiben.
-Wenn der Ordner selbst nicht durch andere Regeln ausgeblendet wird, wird seine Entfernung aus dem Baum genau durch diese Option gesteuert.
-
-### 12.7 Leere Dateien
-Blendet leere Dateien mit Größe 0 Byte im Baum sowie in Kopier-/Exportergebnissen aus.
-
-### 12.8 Dateien ohne Erweiterung
-Blendet Dateien ohne Erweiterung (zum Beispiel: `Dockerfile`, `Makefile`, `README`) im Baum sowie in Kopier-/Exportergebnissen aus.
-
-### 12.9 Zähler im Block „Ignorieren“
-Bei verfügbaren Grundregeln wird die Anzahl im Format `(N)` angezeigt.
-
-Ein Zähler zeigt den direkten Beitrag dieser Regel bei der aktuellen Kombination von Einstellungen, nicht die Gesamtzahl ähnlicher Elemente auf dem Datenträger. Daher kann das Ändern einer Option den Zähler einer anderen ändern: Ein Element darf nicht gleichzeitig als Ergebnis mehrerer überlappender Regeln gezählt werden.
-
-Unter Windows kann der Ordner `.git` zum Beispiel sowohl einen führenden Punkt haben als auch versteckt sein. Solange „Ordner mit führendem Punkt“ ihn ausblendet, wird er nicht zusätzlich als Ergebnis von „Versteckte Ordner“ gezählt.
+### 12.7 Änderungen anwenden
+Das Umschalten von Kontrollkästchen aktualisiert zuerst die verfügbaren Einstellungen und Zähler. Der endgültige Baum wird nach „Einstellungen anwenden“ neu aufgebaut. Wird die Vorbereitung abgebrochen, kehrt DevProjex zum letzten vollständig abgeschlossenen Zustand zurück; teilweise berechnete Regeln werden nicht angewendet.
 
 ## 13) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
