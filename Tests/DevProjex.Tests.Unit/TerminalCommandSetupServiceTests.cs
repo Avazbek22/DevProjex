@@ -918,6 +918,7 @@ public sealed class TerminalCommandSetupServiceTests
 		var userBin = temp.CreateFolder(".local/bin");
 		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
 		File.WriteAllText(wrapperPath, TerminalCommandSetupService.BuildWrapperContent(target));
+		SetUnixExecutableMode(wrapperPath);
 		var service = CreateService(TerminalCommandHostPlatform.Linux, temp.Path, userBin, target);
 
 		var snapshot = service.Probe();
@@ -937,6 +938,7 @@ public sealed class TerminalCommandSetupServiceTests
 		var userBin = temp.CreateFolder(".local/bin");
 		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
 		File.WriteAllText(wrapperPath, TerminalCommandSetupService.BuildWrapperContent(target));
+		SetUnixExecutableMode(wrapperPath);
 		var service = CreateService(
 			TerminalCommandHostPlatform.Linux,
 			temp.Path,
@@ -952,6 +954,30 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Contains(".local/bin", snapshot.ShellProfileHint, StringComparison.Ordinal);
 		Assert.True(install.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.AlreadyInstalled, install.Outcome);
+	}
+
+	[Fact]
+	public void Probe_UnixManagedWrapperWithoutExecutePermission_ReturnsRepairableStale()
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(wrapperPath, TerminalCommandSetupService.BuildWrapperContent(target));
+		File.SetUnixFileMode(
+			wrapperPath,
+			UnixFileMode.UserRead | UnixFileMode.UserWrite |
+			UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+		var service = CreateService(TerminalCommandHostPlatform.Linux, temp.Path, userBin, target);
+
+		var snapshot = service.Probe();
+
+		Assert.Equal(TerminalCommandSetupState.Stale, snapshot.State);
+		Assert.True(snapshot.CanRepair);
+		Assert.False(snapshot.IsReady);
 	}
 
 	[Fact]
@@ -1438,4 +1464,16 @@ public sealed class TerminalCommandSetupServiceTests
 
 	private static string NormalizeForPathListAssert(string value) =>
 		Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+	private static void SetUnixExecutableMode(string path)
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			return;
+
+		File.SetUnixFileMode(
+			path,
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+			UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+			UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+	}
 }

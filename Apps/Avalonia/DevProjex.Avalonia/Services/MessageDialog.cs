@@ -2,7 +2,7 @@ namespace DevProjex.Avalonia.Services;
 
 public static class MessageDialog
 {
-    public static async Task ShowAsync(Window owner, string title, string message)
+    public static async Task ShowAsync(Window owner, string title, string message, double height = 200)
     {
         var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
         var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
@@ -12,7 +12,7 @@ public static class MessageDialog
             brushes,
             BuildContent(message),
             width: 420,
-            height: 200);
+            height: height);
 
         if (owner is not null)
             await dialog.ShowDialog(owner);

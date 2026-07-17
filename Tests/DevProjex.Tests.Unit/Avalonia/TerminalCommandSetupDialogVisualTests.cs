@@ -57,9 +57,15 @@ public sealed class TerminalCommandSetupDialogVisualTests
 			CommandLine = string.Empty,
 			ShowInstallButton = false
 		};
+		var compactManualWithAction = compactManualContent with
+		{
+			InstallButtonText = "Set up again",
+			ShowInstallButton = true
+		};
 		var automatic = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: true, detailedManualContent);
 		var manual = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, detailedManualContent);
 		var compactManual = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, compactManualContent);
+		var compactManualAction = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, compactManualWithAction);
 
 		Assert.Equal(480, automatic.Width);
 		Assert.Equal(180, automatic.Height);
@@ -67,6 +73,8 @@ public sealed class TerminalCommandSetupDialogVisualTests
 		Assert.True(automatic.Height < manual.Height);
 		Assert.True(compactManual.Width < manual.Width);
 		Assert.True(compactManual.Height < manual.Height);
+		Assert.Equal(190, compactManual.Height);
+		Assert.Equal(compactManual, compactManualAction);
 		Assert.True(compactManual.Height > automatic.Height);
 	}
 
@@ -191,6 +199,11 @@ public sealed class TerminalCommandSetupDialogVisualTests
 			completion);
 		var reinstallButton = FindDescendants<Button>(content)
 			.Single(button => string.Equals(button.Content?.ToString(), "Set up again", StringComparison.Ordinal));
+		var closeButton = FindDescendants<Button>(content)
+			.Single(button => string.Equals(button.Content?.ToString(), "OK", StringComparison.Ordinal));
+
+		Assert.DoesNotContain("primary-action", reinstallButton.Classes);
+		Assert.Contains("primary-action", closeButton.Classes);
 
 		reinstallButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 		var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(1));

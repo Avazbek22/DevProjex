@@ -5409,7 +5409,8 @@ public partial class MainWindow : Window
             await MessageDialog.ShowAsync(
                 this,
                 _localization["Dialog.TerminalCommand.Title"],
-                _localization["Dialog.TerminalCommand.ReconfigureSucceeded"]);
+                _localization["Dialog.TerminalCommand.ReconfigureSucceeded"],
+                height: 120);
         }
     }
 

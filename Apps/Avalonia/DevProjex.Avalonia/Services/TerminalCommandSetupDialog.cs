@@ -151,7 +151,8 @@ internal static class TerminalCommandSetupDialog
 				HorizontalContentAlignment = HorizontalAlignment.Center,
 				VerticalContentAlignment = VerticalAlignment.Center
 			};
-			installButton.Classes.Add("primary-action");
+			if (!snapshot.CanReinstall)
+				installButton.Classes.Add("primary-action");
 			installButton.Click += (_, _) =>
 			{
 				completion.TrySetResult(new TerminalCommandDialogResult(
@@ -173,6 +174,8 @@ internal static class TerminalCommandSetupDialog
 			HorizontalContentAlignment = HorizontalAlignment.Center,
 			VerticalContentAlignment = VerticalAlignment.Center
 		};
+		if (snapshot.CanReinstall)
+			closeButton.Classes.Add("primary-action");
 		closeButton.Click += (_, _) =>
 		{
 			var action = dontShowAgain.IsChecked == true
@@ -266,12 +269,11 @@ internal sealed record TerminalCommandDialogDimensions(
 			return new TerminalCommandDialogDimensions(480, 180, 420, 170);
 
 		return IsCompactManualContent(content)
-			? new TerminalCommandDialogDimensions(500, 220, 420, 190)
+			? new TerminalCommandDialogDimensions(500, 190, 420, 180)
 			: new TerminalCommandDialogDimensions(560, 320, 480, 280);
 	}
 
 	private static bool IsCompactManualContent(TerminalCommandDialogText content) =>
-		!content.ShowInstallButton &&
 		string.IsNullOrWhiteSpace(content.Details) &&
 		string.IsNullOrWhiteSpace(content.CommandLine);
 }
