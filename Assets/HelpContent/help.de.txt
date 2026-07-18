@@ -1,4 +1,4 @@
-﻿## 1) Was ist das und wozu
+## 1) Was ist das und wozu
 DevProjex bereitet den Projektkontext schnell auf: zeigt die Ordner/Dateistruktur, erlaubt das Markieren von Elementen und das Kopieren des Baums und/oder von Dateiinhalten in die Zwischenablage. Nützlich für Code‑Reviews, Support, Schulung und das Teilen der Struktur mit einem KI‑Assistenten.
 
 Wichtig: Die App arbeitet nur lesend und ändert keine Dateien.
@@ -18,7 +18,7 @@ Tastenkürzel:
 * Ordner öffnen… — Wurzelordner öffnen (Ctrl+O)
 * Neues Fenster — eine neue unabhängige DevProjex-Instanz öffnen
 * Zuletzt verwendet — Liste zuletzt geöffneter lokaler Ordner
-* Aktualisieren — Baum neu einlesen und aufbauen (F5)
+* Aktualisieren — einen lokalen Ordner neu einlesen und den Baum aufbauen (F5)
 * In Datei exportieren:
   * Baum exportieren
   * Inhalt exportieren
@@ -55,7 +55,7 @@ Regeln:
 * es werden bis zu 15 letzte Ordner gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
 
-Für jeden Eintrag wird der kurze Ordnername angezeigt; der vollständige Pfad ist über einen Tooltip verfügbar.
+Für jeden Eintrag werden der übergeordnete Ordner und der Projektname angezeigt, zum Beispiel `Projects / App`.
 
 ## 4) Aus dem Terminal starten
 DevProjex kann aus dem Terminal gestartet werden.
@@ -93,7 +93,7 @@ Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
 `%TEMP%\DevProjex\RepoCache`
 
 * Branch — zeigt die Liste verfügbarer Branches mit Markierung der aktiven Branch; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn sie lokal noch nicht existiert, wird sie per fetch geladen und lokal erstellt.
-* Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>.
+* Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>. Bei einem Git-Clone-Projekt führt F5 dieselbe Aktion aus; der normale Befehl „Datei → Aktualisieren“ ist deaktiviert.
 
 ### Klonfenster
 Im Git-Clone-Fenster kann unter dem URL-Feld eine Liste „Zuletzt verwendete Repositories“ angezeigt werden.
@@ -274,6 +274,10 @@ Rechts verfügbar:
 
 Änderungen in „Ignorieren“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet und nach dem Klick auf „Anwenden“ angewendet.
 
+Nach dem Ändern eines Kontrollkästchens kann die App verfügbare Optionen und deren Zähler im Hintergrund aktualisieren. Der resultierende Baum wird erst nach dem Klick auf „Anwenden“ neu aufgebaut.
+
+Wird eine Aktualisierung verfügbarer Optionen mit der X-Schaltfläche in der Statusleiste abgebrochen, werden unvollständige Änderungen nicht angewendet und das Panel kehrt zum letzten abgeschlossenen Zustand zurück.
+
 Jede Liste hat einen Alle‑Schalter.
 
 Hinweis zu „Dateitypen“:
@@ -298,104 +302,52 @@ Wichtig:
 * wenn nach Aktualisieren oder erneutem Öffnen ein neuer Ordner der obersten Ebene, ein neuer Dateityp oder eine neue Option in „Ignorieren“ erscheint, ist dieser Punkt standardmäßig aktiviert;
 * bereits bekannte Punkte behalten die ausdrückliche Auswahl des Benutzers: neue Dateien eines deaktivierten Typs aktivieren diesen Typ nicht erneut.
 
-## 12) Ignore
-Die Liste „Ignorieren“ wird automatisch aus dem aktuellen Pfad und den ausgewählten Ordnern der obersten Ebene aufgebaut.
+## 12) Ignorieren
+Der Block „Ignorieren“ steuert, welche Dateien und Ordner aus Baum, Inhalt, Kopier- und Exportergebnissen ausgeschlossen werden.
 
-Reihenfolge der Optionen:
-* Smart Ignore (wenn verfügbar)
-* .gitignore verwenden (wenn mindestens eine `.gitignore` gefunden wurde)
-* Leere Ordner
-* Leere Dateien
-* Versteckte Ordner
-* Versteckte Dateien
-* Ordner mit führendem Punkt
-* Dateien mit führendem Punkt
-* Dateien ohne Erweiterung
+Ein Element wird nur angezeigt, wenn sein Ordner der obersten Ebene und sein Dateityp ausgewählt sind und keine aktivierte Ignore-Regel es ausschließt. Die Regeln wirken gemeinsam: Blendet mindestens eine Regel ein Element aus, kann eine andere Regel es nicht wieder sichtbar machen.
 
-Optionen der Grundregeln (versteckt, mit Punkt, leer, ohne Erweiterung) werden nur angezeigt, wenn passende Elemente vorhanden sind.
-Wenn eine Option in „Ignorieren“ erstmals verfügbar wird, ist sie standardmäßig aktiviert. Eine zuvor ausdrücklich deaktivierte Option behält diesen Zustand, wenn sie wieder verfügbar wird.
+### 12.1 Verfügbare Regeln
+Je nach Projektinhalt können Smart Ignore, „.gitignore verwenden“, leere, versteckte oder mit Punkt beginnende Ordner und Dateien sowie Dateien ohne Erweiterung angezeigt werden.
 
-Die Trennlinie unter „.gitignore verwenden“ trennt Git/Smart-Regeln von den grundlegenden Sichtbarkeitsregeln.
+Eine Option erscheint, wenn sie den aktuellen Baum verändern kann. Die Liste kann sich daher nach dem Umschalten einer anderen Regel, eines Ordners der obersten Ebene oder eines Dateityps ändern. Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert; eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend verschwindet.
 
-### 12.1 Geltungsbereich der Regeln
-Die Anwendung bildet Projektbereiche (Scopes), in denen die Ignore-Regeln gelten:
-* Wurzelordner (wenn im Root `.gitignore` oder ein Projektmarker vorhanden ist)
-* Ordner der ersten Ebene
-* verschachtelte Projekt-Unterordner
+### 12.2 Smart Ignore
+Smart Ignore blendet Abhängigkeiten, Build-Ausgaben, Caches und andere Projektartefakte aus. DevProjex erkennt den Projekttyp anhand der Struktur und Markerdateien wie `.csproj`, `package.json`, `pyproject.toml` oder `Cargo.toml`. Die Regeln des entsprechenden Stacks gelten nur innerhalb des erkannten Projektbereichs und nicht für benachbarte Projekte anderer Stacks.
 
-Die Suche nach verschachtelten Projektbereichen ist begrenzt und hängt von der Ordnerstruktur ab.
-Für normale Projekte wird eine flache Suche verwendet. In erkannten Monorepos kann tiefer gesucht werden.
-Systemordner, Abhängigkeiten und bestätigte Build-Artefakte werden bei der Bereichssuche übersprungen.
+Bei mehrdeutigen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `Library` wird zusätzlich der Ordnerinhalt geprüft. Ein gewöhnlicher Benutzerordner wird daher nicht allein wegen seines Namens ausgeblendet. Einige Abhängigkeitsspeicher und Systemordner lassen sich anhand ihrer charakteristischen Struktur auch außerhalb eines ausdrücklich erkannten Projekts bestimmen.
 
-Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.gitignore` und Smart Ignore. Sobald ein Bereich gefunden wurde, werden die Regeln auf seinen Inhalt durch den normalen Baum-Scan angewendet.
+Die Erkennung neuer Projektbereiche ist begrenzt, damit große Benutzerordner nicht vollständig wiederholt analysiert werden. Normale Strukturen werden flach, erkannte Monorepos tiefer durchsucht. Nach der Erkennung gilt Smart Ignore ohne Tiefenbegrenzung für den gesamten Unterbaum des Bereichs.
 
-### 12.2 „.gitignore verwenden“
-* Aktiviert: `.gitignore`-Regeln werden in den gefundenen Bereichen angewendet.
-* Deaktiviert: `.gitignore`-Regeln werden vollständig abgeschaltet.
+### 12.3 .gitignore verwenden
+Wenn aktiviert, berücksichtigt DevProjex jede erreichbare `.gitignore`, nicht nur die Datei im Wurzelordner. Jede Datei gilt für ihren eigenen Ordner und alle erreichbaren Unterordner, jedoch nicht für übergeordnete oder benachbarte Ordner.
 
-Bei Ordnern mit mehreren Projekten gilt die `.gitignore` eines Projekts nicht für benachbarte Projekte außerhalb seines Bereichs.
+Für einen Pfad werden die Regeln von der übergeordneten zur tieferen `.gitignore` ausgewertet; innerhalb einer Datei von oben nach unten. Die letzte passende Regel bestimmt das Git-Ergebnis.
 
-### 12.3 „Smart Ignore“
-* Wird nur angezeigt, wenn es den resultierenden Baum verändern kann.
-* Aktiviert: typische Build-Artefakte, Tool-Caches und Abhängigkeitsspeicher werden zusätzlich ausgeblendet.
-* Deaktiviert: Smart-Regeln werden nicht angewendet.
+Eine Regel mit `!` hebt nur einen früheren Git-Ausschluss in ihrem Bereich auf. Sie kann keine Datei zurückholen, solange deren übergeordneter Ordner ausgeschlossen bleibt. Eine `.gitignore` in einem vollständig ausgeschlossenen und unerreichbaren Ordner wird nicht ausgewertet.
 
-Ein Ordner wird nicht allein wegen seines Namens ignoriert.
-Bei allgemeinen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `Library` wird zusätzlich der Inhalt geprüft.
-Enthält der Ordner normalen Quellcode, bleibt er sichtbar.
+Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude`, globale Git-Regeln und der Git-Index werden nicht berücksichtigt.
 
-Smart Ignore berücksichtigt die Struktur jedes erkannten Projekts und arbeitet getrennt innerhalb seines Bereichs.
+### 12.4 Zusammenspiel von .gitignore und Smart Ignore
+Bei einem Projekt mit einem Bereich und eigener `.gitignore` zeigt die Oberfläche meist nur „.gitignore verwenden“. Dann aktiviert diese Option sowohl `.gitignore` als auch passende Smart-Ignore-Regeln. In einem Workspace mit mehreren Projekten können beide Optionen getrennt erscheinen und unabhängig für ihre Bereiche arbeiten.
 
-### 12.4 Grundregeln
-Optionen:
-* Versteckte Ordner
-* Versteckte Dateien
-* Ordner mit führendem Punkt
-* Dateien mit führendem Punkt
-* Leere Ordner
-* Leere Dateien
-* Dateien ohne Erweiterung
+Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam. Es gibt daher keine gemeinsame „stärkere“ Regel: Ein Element bleibt nur sichtbar, wenn es alle aktivierten Mechanismen durchläuft.
 
-Wenn aktiviert, blendet eine Option die passenden Elemente im Baum sowie in Kopier-/Exportergebnissen aus.
-Die Grundregeln werden getrennt von `.gitignore` und Smart Ignore aktiviert, aber das Endergebnis wird immer anhand des aktuellen Baums nach Anwendung aller aktiven Filter berechnet.
+### 12.5 Grundregeln
+Regeln für führende Punkte prüfen den Namen; Regeln für versteckte Elemente prüfen das Hidden-Systemattribut. Beides kann je nach Plattform dasselbe oder verschiedene Elemente betreffen.
 
-### 12.5 Internes Verhalten: typische Fälle
-1. Ein Projekt mit `.gitignore`.
-Meist wird nur „.gitignore verwenden“ angezeigt.
-Bei Aktivierung arbeiten `.gitignore` und Smart Ignore zusammen.
-Bei Deaktivierung werden beide abgeschaltet.
+„Leere Dateien“ blendet Dateien mit 0 Byte aus. „Dateien ohne Erweiterung“ betrifft beispielsweise `Dockerfile`, `Makefile` und `README`.
 
-2. Ein Projekt ohne `.gitignore`.
-„.gitignore verwenden“ wird nicht angezeigt.
-„Smart Ignore“ wird nur angezeigt, wenn es den aktuellen Baum beeinflussen kann.
+„Leere Ordner“ blendet logisch leere Ordner aus. Ein Ordner ist logisch leer, wenn nach Anwendung der ausgewählten Dateitypen und aller anderen Regeln keine sichtbaren Dateien oder Unterordner verbleiben. Deshalb kann sich sein Zähler ändern, wenn eine andere Regel umgeschaltet wird.
 
-3. Mehrprojekt-Workspace: ein Teil mit `.gitignore`, ein Teil ohne.
-„.gitignore verwenden“ und „Smart Ignore“ werden angezeigt.
-`.gitignore` wirkt nur im eigenen Bereich.
-Smart Ignore (wenn aktiviert) ergänzt die Filterung in den gefundenen Bereichen.
+### 12.6 Zähler
+Ein Zähler zeigt den direkten Beitrag einer Regel unter den aktuellen Einstellungen, nicht die physische Anzahl ähnlicher Elemente auf dem Datenträger. Ein Element wird nicht gleichzeitig mehreren überlappenden Zählern zugeordnet.
 
-4. Mehrprojekt-Workspace: alle Projekte haben `.gitignore`.
-„.gitignore verwenden“ wird angezeigt.
-„Smart Ignore“ wird nicht als separater Punkt angezeigt.
+Die feste Zuordnung lautet: für Ordner `.gitignore`, Smart Ignore, führender Punkt, Hidden-Attribut; für Dateien `.gitignore`, Smart Ignore, führender Punkt, keine Erweiterung, leere Datei, Hidden-Attribut. Diese Reihenfolge betrifft nur die Zähler. Für die Sichtbarkeit genügt jeder aktivierte Mechanismus, der das Element ausschließt.
 
-5. Ordner ohne anwendbare Regeln.
-Wenn keine `.gitignore` gefunden wird und Smart Ignore den Baum nicht beeinflusst, werden diese Punkte nicht angezeigt.
-Es bleiben nur die grundlegenden Sichtbarkeitsregeln.
+### 12.7 Änderungen anwenden
+Das Umschalten von Kontrollkästchen aktualisiert zuerst die verfügbaren Einstellungen und Zähler. Der endgültige Baum wird nach „Einstellungen anwenden“ neu aufgebaut. Wird die Vorbereitung abgebrochen, kehrt DevProjex zum letzten vollständig abgeschlossenen Zustand zurück; teilweise berechnete Regeln werden nicht angewendet.
 
-### 12.6 Leere Ordner
-Blendet logisch leere Ordner im Baum sowie in Kopier-/Exportergebnissen aus.
-Ein logisch leerer Ordner ist ein Ordner, in dem nach Anwendung der aktuellen Sichtbarkeitsregeln, von `.gitignore`, Smart Ignore und der ausgewählten Dateitypen keine sichtbaren Nachfolger mehr verbleiben.
-Wenn der Ordner selbst nicht durch andere Regeln ausgeblendet wird, wird seine Entfernung aus dem Baum genau durch diese Option gesteuert.
-
-### 12.7 Leere Dateien
-Blendet leere Dateien mit Größe 0 Byte im Baum sowie in Kopier-/Exportergebnissen aus.
-
-### 12.8 Dateien ohne Erweiterung
-Blendet Dateien ohne Erweiterung (zum Beispiel: `Dockerfile`, `Makefile`, `README`) im Baum sowie in Kopier-/Exportergebnissen aus.
-
-### 12.9 Zähler im Block „Ignorieren“
-Bei verfügbaren Optionen wird die Anzahl im Format `(N)` angezeigt.
-Bei Grundregeln zeigt diese Zahl, wie viele Elemente in der aktuellen Baumkonfiguration genau durch diese Regel ausgeblendet werden.
 ## 13) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
 * ausgewählte Ordner der obersten Ebene
@@ -448,18 +400,27 @@ Auswahlreihenfolge:
 4) sonst — unbekannt
 
 ## 15) Thema und Effekte
-Das Theme‑Popover ermöglicht:
-* helles/dunkles Theme
-* Transparent / Mica / Acrylic
-* Intensität, Unschärfe, Kontrast, Rahmen
+Im Bereich „Thema“ können ein helles oder dunkles Theme und ein Hintergrundeffekt gewählt werden:
+* Transparenz
+* Weichzeichnen
+* Mica
 
-Einträge mit [Beta] können sich zwischen Versionen ändern.
+Die Effekte schließen sich gegenseitig aus. Ein erneuter Klick auf den ausgewählten Effekt deaktiviert ihn und stellt einen normalen undurchsichtigen Hintergrund wieder her.
+
+Verfügbare Einstellungen:
+* Hintergrundtransparenz — verfügbar für Transparenz und Weichzeichnen.
+* Kontrast der oberen Leiste — passt die Hauptleiste mit Vorschau-, Such-, Filter- und Baumformat-Befehlen an.
+* Menütransparenz — gilt gleichermaßen für das Hauptmenü und seine Untermenüs.
+* Sichtbarkeit der Ränder — bestimmt, wie deutlich die Ränder der Oberfläche dargestellt werden.
+
+Mica verwendet das Systemmaterial der Plattform und hat keine separate Einstellung für die Hintergrundtransparenz. Ist der ausgewählte Effekt Weichzeichnen oder Mica nicht verfügbar, versucht die App zunächst den jeweils anderen nativen Effekt. Erst wenn beide nicht verfügbar sind, wird ein normaler undurchsichtiger Hintergrund verwendet.
+
+Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs, Untermenüs und andere Popup-Flächen verwenden, sofern unterstützt, Weichzeichnen, damit dahinterliegende Baum- und Inhaltselemente die Lesbarkeit nicht beeinträchtigen.
 
 ## 16) Hilfe
 
 ### 16.1 Einstellungen zurücksetzen
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) setzt nur visuelle UI-Parameter zurück (Theme, Effekte, Kompaktmodus, Baumanimation) und ändert keine Projektdaten.
-Einstellungen zurücksetzen löscht außerdem die gespeicherte Sprachauswahl der Oberfläche.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Baumanimation und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
 
 ### 16.2 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
@@ -492,8 +453,9 @@ Verhalten:
 X-Schaltfläche (Abbrechen) in der Statusleiste:
 * führt eine Best-Effort-Abbruchanforderung für Operationen mit Abbruchunterstützung aus;
 * stoppt die Hintergrundberechnung von Daten;
+* setzt das Panel beim Abbrechen einer Aktualisierung verfügbarer Optionen auf den letzten abgeschlossenen Zustand zurück;
 * bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
 
 ## 19) Hinweise
-* Standardmäßig sind dunkles Theme und Transparenzeffekte aktiviert (wenn unterstützt).
+* Standardmäßig wird das dunkle Theme mit Weichzeichnen verwendet. Ist Weichzeichnen nicht verfügbar, versucht die App Mica; sind beide Effekte nicht verfügbar, werden die Effekte deaktiviert.
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.

@@ -1,4 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
 namespace DevProjex.Tests.Integration;
@@ -786,7 +785,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 	private static TemporaryDirectory CreateScopedControllerWorkspace()
 	{
 		var workspace = new TemporaryDirectory();
-		workspace.CreateFile("api/.gitignore", "logs/*\n!logs/keep.log\ngenerated/\n!generated/keep/\n");
+		workspace.CreateFile("api/.gitignore", "logs/*\n!logs/keep.log\ngenerated/*\n!generated/keep/\n");
 		workspace.CreateFile("api/App.csproj", "<Project />\n");
 		workspace.CreateFile("api/src/Program.cs", "Console.WriteLine(\"api\");\n");
 		workspace.CreateFile("api/logs/drop.log", "drop log\n");

@@ -152,6 +152,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		using var temp = new TemporaryDirectory();
 		var projectPath = temp.CreateDirectory("project with spaces");
 		SeedUserLevelProject(projectPath);
+		WriteProjectFile(projectPath, Path.Combine("src", "Пример.cs"), "namespace Smoke;\npublic sealed class Пример { }\n");
 
 		var result = await RunUserLevelTerminalCommandAsync(
 			temp,
@@ -166,6 +167,8 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
 		var (jsonPart, contentPart) = SplitTreeContentJsonStdout(result.Stdout);
+		Assert.Contains("\"Пример.cs\"", jsonPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\u04", jsonPart, StringComparison.OrdinalIgnoreCase);
 		using var document = JsonDocument.Parse(jsonPart);
 		var root = document.RootElement;
 		Assert.Equal(GetComparablePath(projectPath), GetComparablePath(root.GetProperty("rootPath").GetString()!));
@@ -174,9 +177,11 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		var tree = JsonTreeExportTestHelper.GetTree(document);
 		JsonTreeExportTestHelper.AssertRelativePathsUseForwardSlashes(tree);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
-		Assert.Equal(["src/App.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.Equal(["src/App.cs", "src/Пример.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
 		Assert.Contains("App.cs:", contentPart, StringComparison.Ordinal);
 		Assert.Contains("public static class App", contentPart, StringComparison.Ordinal);
+		Assert.Contains("Пример.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("public sealed class Пример", contentPart, StringComparison.Ordinal);
 		Assert.DoesNotContain("Readme.txt", result.Stdout, StringComparison.Ordinal);
 		Assert.DoesNotContain("LICENSE", result.Stdout, StringComparison.Ordinal);
 		Assert.DoesNotContain("bin placeholder", result.Stdout, StringComparison.Ordinal);
@@ -513,13 +518,13 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			return;
 
 		using var temp = new TemporaryDirectory();
-		var appDirectory = temp.CreateDirectory("DevProjex & copied build");
+		var appDirectory = temp.CreateDirectory("DevProjex & !missing! copied build");
 		CopyAppBuildOutputToDirectory(appDirectory);
 		var copiedAppHostPath = GetNativeAppHostExecutablePath(appDirectory);
 		var launcherPath = Path.Combine(temp.Path, CommandLineExecutableAliases.WindowsPortableCommandFileName);
 		await CreateWindowsLauncherAsync(launcherPath, copiedAppHostPath);
 
-		var result = await RunWindowsCommandAsync(launcherPath, CommandLineOptionTokens.Version);
+		var result = await RunWindowsCommandWithDelayedExpansionAsync(launcherPath, CommandLineOptionTokens.Version);
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal($"{MainWindowViewModel.TitleVersion}{Environment.NewLine}", result.Stdout);
@@ -1338,6 +1343,9 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Contains("\"файл.txt\"", result.Stdout, StringComparison.Ordinal);
+		Assert.Contains("\"Пользователь.cs\"", result.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\u04", result.Stdout, StringComparison.OrdinalIgnoreCase);
 		using var document = JsonDocument.Parse(result.Stdout);
 		Assert.Equal(Path.GetFullPath(projectPath).Replace('\\', '/'), document.RootElement.GetProperty("rootPath").GetString());
 		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(document.RootElement);
@@ -1377,6 +1385,45 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		Assert.Contains("empty-folder", JsonTreeExportTestHelper.ExtractEmptyFolderPaths(tree));
 		Assert.DoesNotContain("namespace RepoLike", result.Stdout, StringComparison.Ordinal);
 		Assert.DoesNotContain("guide content", result.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Process_ExportJsonTreeWithUnicodePathsToFileWritesReadableUtf8AndRoundTrips()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("Проект JSON");
+		WriteProjectFile(projectPath, Path.Combine("Документы", "Файл [финал].cs"), "namespace Пример;\n");
+		WriteProjectFile(projectPath, Path.Combine("Документы", "Сводка.txt"), "сводка\n");
+		var outputPath = Path.Combine(temp.Path, "экспорт", "дерево.json");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, outputPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		Assert.Equal(Path.GetFullPath(outputPath), AssertSingleOutputLine(result.Stdout));
+		Assert.True(File.Exists(outputPath));
+
+		var json = await File.ReadAllTextAsync(outputPath, Encoding.UTF8, TestContext.Current.CancellationToken);
+		Assert.Contains("Проект JSON", json, StringComparison.Ordinal);
+		Assert.Contains("\"Документы\"", json, StringComparison.Ordinal);
+		Assert.Contains("Файл", json, StringComparison.Ordinal);
+		Assert.Contains("Сводка.txt", json, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\u04", json, StringComparison.OrdinalIgnoreCase);
+
+		using var document = JsonDocument.Parse(json);
+		Assert.Equal(
+			Path.GetFullPath(projectPath).Replace('\\', '/'),
+			document.RootElement.GetProperty("rootPath").GetString());
+		Assert.Equal(
+			["Документы/Сводка.txt", "Документы/Файл [финал].cs"],
+			JsonTreeExportTestHelper.ExtractFilePaths(JsonTreeExportTestHelper.GetTree(document))
+				.OrderBy(static path => path, StringComparer.Ordinal)
+				.ToArray());
 	}
 
 	[Fact]
@@ -2553,6 +2600,29 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		};
 
 		startInfo.ArgumentList.Add("/d");
+		startInfo.ArgumentList.Add("/c");
+		startInfo.ArgumentList.Add(commandPath);
+		foreach (var arg in args)
+			startInfo.ArgumentList.Add(arg);
+
+		return await RunProcessAsync(startInfo);
+	}
+
+	private static async Task<CommandLineProcessResult> RunWindowsCommandWithDelayedExpansionAsync(
+		string commandPath,
+		params string[] args)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = "cmd.exe",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		startInfo.ArgumentList.Add("/d");
+		startInfo.ArgumentList.Add("/v:on");
 		startInfo.ArgumentList.Add("/c");
 		startInfo.ArgumentList.Add(commandPath);
 		foreach (var arg in args)

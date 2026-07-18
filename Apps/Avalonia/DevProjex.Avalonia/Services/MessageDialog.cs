@@ -2,7 +2,7 @@ namespace DevProjex.Avalonia.Services;
 
 public static class MessageDialog
 {
-    public static async Task ShowAsync(Window owner, string title, string message)
+    public static async Task ShowAsync(Window owner, string title, string message, double height = 200)
     {
         var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
         var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
@@ -12,7 +12,7 @@ public static class MessageDialog
             brushes,
             BuildContent(message),
             width: 420,
-            height: 200);
+            height: height);
 
         if (owner is not null)
             await dialog.ShowDialog(owner);
@@ -25,7 +25,9 @@ public static class MessageDialog
         string title,
         string message,
         string confirmButtonText = "Да",
-        string cancelButtonText = "Отмена")
+        string cancelButtonText = "Отмена",
+        double width = 520,
+        double height = 260)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
@@ -35,8 +37,8 @@ public static class MessageDialog
             themeVariant,
             brushes,
             BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
-            width: 520,
-            height: 260);
+            width: width,
+            height: height);
 
         dialog.Closed += (_, _) => completion.TrySetResult(false);
 

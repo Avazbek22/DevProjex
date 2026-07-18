@@ -8,6 +8,71 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class MetricsPipelineWarmupTests
 {
     [AvaloniaFact]
+    public async Task InitializeFileMetricsCacheAsync_PendingVisualGate_DefersAllFileIoUntilReveal()
+    {
+        using var temp = new TemporaryDirectory();
+        var textFile = temp.CreateFile("Program.cs", "Console.WriteLine(\"ready\");");
+        var treeRoot = new TreeNodeDescriptor(
+            "root",
+            temp.Path,
+            true,
+            false,
+            "folder",
+            [new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+        var currentTree = new BuildTreeResult(
+            treeRoot,
+            RootAccessDenied: false,
+            HadAccessDenied: false,
+            [textFile]);
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+        var observedProgressValues = new List<double>();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.StatusProgressValue))
+                observedProgressValues.Add(viewModel.StatusProgressValue);
+        };
+        var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+        using var pipeline = new MetricsPipeline(
+            viewModel,
+            CreateLocalization(),
+            analyzer,
+            new TreeExportService(),
+            status,
+            currentTreeProvider: () => currentTree,
+            currentPathProvider: () => temp.Path,
+            selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+            treeFormatProvider: () => TreeTextFormat.Ascii,
+            exportPathPresentationProvider: () => null,
+            boundsWidthProvider: () => 1400);
+        var visualReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var warmupTask = pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+            currentTree,
+            visualReady.Task,
+            TestContext.Current.CancellationToken);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
+        Assert.False(pipeline.IsBackgroundActive);
+        Assert.False(pipeline.HasCompleteBaseline);
+        Assert.Equal(0, viewModel.StatusProgressValue);
+        Assert.DoesNotContain(observedProgressValues, static value => value > 0);
+
+        visualReady.SetResult();
+        await warmupTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+        Assert.True(pipeline.HasCompleteBaseline);
+        Assert.Contains(100, observedProgressValues);
+    }
+
+    [AvaloniaFact]
     public async Task InitializeFileMetricsCacheAsync_MixedFiles_InspectsEachTextFileOnceAndPublishesRenderedMetrics()
     {
         using var temp = new TemporaryDirectory();

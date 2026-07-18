@@ -327,7 +327,7 @@ public sealed class RecentProjectsStoreTests
 
 		var loaded = store.Load();
 
-		Assert.Equal(1, loaded.SchemaVersion);
+		Assert.Equal(2, loaded.SchemaVersion);
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
 		Assert.Equal(invalidJson, File.ReadAllText(filePath));
@@ -398,6 +398,7 @@ public sealed class RecentProjectsStoreTests
 		{
 		  "schemaVersion": 0,
 		  "recentFolders": null,
+		  "recentFolderRemovals": null,
 		  "recentRepositories": null
 		}
 		""");
@@ -410,11 +411,96 @@ public sealed class RecentProjectsStoreTests
 		});
 
 		Assert.NotNull(persisted);
-		Assert.Equal(1, loaded.SchemaVersion);
+		Assert.Equal(2, loaded.SchemaVersion);
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
-		Assert.Equal(1, persisted!.SchemaVersion);
+		Assert.Equal(2, persisted!.SchemaVersion);
 		Assert.Empty(persisted.RecentFolders);
+		Assert.Empty(persisted.RecentFolderRemovals);
 		Assert.Empty(persisted.RecentRepositories);
+	}
+
+	[Fact]
+	public void RemoveFolder_RemovesOnlyRequestedFolderAndPersistsTombstone()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var removedPath = temp.CreateFolder("Removed");
+		var retainedPath = temp.CreateFolder("Retained");
+		var state = store.AddFolder(store.Load(), removedPath);
+		state = store.AddFolder(state, retainedPath);
+		state = store.AddRepository(state, "https://github.com/example/repo");
+
+		state = store.RemoveFolder(state, removedPath);
+		var reloaded = store.Load();
+
+		Assert.DoesNotContain(state.RecentFolders, entry => PathComparer.Default.Equals(entry.Path, removedPath));
+		Assert.Single(reloaded.RecentFolders);
+		Assert.Equal(PathUtility.Normalize(retainedPath), reloaded.RecentFolders[0].Path);
+		Assert.Single(reloaded.RecentRepositories);
+		var removal = Assert.Single(reloaded.RecentFolderRemovals);
+		Assert.Equal(PathUtility.Normalize(removedPath), removal.Path);
+	}
+
+	[Fact]
+	public void TryPersist_StaleSnapshot_DoesNotResurrectExplicitlyRemovedFolder()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folderPath = temp.CreateFolder("Workspace");
+		var current = store.AddFolder(store.Load(), folderPath);
+		var stale = new RecentProjectsDb
+		{
+			SchemaVersion = current.SchemaVersion,
+			RecentFolders = current.RecentFolders.Select(static entry => entry with { }).ToList()
+		};
+
+		store.RemoveFolder(current, folderPath);
+		Assert.True(store.TryPersist(stale));
+
+		var reloaded = store.Load();
+		Assert.Empty(reloaded.RecentFolders);
+		Assert.Single(reloaded.RecentFolderRemovals);
+	}
+
+	[Fact]
+	public void AddFolder_AfterExplicitRemoval_RestoresItAsNewerHistory()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folderPath = temp.CreateFolder("Workspace");
+		var state = store.AddFolder(store.Load(), folderPath);
+		state = store.RemoveFolder(state, folderPath);
+
+		state = store.AddFolder(state, folderPath);
+		var reloaded = store.Load();
+
+		Assert.Single(state.RecentFolders);
+		Assert.Single(reloaded.RecentFolders);
+		Assert.Equal(PathUtility.Normalize(folderPath), reloaded.RecentFolders[0].Path);
+	}
+
+	[Fact]
+	public void TryPersist_ExcessRemovalHistory_IsBoundedToNewestSixtyFourEntries()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var snapshot = new RecentProjectsDb
+		{
+			RecentFolderRemovals = Enumerable.Range(0, 70)
+				.Select(index => new RecentFolderRemovalEntry
+				{
+					Path = Path.Combine(temp.Path, $"Removed{index}"),
+					RemovedUtc = DateTimeOffset.UtcNow.AddMinutes(index)
+				})
+				.ToList()
+		};
+
+		Assert.True(store.TryPersist(snapshot));
+		var reloaded = store.Load();
+
+		Assert.Equal(64, reloaded.RecentFolderRemovals.Count);
+		Assert.Contains(reloaded.RecentFolderRemovals, entry => entry.Path.EndsWith("Removed69", StringComparison.Ordinal));
+		Assert.DoesNotContain(reloaded.RecentFolderRemovals, entry => entry.Path.EndsWith("Removed0", StringComparison.Ordinal));
 	}
 }

@@ -3,6 +3,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Interactivity;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -56,16 +57,31 @@ public sealed class TerminalCommandSetupDialogVisualTests
 			CommandLine = string.Empty,
 			ShowInstallButton = false
 		};
+		var compactManualWithAction = compactManualContent with
+		{
+			InstallButtonText = "Set up again",
+			ShowInstallButton = true
+		};
+		var pathSetup = detailedManualContent with { IsPathSetup = true };
 		var automatic = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: true, detailedManualContent);
+		var pathSetupAutomatic = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: true, pathSetup);
 		var manual = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, detailedManualContent);
 		var compactManual = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, compactManualContent);
+		var compactManualAction = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, compactManualWithAction);
+		var pathSetupManual = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, pathSetup);
 
 		Assert.Equal(480, automatic.Width);
 		Assert.Equal(180, automatic.Height);
+		Assert.Equal(600, pathSetupAutomatic.Width);
+		Assert.Equal(180, pathSetupAutomatic.Height);
 		Assert.True(automatic.Width < manual.Width);
 		Assert.True(automatic.Height < manual.Height);
 		Assert.True(compactManual.Width < manual.Width);
 		Assert.True(compactManual.Height < manual.Height);
+		Assert.Equal(190, compactManual.Height);
+		Assert.Equal(compactManual, compactManualAction);
+		Assert.Equal(190, pathSetupManual.Height);
+		Assert.True(pathSetupManual.Height * 2 <= manual.Height + 60);
 		Assert.True(compactManual.Height > automatic.Height);
 	}
 
@@ -161,6 +177,139 @@ public sealed class TerminalCommandSetupDialogVisualTests
 		Assert.Contains("\n\n", ReadTextBlockText(message), StringComparison.Ordinal);
 		Assert.Equal(2, commandRuns.Length);
 		Assert.All(commandRuns, run => Assert.Equal(FontWeight.Bold, run.FontWeight));
+	}
+
+	[AvaloniaFact]
+	public async Task BuildContent_PathMissing_UsesSinglePrimaryRecoveryAction()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.InstalledPathMissing,
+			CommandPath: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: "/opt/DevProjex/DevProjex",
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: false,
+			CanInstall: false,
+			CanRepair: false,
+			ShellProfileHint: "Add ~/.local/bin to PATH.",
+			PathSetupCommand: "fish_add_path $HOME/.local/bin");
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot);
+		var completion = new TaskCompletionSource<TerminalCommandDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var content = InvokeBuildContent(
+			new Window(),
+			localization,
+			text,
+			snapshot,
+			isAutomaticPrompt: false,
+			new CheckBox(),
+			completion);
+
+		var buttons = FindDescendants<Button>(content).ToArray();
+
+		Assert.Contains(buttons, button => Equals(button.Content, "Copy PATH command"));
+		var configurePath = Assert.Single(buttons, button => Equals(button.Content, "Add to PATH"));
+		Assert.Contains("primary-action", configurePath.Classes);
+		var ok = Assert.Single(buttons, button => Equals(button.Content, "OK"));
+		Assert.DoesNotContain("primary-action", ok.Classes);
+		Assert.Single(buttons, button => button.Classes.Contains("primary-action"));
+
+		configurePath.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+		var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(1));
+		Assert.Equal(TerminalCommandDialogAction.ConfigurePath, result.Action);
+	}
+
+	[AvaloniaTheory]
+	[InlineData(TerminalCommandSetupState.NotInstalled, true, false, true, "Set up terminal launch")]
+	[InlineData(TerminalCommandSetupState.Stale, false, true, false, "Repair")]
+	[InlineData(TerminalCommandSetupState.InstalledPathMissing, false, false, true, "Add to PATH")]
+	[InlineData(TerminalCommandSetupState.CommandShadowed, false, false, true, "Add to PATH")]
+	[InlineData(TerminalCommandSetupState.Installed, false, false, false, "OK")]
+	[InlineData(TerminalCommandSetupState.ManagedByOperatingSystem, false, false, false, "OK")]
+	public void BuildContent_ActionHierarchy_ExposesExactlyOnePrimaryAction(
+		TerminalCommandSetupState state,
+		bool canInstall,
+		bool canRepair,
+		bool isAutomaticPrompt,
+		string expectedPrimaryLabel)
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var isInstalled = state == TerminalCommandSetupState.Installed;
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			state,
+			CommandPath: state == TerminalCommandSetupState.ManagedByOperatingSystem
+				? null
+				: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: state == TerminalCommandSetupState.ManagedByOperatingSystem
+				? null
+				: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: isInstalled || state is TerminalCommandSetupState.InstalledPathMissing or TerminalCommandSetupState.CommandShadowed
+				? "/opt/DevProjex/DevProjex"
+				: null,
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: isInstalled || state == TerminalCommandSetupState.ManagedByOperatingSystem,
+			CanInstall: canInstall,
+			CanRepair: canRepair,
+			ShellProfileHint: null,
+			PathSetupCommand: state is TerminalCommandSetupState.InstalledPathMissing or TerminalCommandSetupState.CommandShadowed
+				? "fish_add_path \"$HOME/.local/bin\""
+				: null);
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot, isAutomaticPrompt);
+		var content = InvokeBuildContent(
+			new Window(),
+			localization,
+			text,
+			snapshot,
+			isAutomaticPrompt,
+			new CheckBox(),
+			new TaskCompletionSource<TerminalCommandDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously));
+
+		var primary = Assert.Single(
+			FindDescendants<Button>(content),
+			button => button.Classes.Contains("primary-action"));
+
+		Assert.Equal(expectedPrimaryLabel, primary.Content?.ToString());
+	}
+
+	[AvaloniaFact]
+	public async Task BuildContent_InstalledManagedLauncher_UsesExplicitReinstallAction()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.Installed,
+			CommandPath: "/home/me/.local/bin/devprojex",
+			TargetExecutablePath: "/opt/DevProjex/DevProjex",
+			InstalledTargetExecutablePath: "/opt/DevProjex/DevProjex",
+			UserBinDirectory: "/home/me/.local/bin",
+			UserBinDirectoryIsInPath: true,
+			CanInstall: false,
+			CanRepair: false,
+			ShellProfileHint: null);
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot);
+		var completion = new TaskCompletionSource<TerminalCommandDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var content = InvokeBuildContent(
+			new Window(),
+			localization,
+			text,
+			snapshot,
+			isAutomaticPrompt: false,
+			new CheckBox(),
+			completion);
+		var reinstallButton = FindDescendants<Button>(content)
+			.Single(button => string.Equals(button.Content?.ToString(), "Set up again", StringComparison.Ordinal));
+		var closeButton = FindDescendants<Button>(content)
+			.Single(button => string.Equals(button.Content?.ToString(), "OK", StringComparison.Ordinal));
+
+		Assert.DoesNotContain("primary-action", reinstallButton.Classes);
+		Assert.Contains("primary-action", closeButton.Classes);
+
+		reinstallButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+		var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+		Assert.Equal(TerminalCommandDialogAction.Reinstall, result.Action);
 	}
 
 	private static object? CaptureResource(IResourceDictionary resources, string key, out bool exists)

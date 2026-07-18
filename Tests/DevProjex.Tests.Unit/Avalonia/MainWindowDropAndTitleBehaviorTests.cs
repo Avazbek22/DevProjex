@@ -1,5 +1,7 @@
 namespace DevProjex.Tests.Unit.Avalonia;
 
+using global::Avalonia.Input;
+
 public sealed class MainWindowDropAndTitleBehaviorTests
 {
     [Fact]
@@ -16,7 +18,7 @@ public sealed class MainWindowDropAndTitleBehaviorTests
     }
 
     [Fact]
-    public void ResolveDropFolderPath_UsesParentDirectory_WhenOnlyFileIsProvided()
+    public void ResolveDropFolderPath_RejectsFileInsteadOfOpeningItsParentDirectory()
     {
         var method = GetPrivateStaticMethod("ResolveDropFolderPath");
         using var temp = new TemporaryDirectory();
@@ -24,7 +26,34 @@ public sealed class MainWindowDropAndTitleBehaviorTests
 
         var result = (string?)method.Invoke(null, [new[] { file }]);
 
-        Assert.Equal(Path.GetDirectoryName(file), result);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ResolveDropFolderPath_UsesFirstExistingDirectory_WhenSeveralAreProvided()
+    {
+        var method = GetPrivateStaticMethod("ResolveDropFolderPath");
+        using var temp = new TemporaryDirectory();
+        var firstFolder = temp.CreateFolder("first");
+        var secondFolder = temp.CreateFolder("second");
+
+        var result = (string?)method.Invoke(null, [new[] { firstFolder, secondFolder }]);
+
+        Assert.Equal(firstFolder, result);
+    }
+
+    [Fact]
+    public void ResolveDropFolderPath_SkipsFilesAndMissingPathsBeforeExistingDirectory()
+    {
+        var method = GetPrivateStaticMethod("ResolveDropFolderPath");
+        using var temp = new TemporaryDirectory();
+        var file = temp.CreateFile("notes.txt", "notes");
+        var missingPath = Path.Combine(temp.Path, "missing");
+        var folder = temp.CreateFolder("project");
+
+        var result = (string?)method.Invoke(null, [new[] { file, missingPath, folder }]);
+
+        Assert.Equal(folder, result);
     }
 
     [Fact]
@@ -36,6 +65,20 @@ public sealed class MainWindowDropAndTitleBehaviorTests
         var result = (string?)method.Invoke(null, [new string?[] { null, "", "  ", missingPath }]);
 
         Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData(false, DragDropEffects.None)]
+    [InlineData(true, DragDropEffects.Copy)]
+    public void ResolveDropEffect_MapsFolderValidityToNativeCursorFeedback(
+        bool hasFolder,
+        DragDropEffects expected)
+    {
+        var method = GetPrivateStaticMethod("ResolveDropEffect");
+
+        var result = (DragDropEffects)method.Invoke(null, [hasFolder])!;
+
+        Assert.Equal(expected, result);
     }
 
     [Fact]

@@ -38,7 +38,7 @@ public sealed class IgnoreOwnershipAuditService
 				if (isDot)
 					physicalDotDirectories++;
 
-				var gitIgnore = rules.UseGitIgnore
+				var gitIgnore = rules.IsGitIgnoreTraversalEnabled
 					? gitIgnoreContext.Evaluate(directoryPath, name, isDirectory: true, name)
 					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 				var owner = IgnoreDecisionEngine

@@ -19,6 +19,44 @@ public sealed class ProjectScopeDiscoveryServiceTests
 	}
 
 	[Fact]
+	public void Revalidate_UnchangedProbedTopology_ReusesCachedContext()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/package.json", "{}");
+		temp.CreateFile("workspace/src/app.ts", "export {};");
+		var discovery = CreateDiscovery();
+		var initial = discovery.Discover(temp.Path, ["workspace"]);
+
+		var reused = discovery.Revalidate(temp.Path, TestContext.Current.CancellationToken);
+		var repeated = discovery.Discover(temp.Path, ["workspace"]);
+
+		Assert.True(reused);
+		Assert.Same(initial, repeated);
+	}
+
+	[Fact]
+	public void Revalidate_NewNestedProjectScope_InvalidatesCachedTopology()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/readme.txt", "plain");
+		var workspacePath = Path.Combine(temp.Path, "workspace");
+		var discovery = CreateDiscovery();
+		var initial = discovery.Discover(temp.Path, ["workspace"]);
+		Assert.DoesNotContain(initial.Scopes, scope => ScopeEndsWith(scope, "workspace/service"));
+
+		temp.CreateFile("workspace/service/package.json", "{}");
+		Directory.SetLastWriteTimeUtc(
+			workspacePath,
+			Directory.GetLastWriteTimeUtc(workspacePath).AddSeconds(2));
+
+		var reused = discovery.Revalidate(temp.Path, TestContext.Current.CancellationToken);
+		var refreshed = discovery.Discover(temp.Path, ["workspace"]);
+
+		Assert.False(reused);
+		Assert.Contains(refreshed.Scopes, scope => ScopeEndsWith(scope, "workspace/service"));
+	}
+
+	[Fact]
 	public void Discover_MixedWorkspace_UsesOneScopeModelForGitAndMarkerProjects()
 	{
 		using var temp = new TemporaryDirectory();

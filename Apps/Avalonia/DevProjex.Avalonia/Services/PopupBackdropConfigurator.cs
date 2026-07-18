@@ -1,5 +1,7 @@
 namespace DevProjex.Avalonia.Services;
 
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+
 internal enum PopupBackdropTransparencyFallback
 {
     None,
@@ -8,8 +10,9 @@ internal enum PopupBackdropTransparencyFallback
 
 internal static class PopupBackdropConfigurator
 {
-    private static readonly WindowTransparencyLevel[] NoEffectHints =
+    private static readonly WindowTransparencyLevel[] TransparentHints =
     [
+        WindowTransparencyLevel.Transparent,
         WindowTransparencyLevel.None
     ];
 
@@ -31,20 +34,20 @@ internal static class PopupBackdropConfigurator
     public static bool TryApply(
         Control? hostedControl,
         TopLevel? host,
-        bool enableBackdrop,
+        ThemeEffectMode effect,
         PopupBackdropTransparencyFallback fallback)
     {
         if (hostedControl is null)
             return false;
 
         return TopLevel.GetTopLevel(hostedControl) is TopLevel popupLevel &&
-               TryApplyToTopLevel(popupLevel, host, enableBackdrop, fallback);
+               TryApplyToTopLevel(popupLevel, host, effect, fallback);
     }
 
     public static bool TryApplyToTopLevel(
         TopLevel popupLevel,
         TopLevel? host,
-        bool enableBackdrop,
+        ThemeEffectMode effect,
         PopupBackdropTransparencyFallback fallback)
     {
         if (host is not null && ReferenceEquals(popupLevel, host))
@@ -52,19 +55,17 @@ internal static class PopupBackdropConfigurator
 
         try
         {
-            if (enableBackdrop)
+            if (effect != ThemeEffectMode.Solid)
             {
                 // Menu/popover surfaces intentionally use the smaller popup radius.
                 // Borderless dialogs have a separate profile because their outer card is 12px.
                 CompositionBackdropCornerRadiusCoordinator.UseRoundedCornersForPopupSurface();
             }
 
-            popupLevel.TransparencyLevelHint = enableBackdrop
-                ? ResolveEffectHints(fallback)
-                : NoEffectHints;
-
-            if (enableBackdrop)
-                popupLevel.Background = Brushes.Transparent;
+            popupLevel.TransparencyLevelHint = ResolveEffectHints(effect, fallback);
+            // The top-level host must stay transparent even for an opaque Solid surface;
+            // otherwise its rectangular background leaks outside the rounded child border.
+            popupLevel.Background = Brushes.Transparent;
 
             return true;
         }
@@ -76,10 +77,17 @@ internal static class PopupBackdropConfigurator
     }
 
     private static IReadOnlyList<WindowTransparencyLevel> ResolveEffectHints(
+        ThemeEffectMode effect,
         PopupBackdropTransparencyFallback fallback)
     {
-        return fallback == PopupBackdropTransparencyFallback.Transparent
-            ? EffectHintsWithTransparentFallback
-            : EffectHints;
+        return effect switch
+        {
+            ThemeEffectMode.Solid => TransparentHints,
+            // Transparent applies to the main window only. Popup text surfaces still need
+            // a native blur so content behind them cannot compete with menu labels.
+            _ => fallback == PopupBackdropTransparencyFallback.Transparent
+                ? EffectHintsWithTransparentFallback
+                : EffectHints
+        };
     }
 }

@@ -181,6 +181,30 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		Assert.Equal(0, treeBuilder.InventoryProjectionCount);
 	}
 
+	[Fact]
+	public void Load_DefaultSelectionDiscoversDeepGitIgnoreBeyondBoundedProjectScopes()
+	{
+		using var temp = new TemporaryDirectory();
+		var segments = new List<string> { "workspace" };
+		for (var depth = 0; depth < 12; depth++)
+			segments.Add($"level-{depth:D2}");
+		segments.Add("repo");
+		var repo = Path.Combine([.. segments]);
+		temp.CreateFile(Path.Combine(repo, ".gitignore"), "*.noise\n");
+		var visiblePath = temp.CreateFile(Path.Combine(repo, "visible.txt"), "visible\n");
+		var ignoredPath = temp.CreateFile(Path.Combine(repo, "generated.noise"), "ignored\n");
+		var service = CreateService(new FileSystemScanner(), new TreeBuilder());
+
+		var loaded = service.Load(
+			new ProjectAnalysisRequest(temp.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+		Assert.Contains(visiblePath, loaded.Tree.OrderedFilePaths!);
+		Assert.DoesNotContain(ignoredPath, loaded.Tree.OrderedFilePaths!);
+		Assert.DoesNotContain(".noise", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+	}
+
 	private static TemporaryDirectory CreateMixedWorkspace()
 	{
 		var temp = new TemporaryDirectory();

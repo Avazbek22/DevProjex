@@ -9,7 +9,9 @@ namespace DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 internal static class ProjectLoadWorkflowRefreshHarness
 {
-    public static WorkflowServices CreateServices(IFileSystemScanner? scanner = null)
+    public static WorkflowServices CreateServices(
+        IFileSystemScanner? scanner = null,
+        Func<IgnoreRules, IgnoreRules>? transformRules = null)
     {
         var scanOptions = new ScanOptionsUseCase(scanner ?? new FileSystemScanner());
         var filterSelectionService = new FilterOptionSelectionService();
@@ -20,7 +22,11 @@ internal static class ProjectLoadWorkflowRefreshHarness
             scanOptions,
             filterSelectionService,
             ignoreOptionsService,
-            (path, selectedIgnoreOptions, selectedRoots) => ignoreRulesService.Build(path, selectedIgnoreOptions, selectedRoots),
+            (path, selectedIgnoreOptions, selectedRoots) =>
+            {
+                var rules = ignoreRulesService.Build(path, selectedIgnoreOptions, selectedRoots);
+                return transformRules?.Invoke(rules) ?? rules;
+            },
             (path, selectedRoots) => ignoreRulesService.GetIgnoreOptionsAvailability(path, selectedRoots) with
             {
                 ShowAdvancedCounts = true

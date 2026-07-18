@@ -27,7 +27,10 @@ internal static class UiTestDriver
         bool waitForInitialSettingsPane = true,
         string? appDataPathOverride = null,
         Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null,
-        bool waitForStatusIdle = true)
+        bool waitForStatusIdle = true,
+        ProjectSourceType projectSourceType = ProjectSourceType.LocalFolder,
+        string? managedClonePath = null,
+        string? repositoryUrl = null)
     {
         var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
         var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
@@ -41,6 +44,17 @@ internal static class UiTestDriver
             Width = 1500,
             Height = 920
         };
+
+        if (projectSourceType == ProjectSourceType.GitClone)
+        {
+            var clonePath = managedClonePath ?? project.RootPath;
+            var viewModel = GetViewModel(window);
+            viewModel.ProjectSourceType = ProjectSourceType.GitClone;
+            viewModel.CurrentBranch = "main";
+            SetRequiredPrivateField(window, "_currentCachedRepoPath", clonePath);
+            SetRequiredPrivateField(window, "_currentRepositoryUrl", repositoryUrl);
+        }
+
         TrackTopLevelWindow(window);
         WindowAppDataPaths[window] = appDataPath;
 
@@ -458,6 +472,36 @@ internal static class UiTestDriver
     {
         var previewCopyButton = GetRequiredControl<Button>(window, "PreviewCopyButton");
         await ClickAsync(window, previewCopyButton);
+    }
+
+    public static async Task CopyContentToClipboardAsync(MainWindow window, string expectedContent)
+        => await InvokeClipboardActionAsync(window, "OnCopyContent", expectedContent);
+
+    public static async Task CopyTreeToClipboardAsync(MainWindow window, string expectedContent)
+        => await InvokeClipboardActionAsync(window, "OnCopyTree", expectedContent);
+
+    public static async Task CopyTreeAndContentToClipboardAsync(MainWindow window, string expectedContent)
+        => await InvokeClipboardActionAsync(window, "OnCopyTreeAndContent", expectedContent);
+
+    private static async Task InvokeClipboardActionAsync(
+        MainWindow window,
+        string methodName,
+        string expectedContent)
+    {
+        var method = typeof(MainWindow).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        await SetClipboardTextAsync(window, $"copy-content-pending-{Guid.NewGuid():N}");
+        await window.Dispatcher.InvokeAsync(
+            () => method!.Invoke(window, [window, new RoutedEventArgs()]),
+            DispatcherPriority.Normal);
+
+        await WaitForClipboardTextAsync(window, expectedContent, TimeSpan.FromSeconds(10));
+        await WaitForConditionAsync(
+            window,
+            () => !GetViewModel(window).StatusBusy,
+            $"{methodName} operation to finish",
+            timeout: TimeSpan.FromSeconds(10));
     }
 
     public static async Task ClickPreviewStickyHeaderCopyButtonAsync(MainWindow window)
@@ -1407,6 +1451,13 @@ internal static class UiTestDriver
     {
         var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<T>(field?.GetValue(window));
+    }
+
+    private static void SetRequiredPrivateField(MainWindow window, string fieldName, object? value)
+    {
+        var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field!.SetValue(window, value);
     }
 
     private static T InvokePrivateMethod<T>(MainWindow window, string methodName)

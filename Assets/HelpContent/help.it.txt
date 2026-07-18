@@ -1,4 +1,4 @@
-﻿## 1) Cos’è e a cosa serve
+## 1) Cos’è e a cosa serve
 DevProjex prepara rapidamente il contesto del progetto: mostra la struttura di cartelle/file, permette di selezionare gli elementi e copiare l’albero e/o il contenuto dei file negli appunti. Utile per code review, supporto, formazione e condivisione della struttura con un assistente AI.
 
 Importante: l’app è solo in lettura e non modifica i file.
@@ -18,7 +18,7 @@ Scorciatoie:
 * Apri cartella… — apri la cartella radice (Ctrl+O)
 * Nuova finestra — apri una nuova istanza indipendente di DevProjex
 * Recenti — elenco delle cartelle locali aperte di recente
-* Aggiorna — rileggi e ricostruisci l’albero (F5)
+* Aggiorna — rileggi una cartella locale e ricostruisci l’albero (F5)
 * Esporta su file:
   * Esporta albero
   * Esporta contenuto
@@ -55,7 +55,7 @@ Regole:
 * vengono conservate fino a 15 cartelle recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
 
-Per ogni elemento viene mostrato il nome breve della cartella; il percorso completo è disponibile in un tooltip.
+Per ogni elemento vengono mostrati la cartella padre e il nome del progetto, ad esempio `Projects / App`.
 
 ## 4) Avvio dal terminale
 DevProjex può essere avviato dal terminale.
@@ -93,7 +93,7 @@ La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
 `%TEMP%\DevProjex\RepoCache`
 
 * Branch — mostra l’elenco dei branch disponibili con indicazione di quello attivo; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste in locale, viene scaricato (fetch) e creato localmente.
-* Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
+* Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>. Per un progetto Git Clone, F5 esegue la stessa azione; il normale comando «File → Aggiorna» è disattivato.
 
 ### Finestra di clonazione
 Nella finestra Git Clone può comparire sotto il campo URL un elenco «Repository recenti».
@@ -274,6 +274,10 @@ A destra sono disponibili:
 
 Le modifiche in « Ignora », « Tipi di file » e « Cartelle di primo livello » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
 
+Dopo la modifica di una casella, l’app può aggiornare in background le opzioni disponibili e i relativi contatori. L’albero risultante viene ricostruito solo dopo aver premuto « Applica ».
+
+Se l’aggiornamento delle opzioni disponibili viene annullato con il pulsante X nella barra di stato, le modifiche incomplete non vengono applicate e il pannello torna all’ultimo stato completato.
+
 Ogni lista ha il toggle Tutti.
 
 Nota su « Tipi di file »:
@@ -299,103 +303,51 @@ Importante:
 * i punti già noti mantengono la scelta esplicita dell’utente: nuovi file di un tipo disattivato non riattivano quel tipo.
 
 ## 12) Ignora
-L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
+Il blocco «Ignora» controlla quali file e cartelle vengono esclusi dall’albero, dal contenuto, dalla copia e dall’esportazione.
 
-Ordine delle opzioni:
-* Smart ignore (se disponibile)
-* Usa .gitignore (se viene trovato almeno un `.gitignore`)
-* Cartelle vuote
-* File vuoti
-* Cartelle nascoste
-* File nascosti
-* Cartelle con punto iniziale
-* File con punto iniziale
-* File senza estensione
+Un elemento viene mostrato solo se la cartella di primo livello e il tipo di file sono selezionati e nessuna regola attiva lo esclude. Le regole si sommano: se almeno una nasconde un elemento, un’altra non può renderlo visibile.
 
-Le opzioni delle regole base (nascosti, con punto, vuoti, senza estensione) vengono mostrate solo se esistono elementi corrispondenti.
-Quando un’opzione in « Ignora » diventa disponibile per la prima volta, viene attivata per impostazione predefinita. Un’opzione disattivata esplicitamente in precedenza mantiene quello stato quando torna disponibile.
+### 12.1 Regole disponibili
+In base al contenuto del progetto possono comparire Smart Ignore, «Usa .gitignore», cartelle e file vuoti, nascosti o con punto iniziale e file senza estensione.
 
-La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
+Un’opzione appare quando può modificare l’albero corrente. L’elenco può quindi cambiare dopo la modifica di un’altra regola, di una cartella di primo livello o di un tipo di file. Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
 
-### 12.1 Ambito delle regole
-L’app costruisce ambiti di progetto (scope) in cui applicare le regole di ignore:
-* radice (se la radice contiene `.gitignore` o un marker di progetto)
-* cartelle di primo livello
-* sottocartelle di progetto annidate
+### 12.2 Smart Ignore
+Smart Ignore nasconde dipendenze, risultati di build, cache e altri artefatti di servizio. DevProjex identifica il tipo di progetto dalla struttura e da file marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml`. Le regole dello stack rilevato restano nell’area del progetto e non si estendono ai progetti vicini di un altro stack.
 
-La ricerca degli ambiti di progetto annidati è limitata e dipende dalla struttura della cartella.
-Per i progetti normali viene usata una ricerca poco profonda. Nei monorepo riconosciuti la ricerca può essere più profonda.
-Le cartelle di sistema, le dipendenze e gli artefatti di build confermati vengono ignorati durante la ricerca degli ambiti.
+Per nomi ambigui come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` viene verificato anche il contenuto. Una normale cartella dell’utente non viene quindi nascosta solo per il nome. Alcuni archivi di dipendenze e cartelle di servizio possono essere riconosciuti dalla loro struttura caratteristica anche fuori da un progetto rilevato esplicitamente.
 
-Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e Smart Ignore. Una volta trovato un ambito, le regole vengono applicate al suo contenuto tramite la normale scansione dell’albero.
+La ricerca di nuove aree di progetto è limitata per evitare l’analisi ripetuta di ogni directory in una grande cartella utente. Le strutture normali usano una ricerca poco profonda, mentre i monorepo riconosciuti vengono esaminati più in profondità. Dopo il rilevamento, Smart Ignore si applica all’intero sottoalbero senza limite di profondità.
 
-### 12.2 « Usa .gitignore »
-* Attivo: le regole `.gitignore` sono applicate negli ambiti rilevati.
-* Disattivo: le regole `.gitignore` sono completamente disattivate.
+### 12.3 Usa .gitignore
+Quando è attiva, l’opzione applica ogni `.gitignore` raggiungibile, non solo quello nella radice. Ogni file agisce sulla cartella che lo contiene e su tutte le sottocartelle accessibili, ma non sulle cartelle superiori o adiacenti.
 
-Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
+Per un percorso, le regole vengono valutate dal `.gitignore` padre verso quelli più profondi; nello stesso file, dall’alto verso il basso. L’ultima regola corrispondente determina il risultato Git.
 
-### 12.3 « Smart ignore »
-* Viene mostrato solo quando può modificare l’albero risultante.
-* Attivo: nasconde anche i tipici artefatti di build, le cache degli strumenti e gli archivi delle dipendenze.
-* Disattivo: le regole smart non vengono applicate.
+Una regola che inizia con `!` annulla solo una precedente esclusione Git nella propria area. Non può ripristinare un file finché la cartella padre rimane esclusa. Un `.gitignore` dentro una cartella completamente esclusa e irraggiungibile non viene valutato.
 
-Una cartella non viene ignorata solo per il suo nome.
-Per nomi comuni come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` viene controllato anche il contenuto.
-Se la cartella contiene normali file sorgente, rimane visibile.
+Una riga errata o non supportata viene ignorata singolarmente; le altre regole valide continuano a funzionare. L’opzione comprende solo i file `.gitignore` dell’albero di lavoro. `.git/info/exclude`, le regole Git globali e lo stato dell’indice Git non vengono applicati.
 
-Smart Ignore considera la struttura di ogni progetto rilevato e opera separatamente nel relativo ambito.
+### 12.4 Relazione tra .gitignore e Smart Ignore
+In un progetto con una sola area e un proprio `.gitignore`, l’interfaccia mostra di solito solo «Usa .gitignore». In questo caso l’opzione attiva sia `.gitignore` sia le regole Smart Ignore applicabili. In uno spazio di lavoro con più progetti, le opzioni possono apparire separatamente e funzionare in modo indipendente nelle rispettive aree.
 
-### 12.4 Regole base
-Opzioni:
-* Cartelle nascoste
-* File nascosti
-* Cartelle con punto iniziale
-* File con punto iniziale
-* Cartelle vuote
-* File vuoti
-* File senza estensione
+Una negazione Git con `!` annulla solo il risultato Git; non prevale su Smart Ignore o su una regola di base. Non esiste quindi una regola globalmente «più forte»: un elemento deve superare tutti i meccanismi attivi per restare visibile.
 
-Quando un’opzione è attiva, nasconde gli elementi corrispondenti nell’albero e nei risultati di copia/esportazione.
-Le regole di base vengono attivate separatamente da `.gitignore` e Smart Ignore, ma il risultato finale viene sempre calcolato sull’albero corrente dopo l’applicazione di tutti i filtri attivi.
+### 12.5 Regole di base
+Le regole per il punto iniziale controllano il nome; quelle per gli elementi nascosti controllano l’attributo di sistema Hidden. A seconda della piattaforma possono riguardare lo stesso elemento oppure elementi diversi.
 
-### 12.5 Comportamento interno: casi tipici
-1. Progetto singolo con `.gitignore`.
-Di norma viene mostrato solo « Usa .gitignore ».
-Quando è attivo, `.gitignore` e Smart Ignore lavorano insieme.
-Quando è disattivo, entrambi vengono disattivati.
+«File vuoti» nasconde i file di 0 byte. «File senza estensione» nasconde, ad esempio, `Dockerfile`, `Makefile` e `README`.
 
-2. Progetto singolo senza `.gitignore`.
-« Usa .gitignore » non viene mostrato.
-« Smart ignore » viene mostrato solo se può influire sull’albero corrente.
+«Cartelle vuote» nasconde le cartelle logicamente vuote. Una cartella è logicamente vuota quando, dopo i tipi di file selezionati e tutte le altre regole, non rimangono file o sottocartelle visibili. Il relativo contatore può quindi cambiare quando viene modificata un’altra regola.
 
-3. Workspace multi-progetto, alcuni progetti con `.gitignore`, altri senza.
-Vengono mostrati « Usa .gitignore » e « Smart ignore ».
-`.gitignore` opera nel proprio ambito.
-Smart Ignore (se attivo) completa il filtraggio negli ambiti rilevati.
+### 12.6 Contatori
+Un contatore mostra il contributo diretto della regola con le impostazioni correnti, non il numero fisico di elementi simili sul disco. Lo stesso elemento non viene attribuito contemporaneamente a più contatori sovrapposti.
 
-4. Workspace multi-progetto, tutti i progetti hanno `.gitignore`.
-Viene mostrato « Usa .gitignore ».
-« Smart ignore » non viene mostrato come opzione separata.
+L’ordine stabile di attribuzione è: per le cartelle, `.gitignore`, Smart Ignore, punto iniziale, attributo Hidden; per i file, `.gitignore`, Smart Ignore, punto iniziale, nessuna estensione, file vuoto, attributo Hidden. Questo ordine riguarda solo i contatori. Per la visibilità è sufficiente che un qualsiasi meccanismo attivo escluda l’elemento.
 
-5. Cartella senza regole applicabili.
-Se non viene trovato `.gitignore` e Smart Ignore non influisce sull’albero, queste opzioni non vengono mostrate.
-Restano solo le regole base di visibilità.
+### 12.7 Applicazione delle modifiche
+Le caselle aggiornano prima le opzioni disponibili e i contatori. L’albero finale viene ricostruito dopo «Applica impostazioni». Se la preparazione viene annullata, DevProjex torna all’ultimo stato completato; le regole calcolate solo in parte non vengono applicate.
 
-### 12.6 Cartelle vuote
-Nasconde le cartelle logicamente vuote dall’albero e dai risultati di copia/esportazione.
-Una cartella logicamente vuota è una cartella nella quale non restano discendenti visibili dopo l’applicazione delle regole di visibilità correnti, di `.gitignore`, di Smart Ignore e dei tipi di file selezionati.
-Se la cartella stessa non è nascosta da altre regole, la sua rimozione dall’albero è controllata proprio da questa opzione.
-
-### 12.7 File vuoti
-Nasconde i file vuoti di dimensione 0 byte dall’albero e dai risultati di copia/esportazione.
-
-### 12.8 File senza estensione
-Nasconde i file senza estensione (ad esempio: `Dockerfile`, `Makefile`, `README`) dall’albero e dai risultati di copia/esportazione.
-
-### 12.9 Contatori nel blocco « Ignora »
-Vicino alle opzioni disponibili viene mostrato il numero nel formato `(N)`.
-Per le regole di base, questo numero mostra quanti elementi vengono nascosti proprio da quella regola nella configurazione corrente dell’albero.
 ## 13) Come vengono calcolati albero e metriche
 Il risultato dipende da:
 * cartelle di primo livello selezionate
@@ -448,18 +400,27 @@ Ordine di scelta:
 4) altrimenti — sconosciuto
 
 ## 15) Tema ed effetti
-Il popover del tema permette di scegliere:
-* tema chiaro/scuro
-* Trasparente / Mica / Acrylic
-* intensità, blur, contrasto, bordi
+La sezione «Tema» permette di scegliere un tema chiaro o scuro e un effetto di sfondo:
+* Trasparenza
+* Sfocatura
+* Mica
 
-Gli elementi [Beta] possono cambiare tra versioni.
+Gli effetti si escludono a vicenda. Un nuovo clic sull’effetto selezionato lo disattiva e ripristina un normale sfondo opaco.
+
+Impostazioni disponibili:
+* Trasparenza dello sfondo — disponibile per Trasparenza e Sfocatura.
+* Contrasto barra superiore — regola la barra principale con i comandi di anteprima, ricerca, filtro e formato dell’albero.
+* Trasparenza dei menu — si applica allo stesso modo al menu principale e ai relativi sottomenu.
+* Visibilità dei bordi — regola quanto sono evidenti i bordi dell’interfaccia.
+
+Mica usa il materiale di sistema della piattaforma e non ha un’impostazione separata per la trasparenza dello sfondo. Se l’effetto selezionato, Sfocatura o Mica, non è disponibile, l’app prova prima l’altro effetto nativo. Un normale sfondo opaco viene usato solo quando nessuno dei due effetti è disponibile.
+
+In modalità Trasparenza, lo sfondo della finestra principale rimane trasparente. Menu, sottomenu e altre superfici popup usano Sfocatura, se supportata, affinché l’albero e il contenuto sottostanti non riducano la leggibilità.
 
 ## 16) Aiuto
 
 ### 16.1 Ripristina impostazioni
-Ripristina impostazioni (Aiuto → Ripristina impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
-Questa azione azzera anche la lingua dell’interfaccia salvata.
+Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, animazione dell’albero e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.
 
 ### 16.2 Ripristina dati
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
@@ -492,8 +453,9 @@ Comportamento:
 Pulsante X (annulla) nella barra di stato:
 * esegue annullamento best-effort per operazioni che supportano l’annullamento;
 * interrompe il calcolo dati in background;
+* quando viene annullato un aggiornamento delle opzioni disponibili, riporta il pannello all’ultimo stato completato;
 * per operazioni senza supporto annullamento, ferma l’indicazione nella barra di stato, mentre l’operazione può comunque terminare in background.
 
 ## 19) Note
-* Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
+* Per impostazione predefinita viene usato il tema scuro con Sfocatura. Se Sfocatura non è disponibile, l’app prova Mica; se nessuno dei due effetti è disponibile, gli effetti vengono disattivati.
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.

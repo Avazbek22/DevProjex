@@ -7,6 +7,8 @@ internal enum TerminalCommandDialogAction
 {
 	None,
 	InstallOrRepair,
+	ConfigurePath,
+	Reinstall,
 	DismissPrompt
 }
 
@@ -119,7 +121,9 @@ internal static class TerminalCommandSetupDialog
 		{
 			var copyButton = new Button
 			{
-				Content = localization["Dialog.TerminalCommand.CopyCommand"],
+				Content = localization[content.IsPathSetup
+					? "Dialog.TerminalCommand.CopyPathCommand"
+					: "Dialog.TerminalCommand.CopyCommand"],
 				MinWidth = 118,
 				Margin = new Thickness(0, 0, 8, 0),
 				IsEnabled = !string.IsNullOrWhiteSpace(content.CommandToCopy),
@@ -150,15 +154,39 @@ internal static class TerminalCommandSetupDialog
 				HorizontalContentAlignment = HorizontalAlignment.Center,
 				VerticalContentAlignment = VerticalAlignment.Center
 			};
-			installButton.Classes.Add("primary-action");
+			if (!snapshot.CanReinstall)
+				installButton.Classes.Add("primary-action");
 			installButton.Click += (_, _) =>
 			{
 				completion.TrySetResult(new TerminalCommandDialogResult(
-					TerminalCommandDialogAction.InstallOrRepair,
+					snapshot.CanReinstall
+						? TerminalCommandDialogAction.Reinstall
+						: TerminalCommandDialogAction.InstallOrRepair,
 					dontShowAgain.IsChecked == true));
 				(TopLevel.GetTopLevel(buttonPanel) as Window)?.Close();
 			};
 			buttonPanel.Children.Add(installButton);
+		}
+
+		if (content.IsPathSetup)
+		{
+			var configurePathButton = new Button
+			{
+				Content = localization["Dialog.TerminalCommand.AddToPath"],
+				MinWidth = 138,
+				Margin = new Thickness(0, 0, 8, 0),
+				HorizontalContentAlignment = HorizontalAlignment.Center,
+				VerticalContentAlignment = VerticalAlignment.Center
+			};
+			configurePathButton.Classes.Add("primary-action");
+			configurePathButton.Click += (_, _) =>
+			{
+				completion.TrySetResult(new TerminalCommandDialogResult(
+					TerminalCommandDialogAction.ConfigurePath,
+					dontShowAgain.IsChecked == true));
+				(TopLevel.GetTopLevel(buttonPanel) as Window)?.Close();
+			};
+			buttonPanel.Children.Add(configurePathButton);
 		}
 
 		var closeButton = new Button
@@ -170,6 +198,8 @@ internal static class TerminalCommandSetupDialog
 			HorizontalContentAlignment = HorizontalAlignment.Center,
 			VerticalContentAlignment = VerticalAlignment.Center
 		};
+		if (snapshot.CanReinstall || (!content.ShowInstallButton && !content.IsPathSetup))
+			closeButton.Classes.Add("primary-action");
 		closeButton.Click += (_, _) =>
 		{
 			var action = dontShowAgain.IsChecked == true
@@ -260,17 +290,21 @@ internal sealed record TerminalCommandDialogDimensions(
 		TerminalCommandDialogText content)
 	{
 		if (isAutomaticPrompt)
-			return new TerminalCommandDialogDimensions(480, 180, 420, 170);
+		{
+			return content.IsPathSetup
+				? new TerminalCommandDialogDimensions(600, 180, 540, 170)
+				: new TerminalCommandDialogDimensions(480, 180, 420, 170);
+		}
 
 		return IsCompactManualContent(content)
-			? new TerminalCommandDialogDimensions(500, 220, 420, 190)
+			? new TerminalCommandDialogDimensions(500, 190, 420, 180)
 			: new TerminalCommandDialogDimensions(560, 320, 480, 280);
 	}
 
 	private static bool IsCompactManualContent(TerminalCommandDialogText content) =>
-		!content.ShowInstallButton &&
-		string.IsNullOrWhiteSpace(content.Details) &&
-		string.IsNullOrWhiteSpace(content.CommandLine);
+		content.IsPathSetup ||
+		(string.IsNullOrWhiteSpace(content.Details) &&
+		 string.IsNullOrWhiteSpace(content.CommandLine));
 }
 
 internal sealed record TerminalCommandDialogText(
@@ -281,7 +315,8 @@ internal sealed record TerminalCommandDialogText(
 	string CommandToCopy,
 	bool ShowCopyButton,
 	string InstallButtonText,
-	bool ShowInstallButton);
+	bool ShowInstallButton,
+	bool IsPathSetup = false);
 
 internal static class TerminalCommandSetupDialogText
 {
@@ -294,13 +329,21 @@ internal static class TerminalCommandSetupDialogText
 		var body = GetBody(localization, snapshot, isAutomaticPrompt);
 		var details = isAutomaticPrompt ? string.Empty : GetDetails(localization, snapshot);
 		var commandToCopy = GetCommandToCopy(snapshot);
+		var isPathSetup = snapshot.State is
+			TerminalCommandSetupState.InstalledPathMissing or
+			TerminalCommandSetupState.CommandShadowed;
 		var commandLine = isAutomaticPrompt || ShouldHideCommandLine(snapshot)
 			? string.Empty
-			: localization.Format("Dialog.TerminalCommand.CommandLine", commandToCopy);
-		var showCopyButton = !isAutomaticPrompt && ShouldShowCopyButton(snapshot, commandToCopy);
-		var installText = snapshot.CanRepair
-			? localization["Dialog.TerminalCommand.Repair"]
-			: localization["Dialog.TerminalCommand.Enable"];
+			: isPathSetup
+				? snapshot.PathSetupCommand ?? string.Empty
+				: localization.Format("Dialog.TerminalCommand.CommandLine", commandToCopy);
+		var showCopyButton = (!isAutomaticPrompt || isPathSetup) &&
+		                     ShouldShowCopyButton(snapshot, commandToCopy);
+		var installText = snapshot.CanReinstall
+			? localization["Dialog.TerminalCommand.Reconfigure"]
+			: snapshot.CanRepair
+				? localization["Dialog.TerminalCommand.Repair"]
+				: localization["Dialog.TerminalCommand.Setup"];
 
 		return new TerminalCommandDialogText(
 			title,
@@ -310,7 +353,8 @@ internal static class TerminalCommandSetupDialogText
 			commandToCopy,
 			showCopyButton,
 			installText,
-			snapshot.IsActionable);
+			snapshot.IsActionable || snapshot.CanReinstall,
+			isPathSetup);
 	}
 
 	private static bool ShouldShowCopyButton(TerminalCommandSetupSnapshot snapshot, string commandToCopy)
@@ -319,12 +363,20 @@ internal static class TerminalCommandSetupDialogText
 			return false;
 
 		return snapshot.State is
+			TerminalCommandSetupState.InstalledPathMissing or
+			TerminalCommandSetupState.CommandShadowed or
 			TerminalCommandSetupState.ManagedByOperatingSystem or
 			TerminalCommandSetupState.UnsupportedOnCurrentPackage;
 	}
 
 	private static string GetCommandToCopy(TerminalCommandSetupSnapshot snapshot)
 	{
+		if (snapshot.State is TerminalCommandSetupState.InstalledPathMissing or
+		    TerminalCommandSetupState.CommandShadowed)
+		{
+			return snapshot.PathSetupCommand ?? string.Empty;
+		}
+
 		if (snapshot.State == TerminalCommandSetupState.UnsupportedOnCurrentPackage &&
 		    !string.IsNullOrWhiteSpace(snapshot.TargetExecutablePath))
 			return QuoteForDisplay(snapshot.TargetExecutablePath);
@@ -364,6 +416,10 @@ internal static class TerminalCommandSetupDialogText
 				localization["Dialog.TerminalCommand.Body.NotInstalled"],
 			TerminalCommandSetupState.Installed =>
 				localization["Dialog.TerminalCommand.Body.Installed"],
+			TerminalCommandSetupState.InstalledPathMissing =>
+				localization["Dialog.TerminalCommand.Body.InstalledPathMissing"],
+			TerminalCommandSetupState.CommandShadowed =>
+				localization["Dialog.TerminalCommand.Body.CommandShadowed"],
 			TerminalCommandSetupState.Stale =>
 				localization["Dialog.TerminalCommand.Body.Stale"],
 			TerminalCommandSetupState.ConflictingCommand =>
@@ -376,8 +432,12 @@ internal static class TerminalCommandSetupDialogText
 
 	private static string GetDetails(LocalizationService localization, TerminalCommandSetupSnapshot snapshot)
 	{
-		if (snapshot.State == TerminalCommandSetupState.Installed)
-			return string.Empty;
+		if (snapshot.State is TerminalCommandSetupState.Installed or TerminalCommandSetupState.InstalledPathMissing)
+		{
+			return string.IsNullOrWhiteSpace(snapshot.ShellProfileHint)
+				? string.Empty
+				: localization.Format("Dialog.TerminalCommand.Detail.PathHint", snapshot.ShellProfileHint);
+		}
 
 		var lines = new List<string>();
 
@@ -390,6 +450,8 @@ internal static class TerminalCommandSetupDialogText
 			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.Target", snapshot.TargetExecutablePath));
 		if (!string.IsNullOrWhiteSpace(snapshot.InstalledTargetExecutablePath))
 			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.InstalledTarget", snapshot.InstalledTargetExecutablePath));
+		if (!string.IsNullOrWhiteSpace(snapshot.ResolvedCommandPath))
+			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.ResolvedCommand", snapshot.ResolvedCommandPath));
 		if (!string.IsNullOrWhiteSpace(snapshot.ShellProfileHint))
 			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.PathHint", snapshot.ShellProfileHint));
 

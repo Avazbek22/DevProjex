@@ -26,16 +26,16 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "### Daraxt shrifti", "«E’tiborsiz qoldirish», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi" }
     };
 
-    public static TheoryData<string, string> IgnoreScopeContracts => new()
+    public static TheoryData<string, string, string> IgnoreScopeContracts => new()
     {
-        { "help.ru.txt", "Это ограничение относится только к обнаружению вложенных областей для `.gitignore` и Smart Ignore" },
-        { "help.en.txt", "This limit only controls discovery of nested scopes for `.gitignore` and Smart Ignore" },
-        { "help.de.txt", "Diese Begrenzung betrifft nur die Erkennung verschachtelter Bereiche für `.gitignore` und Smart Ignore" },
-        { "help.fr.txt", "Cette limite concerne uniquement la détection des zones imbriquées pour `.gitignore` et Smart Ignore" },
-        { "help.it.txt", "Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e Smart Ignore" },
-        { "help.kk.txt", "Бұл шектеу тек `.gitignore` және Smart Ignore үшін ішкі аймақтарды табуға қатысты" },
-        { "help.tg.txt", "Ин маҳдудият танҳо ба ёфтани минтақаҳои дохилӣ барои `.gitignore` ва Smart Ignore дахл дорад" },
-        { "help.uz.txt", "Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga tegishli" }
+        { "help.ru.txt", "Поиск новых проектных областей ограничен", "После обнаружения области Smart Ignore применяется ко всему её поддереву без ограничения глубины" },
+        { "help.en.txt", "Project scope discovery is bounded", "After a scope is found, Smart Ignore applies to its entire subtree without a depth limit" },
+        { "help.de.txt", "Die Erkennung neuer Projektbereiche ist begrenzt", "Nach der Erkennung gilt Smart Ignore ohne Tiefenbegrenzung für den gesamten Unterbaum des Bereichs" },
+        { "help.fr.txt", "La détection de nouvelles zones de projet est limitée", "Une fois la zone détectée, Smart Ignore s’applique à tout son sous-arbre sans limite de profondeur" },
+        { "help.it.txt", "La ricerca di nuove aree di progetto è limitata", "Dopo il rilevamento, Smart Ignore si applica all’intero sottoalbero senza limite di profondità" },
+        { "help.kk.txt", "жаңа жоба аймақтарын іздеу шектелген", "Аймақ табылғаннан кейін Smart Ignore оның бүкіл ішкі ағашына тереңдік шектеуінсіз қолданылады" },
+        { "help.tg.txt", "Ҷустуҷӯи минтақаҳои нави лоиҳа маҳдуд аст", "Баъд аз ёфтани минтақа Smart Ignore ба тамоми зердарахти он бе маҳдудияти амиқӣ татбиқ мешавад" },
+        { "help.uz.txt", "yangi loyiha hududlarini izlash cheklangan", "Hudud topilgach, Smart Ignore uning butun ichki daraxtiga chuqurlik cheklovisiz qo‘llanadi" }
     };
 
     public static TheoryData<string, string> LanguagePersistenceContracts => new()
@@ -50,10 +50,34 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "Tanlangan til ilova qayta ishga tushirilganda saqlanadi" }
     };
 
+    public static TheoryData<string, string, string, string, string> CurrentBehaviorContracts => new()
+    {
+        { "help.ru.txt", "### 12.2 Умный игнор", "гибрид", "Blur", "последнему завершённому состоянию" },
+        { "help.en.txt", "### 12.2 Smart Ignore", "hybrid", "Blur", "last completed state" },
+        { "help.de.txt", "### 12.2 Smart Ignore", "hybrid", "Weichzeichnen", "letzten abgeschlossenen Zustand" },
+        { "help.fr.txt", "### 12.2 Smart Ignore", "hybride", "Flou", "dernier état terminé" },
+        { "help.it.txt", "### 12.2 Smart Ignore", "ibrido", "Sfocatura", "ultimo stato completato" },
+        { "help.kk.txt", "### 12.2 Smart Ignore", "гибрид", "Бұлдырлату", "соңғы аяқталған күйіне" },
+        { "help.tg.txt", "### 12.2 Smart Ignore", "гибрид", "Тирагӣ", "ҳолати охирини анҷомёфта" },
+        { "help.uz.txt", "### 12.2 Smart Ignore", "gibrid", "Xiralashtirish", "oxirgi yakunlangan holatiga" }
+    };
+
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
     {
         { "help.ru.txt", "JSON-экспорт использует такой формат дерева: массивы содержат файлы, объекты содержат подпапки, `/` содержит файлы текущей папки, а `[]` обозначает пустую папку." },
         { "help.en.txt", "JSON export uses this tree format: arrays contain files, objects contain subfolders, `/` contains files in the current folder, and `[]` represents an empty folder." }
+    };
+
+    public static TheoryData<string, string, string, string> ThemeFallbackContracts => new()
+    {
+        { "help.ru.txt", "сначала пробует другой системный эффект", "фон главного окна", "Если Blur недоступен, приложение пробует Mica" },
+        { "help.en.txt", "first tries the other native effect", "main-window background", "If Blur is unavailable, the app tries Mica" },
+        { "help.de.txt", "zunächst den jeweils anderen nativen Effekt", "Hintergrund des Hauptfensters", "Ist Weichzeichnen nicht verfügbar, versucht die App Mica" },
+        { "help.fr.txt", "essaie d’abord l’autre effet natif", "arrière-plan de la fenêtre principale", "Si le Flou n’est pas disponible, l’application essaie Mica" },
+        { "help.it.txt", "prova prima l’altro effetto nativo", "sfondo della finestra principale", "Se Sfocatura non è disponibile, l’app prova Mica" },
+        { "help.kk.txt", "алдымен басқа жүйелік эффектіні қолданып көреді", "негізгі терезенің фоны", "Бұлдырлату қолжетімсіз болса, қолданба Mica-ны қолданып көреді" },
+        { "help.tg.txt", "аввал эффекти дигари системавиро месанҷад", "заминаи равзанаи асосӣ", "Агар Тирагӣ дастрас набошад, барнома Mica-ро месанҷад" },
+        { "help.uz.txt", "avval boshqa tizim effektini sinab ko‘radi", "asosiy oyna foni", "Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi" }
     };
 
     [Theory]
@@ -77,13 +101,15 @@ public sealed class HelpContentDocumentationContractTests
     [MemberData(nameof(IgnoreScopeContracts))]
     public void HelpContent_IgnoreScopeDepth_ClarifiesDiscoveryOnlyLimit(
         string fileName,
-        string expectedClarification)
+        string expectedBoundedDiscoveryText,
+        string expectedUnlimitedApplicationText)
     {
         var content = ReadHelpFile(fileName);
         var ignoreSection = ExtractSection(content, "## 12)", "## 13)");
 
         Assert.Contains("2", ignoreSection, StringComparison.Ordinal);
-        Assert.Contains(expectedClarification, ignoreSection, StringComparison.Ordinal);
+        Assert.Contains(expectedBoundedDiscoveryText, ignoreSection, StringComparison.Ordinal);
+        Assert.Contains(expectedUnlimitedApplicationText, ignoreSection, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -100,6 +126,31 @@ public sealed class HelpContentDocumentationContractTests
     }
 
     [Theory]
+    [MemberData(nameof(CurrentBehaviorContracts))]
+    public void HelpContent_DescribesCurrentIgnoreRefreshAndThemeBehavior(
+        string fileName,
+        string expectedSmartIgnoreHeading,
+        string forbiddenInternalTerm,
+        string expectedBlurLabel,
+        string expectedCancelRestoreText)
+    {
+        var content = ReadHelpFile(fileName);
+        var gitSection = ExtractSection(content, "## 5)", "## 6)");
+        var ignoreSection = ExtractSection(content, "## 12)", "## 13)");
+        var themeSection = ExtractSection(content, "## 15)", "## 16)");
+        var progressSection = ExtractSection(content, "## 18)", "## 19)");
+
+        Assert.Contains("F5", gitSection, StringComparison.Ordinal);
+        Assert.Contains("Projects / App", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSmartIgnoreHeading, ignoreSection, StringComparison.Ordinal);
+        Assert.DoesNotContain(forbiddenInternalTerm, ignoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedBlurLabel, themeSection, StringComparison.Ordinal);
+        Assert.DoesNotContain("Acrylic", themeSection, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Beta]", themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedCancelRestoreText, progressSection, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [MemberData(nameof(JsonTreeFormatContracts))]
     public void HelpContent_JsonTreeFormat_DescribesCurrentContract(string fileName, string expectedText)
     {
@@ -110,6 +161,22 @@ public sealed class HelpContentDocumentationContractTests
         Assert.DoesNotContain("\"files\"", content, StringComparison.Ordinal);
         Assert.DoesNotContain("\"name\"", content, StringComparison.Ordinal);
         Assert.DoesNotContain("\"path\"", content, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(ThemeFallbackContracts))]
+    public void HelpContent_ThemeSection_DescribesNativeFallbackChainAndTransparentPopupSurfaces(
+        string fileName,
+        string expectedNativeFallbackText,
+        string expectedTransparentWindowText,
+        string expectedDefaultFallbackText)
+    {
+        var content = ReadHelpFile(fileName);
+        var themeSection = ExtractSection(content, "## 15)", "## 16)");
+
+        Assert.Contains(expectedNativeFallbackText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedTransparentWindowText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedDefaultFallbackText, content, StringComparison.Ordinal);
     }
 
     [Theory]

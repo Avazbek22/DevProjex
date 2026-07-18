@@ -105,7 +105,7 @@ public partial class GitCloneWindow : Window
             PopupBackdropConfigurator.TryApply(
                 popup?.Child,
                 this,
-                viewModel.HasAnyEffect,
+                viewModel.ActiveThemeEffect,
                 PopupBackdropTransparencyFallback.Transparent);
         }, DispatcherPriority.Loaded);
     }

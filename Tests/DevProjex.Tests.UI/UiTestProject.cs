@@ -229,6 +229,29 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithHierarchicalGitIgnoreCombatWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine("repo", ".gitignore"), "*.rootdrop\n!keep.rootdrop\n[unterminated\n");
+            WriteFile(rootPath, Path.Combine("repo", "drop.rootdrop"), "ROOT-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "keep.rootdrop"), "ROOT-KEEP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", ".gitignore"), "!module-keep.rootdrop\n*.moddrop\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "module-keep.rootdrop"), "MODULE-KEEP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "drop.moddrop"), "MODULE-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", ".gitignore"), "!rescue.moddrop\n*.deepdrop\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "rescue.moddrop"), "CHILD-RESCUE-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "drop.deepdrop"), "CHILD-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "grand", ".gitignore"), "!visible.deepdrop\n*.lastdrop\ninvalid\\\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "grand", "visible.deepdrop"), "GRAND-KEEP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "grand", "drop.lastdrop"), "GRAND-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "module", "child", "grand", "invalid", "visible.txt"), "MALFORMED-RULE-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "sibling", ".gitignore"), "*.siblingdrop\n");
+            WriteFile(rootPath, Path.Combine("repo", "sibling", "drop.siblingdrop"), "SIBLING-DROP-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("repo", "outside", "visible.siblingdrop"), "SIBLING-ISOLATION-SENTINEL\n");
+        });
+    }
+
     public static UiTestProject CreateWithRootExtensionIgnoreStressWorkspace()
     {
         return Create(static rootPath =>
@@ -294,14 +317,53 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
-    private static UiTestProject Create(Action<string> seedWorkspace)
+    public static UiTestProject CreateWithManagedGitCloneContentWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
+            WriteFile(rootPath, Path.Combine(".git", "objects", "pack", "pack-test.pack"), "git metadata\n");
+            TryMarkHidden(Path.Combine(rootPath, ".git"));
+
+            WriteFile(
+                rootPath,
+                Path.Combine("src", "CloneContentProbe.cs"),
+                "namespace CloneProbe;\npublic static class CloneContentProbe { public const string Value = \"CLONE-CONTENT-SENTINEL\"; }\n");
+            WriteFile(
+                rootPath,
+                Path.Combine("docs", "clone-guide.md"),
+                "# Clone guide\n\nCLONE-DOCUMENTATION-SENTINEL\n");
+            WriteFile(rootPath, Path.Combine("src", "empty.txt"), string.Empty);
+            WriteBinaryFile(
+                rootPath,
+                Path.Combine("assets", "clone-image.bin"),
+                [0, 1, 2, 3, 0, 255, 4, 5]);
+        });
+    }
+
+    public static UiTestProject CreateWithUnicodeJsonWorkspace()
+    {
+        return Create(
+            static rootPath =>
+            {
+                WriteFile(rootPath, Path.Combine("Документы", "Отчёт [финал].txt"), "Содержимое отчёта\n");
+                WriteFile(rootPath, Path.Combine("Документы", "Сводка.txt"), "Содержимое сводки\n");
+                WriteFile(rootPath, "Корень.txt", "Содержимое корневого файла\n");
+            },
+            workspaceDirectoryName: "рабочая папка");
+    }
+
+    private static UiTestProject Create(Action<string> seedWorkspace) =>
+        Create(seedWorkspace, workspaceDirectoryName: "workspace");
+
+    private static UiTestProject Create(Action<string> seedWorkspace, string workspaceDirectoryName)
     {
         var testRoot = Path.Combine(
             Path.GetTempPath(),
             "DevProjex",
             "DevProjex.Tests.UI");
         var instanceId = Guid.NewGuid().ToString("N");
-        var rootPath = Path.Combine(testRoot, instanceId, "workspace");
+        var rootPath = Path.Combine(testRoot, instanceId, workspaceDirectoryName);
         var appDataPath = Path.Combine(testRoot, instanceId, "appdata");
 
         Directory.CreateDirectory(rootPath);

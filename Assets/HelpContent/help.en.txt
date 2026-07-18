@@ -18,7 +18,7 @@ Hotkeys:
 * Open folder… — open root folder (Ctrl+O)
 * New window — open a new independent DevProjex instance
 * Recent — list of recently opened local folders
-* Refresh — rescan and rebuild the tree (F5)
+* Refresh — rescan a local folder and rebuild the tree (F5)
 * Export to file:
   * Export tree
   * Export content
@@ -55,7 +55,7 @@ Rules:
 * up to 15 recent folders are stored;
 * history is preserved between app launches.
 
-Each item shows the short folder name, and the full path is available in a tooltip.
+Each item shows the parent folder and project name, for example `Projects / App`.
 
 ## 4) Launch from terminal
 DevProjex can be launched from the terminal.
@@ -93,7 +93,7 @@ The cache is stored in the system temp folder. On Windows it is usually:
 `%TEMP%\DevProjex\RepoCache`
 
 * Branch — shows the list of available branches with the active one marked; switching updates the tree to the selected branch. If the branch already exists locally, switching is offline (no update). If it does not exist locally, it is fetched and created.
-* Get updates — updates only the current branch: fetch and reset to origin/<branch>.
+* Get updates — updates only the current branch: fetch and reset to origin/<branch>. For a Git Clone project, F5 performs the same action; the regular “File → Refresh” command is disabled.
 
 ### Clone window
 In the Git Clone window, a “Recent repositories” list can appear below the URL field.
@@ -274,6 +274,10 @@ Available on the right:
 
 Changes in “Ignore options”, “Extensions”, and “Root folders” are staged in the panel and applied after clicking “Apply settings”.
 
+After a checkbox changes, the app may update available options and their counts in the background. The resulting tree is rebuilt only after clicking “Apply settings”.
+
+If an available-options update is canceled with the X button in the status bar, unfinished changes are not applied and the panel returns to its last completed state.
+
 Each list has an All toggle.
 
 Note about "Extensions":
@@ -299,11 +303,20 @@ Important:
 * options already seen keep the user's explicit choice: new files of a disabled type do not enable that type again.
 
 ## 12) Ignore
-The "Ignore" list is built automatically from the current path and selected top-level folders.
+The "Ignore" block controls which files and folders are excluded from the tree, content, copy, and export results.
 
-Option order:
-* Smart ignore (when available)
-* Use .gitignore (when at least one `.gitignore` is found)
+An item is shown only when all of these conditions are met:
+* its top-level folder is selected;
+* its file type is selected, if the file has a type;
+* no enabled ignore rule excludes it.
+
+Ignore rules are cumulative. If at least one enabled rule hides an item, another rule cannot make it visible.
+
+### 12.1 Available rules
+Depending on the project contents, the following options may be shown:
+
+* Smart Ignore
+* Use .gitignore
 * Empty folders
 * Empty files
 * Hidden folders
@@ -312,90 +325,86 @@ Option order:
 * Dot-prefixed files
 * Files without extension
 
-Basic-rule options (hidden, dot-prefixed, empty, extensionless) are shown only when matching elements exist.
-When an option in "Ignore" becomes available for the first time, it is enabled by default. An option explicitly disabled earlier keeps that state when it becomes available again.
+An option is shown when its rule can change the current tree. The list may therefore change after switching another rule, a top-level folder, or a file type.
 
-The separator under "Use .gitignore" splits Git/Smart rules from basic visibility rules.
+A new option is enabled by default when it first appears. A known option keeps the user's choice even if it temporarily disappears from the list.
 
-### 12.1 Rule scope
-The app builds project scopes where ignore rules are applied:
-* root (if root has `.gitignore` or a project marker)
-* first-level folders
-* nested project subfolders
+### 12.2 Smart Ignore
+Smart Ignore hides dependencies, build output, caches, and other project service artifacts.
 
-Nested project scope discovery is bounded and depends on the folder structure.
-Regular projects use shallow discovery. Recognized monorepos can be searched more deeply.
-Service folders, dependencies, and confirmed build artifacts are skipped during scope discovery.
+DevProjex first identifies the project type from its structure and marker files, for example:
 
-This limit only controls discovery of nested scopes for `.gitignore` and Smart Ignore. Once a scope is found, rules are applied to that scope's contents through the normal tree scan.
+* `.csproj`
+* `package.json`
+* `pyproject.toml`
+* `Cargo.toml`
 
-### 12.2 "Use .gitignore"
-* Enabled: `.gitignore` rules are applied in detected scopes.
-* Disabled: `.gitignore` rules are fully disabled.
+Rules for the corresponding stack are then applied inside the detected project scope. For example, .NET rules do not extend into a neighboring Python or JavaScript project.
 
-For multi-project folders, one project's `.gitignore` is not applied to neighboring projects outside its scope.
+A folder name alone is not always enough. Ambiguous names such as `build`, `vendor`, `packages`, `cache`, `pkg`, or `Library` are also verified by their contents. This prevents an ordinary user folder from being hidden only because it has a similar name.
 
-### 12.3 "Smart ignore"
-* Shown only when it can change the resulting tree.
-* Enabled: common build artifacts, tool caches, and dependency stores are additionally hidden.
-* Disabled: smart rules are not applied.
+Some dependency stores and service directories can be recognized by their characteristic internal structure even outside an explicitly detected project.
 
-A folder is not ignored only because of its name.
-For common names such as `build`, `vendor`, `packages`, `cache`, `pkg`, or `Library`, the contents are also checked.
-If the folder contains regular source files, it remains visible.
+Project scope discovery is bounded so loading a large user folder does not become a full repeated analysis of every directory. Regular structures use shallow discovery, while recognized monorepos are searched more deeply. After a scope is found, Smart Ignore applies to its entire subtree without a depth limit.
 
-Smart Ignore considers the structure of each detected project and works separately inside its scope.
+### 12.3 Use .gitignore
+When enabled, DevProjex applies every reachable `.gitignore`, not only the file at the root of the opened folder.
 
-### 12.4 Basic rules
-Options:
-* Hidden folders
-* Hidden files
-* Dot-prefixed folders
-* Dot-prefixed files
-* Empty folders
-* Empty files
-* Files without extension
+Each `.gitignore` applies:
 
-When enabled, an option hides matching elements from the tree and from copy/export results.
-Basic rules are enabled separately from `.gitignore` and Smart Ignore, but the final result is always calculated from the current tree after all active filters are applied.
+* to the folder that contains it;
+* to all accessible folders below it;
+* only inside that scope.
 
-### 12.5 Internal behavior: common cases
-1. Single project with `.gitignore`.
-Usually only "Use .gitignore" is shown.
-When enabled, `.gitignore` and Smart Ignore work together.
-When disabled, both `.gitignore` and Smart Ignore are disabled.
+Rules from a nested `.gitignore` do not affect parent or sibling folders.
 
-2. Single project without `.gitignore`.
-"Use .gitignore" is not shown.
-"Smart ignore" is shown only when it can affect the current tree.
+For a particular path, rules are processed from the parent `.gitignore` toward deeper files. Within one file, rules are processed from top to bottom. The last matching rule determines the Git result.
 
-3. Multi-project workspace, some projects have `.gitignore`, some do not.
-Both "Use .gitignore" and "Smart ignore" are shown.
-`.gitignore` works inside its own scopes.
-Smart Ignore (when enabled) complements filtering in detected scopes.
+A rule starting with `!` cancels an earlier Git exclusion only within its scope. It cannot restore a file while its parent folder remains excluded. A `.gitignore` inside a fully excluded and unreachable folder does not participate in evaluation.
 
-4. Multi-project workspace, all projects have `.gitignore`.
-"Use .gitignore" is shown.
-"Smart ignore" is not shown as a separate option.
+A malformed or unsupported line is skipped independently. Other valid rules in that file and rules in neighboring scopes continue to work.
 
-5. Folder without applicable rules.
-If no `.gitignore` is found and Smart Ignore does not affect the tree, these options are hidden.
-Only basic visibility rules remain.
+This option covers working-tree `.gitignore` files only. Rules from `.git/info/exclude`, global Git configuration, and Git index state are not applied.
 
-### 12.6 Empty folders
-Hides logically empty folders from the tree and from copy/export results.
-A logically empty folder is a folder that has no visible descendants after the current visibility rules, `.gitignore`, Smart Ignore, and selected file types are applied.
-If the folder itself is not hidden by other rules, removing it from the tree is controlled by this option.
+### 12.4 Relationship between .gitignore and Smart Ignore
+For a project with one scope and its own `.gitignore`, the interface usually shows only "Use .gitignore". In this mode, it controls the project's combined policy by enabling both `.gitignore` rules and applicable Smart Ignore rules.
 
-### 12.7 Empty files
-Hides empty files with size 0 bytes from the tree and from copy/export results.
+In a workspace with multiple projects, the options may be shown separately. In that case, `.gitignore` and Smart Ignore are enabled independently for the applicable scopes.
 
-### 12.8 Files without extension
-Hides files without extension (for example: `Dockerfile`, `Makefile`, `README`) from the tree and from copy/export results.
+A Git negation rule starting with `!` cancels only a Git result. It does not override Smart Ignore or a basic rule. For example, a file restored by `!` remains hidden if Smart Ignore or "Empty files" excludes it.
 
-### 12.9 Counters in the "Ignore" block
-Counts are shown near available options in the `(N)` format.
-For basic rules, this count shows how many elements are hidden by that specific rule in the current tree configuration.
+There is therefore no shared "stronger rule" between `.gitignore`, Smart Ignore, and the basic rules. An item must pass every enabled mechanism to remain visible.
+
+### 12.5 Basic rules
+"Dot-prefixed folders" and "Dot-prefixed files" inspect the item name.
+
+"Hidden folders" and "Hidden files" inspect the system hidden attribute. On some platforms, a dot-prefixed name and the system attribute may describe the same item or different items.
+
+"Empty files" hides files whose size is 0 bytes.
+
+"Files without extension" hides files such as `Dockerfile`, `Makefile`, and `README`.
+
+"Empty folders" hides logically empty folders. A folder is logically empty when no visible file or subfolder remains after the selected file types and all other rules are applied.
+
+The empty-folder count can therefore change after another rule is switched: hiding files can make their containing folders logically empty.
+
+### 12.6 Counters
+The count next to a rule shows its direct contribution under the current settings, not the physical number of similar items on disk.
+
+One item is not attributed to several overlapping counters at the same time. For example, the `.git` folder may have both a dot-prefixed name and the system Hidden attribute, but its exclusion is attributed to only one rule.
+
+A stable order is used to select the owner of an exclusion:
+
+* folders: `.gitignore`, Smart Ignore, dot-prefixed name, system Hidden attribute;
+* files: `.gitignore`, Smart Ignore, dot-prefixed name, no extension, empty file, system Hidden attribute.
+
+This order affects counters only. Final visibility follows a simpler rule: an item is hidden if any enabled mechanism excludes it.
+
+### 12.7 Applying changes
+Switching checkboxes first updates the available settings and counters in the panel. The final tree is rebuilt after "Apply settings" is selected.
+
+If settings preparation is cancelled, DevProjex returns the panel to the last fully completed state. Partially calculated rules are not applied.
+
 ## 13) How the tree and metrics are calculated
 Result depends on:
 * selected Root folders
@@ -448,18 +457,27 @@ Icon selection order:
 4) otherwise — unknown
 
 ## 15) Theme and effects
-Theme popover lets you switch:
-* light/dark theme
-* Transparent / Mica / Acrylic
-* intensity, blur, contrast, border settings
+The Theme section lets you select a light or dark theme and one background effect:
+* Transparency
+* Blur
+* Mica
 
-Items marked [Beta] may change between versions.
+Effects are mutually exclusive. Clicking the selected effect again disables it and restores a regular opaque background.
+
+Available settings:
+* Background transparency — available for Transparency and Blur.
+* Top panel contrast — adjusts the main panel containing Preview, Search, Filter, and tree-format commands.
+* Menu transparency — applies equally to the main menu and its submenus.
+* Border visibility — adjusts how strongly interface borders are shown.
+
+Mica uses the platform's system material and has no separate background-transparency setting. If the selected Blur or Mica effect is unavailable, the app first tries the other native effect. A regular opaque background is used only when neither Blur nor Mica is available.
+
+In Transparency mode, the main-window background remains transparent. Menus, submenus, and other popup surfaces use Blur when supported so tree and content elements behind them do not interfere with readability.
 
 ## 16) Help
 
 ### 16.1 Reset settings
-Reset settings (Help → Reset settings) resets only visual interface settings (theme, effects, Compact mode, Tree animation) and does not modify project data.
-Reset settings also clears the saved interface language selection.
+Reset settings (Help → Reset settings) restores the default theme, effects, Compact mode, Tree animation, and interface language. Project profiles, history, and files on disk are not changed.
 
 ### 16.2 Reset data
 Reset data (Help → Reset data) removes saved local-project parameter profiles:
@@ -492,8 +510,9 @@ Behavior:
 X button (cancel) in the status bar:
 * performs best-effort cancellation for operations that support cancellation;
 * stops background data calculation;
+* when an available-options update is canceled, returns the panel to its last completed state;
 * for operations without cancellation support, it stops status-bar indication, while the operation itself may still finish in background.
 
 ## 19) Notes
-* By default, dark theme and transparency effects are enabled (if supported).
+* By default, the dark theme with Blur is used. If Blur is unavailable, the app tries Mica; if neither effect is available, effects are disabled.
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.

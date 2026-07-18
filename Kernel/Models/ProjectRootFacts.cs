@@ -166,4 +166,5 @@ public readonly record struct ProjectRootDirectoryFact(
 public readonly record struct ProjectRootFileSignature(
 	long LastWriteTicksUtc,
 	long LengthBytes,
-	string LinkTarget);
+	string LinkTarget,
+	string ContentFingerprint);

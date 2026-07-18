@@ -6,6 +6,7 @@ public sealed partial class FileSystemScanner
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts Counts;
+        public int GitIgnoreImpactCount;
     }
 
     private sealed class IgnoreSectionSnapshotLocalState
@@ -59,12 +60,20 @@ public sealed partial class FileSystemScanner
         public bool IsEmpty => HiddenFolders == 0 && DotFolders == 0;
     }
 
-    private struct DirectoryScanNode(string path, string relativePath, int parentIndex, bool isAccessDenied)
+    private struct DirectoryScanNode(
+        string path,
+        string relativePath,
+        int parentIndex,
+        bool isAccessDenied,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
     {
         public string Path { get; } = path;
         public string RelativePath { get; } = relativePath;
         public int ParentIndex { get; } = parentIndex;
         public bool IsAccessDenied { get; set; } = isAccessDenied;
+        public IgnoreRules.GitIgnoreScanContext GitIgnoreContext { get; } = gitIgnoreContext;
+        public IgnoreRules.GitIgnoreScanContext GitIgnoreCandidateContext { get; } = gitIgnoreCandidateContext;
     }
 
     private readonly record struct DirectoryToggleRuleState(
@@ -117,7 +126,9 @@ public sealed partial class FileSystemScanner
         DirectoryToggleRuleState extensionDiscoveryRuleState,
         DirectoryToggleRuleState baseRuleState,
         DirectoryToggleRuleState hiddenFoldersRuleState,
-        DirectoryToggleRuleState dotFoldersRuleState)
+        DirectoryToggleRuleState dotFoldersRuleState,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
     {
         public string Path { get; } = path;
         public string RelativePath { get; } = relativePath;
@@ -131,6 +142,8 @@ public sealed partial class FileSystemScanner
         public DirectoryToggleRuleState BaseRuleState { get; } = baseRuleState;
         public DirectoryToggleRuleState HiddenFoldersRuleState { get; } = hiddenFoldersRuleState;
         public DirectoryToggleRuleState DotFoldersRuleState { get; } = dotFoldersRuleState;
+        public IgnoreRules.GitIgnoreScanContext GitIgnoreContext { get; } = gitIgnoreContext;
+        public IgnoreRules.GitIgnoreScanContext GitIgnoreCandidateContext { get; } = gitIgnoreCandidateContext;
 
         public bool CanAnyVariantTraverseChildren =>
             ExtensionDiscoveryRuleState.CanTraverseChildren ||
@@ -138,6 +151,10 @@ public sealed partial class FileSystemScanner
             HiddenFoldersRuleState.CanTraverseChildren ||
             DotFoldersRuleState.CanTraverseChildren;
     }
+
+    private sealed record EffectiveIgnoreScanDiscovery(
+        List<EffectiveIgnoreScanNode> Nodes,
+        IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers);
 
     private struct EffectiveIgnoreNodeFileMetrics
     {

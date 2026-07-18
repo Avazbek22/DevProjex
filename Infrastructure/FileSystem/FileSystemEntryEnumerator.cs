@@ -4,6 +4,10 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 internal static class FileSystemEntryEnumerator
 {
+	private static readonly StringComparison FileNameComparison = OperatingSystem.IsLinux()
+		? StringComparison.Ordinal
+		: StringComparison.OrdinalIgnoreCase;
+
 	private static readonly EnumerationOptions SingleLevelOptions = new()
 	{
 		RecurseSubdirectories = false,
@@ -34,6 +38,48 @@ internal static class FileSystemEntryEnumerator
 		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
 			entry.IsDirectory && !IsReparsePoint(ref entry);
 		return enumerable;
+	}
+
+	public static DirectoryEnumerationBatch ReadDirectoriesAndGitIgnore(
+		string path,
+		string relativeDirectory,
+		CancellationToken cancellationToken)
+	{
+		var enumerable = new FileSystemEnumerable<DirectoryDiscoveryEntry>(
+			path,
+			(ref FileSystemEntry entry) =>
+			{
+				var name = entry.FileName.ToString();
+				return new DirectoryDiscoveryEntry(
+					name,
+					entry.ToSpecifiedFullPath(),
+					entry.IsDirectory,
+					entry.IsHidden);
+			},
+			SingleLevelOptions);
+		enumerable.ShouldIncludePredicate = (ref FileSystemEntry entry) =>
+			!IsReparsePoint(ref entry) &&
+			(entry.IsDirectory || entry.FileName.Equals(".gitignore", FileNameComparison));
+
+		List<FileSystemDirectoryEntry>? directories = null;
+		string? gitIgnorePath = null;
+		foreach (var entry in enumerable)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!entry.IsDirectory)
+			{
+				gitIgnorePath ??= entry.FullPath;
+				continue;
+			}
+
+			(directories ??= []).Add(new FileSystemDirectoryEntry(
+				entry.Name,
+				entry.FullPath,
+				CombineRelativePath(relativeDirectory, entry.Name),
+				entry.IsHidden));
+		}
+
+		return new DirectoryEnumerationBatch(directories ?? [], gitIgnorePath);
 	}
 
 	public static IEnumerable<FileSystemFileEntry> EnumerateFiles(string path)
@@ -97,4 +143,14 @@ internal static class FileSystemEntryEnumerator
 	{
 		return (entry.Attributes & FileAttributes.ReparsePoint) != 0;
 	}
+
+	private readonly record struct DirectoryDiscoveryEntry(
+		string Name,
+		string FullPath,
+		bool IsDirectory,
+		bool IsHidden);
 }
+
+internal readonly record struct DirectoryEnumerationBatch(
+	IReadOnlyList<FileSystemDirectoryEntry> Directories,
+	string? GitIgnorePath);

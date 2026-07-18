@@ -7,7 +7,12 @@
              x:CompileBindings="True">
   <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
     <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
-    <Menu Name="MainMenu" Grid.Column="0" Grid.ColumnSpan="4" Margin="0" Padding="0,0,210,0">
+    <Menu Name="MainMenu"
+          Classes="main-menu-strip"
+          Grid.Column="0"
+          Grid.ColumnSpan="4"
+          Margin="0"
+          Padding="0,0,210,0">
       <MenuItem Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
         <MenuItem Name="OpenNewWindowMenuItem"
@@ -18,7 +23,10 @@
                   IsVisible="{Binding RecentFoldersMenuVisible}">
           <!-- Populated dynamically from the recent-projects store. -->
         </MenuItem>
-        <MenuItem Header="{Binding MenuFileRefresh}" Click="OnRefresh" IsEnabled="{Binding IsProjectLoaded}" />
+        <MenuItem Name="RefreshMenuItem"
+                  Header="{Binding MenuFileRefresh}"
+                  Click="OnRefresh"
+                  IsEnabled="{Binding CanRefreshLocalProject}" />
         <MenuItem Header="{Binding MenuFileExport}" IsEnabled="{Binding IsProjectLoaded}">
           <MenuItem Header="{Binding MenuFileExportTree}" Click="OnExportTreeToFile" />
           <MenuItem Header="{Binding MenuFileExportContent}" Click="OnExportContentToFile" />
@@ -31,10 +39,13 @@
         <MenuItem Name="GitBranchMenuItem"
                   Classes="git-branch-menu"
                   Header="{Binding MenuGitBranch}"
-                  IsEnabled="{Binding IsGitMode}">
+                  IsEnabled="{Binding CanGetGitUpdates}">
           <!-- Branch items will be populated dynamically -->
         </MenuItem>
-        <MenuItem Header="{Binding MenuGitGetUpdates}" Click="OnGitGetUpdates" IsEnabled="{Binding IsGitMode}" />
+        <MenuItem Name="GitGetUpdatesMenuItem"
+                  Header="{Binding MenuGitGetUpdates}"
+                  Click="OnGitGetUpdates"
+                  IsEnabled="{Binding CanGetGitUpdates}" />
       </MenuItem>
       <MenuItem Header="{Binding MenuCopy}" IsEnabled="{Binding IsProjectLoaded}">
         <MenuItem Header="{Binding MenuCopyTree}" Click="OnCopyTree" />

@@ -85,9 +85,13 @@ jobs:
         if: ${{ matrix.os_id == 'linux' }}
         shell: bash
         run: |
-          if ! command -v xvfb-run >/dev/null 2>&1; then
+          missing_packages=()
+          command -v xvfb-run >/dev/null 2>&1 || missing_packages+=(xvfb)
+          command -v zsh >/dev/null 2>&1 || missing_packages+=(zsh)
+          command -v fish >/dev/null 2>&1 || missing_packages+=(fish)
+          if (( ${#missing_packages[@]} > 0 )); then
             sudo apt-get update
-            sudo apt-get install -y xvfb
+            sudo apt-get install -y "${missing_packages[@]}"
           fi
 
       - name: Run ${{ matrix.suite_name }} Tests
@@ -191,10 +195,18 @@ jobs:
         if: ${{ matrix.os_id == 'linux' }}
         shell: bash
         run: |
-          if ! command -v xvfb-run >/dev/null 2>&1; then
+          missing_packages=()
+          command -v xvfb-run >/dev/null 2>&1 || missing_packages+=(xvfb)
+          command -v zsh >/dev/null 2>&1 || missing_packages+=(zsh)
+          command -v fish >/dev/null 2>&1 || missing_packages+=(fish)
+          if (( ${#missing_packages[@]} > 0 )); then
             sudo apt-get update
-            sudo apt-get install -y xvfb
+            sudo apt-get install -y "${missing_packages[@]}"
           fi
+
+          command -v xvfb-run
+          zsh --version
+          fish --version
 
       - name: Run terminal command unit tests
         if: ${{ matrix.os_id != 'linux' }}
@@ -235,6 +247,8 @@ jobs:
       - name: Run terminal command integration tests (Linux headless)
         if: ${{ matrix.os_id == 'linux' }}
         shell: bash
+        env:
+          DEVPROJEX_REQUIRE_TERMINAL_SHELL_MATRIX: 1
         run: >
           xvfb-run -a dotnet test Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
           -c Release

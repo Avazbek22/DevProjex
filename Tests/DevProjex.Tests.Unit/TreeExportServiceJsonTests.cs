@@ -244,7 +244,7 @@ public sealed class TreeExportServiceJsonTests
 	[Fact]
 	public void BuildFullTree_JsonTree_PreservesUnicodeAndSpecialJsonCharacters()
 	{
-		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexJsonSpecialFixture");
+		var rootPath = Path.Combine(Path.GetTempPath(), "Проекты", "Демо");
 		var root = new TreeNodeDescriptor(
 			"Root",
 			rootPath,
@@ -267,6 +267,11 @@ public sealed class TreeExportServiceJsonTests
 		var service = new TreeExportService();
 
 		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
+
+		Assert.Contains("Проекты", result, StringComparison.Ordinal);
+		Assert.Contains("\"папка с пробелами\"", result, StringComparison.Ordinal);
+		Assert.Contains("файл", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\u04", result, StringComparison.OrdinalIgnoreCase);
 
 		using var document = JsonDocument.Parse(result);
 		var tree = JsonTreeExportTestHelper.GetTree(document);
@@ -311,6 +316,9 @@ public sealed class TreeExportServiceJsonTests
 		var service = new TreeExportService();
 
 		var result = service.BuildFullTree(rootPath, root, TreeTextFormat.Json);
+
+		Assert.Contains("\"Файл.cs\"", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\u04", result, StringComparison.OrdinalIgnoreCase);
 
 		using var document = JsonDocument.Parse(result);
 		var files = JsonTreeExportTestHelper.GetTree(document)

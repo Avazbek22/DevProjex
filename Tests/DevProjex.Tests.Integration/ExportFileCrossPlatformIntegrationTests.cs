@@ -503,6 +503,10 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		var separatorIndex = content.IndexOf("\u00A0", StringComparison.Ordinal);
 		var jsonPart = content[..separatorIndex].TrimEnd('\r', '\n');
 
+		Assert.Contains("\"проект\"", jsonPart, StringComparison.Ordinal);
+		Assert.Contains("\"файл.txt\"", jsonPart, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\u04", jsonPart, StringComparison.OrdinalIgnoreCase);
+
 		using var doc = JsonDocument.Parse(jsonPart);
 		var tree = JsonTreeExportTestHelper.GetTree(doc);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("проект").ValueKind);

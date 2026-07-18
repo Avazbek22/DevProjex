@@ -6,6 +6,49 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace)
 {
 	[AvaloniaFact]
+	public async Task FileMenu_UnavailableFolder_IsMutedThenRestoredAfterNextOpenCheck()
+	{
+		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var missingPath = PathUtility.Normalize(Path.Combine(workspace.Project.RootPath, "history", "disconnected"));
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		recentStore.AddFolder(recentStore.Load(), missingPath);
+		var missingFolderAvailable = 0;
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with
+			{
+				RecentFolderAvailabilityService = new RecentFolderAvailabilityService(path =>
+					!PathComparer.Default.Equals(path, missingPath) ||
+					Volatile.Read(ref missingFolderAvailable) == 1)
+			});
+
+		try
+		{
+			var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
+			recentMenu.IsSubMenuOpen = true;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => FindRecentItem(recentMenu, missingPath).Classes.Contains("recent-folder-unavailable"),
+				"unavailable recent folder to become visually muted");
+			Assert.True(FindRecentItem(recentMenu, missingPath).IsEnabled);
+
+			Interlocked.Exchange(ref missingFolderAvailable, 1);
+			recentMenu.IsSubMenuOpen = false;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			recentMenu.IsSubMenuOpen = true;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !FindRecentItem(recentMenu, missingPath).Classes.Contains("recent-folder-unavailable"),
+				"available recent folder to return to normal styling");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task FileMenu_RecentFolders_ShowsPersistedEntriesInOrder()
 	{
 		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
@@ -244,4 +287,9 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 			await UiTestDriver.CloseWindowAsync(firstWindow);
 		}
 	}
+
+	private static MenuItem FindRecentItem(MenuItem recentMenu, string path)
+		=> Assert.Single(
+			recentMenu.Items.OfType<MenuItem>(),
+			item => item.Tag is string itemPath && PathComparer.Default.Equals(itemPath, path));
 }

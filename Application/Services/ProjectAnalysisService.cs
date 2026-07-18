@@ -217,12 +217,14 @@ public sealed class ProjectAnalysisService(
 			discoveryRules,
 			cancellationToken);
 		var counts = scan.Value.IgnoreOptionCounts;
+		var controllerImpactCounts = scan.Value.ControllerImpactCounts;
 
 		// Headless automation has to start from the same dynamic defaults as the UI.
 		// Git/smart/dot/hidden availability is structural, while empty and extensionless
 		// options only exist when the current root selection exposes matching entries.
 		var dynamicAvailability = availability with
 		{
+			IncludeGitIgnore = availability.IncludeGitIgnore || controllerImpactCounts.GitIgnore > 0,
 			IncludeEmptyFolders = counts.EmptyFolders > 0,
 			EmptyFoldersCount = counts.EmptyFolders,
 			IncludeEmptyFiles = counts.EmptyFiles > 0,

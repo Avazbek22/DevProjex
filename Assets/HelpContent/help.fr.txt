@@ -1,4 +1,4 @@
-﻿## 1) Qu’est‑ce que c’est et pourquoi
+## 1) Qu’est‑ce que c’est et pourquoi
 DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour code review, support, formation et partage de structure avec un assistant IA.
 
 Important : l’application est en lecture seule et ne modifie jamais les fichiers.
@@ -18,7 +18,7 @@ Raccourcis :
 * Ouvrir le dossier… — ouvrir le dossier racine (Ctrl+O)
 * Nouvelle fenêtre — ouvrir une nouvelle instance indépendante de DevProjex
 * Récents — liste des dossiers locaux ouverts récemment
-* Actualiser — relire et reconstruire l’arborescence (F5)
+* Actualiser — relire un dossier local et reconstruire l’arborescence (F5)
 * Exporter vers un fichier :
   * Exporter l’arborescence
   * Exporter le contenu
@@ -55,7 +55,7 @@ Règles :
 * jusqu’à 15 derniers dossiers sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.
 
-Pour chaque élément, le nom court du dossier est affiché ; le chemin complet est disponible dans une info-bulle.
+Pour chaque élément, le dossier parent et le nom du projet sont affichés, par exemple `Projects / App`.
 
 ## 4) Lancement depuis le terminal
 DevProjex peut être lancé depuis le terminal.
@@ -93,7 +93,7 @@ Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’e
 `%TEMP%\DevProjex\RepoCache`
 
 * Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
-* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
+* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>. Pour un projet Git Clone, F5 effectue la même action ; la commande normale « Fichier → Actualiser » est désactivée.
 
 ### Fenêtre de clonage
 Dans la fenêtre Git Clone, une liste « Dépôts récents » peut apparaître sous le champ URL.
@@ -274,6 +274,10 @@ Limitations :
 
 Les changements dans « Ignorer », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
 
+Après la modification d’une case, l’application peut actualiser en arrière-plan les options disponibles et leurs compteurs. L’arborescence résultante n’est reconstruite qu’après un clic sur « Appliquer ».
+
+Si l’actualisation des options disponibles est annulée avec le bouton X de la barre d’état, les changements inachevés ne sont pas appliqués et le panneau revient à son dernier état terminé.
+
 Chaque liste a un bouton Tous.
 
 Remarque sur « Types de fichiers » :
@@ -299,103 +303,51 @@ Important :
 * les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
 
 ## 12) Ignorer
-La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
+Le bloc « Ignorer » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
 
-Ordre des options :
-* Smart ignore (si disponible)
-* Utiliser .gitignore (si au moins un `.gitignore` est trouvé)
-* Dossiers vides
-* Fichiers vides
-* Dossiers cachés
-* Fichiers cachés
-* Dossiers commençant par un point
-* Fichiers commençant par un point
-* Fichiers sans extension
+Un élément n’est affiché que si son dossier de premier niveau et son type de fichier sont sélectionnés et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
 
-Les options des règles de base (cachés, avec point, vides, sans extension) sont affichées uniquement si des éléments correspondants existent.
-Quand une option dans « Ignorer » devient disponible pour la première fois, elle est activée par défaut. Une option explicitement désactivée auparavant conserve cet état lorsqu’elle redevient disponible.
+### 12.1 Règles disponibles
+Selon le contenu du projet, Smart Ignore, « Utiliser .gitignore », les dossiers et fichiers vides, cachés ou commençant par un point, ainsi que les fichiers sans extension peuvent être proposés.
 
-La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
+Une option apparaît lorsqu’elle peut modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle, d’un dossier de premier niveau ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
 
-### 12.1 Portée des règles
-L’application construit des zones de projet (scopes) où les règles d’ignore sont appliquées :
-* racine (si la racine contient `.gitignore` ou un marqueur de projet)
-* dossiers du premier niveau
-* sous-dossiers de projet imbriqués
+### 12.2 Smart Ignore
+Smart Ignore masque les dépendances, résultats de build, caches et autres artefacts de service. DevProjex identifie le type du projet à partir de sa structure et de fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml`. Les règles de la technologie reconnue restent dans la zone du projet et ne s’étendent pas aux projets voisins d’une autre technologie.
 
-La recherche des zones de projet imbriquées est limitée et dépend de la structure du dossier.
-Une recherche peu profonde est utilisée pour les projets ordinaires. La recherche peut aller plus loin dans les monorepos reconnus.
-Les dossiers système, les dépendances et les artefacts de build confirmés sont ignorés pendant la recherche des zones.
+Pour les noms ambigus comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le contenu est également vérifié. Un dossier utilisateur ordinaire n’est donc pas masqué uniquement à cause de son nom. Certains magasins de dépendances et dossiers de service peuvent aussi être reconnus hors d’un projet explicite grâce à leur structure caractéristique.
 
-Cette limite concerne uniquement la détection des zones imbriquées pour `.gitignore` et Smart Ignore. Une fois la zone trouvée, les règles sont appliquées à son contenu par le parcours normal de l’arbre.
+La détection de nouvelles zones de projet est limitée afin d’éviter une analyse répétée de chaque dossier dans un grand répertoire utilisateur. La recherche reste peu profonde dans une structure normale et va plus loin dans un monorepo reconnu. Une fois la zone détectée, Smart Ignore s’applique à tout son sous-arbre sans limite de profondeur.
 
-### 12.2 « Utiliser .gitignore »
-* Activé : les règles `.gitignore` sont appliquées dans les zones détectées.
-* Désactivé : les règles `.gitignore` sont entièrement désactivées.
+### 12.3 Utiliser .gitignore
+Lorsqu’elle est activée, l’option applique chaque `.gitignore` accessible, et pas seulement celui de la racine. Chaque fichier s’applique à son propre dossier et à tous ses sous-dossiers accessibles, jamais aux dossiers parents ou voisins.
 
-Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
+Pour un chemin donné, les règles sont évaluées du `.gitignore` parent vers les fichiers plus profonds ; dans un même fichier, de haut en bas. La dernière règle correspondante détermine le résultat Git.
 
-### 12.3 « Smart ignore »
-* Affiché uniquement lorsqu’il peut modifier l’arbre résultant.
-* Activé : les artefacts de build, caches d’outils et magasins de dépendances courants sont masqués en plus.
-* Désactivé : les règles smart ne sont pas appliquées.
+Une règle commençant par `!` annule uniquement une exclusion Git antérieure dans sa zone. Elle ne peut pas restaurer un fichier tant que son dossier parent reste exclu. Un `.gitignore` situé dans un dossier entièrement exclu et inaccessible n’est pas évalué.
 
-Un dossier n’est pas ignoré uniquement à cause de son nom.
-Pour les noms courants comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le contenu est également vérifié.
-Si le dossier contient des sources ordinaires, il reste visible.
+Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude`, les règles Git globales et l’état de l’index Git ne sont pas appliqués.
 
-Smart Ignore tient compte de la structure de chaque projet détecté et fonctionne séparément dans sa zone.
+### 12.4 Relation entre .gitignore et Smart Ignore
+Dans un projet ayant une seule zone et son propre `.gitignore`, l’interface affiche généralement uniquement « Utiliser .gitignore ». Cette option active alors à la fois `.gitignore` et les règles Smart Ignore applicables. Dans un espace de travail contenant plusieurs projets, les deux options peuvent être affichées séparément et fonctionner indépendamment dans leurs zones.
 
-### 12.4 Règles de base
-Options :
-* Dossiers cachés
-* Fichiers cachés
-* Dossiers commençant par un point
-* Fichiers commençant par un point
-* Dossiers vides
-* Fichiers vides
-* Fichiers sans extension
+Une négation Git avec `!` annule uniquement le résultat Git. Elle ne remplace ni Smart Ignore ni une règle de base. Il n’existe donc pas de règle globalement « plus forte » : un élément doit passer tous les mécanismes actifs pour rester visible.
 
-Quand une option est activée, elle masque les éléments correspondants dans l’arbre et dans les résultats de copie/export.
-Les règles de base s’activent séparément de `.gitignore` et de Smart Ignore, mais le résultat final est toujours calculé à partir de l’arbre courant après application de tous les filtres actifs.
+### 12.5 Règles de base
+Les règles « commençant par un point » vérifient le nom ; les règles « caché » vérifient l’attribut système Hidden. Selon la plateforme, elles peuvent viser le même élément ou des éléments différents.
 
-### 12.5 Fonctionnement interne : cas typiques
-1. Projet unique avec `.gitignore`.
-En général, seule l’option « Utiliser .gitignore » est affichée.
-Quand elle est activée, `.gitignore` et Smart Ignore fonctionnent ensemble.
-Quand elle est désactivée, les deux sont désactivés.
+« Fichiers vides » masque les fichiers de 0 octet. « Fichiers sans extension » masque par exemple `Dockerfile`, `Makefile` et `README`.
 
-2. Projet unique sans `.gitignore`.
-« Utiliser .gitignore » n’est pas affiché.
-« Smart ignore » n’est affiché que s’il peut affecter l’arbre courant.
+« Dossiers vides » masque les dossiers logiquement vides. Un dossier est logiquement vide lorsqu’aucun fichier ou sous-dossier visible ne reste après l’application des types sélectionnés et de toutes les autres règles. Son compteur peut donc changer lorsqu’une autre règle est modifiée.
 
-3. Espace multi-projets, certains projets ont `.gitignore`, d’autres non.
-« Utiliser .gitignore » et « Smart ignore » sont affichés.
-`.gitignore` agit dans sa propre zone.
-Smart Ignore (s’il est activé) complète le filtrage dans les zones détectées.
+### 12.6 Compteurs
+Un compteur indique la contribution directe d’une règle avec les paramètres actuels, et non le nombre physique d’éléments similaires sur le disque. Un élément n’est pas attribué simultanément à plusieurs compteurs qui se recouvrent.
 
-4. Espace multi-projets, tous les projets ont `.gitignore`.
-« Utiliser .gitignore » est affiché.
-« Smart ignore » n’est pas affiché comme option séparée.
+L’ordre stable d’attribution est : pour les dossiers, `.gitignore`, Smart Ignore, nom commençant par un point, attribut Hidden ; pour les fichiers, `.gitignore`, Smart Ignore, nom commençant par un point, absence d’extension, fichier vide, attribut Hidden. Cet ordre ne concerne que les compteurs. Pour la visibilité, tout mécanisme actif peut exclure l’élément.
 
-5. Dossier sans règles applicables.
-Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’affecte pas l’arbre, ces options sont masquées.
-Seules les règles de visibilité de base restent actives.
+### 12.7 Application des modifications
+Les cases à cocher mettent d’abord à jour les options disponibles et leurs compteurs. L’arbre final est reconstruit après « Appliquer les paramètres ». Si la préparation est annulée, DevProjex revient au dernier état entièrement terminé ; aucune règle partiellement calculée n’est appliquée.
 
-### 12.6 Dossiers vides
-Masque les dossiers logiquement vides dans l’arbre et dans les résultats de copie/export.
-Un dossier logiquement vide est un dossier dans lequel il ne reste plus aucun descendant visible après application des règles de visibilité actuelles, de `.gitignore`, de Smart Ignore et des types de fichiers sélectionnés.
-Si le dossier lui-même n’est pas masqué par d’autres règles, sa suppression de l’arbre est contrôlée précisément par cette option.
-
-### 12.7 Fichiers vides
-Masque les fichiers vides de taille 0 octet dans l’arbre et dans les résultats de copie/export.
-
-### 12.8 Fichiers sans extension
-Masque les fichiers sans extension (par exemple : `Dockerfile`, `Makefile`, `README`) dans l’arbre et dans les résultats de copie/export.
-
-### 12.9 Compteurs dans le bloc « Ignorer »
-Le nombre est affiché à côté des options disponibles au format `(N)`.
-Pour les règles de base, ce nombre indique combien d’éléments sont masqués précisément par cette règle dans la configuration actuelle de l’arbre.
 ## 13) Comment l'arbre et les métriques sont calculés
 Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
@@ -448,18 +400,27 @@ Ordre de sélection :
 4) sinon — inconnu
 
 ## 15) Thème et effets
-Le popover de thème permet :
-* thème clair/sombre
-* Transparent / Mica / Acrylic
-* intensité, flou, contraste, bordures
+La section « Thème » permet de choisir un thème clair ou sombre et un effet d’arrière-plan :
+* Transparence
+* Flou
+* Mica
 
-Les éléments [Beta] peuvent évoluer entre versions.
+Les effets sont mutuellement exclusifs. Un nouveau clic sur l’effet sélectionné le désactive et rétablit un arrière-plan opaque normal.
+
+Paramètres disponibles :
+* Transparence de l’arrière-plan — disponible pour Transparence et Flou.
+* Contraste de la barre supérieure — règle la barre principale contenant les commandes d’aperçu, de recherche, de filtre et de format d’arborescence.
+* Transparence des menus — s’applique de la même manière au menu principal et à ses sous-menus.
+* Visibilité des bordures — règle l’intensité des bordures de l’interface.
+
+Mica utilise le matériau système de la plateforme et ne possède pas de réglage séparé pour la transparence de l’arrière-plan. Si l’effet sélectionné, Flou ou Mica, n’est pas disponible, l’application essaie d’abord l’autre effet natif. Un arrière-plan opaque normal n’est utilisé que si aucun des deux effets n’est disponible.
+
+En mode Transparence, l’arrière-plan de la fenêtre principale reste transparent. Les menus, sous-menus et autres surfaces contextuelles utilisent le Flou lorsqu’il est pris en charge, afin que l’arborescence et le contenu situés derrière ne gênent pas la lecture.
 
 ## 16) Aide
 
 ### 16.1 Réinitialiser les paramètres
-Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) réinitialise uniquement les paramètres visuels de l’interface (thème, effets, mode compact, animation de l'arborescence) et ne modifie pas les données du projet.
-Cette action efface aussi le choix de langue de l’interface enregistré.
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, de l’animation de l’arborescence et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
 
 ### 16.2 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
@@ -492,8 +453,9 @@ Comportement :
 Bouton X (annuler) dans la barre d’état :
 * exécute une annulation best-effort pour les opérations qui prennent en charge l’annulation ;
 * arrête le calcul de données en arrière-plan ;
+* lors de l’annulation d’une actualisation des options disponibles, rétablit le dernier état terminé du panneau ;
 * pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
 
 ## 19) Notes
-* Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
+* Par défaut, le thème sombre avec l’effet Flou est utilisé. Si le Flou n’est pas disponible, l’application essaie Mica ; si aucun des deux effets n’est disponible, les effets sont désactivés.
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.

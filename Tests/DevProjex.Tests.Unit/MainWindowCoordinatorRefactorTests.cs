@@ -103,6 +103,28 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public void ProjectTreeInventoryReuseScope_TracksDeepGitIgnoreTraversalWithoutPrebuiltMatcher()
+    {
+        var rootPath = Path.Combine(Path.GetTempPath(), "reuse-scope-deep-git");
+        var disabledOptions = CreateInventoryScopeOptions(
+            roots: ["src"],
+            useGitIgnore: false,
+            useSmartIgnore: false,
+            ignoreHiddenFolders: false,
+            ignoreDotFolders: false);
+        var enabledOptions = disabledOptions with
+        {
+            IgnoreRules = disabledOptions.IgnoreRules with { EnableGitIgnoreTraversal = true }
+        };
+        var scope = ProjectTreeInventoryReuseScope.Create(
+            rootPath,
+            enabledOptions,
+            supportsHiddenDotFolderVariants: true);
+
+        Assert.False(scope.CanProject(rootPath, disabledOptions));
+    }
+
+    [Fact]
     public void TaskbarProgressCoordinator_SyncsStatusAndGitCloneProgress()
     {
         var viewModel = CreateViewModel();

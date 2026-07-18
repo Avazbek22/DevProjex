@@ -240,7 +240,7 @@ public sealed class NestedMultiStackScopeIsolationMatrixIntegrationTests
 
 		temp.CreateFile("monorepo/web-app/.gitignore", string.Join('\n', new[]
 		{
-			"generated/",
+			"generated/*",
 			"!generated/keep.txt",
 			"*.cache",
 			"!web.cache"

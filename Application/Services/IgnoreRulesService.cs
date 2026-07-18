@@ -16,9 +16,48 @@ public sealed class IgnoreRulesService(
 	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
 		? StringComparer.Ordinal
 		: StringComparer.OrdinalIgnoreCase;
+	private static readonly StringComparison PathStringComparison = OperatingSystem.IsLinux()
+		? StringComparison.Ordinal
+		: StringComparison.OrdinalIgnoreCase;
 
 	public IgnoreRules Build(string rootPath, IReadOnlyCollection<IgnoreOptionId> selectedOptions) =>
 		Build(rootPath, selectedOptions, selectedRootFolders: null);
+
+	public void InvalidateCaches(string rootPath)
+	{
+		_projectScopeDiscovery.Invalidate(rootPath);
+		InvalidateGitIgnoreMatchers(rootPath);
+	}
+
+	public bool RevalidateCaches(string rootPath, CancellationToken cancellationToken = default)
+	{
+		var reusedDiscovery = _projectScopeDiscovery.Revalidate(rootPath, cancellationToken);
+		if (!reusedDiscovery)
+			InvalidateGitIgnoreMatchers(rootPath);
+		return reusedDiscovery;
+	}
+
+	private static void InvalidateGitIgnoreMatchers(string rootPath)
+	{
+		string normalizedRoot;
+		try
+		{
+			normalizedRoot = Path.GetFullPath(rootPath);
+		}
+		catch
+		{
+			return;
+		}
+
+		lock (CacheSync)
+		{
+			foreach (var cachePath in GitIgnoreCache.Keys.ToArray())
+			{
+				if (IsSameOrDescendantPath(cachePath, normalizedRoot))
+					GitIgnoreCache.Remove(cachePath);
+			}
+		}
+	}
 
 	public IgnoreRules Build(
 		string rootPath,
@@ -27,8 +66,10 @@ public sealed class IgnoreRulesService(
 	{
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
 		var availability = BuildRuntimeIgnoreOptionsAvailability(context);
-		var requestedGitIgnore = availability.IncludeGitIgnore &&
-								 selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
+		// A nested .gitignore can be discovered by the scanner after bounded project-scope
+		// discovery has completed. An explicit/default selection must therefore activate the
+		// traversal controller even when no prebuilt scope matcher exists yet.
+		var requestedGitIgnore = selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 
 		// Hybrid ignore has two controller modes:
 		// - In mixed workspaces, .gitignore and Smart Ignore are independent because some
@@ -36,6 +77,8 @@ public sealed class IgnoreRulesService(
 		// - In a single .gitignore scope, Smart Ignore is intentionally hidden and follows
 		//   Use .gitignore. Users get one practical "respect project ignore policy" switch
 		//   instead of two overlapping switches that hide the same build output.
+		// This is a product contract, not a UI shortcut. Replacing it with a uniform
+		// "selected Smart Ignore only" rule breaks cloned repositories and changes their tree.
 		var smartIgnoreFollowsGitIgnore = !availability.IncludeSmartIgnore &&
 		                                  context.IsSingleScopeWithGitIgnore;
 		var useSmartIgnore = availability.IncludeSmartIgnore
@@ -101,6 +144,7 @@ public sealed class IgnoreRulesService(
 			IgnoreEmptyFiles = selectedOptions.Contains(IgnoreOptionId.EmptyFiles),
 			IgnoreExtensionlessFiles = selectedOptions.Contains(IgnoreOptionId.ExtensionlessFiles),
 			UseGitIgnore = useGitIgnore,
+			EnableGitIgnoreTraversal = requestedGitIgnore,
 			UseSmartIgnore = useSmartIgnore,
 			GitIgnoreCandidateMatchesActiveRules = useGitIgnore,
 			SmartIgnoreCandidateMatchesActiveRules = useSmartIgnore,
@@ -199,6 +243,9 @@ public sealed class IgnoreRulesService(
 
 	private ScopedSmartIgnoreBuildResult BuildScopedSmartIgnore(ProjectScanContext context)
 	{
+		// Merged name sets are only fast candidate indexes. Scoped matchers remain the
+		// authority for ownership; matching the merged names globally leaks one stack's
+		// artifacts into sibling projects that merely reuse the same folder name.
 		var mergeSync = new object();
 		var folderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var fileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -310,7 +357,12 @@ public sealed class IgnoreRulesService(
 		try
 		{
 			var cacheKey = Path.GetFullPath(gitIgnorePath);
-			var signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+			var signature = rootFacts?.GitIgnoreSignature;
+			if (!signature.HasValue ||
+			    !ProjectRootFactsProvider.HasMatchingFileMetadata(gitIgnorePath, signature.GetValueOrDefault()))
+			{
+				signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+			}
 
 			if (signature.HasValue)
 			{
@@ -344,6 +396,20 @@ public sealed class IgnoreRulesService(
 	}
 
 	private sealed record GitIgnoreCacheEntry(ProjectRootFileSignature Signature, GitIgnoreMatcher Matcher);
+
+	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
+	{
+		if (PathStringComparer.Equals(candidatePath, rootPath))
+			return true;
+		if (!candidatePath.StartsWith(rootPath, PathStringComparison))
+			return false;
+
+		return candidatePath.Length > rootPath.Length &&
+		       IsDirectorySeparator(candidatePath[rootPath.Length]);
+	}
+
+	private static bool IsDirectorySeparator(char value) =>
+		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
 
 	private sealed record ScopedSmartIgnoreBuildResult(
 		IReadOnlySet<string> FolderNames,

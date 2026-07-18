@@ -11,7 +11,7 @@
         Icon="avares://DevProjex/AppIcon/app.ico"
         Width="1200" Height="800"
         MinWidth="850" MinHeight="600"
-        TransparencyLevelHint="Mica, AcrylicBlur, Blur"
+        TransparencyLevelHint="None"
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TreeViewItem" x:DataType="vm:TreeNodeViewModel">
@@ -393,6 +393,11 @@
           <!-- Soft semi-transparent background -->
           <Rectangle RadiusX="20" RadiusY="20"
                      Fill="{DynamicResource DropZoneInnerBrush}"
+                     Margin="1" />
+
+          <Rectangle RadiusX="20" RadiusY="20"
+                     Fill="#000000"
+                     Opacity="{Binding DropZoneShadeOpacity}"
                      Margin="1" />
 
           <!-- Content -->

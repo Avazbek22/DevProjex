@@ -63,7 +63,7 @@ public sealed class TreeBuilderIgnoreCompositionMatrixIntegrationTests
 	public void Build_GitIgnoreNegationAndEmptyFolderIgnore_KeepExplicitlyUnignoredBranch()
 	{
 		using var temp = new TemporaryDirectory();
-		temp.CreateFile("proj-git/.gitignore", "generated/\n!generated/keep/\n");
+		temp.CreateFile("proj-git/.gitignore", "generated/*\n!generated/keep/\n");
 		temp.CreateFile("proj-git/generated/drop/file.txt", "drop");
 		temp.CreateFile("proj-git/generated/keep/file.txt", "keep");
 		temp.CreateFile("proj-git/src/main.cs", "class App {}");

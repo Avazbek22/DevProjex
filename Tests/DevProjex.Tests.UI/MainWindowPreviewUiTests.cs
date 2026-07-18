@@ -1,5 +1,6 @@
 using Avalonia.Layout;
 using DevProjex.Application.Services;
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace DevProjex.Tests.UI;
@@ -7,6 +8,68 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
+    [AvaloniaFact]
+    public async Task JsonTree_UserVisibleCopyAndPreviewRoutesKeepUnicodeNamesReadable()
+    {
+        using var project = UiTestProject.CreateWithUnicodeJsonWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            viewModel.SelectedExportFormat = ExportFormat.Json;
+
+            var treePayload = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+                window,
+                PreviewContentMode.Tree);
+            AssertReadableUnicodeJsonTree(treePayload, project.RootPath);
+
+            await UiTestDriver.CopyTreeToClipboardAsync(window, treePayload);
+            Assert.Equal(treePayload, await UiTestDriver.GetClipboardTextAsync(window));
+
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Tree);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window)
+                    .Contains("\"Документы\"", StringComparison.Ordinal),
+                "readable Unicode JSON tree preview to be rendered");
+
+            var previewTreePayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.Equal(NormalizeLineEndings(treePayload), NormalizeLineEndings(previewTreePayload));
+            AssertReadableUnicodeJsonTree(previewTreePayload, project.RootPath);
+
+            await UiTestDriver.SetClipboardTextAsync(window, $"unicode-preview-pending-{Guid.NewGuid():N}");
+            await UiTestDriver.ClickPreviewCopyButtonAsync(window);
+            await UiTestDriver.WaitForClipboardTextAsync(window, previewTreePayload);
+
+            var treeAndContentPayload = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+                window,
+                PreviewContentMode.TreeAndContent);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window)
+                    .Contains("Содержимое отчёта", StringComparison.Ordinal),
+                "Unicode JSON tree and content preview to be rendered");
+
+            var previewTreeAndContentPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.Equal(
+                NormalizeLineEndings(treeAndContentPayload),
+                NormalizeLineEndings(previewTreeAndContentPayload));
+            var (jsonTreePart, contentPart) = SplitTreeAndContentPayload(previewTreeAndContentPayload);
+            AssertReadableUnicodeJsonTree(jsonTreePart, project.RootPath);
+            Assert.Contains("Содержимое отчёта", contentPart, StringComparison.Ordinal);
+
+            await UiTestDriver.CopyTreeAndContentToClipboardAsync(window, treeAndContentPayload);
+            Assert.Equal(treeAndContentPayload, await UiTestDriver.GetClipboardTextAsync(window));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task TreePreview_UsesSelectedXmlAndMarkdownFormats()
     {
@@ -185,6 +248,86 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
             Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var closedPreviewContentMetrics));
             Assert.Equal(actualContentOnlyMetrics, closedPreviewContentMetrics);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ManagedGitClone_ContentPreviewCopyAndStatusUseTheSameReadableFiles()
+    {
+        using var project = UiTestProject.CreateWithManagedGitCloneContentWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            projectSourceType: ProjectSourceType.GitClone,
+            managedClonePath: project.RootPath,
+            repositoryUrl: "https://github.com/example/clone-content-probe");
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            Assert.True(viewModel.IsGitMode);
+            Assert.DoesNotContain(viewModel.RootFolders, option =>
+                string.Equals(option.Name, ".git", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
+                viewModel.TreeNodes.SelectMany(static node => node.Flatten()),
+                node => IsGitMetadataPath(project.RootPath, node.FullPath));
+
+            var expectedContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+                window,
+                PreviewContentMode.Content);
+            AssertCloneTextContent(expectedContent);
+
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window)
+                    .Contains("CLONE-CONTENT-SENTINEL", StringComparison.Ordinal),
+                "managed clone text content to appear in Content preview");
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+
+            var contentPreview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.Equal(NormalizeLineEndings(expectedContent), NormalizeLineEndings(contentPreview));
+            AssertCloneTextContent(contentPreview);
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var contentStatusMetrics));
+            Assert.Equal(
+                ToRenderedStatusMetrics(ExportOutputMetricsCalculator.FromText(contentPreview)),
+                contentStatusMetrics);
+
+            await UiTestDriver.CopyContentToClipboardAsync(window, expectedContent);
+            Assert.Equal(expectedContent, await UiTestDriver.GetClipboardTextAsync(window));
+
+            var expectedTreeAndContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+                window,
+                PreviewContentMode.TreeAndContent);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window)
+                    .Contains("CLONE-DOCUMENTATION-SENTINEL", StringComparison.Ordinal),
+                "managed clone text content to appear in Tree and Content preview");
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+
+            var treeAndContentPreview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.Equal(
+                NormalizeLineEndings(expectedTreeAndContent),
+                NormalizeLineEndings(treeAndContentPreview));
+            AssertCloneTextContent(treeAndContentPreview);
+            Assert.Contains("src/CloneContentProbe.cs:", treeAndContentPreview, StringComparison.Ordinal);
+            Assert.Contains("docs/clone-guide.md:", treeAndContentPreview, StringComparison.Ordinal);
+            Assert.DoesNotContain(project.RootPath.Replace('\\', '/'), treeAndContentPreview.Replace('\\', '/'), StringComparison.Ordinal);
+
+            var contentBody = ExtractContentBodyFromTreeAndContentPayload(treeAndContentPreview);
+            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var treeAndContentStatusMetrics));
+            Assert.Equal(
+                ToRenderedStatusMetrics(ExportOutputMetricsCalculator.FromText(contentBody)),
+                treeAndContentStatusMetrics);
+
+            await UiTestDriver.CopyTreeAndContentToClipboardAsync(window, expectedTreeAndContent);
+            Assert.Equal(expectedTreeAndContent, await UiTestDriver.GetClipboardTextAsync(window));
         }
         finally
         {
@@ -914,6 +1057,46 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
         Assert.True(UiTestDriver.TryParseStatusMetrics(rendered, out var parsed));
         return parsed;
+    }
+
+    private static void AssertCloneTextContent(string payload)
+    {
+        Assert.Contains("CLONE-CONTENT-SENTINEL", payload, StringComparison.Ordinal);
+        Assert.Contains("CLONE-DOCUMENTATION-SENTINEL", payload, StringComparison.Ordinal);
+        Assert.DoesNotContain("clone-image.bin:", payload, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("No text content to copy", payload, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsGitMetadataPath(string rootPath, string candidatePath)
+    {
+        var relativePath = Path.GetRelativePath(rootPath, candidatePath);
+        return string.Equals(relativePath, ".git", StringComparison.OrdinalIgnoreCase) ||
+               relativePath.StartsWith($".git{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeLineEndings(string value) =>
+        value.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private static void AssertReadableUnicodeJsonTree(string json, string expectedRootPath)
+    {
+        Assert.Contains("рабочая папка", json, StringComparison.Ordinal);
+        Assert.Contains("\"Документы\"", json, StringComparison.Ordinal);
+        Assert.Contains("Отчёт", json, StringComparison.Ordinal);
+        Assert.Contains("Сводка.txt", json, StringComparison.Ordinal);
+        Assert.Contains("Корень.txt", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u04", json, StringComparison.OrdinalIgnoreCase);
+
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal(
+            Path.GetFullPath(expectedRootPath).Replace('\\', '/'),
+            document.RootElement.GetProperty("rootPath").GetString());
+        var tree = document.RootElement.GetProperty("tree");
+        Assert.Equal(
+            ["Отчёт [финал].txt", "Сводка.txt"],
+            tree.GetProperty("Документы").EnumerateArray().Select(static item => item.GetString()!).ToArray());
+        Assert.Equal(
+            ["Корень.txt"],
+            tree.GetProperty("/").EnumerateArray().Select(static item => item.GetString()!).ToArray());
     }
 
     private static bool IsExpectedTreeFormat(string payload, ExportFormat format)

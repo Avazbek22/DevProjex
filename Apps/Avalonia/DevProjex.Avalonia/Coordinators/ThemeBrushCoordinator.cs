@@ -1,5 +1,6 @@
 using Avalonia.LogicalTree;
 using DevProjex.Avalonia.Services;
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -14,13 +15,24 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     private SolidColorBrush _currentMenuChildHoverBrush = new(Colors.Gray);
     private SolidColorBrush _currentMenuChildPressedBrush = new(Colors.DimGray);
     private SolidColorBrush _currentBorderBrush = new(Colors.Gray);
+    private readonly SolidColorBrush _transparencyFallbackBrush = new(Colors.Black);
     private SolidColorBrush? _backgroundBrush;
     private SolidColorBrush? _panelBrush;
+    private SolidColorBrush? _mainMenuStripBrush;
+    private SolidColorBrush? _mainMenuPopupBrush;
     private SolidColorBrush? _accentBrush;
+    private readonly HashSet<string> _publishedResourceKeys = new(StringComparer.Ordinal);
+    private int _dynamicUpdateScheduled;
+    private DispatcherTimer? _actualEffectProbeTimer;
+    private bool _disposed;
 
     public void HandleSubmenuOpened(object? sender, RoutedEventArgs e)
     {
         if (e.Source is not MenuItem menuItem)
+            return;
+
+        var mainMenu = menuProvider();
+        if (mainMenu is null || !menuItem.GetLogicalAncestors().Contains(mainMenu))
             return;
 
         window.Dispatcher.Post(() =>
@@ -42,6 +54,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     public void UpdateTransparencyEffect()
     {
         CompositionBackdropCornerRadiusCoordinator.UseSharpCornersForDecoratedWindow();
+        UpdateDynamicThemeBrushes();
 
         if (!viewModel.HasAnyEffect)
         {
@@ -50,20 +63,21 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
                 WindowTransparencyLevel.None
             ];
 
-            UpdateDynamicThemeBrushes();
             return;
         }
 
         if (viewModel.IsMicaEnabled)
         {
+            // Keep Transparent out of automatic fallback chains: it is an explicit user choice.
             window.TransparencyLevelHint =
             [
                 WindowTransparencyLevel.Mica,
+                WindowTransparencyLevel.AcrylicBlur,
                 WindowTransparencyLevel.Blur,
                 WindowTransparencyLevel.None
             ];
+            ScheduleActualEffectSynchronization();
 
-            UpdateDynamicThemeBrushes();
             return;
         }
 
@@ -73,194 +87,147 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             [
                 WindowTransparencyLevel.AcrylicBlur,
                 WindowTransparencyLevel.Blur,
-                WindowTransparencyLevel.Transparent,
+                WindowTransparencyLevel.Mica,
                 WindowTransparencyLevel.None
             ];
+            ScheduleActualEffectSynchronization();
 
-            UpdateDynamicThemeBrushes();
             return;
         }
 
-        var blur = Math.Clamp(viewModel.BlurRadius / 100.0, 0.0, 1.0);
+        window.TransparencyLevelHint =
+        [
+            WindowTransparencyLevel.Transparent,
+            WindowTransparencyLevel.None
+        ];
 
-        if (blur <= 0.0001)
+    }
+
+    public void SynchronizeActualEffectAvailability()
+    {
+        var requested = viewModel.ActiveThemeEffect;
+        if (requested is ThemeEffectMode.Solid or ThemeEffectMode.Transparent)
+            return;
+
+        var actual = window.ActualTransparencyLevel;
+        var resolved = ThemeEffectPlatformSupport.ResolveActual(requested, actual);
+
+        switch (resolved)
         {
-            window.TransparencyLevelHint =
-            [
-                WindowTransparencyLevel.Transparent,
-                WindowTransparencyLevel.None
-            ];
-        }
-        else
-        {
-            window.TransparencyLevelHint =
-            [
-                WindowTransparencyLevel.AcrylicBlur,
-                WindowTransparencyLevel.Blur,
-                WindowTransparencyLevel.Transparent,
-                WindowTransparencyLevel.None
-            ];
+            case ThemeEffectMode.Mica:
+                viewModel.SetMicaAvailability(true);
+                if (requested == ThemeEffectMode.Acrylic)
+                    viewModel.SetAcrylicAvailability(false);
+                break;
+            case ThemeEffectMode.Acrylic:
+                viewModel.SetAcrylicAvailability(true);
+                if (requested == ThemeEffectMode.Mica)
+                    viewModel.SetMicaAvailability(false);
+                break;
+            default:
+                // Reaching None proves that neither native backdrop in the ordered chain worked.
+                if (requested == ThemeEffectMode.Mica)
+                {
+                    viewModel.SetAcrylicAvailability(false);
+                    viewModel.SetMicaAvailability(false);
+                }
+                else
+                {
+                    viewModel.SetMicaAvailability(false);
+                    viewModel.SetAcrylicAvailability(false);
+                }
+                break;
         }
 
-        UpdateDynamicThemeBrushes();
+        if (viewModel.ActiveThemeEffect != requested)
+        {
+            UpdateTransparencyEffect();
+            UpdateDynamicThemeBrushes();
+        }
+    }
+
+    public void ScheduleActualEffectSynchronization()
+    {
+        if (_disposed || !window.IsVisible)
+            return;
+
+        if (_actualEffectProbeTimer is null)
+        {
+            _actualEffectProbeTimer = new DispatcherTimer(DispatcherPriority.Loaded, window.Dispatcher)
+            {
+                Interval = TimeSpan.FromMilliseconds(100)
+            };
+            _actualEffectProbeTimer.Tick += OnActualEffectProbeTick;
+        }
+
+        // Native backdrops can briefly report the previous level while the compositor switches.
+        _actualEffectProbeTimer.Stop();
+        _actualEffectProbeTimer.Start();
+    }
+
+    private void OnActualEffectProbeTick(object? sender, EventArgs e)
+    {
+        _actualEffectProbeTimer?.Stop();
+        if (!_disposed)
+            SynchronizeActualEffectAvailability();
+    }
+
+    public void ScheduleDynamicThemeBrushUpdate()
+    {
+        if (_disposed || Interlocked.Exchange(ref _dynamicUpdateScheduled, 1) != 0)
+            return;
+
+        window.Dispatcher.Post(() =>
+        {
+            if (Interlocked.Exchange(ref _dynamicUpdateScheduled, 0) != 0 && !_disposed)
+                UpdateDynamicThemeBrushes();
+        }, DispatcherPriority.Render);
     }
 
     public void UpdateDynamicThemeBrushes()
     {
+        Volatile.Write(ref _dynamicUpdateScheduled, 0);
+        if (_disposed)
+            return;
+
         if (global::Avalonia.Application.Current is not { } app)
             return;
 
         var theme = app.ActualThemeVariant ?? ThemeVariant.Dark;
         var isDark = theme == ThemeVariant.Dark;
-
-        var baseBg = isDark ? Color.Parse("#121214") : Color.Parse("#FFFFFF");
-        var basePanel = isDark ? Color.Parse("#17171A") : Color.Parse("#F3F3F3");
-
-        var material = Math.Clamp(viewModel.MaterialIntensity / 100.0, 0.0, 1.0);
-        var contrast = Math.Clamp(viewModel.PanelContrast / 100.0, 0.0, 1.0);
-        var borderStrength = Math.Clamp(viewModel.BorderStrength / 100.0, 0.0, 1.0);
-        var menuChild = Math.Clamp(viewModel.MenuChildIntensity / 100.0, 0.0, 1.0);
-        var blur = Math.Clamp(viewModel.BlurRadius / 100.0, 0.0, 1.0);
-
-        Color bgBase = baseBg;
-        Color panelBase = basePanel;
-
-        byte bgAlpha;
-        byte panelAlpha;
-        byte borderAlpha;
-        byte menuAlpha;
-        byte menuChildAlpha = 255;
-        Color menuBase = panelBase;
-        Color menuChildBase = panelBase;
-        if (!viewModel.HasAnyEffect)
-        {
-            bgAlpha = 255;
-            panelAlpha = 255;
-            menuAlpha = 255;
-            menuChildAlpha = 255;
-        }
-        else if (viewModel.IsMicaEnabled)
-        {
-            var micaStrength = Math.Pow(material, 0.7);
-
-            bgAlpha = (byte)Math.Round(255 * (1.0 - (micaStrength * 0.9)));
-
-            var panelMinAlpha = bgAlpha;
-            var panelMaxAlpha = 170 + (contrast * 70);
-            panelAlpha = (byte)Math.Clamp(
-                panelMinAlpha + (panelMaxAlpha - panelMinAlpha) * contrast - (micaStrength * 60),
-                panelMinAlpha,
-                255);
-
-            menuAlpha = (byte)Math.Clamp(panelAlpha + 35, 160, 255);
-            menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 140, 255);
-
-            if (isDark)
-            {
-                bgBase = Color.Parse("#0D0E10");
-                panelBase = Color.Parse("#14161A");
-            }
-            else
-            {
-                bgBase = Color.Parse("#FFFFFF");
-                panelBase = Color.Parse("#F7F7F7");
-            }
-        }
-        else if (viewModel.IsAcrylicEnabled)
-        {
-            bgAlpha = (byte)Math.Round(240 - (material * 200));
-            panelAlpha = (byte)Math.Round(235 - (material * 150));
-
-            panelAlpha = (byte)Math.Clamp(panelAlpha + (contrast * 40), 70, 255);
-
-            menuAlpha = (byte)Math.Clamp(panelAlpha + 30, 150, 255);
-            menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 130, 255);
-        }
-        else
-        {
-            bgAlpha = (byte)Math.Round(255 * (1.0 - material));
-
-            var blurVisibility = Math.Pow(blur, 2.2);
-
-            var panelBaseAlpha = 90 + (contrast * 130);
-            panelAlpha = (byte)Math.Clamp(panelBaseAlpha + (blurVisibility * 25), 70, 255);
-
-            menuAlpha = (byte)Math.Clamp(panelAlpha + 45, 170, 255);
-            menuChildAlpha = (byte)Math.Clamp(menuAlpha - (menuChild * 40), 150, 255);
-        }
-
-        if (viewModel.HasAnyEffect)
-        {
-            // Keep window surface denser than content islands and preserve visible submenu contrast response.
-            bgAlpha = (byte)Math.Clamp(bgAlpha + 22, 90, 255);
-
-            const int minAlphaGap = 12;
-            var maxPanelAlpha = Math.Max(60, bgAlpha - minAlphaGap);
-            panelAlpha = (byte)Math.Clamp(panelAlpha, 60, maxPanelAlpha);
-
-            if (isDark)
-            {
-                menuAlpha = (byte)Math.Clamp(panelAlpha + 28 + (contrast * 16), 120, 255);
-                var submenuDelta = 10 + (menuChild * 80);
-                menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 45, 255);
-            }
-            else
-            {
-                // Light theme requires lower alpha and subtle cool tint to make blur/material visible.
-                menuAlpha = (byte)Math.Clamp(panelAlpha + 12 + (contrast * 8), 96, 215);
-                var submenuDelta = 12 + (menuChild * 72);
-                menuChildAlpha = (byte)Math.Clamp(menuAlpha - submenuDelta, 72, 205);
-
-                menuBase = Color.Parse("#F8FBFF");
-                menuChildBase = Color.Parse("#F2F7FD");
-            }
-        }
-
-        borderAlpha = (byte)Math.Round(255 * borderStrength);
+        var effect = viewModel.ActiveThemeEffect;
+        var palette = ThemePaletteCalculator.Calculate(
+            isDark,
+            effect,
+            viewModel.BackgroundTransparency,
+            viewModel.PanelContrast,
+            viewModel.MenuTransparency,
+            viewModel.BorderVisibility);
 
         // Mutate existing brush colors instead of allocating new instances
-        var bgColor = Color.FromArgb(bgAlpha, bgBase.R, bgBase.G, bgBase.B);
-        _backgroundBrush ??= new SolidColorBrush(bgColor);
-        _backgroundBrush.Color = bgColor;
-        UpdateResource("AppBackgroundBrush", _backgroundBrush);
+        UpdateBrushResource("AppBackgroundBrush", ref _backgroundBrush, palette.Background);
+        UpdateBrushResource("AppPanelBrush", ref _panelBrush, palette.Panel);
+        UpdateBrushResource("MainMenuStripBrush", ref _mainMenuStripBrush, palette.MainMenuStrip);
+        var mainMenuPopupPublished = UpdateBrushResource(
+            "MainMenuPopupBrush",
+            ref _mainMenuPopupBrush,
+            palette.MainMenuPopup);
+        UpdateBrushResource("MenuPopupBrush", _currentMenuBrush, palette.Menu);
+        UpdateBrushResource("MenuChildPopupBrush", _currentMenuChildBrush, palette.MenuChild);
+        UpdateBrushResource("MenuHoverBrush", _currentMenuHoverBrush, palette.MenuHover);
+        UpdateBrushResource("MenuPressedBrush", _currentMenuPressedBrush, palette.MenuPressed);
+        UpdateBrushResource("MenuChildHoverBrush", _currentMenuChildHoverBrush, palette.MenuHover);
+        UpdateBrushResource("MenuChildPressedBrush", _currentMenuChildPressedBrush, palette.MenuPressed);
+        var borderPublished = UpdateBrushResource("AppBorderBrush", _currentBorderBrush, palette.Border);
+        UpdateBrushResource("AppAccentBrush", ref _accentBrush, palette.Accent);
 
-        var panelColor = Color.FromArgb(panelAlpha, panelBase.R, panelBase.G, panelBase.B);
-        _panelBrush ??= new SolidColorBrush(panelColor);
-        _panelBrush.Color = panelColor;
-        UpdateResource("AppPanelBrush", _panelBrush);
+        if (_transparencyFallbackBrush.Color != palette.TransparencyFallback)
+            _transparencyFallbackBrush.Color = palette.TransparencyFallback;
+        if (!ReferenceEquals(window.TransparencyBackgroundFallback, _transparencyFallbackBrush))
+            window.TransparencyBackgroundFallback = _transparencyFallbackBrush;
 
-        var menuColor = Color.FromArgb(menuAlpha, menuBase.R, menuBase.G, menuBase.B);
-        _currentMenuBrush.Color = menuColor;
-        UpdateResource("MenuPopupBrush", _currentMenuBrush);
-
-        var menuChildColor = Color.FromArgb(menuChildAlpha, menuChildBase.R, menuChildBase.G, menuChildBase.B);
-        _currentMenuChildBrush.Color = menuChildColor;
-        UpdateResource("MenuChildPopupBrush", _currentMenuChildBrush);
-
-        var hoverColor = isDark ? Color.Parse("#343B46") : Color.Parse("#DCE7F4");
-        var pressedColor = isDark ? Color.Parse("#3B4452") : Color.Parse("#CFDDF0");
-
-        _currentMenuHoverBrush.Color = hoverColor;
-        _currentMenuPressedBrush.Color = pressedColor;
-        _currentMenuChildHoverBrush.Color = hoverColor;
-        _currentMenuChildPressedBrush.Color = pressedColor;
-
-        UpdateResource("MenuHoverBrush", _currentMenuHoverBrush);
-        UpdateResource("MenuPressedBrush", _currentMenuPressedBrush);
-        UpdateResource("MenuChildHoverBrush", _currentMenuChildHoverBrush);
-        UpdateResource("MenuChildPressedBrush", _currentMenuChildPressedBrush);
-
-        var borderBase = isDark ? Color.Parse("#505050") : Color.Parse("#C0C0C0");
-        var borderColor = Color.FromArgb(borderAlpha, borderBase.R, borderBase.G, borderBase.B);
-        _currentBorderBrush.Color = borderColor;
-        UpdateResource("AppBorderBrush", _currentBorderBrush);
-
-        var accentColor = isDark ? Color.Parse("#2D8CFF") : Color.Parse("#0078D4");
-        _accentBrush ??= new SolidColorBrush(accentColor);
-        _accentBrush.Color = accentColor;
-        UpdateResource("AppAccentBrush", _accentBrush);
-
-        ApplyMenuBrushesDirect();
+        if (mainMenuPopupPublished || borderPublished)
+            ApplyMenuBrushesDirect();
     }
 
     public void ApplyMenuBrushesDirect()
@@ -276,20 +243,18 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
     private void ApplyBrushesToMenuItemPopup(MenuItem menuItem)
     {
-        var isChildMenu = menuItem.Parent is MenuItem;
-
         foreach (var popup in menuItem.GetVisualDescendants().OfType<Popup>().Where(p => p.IsOpen))
         {
             PopupBackdropConfigurator.TryApply(
                 popup.Child,
                 window,
-                viewModel.HasAnyEffect,
+                viewModel.ActiveThemeEffect,
                 PopupBackdropTransparencyFallback.Transparent);
 
             if (popup.Child is not Border border)
                 continue;
 
-            border.Background = isChildMenu ? _currentMenuChildBrush : _currentMenuBrush;
+            border.Background = _mainMenuPopupBrush;
             border.BorderBrush = _currentBorderBrush;
             border.BorderThickness = new Thickness(1);
             border.CornerRadius = new CornerRadius(8);
@@ -301,12 +266,10 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
     private void UpdateMenuItemPopup(MenuItem menuItem)
     {
-        var isChildMenu = menuItem.Parent is MenuItem;
-
         var popup = menuItem.GetVisualDescendants().OfType<Popup>().FirstOrDefault();
         if (popup?.Child is Border border)
         {
-            border.Background = isChildMenu ? _currentMenuChildBrush : _currentMenuBrush;
+            border.Background = _mainMenuPopupBrush;
             border.BorderBrush = _currentBorderBrush;
         }
 
@@ -315,7 +278,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             var subPopup = subItem.GetVisualDescendants().OfType<Popup>().FirstOrDefault();
             if (subPopup?.Child is Border subBorder)
             {
-                subBorder.Background = _currentMenuChildBrush;
+                subBorder.Background = _mainMenuPopupBrush;
                 subBorder.BorderBrush = _currentBorderBrush;
             }
         }
@@ -347,11 +310,40 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         }
     }
 
+    private bool UpdateBrushResource(string key, ref SolidColorBrush? brush, Color color)
+    {
+        brush ??= new SolidColorBrush(color);
+        return UpdateBrushResource(key, brush, color);
+    }
+
+    private bool UpdateBrushResource(string key, SolidColorBrush brush, Color color)
+    {
+        var colorChanged = brush.Color != color;
+        if (colorChanged)
+            brush.Color = color;
+
+        var published = _publishedResourceKeys.Add(key);
+        if (published)
+            UpdateResource(key, brush);
+
+        return published;
+    }
+
     public void Dispose()
     {
+        _disposed = true;
+        if (_actualEffectProbeTimer is not null)
+        {
+            _actualEffectProbeTimer.Stop();
+            _actualEffectProbeTimer.Tick -= OnActualEffectProbeTick;
+            _actualEffectProbeTimer = null;
+        }
         // Null out brush references to break any resource dictionary ties
         _backgroundBrush = null;
         _panelBrush = null;
+        _mainMenuStripBrush = null;
+        _mainMenuPopupBrush = null;
         _accentBrush = null;
+        _publishedResourceKeys.Clear();
     }
 }

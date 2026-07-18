@@ -9,7 +9,7 @@ public static class RootFolderVisibilityProjection
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (candidateRootFolders.Count == 0 || (!rules.UseGitIgnore && !rules.UseSmartIgnore))
+        if (candidateRootFolders.Count == 0 || (!rules.IsGitIgnoreTraversalEnabled && !rules.UseSmartIgnore))
             return candidateRootFolders;
 
         List<string>? visibleRootFolders = null;
@@ -19,7 +19,7 @@ public static class RootFolderVisibilityProjection
             cancellationToken.ThrowIfCancellationRequested();
             var name = candidateRootFolders[index];
             var fullPath = Path.Combine(rootPath, name);
-            var gitIgnore = rules.UseGitIgnore
+            var gitIgnore = rules.IsGitIgnoreTraversalEnabled
                 ? gitIgnoreContext.Evaluate(fullPath, name, isDirectory: true, name)
                 : IgnoreRules.GitIgnoreEvaluation.NotIgnored;
             var isControllerIgnored =

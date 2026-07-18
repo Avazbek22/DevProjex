@@ -333,7 +333,7 @@ public partial class TopMenuBarView : UserControl
         PopupBackdropConfigurator.TryApply(
             popup?.Child,
             TopLevel.GetTopLevel(this),
-            viewModel.HasAnyEffect,
+            viewModel.ActiveThemeEffect,
             PopupBackdropTransparencyFallback.None);
     }
 
@@ -345,7 +345,7 @@ public partial class TopMenuBarView : UserControl
         PopupBackdropConfigurator.TryApply(
             toolTip,
             TopLevel.GetTopLevel(this),
-            viewModel.HasAnyEffect,
+            viewModel.ActiveThemeEffect,
             PopupBackdropTransparencyFallback.Transparent);
     }
 

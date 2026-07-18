@@ -16,9 +16,12 @@ using DevProjex.Infrastructure.Reports;
 using DevProjex.Infrastructure.TerminalCommands;
 using UserSettingsStore = DevProjex.Infrastructure.ThemePresets.UserSettingsStore;
 using UserSettingsDb = DevProjex.Infrastructure.ThemePresets.UserSettingsDb;
+using ThemeSettingsStore = DevProjex.Infrastructure.ThemePresets.ThemeSettingsStore;
+using ThemeSettingsDocument = DevProjex.Infrastructure.ThemePresets.ThemeSettingsDocument;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
 using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
 using ThemePresetEffect = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+using ThemePresetSession = DevProjex.Infrastructure.ThemePresets.ThemePresetSession;
 using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
 
 namespace DevProjex.Avalonia;
@@ -119,15 +122,19 @@ public partial class MainWindow : Window
     private readonly IElevationService _elevation;
     private readonly IAppInstanceLauncher _appInstanceLauncher;
     private readonly UserSettingsStore _userSettingsStore;
+    private readonly ThemeSettingsStore _themeSettingsStore;
     private readonly IGitRepositoryService _gitService;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
     private readonly RecentProjectsStore _recentProjectsStore;
+    private readonly RecentFolderAvailabilityService _recentFolderAvailabilityService;
+    private readonly HashSet<string> _unavailableRecentFolderPaths = new(PathComparer.Default);
 
     private readonly MainWindowViewModel _viewModel;
     private readonly TreeSearchCoordinator _searchCoordinator;
     private readonly NameFilterCoordinator _filterCoordinator;
     private readonly ThemeBrushCoordinator _themeBrushCoordinator;
+    private readonly bool _isMicaSupported = ThemeEffectPlatformSupport.IsMicaSupportedOnCurrentPlatform();
     private readonly SelectionSyncCoordinator _selectionCoordinator;
     private readonly StatusOperationCoordinator _statusOperations;
     private readonly MetricsPipeline _metrics;
@@ -161,9 +168,13 @@ public partial class MainWindow : Window
     private ExportPathPresentation? _cachedPathPresentation;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
+    private bool _themeEffectRuntimeProbeReady;
+    private int _applyingThemePresetDepth;
     private bool _awaitingSystemDialogActivation;
     private TaskCompletionSource<bool>? _systemDialogActivationTcs;
     private UserSettingsDb _userSettingsDb = new();
+    private ThemeSettingsDocument _themeSettingsDocument = new();
+    private ThemePresetSession? _themePresetSession;
     private ThemePresetVariant _currentThemeVariant = ThemePresetVariant.Dark;
     private ThemePresetEffect _currentEffectMode = ThemePresetEffect.Transparent;
 
@@ -209,7 +220,9 @@ public partial class MainWindow : Window
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
+    private Task? _recentFolderAvailabilityRefreshTask;
     private Border? _dropZoneContainer;
+    private bool _dropZoneAcceptsCurrentDrag;
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     private ProjectLoadTiming? _projectLoadTiming;
 #endif
@@ -220,6 +233,8 @@ public partial class MainWindow : Window
     private SettingsPanelView? _settingsPanel;
     private TranslateTransform? _settingsTransform;
     private bool _settingsAnimating;
+    private Task _settingsAnimationTask = Task.CompletedTask;
+    private Task _postLoadVisualReadyTask = Task.CompletedTask;
     private const double SearchToolbarMinWidth = 418.0;
     private const double FilterToolbarMinWidth = 338.0;
     // Minimum/default aligns the settings island edge with the top tree-format switcher.
@@ -369,6 +384,7 @@ public partial class MainWindow : Window
         _elevation = services.Elevation;
         _appInstanceLauncher = services.AppInstanceLauncher;
         _userSettingsStore = services.UserSettingsStore;
+        _themeSettingsStore = services.ThemeSettingsStore;
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
@@ -378,6 +394,7 @@ public partial class MainWindow : Window
         _terminalCommandSetupService = services.TerminalCommandSetupService;
         _sessionMetrics = services.SessionMetricsRecorder;
         _recentProjectsStore = services.RecentProjectsStore;
+        _recentFolderAvailabilityService = services.RecentFolderAvailabilityService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
         _statusOperations = new StatusOperationCoordinator(
@@ -433,12 +450,14 @@ public partial class MainWindow : Window
         if (_dropZoneContainer is not null)
         {
             _dropZoneContainer.AddHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            _dropZoneContainer.AddHandler(DragDrop.DragOverEvent, OnDropZoneDragOver);
             _dropZoneContainer.AddHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
             _dropZoneContainer.AddHandler(DragDrop.DropEvent, OnDropZoneDrop);
             UpdateDropZoneAnimationState();
         }
 
         InitializeUserSettings();
+        _viewModel.SetMicaAvailability(_isMicaSupported);
 
         _viewModel.UpdateHelpPopoverMaxSize(Bounds.Size);
         PropertyChanged += OnWindowPropertyChanged;
@@ -618,13 +637,15 @@ public partial class MainWindow : Window
                     return;
                 _filterCoordinator.OnNameFilterChanged();
             }
-            else if (args.PropertyName is nameof(MainWindowViewModel.MaterialIntensity)
+            else if (args.PropertyName is nameof(MainWindowViewModel.BackgroundTransparency)
                      or nameof(MainWindowViewModel.PanelContrast)
-                     or nameof(MainWindowViewModel.BorderStrength)
-                     or nameof(MainWindowViewModel.MenuChildIntensity))
-                _themeBrushCoordinator.UpdateDynamicThemeBrushes();
-            else if (args.PropertyName == nameof(MainWindowViewModel.BlurRadius))
-                _themeBrushCoordinator.UpdateTransparencyEffect();
+                     or nameof(MainWindowViewModel.BorderVisibility)
+                     or nameof(MainWindowViewModel.MenuTransparency))
+            {
+                if (Volatile.Read(ref _applyingThemePresetDepth) == 0)
+                    _themePresetSession?.MarkDirty();
+                _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
+            }
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 HandleThemePopoverStateChange();
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
@@ -696,6 +717,7 @@ public partial class MainWindow : Window
             // Keep all user-facing state documents present from startup so the app can
             // recover from partial external cleanup without waiting for a later save path.
             _userSettingsStore.EnsureStorageExists();
+            _themeSettingsStore.EnsureStorageExists();
             _recentProjectsStore.EnsureStorageExists();
             _projectProfiles.EnsureStorageExists();
         }
@@ -734,6 +756,7 @@ public partial class MainWindow : Window
         if (_dropZoneContainer is not null)
         {
             _dropZoneContainer.RemoveHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            _dropZoneContainer.RemoveHandler(DragDrop.DragOverEvent, OnDropZoneDragOver);
             _dropZoneContainer.RemoveHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
             _dropZoneContainer.RemoveHandler(DragDrop.DropEvent, OnDropZoneDrop);
         }
@@ -872,7 +895,9 @@ public partial class MainWindow : Window
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
-        // Defer update to let theme resources settle first
+        _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
+
+        // Defer update to let theme resources settle first.
         Dispatcher.Post(
             RefreshThemeHighlightsForActiveQuery,
             DispatcherPriority.Background);
@@ -889,6 +914,13 @@ public partial class MainWindow : Window
 
     private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
+        if (e.Property == ActualTransparencyLevelProperty)
+        {
+            if (_themeEffectRuntimeProbeReady)
+                _themeBrushCoordinator.ScheduleActualEffectSynchronization();
+            return;
+        }
+
         if (e.Property != BoundsProperty)
             return;
 
@@ -1085,6 +1117,8 @@ public partial class MainWindow : Window
 
             await RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            _themeEffectRuntimeProbeReady = true;
+            _themeBrushCoordinator.ScheduleActualEffectSynchronization();
             StartDeferredAppStateBootstrap(cancellationToken);
 
             if (_startupCommandLineErrors.Count > 0)
@@ -1176,19 +1210,39 @@ public partial class MainWindow : Window
 
     private void OnDropZoneDragEnter(object? sender, DragEventArgs e)
     {
-        var hasFolder = e.DataTransfer.Contains(DataFormat.File);
+        string? folder = null;
+        try
+        {
+            folder = ResolveDropFolderPath(
+                e.DataTransfer.TryGetFiles()?.Select(item => item.TryGetLocalPath()) ?? []);
+        }
+        catch
+        {
+            // Some platform storage providers can fail while materializing a dragged item.
+        }
 
-        e.DragEffects = hasFolder ? DragDropEffects.Copy : DragDropEffects.None;
+        _dropZoneAcceptsCurrentDrag = !string.IsNullOrWhiteSpace(folder);
+        e.DragEffects = ResolveDropEffect(_dropZoneAcceptsCurrentDrag);
 
-        // Add visual feedback class
         if (sender is Border border)
         {
-            border.Classes.Add("drag-over");
+            if (_dropZoneAcceptsCurrentDrag)
+                border.Classes.Add("drag-over");
+            else
+                border.Classes.Remove("drag-over");
         }
+    }
+
+    private void OnDropZoneDragOver(object? sender, DragEventArgs e)
+    {
+        // The native no-drop cursor is updated from DragOver, which fires while the pointer moves.
+        e.DragEffects = ResolveDropEffect(_dropZoneAcceptsCurrentDrag);
     }
 
     private void OnDropZoneDragLeave(object? sender, DragEventArgs e)
     {
+        _dropZoneAcceptsCurrentDrag = false;
+
         // Remove visual feedback class
         if (sender is Border border)
         {
@@ -1198,6 +1252,8 @@ public partial class MainWindow : Window
 
     private async void OnDropZoneDrop(object? sender, DragEventArgs e)
     {
+        _dropZoneAcceptsCurrentDrag = false;
+
         // Remove visual feedback class
         if (sender is Border border)
         {
@@ -1210,9 +1266,9 @@ public partial class MainWindow : Window
             if (files is null) return;
 
             var localPaths = files
-                .Select(f => f.TryGetLocalPath())
-                .ToList();
+                .Select(f => f.TryGetLocalPath());
             var folder = ResolveDropFolderPath(localPaths);
+            e.DragEffects = ResolveDropEffect(!string.IsNullOrWhiteSpace(folder));
 
             if (!string.IsNullOrWhiteSpace(folder))
             {
@@ -1238,7 +1294,10 @@ public partial class MainWindow : Window
 
         _viewModel.IsDarkTheme = _currentThemeVariant == ThemePresetVariant.Dark;
         ApplyEffectMode(_currentEffectMode);
-        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, _currentThemeVariant, _currentEffectMode));
+        ApplyPresetValues(_themeSettingsStore.GetPreset(
+            _themeSettingsDocument,
+            _currentThemeVariant,
+            _currentEffectMode));
         _themeBrushCoordinator.UpdateTransparencyEffect();
     }
 
@@ -1247,17 +1306,16 @@ public partial class MainWindow : Window
         _userSettingsDb = _userSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         ApplySavedLanguagePreference(_userSettingsDb.ViewSettings);
 
-        if (!_userSettingsStore.TryParseKey(_userSettingsDb.LastSelected, out var theme, out var effect))
-        {
-            theme = ThemePresetVariant.Dark;
-            effect = ThemePresetEffect.Transparent;
-        }
+        _themeSettingsDocument = _themeSettingsStore.LoadForStartup(StartupStoreLockTimeout);
+        _themePresetSession = new ThemePresetSession(_themeSettingsStore, _themeSettingsDocument);
+        var theme = _themePresetSession.CurrentTheme;
+        var effect = ThemeEffectPlatformSupport.Normalize(_themePresetSession.CurrentEffect, _isMicaSupported);
 
         _currentThemeVariant = theme;
         _currentEffectMode = effect;
         _viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
         ApplyEffectMode(effect);
-        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
+        ApplyPresetValues(_themeSettingsStore.GetPreset(_themeSettingsDocument, theme, effect));
         ApplyViewSettings(_userSettingsDb.ViewSettings);
         _wasThemePopoverOpen = _viewModel.ThemePopoverOpen;
     }
@@ -1266,32 +1324,46 @@ public partial class MainWindow : Window
     {
         switch (effect)
         {
+            case ThemePresetEffect.Solid:
+                _viewModel.SetThemeEffects(transparent: false, mica: false, acrylic: false);
+                break;
             case ThemePresetEffect.Mica:
-                _viewModel.IsMicaEnabled = true;
+                _viewModel.SetThemeEffects(transparent: false, mica: true, acrylic: false);
                 break;
             case ThemePresetEffect.Acrylic:
-                _viewModel.IsAcrylicEnabled = true;
+                _viewModel.SetThemeEffects(transparent: false, mica: false, acrylic: true);
                 break;
             default:
-                _viewModel.IsTransparentEnabled = true;
+                _viewModel.SetThemeEffects(transparent: true, mica: false, acrylic: false);
                 break;
         }
     }
 
     private void ApplyPresetValues(ThemePreset preset)
     {
-        _viewModel.MaterialIntensity = preset.MaterialIntensity;
-        _viewModel.BlurRadius = preset.BlurRadius;
-        _viewModel.PanelContrast = preset.PanelContrast;
-        _viewModel.MenuChildIntensity = preset.MenuChildIntensity;
-        _viewModel.BorderStrength = preset.BorderStrength;
+        Interlocked.Increment(ref _applyingThemePresetDepth);
+        try
+        {
+            _viewModel.BackgroundTransparency = preset.BackgroundTransparency;
+            _viewModel.PanelContrast = preset.PanelContrast;
+            _viewModel.MenuTransparency = preset.MenuTransparency;
+            _viewModel.BorderVisibility = preset.BorderVisibility;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _applyingThemePresetDepth);
+        }
     }
 
     private void ApplyPresetForSelection(ThemePresetVariant theme, ThemePresetEffect effect)
     {
+        if (_themePresetSession is null)
+            return;
+
+        var preset = _themePresetSession.Select(theme, effect, CreateCurrentThemePreset());
         _currentThemeVariant = theme;
         _currentEffectMode = effect;
-        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
+        ApplyPresetValues(preset);
     }
 
     private void ApplyViewSettings(AppViewSettings settings)
@@ -2225,33 +2297,28 @@ public partial class MainWindow : Window
     private void HandleThemePopoverStateChange()
     {
         if (_wasThemePopoverOpen && !_viewModel.ThemePopoverOpen)
-            SaveCurrentThemePreset();
+            PersistCurrentThemePreset();
 
         _wasThemePopoverOpen = _viewModel.ThemePopoverOpen;
     }
 
-    private void SaveCurrentThemePreset()
+    private ThemePreset CreateCurrentThemePreset()
     {
-        var theme = GetSelectedThemeVariant();
-        var effect = GetEffectModeForSave();
-
-        _currentThemeVariant = theme;
-        _currentEffectMode = effect;
-
-        var preset = new ThemePreset
+        return new ThemePreset
         {
-            Theme = theme,
-            Effect = effect,
-            MaterialIntensity = _viewModel.MaterialIntensity,
-            BlurRadius = _viewModel.BlurRadius,
+            BackgroundTransparency = _viewModel.BackgroundTransparency,
             PanelContrast = _viewModel.PanelContrast,
-            MenuChildIntensity = _viewModel.MenuChildIntensity,
-            BorderStrength = _viewModel.BorderStrength
+            MenuTransparency = _viewModel.MenuTransparency,
+            BorderVisibility = _viewModel.BorderVisibility
         };
+    }
 
-        _userSettingsStore.SetPreset(_userSettingsDb, theme, effect, preset);
-        _userSettingsDb.LastSelected = $"{theme}.{effect}";
-        _userSettingsStore.Save(_userSettingsDb);
+    private void PersistCurrentThemePreset()
+    {
+        if (_themePresetSession is not { IsDirty: true } session)
+            return;
+
+        session.Persist(CreateCurrentThemePreset());
     }
 
     private void SaveCurrentViewSettings()
@@ -2260,12 +2327,11 @@ public partial class MainWindow : Window
         {
             IsCompactMode = _viewModel.IsCompactMode,
             IsTreeAnimationEnabled = _viewModel.IsTreeAnimationEnabled,
-            IsAdvancedIgnoreCountsEnabled = AdvancedIgnoreCountsAlwaysEnabled,
             IsTerminalCommandPromptDismissed = _userSettingsDb.ViewSettings?.IsTerminalCommandPromptDismissed ?? false,
             PreferredLanguage = _userSettingsDb.ViewSettings?.PreferredLanguage
         };
 
-        _userSettingsStore.Save(_userSettingsDb);
+        _userSettingsStore.TryPersistViewSettings(_userSettingsDb);
     }
 
     private void SaveCurrentLanguageSetting()
@@ -2276,7 +2342,7 @@ public partial class MainWindow : Window
             PreferredLanguage = _localization.CurrentLanguage
         };
 
-        _userSettingsStore.Save(_userSettingsDb);
+        _userSettingsStore.TryPersistViewSettings(_userSettingsDb);
     }
 
     private void SetLanguageAndPersist(AppLanguage language)
@@ -2294,15 +2360,9 @@ public partial class MainWindow : Window
             return ThemePresetEffect.Mica;
         if (_viewModel.IsAcrylicEnabled)
             return ThemePresetEffect.Acrylic;
-        return ThemePresetEffect.Transparent;
-    }
-
-    private ThemePresetEffect GetEffectModeForSave()
-    {
-        if (_viewModel.HasAnyEffect)
-            return GetSelectedEffectMode();
-
-        return _currentEffectMode;
+        return _viewModel.IsTransparentEnabled
+            ? ThemePresetEffect.Transparent
+            : ThemePresetEffect.Solid;
     }
 
     private void InitializeFonts()
@@ -2444,6 +2504,16 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
+        await ProjectRefreshRoutingPolicy.ExecuteAsync(
+            _viewModel.IsProjectLoaded,
+            _viewModel.ProjectSourceType,
+            ReloadCurrentProjectAsync,
+            GetGitUpdatesAsync);
+        e.Handled = true;
+    }
+
+    private async Task ReloadCurrentProjectAsync()
+    {
         CancelBackgroundMemoryCleanup();
         CancelPreviewRefresh();
         var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
@@ -2455,7 +2525,10 @@ public partial class MainWindow : Window
             cancelAction: () => refreshCts.Cancel());
         try
         {
-            await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
+            await ReloadProjectAsync(
+                cancellationToken,
+                applyStoredProfile: true,
+                reuseUnchangedDiscoveryCaches: true);
             _statusOperations.Complete(statusOperationId);
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.RefreshProject);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
@@ -3008,7 +3081,7 @@ public partial class MainWindow : Window
         PopupBackdropConfigurator.TryApply(
             toolTip,
             GetTopLevel(this),
-            _viewModel.HasAnyEffect,
+            _viewModel.ActiveThemeEffect,
             PopupBackdropTransparencyFallback.Transparent);
     }
 
@@ -3627,7 +3700,9 @@ public partial class MainWindow : Window
 
         var newVisible = !_viewModel.SettingsVisible;
         _viewModel.SettingsVisible = newVisible;
-        AnimateSettingsPanel(newVisible);
+        ObserveDetachedTask(
+            AnimateSettingsPanelAsync(newVisible),
+            "AnimateSettingsPanel");
     }
 
     private void OnTogglePreview(object? sender, RoutedEventArgs e)
@@ -4777,11 +4852,25 @@ public partial class MainWindow : Window
             _previewBar.Classes.Remove("preview-toolbar-suspended");
     }
 
-    private async void AnimateSettingsPanel(bool show)
+    private Task AnimateSettingsPanelAsync(bool show)
     {
-        if (_settingsIsland is null || _settingsTransform is null || _settingsContainer is null) return;
-        if (_settingsAnimating) return;
+        var settingsIsland = _settingsIsland;
+        var settingsTransform = _settingsTransform;
+        if (settingsIsland is null || settingsTransform is null || _settingsContainer is null)
+            return Task.CompletedTask;
 
+        if (_settingsAnimating)
+            return _settingsAnimationTask;
+
+        _settingsAnimationTask = RunSettingsPanelAnimationAsync(show, settingsIsland, settingsTransform);
+        return _settingsAnimationTask;
+    }
+
+    private async Task RunSettingsPanelAnimationAsync(
+        bool show,
+        Border settingsIsland,
+        TranslateTransform settingsTransform)
+    {
         var displayMode = GetCurrentDisplayMode();
         _settingsAnimating = true;
         try
@@ -4866,8 +4955,8 @@ public partial class MainWindow : Window
             }
 
             ApplySettingsPanelWidth(show ? targetVisibleWidth : 0.0, animate: true);
-            _settingsTransform.X = show ? 0.0 : targetVisibleWidth;
-            _settingsIsland.Opacity = show ? 1.0 : 0.0;
+            settingsTransform.X = show ? 0.0 : targetVisibleWidth;
+            settingsIsland.Opacity = show ? 1.0 : 0.0;
             await WaitForPanelAnimationAsync(SettingsPanelAnimationDuration);
 
             switch (displayMode)
@@ -5187,18 +5276,6 @@ public partial class MainWindow : Window
         _themeBrushCoordinator.UpdateDynamicThemeBrushes();
     }
 
-    private void OnToggleMica(object? sender, RoutedEventArgs e)
-    {
-        _viewModel.IsMicaEnabled = !_viewModel.IsMicaEnabled;
-        _themeBrushCoordinator.UpdateTransparencyEffect();
-    }
-
-    private void OnToggleAcrylic(object? sender, RoutedEventArgs e)
-    {
-        _viewModel.IsAcrylicEnabled = !_viewModel.IsAcrylicEnabled;
-        _themeBrushCoordinator.UpdateTransparencyEffect();
-    }
-
     private void OnToggleCompactMode(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.CanToggleCompactMode)
@@ -5244,27 +5321,24 @@ public partial class MainWindow : Window
     private void OnSetTransparentMode(object? sender, RoutedEventArgs e)
     {
         _viewModel.ToggleTransparent();
+        ApplyPresetForSelection(GetSelectedThemeVariant(), GetSelectedEffectMode());
         _themeBrushCoordinator.UpdateTransparencyEffect();
-        if (_viewModel.IsTransparentEnabled)
-            ApplyPresetForSelection(GetSelectedThemeVariant(), ThemePresetEffect.Transparent);
         e.Handled = true;
     }
 
     private void OnSetMicaMode(object? sender, RoutedEventArgs e)
     {
         _viewModel.ToggleMica();
+        ApplyPresetForSelection(GetSelectedThemeVariant(), GetSelectedEffectMode());
         _themeBrushCoordinator.UpdateTransparencyEffect();
-        if (_viewModel.IsMicaEnabled)
-            ApplyPresetForSelection(GetSelectedThemeVariant(), ThemePresetEffect.Mica);
         e.Handled = true;
     }
 
     private void OnSetAcrylicMode(object? sender, RoutedEventArgs e)
     {
         _viewModel.ToggleAcrylic();
+        ApplyPresetForSelection(GetSelectedThemeVariant(), GetSelectedEffectMode());
         _themeBrushCoordinator.UpdateTransparencyEffect();
-        if (_viewModel.IsAcrylicEnabled)
-            ApplyPresetForSelection(GetSelectedThemeVariant(), ThemePresetEffect.Acrylic);
         e.Handled = true;
     }
 
@@ -5324,17 +5398,64 @@ public partial class MainWindow : Window
         TerminalCommandSetupSnapshot snapshot,
         bool isAutomaticPrompt)
     {
-        var dialogResult = await TerminalCommandSetupDialog.ShowAsync(this, _localization, snapshot, isAutomaticPrompt);
-        if (ShouldPersistTerminalCommandPromptDismissal(dialogResult))
-            SaveTerminalCommandPromptDismissed();
-
-        if (dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair)
-            return;
-
-        var installResult = _terminalCommandSetupService.InstallOrRepair();
-        if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
+        while (true)
         {
-            await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+            var dialogResult = await TerminalCommandSetupDialog.ShowAsync(
+                this,
+                _localization,
+                snapshot,
+                isAutomaticPrompt);
+            if (ShouldPersistTerminalCommandPromptDismissal(dialogResult))
+                SaveTerminalCommandPromptDismissed();
+
+            if (dialogResult.Action == TerminalCommandDialogAction.ConfigurePath)
+            {
+                var pathResult = await Task.Run(_terminalCommandSetupService.ConfigurePath);
+                if (pathResult.Success)
+                    return;
+
+                await ShowErrorAsync(pathResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                snapshot = pathResult.Snapshot;
+                isAutomaticPrompt = false;
+                continue;
+            }
+
+            if (dialogResult.Action is not (TerminalCommandDialogAction.InstallOrRepair or
+                TerminalCommandDialogAction.Reinstall))
+                return;
+
+            var installResult = await Task.Run(() =>
+                dialogResult.Action == TerminalCommandDialogAction.Reinstall
+                    ? _terminalCommandSetupService.Reinstall()
+                    : _terminalCommandSetupService.InstallOrRepair());
+            if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
+            {
+                await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                return;
+            }
+
+            if (RequiresTerminalCommandPathConfiguration(installResult.Snapshot))
+            {
+                var pathResult = await Task.Run(_terminalCommandSetupService.ConfigurePath);
+                if (pathResult.Success)
+                    return;
+
+                await ShowErrorAsync(pathResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                snapshot = pathResult.Snapshot;
+                isAutomaticPrompt = false;
+                continue;
+            }
+
+            if (dialogResult.Action == TerminalCommandDialogAction.Reinstall)
+            {
+                await MessageDialog.ShowAsync(
+                    this,
+                    _localization["Dialog.TerminalCommand.Title"],
+                    _localization["Dialog.TerminalCommand.ReconfigureSucceeded"],
+                    height: 120);
+            }
+
+            return;
         }
     }
 
@@ -5344,6 +5465,11 @@ public partial class MainWindow : Window
             ? TerminalCommandPostInstallUiAction.None
             : TerminalCommandPostInstallUiAction.ShowError;
 
+    internal static bool RequiresTerminalCommandPathConfiguration(TerminalCommandSetupSnapshot snapshot) =>
+        snapshot.State is
+            TerminalCommandSetupState.InstalledPathMissing or
+            TerminalCommandSetupState.CommandShadowed;
+
     private void SaveTerminalCommandPromptDismissed()
     {
         var current = _userSettingsDb.ViewSettings ?? new AppViewSettings();
@@ -5351,14 +5477,16 @@ public partial class MainWindow : Window
         {
             IsTerminalCommandPromptDismissed = true
         };
-        _userSettingsStore.Save(_userSettingsDb);
+        _userSettingsStore.TryPersistViewSettings(_userSettingsDb);
     }
 
     internal static bool ShouldPersistTerminalCommandPromptDismissal(TerminalCommandDialogResult dialogResult)
     {
-        // Choosing install/repair is not a dismissal. If the install attempt fails,
+        // Choosing install, repair, or reinstall is not a dismissal. If the setup attempt fails,
         // the next startup should still be allowed to offer setup again.
-        return dialogResult.Action != TerminalCommandDialogAction.InstallOrRepair &&
+        return dialogResult.Action is not (TerminalCommandDialogAction.InstallOrRepair or
+                   TerminalCommandDialogAction.Reinstall or
+                   TerminalCommandDialogAction.ConfigurePath) &&
                (dialogResult.DontShowAgain || dialogResult.Action == TerminalCommandDialogAction.DismissPrompt);
     }
 
@@ -5369,7 +5497,8 @@ public partial class MainWindow : Window
             _localization["Dialog.ResetSettings.Title"],
             _localization["Dialog.ResetSettings.Message"],
             _localization["Dialog.ResetSettings.Confirm"],
-            _localization["Dialog.Cancel"]);
+            _localization["Dialog.Cancel"],
+            height: 180);
 
         if (!confirmed)
         {
@@ -5407,23 +5536,25 @@ public partial class MainWindow : Window
     /// </summary>
     private void ResetThemeSettings()
     {
-        _userSettingsDb = _userSettingsStore.ResetToDefaults();
+        var resetDocument = _themeSettingsStore.ResetToDefaults();
+        var resetSession = new ThemePresetSession(_themeSettingsStore, resetDocument);
+        var theme = resetSession.CurrentTheme;
+        var effect = ThemeEffectPlatformSupport.Normalize(resetSession.CurrentEffect, _isMicaSupported);
 
-        // Reparse last selected to get current theme variant and effect
-        if (!_userSettingsStore.TryParseKey(_userSettingsDb.LastSelected, out var theme, out var effect))
-        {
-            theme = ThemePresetVariant.Dark;
-            effect = ThemePresetEffect.Transparent;
-        }
+        if (global::Avalonia.Application.Current is { } app)
+            app.RequestedThemeVariant = theme == ThemePresetVariant.Dark
+                ? ThemeVariant.Dark
+                : ThemeVariant.Light;
 
         _currentThemeVariant = theme;
         _currentEffectMode = effect;
+        _viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
+        ApplyEffectMode(effect);
 
-        // Apply default preset values to ViewModel
-        ApplyPresetValues(_userSettingsStore.GetPreset(_userSettingsDb, theme, effect));
-        ApplyViewSettings(_userSettingsDb.ViewSettings);
+        ApplyPresetValues(_themeSettingsStore.GetPreset(resetDocument, theme, effect));
+        _themeSettingsDocument = resetDocument;
+        _themePresetSession = resetSession;
 
-        // Refresh visual effects
         _themeBrushCoordinator.UpdateTransparencyEffect();
         _themeBrushCoordinator.UpdateDynamicThemeBrushes();
     }
@@ -5472,6 +5603,7 @@ public partial class MainWindow : Window
     private void OnRecentMenuSubmenuOpened(object? sender, RoutedEventArgs e)
     {
         RefreshRecentFoldersMenu();
+        StartRecentFolderAvailabilityRefresh();
     }
 
     private void RefreshRecentFoldersMenu()
@@ -5501,6 +5633,9 @@ public partial class MainWindow : Window
             };
 
             ToolTip.SetTip(item, null);
+            SetRecentFolderMenuItemAvailability(
+                item,
+                !_unavailableRecentFolderPaths.Contains(recentFolder.Value));
             item.Click += OnRecentFolderMenuItemClick;
             recentMenuItem.Items.Add(item);
         }
@@ -5511,12 +5646,117 @@ public partial class MainWindow : Window
         if (sender is not MenuItem { Tag: string path })
             return;
 
+        var lifetimeToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+        bool isAvailable;
+        try
+        {
+            isAvailable = await _recentFolderAvailabilityService.IsAvailableAsync(path, lifetimeToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        UpdateRecentFolderAvailability(path, isAvailable);
+        ApplyRecentFolderAvailabilityToMenu();
+        if (!isAvailable)
+        {
+            var shouldRemove = await MessageDialog.ShowConfirmationAsync(
+                this,
+                _localization["Dialog.RecentFolderUnavailable.Title"],
+                _localization.Format("Dialog.RecentFolderUnavailable.Message", path),
+                _localization["Dialog.RecentFolderUnavailable.Remove"],
+                _localization["Dialog.RecentFolderUnavailable.Keep"],
+                width: 450,
+                height: 180);
+
+            if (shouldRemove)
+                RemoveRecentFolder(path);
+            return;
+        }
+
         await TryOpenFolderAsync(path, fromDialog: true);
+    }
+
+    private void StartRecentFolderAvailabilityRefresh()
+    {
+        if (_recentFolderAvailabilityRefreshTask is { IsCompleted: false } ||
+            _windowLifetimeCts is not { } lifetime)
+        {
+            return;
+        }
+
+        var refreshTask = RefreshRecentFolderAvailabilityAsync(lifetime.Token);
+        _recentFolderAvailabilityRefreshTask = refreshTask;
+        ObserveDetachedTask(refreshTask, "RefreshRecentFolderAvailability");
+    }
+
+    private async Task RefreshRecentFolderAvailabilityAsync(CancellationToken cancellationToken)
+    {
+        var paths = _viewModel.RecentFolders
+            .Select(static folder => folder.Value)
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            _unavailableRecentFolderPaths.Clear();
+            return;
+        }
+
+        var availability = await _recentFolderAvailabilityService.CheckAsync(paths, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _unavailableRecentFolderPaths.IntersectWith(paths);
+        foreach (var (path, isAvailable) in availability)
+            UpdateRecentFolderAvailability(path, isAvailable);
+
+        ApplyRecentFolderAvailabilityToMenu();
+    }
+
+    private void ApplyRecentFolderAvailabilityToMenu()
+    {
+        if (_topMenuBar?.RecentMenuItemControl is not { } recentMenuItem)
+            return;
+
+        foreach (var item in recentMenuItem.Items.OfType<MenuItem>())
+        {
+            if (item.Tag is string path)
+            {
+                SetRecentFolderMenuItemAvailability(
+                    item,
+                    !_unavailableRecentFolderPaths.Contains(path));
+            }
+        }
+    }
+
+    private void UpdateRecentFolderAvailability(string path, bool isAvailable)
+    {
+        if (isAvailable)
+            _unavailableRecentFolderPaths.Remove(path);
+        else
+            _unavailableRecentFolderPaths.Add(path);
+    }
+
+    private static void SetRecentFolderMenuItemAvailability(MenuItem item, bool isAvailable)
+    {
+        const string unavailableClass = "recent-folder-unavailable";
+        if (isAvailable)
+            item.Classes.Remove(unavailableClass);
+        else if (!item.Classes.Contains(unavailableClass))
+            item.Classes.Add(unavailableClass);
+    }
+
+    private void RemoveRecentFolder(string path)
+    {
+        _recentProjectsDb = _recentProjectsStore.RemoveFolder(_recentProjectsDb, path);
+        _unavailableRecentFolderPaths.Remove(path);
+        SyncRecentProjectsToViewModel();
+        RefreshRecentFoldersMenu();
     }
 
     private void RecordRecentFolder(string path)
     {
         _recentProjectsDb = _recentProjectsStore.AddFolder(_recentProjectsDb, path);
+        _unavailableRecentFolderPaths.Remove(path);
         SyncRecentProjectsToViewModel();
         RefreshRecentFoldersMenu();
     }
@@ -5802,31 +6042,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Successfully cloned - open the project
-            _gitCloneWindow?.Close();
-            _gitCloneWindow = null;
-            _viewModel.GitCloneInProgress = false;
-            _viewModel.ProjectSourceType = result.SourceType;
-            _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
-
-            // Save repository name and URL for display
-            _currentProjectDisplayName = result.RepositoryName;
-            _currentRepositoryUrl = result.RepositoryUrl;
-
-            // Save cache path for cleanup when project is closed or replaced
-            _currentCachedRepoPath = targetPath;
-
-            await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
-            RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? url : result.RepositoryUrl);
-
-            // Load branches if Git mode
-            if (result.SourceType == ProjectSourceType.GitClone)
-                await RefreshGitBranchesAsync(result.LocalPath);
-
-            if (_currentPath == result.LocalPath)
-            {
-                _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
-            }
+            await ApplySuccessfulGitCloneAsync(result, targetPath, url, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -5859,6 +6075,48 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    internal async Task ApplySuccessfulGitCloneAsync(
+        GitCloneResult result,
+        string cachePath,
+        string requestedUrl,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _gitCloneWindow?.Close();
+        _gitCloneWindow = null;
+        _viewModel.GitCloneInProgress = false;
+        _viewModel.ProjectSourceType = result.SourceType;
+        _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
+        _currentProjectDisplayName = result.RepositoryName;
+        _currentRepositoryUrl = result.RepositoryUrl;
+        _currentCachedRepoPath = cachePath;
+
+        var opened = await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
+        if (!opened || !PathComparer.Default.Equals(_currentPath, result.LocalPath))
+            return;
+
+        RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? requestedUrl : result.RepositoryUrl);
+
+        // Clone-only branch discovery stays behind the reveal barrier so it cannot compete
+        // with the settings animation or make the clone completion appear frozen.
+        if (result.SourceType == ProjectSourceType.GitClone)
+        {
+            var visualReadyTask = _postLoadVisualReadyTask;
+            await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+                visualReadyTask,
+                MetricsCalculationPolicy.InitialVisualReadyTimeout,
+                cancellationToken);
+
+            if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
+                await RefreshGitBranchesAsync(result.LocalPath, cancellationToken);
+        }
+
+        if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
+            _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
+    }
+
     private void OnGitCloneCancel(object? sender, RoutedEventArgs e)
     {
         if (_viewModel.GitCloneInProgress)
@@ -5881,6 +6139,12 @@ public partial class MainWindow : Window
     }
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
+    {
+        await GetGitUpdatesAsync();
+        e.Handled = true;
+    }
+
+    private async Task GetGitUpdatesAsync()
     {
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
@@ -5951,8 +6215,6 @@ public partial class MainWindow : Window
         {
             DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
-
-        e.Handled = true;
     }
 
     private async void OnGitBranchSwitch(object? sender, string branchName)
@@ -7211,8 +7473,14 @@ public partial class MainWindow : Window
         // Give persistence one last synchronous chance before the process exits.
         // This protects against transient IO failures that would otherwise make the UI look correct
         // during the session but leave no durable snapshot for the next launch.
-        if (_recentProjectsDb.RecentFolders.Count > 0 || _recentProjectsDb.RecentRepositories.Count > 0)
+        PersistCurrentThemePreset();
+
+        if (_recentProjectsDb.RecentFolders.Count > 0 ||
+            _recentProjectsDb.RecentFolderRemovals.Count > 0 ||
+            _recentProjectsDb.RecentRepositories.Count > 0)
+        {
             _recentProjectsStore.TryPersist(_recentProjectsDb);
+        }
 
         _projectProfiles.FlushPending();
     }
@@ -7631,9 +7899,20 @@ public partial class MainWindow : Window
 
             if (action == AutomaticTerminalCommandStartupAction.RepairSilently)
             {
-                ObserveDetachedTask(
-                    Task.Run(_terminalCommandSetupService.InstallOrRepair, cancellationToken),
-                    "RepairTerminalCommand");
+                var repairResult = await Task.Run(
+                    _terminalCommandSetupService.InstallOrRepair,
+                    cancellationToken);
+                if (repairResult.Success &&
+                    TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(
+                        _userSettingsDb.ViewSettings,
+                        repairResult.Snapshot,
+                        !string.IsNullOrWhiteSpace(_startupOptions.Path)))
+                {
+                    await ShowTerminalCommandSetupAsync(
+                        repairResult.Snapshot,
+                        isAutomaticPrompt: true);
+                }
+
                 return;
             }
 
@@ -7678,11 +7957,11 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(executablePath))
             return false;
 
-        var name = GetFileNameWithoutExtensionCrossPlatform(executablePath);
-        return name.Equals("DevProjex", StringComparison.OrdinalIgnoreCase);
+        return CommandLineExecutableAliases.IsPublishedPortableFileName(
+            GetFileNameCrossPlatform(executablePath));
     }
 
-    private static string GetFileNameWithoutExtensionCrossPlatform(string path)
+    private static string GetFileNameCrossPlatform(string path)
     {
         // Unit tests intentionally pass Windows-style paths on Linux runners.
         // Path.GetFileName* only recognizes the current OS separator, so keep
@@ -7690,8 +7969,7 @@ public partial class MainWindow : Window
         var fileNameStart = Math.Max(
             path.LastIndexOf('/'),
             path.LastIndexOf('\\')) + 1;
-        var fileName = path[fileNameStart..];
-        return Path.GetFileNameWithoutExtension(fileName);
+        return path[fileNameStart..];
     }
 
     private bool TryElevateAndRestart(string path)
@@ -7728,10 +8006,28 @@ public partial class MainWindow : Window
 
     private async Task ReloadProjectAsync(
         CancellationToken cancellationToken = default,
-        bool applyStoredProfile = false)
+        bool applyStoredProfile = false,
+        bool reuseUnchangedDiscoveryCaches = false)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
         cancellationToken.ThrowIfCancellationRequested();
+
+        // A no-change F5 validates only directories previously inspected by scope discovery.
+        // Structural changes, project switches and git operations still force a complete rebuild.
+        var canReuseIgnoreRuleCaches = false;
+        if (reuseUnchangedDiscoveryCaches)
+        {
+            canReuseIgnoreRuleCaches = await Task.Run(
+                () => _ignoreRulesService.RevalidateCaches(_currentPath, cancellationToken),
+                cancellationToken);
+        }
+        else
+        {
+            _ignoreRulesService.InvalidateCaches(_currentPath);
+        }
+
+        if (!canReuseIgnoreRuleCaches)
+            _selectionCoordinator.InvalidateFileSystemCaches();
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
         var timing = new ProjectLoadTiming();
@@ -8184,7 +8480,9 @@ public partial class MainWindow : Window
     {
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
-        StartDeferredSettingsPanelAnimation(cancellationToken);
+        var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(cancellationToken);
+        _postLoadVisualReadyTask = settingsRevealTask;
+        ObserveDetachedTask(settingsRevealTask, "AnimateSettingsPanelWhenTreeReady");
 #if DEVPROJEX_PROJECT_LOAD_TIMING
         var timing = _projectLoadTiming;
         if (timing is not null && !timing.HasLoadingElapsed)
@@ -8195,12 +8493,18 @@ public partial class MainWindow : Window
 
         ObserveDetachedTask(
             TrackProjectAnalysisTimingAsync(
-                _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(currentTree, cancellationToken),
+                _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
+                    currentTree,
+                    settingsRevealTask,
+                    cancellationToken),
                 timing),
             "InitializeFileMetricsCache");
 #else
         ObserveDetachedTask(
-            _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(currentTree, cancellationToken),
+            _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+                currentTree,
+                settingsRevealTask,
+                cancellationToken),
             "InitializeFileMetricsCache");
 #endif
     }
@@ -8234,21 +8538,29 @@ public partial class MainWindow : Window
     }
 #endif
 
-    private void StartDeferredSettingsPanelAnimation(CancellationToken cancellationToken)
+    private Task StartDeferredSettingsPanelAnimationAsync(CancellationToken cancellationToken)
     {
-        if (!_viewModel.SettingsVisible || _settingsAnimating)
-            return;
+        if (_settingsAnimating)
+            return _settingsAnimationTask;
 
-        ObserveDetachedTask(
-            AnimateSettingsPanelWhenTreeReadyAsync(cancellationToken),
-            "AnimateSettingsPanelWhenTreeReady");
+        // A visible-width island is already on screen (notably during F5). Treating it as a new
+        // reveal would delay metrics and make existing status values disappear and jump again.
+        if (!SettingsPanelRevealPolicy.ShouldRunInitialReveal(
+                _viewModel.SettingsVisible,
+                settingsAnimating: false,
+                HasVisibleSettingsPanelWidth()))
+        {
+            return Task.CompletedTask;
+        }
+
+        return AnimateSettingsPanelWhenTreeReadyAsync(cancellationToken);
     }
 
     private async Task AnimateSettingsPanelWhenTreeReadyAsync(CancellationToken cancellationToken)
     {
         await WaitForTreeRenderStabilizationAsync(cancellationToken);
-        if (_viewModel.SettingsVisible && !_settingsAnimating)
-            AnimateSettingsPanel(true);
+        if (_viewModel.SettingsVisible)
+            await AnimateSettingsPanelAsync(true);
     }
 
     private static async void ObserveDetachedTask(Task task, string operationName)
@@ -8288,19 +8600,13 @@ public partial class MainWindow : Window
 
     private static string? ResolveDropFolderPath(IEnumerable<string?> localPaths)
     {
-        var pathList = localPaths.ToList();
+        return localPaths.FirstOrDefault(path =>
+            !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
+    }
 
-        var folder = pathList
-            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
-        if (!string.IsNullOrWhiteSpace(folder))
-            return folder;
-
-        var file = pathList
-            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
-
-        return string.IsNullOrWhiteSpace(file)
-            ? null
-            : Path.GetDirectoryName(file);
+    private static DragDropEffects ResolveDropEffect(bool hasFolder)
+    {
+        return hasFolder ? DragDropEffects.Copy : DragDropEffects.None;
     }
 
     private static string BuildWindowTitle(
@@ -8367,7 +8673,15 @@ public partial class MainWindow : Window
         IReadOnlyCollection<IgnoreOptionId> selectedOptions,
         IReadOnlyCollection<string>? selectedRootFolders)
     {
-        return _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+        var rules = _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+        if (!_viewModel.IsGitMode ||
+            string.IsNullOrWhiteSpace(_currentCachedRepoPath) ||
+            !PathComparer.Default.Equals(rootPath, _currentCachedRepoPath))
+        {
+            return rules;
+        }
+
+        return rules with { ExcludedRootFolderName = ".git" };
     }
 
     private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
