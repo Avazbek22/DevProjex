@@ -1555,6 +1555,32 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public async Task Reinstall_ConcurrentServiceInstancesAtomicallyReplaceLauncherWithoutReaderConflicts()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("portable/DevProjex.exe", "fake executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(userBin, CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		File.WriteAllText(commandPath, TerminalCommandSetupService.BuildWindowsLauncherContent(target));
+		var services = Enumerable.Range(0, 32)
+			.Select(_ => CreateWindowsPortableService(
+				temp.Path,
+				processPath: string.Empty,
+				() => userBin,
+				_ => throw new InvalidOperationException("Installed PATH must not be rewritten."),
+				target))
+			.ToArray();
+
+		var results = await Task.WhenAll(services.Select(service => Task.Run(service.Reinstall)));
+
+		Assert.All(results, result => Assert.True(result.Success, result.ErrorMessage));
+		Assert.All(results, result => Assert.Equal(TerminalCommandInstallOutcome.Reinstalled, result.Outcome));
+		Assert.Equal(TerminalCommandSetupService.BuildWindowsLauncherContent(target), File.ReadAllText(commandPath));
+		Assert.Empty(Directory.GetFiles(userBin, ".devprojex.*.tmp"));
+		Assert.Equal(TerminalCommandSetupState.Installed, services[0].Probe().State);
+	}
+
+	[Fact]
 	public void Probe_UnsupportedPlatform_ReturnsNonActionableSnapshotAndInstallIsNotSupported()
 	{
 		using var temp = new TemporaryDirectory();

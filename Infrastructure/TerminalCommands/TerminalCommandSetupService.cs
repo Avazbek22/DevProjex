@@ -140,7 +140,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private TerminalCommandInstallResult InstallOrRepair(bool forceReinstall)
 	{
 		var initial = Probe();
-		if (initial.State == TerminalCommandSetupState.Failed &&
+		if (initial.State is TerminalCommandSetupState.Failed or TerminalCommandSetupState.PermissionDenied &&
 		    !string.IsNullOrWhiteSpace(initial.CommandPath))
 		{
 			try
@@ -509,7 +509,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		try
 		{
 			return string.Equals(
-				File.ReadAllText(commandPath),
+				ReadAllTextDuringAtomicReplacement(commandPath),
 				BuildWindowsLauncherContent(targetPath),
 				StringComparison.Ordinal);
 		}
@@ -848,7 +848,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		try
 		{
 			return string.Equals(
-				File.ReadAllText(commandPath),
+				ReadAllTextDuringAtomicReplacement(commandPath),
 				BuildWrapperContent(targetPath),
 				StringComparison.Ordinal);
 		}
@@ -860,6 +860,18 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		{
 			return false;
 		}
+	}
+
+	private static string ReadAllTextDuringAtomicReplacement(string path)
+	{
+		// Probes must not block the serialized writer from atomically replacing a complete launcher.
+		using var stream = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read | FileShare.Delete);
+		using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+		return reader.ReadToEnd();
 	}
 
 	private static bool HasUnixExecutableMode(string commandPath)

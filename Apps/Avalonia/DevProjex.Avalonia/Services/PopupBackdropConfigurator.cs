@@ -83,7 +83,8 @@ internal static class PopupBackdropConfigurator
         return effect switch
         {
             ThemeEffectMode.Solid => TransparentHints,
-            ThemeEffectMode.Transparent => TransparentHints,
+            // Transparent applies to the main window only. Popup text surfaces still need
+            // a native blur so content behind them cannot compete with menu labels.
             _ => fallback == PopupBackdropTransparencyFallback.Transparent
                 ? EffectHintsWithTransparentFallback
                 : EffectHints

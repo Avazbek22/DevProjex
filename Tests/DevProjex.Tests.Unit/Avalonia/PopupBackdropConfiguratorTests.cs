@@ -153,7 +153,7 @@ public sealed class PopupBackdropConfiguratorTests
     [AvaloniaTheory]
     [InlineData(false)]
     [InlineData(true)]
-    public void TryApplyToTopLevel_TransparentEffect_NeverRequestsBlur(bool useTransparentFallback)
+    public void TryApplyToTopLevel_TransparentWindow_UsesBlurredPopupSurface(bool useTransparentFallback)
     {
         var popupLevel = new Window();
         var fallback = useTransparentFallback
@@ -167,12 +167,21 @@ public sealed class PopupBackdropConfiguratorTests
             fallback);
 
         Assert.True(applied);
-        AssertTransparencyHints(
-            popupLevel,
-            WindowTransparencyLevel.Transparent,
-            WindowTransparencyLevel.None);
-        Assert.DoesNotContain(WindowTransparencyLevel.Blur, popupLevel.TransparencyLevelHint);
-        Assert.DoesNotContain(WindowTransparencyLevel.AcrylicBlur, popupLevel.TransparencyLevelHint);
+        WindowTransparencyLevel[] expected = useTransparentFallback
+            ?
+            [
+                WindowTransparencyLevel.AcrylicBlur,
+                WindowTransparencyLevel.Blur,
+                WindowTransparencyLevel.Transparent,
+                WindowTransparencyLevel.None
+            ]
+            :
+            [
+                WindowTransparencyLevel.AcrylicBlur,
+                WindowTransparencyLevel.Blur,
+                WindowTransparencyLevel.None
+            ];
+        AssertTransparencyHints(popupLevel, expected);
         Assert.Same(Brushes.Transparent, popupLevel.Background);
     }
 
