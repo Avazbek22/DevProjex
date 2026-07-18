@@ -77,6 +77,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isMicaEnabled;
     private bool _isMicaAvailable = true;
     private bool _isAcrylicEnabled;
+    private bool _isAcrylicAvailable = true;
     private bool _isTransparentEnabled = true;
     private PreviewWorkspaceMode _previewWorkspaceMode;
     private bool _isPreviewCompactModeActive;
@@ -707,7 +708,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         IsMicaAvailable = isAvailable;
         if (!isAvailable && _isMicaEnabled)
-            SetThemeEffects(transparent: false, mica: false, acrylic: true);
+            SetThemeEffects(transparent: false, mica: false, acrylic: IsAcrylicAvailable);
+    }
+
+    public bool IsAcrylicAvailable
+    {
+        get => _isAcrylicAvailable;
+        private set
+        {
+            if (_isAcrylicAvailable == value) return;
+            _isAcrylicAvailable = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public void SetAcrylicAvailability(bool isAvailable)
+    {
+        IsAcrylicAvailable = isAvailable;
+        if (!isAvailable && _isAcrylicEnabled)
+            SetThemeEffects(transparent: false, mica: IsMicaAvailable, acrylic: false);
     }
 
     public void SetThemeEffects(bool transparent, bool mica, bool acrylic)
@@ -770,6 +789,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void ToggleAcrylic()
     {
+        if (!IsAcrylicAvailable)
+            return;
+
         if (_isAcrylicEnabled)
             SetThemeEffects(transparent: false, mica: false, acrylic: false);
         else

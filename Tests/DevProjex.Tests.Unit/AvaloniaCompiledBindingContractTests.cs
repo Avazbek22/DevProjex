@@ -112,6 +112,16 @@ public sealed class AvaloniaCompiledBindingContractTests
 		Assert.Equal(
 			["TransparentEffectCheckBox", "BlurEffectCheckBox", "MicaEffectCheckBox"],
 			namedEffectControls);
+		Assert.Equal(
+			"{Binding IsAcrylicAvailable}",
+			root.Descendants(avaloniaNamespace + "CheckBox")
+				.Single(element => element.Attribute(xamlNamespace + "Name")?.Value == "BlurEffectCheckBox")
+				.Attribute("IsVisible")?.Value);
+		Assert.Equal(
+			"{Binding IsMicaAvailable}",
+			root.Descendants(avaloniaNamespace + "CheckBox")
+				.Single(element => element.Attribute(xamlNamespace + "Name")?.Value == "MicaEffectCheckBox")
+				.Attribute("IsVisible")?.Value);
 		Assert.Contains(sliderBindings, binding => binding.Contains("BackgroundTransparency", StringComparison.Ordinal));
 		Assert.Contains(sliderBindings, binding => binding.Contains("MenuTransparency", StringComparison.Ordinal));
 		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("MaterialIntensity", StringComparison.Ordinal));

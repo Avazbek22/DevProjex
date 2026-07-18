@@ -979,7 +979,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SetMicaAvailability_WhenUnavailable_ConvertsMicaToBlurAndBlocksRetoggle()
+    public void SetMicaAvailability_WhenUnavailable_FallsBackToAvailableBlurAndBlocksRetoggle()
     {
         var viewModel = CreateViewModel();
         viewModel.IsMicaEnabled = true;
@@ -990,7 +990,41 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.IsMicaAvailable);
         Assert.False(viewModel.IsMicaEnabled);
         Assert.True(viewModel.IsAcrylicEnabled);
+        Assert.False(viewModel.IsTransparentEnabled);
         Assert.Equal(ThemeEffectMode.Acrylic, viewModel.ActiveThemeEffect);
+    }
+
+    [Fact]
+    public void SetEffectAvailability_WhenMicaAndBlurAreUnavailable_DisablesEffectsAndBlocksRetoggle()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsMicaEnabled = true;
+
+        viewModel.SetAcrylicAvailability(false);
+        viewModel.SetMicaAvailability(false);
+        viewModel.ToggleMica();
+        viewModel.ToggleAcrylic();
+
+        Assert.False(viewModel.IsMicaAvailable);
+        Assert.False(viewModel.IsAcrylicAvailable);
+        Assert.False(viewModel.HasAnyEffect);
+        Assert.Equal(ThemeEffectMode.Solid, viewModel.ActiveThemeEffect);
+    }
+
+    [Fact]
+    public void SetAcrylicAvailability_WhenUnavailable_FallsBackToAvailableMicaAndBlocksRetoggle()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsAcrylicEnabled = true;
+
+        viewModel.SetAcrylicAvailability(false);
+        viewModel.ToggleAcrylic();
+
+        Assert.False(viewModel.IsAcrylicAvailable);
+        Assert.False(viewModel.IsAcrylicEnabled);
+        Assert.True(viewModel.IsMicaEnabled);
+        Assert.False(viewModel.IsTransparentEnabled);
+        Assert.Equal(ThemeEffectMode.Mica, viewModel.ActiveThemeEffect);
     }
 
     [Fact]

@@ -16,4 +16,19 @@ internal static class ThemeEffectPlatformSupport
         requested == ThemeEffectMode.Mica && !isMicaSupported
             ? ThemeEffectMode.Acrylic
             : requested;
+
+    internal static ThemeEffectMode ResolveActual(
+        ThemeEffectMode requested,
+        WindowTransparencyLevel actual) => requested switch
+    {
+        ThemeEffectMode.Mica when actual == WindowTransparencyLevel.Mica => ThemeEffectMode.Mica,
+        ThemeEffectMode.Mica when IsBlurLevel(actual) => ThemeEffectMode.Acrylic,
+        ThemeEffectMode.Acrylic when actual == WindowTransparencyLevel.Mica => ThemeEffectMode.Mica,
+        ThemeEffectMode.Acrylic when IsBlurLevel(actual) => ThemeEffectMode.Acrylic,
+        ThemeEffectMode.Transparent when actual == WindowTransparencyLevel.Transparent => ThemeEffectMode.Transparent,
+        _ => ThemeEffectMode.Solid
+    };
+
+    internal static bool IsBlurLevel(WindowTransparencyLevel level) =>
+        level == WindowTransparencyLevel.AcrylicBlur || level == WindowTransparencyLevel.Blur;
 }

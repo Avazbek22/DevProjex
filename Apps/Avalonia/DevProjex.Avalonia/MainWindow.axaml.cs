@@ -168,6 +168,7 @@ public partial class MainWindow : Window
     private ExportPathPresentation? _cachedPathPresentation;
     private bool _elevationAttempted;
     private bool _wasThemePopoverOpen;
+    private bool _themeEffectRuntimeProbeReady;
     private int _applyingThemePresetDepth;
     private bool _awaitingSystemDialogActivation;
     private TaskCompletionSource<bool>? _systemDialogActivationTcs;
@@ -913,6 +914,13 @@ public partial class MainWindow : Window
 
     private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
+        if (e.Property == ActualTransparencyLevelProperty)
+        {
+            if (_themeEffectRuntimeProbeReady)
+                _themeBrushCoordinator.ScheduleActualEffectSynchronization();
+            return;
+        }
+
         if (e.Property != BoundsProperty)
             return;
 
@@ -1109,6 +1117,8 @@ public partial class MainWindow : Window
 
             await RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            _themeEffectRuntimeProbeReady = true;
+            _themeBrushCoordinator.ScheduleActualEffectSynchronization();
             StartDeferredAppStateBootstrap(cancellationToken);
 
             if (_startupCommandLineErrors.Count > 0)
@@ -5529,7 +5539,7 @@ public partial class MainWindow : Window
         var resetDocument = _themeSettingsStore.ResetToDefaults();
         var resetSession = new ThemePresetSession(_themeSettingsStore, resetDocument);
         var theme = resetSession.CurrentTheme;
-        var effect = resetSession.CurrentEffect;
+        var effect = ThemeEffectPlatformSupport.Normalize(resetSession.CurrentEffect, _isMicaSupported);
 
         if (global::Avalonia.Application.Current is { } app)
             app.RequestedThemeVariant = theme == ThemePresetVariant.Dark
@@ -5541,7 +5551,7 @@ public partial class MainWindow : Window
         _viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
         ApplyEffectMode(effect);
 
-        ApplyPresetValues(resetSession.CurrentPreset);
+        ApplyPresetValues(_themeSettingsStore.GetPreset(resetDocument, theme, effect));
         _themeSettingsDocument = resetDocument;
         _themePresetSession = resetSession;
 

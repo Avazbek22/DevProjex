@@ -24,7 +24,6 @@ public sealed class ThemeBrushCoordinatorTests
 			WindowTransparencyLevel.Mica,
 			WindowTransparencyLevel.AcrylicBlur,
 			WindowTransparencyLevel.Blur,
-			WindowTransparencyLevel.Transparent,
 			WindowTransparencyLevel.None);
 
 		using var acrylic = CreateHarness();
@@ -34,7 +33,7 @@ public sealed class ThemeBrushCoordinatorTests
 			acrylic.Window,
 			WindowTransparencyLevel.AcrylicBlur,
 			WindowTransparencyLevel.Blur,
-			WindowTransparencyLevel.Transparent,
+			WindowTransparencyLevel.Mica,
 			WindowTransparencyLevel.None);
 
 		using var transparent = CreateHarness();

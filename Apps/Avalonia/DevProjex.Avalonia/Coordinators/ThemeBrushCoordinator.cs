@@ -23,6 +23,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     private SolidColorBrush? _accentBrush;
     private readonly HashSet<string> _publishedResourceKeys = new(StringComparer.Ordinal);
     private int _dynamicUpdateScheduled;
+    private DispatcherTimer? _actualEffectProbeTimer;
     private bool _disposed;
 
     public void HandleSubmenuOpened(object? sender, RoutedEventArgs e)
@@ -67,14 +68,15 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
         if (viewModel.IsMicaEnabled)
         {
+            // Keep Transparent out of automatic fallback chains: it is an explicit user choice.
             window.TransparencyLevelHint =
             [
                 WindowTransparencyLevel.Mica,
                 WindowTransparencyLevel.AcrylicBlur,
                 WindowTransparencyLevel.Blur,
-                WindowTransparencyLevel.Transparent,
                 WindowTransparencyLevel.None
             ];
+            ScheduleActualEffectSynchronization();
 
             return;
         }
@@ -85,9 +87,10 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             [
                 WindowTransparencyLevel.AcrylicBlur,
                 WindowTransparencyLevel.Blur,
-                WindowTransparencyLevel.Transparent,
+                WindowTransparencyLevel.Mica,
                 WindowTransparencyLevel.None
             ];
+            ScheduleActualEffectSynchronization();
 
             return;
         }
@@ -98,6 +101,75 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
             WindowTransparencyLevel.None
         ];
 
+    }
+
+    public void SynchronizeActualEffectAvailability()
+    {
+        var requested = viewModel.ActiveThemeEffect;
+        if (requested is ThemeEffectMode.Solid or ThemeEffectMode.Transparent)
+            return;
+
+        var actual = window.ActualTransparencyLevel;
+        var resolved = ThemeEffectPlatformSupport.ResolveActual(requested, actual);
+
+        switch (resolved)
+        {
+            case ThemeEffectMode.Mica:
+                viewModel.SetMicaAvailability(true);
+                if (requested == ThemeEffectMode.Acrylic)
+                    viewModel.SetAcrylicAvailability(false);
+                break;
+            case ThemeEffectMode.Acrylic:
+                viewModel.SetAcrylicAvailability(true);
+                if (requested == ThemeEffectMode.Mica)
+                    viewModel.SetMicaAvailability(false);
+                break;
+            default:
+                // Reaching None proves that neither native backdrop in the ordered chain worked.
+                if (requested == ThemeEffectMode.Mica)
+                {
+                    viewModel.SetAcrylicAvailability(false);
+                    viewModel.SetMicaAvailability(false);
+                }
+                else
+                {
+                    viewModel.SetMicaAvailability(false);
+                    viewModel.SetAcrylicAvailability(false);
+                }
+                break;
+        }
+
+        if (viewModel.ActiveThemeEffect != requested)
+        {
+            UpdateTransparencyEffect();
+            UpdateDynamicThemeBrushes();
+        }
+    }
+
+    public void ScheduleActualEffectSynchronization()
+    {
+        if (_disposed || !window.IsVisible)
+            return;
+
+        if (_actualEffectProbeTimer is null)
+        {
+            _actualEffectProbeTimer = new DispatcherTimer(DispatcherPriority.Loaded, window.Dispatcher)
+            {
+                Interval = TimeSpan.FromMilliseconds(100)
+            };
+            _actualEffectProbeTimer.Tick += OnActualEffectProbeTick;
+        }
+
+        // Native backdrops can briefly report the previous level while the compositor switches.
+        _actualEffectProbeTimer.Stop();
+        _actualEffectProbeTimer.Start();
+    }
+
+    private void OnActualEffectProbeTick(object? sender, EventArgs e)
+    {
+        _actualEffectProbeTimer?.Stop();
+        if (!_disposed)
+            SynchronizeActualEffectAvailability();
     }
 
     public void ScheduleDynamicThemeBrushUpdate()
@@ -260,6 +332,12 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     public void Dispose()
     {
         _disposed = true;
+        if (_actualEffectProbeTimer is not null)
+        {
+            _actualEffectProbeTimer.Stop();
+            _actualEffectProbeTimer.Tick -= OnActualEffectProbeTick;
+            _actualEffectProbeTimer = null;
+        }
         // Null out brush references to break any resource dictionary ties
         _backgroundBrush = null;
         _panelBrush = null;

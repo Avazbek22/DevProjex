@@ -29,6 +29,7 @@
                     Click="OnSetTransparentMode" />
           <CheckBox x:Name="BlurEffectCheckBox"
                     Content="{Binding ThemeBlurLabel}"
+                    IsVisible="{Binding IsAcrylicAvailable}"
                     IsChecked="{Binding IsAcrylicEnabled, Mode=OneWay}"
                     Click="OnSetAcrylicMode" />
           <CheckBox x:Name="MicaEffectCheckBox"
