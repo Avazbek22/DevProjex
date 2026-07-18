@@ -56,6 +56,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
+	// Cover lock-free probes and writes within one process; the named mutex still protects separate processes.
+	private static readonly object ProcessSetupSync = new();
 
 	private readonly TerminalCommandSetupServiceOptions _options = options ?? new TerminalCommandSetupServiceOptions();
 
@@ -76,9 +78,19 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 	}
 
-	public TerminalCommandInstallResult InstallOrRepair() => InstallOrRepair(forceReinstall: false);
+	public TerminalCommandInstallResult InstallOrRepair()
+	{
+		lock (ProcessSetupSync)
+			return InstallOrRepairCore(forceReinstall: false);
+	}
 
 	public TerminalCommandPathSetupResult ConfigurePath()
+	{
+		lock (ProcessSetupSync)
+			return ConfigurePathCore();
+	}
+
+	private TerminalCommandPathSetupResult ConfigurePathCore()
 	{
 		var initial = Probe();
 		if (initial.State == TerminalCommandSetupState.Installed)
@@ -135,9 +147,13 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 	}
 
-	public TerminalCommandInstallResult Reinstall() => InstallOrRepair(forceReinstall: true);
+	public TerminalCommandInstallResult Reinstall()
+	{
+		lock (ProcessSetupSync)
+			return InstallOrRepairCore(forceReinstall: true);
+	}
 
-	private TerminalCommandInstallResult InstallOrRepair(bool forceReinstall)
+	private TerminalCommandInstallResult InstallOrRepairCore(bool forceReinstall)
 	{
 		var initial = Probe();
 		if (initial.State is TerminalCommandSetupState.Failed or TerminalCommandSetupState.PermissionDenied &&
