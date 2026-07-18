@@ -1,5 +1,6 @@
 using Avalonia.Layout;
 using DevProjex.Application.Services;
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace DevProjex.Tests.UI;
@@ -7,6 +8,68 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
+    [AvaloniaFact]
+    public async Task JsonTree_UserVisibleCopyAndPreviewRoutesKeepUnicodeNamesReadable()
+    {
+        using var project = UiTestProject.CreateWithUnicodeJsonWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            viewModel.SelectedExportFormat = ExportFormat.Json;
+
+            var treePayload = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+                window,
+                PreviewContentMode.Tree);
+            AssertReadableUnicodeJsonTree(treePayload, project.RootPath);
+
+            await UiTestDriver.CopyTreeToClipboardAsync(window, treePayload);
+            Assert.Equal(treePayload, await UiTestDriver.GetClipboardTextAsync(window));
+
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Tree);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window)
+                    .Contains("\"Документы\"", StringComparison.Ordinal),
+                "readable Unicode JSON tree preview to be rendered");
+
+            var previewTreePayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.Equal(NormalizeLineEndings(treePayload), NormalizeLineEndings(previewTreePayload));
+            AssertReadableUnicodeJsonTree(previewTreePayload, project.RootPath);
+
+            await UiTestDriver.SetClipboardTextAsync(window, $"unicode-preview-pending-{Guid.NewGuid():N}");
+            await UiTestDriver.ClickPreviewCopyButtonAsync(window);
+            await UiTestDriver.WaitForClipboardTextAsync(window, previewTreePayload);
+
+            var treeAndContentPayload = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+                window,
+                PreviewContentMode.TreeAndContent);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window)
+                    .Contains("Содержимое отчёта", StringComparison.Ordinal),
+                "Unicode JSON tree and content preview to be rendered");
+
+            var previewTreeAndContentPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.Equal(
+                NormalizeLineEndings(treeAndContentPayload),
+                NormalizeLineEndings(previewTreeAndContentPayload));
+            var (jsonTreePart, contentPart) = SplitTreeAndContentPayload(previewTreeAndContentPayload);
+            AssertReadableUnicodeJsonTree(jsonTreePart, project.RootPath);
+            Assert.Contains("Содержимое отчёта", contentPart, StringComparison.Ordinal);
+
+            await UiTestDriver.CopyTreeAndContentToClipboardAsync(window, treeAndContentPayload);
+            Assert.Equal(treeAndContentPayload, await UiTestDriver.GetClipboardTextAsync(window));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task TreePreview_UsesSelectedXmlAndMarkdownFormats()
     {
@@ -1013,6 +1076,28 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
     private static string NormalizeLineEndings(string value) =>
         value.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private static void AssertReadableUnicodeJsonTree(string json, string expectedRootPath)
+    {
+        Assert.Contains("рабочая папка", json, StringComparison.Ordinal);
+        Assert.Contains("\"Документы\"", json, StringComparison.Ordinal);
+        Assert.Contains("Отчёт", json, StringComparison.Ordinal);
+        Assert.Contains("Сводка.txt", json, StringComparison.Ordinal);
+        Assert.Contains("Корень.txt", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u04", json, StringComparison.OrdinalIgnoreCase);
+
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal(
+            Path.GetFullPath(expectedRootPath).Replace('\\', '/'),
+            document.RootElement.GetProperty("rootPath").GetString());
+        var tree = document.RootElement.GetProperty("tree");
+        Assert.Equal(
+            ["Отчёт [финал].txt", "Сводка.txt"],
+            tree.GetProperty("Документы").EnumerateArray().Select(static item => item.GetString()!).ToArray());
+        Assert.Equal(
+            ["Корень.txt"],
+            tree.GetProperty("/").EnumerateArray().Select(static item => item.GetString()!).ToArray());
+    }
 
     private static bool IsExpectedTreeFormat(string payload, ExportFormat format)
     {

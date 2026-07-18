@@ -413,7 +413,9 @@ Verfügbare Einstellungen:
 * Menütransparenz — gilt gleichermaßen für das Hauptmenü und seine Untermenüs.
 * Sichtbarkeit der Ränder — bestimmt, wie deutlich die Ränder der Oberfläche dargestellt werden.
 
-Mica verwendet das Systemmaterial der Plattform und hat keine separate Einstellung für die Hintergrundtransparenz. Wird ein Effekt vom System nicht unterstützt, verwendet die App eine sichere undurchsichtige Darstellung.
+Mica verwendet das Systemmaterial der Plattform und hat keine separate Einstellung für die Hintergrundtransparenz. Ist der ausgewählte Effekt Weichzeichnen oder Mica nicht verfügbar, versucht die App zunächst den jeweils anderen nativen Effekt. Erst wenn beide nicht verfügbar sind, wird ein normaler undurchsichtiger Hintergrund verwendet.
+
+Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs, Untermenüs und andere Popup-Flächen verwenden, sofern unterstützt, Weichzeichnen, damit dahinterliegende Baum- und Inhaltselemente die Lesbarkeit nicht beeinträchtigen.
 
 ## 16) Hilfe
 
@@ -455,5 +457,5 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 * bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
 
 ## 19) Hinweise
-* Standardmäßig wird das dunkle Theme mit Weichzeichnen verwendet. Wird der Effekt vom System nicht unterstützt, verwendet die App eine sichere undurchsichtige Darstellung.
+* Standardmäßig wird das dunkle Theme mit Weichzeichnen verwendet. Ist Weichzeichnen nicht verfügbar, versucht die App Mica; sind beide Effekte nicht verfügbar, werden die Effekte deaktiviert.
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.

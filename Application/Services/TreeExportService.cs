@@ -1,5 +1,7 @@
 using System.Buffers;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Unicode;
 using System.Xml;
 
 namespace DevProjex.Application.Services;
@@ -10,7 +12,8 @@ public sealed class TreeExportService
 
 	private static readonly JsonWriterOptions JsonWriterOptions = new()
 	{
-		Indented = true
+		Indented = true,
+		Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
 	};
 
 	private static readonly XmlWriterSettings XmlWriterSettings = new()

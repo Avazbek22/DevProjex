@@ -413,7 +413,9 @@ Paramètres disponibles :
 * Transparence des menus — s’applique de la même manière au menu principal et à ses sous-menus.
 * Visibilité des bordures — règle l’intensité des bordures de l’interface.
 
-Mica utilise le matériau système de la plateforme et ne possède pas de réglage séparé pour la transparence de l’arrière-plan. Si un effet n’est pas pris en charge par le système, l’application utilise un affichage opaque sûr.
+Mica utilise le matériau système de la plateforme et ne possède pas de réglage séparé pour la transparence de l’arrière-plan. Si l’effet sélectionné, Flou ou Mica, n’est pas disponible, l’application essaie d’abord l’autre effet natif. Un arrière-plan opaque normal n’est utilisé que si aucun des deux effets n’est disponible.
+
+En mode Transparence, l’arrière-plan de la fenêtre principale reste transparent. Les menus, sous-menus et autres surfaces contextuelles utilisent le Flou lorsqu’il est pris en charge, afin que l’arborescence et le contenu situés derrière ne gênent pas la lecture.
 
 ## 16) Aide
 
@@ -455,5 +457,5 @@ Bouton X (annuler) dans la barre d’état :
 * pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
 
 ## 19) Notes
-* Par défaut, le thème sombre avec l’effet Flou est utilisé. Si l’effet n’est pas pris en charge par le système, l’application utilise un affichage opaque sûr.
+* Par défaut, le thème sombre avec l’effet Flou est utilisé. Si le Flou n’est pas disponible, l’application essaie Mica ; si aucun des deux effets n’est disponible, les effets sont désactivés.
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.

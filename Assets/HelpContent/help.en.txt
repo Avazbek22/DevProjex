@@ -470,7 +470,9 @@ Available settings:
 * Menu transparency — applies equally to the main menu and its submenus.
 * Border visibility — adjusts how strongly interface borders are shown.
 
-Mica uses the platform's system material and has no separate background-transparency setting. If an effect is not supported by the system, the app uses a safe opaque fallback.
+Mica uses the platform's system material and has no separate background-transparency setting. If the selected Blur or Mica effect is unavailable, the app first tries the other native effect. A regular opaque background is used only when neither Blur nor Mica is available.
+
+In Transparency mode, the main-window background remains transparent. Menus, submenus, and other popup surfaces use Blur when supported so tree and content elements behind them do not interfere with readability.
 
 ## 16) Help
 
@@ -512,5 +514,5 @@ X button (cancel) in the status bar:
 * for operations without cancellation support, it stops status-bar indication, while the operation itself may still finish in background.
 
 ## 19) Notes
-* By default, the dark theme with Blur is used. If the effect is not supported by the system, the app uses a safe opaque fallback.
+* By default, the dark theme with Blur is used. If Blur is unavailable, the app tries Mica; if neither effect is available, effects are disabled.
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.

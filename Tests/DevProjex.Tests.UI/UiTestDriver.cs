@@ -477,6 +477,9 @@ internal static class UiTestDriver
     public static async Task CopyContentToClipboardAsync(MainWindow window, string expectedContent)
         => await InvokeClipboardActionAsync(window, "OnCopyContent", expectedContent);
 
+    public static async Task CopyTreeToClipboardAsync(MainWindow window, string expectedContent)
+        => await InvokeClipboardActionAsync(window, "OnCopyTree", expectedContent);
+
     public static async Task CopyTreeAndContentToClipboardAsync(MainWindow window, string expectedContent)
         => await InvokeClipboardActionAsync(window, "OnCopyTreeAndContent", expectedContent);
 

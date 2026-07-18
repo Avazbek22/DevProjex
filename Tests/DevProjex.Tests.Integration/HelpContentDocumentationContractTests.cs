@@ -68,6 +68,18 @@ public sealed class HelpContentDocumentationContractTests
         { "help.en.txt", "JSON export uses this tree format: arrays contain files, objects contain subfolders, `/` contains files in the current folder, and `[]` represents an empty folder." }
     };
 
+    public static TheoryData<string, string, string, string> ThemeFallbackContracts => new()
+    {
+        { "help.ru.txt", "сначала пробует другой системный эффект", "фон главного окна", "Если Blur недоступен, приложение пробует Mica" },
+        { "help.en.txt", "first tries the other native effect", "main-window background", "If Blur is unavailable, the app tries Mica" },
+        { "help.de.txt", "zunächst den jeweils anderen nativen Effekt", "Hintergrund des Hauptfensters", "Ist Weichzeichnen nicht verfügbar, versucht die App Mica" },
+        { "help.fr.txt", "essaie d’abord l’autre effet natif", "arrière-plan de la fenêtre principale", "Si le Flou n’est pas disponible, l’application essaie Mica" },
+        { "help.it.txt", "prova prima l’altro effetto nativo", "sfondo della finestra principale", "Se Sfocatura non è disponibile, l’app prova Mica" },
+        { "help.kk.txt", "алдымен басқа жүйелік эффектіні қолданып көреді", "негізгі терезенің фоны", "Бұлдырлату қолжетімсіз болса, қолданба Mica-ны қолданып көреді" },
+        { "help.tg.txt", "аввал эффекти дигари системавиро месанҷад", "заминаи равзанаи асосӣ", "Агар Тирагӣ дастрас набошад, барнома Mica-ро месанҷад" },
+        { "help.uz.txt", "avval boshqa tizim effektini sinab ko‘radi", "asosiy oyna foni", "Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi" }
+    };
+
     [Theory]
     [MemberData(nameof(TreeFontAndSettingsContracts))]
     public void HelpContent_TreeFontAndSettingsPanel_DescribeCurrentUi(
@@ -149,6 +161,22 @@ public sealed class HelpContentDocumentationContractTests
         Assert.DoesNotContain("\"files\"", content, StringComparison.Ordinal);
         Assert.DoesNotContain("\"name\"", content, StringComparison.Ordinal);
         Assert.DoesNotContain("\"path\"", content, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(ThemeFallbackContracts))]
+    public void HelpContent_ThemeSection_DescribesNativeFallbackChainAndTransparentPopupSurfaces(
+        string fileName,
+        string expectedNativeFallbackText,
+        string expectedTransparentWindowText,
+        string expectedDefaultFallbackText)
+    {
+        var content = ReadHelpFile(fileName);
+        var themeSection = ExtractSection(content, "## 15)", "## 16)");
+
+        Assert.Contains(expectedNativeFallbackText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedTransparentWindowText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedDefaultFallbackText, content, StringComparison.Ordinal);
     }
 
     [Theory]

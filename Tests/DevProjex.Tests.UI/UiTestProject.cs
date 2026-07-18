@@ -341,14 +341,29 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
-    private static UiTestProject Create(Action<string> seedWorkspace)
+    public static UiTestProject CreateWithUnicodeJsonWorkspace()
+    {
+        return Create(
+            static rootPath =>
+            {
+                WriteFile(rootPath, Path.Combine("Документы", "Отчёт [финал].txt"), "Содержимое отчёта\n");
+                WriteFile(rootPath, Path.Combine("Документы", "Сводка.txt"), "Содержимое сводки\n");
+                WriteFile(rootPath, "Корень.txt", "Содержимое корневого файла\n");
+            },
+            workspaceDirectoryName: "рабочая папка");
+    }
+
+    private static UiTestProject Create(Action<string> seedWorkspace) =>
+        Create(seedWorkspace, workspaceDirectoryName: "workspace");
+
+    private static UiTestProject Create(Action<string> seedWorkspace, string workspaceDirectoryName)
     {
         var testRoot = Path.Combine(
             Path.GetTempPath(),
             "DevProjex",
             "DevProjex.Tests.UI");
         var instanceId = Guid.NewGuid().ToString("N");
-        var rootPath = Path.Combine(testRoot, instanceId, "workspace");
+        var rootPath = Path.Combine(testRoot, instanceId, workspaceDirectoryName);
         var appDataPath = Path.Combine(testRoot, instanceId, "appdata");
 
         Directory.CreateDirectory(rootPath);

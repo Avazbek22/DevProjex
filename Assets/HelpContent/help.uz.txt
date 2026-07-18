@@ -413,7 +413,9 @@ Mavjud sozlamalar:
 * Menyu shaffofligi — asosiy menyu va uning ichki menyulariga bir xil qo‘llanadi.
 * Chegaralar ko‘rinishi — interfeys chegaralarining qanchalik aniq ko‘rinishini sozlaydi.
 
-Mica platformaning tizim materialidan foydalanadi va fon shaffofligi uchun alohida sozlamaga ega emas. Tizim effektni qo‘llamasa, ilova xavfsiz shaffof bo‘lmagan ko‘rinishdan foydalanadi.
+Mica platformaning tizim materialidan foydalanadi va fon shaffofligi uchun alohida sozlamaga ega emas. Tanlangan Xiralashtirish yoki Mica effekti mavjud bo‘lmasa, ilova avval boshqa tizim effektini sinab ko‘radi. Oddiy shaffof bo‘lmagan fon faqat ikkala effekt ham mavjud bo‘lmaganda ishlatiladi.
+
+«Shaffoflik» rejimida asosiy oyna foni shaffof bo‘lib qoladi. Menyular, ichki menyular va boshqa ochiluvchi yuzalar, agar qo‘llab-quvvatlansa, Xiralashtirishdan foydalanadi, shunda ularning ortidagi daraxt va kontent o‘qishga xalaqit bermaydi.
 
 ## 16) Yordam
 
@@ -455,5 +457,5 @@ Status-bardagi X (bekor qilish) tugmasi:
 * bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
 
 ## 19) Eslatmalar
-* Standart holatda Xiralashtirish effektli qorong‘i mavzu ishlatiladi. Tizim effektni qo‘llamasa, ilova xavfsiz shaffof bo‘lmagan ko‘rinishdan foydalanadi.
+* Standart holatda Xiralashtirish effektli qorong‘i mavzu ishlatiladi. Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi; ikkala effekt ham mavjud bo‘lmasa, effektlar o‘chiriladi.
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.

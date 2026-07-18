@@ -413,7 +413,9 @@ Impostazioni disponibili:
 * Trasparenza dei menu — si applica allo stesso modo al menu principale e ai relativi sottomenu.
 * Visibilità dei bordi — regola quanto sono evidenti i bordi dell’interfaccia.
 
-Mica usa il materiale di sistema della piattaforma e non ha un’impostazione separata per la trasparenza dello sfondo. Se un effetto non è supportato dal sistema, l’app usa una visualizzazione opaca sicura.
+Mica usa il materiale di sistema della piattaforma e non ha un’impostazione separata per la trasparenza dello sfondo. Se l’effetto selezionato, Sfocatura o Mica, non è disponibile, l’app prova prima l’altro effetto nativo. Un normale sfondo opaco viene usato solo quando nessuno dei due effetti è disponibile.
+
+In modalità Trasparenza, lo sfondo della finestra principale rimane trasparente. Menu, sottomenu e altre superfici popup usano Sfocatura, se supportata, affinché l’albero e il contenuto sottostanti non riducano la leggibilità.
 
 ## 16) Aiuto
 
@@ -455,5 +457,5 @@ Pulsante X (annulla) nella barra di stato:
 * per operazioni senza supporto annullamento, ferma l’indicazione nella barra di stato, mentre l’operazione può comunque terminare in background.
 
 ## 19) Note
-* Per impostazione predefinita viene usato il tema scuro con Sfocatura. Se l’effetto non è supportato dal sistema, l’app usa una visualizzazione opaca sicura.
+* Per impostazione predefinita viene usato il tema scuro con Sfocatura. Se Sfocatura non è disponibile, l’app prova Mica; se nessuno dei due effetti è disponibile, gli effetti vengono disattivati.
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.
