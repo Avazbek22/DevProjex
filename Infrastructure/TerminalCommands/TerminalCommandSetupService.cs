@@ -784,7 +784,13 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		try
 		{
-			using var reader = new StreamReader(commandPath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+			// Lock-free probes may read the previous complete launcher while a serialized writer atomically replaces it.
+			using var stream = new FileStream(
+				commandPath,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.Read | FileShare.Delete);
+			using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
 			var firstLine = reader.ReadLine();
 			var marker = firstLine;
 			var target = reader.ReadLine();
