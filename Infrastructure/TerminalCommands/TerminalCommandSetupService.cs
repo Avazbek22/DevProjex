@@ -940,12 +940,14 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		var extensions = GetWindowsPathExtensions();
 		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
 		{
-			var directory = NormalizePath(entry);
+			var isManagedDirectory = AreSameDirectory(entry, managedDirectory);
+			// Use the known physical path after a Windows-semantic match so case-sensitive CI hosts do not probe a synthetic casing.
+			var directory = isManagedDirectory ? managedDirectory : NormalizePath(entry);
 			var candidate = FindWindowsCommandCandidate(directory, extensions);
 			if (candidate is not null)
 				return candidate;
 			// Command resolution is decided once the managed directory has been inspected.
-			if (AreSameDirectory(entry, managedDirectory))
+			if (isManagedDirectory)
 				break;
 		}
 
