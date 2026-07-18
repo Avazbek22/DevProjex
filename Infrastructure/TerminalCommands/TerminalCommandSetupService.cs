@@ -140,6 +140,25 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private TerminalCommandInstallResult InstallOrRepair(bool forceReinstall)
 	{
 		var initial = Probe();
+		if (initial.State == TerminalCommandSetupState.Failed &&
+		    !string.IsNullOrWhiteSpace(initial.CommandPath))
+		{
+			try
+			{
+				// A concurrent atomic replacement can make the lock-free probe observe a transient missing or unreadable launcher.
+				using var setupLock = AcquireSetupLock(initial.CommandPath);
+				initial = Probe();
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				return FailedAfterInstallAttempt(initial, TerminalCommandSetupState.PermissionDenied, ex.Message);
+			}
+			catch (Exception ex)
+			{
+				return FailedAfterInstallAttempt(initial, TerminalCommandSetupState.Failed, ex.Message);
+			}
+		}
+
 		if (initial.State == TerminalCommandSetupState.ManagedByOperatingSystem)
 		{
 			return new TerminalCommandInstallResult(
@@ -922,12 +941,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
 		{
 			var directory = NormalizePath(entry);
-			foreach (var extension in extensions)
-			{
-				var candidate = Path.Combine(directory, CommandLineExecutableAliases.UnixCommand + extension);
-				if (File.Exists(candidate))
-					return candidate;
-			}
+			var candidate = FindWindowsCommandCandidate(directory, extensions);
+			if (candidate is not null)
+				return candidate;
 			// Command resolution is decided once the managed directory has been inspected.
 			if (AreSameDirectory(entry, managedDirectory))
 				break;
@@ -1005,8 +1021,51 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private bool ContainsWindowsCommandCandidate(string directory)
 	{
 		directory = NormalizePath(directory);
-		return GetWindowsPathExtensions().Any(extension =>
-			File.Exists(Path.Combine(directory, CommandLineExecutableAliases.UnixCommand + extension)));
+		return FindWindowsCommandCandidate(directory, GetWindowsPathExtensions()) is not null;
+	}
+
+	private static string? FindWindowsCommandCandidate(
+		string directory,
+		IReadOnlyList<string> extensions)
+	{
+		foreach (var extension in extensions)
+		{
+			var candidate = Path.Combine(directory, CommandLineExecutableAliases.UnixCommand + extension);
+			if (File.Exists(candidate))
+				return candidate;
+		}
+
+		if (OperatingSystem.IsWindows())
+			return null;
+
+		try
+		{
+			// Windows command resolution is case-insensitive even when its abstraction is exercised on a case-sensitive CI host.
+			foreach (var candidate in Directory.EnumerateFiles(directory))
+			{
+				var fileName = Path.GetFileName(candidate);
+				foreach (var extension in extensions)
+				{
+					if (string.Equals(
+						    fileName,
+						    CommandLineExecutableAliases.UnixCommand + extension,
+						    StringComparison.OrdinalIgnoreCase))
+					{
+						return candidate;
+					}
+				}
+			}
+		}
+		catch (IOException)
+		{
+			return null;
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return null;
+		}
+
+		return null;
 	}
 
 	private string? SafeGetHomeDirectory()
