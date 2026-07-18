@@ -13,6 +13,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 	[InlineData(TerminalCommandSetupState.NotInstalled, true, false)]
 	[InlineData(TerminalCommandSetupState.Installed, false, false)]
 	[InlineData(TerminalCommandSetupState.InstalledPathMissing, false, false)]
+	[InlineData(TerminalCommandSetupState.CommandShadowed, false, false)]
 	[InlineData(TerminalCommandSetupState.Stale, false, true)]
 	[InlineData(TerminalCommandSetupState.ConflictingCommand, false, false)]
 	[InlineData(TerminalCommandSetupState.PermissionDenied, false, false)]
@@ -34,7 +35,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 			CanInstall: canInstall,
 			CanRepair: canRepair,
 			ShellProfileHint: "Add ~/.local/bin to PATH.",
-			PathSetupCommand: state == TerminalCommandSetupState.InstalledPathMissing
+			PathSetupCommand: state is TerminalCommandSetupState.InstalledPathMissing or TerminalCommandSetupState.CommandShadowed
 				? "fish_add_path $HOME/.local/bin"
 				: null);
 
@@ -47,6 +48,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 		Assert.Equal(canInstall || canRepair || snapshot.CanReinstall, text.ShowInstallButton);
 		var expectedCopyButton = state is
 			TerminalCommandSetupState.InstalledPathMissing or
+			TerminalCommandSetupState.CommandShadowed or
 			TerminalCommandSetupState.ManagedByOperatingSystem or
 			TerminalCommandSetupState.UnsupportedOnCurrentPackage;
 		Assert.Equal(expectedCopyButton, text.ShowCopyButton);
@@ -60,7 +62,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 			Assert.Equal("devprojex", text.CommandToCopy);
 			Assert.Empty(text.CommandLine);
 		}
-		else if (state == TerminalCommandSetupState.InstalledPathMissing)
+		else if (state is TerminalCommandSetupState.InstalledPathMissing or TerminalCommandSetupState.CommandShadowed)
 		{
 			Assert.Equal("fish_add_path $HOME/.local/bin", text.CommandToCopy);
 			Assert.Equal(text.CommandToCopy, text.CommandLine);
@@ -216,6 +218,30 @@ public sealed class TerminalCommandSetupDialogTextTests
 	}
 
 	[Fact]
+	public void Create_WindowsPathRecoveryWithoutShellCommandDoesNotOfferMisleadingCopyAction()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var snapshot = new TerminalCommandSetupSnapshot(
+			CommandLineExecutableAliases.UnixCommand,
+			TerminalCommandSetupState.InstalledPathMissing,
+			CommandPath: @"C:\Users\me\AppData\Local\DevProjex\bin\devprojex.cmd",
+			TargetExecutablePath: @"C:\Users\me\DevProjex.exe",
+			InstalledTargetExecutablePath: @"C:\Users\me\DevProjex.exe",
+			UserBinDirectory: @"C:\Users\me\AppData\Local\DevProjex\bin",
+			UserBinDirectoryIsInPath: false,
+			CanInstall: false,
+			CanRepair: false,
+			ShellProfileHint: "DevProjex can update the user PATH.");
+
+		var text = TerminalCommandSetupDialogText.Create(localization, snapshot);
+
+		Assert.True(text.IsPathSetup);
+		Assert.False(text.ShowCopyButton);
+		Assert.Empty(text.CommandToCopy);
+		Assert.Empty(text.CommandLine);
+	}
+
+	[Fact]
 	public void Create_AutomaticPrompt_UsesShortUserFacingQuestionWithoutTechnicalDetails()
 	{
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
@@ -266,7 +292,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 
 		var text = TerminalCommandSetupDialogText.Create(localization, snapshot, isAutomaticPrompt: true);
 
-		Assert.Contains("нужно обновить", text.Body, StringComparison.Ordinal);
+		Assert.Contains("устарела", text.Body, StringComparison.Ordinal);
 		Assert.DoesNotContain("Сделать команду", text.Body, StringComparison.Ordinal);
 		Assert.Equal("Исправить", text.InstallButtonText);
 		Assert.False(text.ShowCopyButton);

@@ -61,6 +61,20 @@ public sealed class TerminalCommandPromptDismissalTests
 		Assert.Equal(MainWindow.TerminalCommandPostInstallUiAction.ShowError, action);
 	}
 
+	[Theory]
+	[InlineData(TerminalCommandSetupState.InstalledPathMissing, true)]
+	[InlineData(TerminalCommandSetupState.CommandShadowed, true)]
+	[InlineData(TerminalCommandSetupState.Installed, false)]
+	[InlineData(TerminalCommandSetupState.Stale, false)]
+	public void RequiresTerminalCommandPathConfiguration_ContinuesOnlyForRecoverablePathStates(
+		TerminalCommandSetupState state,
+		bool expected)
+	{
+		var snapshot = CreateInstalledSnapshot() with { State = state };
+
+		Assert.Equal(expected, MainWindow.RequiresTerminalCommandPathConfiguration(snapshot));
+	}
+
 	private static TerminalCommandSetupSnapshot CreateInstalledSnapshot() =>
 		new(
 			CommandLineExecutableAliases.UnixCommand,

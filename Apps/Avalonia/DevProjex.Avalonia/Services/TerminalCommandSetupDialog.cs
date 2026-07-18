@@ -329,7 +329,9 @@ internal static class TerminalCommandSetupDialogText
 		var body = GetBody(localization, snapshot, isAutomaticPrompt);
 		var details = isAutomaticPrompt ? string.Empty : GetDetails(localization, snapshot);
 		var commandToCopy = GetCommandToCopy(snapshot);
-		var isPathSetup = snapshot.State == TerminalCommandSetupState.InstalledPathMissing;
+		var isPathSetup = snapshot.State is
+			TerminalCommandSetupState.InstalledPathMissing or
+			TerminalCommandSetupState.CommandShadowed;
 		var commandLine = isAutomaticPrompt || ShouldHideCommandLine(snapshot)
 			? string.Empty
 			: isPathSetup
@@ -362,16 +364,17 @@ internal static class TerminalCommandSetupDialogText
 
 		return snapshot.State is
 			TerminalCommandSetupState.InstalledPathMissing or
+			TerminalCommandSetupState.CommandShadowed or
 			TerminalCommandSetupState.ManagedByOperatingSystem or
 			TerminalCommandSetupState.UnsupportedOnCurrentPackage;
 	}
 
 	private static string GetCommandToCopy(TerminalCommandSetupSnapshot snapshot)
 	{
-		if (snapshot.State == TerminalCommandSetupState.InstalledPathMissing &&
-		    !string.IsNullOrWhiteSpace(snapshot.PathSetupCommand))
+		if (snapshot.State is TerminalCommandSetupState.InstalledPathMissing or
+		    TerminalCommandSetupState.CommandShadowed)
 		{
-			return snapshot.PathSetupCommand;
+			return snapshot.PathSetupCommand ?? string.Empty;
 		}
 
 		if (snapshot.State == TerminalCommandSetupState.UnsupportedOnCurrentPackage &&
@@ -415,6 +418,8 @@ internal static class TerminalCommandSetupDialogText
 				localization["Dialog.TerminalCommand.Body.Installed"],
 			TerminalCommandSetupState.InstalledPathMissing =>
 				localization["Dialog.TerminalCommand.Body.InstalledPathMissing"],
+			TerminalCommandSetupState.CommandShadowed =>
+				localization["Dialog.TerminalCommand.Body.CommandShadowed"],
 			TerminalCommandSetupState.Stale =>
 				localization["Dialog.TerminalCommand.Body.Stale"],
 			TerminalCommandSetupState.ConflictingCommand =>
@@ -445,6 +450,8 @@ internal static class TerminalCommandSetupDialogText
 			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.Target", snapshot.TargetExecutablePath));
 		if (!string.IsNullOrWhiteSpace(snapshot.InstalledTargetExecutablePath))
 			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.InstalledTarget", snapshot.InstalledTargetExecutablePath));
+		if (!string.IsNullOrWhiteSpace(snapshot.ResolvedCommandPath))
+			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.ResolvedCommand", snapshot.ResolvedCommandPath));
 		if (!string.IsNullOrWhiteSpace(snapshot.ShellProfileHint))
 			lines.Add(localization.Format("Dialog.TerminalCommand.Detail.PathHint", snapshot.ShellProfileHint));
 

@@ -513,13 +513,13 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 			return;
 
 		using var temp = new TemporaryDirectory();
-		var appDirectory = temp.CreateDirectory("DevProjex & copied build");
+		var appDirectory = temp.CreateDirectory("DevProjex & !missing! copied build");
 		CopyAppBuildOutputToDirectory(appDirectory);
 		var copiedAppHostPath = GetNativeAppHostExecutablePath(appDirectory);
 		var launcherPath = Path.Combine(temp.Path, CommandLineExecutableAliases.WindowsPortableCommandFileName);
 		await CreateWindowsLauncherAsync(launcherPath, copiedAppHostPath);
 
-		var result = await RunWindowsCommandAsync(launcherPath, CommandLineOptionTokens.Version);
+		var result = await RunWindowsCommandWithDelayedExpansionAsync(launcherPath, CommandLineOptionTokens.Version);
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Equal($"{MainWindowViewModel.TitleVersion}{Environment.NewLine}", result.Stdout);
@@ -2553,6 +2553,29 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 		};
 
 		startInfo.ArgumentList.Add("/d");
+		startInfo.ArgumentList.Add("/c");
+		startInfo.ArgumentList.Add(commandPath);
+		foreach (var arg in args)
+			startInfo.ArgumentList.Add(arg);
+
+		return await RunProcessAsync(startInfo);
+	}
+
+	private static async Task<CommandLineProcessResult> RunWindowsCommandWithDelayedExpansionAsync(
+		string commandPath,
+		params string[] args)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = "cmd.exe",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		startInfo.ArgumentList.Add("/d");
+		startInfo.ArgumentList.Add("/v:on");
 		startInfo.ArgumentList.Add("/c");
 		startInfo.ArgumentList.Add(commandPath);
 		foreach (var arg in args)

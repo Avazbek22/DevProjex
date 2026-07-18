@@ -14,6 +14,8 @@ public sealed class TerminalCommandLocalizationTests
 		"Dialog.TerminalCommand.Body.HomeMissing",
 		"Dialog.TerminalCommand.Body.NotInstalled",
 		"Dialog.TerminalCommand.Body.Installed",
+		"Dialog.TerminalCommand.Body.InstalledPathMissing",
+		"Dialog.TerminalCommand.Body.CommandShadowed",
 		"Dialog.TerminalCommand.Body.Stale",
 		"Dialog.TerminalCommand.Body.Conflict",
 		"Dialog.TerminalCommand.Body.PermissionDenied",
@@ -23,6 +25,7 @@ public sealed class TerminalCommandLocalizationTests
 		"Dialog.TerminalCommand.Detail.CommandPath",
 		"Dialog.TerminalCommand.Detail.Target",
 		"Dialog.TerminalCommand.Detail.InstalledTarget",
+		"Dialog.TerminalCommand.Detail.ResolvedCommand",
 		"Dialog.TerminalCommand.Detail.PathHint",
 		"Dialog.TerminalCommand.CommandLine",
 		"Dialog.TerminalCommand.CopyCommand",
@@ -69,6 +72,7 @@ public sealed class TerminalCommandLocalizationTests
 			"Dialog.TerminalCommand.Detail.CommandPath",
 			"Dialog.TerminalCommand.Detail.Target",
 			"Dialog.TerminalCommand.Detail.InstalledTarget",
+			"Dialog.TerminalCommand.Detail.ResolvedCommand",
 			"Dialog.TerminalCommand.Detail.PathHint",
 			"Dialog.TerminalCommand.CommandLine"
 		};

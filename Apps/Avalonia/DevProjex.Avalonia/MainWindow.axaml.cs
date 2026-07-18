@@ -5424,7 +5424,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (installResult.Snapshot.State == TerminalCommandSetupState.InstalledPathMissing)
+            if (RequiresTerminalCommandPathConfiguration(installResult.Snapshot))
             {
                 var pathResult = await Task.Run(_terminalCommandSetupService.ConfigurePath);
                 if (pathResult.Success)
@@ -5454,6 +5454,11 @@ public partial class MainWindow : Window
         installResult.Success
             ? TerminalCommandPostInstallUiAction.None
             : TerminalCommandPostInstallUiAction.ShowError;
+
+    internal static bool RequiresTerminalCommandPathConfiguration(TerminalCommandSetupSnapshot snapshot) =>
+        snapshot.State is
+            TerminalCommandSetupState.InstalledPathMissing or
+            TerminalCommandSetupState.CommandShadowed;
 
     private void SaveTerminalCommandPromptDismissed()
     {
@@ -7942,11 +7947,11 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(executablePath))
             return false;
 
-        var name = GetFileNameWithoutExtensionCrossPlatform(executablePath);
-        return name.Equals("DevProjex", StringComparison.OrdinalIgnoreCase);
+        return CommandLineExecutableAliases.IsPublishedPortableFileName(
+            GetFileNameCrossPlatform(executablePath));
     }
 
-    private static string GetFileNameWithoutExtensionCrossPlatform(string path)
+    private static string GetFileNameCrossPlatform(string path)
     {
         // Unit tests intentionally pass Windows-style paths on Linux runners.
         // Path.GetFileName* only recognizes the current OS separator, so keep
@@ -7954,8 +7959,7 @@ public partial class MainWindow : Window
         var fileNameStart = Math.Max(
             path.LastIndexOf('/'),
             path.LastIndexOf('\\')) + 1;
-        var fileName = path[fileNameStart..];
-        return Path.GetFileNameWithoutExtension(fileName);
+        return path[fileNameStart..];
     }
 
     private bool TryElevateAndRestart(string path)

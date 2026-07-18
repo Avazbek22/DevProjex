@@ -9,6 +9,7 @@ public enum TerminalCommandSetupState
 	NotInstalled,
 	Installed,
 	InstalledPathMissing,
+	CommandShadowed,
 	Stale,
 	ConflictingCommand,
 	PermissionDenied,
@@ -37,7 +38,8 @@ public sealed record TerminalCommandSetupSnapshot(
 	bool CanInstall,
 	bool CanRepair,
 	string? ShellProfileHint,
-	string? PathSetupCommand = null)
+	string? PathSetupCommand = null,
+	string? ResolvedCommandPath = null)
 {
 	public bool IsReady =>
 		State == TerminalCommandSetupState.ManagedByOperatingSystem ||

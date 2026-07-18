@@ -224,6 +224,7 @@ public sealed class TerminalCommandSetupDialogVisualTests
 	[InlineData(TerminalCommandSetupState.NotInstalled, true, false, true, "Set up terminal launch")]
 	[InlineData(TerminalCommandSetupState.Stale, false, true, false, "Repair")]
 	[InlineData(TerminalCommandSetupState.InstalledPathMissing, false, false, true, "Add to PATH")]
+	[InlineData(TerminalCommandSetupState.CommandShadowed, false, false, true, "Add to PATH")]
 	[InlineData(TerminalCommandSetupState.Installed, false, false, false, "OK")]
 	[InlineData(TerminalCommandSetupState.ManagedByOperatingSystem, false, false, false, "OK")]
 	public void BuildContent_ActionHierarchy_ExposesExactlyOnePrimaryAction(
@@ -244,7 +245,7 @@ public sealed class TerminalCommandSetupDialogVisualTests
 			TargetExecutablePath: state == TerminalCommandSetupState.ManagedByOperatingSystem
 				? null
 				: "/opt/DevProjex/DevProjex",
-			InstalledTargetExecutablePath: isInstalled || state == TerminalCommandSetupState.InstalledPathMissing
+			InstalledTargetExecutablePath: isInstalled || state is TerminalCommandSetupState.InstalledPathMissing or TerminalCommandSetupState.CommandShadowed
 				? "/opt/DevProjex/DevProjex"
 				: null,
 			UserBinDirectory: "/home/me/.local/bin",
@@ -252,7 +253,7 @@ public sealed class TerminalCommandSetupDialogVisualTests
 			CanInstall: canInstall,
 			CanRepair: canRepair,
 			ShellProfileHint: null,
-			PathSetupCommand: state == TerminalCommandSetupState.InstalledPathMissing
+			PathSetupCommand: state is TerminalCommandSetupState.InstalledPathMissing or TerminalCommandSetupState.CommandShadowed
 				? "fish_add_path \"$HOME/.local/bin\""
 				: null);
 		var text = TerminalCommandSetupDialogText.Create(localization, snapshot, isAutomaticPrompt);
