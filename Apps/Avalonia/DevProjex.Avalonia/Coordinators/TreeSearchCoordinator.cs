@@ -54,7 +54,6 @@ public sealed class TreeSearchCoordinator(
     private int _indexedRootCount;
     private int _searchVersion;
     private int _bringIntoViewVersion;
-    private double? _searchNavigationTargetHorizontalOffset;
     private int _searchExpansionEpoch;
     private bool _searchExpansionStateInitialized;
     private const int SearchQueryCacheLimit = 8;
@@ -347,14 +346,15 @@ public sealed class TreeSearchCoordinator(
         }
 
         var node = _searchMatches[_searchMatchIndex];
-        _searchNavigationTargetHorizontalOffset = CaptureTreeHorizontalOffset();
         node.EnsureParentsExpanded();
         SelectTreeNode(node);
         UpdateCurrentSearchMatch(node);
         UpdateSearchMatchSummary();
-        var bringIntoViewVersion = BringNodeIntoView(node);
+        // Horizontal scrolling is disabled on the tree, so search navigation only needs to bring the
+        // match into view vertically. The former horizontal offset capture/restore/re-clamp dance was
+        // the source of the side-scroll jumpiness and is intentionally gone.
+        BringNodeIntoView(node);
         treeView.Focus();
-        RestoreTreeHorizontalOffsetAfterSearchNavigation(bringIntoViewVersion);
     }
 
     private async Task RunSearchAsync(int version, CancellationToken token)
@@ -1100,40 +1100,20 @@ public sealed class TreeSearchCoordinator(
         if (containerTopLeft is null)
             return;
 
-        var horizontalTarget = ResolveTreeItemHorizontalScrollTarget(container);
-        var horizontalTopLeft = horizontalTarget.TranslatePoint(default, scrollViewer) ?? containerTopLeft.Value;
+        // Vertical-only bring-into-view. Horizontal scrolling is disabled on the tree, so the
+        // horizontal offset is left untouched (it stays at 0) and is never read or re-clamped.
         var currentOffset = scrollViewer.Offset;
-        var baseOffsetX = _searchNavigationTargetHorizontalOffset ?? currentOffset.X;
-        var itemLeftAtBaseOffset = currentOffset.X + horizontalTopLeft.X - baseOffsetX;
         var targetY = ResolveVerticalOffsetForSearchNavigation(
             currentOffset.Y,
             containerTopLeft.Value.Y,
             containerTopLeft.Value.Y + container.Bounds.Height,
             scrollViewer.Viewport.Height,
             scrollViewer.Extent.Height);
-        var targetX = ResolveHorizontalOffsetForSearchNavigation(
-            baseOffsetX,
-            itemLeftAtBaseOffset,
-            itemLeftAtBaseOffset + horizontalTarget.Bounds.Width,
-            scrollViewer.Viewport.Width,
-            scrollViewer.Extent.Width);
 
-        _searchNavigationTargetHorizontalOffset = targetX;
-
-        if (Math.Abs(targetX - currentOffset.X) < 0.5 && Math.Abs(targetY - currentOffset.Y) < 0.5)
+        if (Math.Abs(targetY - currentOffset.Y) < 0.5)
             return;
 
-        scrollViewer.Offset = new Vector(targetX, targetY);
-    }
-
-    private static Control ResolveTreeItemHorizontalScrollTarget(TreeViewItem container)
-    {
-        // TreeViewItem can be a stretched row container. Horizontal search navigation must
-        // use the actual row content width, otherwise the tree may side-scroll even when
-        // the visible text/icon block already fits inside the narrow preview tree island.
-        return container.FindDescendantOfType<Control>(
-            includeSelf: false,
-            visual => visual is Control { Name: "TreeItemContent" }) ?? container;
+        scrollViewer.Offset = new Vector(currentOffset.X, targetY);
     }
 
     private bool TryGetContainer(TreeNodeViewModel node, out TreeViewItem? container)
@@ -1188,56 +1168,10 @@ public sealed class TreeSearchCoordinator(
             includeSelf: false,
             visual => visual is ScrollViewer);
 
-    private double? CaptureTreeHorizontalOffset() =>
-        GetTreeScrollViewer()?.Offset.X;
-
-    private void RestoreTreeHorizontalOffsetAfterSearchNavigation(int version)
-    {
-        var targetOffsetX = _searchNavigationTargetHorizontalOffset;
-        if (targetOffsetX is null)
-            return;
-
-        RestoreTreeHorizontalOffset(targetOffsetX.Value);
-
-        treeView.Dispatcher.Post(
-            () => RestoreTreeHorizontalOffsetIfCurrent(version),
-            DispatcherPriority.Render);
-        treeView.Dispatcher.Post(
-            () => RestoreTreeHorizontalOffsetIfCurrent(version),
-            DispatcherPriority.Loaded);
-        treeView.Dispatcher.Post(
-            () => RestoreTreeHorizontalOffsetIfCurrent(version),
-            DispatcherPriority.Background);
-    }
-
-    private void RestoreTreeHorizontalOffsetIfCurrent(int version)
-    {
-        if (version != Volatile.Read(ref _bringIntoViewVersion))
-            return;
-
-        var targetOffsetX = _searchNavigationTargetHorizontalOffset;
-        if (targetOffsetX is null)
-            return;
-
-        RestoreTreeHorizontalOffset(targetOffsetX.Value);
-    }
-
-    private void RestoreTreeHorizontalOffset(double preservedOffsetX)
-    {
-        var scrollViewer = GetTreeScrollViewer();
-        if (scrollViewer is null)
-            return;
-
-        var targetX = ResolveClampedTreeHorizontalOffset(
-            preservedOffsetX,
-            scrollViewer.Extent.Width,
-            scrollViewer.Viewport.Width);
-        if (Math.Abs(scrollViewer.Offset.X - targetX) < 0.5)
-            return;
-
-        scrollViewer.Offset = new Vector(targetX, scrollViewer.Offset.Y);
-    }
-
+    // ResolveClampedTreeHorizontalOffset / ResolveHorizontalOffsetForSearchNavigation are retained as
+    // pure helpers (still covered by unit tests) but are no longer used to drive scrolling: horizontal
+    // scrolling is disabled on the tree, so search navigation never reads or writes the horizontal
+    // offset. Removing that logic eliminated the side-scroll jumpiness during search navigation.
     internal static double ResolveClampedTreeHorizontalOffset(
         double preservedOffsetX,
         double extentWidth,

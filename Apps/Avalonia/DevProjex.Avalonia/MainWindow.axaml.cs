@@ -343,6 +343,11 @@ public partial class MainWindow : Window
 
     private int _previewSelectionMetricsVersion;
     private static readonly TimeSpan PreviewSelectionMetricsDebounceInterval = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80));
+
+    // Longer preview coalescing window used when a directory/root toggle changes the selection in
+    // bulk. Keeps the heavy "read every selected file" build from firing on the incremental debounce
+    // while a "select all" cascade is still settling.
+    private static readonly TimeSpan LargeSelectionPreviewDebounce = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(700));
     private ExportOutputMetrics _lastPreviewSelectionMetrics = ExportOutputMetrics.Empty;
     private bool _hasPreviewSelectionMetricsSnapshot;
 
@@ -2886,9 +2891,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SchedulePreviewRefresh(bool immediate = false)
+    private void SchedulePreviewRefresh(bool immediate = false, TimeSpan? debounceOverride = null)
     {
-        _previewPipeline.ScheduleRefresh(immediate);
+        _previewPipeline.ScheduleRefresh(immediate, debounceOverride);
     }
 
     private void CancelPreviewRefresh()
@@ -7109,12 +7114,40 @@ public partial class MainWindow : Window
         {
             _viewModel.SearchQuery = string.Empty;
             _searchCoordinator.CancelPending();
-            // Project load clears search state ahead of time. Skip the expensive tree-wide search
-            // normalization when there is no active query or cached match state to restore.
-            if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery) || _searchCoordinator.HasMatches)
-                _searchCoordinator.UpdateSearchMatches();
 
-            // Release stale highlight objects after search state is rebuilt.
+            // Capture the user's checkbox selection before the rebuild discards the current graph.
+            // GetCheckedPaths returns the compact, disjoint minimal set (a fully-checked directory
+            // appears once; a checked dir never coexists with its descendants), so replaying it later
+            // realizes only the ancestor chains of actually-checked items, not the whole tree.
+            var restoreCheckedPaths = GetCheckedPaths();
+
+            // Opening search lazily realizes the ENTIRE view-model graph to build the flat search
+            // index. Normalizing in place (UpdateSearchMatches on an empty query) only collapses
+            // nodes; it never frees each node's _children nor clears the flat index / query caches,
+            // so the materialized graph (~1.5 GB on large projects) stayed alive and the compacting
+            // GC in ForceMemoryCleanup reclaimed nothing. Rebuild the tree the same way filter-close
+            // does: RefreshTreeAsync -> ApplyTreeRefreshResult runs ClearSearchState() (clears
+            // _flatNodeIndex + query caches) and ClearRecursive() on every node, then installs a
+            // fresh lazy root. This resets expansion to the base lazy tree (only the root expanded),
+            // matching the prior search-close behavior (collapse-all-except-root) while now actually
+            // freeing the graph so the scheduled cleanup below can return the memory to the OS.
+            var rebuilt = false;
+            try
+            {
+                await RefreshTreeAsync(interactiveFilter: true);
+                rebuilt = true;
+            }
+            catch (OperationCanceledException)
+            {
+                // A newer tree refresh superseded the search-close rebuild.
+            }
+
+            // The rebuild produces fresh, unchecked view-models. Restore the user's checkbox selection
+            // onto the new lazy root — but only on the success path (a superseded/cancelled rebuild is
+            // handled by whichever newer refresh replaced it, so we must not race it here).
+            if (rebuilt)
+                RestoreCheckedPaths(restoreCheckedPaths);
+
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.SearchClose);
         }
         else
@@ -8948,6 +8981,80 @@ public partial class MainWindow : Window
             root.IsExpanded = true;
     }
 
+    // Matches PathComparer.Default's case sensitivity (OrdinalIgnoreCase on Windows, Ordinal elsewhere)
+    // for the segment-aware ancestor test used while resolving a checked path against the tree.
+    private static readonly StringComparison TreePathStringComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    /// <summary>
+    /// Re-applies a captured checkbox selection to the freshly rebuilt (lazy) tree by replaying each
+    /// path as a user-equivalent <see cref="TreeNodeViewModel.IsChecked"/> = true. Reusing the normal
+    /// setter keeps the exact selection cascade/tri-state semantics of a manual click: it flows down to
+    /// still-unrealized children via the deferred check state and recomputes ancestor tri-state upward.
+    /// Only the ancestor chains of actually-checked items are realized, so the memory win of the rebuild
+    /// is preserved. Paths that no longer resolve (project changed) are skipped silently.
+    /// </summary>
+    private void RestoreCheckedPaths(HashSet<string> checkedPaths)
+    {
+        if (checkedPaths.Count == 0)
+            return;
+
+        foreach (var path in checkedPaths)
+        {
+            if (string.IsNullOrEmpty(path))
+                continue;
+
+            var node = FindTreeNodeByPath(path);
+            if (node is not null)
+                node.IsChecked = true;
+        }
+    }
+
+    private TreeNodeViewModel? FindTreeNodeByPath(string path)
+    {
+        // Pick the root that is the target itself or a segment-aware ancestor of it.
+        TreeNodeViewModel? current = null;
+        foreach (var root in _viewModel.TreeNodes)
+        {
+            if (PathComparer.Default.Equals(root.FullPath, path) || IsPathUnder(path, root.FullPath))
+            {
+                current = root;
+                break;
+            }
+        }
+
+        // Descend one level at a time, realizing children lazily, until the exact node is found.
+        while (current is not null && !PathComparer.Default.Equals(current.FullPath, path))
+        {
+            TreeNodeViewModel? next = null;
+            foreach (var child in current.Children)
+            {
+                if (PathComparer.Default.Equals(child.FullPath, path) || IsPathUnder(path, child.FullPath))
+                {
+                    next = child;
+                    break;
+                }
+            }
+
+            current = next;
+        }
+
+        return current;
+    }
+
+    private static bool IsPathUnder(string descendantPath, string ancestorPath)
+    {
+        if (descendantPath.Length <= ancestorPath.Length)
+            return false;
+
+        var boundary = descendantPath[ancestorPath.Length];
+        if (boundary != Path.DirectorySeparatorChar && boundary != Path.AltDirectorySeparatorChar)
+            return false;
+
+        return descendantPath.StartsWith(ancestorPath, TreePathStringComparison);
+    }
+
     /// <summary>
     /// Validates that URL looks like a valid Git repository URL.
     /// Accepts URLs from common Git hosting services (GitHub, GitLab, Bitbucket, etc.)
@@ -9061,11 +9168,18 @@ public partial class MainWindow : Window
 
     private bool IsBackgroundMetricsActive() => _metrics.IsBackgroundActive;
 
-    private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
+    private void OnTreeNodeCheckedChanged(TreeNodeViewModel node)
     {
         _treeSelectionSnapshotCache.Invalidate();
-        _metrics.ScheduleRecalculate();
-        SchedulePreviewRefresh();
+
+        // Toggling a directory (especially the project root) cascades the check across its whole
+        // subtree, which turns the follow-up metrics recompute and full-project preview rebuild into
+        // heavy work that can starve the render thread. Coalesce those with a longer debounce so a
+        // deliberate "select all" stays responsive; single-file toggles keep the near-instant default.
+        var largeSelectionChange = node.HasChildren;
+        _metrics.ScheduleRecalculate(largeSelectionChange);
+        SchedulePreviewRefresh(
+            debounceOverride: largeSelectionChange ? LargeSelectionPreviewDebounce : null);
     }
 
     private void RenderPreviewSelectionMetrics()

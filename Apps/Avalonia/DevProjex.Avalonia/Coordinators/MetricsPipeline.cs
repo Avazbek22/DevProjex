@@ -58,6 +58,11 @@ internal sealed class MetricsPipeline(
 
     private const double CompactStatusMetricsThresholdWidth = 1050;
 
+    // Incremental (single-file) selection changes stay near-instant; bulk directory/root toggles
+    // coalesce into a longer window to keep the UI thread responsive during "select all".
+    private static readonly TimeSpan MetricsDebounceDelay = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan MetricsLargeSelectionDebounceDelay = TimeSpan.FromMilliseconds(300);
+
     private static readonly FrozenSet<string> MetricsWarmupBinaryExtensions =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -114,20 +119,26 @@ internal sealed class MetricsPipeline(
 
     public bool HasStatusMetricsSnapshot => _hasStatusMetricsSnapshot;
 
-    public void ScheduleRecalculate()
+    public void ScheduleRecalculate(bool largeSelectionChange = false)
     {
         // A parent checkbox can fire hundreds of child change notifications. Keep the
         // debounce timer inside the metrics pipeline so UI code does not own recalc state.
+        //
+        // Bulk directory/root toggles select the whole subtree and make the follow-up metrics
+        // recompute expensive (full-tree text build + large-string/GC pressure). Coalesce those
+        // with a longer window so a deliberate "select all" does not immediately kick heavy work
+        // while the selection cascade is still settling. Single-file toggles keep the near-instant
+        // default so normal selections still feel responsive.
         if (_metricsDebounceTimer is null)
         {
-            _metricsDebounceTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(50)
-            };
+            _metricsDebounceTimer = new DispatcherTimer();
             _metricsDebounceTimer.Tick += OnMetricsDebounceTimerTick;
         }
 
         _metricsDebounceTimer.Stop();
+        _metricsDebounceTimer.Interval = largeSelectionChange
+            ? MetricsLargeSelectionDebounceDelay
+            : MetricsDebounceDelay;
         _metricsDebounceTimer.Start();
     }
 

@@ -575,6 +575,7 @@
                                             ItemsSource="{Binding TreeNodes}"
                                             IsEnabled="{Binding IsProjectLoaded}"
                                             Padding="0,0,0,4"
+                                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                             FontFamily="{Binding SelectedFontFamily}"
                                             FontSize="{Binding TreeFontSize}">
                     <controls:ProjectTreeView.ItemsPanel>
@@ -590,30 +591,43 @@
                             <ColumnDefinition Width="{CompiledBinding IndentWidth}" />
                             <ColumnDefinition Width="*" />
                           </Grid.ColumnDefinitions>
-                          <StackPanel Grid.Column="1"
-                                      Name="TreeItemContent"
-                                      Orientation="Horizontal"
-                                      Background="Transparent"
-                                      Spacing="{DynamicResource TreeItemSpacingResource}">
-                            <CheckBox IsThreeState="True"
-                                      IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
-                                      VerticalAlignment="Center" />
-                            <Image Source="{CompiledBinding Icon}"
-                                   Width="{DynamicResource TreeIconSizeResource}"
-                                   Height="{DynamicResource TreeIconSizeResource}"
-                                   Stretch="Uniform"
-                                   VerticalAlignment="Center" />
-                            <TextBlock Text="{CompiledBinding DisplayName}"
+                          <Grid Grid.Column="1"
+                                Name="TreeItemContent"
+                                Background="Transparent"
+                                ColumnDefinitions="Auto,*">
+                            <StackPanel Grid.Column="0"
+                                        Orientation="Horizontal"
+                                        Background="Transparent"
+                                        Spacing="{DynamicResource TreeItemSpacingResource}">
+                              <CheckBox IsThreeState="True"
+                                        IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
+                                        VerticalAlignment="Center" />
+                              <Image Source="{CompiledBinding Icon}"
+                                     Width="{DynamicResource TreeIconSizeResource}"
+                                     Height="{DynamicResource TreeIconSizeResource}"
+                                     Stretch="Uniform"
+                                     VerticalAlignment="Center" />
+                            </StackPanel>
+                            <!-- Name cell fills the remaining viewport width and trims long names.
+                                 Horizontal scrolling is disabled, so the cell is bounded and the
+                                 ellipsis takes over; the full path is shown on hover. -->
+                            <TextBlock Grid.Column="1"
+                                       Text="{CompiledBinding DisplayName}"
                                        IsVisible="{Binding !HasHighlightedDisplay}"
                                        VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"
+                                       ToolTip.Tip="{CompiledBinding FullPath}"
                                        Margin="{DynamicResource TreeTextMarginResource}"
                                        Foreground="{DynamicResource AppTextBrush}" />
-                            <TextBlock Inlines="{CompiledBinding DisplayInlines}"
+                            <TextBlock Grid.Column="1"
+                                       Inlines="{CompiledBinding DisplayInlines}"
                                        IsVisible="{Binding HasHighlightedDisplay}"
                                        VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"
+                                       ToolTip.Tip="{CompiledBinding FullPath}"
                                        Margin="{DynamicResource TreeTextMarginResource}"
                                        Foreground="{DynamicResource AppTextBrush}" />
-                          </StackPanel>
+                          </Grid>
                         </Grid>
                       </TreeDataTemplate>
                     </controls:ProjectTreeView.ItemTemplate>

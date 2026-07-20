@@ -423,6 +423,36 @@ public sealed class MainWindowPreviewInternalsTests
             ]);
     }
 
+    [Fact]
+    public void IsPathUnder_UsesSegmentAwareBoundary()
+    {
+        // Guards the search-close selection restore: resolving a checked path against the rebuilt tree
+        // must not treat a name-prefix sibling ("proj/a/bc") as a descendant of "proj/a/b".
+        var method = typeof(MainWindow).GetMethod(
+            "IsPathUnder",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        bool IsUnder(string descendant, string ancestor) =>
+            (bool)method!.Invoke(null, [descendant, ancestor])!;
+
+        var ancestor = CreatePath("proj", "a", "b");
+
+        // Direct and nested descendants are under the ancestor.
+        Assert.True(IsUnder(CreatePath("proj", "a", "b", "c"), ancestor));
+        Assert.True(IsUnder(CreatePath("proj", "a", "b", "c", "d.cs"), ancestor));
+
+        // The ancestor path is not "under" itself.
+        Assert.False(IsUnder(ancestor, ancestor));
+
+        // Siblings that only share a name prefix are NOT under it (segment-aware, not raw StartsWith).
+        Assert.False(IsUnder(CreatePath("proj", "a", "bc"), ancestor));
+        Assert.False(IsUnder(CreatePath("proj", "a", "bcd", "e.cs"), ancestor));
+
+        // A shorter/unrelated path is not under it.
+        Assert.False(IsUnder(CreatePath("proj", "a"), ancestor));
+    }
+
     private static string CreatePath(params string[] segments)
     {
         return OperatingSystem.IsWindows()

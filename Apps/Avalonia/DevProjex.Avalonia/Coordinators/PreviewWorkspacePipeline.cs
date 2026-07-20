@@ -21,7 +21,7 @@ internal sealed class PreviewWorkspacePipeline(
 
     public bool ShouldClearBeforeNextRefresh => _clearBeforeNextRefresh;
 
-    public void ScheduleRefresh(bool immediate = false)
+    public void ScheduleRefresh(bool immediate = false, TimeSpan? debounceOverride = null)
     {
         _refreshRequested = true;
 
@@ -37,6 +37,12 @@ internal sealed class PreviewWorkspacePipeline(
 
         EnsureDebounceTimer();
         _previewDebounceTimer!.Stop();
+        // Rebuilding the preview reads every selected file. Bulk selection changes ("select all")
+        // pass a longer coalescing window so the heavy build waits for the selection to settle,
+        // instead of firing on the default incremental-edit debounce.
+        _previewDebounceTimer.Interval = debounceOverride is { } overrideInterval && overrideInterval > debounceInterval
+            ? overrideInterval
+            : debounceInterval;
         _previewDebounceTimer.Start();
     }
 

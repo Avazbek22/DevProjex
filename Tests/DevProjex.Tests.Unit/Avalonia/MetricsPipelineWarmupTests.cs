@@ -145,6 +145,67 @@ public sealed class MetricsPipelineWarmupTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task ScheduleRecalculate_UsesLongerDebounceForBulkSelectionChanges()
+    {
+        using var temp = new TemporaryDirectory();
+        var treeRoot = new TreeNodeDescriptor("root", temp.Path, true, false, "folder", []);
+        var currentTree = new BuildTreeResult(treeRoot, RootAccessDenied: false, HadAccessDenied: false, []);
+        var viewModel = CreateViewModel();
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+        var pipeline = new MetricsPipeline(
+            viewModel,
+            CreateLocalization(),
+            new FileContentAnalyzer(),
+            new TreeExportService(),
+            status,
+            currentTreeProvider: () => currentTree,
+            currentPathProvider: () => temp.Path,
+            selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+            treeFormatProvider: () => TreeTextFormat.Ascii,
+            exportPathPresentationProvider: () => null,
+            boundsWidthProvider: () => 1400);
+
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                // A single-file toggle keeps the near-instant default debounce.
+                pipeline.ScheduleRecalculate(largeSelectionChange: false);
+                var incrementalInterval = GetDebounceInterval(pipeline);
+
+                // A directory/root "select all" toggle coalesces with a longer window.
+                pipeline.ScheduleRecalculate(largeSelectionChange: true);
+                var bulkInterval = GetDebounceInterval(pipeline);
+
+                // Stop the timer so it never fires Recalculate during teardown.
+                GetDebounceTimer(pipeline)?.Stop();
+
+                Assert.Equal(TimeSpan.FromMilliseconds(50), incrementalInterval);
+                Assert.Equal(TimeSpan.FromMilliseconds(300), bulkInterval);
+                Assert.True(bulkInterval > incrementalInterval);
+            });
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(pipeline.Dispose);
+        }
+    }
+
+    private static DispatcherTimer? GetDebounceTimer(MetricsPipeline pipeline)
+    {
+        var field = typeof(MetricsPipeline).GetField(
+            "_metricsDebounceTimer",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        return field?.GetValue(pipeline) as DispatcherTimer;
+    }
+
+    private static TimeSpan GetDebounceInterval(MetricsPipeline pipeline) =>
+        GetDebounceTimer(pipeline)?.Interval ?? TimeSpan.Zero;
+
     private static TreeNodeDescriptor CreateTree(
         string rootPath,
         string textFile,
