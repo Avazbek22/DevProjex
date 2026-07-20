@@ -1,14 +1,22 @@
-# DevProjex 📁🌳
+<h1 align="center">DevProjex 📁🌳</h1>
 
-![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)
-![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)
-![License](https://img.shields.io/github/license/Avazbek22/DevProjex)
-![.NET](https://img.shields.io/badge/.NET-10-purple)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green)
-![WinGet](https://img.shields.io/badge/winget-available-blue)
-![Repo size](https://img.shields.io/github/repo-size/Avazbek22/DevProjex)
+<h2 align="center">🏆 Officially Selected by the Avalonia UI Team for the <a href="https://avaloniaui.net/showcase">Avalonia App Showcase</a></h2>
 
-**The fastest way to turn a real codebase into clean AI-ready context**
+<p align="center">
+  <a href="https://github.com/Avazbek22/DevProjex/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Avazbek22/DevProjex/total"></a>
+  <a href="https://github.com/Avazbek22/DevProjex/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml"></a>
+  <a href="https://github.com/Avazbek22/DevProjex/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/Avazbek22/DevProjex"></a>
+  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-purple">
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green">
+  <img alt="Repository size" src="https://img.shields.io/github/repo-size/Avazbek22/DevProjex">
+ <a href="https://avaloniaui.net/showcase"><img alt="Avalonia App Showcase" src="https://img.shields.io/badge/Avalonia%20Team-Showcase%20Selection-7B61FF?logo=avaloniaui&logoColor=white"></a>
+</p>
+
+
+
+<p align="center">
+  <strong>The fastest way to turn a real codebase into clean, AI-ready context.</strong>
+</p>
 
 DevProjex is a cross-platform desktop app for turning real folders and codebases into **clean, controlled context for AI chats, reviews, and documentation**.
 
