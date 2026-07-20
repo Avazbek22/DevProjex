@@ -592,7 +592,6 @@
                             <ColumnDefinition Width="*" />
                           </Grid.ColumnDefinitions>
                           <Grid Grid.Column="1"
-                                Name="TreeItemContent"
                                 Background="Transparent"
                                 ColumnDefinitions="Auto,*">
                             <StackPanel Grid.Column="0"

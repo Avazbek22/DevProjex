@@ -844,11 +844,10 @@ public sealed class TreeSearchCoordinator(
         }
     }
 
-    private int BringNodeIntoView(TreeNodeViewModel node)
+    private void BringNodeIntoView(TreeNodeViewModel node)
     {
         var version = Interlocked.Increment(ref _bringIntoViewVersion);
         TryBringNodeIntoViewWithRetries(node, version, attempt: 0);
-        return version;
     }
 
     private void SelectTreeNode(TreeNodeViewModel node)
@@ -1168,40 +1167,8 @@ public sealed class TreeSearchCoordinator(
             includeSelf: false,
             visual => visual is ScrollViewer);
 
-    // ResolveClampedTreeHorizontalOffset / ResolveHorizontalOffsetForSearchNavigation are retained as
-    // pure helpers (still covered by unit tests) but are no longer used to drive scrolling: horizontal
-    // scrolling is disabled on the tree, so search navigation never reads or writes the horizontal
-    // offset. Removing that logic eliminated the side-scroll jumpiness during search navigation.
-    internal static double ResolveClampedTreeHorizontalOffset(
-        double preservedOffsetX,
-        double extentWidth,
-        double viewportWidth)
-    {
-        var maxX = Math.Max(0, extentWidth - viewportWidth);
-        return Math.Clamp(preservedOffsetX, 0, maxX);
-    }
-
-    internal static double ResolveHorizontalOffsetForSearchNavigation(
-        double currentOffsetX,
-        double itemLeft,
-        double itemRight,
-        double viewportWidth,
-        double extentWidth)
-    {
-        const double tolerance = 1.0;
-        if (viewportWidth <= 0 ||
-            itemLeft >= -tolerance && itemRight <= viewportWidth + tolerance)
-        {
-            return ResolveClampedTreeHorizontalOffset(currentOffsetX, extentWidth, viewportWidth);
-        }
-
-        var targetX = itemLeft < 0
-            ? currentOffsetX + itemLeft
-            : currentOffsetX + itemRight - viewportWidth;
-
-        return ResolveClampedTreeHorizontalOffset(targetX, extentWidth, viewportWidth);
-    }
-
+    // Horizontal scrolling is disabled on the tree, so search navigation only adjusts the vertical
+    // offset. The former horizontal offset helpers were removed along with that logic.
     internal static double ResolveVerticalOffsetForSearchNavigation(
         double currentOffsetY,
         double itemTop,

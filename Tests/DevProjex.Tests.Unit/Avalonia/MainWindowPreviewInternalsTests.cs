@@ -451,6 +451,13 @@ public sealed class MainWindowPreviewInternalsTests
 
         // A shorter/unrelated path is not under it.
         Assert.False(IsUnder(CreatePath("proj", "a"), ancestor));
+
+        // Filesystem/drive-root ancestors already end in a separator ("/" or "C:\"): the next
+        // descendant character is a real segment, not the boundary, so children still resolve.
+        var fsRoot = CreatePath();
+        Assert.True(IsUnder(CreatePath("home"), fsRoot));
+        Assert.True(IsUnder(CreatePath("a.txt"), fsRoot));
+        Assert.False(IsUnder(fsRoot, fsRoot));
     }
 
     private static string CreatePath(params string[] segments)

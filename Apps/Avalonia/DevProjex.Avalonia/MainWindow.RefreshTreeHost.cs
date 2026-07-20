@@ -122,6 +122,17 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _viewModel.TreeNodes.Add(root);
         root.IsExpanded = true;
 
+        // Re-apply a checkbox selection captured before a search-close rebuild. This runs synchronously
+        // (no awaits) right after the fresh root is installed and BEFORE _metrics.Recalculate() /
+        // SchedulePreviewRefresh below, so those compute once against the correct selection instead of
+        // an empty (== whole project) one — no empty flash, no double build. Any refresh that reaches
+        // this point honors the pending set, which also preserves selection across a superseding rebuild.
+        if (_pendingCheckedPathsToRestore is { Count: > 0 } pendingChecks)
+        {
+            RestoreCheckedPaths(pendingChecks);
+            _pendingCheckedPathsToRestore = null;
+        }
+
         if (!interactiveFilter && !string.IsNullOrWhiteSpace(input.NameFilter) && root.Children.Count == 0)
             _toastService.Show(_localization["Toast.NoMatches"]);
 

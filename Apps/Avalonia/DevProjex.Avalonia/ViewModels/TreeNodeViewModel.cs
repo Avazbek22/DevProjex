@@ -85,7 +85,9 @@ public sealed class TreeNodeViewModel(
         }
     }
 
-    public string FullPath => Descriptor.FullPath;
+    // Null-safe: ClearRecursive sets Descriptor = null! during teardown, and the tree row's
+    // ToolTip.Tip binding may still evaluate FullPath on a torn-down node.
+    public string FullPath => Descriptor?.FullPath ?? string.Empty;
 
     public bool? IsChecked
     {

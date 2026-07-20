@@ -211,6 +211,9 @@ public partial class MainWindow : Window
     private VirtualizedPreviewTextControl? _previewTextControl;
     private VirtualizedLineNumbersControl? _previewLineNumbersControl;
     private HashSet<string>? _filterExpansionSnapshot;
+    // Checkbox selection captured before a search-close rebuild, re-applied atomically inside
+    // ApplyTreeRefreshResult (right after the fresh root is installed, before metrics/preview fire).
+    private HashSet<string>? _pendingCheckedPathsToRestore;
     private int _filterApplyVersion;
     private SuspendedTreeToolMode _previewOnlySuspendedTreeToolMode;
     private CancellationTokenSource? _projectOperationCts;
@@ -7119,7 +7122,10 @@ public partial class MainWindow : Window
             // GetCheckedPaths returns the compact, disjoint minimal set (a fully-checked directory
             // appears once; a checked dir never coexists with its descendants), so replaying it later
             // realizes only the ancestor chains of actually-checked items, not the whole tree.
-            var restoreCheckedPaths = GetCheckedPaths();
+            // ApplyTreeRefreshResult re-applies this atomically, right after installing the fresh root
+            // and BEFORE metrics/preview fire, so they never compute against an empty (== whole project)
+            // selection and there is no empty-flash / double build.
+            _pendingCheckedPathsToRestore = GetCheckedPaths();
 
             // Opening search lazily realizes the ENTIRE view-model graph to build the flat search
             // index. Normalizing in place (UpdateSearchMatches on an empty query) only collapses
@@ -7131,22 +7137,23 @@ public partial class MainWindow : Window
             // fresh lazy root. This resets expansion to the base lazy tree (only the root expanded),
             // matching the prior search-close behavior (collapse-all-except-root) while now actually
             // freeing the graph so the scheduled cleanup below can return the memory to the OS.
-            var rebuilt = false;
             try
             {
                 await RefreshTreeAsync(interactiveFilter: true);
-                rebuilt = true;
             }
             catch (OperationCanceledException)
             {
                 // A newer tree refresh superseded the search-close rebuild.
             }
-
-            // The rebuild produces fresh, unchecked view-models. Restore the user's checkbox selection
-            // onto the new lazy root — but only on the success path (a superseded/cancelled rebuild is
-            // handled by whichever newer refresh replaced it, so we must not race it here).
-            if (rebuilt)
-                RestoreCheckedPaths(restoreCheckedPaths);
+            catch (Exception ex)
+            {
+                await ShowErrorAsync(ex.Message);
+            }
+            finally
+            {
+                // Never let a pending restore leak into a later, unrelated refresh.
+                _pendingCheckedPathsToRestore = null;
+            }
 
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.SearchClose);
         }
@@ -9048,9 +9055,17 @@ public partial class MainWindow : Window
         if (descendantPath.Length <= ancestorPath.Length)
             return false;
 
-        var boundary = descendantPath[ancestorPath.Length];
-        if (boundary != Path.DirectorySeparatorChar && boundary != Path.AltDirectorySeparatorChar)
-            return false;
+        // A filesystem/drive root ("/" or "C:\") already ends in a separator, so the next character
+        // in the descendant is a real path segment rather than the boundary separator. Only require an
+        // explicit separator boundary when the ancestor does not already end in one.
+        var ancestorEndsWithSep = ancestorPath.Length > 0 &&
+            (ancestorPath[^1] == Path.DirectorySeparatorChar || ancestorPath[^1] == Path.AltDirectorySeparatorChar);
+        if (!ancestorEndsWithSep)
+        {
+            var boundary = descendantPath[ancestorPath.Length];
+            if (boundary != Path.DirectorySeparatorChar && boundary != Path.AltDirectorySeparatorChar)
+                return false;
+        }
 
         return descendantPath.StartsWith(ancestorPath, TreePathStringComparison);
     }
