@@ -33,6 +33,8 @@ Ausgewählte Ordner der obersten Ebene, Dateitypen, Ausschlussregeln und markier
 
 Text- und Binärdateien werden kopiert, einbezogene leere Ordner bleiben erhalten. Die Quelldateien werden nicht verändert. Das Ergebnis kann nicht innerhalb des Quellprojekts gespeichert werden.
 
+Während des Exports können Baum und Einstellungen nicht geändert, Filter, Format oder Vorschaumodus nicht verwendet und keine Git-Befehle, Aktualisierungen oder andere Projekte gestartet werden.
+
 Formatregeln:
 * Baum exportieren:
   * ASCII -> nur `.txt`.

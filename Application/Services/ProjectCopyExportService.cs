@@ -57,6 +57,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		// A sibling staging directory keeps the final rename atomic and prevents partial results from becoming visible.
 		var stagingPath = Path.Combine(destinationParent, $".devprojex-{Guid.NewGuid():N}.tmp");
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
 
@@ -69,6 +70,8 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				cancellationToken.ThrowIfCancellationRequested();
 				var destination = ResolveDestinationPath(stagingPath, directory.RelativePath);
 				Directory.CreateDirectory(destination);
+				processedEntries++;
+				ReportProgress(progress, processedEntries, plan.Entries.Count, bytesWritten);
 			}
 
 			foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
@@ -79,12 +82,13 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				var copiedBytes = await CopyFileAsync(file.SourcePath, destination, buffer, cancellationToken)
 					.ConfigureAwait(false);
 				bytesWritten += copiedBytes;
+				processedEntries++;
 				processedFiles++;
 				TryCopyLastWriteTime(file.SourcePath, destination);
-				ReportProgress(progress, processedFiles, plan.FileCount, bytesWritten);
+				ReportProgress(progress, processedEntries, plan.Entries.Count, bytesWritten);
 			}
 
-			if (plan.FileCount == 0)
+			if (plan.Entries.Count == 0)
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
@@ -120,6 +124,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		var stagingPath = Path.Combine(destinationDirectory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
 
@@ -134,6 +139,8 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 					var entryName = BuildZipEntryName(plan.ProjectName, directory.RelativePath, isDirectory: true);
 					var entry = archive.CreateEntry(entryName, CompressionLevel.NoCompression);
 					TrySetZipLastWriteTime(entry, directory.SourcePath);
+					processedEntries++;
+					ReportProgress(progress, processedEntries, plan.Entries.Count, bytesWritten);
 				}
 
 				foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
@@ -146,11 +153,12 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 					await using var destination = entry.Open();
 					var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
 					bytesWritten += copiedBytes;
+					processedEntries++;
 					processedFiles++;
-					ReportProgress(progress, processedFiles, plan.FileCount, bytesWritten);
+					ReportProgress(progress, processedEntries, plan.Entries.Count, bytesWritten);
 				}
 
-				if (plan.FileCount == 0)
+				if (plan.Entries.Count == 0)
 					ReportProgress(progress, 0, 0, 0);
 			}
 
@@ -480,12 +488,12 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 
 	private static void ReportProgress(
 		IProgress<ProjectCopyExportProgress>? progress,
-		int processedFiles,
-		int totalFiles,
+		int processedEntries,
+		int totalEntries,
 		long bytesWritten)
 	{
-		var percentage = totalFiles == 0 ? 100 : processedFiles * 100d / totalFiles;
-		progress?.Report(new ProjectCopyExportProgress(processedFiles, totalFiles, bytesWritten, percentage));
+		var percentage = totalEntries == 0 ? 100 : processedEntries * 100d / totalEntries;
+		progress?.Report(new ProjectCopyExportProgress(processedEntries, totalEntries, bytesWritten, percentage));
 	}
 
 	private static void TryCopyLastWriteTime(string sourcePath, string destinationPath)

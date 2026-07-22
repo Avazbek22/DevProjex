@@ -23,12 +23,15 @@
           Margin="0"
           Padding="0,0,210,0">
       <MenuItem Header="{Binding MenuFile}">
-        <MenuItem Header="{Binding MenuFileOpen}" Click="OnOpenFolder" />
+        <MenuItem Header="{Binding MenuFileOpen}"
+                  Click="OnOpenFolder"
+                  IsEnabled="{Binding CanChangeProjectTree}" />
         <MenuItem Name="OpenNewWindowMenuItem"
                   Header="{Binding MenuFileOpenNewWindow}"
                   Click="OnOpenNewWindow" />
         <MenuItem Name="RecentMenuItem"
                   Header="{Binding MenuFileRecent}"
+                  IsEnabled="{Binding CanChangeProjectTree}"
                   IsVisible="{Binding RecentFoldersMenuVisible}">
           <!-- Populated dynamically from the recent-projects store. -->
         </MenuItem>
@@ -43,7 +46,7 @@
         </MenuItem>
         <MenuItem Name="ExportProjectCopyMenuItem"
                   Header="{Binding MenuFileExportProjectCopy}"
-                  IsEnabled="{Binding IsProjectLoaded}">
+                  IsEnabled="{Binding CanExportProjectCopy}">
           <MenuItem Name="ExportProjectCopyFolderMenuItem"
                     Padding="11,4,0,7"
                     AutomationProperties.HelpText="{Binding MenuFileExportProjectCopyFolderHelp}"
@@ -137,7 +140,7 @@
         </MenuItem>
         <MenuItem Header="{Binding MenuFileExit}" Click="OnExit" />
       </MenuItem>
-      <MenuItem Name="GitMenuItem" Header="Git">
+      <MenuItem Name="GitMenuItem" Header="Git" IsEnabled="{Binding CanChangeProjectTree}">
         <MenuItem Header="{Binding MenuGitClone}" Click="OnGitClone" />
         <MenuItem Name="GitBranchMenuItem"
                   Classes="git-branch-menu"
@@ -183,7 +186,7 @@
           </MenuItem.Header>
         </MenuItem>
       </MenuItem>
-      <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchFilterAvailable}" Click="OnToggleSearch" />
+      <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />
       <MenuItem Header="{Binding MenuLanguage}">
         <MenuItem Name="LanguageEnMenuItem" Header="English" Click="OnLangEn" />

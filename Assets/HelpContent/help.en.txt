@@ -33,6 +33,8 @@ Selected root folders, file types, exclusion rules, and checked items are respec
 
 Text and binary files are copied, and included empty folders are preserved. The source files are not modified. The result cannot be saved inside the source project.
 
+During export, you cannot change the tree or settings, use the filter, change the format or preview mode, run Git commands, refresh, or open another project.
+
 Format rules:
 * Export tree:
   * ASCII -> `.txt` only.

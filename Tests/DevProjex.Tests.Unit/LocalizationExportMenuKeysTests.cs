@@ -117,6 +117,42 @@ public sealed class LocalizationExportMenuKeysTests
 		Assert.StartsWith("Создаёт ZIP-архив из текущего дерева", russian["Menu.File.ExportProjectCopy.Zip.Help"]);
 	}
 
+	[Fact]
+	public void ProjectCopyProgress_UsesCompactEntryCountWithoutNoun()
+	{
+		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
+		var english = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "en.json")));
+		var russian = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "ru.json")));
+
+		Assert.Equal("Export Project", english["Status.Operation.ExportingProjectCopy"]);
+		Assert.Equal("Экспорт проекта", russian["Status.Operation.ExportingProjectCopy"]);
+		Assert.Equal("Export Project: {0}/{1}", english["Status.Operation.ExportingProjectCopy.Progress"]);
+		Assert.Equal("Экспорт проекта: {0}/{1}", russian["Status.Operation.ExportingProjectCopy.Progress"]);
+	}
+
+	[Theory]
+	[InlineData("de")]
+	[InlineData("en")]
+	[InlineData("es")]
+	[InlineData("fr")]
+	[InlineData("it")]
+	[InlineData("kk")]
+	[InlineData("pt")]
+	[InlineData("pt-pt")]
+	[InlineData("ru")]
+	[InlineData("tg")]
+	[InlineData("uz")]
+	public void ProjectCopyPickerAndResultToast_PresentNameAndReadablePath(string locale)
+	{
+		var localizationPath = Path.Combine(FindRepositoryRoot(), "Assets", "Localization", $"{locale}.json");
+		var values = ReadKeyValues(File.ReadAllText(localizationPath));
+
+		Assert.False(string.IsNullOrWhiteSpace(values["Picker.ProjectCopy.Folder"]));
+		Assert.DoesNotContain("{0}", values["Picker.ProjectCopy.Folder"], StringComparison.Ordinal);
+		Assert.Contains("\n{0}", values["Toast.ProjectCopy.Folder"], StringComparison.Ordinal);
+		Assert.Contains("\n{0}", values["Toast.ProjectCopy.Zip"], StringComparison.Ordinal);
+	}
+
 	private static HashSet<string> ReadKeys(string json)
 	{
 		using var doc = JsonDocument.Parse(json);

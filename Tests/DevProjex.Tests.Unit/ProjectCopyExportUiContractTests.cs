@@ -85,10 +85,110 @@ public sealed class ProjectCopyExportUiContractTests
         Assert.Contains("_currentTree.Root", source, StringComparison.Ordinal);
         Assert.DoesNotContain("_filterBaseTree", source, StringComparison.Ordinal);
         Assert.Contains("GetCheckedPaths()", source, StringComparison.Ordinal);
+        Assert.Contains("Picker.ProjectCopy.Folder", source, StringComparison.Ordinal);
+        Assert.Contains("Title = _localization[\"Picker.ProjectCopy.Folder\"]", source, StringComparison.Ordinal);
+        Assert.Contains("SuggestedFileName = folderName", source, StringComparison.Ordinal);
+        Assert.Contains("AddPathWrapOpportunities", source, StringComparison.Ordinal);
+        Assert.Contains("ProjectCopyResultToastDuration", source, StringComparison.Ordinal);
+        Assert.Contains("ProcessedEntryCount", source, StringComparison.Ordinal);
+        Assert.Contains("TotalEntryCount", source, StringComparison.Ordinal);
         Assert.Contains("ProjectCopyExportErrorPresentation.ResolveLocalizationKey", source, StringComparison.Ordinal);
         Assert.DoesNotContain("exception.Message", source, StringComparison.Ordinal);
         Assert.DoesNotContain("innerException.Message", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowErrorAsync", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProjectCopyExport_DisablesTreeMutationButKeepsReadOnlyAndIgnoredActionsVisuallyAvailable()
+    {
+        var topMenu = ReadTopMenuDocument();
+        var window = XDocument.Load(Path.Combine(
+            FindRepositoryRoot(),
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.axaml"));
+        var settings = XDocument.Load(Path.Combine(
+            FindRepositoryRoot(),
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "Views",
+            "SettingsPanelView.axaml"));
+
+        Assert.Equal("{Binding CanChangeProjectTree}", Attribute(FindMenuByHeader(topMenu, "{Binding MenuFileOpen}"), "IsEnabled"));
+        Assert.Equal("{Binding CanChangeProjectTree}", Attribute(FindNamedElement(topMenu, "RecentMenuItem"), "IsEnabled"));
+        Assert.Equal("{Binding CanChangeProjectTree}", Attribute(FindNamedElement(topMenu, "GitMenuItem"), "IsEnabled"));
+        Assert.Equal("{Binding CanRefreshLocalProject}", Attribute(FindNamedElement(topMenu, "RefreshMenuItem"), "IsEnabled"));
+        Assert.Equal("{Binding IsProjectLoaded}", Attribute(FindMenuByHeader(topMenu, "{Binding MenuFileExport}"), "IsEnabled"));
+        Assert.Equal("{Binding IsProjectLoaded}", Attribute(FindMenuByHeader(topMenu, "{Binding MenuCopy}"), "IsEnabled"));
+        Assert.Equal("{Binding IsProjectLoaded}", Attribute(FindMenuByHeader(topMenu, "{Binding MenuView}"), "IsEnabled"));
+        Assert.Equal("{Binding IsSearchAvailable}", Attribute(FindMenuByHeader(topMenu, "{Binding MenuSearch}"), "IsEnabled"));
+        Assert.Equal("{Binding IsProjectLoaded}", Attribute(FindMenuByHeader(topMenu, "{Binding MenuOptions}"), "IsEnabled"));
+        Assert.Equal("{Binding IsProjectLoaded}", Attribute(FindNamedElement(topMenu, "FormatSegmentedControl"), "IsEnabled"));
+        Assert.Equal("{Binding IsProjectLoaded}", Attribute(FindNamedElement(topMenu, "PreviewToggleButton"), "IsEnabled"));
+        Assert.Equal("{Binding IsProjectLoaded}", Attribute(FindNamedElement(topMenu, "FilterToggleButton"), "IsEnabled"));
+        Assert.Equal("{Binding IsSearchAvailable}", Attribute(FindNamedElement(window, "SearchBar"), "IsEnabled"));
+        Assert.Equal("{Binding IsSearchFilterAvailable}", Attribute(FindNamedElement(window, "FilterBar"), "IsEnabled"));
+        Assert.Equal("{Binding CanUseProjectWorkspaceActions}", Attribute(FindNamedElement(window, "ProjectTree"), "IsEnabled"));
+        Assert.Equal("{Binding IsProjectLoaded}", Attribute(FindNamedElement(window, "PreviewBar"), "IsEnabled"));
+        Assert.Equal("{Binding AreFilterSettingsEnabled}", Attribute(FindNamedElement(settings, "PanelRoot"), "IsEnabled"));
+    }
+
+    [Fact]
+    public void ProjectCopyExport_CancelsPendingPreviewAndGuardsPreviewAndFormatActions()
+    {
+        var exportSource = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.ProjectCopyExport.cs");
+        var menuSource = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "Views",
+            "TopMenuBarView.axaml.cs");
+        var windowSource = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.axaml.cs");
+
+        Assert.Contains("CancelPreviewRefresh();", exportSource, StringComparison.Ordinal);
+        Assert.Contains("await Task.Run(", exportSource, StringComparison.Ordinal);
+        Assert.Contains("CanUseProjectWorkspaceActions: false", menuSource, StringComparison.Ordinal);
+        Assert.Contains("CanUseProjectWorkspaceActions: true", menuSource, StringComparison.Ordinal);
+        Assert.Contains("if (!_viewModel.CanUseProjectWorkspaceActions)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("BeginOutputPreparationStatus()", windowSource, StringComparison.Ordinal);
+        Assert.Contains("if (_viewModel.IsProjectCopyExportInProgress)", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClosingWindow_CancelsProjectCopyAndWaitsForStagingCleanupBeforeClosing()
+    {
+        var windowSource = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.axaml.cs");
+        var lifecycleSource = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.Lifecycle.cs");
+        var exportSource = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.ProjectCopyExport.cs");
+
+        Assert.Contains("Closing += OnWindowClosing", windowSource, StringComparison.Ordinal);
+        Assert.Contains("e.Cancel = true", lifecycleSource, StringComparison.Ordinal);
+        Assert.Contains("_projectCopyExportCts.Cancel()", lifecycleSource, StringComparison.Ordinal);
+        Assert.Contains("await completion", lifecycleSource, StringComparison.Ordinal);
+        Assert.Contains("_allowCloseAfterProjectCopyExportCleanup = true", lifecycleSource, StringComparison.Ordinal);
+        Assert.Contains("completion.TrySetResult(true)", exportSource, StringComparison.Ordinal);
     }
 
     private static XDocument ReadTopMenuDocument() => XDocument.Load(Path.Combine(
@@ -101,6 +201,10 @@ public sealed class ProjectCopyExportUiContractTests
 
     private static XElement FindNamedElement(XDocument document, string name) =>
         Assert.Single(document.Descendants(), element => Attribute(element, "Name") == name);
+
+    private static XElement FindMenuByHeader(XDocument document, string header) =>
+        Assert.Single(document.Descendants(), element =>
+            element.Name.LocalName == "MenuItem" && Attribute(element, "Header") == header);
 
     private static bool IsMenuItem(XElement element) => element.Name.LocalName == "MenuItem";
 

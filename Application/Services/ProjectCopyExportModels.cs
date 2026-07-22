@@ -35,8 +35,8 @@ public sealed record ProjectCopyExportResult(
 	long BytesWritten);
 
 public sealed record ProjectCopyExportProgress(
-	int ProcessedFileCount,
-	int TotalFileCount,
+	int ProcessedEntryCount,
+	int TotalEntryCount,
 	long BytesWritten,
 	double Percentage);
 

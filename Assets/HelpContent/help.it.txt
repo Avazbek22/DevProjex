@@ -33,6 +33,8 @@ Vengono rispettati le cartelle di primo livello, i tipi di file, le regole di es
 
 Vengono copiati i file di testo e binari e conservate le cartelle vuote incluse. I file di origine non vengono modificati. Il risultato non può essere salvato all’interno del progetto di origine.
 
+Durante l’esportazione non è possibile modificare l’albero o le impostazioni, usare il filtro, cambiare formato o modalità di anteprima, eseguire comandi Git, aggiornare o aprire un altro progetto.
+
 Regole di formato:
 * Esporta albero:
   * ASCII -> solo `.txt`.

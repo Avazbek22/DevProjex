@@ -113,6 +113,21 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "Loyihani eksport qilish", "Jildga…", "ZIP arxivga…", "Hech narsa belgilanmasa", "kataloglar tuzilmasini", "Matnli va binar fayllar", "boshlang‘ich loyiha ichiga" }
     };
 
+    public static TheoryData<string, string> ProjectExportBusyContracts => new()
+    {
+        { "help.ru.txt", "Во время экспорта нельзя изменять дерево и параметры, использовать фильтр, менять формат или режим предпросмотра" },
+        { "help.en.txt", "During export, you cannot change the tree or settings, use the filter, change the format or preview mode" },
+        { "help.de.txt", "Während des Exports können Baum und Einstellungen nicht geändert, Filter, Format oder Vorschaumodus nicht verwendet" },
+        { "help.fr.txt", "Pendant l’export, vous ne pouvez pas modifier l’arborescence ou les paramètres, utiliser le filtre, changer le format ou le mode d’aperçu" },
+        { "help.it.txt", "Durante l’esportazione non è possibile modificare l’albero o le impostazioni, usare il filtro, cambiare formato o modalità di anteprima" },
+        { "help.es.txt", "Durante la exportación no se puede cambiar el árbol ni la configuración, usar el filtro, cambiar el formato o el modo de vista previa" },
+        { "help.pt.txt", "Durante a exportação, não é possível alterar a árvore ou as configurações, usar o filtro, mudar o formato ou o modo de visualização" },
+        { "help.pt-pt.txt", "Durante a exportação, não é possível alterar a árvore ou as definições, usar o filtro, mudar o formato ou o modo de pré-visualização" },
+        { "help.kk.txt", "Экспорт кезінде ағаш пен параметрлерді өзгертуге, сүзгіні пайдалануға, пішімді немесе алдын ала қарау режимін ауыстыруға" },
+        { "help.tg.txt", "Ҳангоми содирот тағйир додани дарахт ё параметрҳо, истифодаи филтр, иваз кардани формат ё реҷаи пешнамоиш" },
+        { "help.uz.txt", "Eksport paytida daraxt yoki parametrlarni o‘zgartirish, filtrdan foydalanish, format yoki ko‘rib chiqish rejimini almashtirish" }
+    };
+
     [Theory]
     [MemberData(nameof(TreeFontAndSettingsContracts))]
     public void HelpContent_TreeFontAndSettingsPanel_DescribeCurrentUi(
@@ -233,6 +248,17 @@ public sealed class HelpContentDocumentationContractTests
         Assert.Contains(expectedDirectoryStructure, fileSection, StringComparison.Ordinal);
         Assert.Contains(expectedBinarySupport, fileSection, StringComparison.Ordinal);
         Assert.Contains(expectedInsideSourceRestriction, fileSection, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectExportBusyContracts))]
+    public void HelpContent_FileSection_DescribesUnavailableTreeChangesDuringProjectExport(
+        string fileName,
+        string expectedBusyBehavior)
+    {
+        var fileSection = ExtractSection(ReadHelpFile(fileName), "## 3)", "## 4)");
+
+        Assert.Contains(expectedBusyBehavior, fileSection, StringComparison.Ordinal);
     }
 
     [Theory]

@@ -24,6 +24,35 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Assert.True(File.Exists(Path.Combine(result.DestinationPath, "LICENSE")));
 	}
 
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task ProgressCountsDirectoriesAndFilesFromEffectiveExportPlan(ProjectCopyExportFormat format)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var updates = new List<ProjectCopyExportProgress>();
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(updates.Add);
+		var destination = format == ProjectCopyExportFormat.Folder
+			? workspace.DestinationParent
+			: Path.Combine(workspace.DestinationParent, "progress.zip");
+
+		var result = await workspace.ExportAsync(
+			format,
+			destination,
+			[],
+			progress: progress,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var expectedEntryCount = result.CreatedDirectoryCount + result.CopiedFileCount;
+		Assert.NotEmpty(updates);
+		Assert.Equal(expectedEntryCount, updates[^1].ProcessedEntryCount);
+		Assert.Equal(expectedEntryCount, updates[^1].TotalEntryCount);
+		Assert.Equal(100, updates[^1].Percentage);
+		Assert.All(updates, update => Assert.Equal(expectedEntryCount, update.TotalEntryCount));
+		Assert.True(updates.Select(update => update.ProcessedEntryCount).SequenceEqual(
+			updates.Select(update => update.ProcessedEntryCount).Order()));
+	}
+
 	[Fact]
 	public async Task FolderExport_SelectedFileCopiesOnlyFileAndRequiredDirectories()
 	{
@@ -397,7 +426,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		using var cancellation = new CancellationTokenSource();
 		var progress = new CallbackProgress<ProjectCopyExportProgress>(value =>
 		{
-			if (value.ProcessedFileCount == 1)
+			if (value.ProcessedEntryCount == 1)
 				cancellation.Cancel();
 		});
 		var destination = format == ProjectCopyExportFormat.Folder

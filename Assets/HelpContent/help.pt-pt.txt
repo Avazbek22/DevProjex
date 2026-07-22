@@ -33,6 +33,8 @@ São respeitadas as pastas raiz selecionadas, os tipos de ficheiro, as regras de
 
 Os ficheiros de texto e binários são copiados, e as pastas vazias incluídas são preservadas. Os ficheiros de origem não são alterados. O resultado não pode ser guardado dentro do projeto de origem.
 
+Durante a exportação, não é possível alterar a árvore ou as definições, usar o filtro, mudar o formato ou o modo de pré-visualização, executar comandos Git, atualizar ou abrir outro projeto.
+
 Regras de formato:
 * Árvore de exportação:
   * ASCII -> apenas `.txt`.

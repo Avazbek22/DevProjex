@@ -33,6 +33,8 @@ Se respetan las carpetas raíz seleccionadas, los tipos de archivo, las reglas d
 
 Se copian archivos de texto y binarios, y se conservan las carpetas vacías incluidas. Los archivos de origen no se modifican. El resultado no puede guardarse dentro del proyecto de origen.
 
+Durante la exportación no se puede cambiar el árbol ni la configuración, usar el filtro, cambiar el formato o el modo de vista previa, ejecutar comandos de Git, actualizar ni abrir otro proyecto.
+
 Reglas de formato:
 * Árbol de exportación:
   * ASCII -> `.txt` únicamente.

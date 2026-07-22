@@ -542,6 +542,7 @@
                       ClipToBounds="True"
                       Height="0">
                 <views:SearchBarView Name="SearchBar"
+                                     IsEnabled="{Binding IsSearchAvailable}"
                                      RenderTransformOrigin="50%,0%"
                                      SearchKeyDown="OnSearchKeyDown"
                                      SearchPrevRequested="OnSearchPrev"
@@ -560,6 +561,7 @@
                       ClipToBounds="True"
                       Height="0">
                 <views:FilterBarView Name="FilterBar"
+                                     IsEnabled="{Binding IsSearchFilterAvailable}"
                                      RenderTransformOrigin="50%,0%"
                                      FilterKeyDown="OnFilterKeyDown"
                                      FilterCloseRequested="OnFilterClose">
@@ -578,7 +580,7 @@
                 <Grid>
                   <controls:ProjectTreeView Name="ProjectTree"
                                             ItemsSource="{Binding TreeNodes}"
-                                            IsEnabled="{Binding IsProjectLoaded}"
+                                            IsEnabled="{Binding CanUseProjectWorkspaceActions}"
                                             Padding="0,0,0,4"
                                             FontFamily="{Binding SelectedFontFamily}"
                                             FontSize="{Binding TreeFontSize}">
@@ -627,6 +629,7 @@
                   <Button Name="PreviewTreeHideButton"
                           Classes="menu-icon-button tree-island-close-button"
                           IsVisible="{Binding IsPreviewMode}"
+                          IsEnabled="{Binding IsProjectLoaded}"
                           HorizontalAlignment="Right"
                           VerticalAlignment="Top"
                           Margin="0,8,13,0"
@@ -705,7 +708,8 @@
                     ClipToBounds="True"
                     Margin="0,0,0,4">
               <Border Name="PreviewBar"
-                      Classes="preview-panel">
+                      Classes="preview-panel"
+                      IsEnabled="{Binding IsProjectLoaded}">
               <Grid Name="PreviewBarLayoutGrid"
                     ColumnDefinitions="Auto,*,Auto"
                     Margin="12,5"
@@ -961,7 +965,7 @@
                     CornerRadius="8"
                     Padding="14,10"
                     Opacity="{Binding Opacity}"
-                    MaxWidth="420"
+                    MaxWidth="560"
                     HorizontalAlignment="Center"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="1">

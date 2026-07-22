@@ -33,6 +33,8 @@ Les dossiers de premier niveau, types de fichiers, règles d’exclusion et él�
 
 Les fichiers texte et binaires sont copiés, et les dossiers vides inclus sont conservés. Les fichiers sources ne sont pas modifiés. Le résultat ne peut pas être enregistré dans le projet source.
 
+Pendant l’export, vous ne pouvez pas modifier l’arborescence ou les paramètres, utiliser le filtre, changer le format ou le mode d’aperçu, lancer des commandes Git, actualiser ou ouvrir un autre projet.
+
 Règles de format :
 * Exporter l’arborescence :
   * ASCII -> uniquement `.txt`.

@@ -33,6 +33,8 @@ Tanlangan yuqori darajadagi jildlar, fayl turlari, istisno qoidalari va belgilan
 
 Matnli va binar fayllar nusxalanadi, kiritilgan bo‘sh jildlar ham saqlanadi. Asl fayllar o‘zgartirilmaydi. Natijani boshlang‘ich loyiha ichiga saqlab bo‘lmaydi.
 
+Eksport paytida daraxt yoki parametrlarni o‘zgartirish, filtrdan foydalanish, format yoki ko‘rib chiqish rejimini almashtirish, Git buyruqlarini, yangilashni yoki boshqa loyihani ochishni ishga tushirish mumkin emas.
+
 Format qoidalari:
 * Daraxtni eksport qilish:
   * ASCII -> faqat `.txt`.

@@ -138,11 +138,17 @@ public partial class TopMenuBarView : UserControl
 
     private void OnToggleSettings(object? sender, RoutedEventArgs e) => ToggleSettingsRequested?.Invoke(sender, e);
 
-    private void OnTogglePreview(object? sender, RoutedEventArgs e) => TogglePreviewRequested?.Invoke(sender, e);
+    private void OnTogglePreview(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: false })
+            return;
+
+        TogglePreviewRequested?.Invoke(sender, e);
+    }
 
     private void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel { IsSearchFilterAvailable: false })
+        if (DataContext is MainWindowViewModel { IsSearchAvailable: false })
             return;
 
         ToggleSearchRequested?.Invoke(sender, e);
@@ -158,25 +164,25 @@ public partial class TopMenuBarView : UserControl
 
     private void OnAsciiFormatClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: true } vm)
             vm.SelectedExportFormat = ExportFormat.Ascii;
     }
 
     private void OnJsonFormatClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: true } vm)
             vm.SelectedExportFormat = ExportFormat.Json;
     }
 
     private void OnXmlFormatClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: true } vm)
             vm.SelectedExportFormat = ExportFormat.Xml;
     }
 
     private void OnMarkdownFormatClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: true } vm)
             vm.SelectedExportFormat = ExportFormat.Markdown;
     }
 

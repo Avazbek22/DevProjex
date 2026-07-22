@@ -219,6 +219,9 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private CancellationTokenSource? _projectCopyExportCts;
+    private TaskCompletionSource<bool>? _projectCopyExportCompletion;
+    private bool _projectCopyExportClosePending;
+    private bool _allowCloseAfterProjectCopyExportCleanup;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
@@ -603,6 +606,7 @@ public partial class MainWindow : Window
         // Prime the saved material/backdrop before the startup reveal gate waits for the
         // first render frames, otherwise the gate would only hide the default XAML surface.
         ApplyStartupThemePreset();
+        Closing += OnWindowClosing;
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
@@ -789,6 +793,7 @@ public partial class MainWindow : Window
 
         // Unsubscribe from window lifecycle events
         Opened -= OnOpened;
+        Closing -= OnWindowClosing;
         Closed -= OnWindowClosed;
         Activated -= OnActivated;
         Deactivated -= OnDeactivated;
@@ -2455,6 +2460,9 @@ public partial class MainWindow : Window
 
     private async void OnOpenFolder(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanChangeProjectTree)
+            return;
+
         try
         {
             var options = new FolderPickerOpenOptions
@@ -2507,6 +2515,9 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanChangeProjectTree)
+            return;
+
         await ProjectRefreshRoutingPolicy.ExecuteAsync(
             _viewModel.IsProjectLoaded,
             _viewModel.ProjectSourceType,
@@ -2597,9 +2608,7 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
-            statusOperationId = _statusOperations.Begin(
-                _localization["Status.Operation.PreparingOutput"],
-                indeterminate: true);
+            statusOperationId = BeginOutputPreparationStatus();
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2638,9 +2647,7 @@ public partial class MainWindow : Window
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
             // Run file reading off UI thread
-            statusOperationId = _statusOperations.Begin(
-                _localization["Status.Operation.PreparingOutput"],
-                indeterminate: true);
+            statusOperationId = BeginOutputPreparationStatus();
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2711,9 +2718,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            statusOperationId = _statusOperations.Begin(
-                _localization["Status.Operation.PreparingOutput"],
-                indeterminate: true);
+            statusOperationId = BeginOutputPreparationStatus();
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2762,9 +2767,7 @@ public partial class MainWindow : Window
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
 
-            statusOperationId = _statusOperations.Begin(
-                _localization["Status.Operation.PreparingOutput"],
-                indeterminate: true);
+            statusOperationId = BeginOutputPreparationStatus();
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -3606,6 +3609,18 @@ public partial class MainWindow : Window
         operationId = null;
     }
 
+    private long? BeginOutputPreparationStatus()
+    {
+        // Clipboard and text-file exports are safe against the captured project tree, but
+        // they must not replace the progress or cancellation action of a physical export.
+        if (_viewModel.IsProjectCopyExportInProgress)
+            return null;
+
+        return _statusOperations.Begin(
+            _localization["Status.Operation.PreparingOutput"],
+            indeterminate: true);
+    }
+
     private string BuildSuggestedExportFileName(string suffix, string extension)
     {
         var baseName = _currentProjectDisplayName;
@@ -3722,7 +3737,7 @@ public partial class MainWindow : Window
 
     private void OnTogglePreview(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.IsProjectLoaded)
+        if (!_viewModel.CanUseProjectWorkspaceActions)
             return;
 
         if (_viewModel.IsPreviewMode)
@@ -3733,7 +3748,7 @@ public partial class MainWindow : Window
 
     private void OnPreviewClose(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.IsProjectLoaded)
+        if (!_viewModel.CanUseProjectWorkspaceActions)
             return;
 
         ClosePreviewMode();
@@ -3771,7 +3786,7 @@ public partial class MainWindow : Window
 
     private void OnPreviewTreeHide(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.IsPreviewTreeVisible)
+        if (!_viewModel.CanUseProjectWorkspaceActions || !_viewModel.IsPreviewTreeVisible)
             return;
 
         HidePreviewTreePane();
@@ -3794,7 +3809,8 @@ public partial class MainWindow : Window
 
     private async Task SwitchPreviewModeAsync(PreviewContentMode targetMode)
     {
-        if (_viewModel.SelectedPreviewContentMode == targetMode)
+        if (!_viewModel.CanUseProjectWorkspaceActions ||
+            _viewModel.SelectedPreviewContentMode == targetMode)
             return;
 
         var switchCts = ReplaceCancellationSource(ref _previewModeSwitchCts);
@@ -5661,7 +5677,7 @@ public partial class MainWindow : Window
 
     private async void OnRecentFolderMenuItemClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem { Tag: string path })
+        if (!_viewModel.CanChangeProjectTree || sender is not MenuItem { Tag: string path })
             return;
 
         var lifetimeToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
@@ -5922,6 +5938,9 @@ public partial class MainWindow : Window
 
     private void OnGitClone(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanChangeProjectTree)
+            return;
+
         _viewModel.GitCloneUrl = string.Empty;
         _viewModel.GitCloneStatus = string.Empty;
         _viewModel.GitCloneInProgress = false;
@@ -6161,6 +6180,9 @@ public partial class MainWindow : Window
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanGetGitUpdates)
+            return;
+
         await GetGitUpdatesAsync();
         e.Handled = true;
     }
@@ -6240,7 +6262,7 @@ public partial class MainWindow : Window
 
     private async void OnGitBranchSwitch(object? sender, string branchName)
     {
-        if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
+        if (!_viewModel.CanGetGitUpdates || string.IsNullOrEmpty(_currentPath))
             return;
 
         var gitCts = ReplaceCancellationSource(ref _gitOperationCts);
@@ -6361,7 +6383,7 @@ public partial class MainWindow : Window
 
     private void OnBranchMenuItemClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem { Tag: string name })
+        if (_viewModel.CanChangeProjectTree && sender is MenuItem { Tag: string name })
             _topMenuBar?.OnGitBranchSwitch(name);
     }
 
@@ -6399,7 +6421,7 @@ public partial class MainWindow : Window
     private async void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
-        if (!_viewModel.IsSearchFilterAvailable) return;
+        if (!_viewModel.IsSearchAvailable) return;
 
         if (_viewModel.SearchVisible)
         {
@@ -6680,7 +6702,8 @@ public partial class MainWindow : Window
         // Ctrl+O (always available)
         if (mods == KeyModifiers.Control && e.Key == Key.O)
         {
-            OnOpenFolder(this, new RoutedEventArgs());
+            if (_viewModel.CanChangeProjectTree)
+                OnOpenFolder(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
@@ -6710,7 +6733,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (_viewModel.IsProjectLoaded)
+            if (_viewModel.IsSearchFilterAvailable)
             {
                 ScheduleSearchOrFilterHotkeyToggle(
                     isSearchToggle: false,
@@ -6759,7 +6782,7 @@ public partial class MainWindow : Window
         // F5 refresh (same as WinForms)
         if (e.Key == Key.F5)
         {
-            if (_viewModel.IsProjectLoaded)
+            if (_viewModel.CanChangeProjectTree && _viewModel.IsProjectLoaded)
                 OnRefresh(this, new RoutedEventArgs());
 
             e.Handled = true;
@@ -6957,7 +6980,10 @@ public partial class MainWindow : Window
         {
             try
             {
-                if (!_viewModel.IsProjectLoaded || !_viewModel.IsSearchFilterAvailable)
+                var isAvailable = isSearchToggle
+                    ? _viewModel.IsSearchAvailable
+                    : _viewModel.IsSearchFilterAvailable;
+                if (!isAvailable)
                     return;
 
                 toggleAction(this);
@@ -6975,7 +7001,7 @@ public partial class MainWindow : Window
     private void ShowSearch(bool focusInput = true, bool selectAllOnFocus = true)
     {
         if (!_viewModel.IsProjectLoaded) return;
-        if (!_viewModel.IsSearchFilterAvailable) return;
+        if (!_viewModel.IsSearchAvailable) return;
         if (_searchBarAnimating) return;
 
         SuppressSearchBoxAccentVisual();
@@ -6992,7 +7018,7 @@ public partial class MainWindow : Window
     private async Task FocusSearchBoxAfterOpenAnimationAsync(bool selectAllOnFocus, int focusRequestVersion)
     {
         await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
-        if (!_viewModel.SearchVisible || !_viewModel.IsSearchFilterAvailable || !IsSearchFocusRequestCurrent(focusRequestVersion))
+        if (!_viewModel.SearchVisible || !_viewModel.IsSearchAvailable || !IsSearchFocusRequestCurrent(focusRequestVersion))
             return;
 
         await TryFocusSearchBoxWithRetryAsync(selectAllOnFocus, focusRequestVersion);
@@ -7199,7 +7225,7 @@ public partial class MainWindow : Window
         await YieldUiAsync(DispatcherPriority.Render);
         await YieldUiAsync(DispatcherPriority.Render);
 
-        if (!_viewModel.SearchVisible || !_viewModel.IsSearchFilterAvailable)
+        if (!_viewModel.SearchVisible || !_viewModel.IsSearchAvailable)
             return;
 
         RestoreSearchBoxAccentVisual();
@@ -7511,6 +7537,9 @@ public partial class MainWindow : Window
 
     private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
+        if (!_viewModel.CanChangeProjectTree)
+            return false;
+
         var stopwatch = Stopwatch.StartNew();
         string normalizedPath;
         try

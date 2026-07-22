@@ -7,16 +7,23 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+    private static readonly TimeSpan ProjectCopyResultToastDuration = TimeSpan.FromSeconds(3.5);
+
     private async void OnExportProjectCopyToFolder(object? sender, RoutedEventArgs e)
     {
-        if (!EnsureTreeReady() || StorageProvider is null || !StorageProvider.CanPickFolder)
+        if (!_viewModel.CanExportProjectCopy ||
+            !EnsureTreeReady() ||
+            StorageProvider is null ||
+            !StorageProvider.CanPickFolder)
             return;
 
         try
         {
+            var folderName = $"{GetProjectCopyName()}-copy";
             var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
                 Title = _localization["Picker.ProjectCopy.Folder"],
+                SuggestedFileName = folderName,
                 AllowMultiple = false
             });
             var destinationParent = folders.FirstOrDefault()?.TryGetLocalPath();
@@ -37,7 +44,10 @@ public partial class MainWindow
 
     private async void OnExportProjectCopyToZip(object? sender, RoutedEventArgs e)
     {
-        if (!EnsureTreeReady() || StorageProvider is null || !StorageProvider.CanSave)
+        if (!_viewModel.CanExportProjectCopy ||
+            !EnsureTreeReady() ||
+            StorageProvider is null ||
+            !StorageProvider.CanSave)
             return;
 
         try
@@ -84,6 +94,7 @@ public partial class MainWindow
             return;
 
         _metrics.CancelBackgroundCalculation();
+        CancelPreviewRefresh();
         var selectedPaths = new HashSet<string>(GetCheckedPaths(), PathComparer.Default);
         var request = new ProjectCopyExportRequest(
             _currentPath,
@@ -93,44 +104,65 @@ public partial class MainWindow
             destinationPath,
             format);
         var cancellation = new CancellationTokenSource();
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _projectCopyExportCts = cancellation;
-        long? operationId = _statusOperations.Begin(
-            _localization["Status.Operation.ExportingProjectCopy"],
-            indeterminate: false,
-            operationType: StatusOperationType.ProjectCopyExport,
-            cancelAction: cancellation.Cancel);
-        var progress = new Progress<ProjectCopyExportProgress>(value =>
-            _statusOperations.UpdateProgress(
-                value.Percentage,
-                string.Format(
-                    CultureInfo.CurrentCulture,
-                    _localization["Status.Operation.ExportingProjectCopy.Progress"],
-                    value.ProcessedFileCount,
-                    value.TotalFileCount),
-                operationId));
+        _projectCopyExportCompletion = completion;
+        _viewModel.IsProjectCopyExportInProgress = true;
+        _searchCoordinator.CancelPending();
+        _filterCoordinator.CancelPending();
+        long? operationId = null;
 
         try
         {
-            var result = await _projectCopyExport.ExportAsync(request, progress, cancellation.Token);
+            operationId = _statusOperations.Begin(
+                _localization["Status.Operation.ExportingProjectCopy"],
+                indeterminate: false,
+                operationType: StatusOperationType.ProjectCopyExport,
+                cancelAction: cancellation.Cancel);
+            var progress = new Progress<ProjectCopyExportProgress>(value =>
+                _statusOperations.UpdateProgress(
+                    value.Percentage,
+                    string.Format(
+                        CultureInfo.CurrentCulture,
+                        _localization["Status.Operation.ExportingProjectCopy.Progress"],
+                        value.ProcessedEntryCount,
+                        value.TotalEntryCount),
+                    operationId));
+            // Planning and source-path validation are synchronous and scale with the tree.
+            // Offloading the complete operation lets Avalonia render the locked controls immediately.
+            var result = await Task.Run(
+                () => _projectCopyExport.ExportAsync(request, progress, cancellation.Token),
+                cancellation.Token);
             CompleteStatusOperation(ref operationId);
             var toastKey = format == ProjectCopyExportFormat.Folder
                 ? "Toast.ProjectCopy.Folder"
                 : "Toast.ProjectCopy.Zip";
-            _toastService.Show(string.Format(CultureInfo.CurrentCulture, _localization[toastKey], result.DestinationPath));
+            _toastService.Show(
+                string.Format(
+                    CultureInfo.CurrentCulture,
+                    _localization[toastKey],
+                    AddPathWrapOpportunities(result.DestinationPath)),
+                ProjectCopyResultToastDuration);
         }
         catch (OperationCanceledException)
         {
             CompleteStatusOperation(ref operationId);
-            _toastService.Show(_localization["Toast.ProjectCopy.Canceled"]);
+            if (!_projectCopyExportClosePending)
+                _toastService.Show(_localization["Toast.ProjectCopy.Canceled"]);
         }
         catch (Exception exception)
         {
             CompleteStatusOperation(ref operationId);
-            ShowProjectCopyExportError(exception);
+            if (!_projectCopyExportClosePending)
+                ShowProjectCopyExportError(exception);
         }
         finally
         {
+            _viewModel.IsProjectCopyExportInProgress = false;
             DisposeIfCurrent(ref _projectCopyExportCts, cancellation);
+            if (ReferenceEquals(_projectCopyExportCompletion, completion))
+                _projectCopyExportCompletion = null;
+            completion.TrySetResult(true);
         }
     }
 
@@ -142,6 +174,10 @@ public partial class MainWindow
 
         return ProjectCopyExportPlanBuilder.NormalizeProjectName(projectName ?? string.Empty, _currentPath ?? string.Empty);
     }
+
+    private static string AddPathWrapOpportunities(string path) =>
+        path.Replace("\\", "\\\u200B", StringComparison.Ordinal)
+            .Replace("/", "/\u200B", StringComparison.Ordinal);
 
     private void ShowProjectCopyExportError(Exception exception)
     {
