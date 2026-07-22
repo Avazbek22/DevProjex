@@ -23,6 +23,15 @@ Teclas de acceso rápido:
   * Árbol de exportación
   * Exportar contenido
   * Exportar árbol y contenido
+* Exportar proyecto:
+  * A una carpeta…
+  * A un archivo ZIP…
+
+La exportación del proyecto crea una carpeta independiente o un archivo ZIP a partir del árbol actual y conserva la estructura de directorios.
+
+Se respetan las carpetas raíz seleccionadas, los tipos de archivo, las reglas de exclusión y los elementos marcados. Si no hay ninguno marcado, se exporta todo el árbol actual.
+
+Se copian archivos de texto y binarios, y se conservan las carpetas vacías incluidas. Los archivos de origen no se modifican. El resultado no puede guardarse dentro del proyecto de origen.
 
 Reglas de formato:
 * Árbol de exportación:

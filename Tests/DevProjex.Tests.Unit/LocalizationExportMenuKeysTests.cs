@@ -102,6 +102,21 @@ public sealed class LocalizationExportMenuKeysTests
 		}
 	}
 
+	[Fact]
+	public void ProjectCopyMenu_UsesShortParentAndActionSpecificHelpText()
+	{
+		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
+		var english = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "en.json")));
+		var russian = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "ru.json")));
+
+		Assert.Equal("Export Project", english["Menu.File.ExportProjectCopy"]);
+		Assert.Equal("Экспорт проекта", russian["Menu.File.ExportProjectCopy"]);
+		Assert.StartsWith("Creates a copy of the current tree", english["Menu.File.ExportProjectCopy.Folder.Help"]);
+		Assert.StartsWith("Creates a ZIP archive from the current tree", english["Menu.File.ExportProjectCopy.Zip.Help"]);
+		Assert.StartsWith("Создаёт копию текущего дерева", russian["Menu.File.ExportProjectCopy.Folder.Help"]);
+		Assert.StartsWith("Создаёт ZIP-архив из текущего дерева", russian["Menu.File.ExportProjectCopy.Zip.Help"]);
+	}
+
 	private static HashSet<string> ReadKeys(string json)
 	{
 		using var doc = JsonDocument.Parse(json);

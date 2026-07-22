@@ -23,6 +23,15 @@ Issiq tugmalar:
   * Daraxtni eksport qilish
   * Mazmunni eksport qilish
   * Daraxt va mazmunni eksport qilish
+* Loyihani eksport qilish:
+  * Jildga…
+  * ZIP arxivga…
+
+Loyihani eksport qilish joriy daraxtdan kataloglar tuzilmasini saqlagan holda alohida jild yoki ZIP arxiv yaratadi.
+
+Tanlangan yuqori darajadagi jildlar, fayl turlari, istisno qoidalari va belgilangan elementlar hisobga olinadi. Hech narsa belgilanmasa, butun joriy daraxt eksport qilinadi.
+
+Matnli va binar fayllar nusxalanadi, kiritilgan bo‘sh jildlar ham saqlanadi. Asl fayllar o‘zgartirilmaydi. Natijani boshlang‘ich loyiha ichiga saqlab bo‘lmaydi.
 
 Format qoidalari:
 * Daraxtni eksport qilish:

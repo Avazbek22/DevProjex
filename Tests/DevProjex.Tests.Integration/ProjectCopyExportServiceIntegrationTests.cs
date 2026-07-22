@@ -247,7 +247,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
-	public async Task SafeExternalDestinationSymlinkIsRejectedByConservativePolicy()
+	public async Task SafeExternalDestinationSymlinkResolvesToTargetAndExports()
 	{
 		using var workspace = ProjectCopyWorkspace.Create();
 		var externalTarget = Directory.CreateDirectory(Path.Combine(workspace.DestinationParent, "safe-target")).FullName;
@@ -256,21 +256,42 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 
 		try
 		{
-			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
-				workspace.ExportAsync(
-					ProjectCopyExportFormat.Folder,
-					linkPath,
-					[],
-					cancellationToken: TestContext.Current.CancellationToken));
+			var result = await workspace.ExportAsync(
+				ProjectCopyExportFormat.Folder,
+				linkPath,
+				[],
+				cancellationToken: TestContext.Current.CancellationToken);
 
-			Assert.Equal(ProjectCopyExportError.UnsafeDestinationPath, exception.Error);
-			Assert.False(Directory.Exists(Path.Combine(externalTarget, "Sample-copy")));
+			Assert.True(Directory.Exists(result.DestinationPath));
+			Assert.True(File.Exists(Path.Combine(externalTarget, "Sample-copy", "README.md")));
 			Assert.Empty(FindStagingArtifacts(externalTarget));
 		}
 		finally
 		{
 			DeleteDirectoryLink(linkPath);
 		}
+	}
+
+	[Fact]
+	public async Task MacOsSystemTemporaryPathSymlinkDoesNotMakeExternalDestinationUnsafe()
+	{
+		if (!OperatingSystem.IsMacOS())
+			Assert.Skip("The macOS system temporary-path regression only applies to macOS.");
+
+		using var workspace = ProjectCopyWorkspace.Create();
+		using var destination = new TemporaryDirectory();
+		var destinationParent = destination.CreateDirectory("exports");
+
+		var result = await workspace.ExportAsync(
+			ProjectCopyExportFormat.Folder,
+			destinationParent,
+			[],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(Directory.Exists(result.DestinationPath));
+		Assert.False(PathUtility.IsPathInside(result.DestinationPath, workspace.SourceRoot));
+		Assert.True(File.Exists(Path.Combine(result.DestinationPath, "README.md")));
+		Assert.Empty(FindStagingArtifacts(destinationParent));
 	}
 
 	[Fact]
@@ -295,6 +316,35 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			Assert.Equal(ProjectCopyExportError.UnsafeDestinationPath, exception.Error);
 			Assert.False(Directory.Exists(Path.Combine(workspace.SourceRoot, "Sample-copy")));
 			Assert.Empty(FindStagingArtifacts(workspace.SourceRoot));
+		}
+		finally
+		{
+			DeleteDirectoryLink(junctionPath);
+		}
+	}
+
+	[Fact]
+	public async Task SafeExternalWindowsJunctionResolvesToTargetAndExports()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows junctions are only available on Windows.");
+
+		using var workspace = ProjectCopyWorkspace.Create();
+		var externalTarget = Directory.CreateDirectory(Path.Combine(workspace.DestinationParent, "junction-target")).FullName;
+		var junctionPath = Path.Combine(workspace.DestinationParent, "safe-junction");
+		CreateWindowsJunctionOrSkip(junctionPath, externalTarget);
+
+		try
+		{
+			var result = await workspace.ExportAsync(
+				ProjectCopyExportFormat.Folder,
+				junctionPath,
+				[],
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			Assert.True(Directory.Exists(result.DestinationPath));
+			Assert.True(File.Exists(Path.Combine(externalTarget, "Sample-copy", "README.md")));
+			Assert.Empty(FindStagingArtifacts(externalTarget));
 		}
 		finally
 		{

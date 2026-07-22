@@ -98,6 +98,21 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "avval boshqa tizim effektini sinab ko‘radi", "asosiy oyna foni", "Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi" }
     };
 
+    public static TheoryData<string, string, string, string, string, string, string, string> ProjectExportContracts => new()
+    {
+        { "help.ru.txt", "Экспорт проекта", "В папку…", "В ZIP-архив…", "Если ничего не отмечено", "структуры каталогов", "бинарные файлы", "внутрь исходного проекта" },
+        { "help.en.txt", "Export project", "To folder…", "To ZIP archive…", "If nothing is checked", "directory structure", "binary files", "inside the source project" },
+        { "help.de.txt", "Projekt exportieren", "In Ordner…", "In ZIP-Archiv…", "Ist nichts markiert", "Verzeichnisstruktur", "Binärdateien", "innerhalb des Quellprojekts" },
+        { "help.fr.txt", "Exporter le projet", "Vers un dossier…", "Vers une archive ZIP…", "Si rien n’est coché", "structure des répertoires", "fichiers texte et binaires", "dans le projet source" },
+        { "help.it.txt", "Esporta progetto", "In una cartella…", "In un archivio ZIP…", "Se non è selezionato nulla", "struttura delle directory", "file di testo e binari", "all’interno del progetto di origine" },
+        { "help.es.txt", "Exportar proyecto", "A una carpeta…", "A un archivo ZIP…", "Si no hay ninguno marcado", "estructura de directorios", "archivos de texto y binarios", "dentro del proyecto de origen" },
+        { "help.pt.txt", "Exportar projeto", "Para uma pasta…", "Para um arquivo ZIP…", "Se nada estiver marcado", "estrutura de diretórios", "Arquivos de texto e binários", "dentro do projeto de origem" },
+        { "help.pt-pt.txt", "Exportar projeto", "Para uma pasta…", "Para um arquivo ZIP…", "Se nada estiver assinalado", "estrutura dos diretórios", "ficheiros de texto e binários", "dentro do projeto de origem" },
+        { "help.kk.txt", "Жобаны экспорттау", "Қалтаға…", "ZIP мұрағатына…", "Ештеңе белгіленбесе", "каталогтар құрылымын", "бинарлық файлдар", "бастапқы жобаның ішіне" },
+        { "help.tg.txt", "Содироти лоиҳа", "Ба ҷузвдон…", "Ба бойгонии ZIP…", "Агар чизе қайд нашуда бошад", "сохтори каталогҳо", "Файлҳои матнӣ ва бинарӣ", "дохили лоиҳаи аслӣ" },
+        { "help.uz.txt", "Loyihani eksport qilish", "Jildga…", "ZIP arxivga…", "Hech narsa belgilanmasa", "kataloglar tuzilmasini", "Matnli va binar fayllar", "boshlang‘ich loyiha ichiga" }
+    };
+
     [Theory]
     [MemberData(nameof(TreeFontAndSettingsContracts))]
     public void HelpContent_TreeFontAndSettingsPanel_DescribeCurrentUi(
@@ -195,6 +210,29 @@ public sealed class HelpContentDocumentationContractTests
         Assert.Contains(expectedNativeFallbackText, themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedTransparentWindowText, themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedDefaultFallbackText, content, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectExportContracts))]
+    public void HelpContent_FileSection_DescribesPhysicalProjectExportContract(
+        string fileName,
+        string expectedParent,
+        string expectedFolderAction,
+        string expectedZipAction,
+        string expectedUncheckedBehavior,
+        string expectedDirectoryStructure,
+        string expectedBinarySupport,
+        string expectedInsideSourceRestriction)
+    {
+        var fileSection = ExtractSection(ReadHelpFile(fileName), "## 3)", "## 4)");
+
+        Assert.Contains(expectedParent, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedFolderAction, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedZipAction, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedUncheckedBehavior, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedDirectoryStructure, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedBinarySupport, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedInsideSourceRestriction, fileSection, StringComparison.Ordinal);
     }
 
     [Theory]

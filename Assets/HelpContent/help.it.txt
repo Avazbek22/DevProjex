@@ -23,6 +23,15 @@ Scorciatoie:
   * Esporta albero
   * Esporta contenuto
   * Esporta albero e contenuto
+* Esporta progetto:
+  * In una cartella…
+  * In un archivio ZIP…
+
+L’esportazione del progetto crea una cartella separata o un archivio ZIP dall’albero corrente, mantenendo la struttura delle directory.
+
+Vengono rispettati le cartelle di primo livello, i tipi di file, le regole di esclusione e gli elementi selezionati. Se non è selezionato nulla, viene esportato l’intero albero corrente.
+
+Vengono copiati i file di testo e binari e conservate le cartelle vuote incluse. I file di origine non vengono modificati. Il risultato non può essere salvato all’interno del progetto di origine.
 
 Regole di formato:
 * Esporta albero:

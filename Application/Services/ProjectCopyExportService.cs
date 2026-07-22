@@ -49,10 +49,11 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		CancellationToken cancellationToken)
 	{
 		var destinationParent = PathUtility.Normalize(destinationParentPath);
+		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationParent);
 		Directory.CreateDirectory(destinationParent);
-		ValidateDestinationPathSegments(destinationParent);
+		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationParent);
 		var preferredPath = ResolveAvailableDirectoryPath(destinationParent, $"{plan.ProjectName}-copy");
-		ValidatePathOutsideSource(plan.ProjectRootPath, preferredPath);
+		ValidateDestinationOutsideSource(plan.ProjectRootPath, preferredPath);
 		// A sibling staging directory keeps the final rename atomic and prevents partial results from becoming visible.
 		var stagingPath = Path.Combine(destinationParent, $".devprojex-{Guid.NewGuid():N}.tmp");
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
@@ -62,8 +63,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		try
 		{
 			Directory.CreateDirectory(stagingPath);
-			ValidateDestinationPathSegments(stagingPath);
-			ValidatePathOutsideSource(plan.ProjectRootPath, stagingPath);
+			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 			foreach (var directory in plan.Entries.Where(static entry => entry.IsDirectory))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -114,10 +114,11 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		if (string.IsNullOrWhiteSpace(destinationDirectory))
 			throw new ProjectCopyExportException(ProjectCopyExportError.DestinationUnavailable, "The ZIP destination directory is unavailable.");
 
+		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
 		Directory.CreateDirectory(destinationDirectory);
-		ValidateDestinationPathSegments(destinationDirectory);
+		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
 		var stagingPath = Path.Combine(destinationDirectory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
-		ValidatePathOutsideSource(plan.ProjectRootPath, stagingPath);
+		ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
 		var processedFiles = 0;
 		long bytesWritten = 0;
@@ -154,10 +155,8 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			}
 
 			cancellationToken.ThrowIfCancellationRequested();
-			ValidateDestinationPathSegments(stagingPath);
-			ValidateDestinationPathSegments(destinationPath);
-			ValidatePathOutsideSource(plan.ProjectRootPath, stagingPath);
-			ValidatePathOutsideSource(plan.ProjectRootPath, destinationPath);
+			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
+			ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
 			File.Move(stagingPath, destinationPath, overwrite: true);
 			return new ProjectCopyExportResult(destinationPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
@@ -247,63 +246,109 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		if (format == ProjectCopyExportFormat.Zip)
 			normalizedDestination = EnsureZipExtension(normalizedDestination);
 
-		ValidatePathOutsideSource(rootPath, normalizedDestination);
-
-		ValidateDestinationPathSegments(normalizedDestination);
+		ValidateDestinationOutsideSource(rootPath, normalizedDestination);
 	}
 
-	private static void ValidatePathOutsideSource(string rootPath, string path)
+	private static void ValidateDestinationOutsideSource(string rootPath, string path)
 	{
-		if (!PathUtility.IsPathInside(path, rootPath))
-			return;
+		var normalizedRoot = PathUtility.Normalize(rootPath);
+		var normalizedDestination = PathUtility.Normalize(path);
+		if (PathUtility.IsPathInside(normalizedDestination, normalizedRoot))
+		{
+			throw new ProjectCopyExportException(
+				ProjectCopyExportError.DestinationInsideSource,
+				"The project copy destination cannot be the source project or a path inside it.");
+		}
 
-		throw new ProjectCopyExportException(
-			ProjectCopyExportError.DestinationInsideSource,
-			"The project copy destination cannot be the source project or a path inside it.");
+		if (!Directory.Exists(normalizedRoot))
+			throw SourceUnavailable($"The source project is no longer available: {normalizedRoot}");
+
+		var canonicalRoot = ResolveCanonicalPath(normalizedRoot);
+		var canonicalDestination = ResolveCanonicalPath(normalizedDestination);
+		if (PathUtility.IsPathInside(canonicalDestination, canonicalRoot))
+		{
+			throw UnsafeDestination(
+				$"The destination resolves to the source project or a path inside it: {normalizedDestination}");
+		}
 	}
 
-	private static void ValidateDestinationPathSegments(string destinationPath)
+	private static string ResolveCanonicalPath(string path)
 	{
-		var normalizedPath = PathUtility.Normalize(destinationPath);
+		var normalizedPath = PathUtility.Normalize(path);
 		var root = Path.GetPathRoot(normalizedPath);
 		if (string.IsNullOrWhiteSpace(root))
 			throw UnsafeDestination($"The destination path has no filesystem root: {normalizedPath}");
 
-		var currentPath = root;
-		ValidateDestinationSegment(currentPath);
+		var lexicalPath = PathUtility.Normalize(root);
+		var canonicalPath = ResolveExistingPathSegment(lexicalPath, lexicalPath);
 		var relativePath = Path.GetRelativePath(root, normalizedPath);
 		if (relativePath == ".")
-			return;
+			return canonicalPath;
 
+		var missingSegmentReached = false;
 		foreach (var segment in relativePath.Split(
 			         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
 			         StringSplitOptions.RemoveEmptyEntries))
 		{
-			currentPath = Path.Combine(currentPath, segment);
-			if (!ValidateDestinationSegment(currentPath))
-				break;
+			lexicalPath = Path.Combine(lexicalPath, segment);
+			var nextCanonicalPath = Path.Combine(canonicalPath, segment);
+			if (missingSegmentReached || !PathExists(lexicalPath))
+			{
+				missingSegmentReached = true;
+				canonicalPath = nextCanonicalPath;
+				continue;
+			}
+
+			canonicalPath = ResolveExistingPathSegment(lexicalPath, nextCanonicalPath);
 		}
+
+		return PathUtility.Normalize(canonicalPath);
 	}
 
-	private static bool ValidateDestinationSegment(string path)
+	private static string ResolveExistingPathSegment(string lexicalPath, string canonicalPath)
 	{
 		try
 		{
-			var attributes = File.GetAttributes(path);
-			if ((attributes & FileAttributes.ReparsePoint) != 0)
-				throw UnsafeDestination($"The destination path contains a symbolic link or reparse point: {path}");
+			var attributes = File.GetAttributes(lexicalPath);
+			if ((attributes & FileAttributes.ReparsePoint) == 0)
+				return PathUtility.Normalize(canonicalPath);
 
+			FileSystemInfo link = Directory.Exists(lexicalPath)
+				? new DirectoryInfo(lexicalPath)
+				: new FileInfo(lexicalPath);
+			var target = link.ResolveLinkTarget(returnFinalTarget: true);
+			if (target is null)
+				throw UnsafeDestination($"The destination link cannot be resolved safely: {lexicalPath}");
+
+			return PathUtility.Normalize(target.FullName);
+		}
+		catch (ProjectCopyExportException)
+		{
+			throw;
+		}
+		catch (Exception exception) when (exception is
+			       FileNotFoundException or
+			       DirectoryNotFoundException or
+			       UnauthorizedAccessException or
+			       IOException or
+			       NotSupportedException)
+		{
+			throw UnsafeDestination($"The destination path cannot be resolved safely: {lexicalPath}", exception);
+		}
+	}
+
+	private static bool PathExists(string path)
+	{
+		try
+		{
+			_ = File.GetAttributes(path);
 			return true;
 		}
 		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
 		{
 			return false;
 		}
-		catch (UnauthorizedAccessException exception)
-		{
-			throw ExportFailure(ProjectCopyExportError.AccessDenied, exception);
-		}
-		catch (IOException exception)
+		catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or NotSupportedException)
 		{
 			throw UnsafeDestination($"The destination path cannot be inspected safely: {path}", exception);
 		}
@@ -341,8 +386,8 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		var candidate = preferredPath;
 		while (true)
 		{
-			ValidatePathOutsideSource(projectRootPath, candidate);
-			ValidateDestinationPathSegments(candidate);
+			ValidateDestinationOutsideSource(projectRootPath, stagingPath);
+			ValidateDestinationOutsideSource(projectRootPath, candidate);
 			try
 			{
 				Directory.Move(stagingPath, candidate);

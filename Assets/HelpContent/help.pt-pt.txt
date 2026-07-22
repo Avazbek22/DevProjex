@@ -23,6 +23,15 @@ Teclas de atalho:
   * Árvore de exportação
   * Exportar conteúdo
   * Exportar árvore e conteúdo
+* Exportar projeto:
+  * Para uma pasta…
+  * Para um arquivo ZIP…
+
+A exportação do projeto cria uma pasta separada ou um arquivo ZIP a partir da árvore atual, preservando a estrutura dos diretórios.
+
+São respeitadas as pastas raiz selecionadas, os tipos de ficheiro, as regras de exclusão e os itens assinalados. Se nada estiver assinalado, é exportada toda a árvore atual.
+
+Os ficheiros de texto e binários são copiados, e as pastas vazias incluídas são preservadas. Os ficheiros de origem não são alterados. O resultado não pode ser guardado dentro do projeto de origem.
 
 Regras de formato:
 * Árvore de exportação:

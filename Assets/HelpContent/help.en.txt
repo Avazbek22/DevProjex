@@ -23,6 +23,15 @@ Hotkeys:
   * Export tree
   * Export content
   * Export tree and content
+* Export project:
+  * To folder…
+  * To ZIP archive…
+
+Export project creates a separate folder or ZIP archive from the current tree while preserving the directory structure.
+
+Selected root folders, file types, exclusion rules, and checked items are respected. If nothing is checked, the entire current tree is exported.
+
+Text and binary files are copied, and included empty folders are preserved. The source files are not modified. The result cannot be saved inside the source project.
 
 Format rules:
 * Export tree:

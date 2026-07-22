@@ -23,6 +23,15 @@ Raccourcis :
   * Exporter l’arborescence
   * Exporter le contenu
   * Exporter arborescence et contenu
+* Exporter le projet :
+  * Vers un dossier…
+  * Vers une archive ZIP…
+
+L’export du projet crée un dossier distinct ou une archive ZIP à partir de l’arborescence actuelle, tout en conservant la structure des répertoires.
+
+Les dossiers de premier niveau, types de fichiers, règles d’exclusion et éléments cochés sont pris en compte. Si rien n’est coché, toute l’arborescence actuelle est exportée.
+
+Les fichiers texte et binaires sont copiés, et les dossiers vides inclus sont conservés. Les fichiers sources ne sont pas modifiés. Le résultat ne peut pas être enregistré dans le projet source.
 
 Règles de format :
 * Exporter l’arborescence :
