@@ -7413,6 +7413,9 @@ public partial class MainWindow : Window
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanApplySettings)
+            return;
+
         var applyCts = ReplaceCancellationSource(ref _applySettingsCts);
         var cancellationToken = applyCts.Token;
         void CancelApply()
