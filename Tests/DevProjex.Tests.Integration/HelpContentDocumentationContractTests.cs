@@ -62,21 +62,6 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "Tanlangan til ilova qayta ishga tushirilganda saqlanadi" }
     };
 
-    public static TheoryData<string, string, string> ProjectCopyExportContracts => new()
-    {
-        { "help.ru.txt", "Экспорт копии проекта", "Исходный проект не изменяется" },
-        { "help.en.txt", "Export Project Copy", "The source project is not modified" },
-        { "help.de.txt", "Projektkopie exportieren", "Das Quellprojekt wird nicht verändert" },
-        { "help.fr.txt", "Exporter une copie du projet", "Le projet source n’est pas modifié" },
-        { "help.it.txt", "Esporta copia del progetto", "Il progetto di origine non viene modificato" },
-        { "help.es.txt", "Exportar copia del proyecto", "El proyecto de origen no se modifica" },
-        { "help.pt.txt", "Exportar cópia do projeto", "O projeto de origem não é modificado" },
-        { "help.pt-pt.txt", "Exportar cópia do projeto", "O projeto de origem não é alterado" },
-        { "help.kk.txt", "Жоба көшірмесін экспорттау", "Бастапқы жоба өзгертілмейді" },
-        { "help.tg.txt", "Содироти нусхаи лоиҳа", "Лоиҳаи аслӣ тағйир дода намешавад" },
-        { "help.uz.txt", "Loyiha nusxasini eksport qilish", "Asl loyiha o‘zgartirilmaydi" }
-    };
-
     public static TheoryData<string, string, string, string, string> CurrentBehaviorContracts => new()
     {
         { "help.ru.txt", "### 12.2 Умный игнор", "гибрид", "Blur", "последнему завершённому состоянию" },
@@ -156,20 +141,6 @@ public sealed class HelpContentDocumentationContractTests
 
         Assert.Contains(expectedPersistenceText, languageSection, StringComparison.Ordinal);
         Assert.Contains(FindResetSettingsLabel(fileName), languageSection, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [MemberData(nameof(ProjectCopyExportContracts))]
-    public void HelpContent_FileSectionDocumentsProjectCopySelectionAndReadOnlyContract(
-        string fileName,
-        string expectedMenuLabel,
-        string expectedReadOnlyText)
-    {
-        var fileSection = ExtractSection(ReadHelpFile(fileName), "## 3)", "## 4)");
-
-        Assert.Contains(expectedMenuLabel, fileSection, StringComparison.Ordinal);
-        Assert.Contains("ZIP", fileSection, StringComparison.Ordinal);
-        Assert.Contains(expectedReadOnlyText, fileSection, StringComparison.Ordinal);
     }
 
     [Theory]

@@ -14,7 +14,8 @@ public sealed class LocalizationExportMenuKeysTests
 		"Menu.File.ExportProjectCopy",
 		"Menu.File.ExportProjectCopy.Folder",
 		"Menu.File.ExportProjectCopy.Zip",
-		"Menu.File.ExportProjectCopy.Help",
+		"Menu.File.ExportProjectCopy.Folder.Help",
+		"Menu.File.ExportProjectCopy.Zip.Help",
 		"Toast.ProjectCopy.Folder",
 		"Toast.ProjectCopy.Zip",
 		"Toast.ProjectCopy.Canceled",
@@ -26,7 +27,13 @@ public sealed class LocalizationExportMenuKeysTests
 		"Error.ProjectCopy.DestinationInsideSource",
 		"Error.ProjectCopy.SymbolicLinkNotSupported",
 		"Error.ProjectCopy.UnsafeSourcePath",
-		"Error.ProjectCopy.Failed"
+		"Error.ProjectCopy.InvalidRequest",
+		"Error.ProjectCopy.DestinationUnavailable",
+		"Error.ProjectCopy.SourceUnavailable",
+		"Error.ProjectCopy.AccessDenied",
+		"Error.ProjectCopy.IoFailure",
+		"Error.ProjectCopy.UnsafeDestinationPath",
+		"Error.ProjectCopy.UnexpectedFailure"
 	];
 
 	[Fact]
@@ -80,6 +87,18 @@ public sealed class LocalizationExportMenuKeysTests
 				Assert.True(values.TryGetValue(required, out var value), $"Missing {required} in {Path.GetFileName(file)}");
 				Assert.False(string.IsNullOrWhiteSpace(value), $"{required} is empty in {Path.GetFileName(file)}");
 			}
+		}
+	}
+
+	[Fact]
+	public void ProjectCopyLocalization_RemovesObsoleteSharedTooltipAndFormattedRawError()
+	{
+		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
+		foreach (var file in Directory.GetFiles(localizationDir, "*.json"))
+		{
+			var keys = ReadKeys(File.ReadAllText(file));
+			Assert.DoesNotContain("Menu.File.ExportProjectCopy.Help", keys);
+			Assert.DoesNotContain("Error.ProjectCopy.Failed", keys);
 		}
 	}
 

@@ -23,11 +23,6 @@ Hotkeys:
   * Export tree
   * Export content
   * Export tree and content
-* Export Project Copy:
-  * To Folder…
-  * To ZIP Archive…
-
-Project copy export reproduces the current effective tree in a separate folder or ZIP. Current settings, exclusions, and checked items are respected; when nothing is checked, the entire current tree is exported. The source project is not modified.
 
 Format rules:
 * Export tree:

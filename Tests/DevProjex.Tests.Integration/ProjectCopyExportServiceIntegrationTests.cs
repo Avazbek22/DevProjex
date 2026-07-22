@@ -194,6 +194,128 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task FolderDestinationSymlinkIntoSourceIsRejectedBeforeStaging()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var linkPath = Path.Combine(workspace.DestinationParent, "source-link");
+		CreateDirectoryLinkOrSkip(linkPath, workspace.SourceRoot);
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				workspace.ExportAsync(
+					ProjectCopyExportFormat.Folder,
+					linkPath,
+					[],
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.Equal(ProjectCopyExportError.UnsafeDestinationPath, exception.Error);
+			Assert.False(Directory.Exists(Path.Combine(workspace.SourceRoot, "Sample-copy")));
+			Assert.Empty(FindStagingArtifacts(workspace.SourceRoot));
+		}
+		finally
+		{
+			DeleteDirectoryLink(linkPath);
+		}
+	}
+
+	[Fact]
+	public async Task ZipDestinationDirectorySymlinkIntoSourceIsRejectedBeforeStaging()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var linkPath = Path.Combine(workspace.DestinationParent, "source-link");
+		CreateDirectoryLinkOrSkip(linkPath, workspace.SourceRoot);
+
+		try
+		{
+			var destination = Path.Combine(linkPath, "copy.zip");
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				workspace.ExportAsync(
+					ProjectCopyExportFormat.Zip,
+					destination,
+					[],
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.Equal(ProjectCopyExportError.UnsafeDestinationPath, exception.Error);
+			Assert.False(File.Exists(Path.Combine(workspace.SourceRoot, "copy.zip")));
+			Assert.Empty(FindStagingArtifacts(workspace.SourceRoot));
+		}
+		finally
+		{
+			DeleteDirectoryLink(linkPath);
+		}
+	}
+
+	[Fact]
+	public async Task SafeExternalDestinationSymlinkIsRejectedByConservativePolicy()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var externalTarget = Directory.CreateDirectory(Path.Combine(workspace.DestinationParent, "safe-target")).FullName;
+		var linkPath = Path.Combine(workspace.DestinationParent, "safe-link");
+		CreateDirectoryLinkOrSkip(linkPath, externalTarget);
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				workspace.ExportAsync(
+					ProjectCopyExportFormat.Folder,
+					linkPath,
+					[],
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.Equal(ProjectCopyExportError.UnsafeDestinationPath, exception.Error);
+			Assert.False(Directory.Exists(Path.Combine(externalTarget, "Sample-copy")));
+			Assert.Empty(FindStagingArtifacts(externalTarget));
+		}
+		finally
+		{
+			DeleteDirectoryLink(linkPath);
+		}
+	}
+
+	[Fact]
+	public async Task WindowsJunctionIntoSourceIsRejectedBeforeWriting()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows junctions are only available on Windows.");
+
+		using var workspace = ProjectCopyWorkspace.Create();
+		var junctionPath = Path.Combine(workspace.DestinationParent, "source-junction");
+		CreateWindowsJunctionOrSkip(junctionPath, workspace.SourceRoot);
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				workspace.ExportAsync(
+					ProjectCopyExportFormat.Folder,
+					junctionPath,
+					[],
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.Equal(ProjectCopyExportError.UnsafeDestinationPath, exception.Error);
+			Assert.False(Directory.Exists(Path.Combine(workspace.SourceRoot, "Sample-copy")));
+			Assert.Empty(FindStagingArtifacts(workspace.SourceRoot));
+		}
+		finally
+		{
+			DeleteDirectoryLink(junctionPath);
+		}
+	}
+
+	[Fact]
+	public async Task OrdinaryExternalDestinationStillExportsFolderAndZip()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+
+		var folder = await workspace.ExportFolderAsync([]);
+		var zip = await workspace.ExportZipAsync([]);
+
+		Assert.True(Directory.Exists(folder.DestinationPath));
+		Assert.True(File.Exists(zip.DestinationPath));
+		Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+	}
+
+	[Fact]
 	public async Task DescriptorPathOutsideProjectRootIsRejected()
 	{
 		using var workspace = ProjectCopyWorkspace.Create();
@@ -286,6 +408,62 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Directory.Exists(path)
 			? Directory.GetFileSystemEntries(path, "*devprojex*.tmp", SearchOption.TopDirectoryOnly)
 			: [];
+
+	private static void CreateDirectoryLinkOrSkip(string linkPath, string targetPath)
+	{
+		try
+		{
+			Directory.CreateSymbolicLink(linkPath, targetPath);
+		}
+		catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+	}
+
+	private static void CreateWindowsJunctionOrSkip(string junctionPath, string targetPath)
+	{
+		using var process = new Process
+		{
+			StartInfo = new ProcessStartInfo("cmd.exe")
+			{
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			}
+		};
+		process.StartInfo.ArgumentList.Add("/c");
+		process.StartInfo.ArgumentList.Add("mklink");
+		process.StartInfo.ArgumentList.Add("/J");
+		process.StartInfo.ArgumentList.Add(junctionPath);
+		process.StartInfo.ArgumentList.Add(targetPath);
+
+		try
+		{
+			process.Start();
+			process.WaitForExit();
+			if (process.ExitCode != 0 || !Directory.Exists(junctionPath))
+				Assert.Skip("The test environment did not allow creating a Windows junction.");
+		}
+		catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip($"Windows junction creation is unavailable: {exception.GetType().Name}.");
+		}
+	}
+
+	private static void DeleteDirectoryLink(string path)
+	{
+		try
+		{
+			if (Directory.Exists(path))
+				Directory.Delete(path);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			// The enclosing temporary workspace performs a final best-effort cleanup.
+		}
+	}
 
 	private static TreeNodeDescriptor ToDescriptor(FileSystemNode node) =>
 		new(

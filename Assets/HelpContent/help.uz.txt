@@ -23,11 +23,6 @@ Issiq tugmalar:
   * Daraxtni eksport qilish
   * Mazmunni eksport qilish
   * Daraxt va mazmunni eksport qilish
-* Loyiha nusxasini eksport qilish:
-  * Jildga…
-  * ZIP arxivga…
-
-Loyiha nusxasini eksport qilish joriy samarali daraxtni alohida jild yoki ZIP arxivda takrorlaydi. Joriy sozlamalar, istisnolar va belgilangan elementlar hisobga olinadi; hech narsa belgilanmagan bo‘lsa, butun joriy daraxt eksport qilinadi. Asl loyiha o‘zgartirilmaydi.
 
 Format qoidalari:
 * Daraxtni eksport qilish:

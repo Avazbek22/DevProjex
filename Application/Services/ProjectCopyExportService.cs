@@ -13,20 +13,33 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(request);
-		var plan = planBuilder.Build(request);
-		ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
-
-		ValidateSources(plan, cancellationToken);
-		return request.Format switch
+		try
 		{
-			ProjectCopyExportFormat.Folder => await ExportFolderAsync(
-				plan, request.DestinationPath, progress, cancellationToken).ConfigureAwait(false),
-			ProjectCopyExportFormat.Zip => await ExportZipAsync(
-				plan, request.DestinationPath, progress, cancellationToken).ConfigureAwait(false),
-			_ => throw new ProjectCopyExportException(
-				ProjectCopyExportError.InvalidRequest,
-				$"Unsupported project copy format: {request.Format}.")
-		};
+			var plan = planBuilder.Build(request);
+			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
+
+			ValidateSources(plan, cancellationToken);
+			return request.Format switch
+			{
+				ProjectCopyExportFormat.Folder => await ExportFolderAsync(
+					plan, request.DestinationPath, progress, cancellationToken).ConfigureAwait(false),
+				ProjectCopyExportFormat.Zip => await ExportZipAsync(
+					plan, request.DestinationPath, progress, cancellationToken).ConfigureAwait(false),
+				_ => throw new ProjectCopyExportException(
+					ProjectCopyExportError.InvalidRequest,
+					$"Unsupported project copy format: {request.Format}.")
+			};
+		}
+		catch (Exception exception) when (exception is not OperationCanceledException and not ProjectCopyExportException)
+		{
+			throw exception switch
+			{
+				FileNotFoundException or DirectoryNotFoundException => ExportFailure(ProjectCopyExportError.SourceUnavailable, exception),
+				UnauthorizedAccessException => ExportFailure(ProjectCopyExportError.AccessDenied, exception),
+				IOException => ExportFailure(ProjectCopyExportError.IoFailure, exception),
+				_ => ExportFailure(ProjectCopyExportError.UnexpectedFailure, exception)
+			};
+		}
 	}
 
 	private static async Task<ProjectCopyExportResult> ExportFolderAsync(
@@ -37,7 +50,9 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 	{
 		var destinationParent = PathUtility.Normalize(destinationParentPath);
 		Directory.CreateDirectory(destinationParent);
+		ValidateDestinationPathSegments(destinationParent);
 		var preferredPath = ResolveAvailableDirectoryPath(destinationParent, $"{plan.ProjectName}-copy");
+		ValidatePathOutsideSource(plan.ProjectRootPath, preferredPath);
 		// A sibling staging directory keeps the final rename atomic and prevents partial results from becoming visible.
 		var stagingPath = Path.Combine(destinationParent, $".devprojex-{Guid.NewGuid():N}.tmp");
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
@@ -47,6 +62,8 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		try
 		{
 			Directory.CreateDirectory(stagingPath);
+			ValidateDestinationPathSegments(stagingPath);
+			ValidatePathOutsideSource(plan.ProjectRootPath, stagingPath);
 			foreach (var directory in plan.Entries.Where(static entry => entry.IsDirectory))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -71,7 +88,12 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
-			var finalPath = MoveStagingDirectoryToAvailablePath(stagingPath, destinationParent, preferredPath, plan.ProjectName);
+			var finalPath = MoveStagingDirectoryToAvailablePath(
+				stagingPath,
+				destinationParent,
+				preferredPath,
+				plan.ProjectName,
+				plan.ProjectRootPath);
 			return new ProjectCopyExportResult(finalPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
 		finally
@@ -93,7 +115,9 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			throw new ProjectCopyExportException(ProjectCopyExportError.DestinationUnavailable, "The ZIP destination directory is unavailable.");
 
 		Directory.CreateDirectory(destinationDirectory);
+		ValidateDestinationPathSegments(destinationDirectory);
 		var stagingPath = Path.Combine(destinationDirectory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+		ValidatePathOutsideSource(plan.ProjectRootPath, stagingPath);
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
 		var processedFiles = 0;
 		long bytesWritten = 0;
@@ -130,6 +154,10 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			}
 
 			cancellationToken.ThrowIfCancellationRequested();
+			ValidateDestinationPathSegments(stagingPath);
+			ValidateDestinationPathSegments(destinationPath);
+			ValidatePathOutsideSource(plan.ProjectRootPath, stagingPath);
+			ValidatePathOutsideSource(plan.ProjectRootPath, destinationPath);
 			File.Move(stagingPath, destinationPath, overwrite: true);
 			return new ProjectCopyExportResult(destinationPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
@@ -152,12 +180,12 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			if (entry.IsDirectory)
 			{
 				if (!Directory.Exists(entry.SourcePath))
-					throw UnsafeSource($"A source directory is no longer available: {entry.SourcePath}");
+					throw SourceUnavailable($"A source directory is no longer available: {entry.SourcePath}");
 				continue;
 			}
 
 			if (!File.Exists(entry.SourcePath))
-				throw UnsafeSource($"A source file is no longer available: {entry.SourcePath}");
+				throw SourceUnavailable($"A source file is no longer available: {entry.SourcePath}");
 
 			_ = new FileInfo(entry.SourcePath).Length;
 		}
@@ -189,9 +217,17 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		{
 			attributes = File.GetAttributes(path);
 		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
 		{
-			throw UnsafeSource($"A source path cannot be inspected safely: {path}", exception);
+			throw SourceUnavailable($"A source path is no longer available: {path}", exception);
+		}
+		catch (UnauthorizedAccessException exception)
+		{
+			throw ExportFailure(ProjectCopyExportError.AccessDenied, exception);
+		}
+		catch (IOException exception)
+		{
+			throw ExportFailure(ProjectCopyExportError.IoFailure, exception);
 		}
 
 		if ((attributes & FileAttributes.ReparsePoint) != 0)
@@ -211,11 +247,65 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		if (format == ProjectCopyExportFormat.Zip)
 			normalizedDestination = EnsureZipExtension(normalizedDestination);
 
-		if (PathUtility.IsPathInside(normalizedDestination, rootPath))
+		ValidatePathOutsideSource(rootPath, normalizedDestination);
+
+		ValidateDestinationPathSegments(normalizedDestination);
+	}
+
+	private static void ValidatePathOutsideSource(string rootPath, string path)
+	{
+		if (!PathUtility.IsPathInside(path, rootPath))
+			return;
+
+		throw new ProjectCopyExportException(
+			ProjectCopyExportError.DestinationInsideSource,
+			"The project copy destination cannot be the source project or a path inside it.");
+	}
+
+	private static void ValidateDestinationPathSegments(string destinationPath)
+	{
+		var normalizedPath = PathUtility.Normalize(destinationPath);
+		var root = Path.GetPathRoot(normalizedPath);
+		if (string.IsNullOrWhiteSpace(root))
+			throw UnsafeDestination($"The destination path has no filesystem root: {normalizedPath}");
+
+		var currentPath = root;
+		ValidateDestinationSegment(currentPath);
+		var relativePath = Path.GetRelativePath(root, normalizedPath);
+		if (relativePath == ".")
+			return;
+
+		foreach (var segment in relativePath.Split(
+			         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+			         StringSplitOptions.RemoveEmptyEntries))
 		{
-			throw new ProjectCopyExportException(
-				ProjectCopyExportError.DestinationInsideSource,
-				"The project copy destination cannot be the source project or a path inside it.");
+			currentPath = Path.Combine(currentPath, segment);
+			if (!ValidateDestinationSegment(currentPath))
+				break;
+		}
+	}
+
+	private static bool ValidateDestinationSegment(string path)
+	{
+		try
+		{
+			var attributes = File.GetAttributes(path);
+			if ((attributes & FileAttributes.ReparsePoint) != 0)
+				throw UnsafeDestination($"The destination path contains a symbolic link or reparse point: {path}");
+
+			return true;
+		}
+		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+		{
+			return false;
+		}
+		catch (UnauthorizedAccessException exception)
+		{
+			throw ExportFailure(ProjectCopyExportError.AccessDenied, exception);
+		}
+		catch (IOException exception)
+		{
+			throw UnsafeDestination($"The destination path cannot be inspected safely: {path}", exception);
 		}
 	}
 
@@ -225,7 +315,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			? stagingRoot
 			: Path.GetFullPath(Path.Combine(stagingRoot, relativePath));
 		if (!PathUtility.IsPathInside(destination, stagingRoot))
-			throw UnsafeSource($"An export entry escapes the staging directory: {relativePath}");
+			throw UnsafeDestination($"An export entry escapes the staging directory: {relativePath}");
 
 		return destination;
 	}
@@ -245,11 +335,14 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		string stagingPath,
 		string destinationParent,
 		string preferredPath,
-		string projectName)
+		string projectName,
+		string projectRootPath)
 	{
 		var candidate = preferredPath;
 		while (true)
 		{
+			ValidatePathOutsideSource(projectRootPath, candidate);
+			ValidateDestinationPathSegments(candidate);
 			try
 			{
 				Directory.Move(stagingPath, candidate);
@@ -379,6 +472,12 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		}
 	}
 
-	private static ProjectCopyExportException UnsafeSource(string message, Exception? innerException = null) =>
-		new(ProjectCopyExportError.UnsafeSourcePath, message, innerException);
+	private static ProjectCopyExportException SourceUnavailable(string message, Exception? innerException = null) =>
+		new(ProjectCopyExportError.SourceUnavailable, message, innerException);
+
+	private static ProjectCopyExportException UnsafeDestination(string message, Exception? innerException = null) =>
+		new(ProjectCopyExportError.UnsafeDestinationPath, message, innerException);
+
+	private static ProjectCopyExportException ExportFailure(ProjectCopyExportError error, Exception exception) =>
+		new(error, $"Project copy export failed with {exception.GetType().Name}.", exception);
 }

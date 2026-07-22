@@ -5,6 +5,15 @@
              x:Class="DevProjex.Avalonia.Views.TopMenuBarView"
              x:DataType="vm:MainWindowViewModel"
              x:CompileBindings="True">
+  <UserControl.Styles>
+    <Style Selector="Border.project-copy-help-indicator">
+      <Setter Property="Opacity" Value="0.72" />
+    </Style>
+    <Style Selector="Border.project-copy-help-indicator:pointerover">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+  </UserControl.Styles>
   <Grid Name="RootGrid" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0">
     <!-- Keep menu surface spanning all columns to avoid transparency seams near the controls. -->
     <Menu Name="MainMenu"
@@ -33,43 +42,98 @@
           <MenuItem Header="{Binding MenuFileExportTreeAndContent}" Click="OnExportTreeAndContentToFile" />
         </MenuItem>
         <MenuItem Name="ExportProjectCopyMenuItem"
-                  IsEnabled="{Binding IsProjectLoaded}"
-                  AutomationProperties.HelpText="{Binding MenuFileExportProjectCopyHelp}">
-          <MenuItem.Header>
-            <StackPanel Orientation="Horizontal" Spacing="7">
-              <TextBlock Text="{Binding MenuFileExportProjectCopy}"
-                         VerticalAlignment="Center" />
-              <Border Width="16"
-                      Height="16"
-                      CornerRadius="8"
-                      BorderThickness="1"
-                      BorderBrush="{DynamicResource AppSecondaryTextBrush}"
-                      Cursor="Help"
-                      VerticalAlignment="Center"
-                      ToolTip.ShowDelay="420"
-                      ToolTip.Placement="Right">
-                <ToolTip.Tip>
-                  <ToolTip Loaded="OnToolTipLoaded" MaxWidth="340">
-                    <TextBlock Text="{Binding MenuFileExportProjectCopyHelp}"
-                               MaxWidth="320"
-                               TextWrapping="Wrap" />
-                  </ToolTip>
-                </ToolTip.Tip>
-                <TextBlock Text="?"
-                           FontSize="10"
-                           FontWeight="SemiBold"
-                           Foreground="{DynamicResource AppSecondaryTextBrush}"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center" />
-              </Border>
-            </StackPanel>
-          </MenuItem.Header>
+                  Header="{Binding MenuFileExportProjectCopy}"
+                  IsEnabled="{Binding IsProjectLoaded}">
           <MenuItem Name="ExportProjectCopyFolderMenuItem"
-                    Header="{Binding MenuFileExportProjectCopyFolder}"
-                    Click="OnExportProjectCopyToFolder" />
+                    Padding="11,4,0,7"
+                    AutomationProperties.HelpText="{Binding MenuFileExportProjectCopyFolderHelp}"
+                    Click="OnExportProjectCopyToFolder">
+            <MenuItem.Header>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" SharedSizeGroup="ProjectCopyActionLabel" />
+                  <ColumnDefinition Width="6" />
+                  <ColumnDefinition Width="16" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
+                           Text="{Binding MenuFileExportProjectCopyFolder}"
+                           VerticalAlignment="Center" />
+                <Border Classes="project-copy-help-indicator"
+                        Grid.Column="2"
+                        Width="16"
+                        Height="16"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource AppMutedTextBrush}"
+                        Background="{DynamicResource MenuPressedBrush}"
+                        Cursor="Help"
+                        VerticalAlignment="Center"
+                        PointerPressed="OnProjectCopyHelpIndicatorPointerPressed"
+                        PointerReleased="OnProjectCopyHelpIndicatorPointerReleased"
+                        ToolTip.ShowDelay="450"
+                        ToolTip.Placement="Right">
+                  <ToolTip.Tip>
+                    <ToolTip Loaded="OnToolTipLoaded" MaxWidth="340">
+                      <TextBlock Text="{Binding MenuFileExportProjectCopyFolderHelp}"
+                                 MaxWidth="320"
+                                 TextWrapping="Wrap" />
+                    </ToolTip>
+                  </ToolTip.Tip>
+                  <TextBlock Text="?"
+                             FontSize="10"
+                             FontWeight="SemiBold"
+                             Foreground="{DynamicResource AppTextBrush}"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Border>
+              </Grid>
+            </MenuItem.Header>
+          </MenuItem>
           <MenuItem Name="ExportProjectCopyZipMenuItem"
-                    Header="{Binding MenuFileExportProjectCopyZip}"
-                    Click="OnExportProjectCopyToZip" />
+                    Padding="11,4,0,7"
+                    AutomationProperties.HelpText="{Binding MenuFileExportProjectCopyZipHelp}"
+                    Click="OnExportProjectCopyToZip">
+            <MenuItem.Header>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" SharedSizeGroup="ProjectCopyActionLabel" />
+                  <ColumnDefinition Width="6" />
+                  <ColumnDefinition Width="16" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
+                           Text="{Binding MenuFileExportProjectCopyZip}"
+                           VerticalAlignment="Center" />
+                <Border Classes="project-copy-help-indicator"
+                        Grid.Column="2"
+                        Width="16"
+                        Height="16"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource AppMutedTextBrush}"
+                        Background="{DynamicResource MenuPressedBrush}"
+                        Cursor="Help"
+                        VerticalAlignment="Center"
+                        PointerPressed="OnProjectCopyHelpIndicatorPointerPressed"
+                        PointerReleased="OnProjectCopyHelpIndicatorPointerReleased"
+                        ToolTip.ShowDelay="450"
+                        ToolTip.Placement="Right">
+                  <ToolTip.Tip>
+                    <ToolTip Loaded="OnToolTipLoaded" MaxWidth="340">
+                      <TextBlock Text="{Binding MenuFileExportProjectCopyZipHelp}"
+                                 MaxWidth="320"
+                                 TextWrapping="Wrap" />
+                    </ToolTip>
+                  </ToolTip.Tip>
+                  <TextBlock Text="?"
+                             FontSize="10"
+                             FontWeight="SemiBold"
+                             Foreground="{DynamicResource AppTextBrush}"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Border>
+              </Grid>
+            </MenuItem.Header>
+          </MenuItem>
         </MenuItem>
         <MenuItem Header="{Binding MenuFileExit}" Click="OnExit" />
       </MenuItem>

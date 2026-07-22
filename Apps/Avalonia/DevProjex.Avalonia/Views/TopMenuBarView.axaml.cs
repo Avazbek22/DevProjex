@@ -102,6 +102,15 @@ public partial class TopMenuBarView : UserControl
     private void OnExportProjectCopyToZip(object? sender, RoutedEventArgs e)
         => ExportProjectCopyToZipRequested?.Invoke(sender, e);
 
+    private void OnProjectCopyHelpIndicatorPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        // The indicator is informational; consuming pointer input keeps the submenu open and prevents export.
+        e.Handled = true;
+    }
+
+    private void OnProjectCopyHelpIndicatorPointerReleased(object? sender, PointerReleasedEventArgs e) =>
+        e.Handled = true;
+
     private void OnExit(object? sender, RoutedEventArgs e) => ExitRequested?.Invoke(sender, e);
 
     private void OnCopyTree(object? sender, RoutedEventArgs e) => CopyTreeRequested?.Invoke(sender, e);

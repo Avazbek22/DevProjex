@@ -1,5 +1,6 @@
 using Avalonia.Platform.Storage;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Avalonia.Services;
 using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia;
@@ -144,17 +145,8 @@ public partial class MainWindow
 
     private void ShowProjectCopyExportError(Exception exception)
     {
-        var message = exception is ProjectCopyExportException projectCopyException
-            ? projectCopyException.Error switch
-            {
-                ProjectCopyExportError.DestinationInsideSource => _localization["Error.ProjectCopy.DestinationInsideSource"],
-                ProjectCopyExportError.SymbolicLinkNotSupported => _localization["Error.ProjectCopy.SymbolicLinkNotSupported"],
-                ProjectCopyExportError.UnsafeSourcePath => _localization["Error.ProjectCopy.UnsafeSourcePath"],
-                _ => string.Format(CultureInfo.CurrentCulture, _localization["Error.ProjectCopy.Failed"], exception.Message)
-            }
-            : string.Format(CultureInfo.CurrentCulture, _localization["Error.ProjectCopy.Failed"], exception.Message);
-
-        ShowProjectCopyExportError(message);
+        var localizationKey = ProjectCopyExportErrorPresentation.ResolveLocalizationKey(exception);
+        ShowProjectCopyExportError(_localization[localizationKey]);
     }
 
     private void ShowProjectCopyExportError(string message) => _toastService.Show(message);

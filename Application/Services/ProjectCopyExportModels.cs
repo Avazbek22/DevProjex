@@ -12,7 +12,12 @@ public enum ProjectCopyExportError
 	DestinationInsideSource = 1,
 	UnsafeSourcePath = 2,
 	SymbolicLinkNotSupported = 3,
-	DestinationUnavailable = 4
+	DestinationUnavailable = 4,
+	SourceUnavailable = 5,
+	AccessDenied = 6,
+	IoFailure = 7,
+	UnsafeDestinationPath = 8,
+	UnexpectedFailure = 9
 }
 
 public sealed record ProjectCopyExportRequest(
