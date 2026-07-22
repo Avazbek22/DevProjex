@@ -310,12 +310,13 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		try
 		{
 			var attributes = File.GetAttributes(lexicalPath);
-			if ((attributes & FileAttributes.ReparsePoint) == 0)
-				return PathUtility.Normalize(canonicalPath);
-
 			FileSystemInfo link = Directory.Exists(lexicalPath)
 				? new DirectoryInfo(lexicalPath)
 				: new FileInfo(lexicalPath);
+			// Unix can expose target attributes for a directory link, so LinkTarget is the primary signal.
+			if (link.LinkTarget is null && (attributes & FileAttributes.ReparsePoint) == 0)
+				return PathUtility.Normalize(canonicalPath);
+
 			var target = link.ResolveLinkTarget(returnFinalTarget: true);
 			if (target is null)
 				throw UnsafeDestination($"The destination link cannot be resolved safely: {lexicalPath}");
