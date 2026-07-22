@@ -269,6 +269,43 @@ public sealed class IgnoreRulesHierarchicalGitIgnoreMatrixTests
 		Assert.False(rules.IsGitIgnored(path, isDirectory: false, "app.log"));
 	}
 
+	[Theory]
+	[InlineData(".git", true)]
+	[InlineData(".github", false)]
+	[InlineData(".git-owned", false)]
+	[InlineData(".gitignore", false)]
+	public void IsGitIgnored_GitAdministrativeBoundary_RejectsOnlyExactMetadataName(
+		string name,
+		bool expectedIgnored)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "logs/\n");
+		var rules = BuildGitIgnoreRules(temp.Path);
+		var fullPath = Path.Combine(temp.Path, name);
+
+		Assert.Equal(expectedIgnored, rules.IsGitIgnored(fullPath, isDirectory: true, name));
+		Assert.Equal(expectedIgnored, rules.IsGitIgnored(fullPath, isDirectory: false, name));
+	}
+
+	[Fact]
+	public void GitIgnoreScanContexts_NestedGitMetadata_IsHardPrunedOnlyByActiveOrCandidateController()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "logs/\n");
+		var activeRules = BuildGitIgnoreRules(temp.Path);
+		var disabledRules = new IgnoreRulesService(new SmartIgnoreService([]))
+			.Build(temp.Path, [], selectedRootFolders: []);
+		var fullPath = Path.Combine(temp.Path, "module", ".git");
+		var relativePath = Path.Combine("module", ".git").Replace('\\', '/');
+
+		Assert.True(activeRules.CreateGitIgnoreScanContext(temp.Path)
+			.Evaluate(fullPath, relativePath, isDirectory: true, ".git").IsIgnored);
+		Assert.False(disabledRules.CreateGitIgnoreScanContext(temp.Path)
+			.Evaluate(fullPath, relativePath, isDirectory: true, ".git").IsIgnored);
+		Assert.True(disabledRules.CreateGitIgnoreCandidateScanContext(temp.Path)
+			.Evaluate(fullPath, relativePath, isDirectory: true, ".git").IsIgnored);
+	}
+
 	private static IgnoreRules BuildGitIgnoreRules(string rootPath)
 	{
 		var service = new IgnoreRulesService(new SmartIgnoreService([]));

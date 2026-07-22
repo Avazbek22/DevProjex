@@ -915,6 +915,48 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_GitIgnoreOnly_TreeContentPrunesGitDatabaseAndKeepsOrdinaryDotPaths()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "tests/\nlogs/\n");
+		temp.CreateFile(".git/objects/pack/object.data", "GIT-OBJECT-SENTINEL\n");
+		temp.CreateFile(".git/hooks/pre-commit.sample", "GIT-HOOK-SENTINEL\n");
+		temp.CreateFile("src/vendor/.git/objects/nested.data", "NESTED-GIT-SENTINEL\n");
+		temp.CreateFile(".github/workflows/ci.yml", "GITHUB-WORKFLOW-SENTINEL\n");
+		temp.CreateFile(".git-owned/source.txt", "GIT-LOOKALIKE-SENTINEL\n");
+		temp.CreateFile("tests/test_app.py", "TEST-SENTINEL\n");
+		temp.CreateFile("src/app.py", "APP-SENTINEL\n");
+
+		var gitIgnoreOnly = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreGitIgnore);
+		var noIgnores = await RunAppAsync(
+			CommandLineOptionTokens.Path, temp.Path,
+			CommandLineOptionTokens.Export, "tree-content",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, gitIgnoreOnly.ExitCode);
+		Assert.Equal(string.Empty, gitIgnoreOnly.Stderr);
+		Assert.Contains("APP-SENTINEL", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+		Assert.Contains("GITHUB-WORKFLOW-SENTINEL", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+		Assert.Contains("GIT-LOOKALIKE-SENTINEL", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("GIT-OBJECT-SENTINEL", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("GIT-HOOK-SENTINEL", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("NESTED-GIT-SENTINEL", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+		Assert.DoesNotContain("TEST-SENTINEL", gitIgnoreOnly.Stdout, StringComparison.Ordinal);
+
+		Assert.Equal(CommandLineExitCodes.Success, noIgnores.ExitCode);
+		Assert.Equal(string.Empty, noIgnores.Stderr);
+		Assert.Contains("GIT-OBJECT-SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("GIT-HOOK-SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("NESTED-GIT-SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+		Assert.Contains("TEST-SENTINEL", noIgnores.Stdout, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task Process_SmartIgnoreOverrideHidesPortableArtifactsAndPreservesSourceContracts()
 	{
 		using var temp = new TemporaryDirectory();

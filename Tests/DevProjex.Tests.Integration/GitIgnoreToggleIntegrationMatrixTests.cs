@@ -66,6 +66,44 @@ public sealed class GitIgnoreToggleIntegrationMatrixTests
 		Assert.False(result.RootAccessDenied);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void GitAdministrativeBoundary_TreeAndScannerStayAlignedWithoutHidingLookalikes(bool useGitIgnore)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "logs/\n");
+		temp.CreateFile(".git/objects/pack/object.data", "GIT-OBJECT-SENTINEL\n");
+		temp.CreateFile(".github/workflows/ci.yml", "name: CI\n");
+		temp.CreateFile(".git-owned/source.txt", "source\n");
+		temp.CreateFile("src/app.txt", "APP-SENTINEL\n");
+		var rules = BuildIgnoreRules(temp.Path, useGitIgnore, ignoreDotFolders: false);
+		var allowedRoots = new HashSet<string>(PathComparer.Default)
+		{
+			".git", ".github", ".git-owned", "src"
+		};
+		var options = new TreeFilterOptions(
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".data", ".txt", ".yml" },
+			allowedRoots,
+			rules);
+
+		var tree = new TreeBuilder().Build(temp.Path, options, TestContext.Current.CancellationToken);
+		var treeRoots = tree.Root.Children.Select(static child => child.Name).ToHashSet(PathComparer.Default);
+		var scannedRoots = new FileSystemScanner()
+			.GetRootFolderNames(temp.Path, rules, TestContext.Current.CancellationToken)
+			.Value
+			.ToHashSet(PathComparer.Default);
+
+		Assert.Equal(!useGitIgnore, treeRoots.Contains(".git"));
+		Assert.Equal(!useGitIgnore, scannedRoots.Contains(".git"));
+		Assert.Contains(".github", treeRoots);
+		Assert.Contains(".github", scannedRoots);
+		Assert.Contains(".git-owned", treeRoots);
+		Assert.Contains(".git-owned", scannedRoots);
+		Assert.Contains("src", treeRoots);
+		Assert.Contains("src", scannedRoots);
+	}
+
 	private static IgnoreRules BuildIgnoreRules(string rootPath, bool useGitIgnore, bool ignoreDotFolders)
 	{
 		var matcher = GitIgnoreMatcher.Build(rootPath, ["[Bb]in/", "[Oo]bj/"]);
