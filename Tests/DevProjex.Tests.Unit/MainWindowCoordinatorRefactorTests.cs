@@ -124,6 +124,47 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.False(scope.CanProject(rootPath, disabledOptions));
     }
 
+    [Theory]
+    [InlineData(1_000_000, 17_300, true)]
+    [InlineData(50_000, 0, true)]
+    [InlineData(49_999, 1, false)]
+    [InlineData(100_000, 40_000, false)]
+    [InlineData(60_000, 40_000, false)]
+    [InlineData(50_000, 25_001, false)]
+    public void ProjectTreeInventoryRetentionPolicy_ReleasesOnlyMateriallyOversizedSnapshots(
+        int inventoryEntries,
+        int visibleEntries,
+        bool expectedRelease)
+    {
+        Assert.Equal(
+            expectedRelease,
+            ProjectTreeInventoryRetentionPolicy.ShouldReleaseReusedInventory(
+                inventoryEntries,
+                visibleEntries));
+    }
+
+    [Theory]
+    [InlineData(49_999, false)]
+    [InlineData(50_000, true)]
+    public void ProjectTreeInventoryRetentionPolicy_MeasuresVisibleTreeOnlyPastRetentionFloor(
+        int inventoryEntries,
+        bool expectedMeasurement)
+    {
+        Assert.Equal(
+            expectedMeasurement,
+            ProjectTreeInventoryRetentionPolicy.RequiresVisibleTreeMeasurement(inventoryEntries));
+    }
+
+    [Fact]
+    public void ProjectTreeInventoryRetentionPolicy_CountsCompleteVisibleHierarchy()
+    {
+        var leaf = new TreeNodeDescriptor("app.cs", "/project/src/app.cs", false, false, "file", []);
+        var directory = new TreeNodeDescriptor("src", "/project/src", true, false, "folder", [leaf]);
+        var root = new TreeNodeDescriptor("project", "/project", true, false, "folder", [directory]);
+
+        Assert.Equal(3, ProjectTreeInventoryRetentionPolicy.CountTreeEntries(root));
+    }
+
     [Fact]
     public void TaskbarProgressCoordinator_SyncsStatusAndGitCloneProgress()
     {

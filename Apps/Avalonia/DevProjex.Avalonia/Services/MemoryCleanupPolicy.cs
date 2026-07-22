@@ -10,7 +10,9 @@ internal enum MemoryCleanupReason
     SearchClose = 5,
     FilterClose = 6,
     PreviewClose = 7,
-    PreviewRebuildCompleted = 8
+    PreviewRebuildCompleted = 8,
+    SelectionProjectionNarrowed = 9,
+    TreeCollapseCompleted = 10
 }
 
 internal readonly record struct MemoryCleanupPlan(
@@ -58,6 +60,14 @@ internal static class MemoryCleanupPolicy
                 WaitForUiSettled: true,
                 MinimumManagedHeapBytes: RoutineCleanupMinimumManagedHeapBytes),
             MemoryCleanupReason.GitBranchSwitch => new(
+                Delay: GeneralDeferredDelay,
+                WaitForUiSettled: true,
+                MinimumManagedHeapBytes: RoutineCleanupMinimumManagedHeapBytes),
+            MemoryCleanupReason.SelectionProjectionNarrowed => new(
+                Delay: GeneralDeferredDelay,
+                WaitForUiSettled: true,
+                MinimumManagedHeapBytes: RoutineCleanupMinimumManagedHeapBytes),
+            MemoryCleanupReason.TreeCollapseCompleted => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
                 MinimumManagedHeapBytes: RoutineCleanupMinimumManagedHeapBytes),

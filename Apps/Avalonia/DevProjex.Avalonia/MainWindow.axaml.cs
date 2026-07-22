@@ -3620,9 +3620,21 @@ public partial class MainWindow : Window
         return $"{sanitized}_{suffix}.{extension}";
     }
 
-    private void OnExpandAll(object? sender, RoutedEventArgs e) => ExpandCollapseTree(expand: true);
+    private void OnExpandAll(object? sender, RoutedEventArgs e)
+    {
+        // A pending compacting collection must not interrupt mass lazy-node realization.
+        CancelBackgroundMemoryCleanup();
+        ExpandCollapseTree(expand: true);
+    }
 
-    private void OnCollapseAll(object? sender, RoutedEventArgs e) => ExpandCollapseTree(expand: false);
+    private void OnCollapseAll(object? sender, RoutedEventArgs e)
+    {
+        ExpandCollapseTree(expand: false);
+
+        // Collapsing makes realized row containers recyclable. Wait for layout to detach them
+        // before compacting the managed heap and trimming the native working set.
+        ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.TreeCollapseCompleted);
+    }
 
     private void ExpandCollapseTree(bool expand)
     {
