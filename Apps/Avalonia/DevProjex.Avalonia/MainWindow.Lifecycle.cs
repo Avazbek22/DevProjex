@@ -21,6 +21,7 @@ public partial class MainWindow
         CancelAndDispose(ref _applySettingsCts);
         CancelAndDispose(ref _gitCloneCts);
         CancelAndDispose(ref _gitOperationCts);
+        CancelAndDispose(ref _projectCopyExportCts);
     }
 
     private void StopMetricsDebounceTimers()

@@ -52,6 +52,7 @@ public static class AvaloniaCompositionRoot
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
         var projectExportService = new ProjectExportService(treeExportService, contentExportService, treeAndContentExportService);
+        var projectCopyExportService = new ProjectCopyExportService(new ProjectCopyExportPlanBuilder());
         var projectAnalysisService = new ProjectAnalysisService(
             scanOptionsUseCase,
             buildTreeUseCase,
@@ -107,6 +108,7 @@ public static class AvaloniaCompositionRoot
             ContentExportService: contentExportService,
             TreeAndContentExportService: treeAndContentExportService,
             ProjectExportService: projectExportService,
+            ProjectCopyExportService: projectCopyExportService,
             PreviewDocumentBuilder: previewDocumentBuilder,
             RepositoryWebPathPresentationService: repositoryWebPathPresentationService,
             TextFileExportService: textFileExportService,

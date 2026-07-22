@@ -23,6 +23,11 @@ Teclas de atalho:
   * Árvore de exportação
   * Exportar conteúdo
   * Exportar árvore e conteúdo
+* Exportar cópia do projeto:
+  * Para uma pasta…
+  * Para um arquivo ZIP…
+
+A exportação da cópia do projeto reproduz a árvore efetiva atual em uma pasta ou um arquivo ZIP separado. As configurações atuais, exclusões e itens marcados são respeitados; se nada estiver marcado, toda a árvore atual será exportada. O projeto de origem não é modificado.
 
 Regras de formato:
 * Árvore de exportação:

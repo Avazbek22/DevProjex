@@ -23,6 +23,11 @@ Tastenkürzel:
   * Baum exportieren
   * Inhalt exportieren
   * Baum und Inhalt exportieren
+* Projektkopie exportieren:
+  * In Ordner…
+  * In ZIP-Archiv…
+
+Der Export einer Projektkopie bildet den aktuellen effektiven Baum in einem separaten Ordner oder ZIP-Archiv ab. Aktuelle Einstellungen, Ausschlüsse und markierte Elemente werden berücksichtigt; wenn nichts markiert ist, wird der gesamte aktuelle Baum exportiert. Das Quellprojekt wird nicht verändert.
 
 Formatregeln:
 * Baum exportieren:

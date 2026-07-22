@@ -10,5 +10,6 @@ public enum StatusOperationType
     GitSwitchBranch = 5,
     PreviewBuild = 6,
     SelectionRefresh = 7,
-    ApplySettings = 8
+    ApplySettings = 8,
+    ProjectCopyExport = 9
 }

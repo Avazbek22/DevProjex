@@ -1262,6 +1262,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuFileExportTree { get; private set; } = string.Empty;
     public string MenuFileExportContent { get; private set; } = string.Empty;
     public string MenuFileExportTreeAndContent { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopy { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopyFolder { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopyZip { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopyHelp { get; private set; } = string.Empty;
     public string MenuFileExit { get; private set; } = string.Empty;
     public string MenuCopy { get; private set; } = string.Empty;
     public string MenuCopyTree { get; private set; } = string.Empty;
@@ -1419,6 +1423,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuFileExportTree = _localization["Menu.File.Export.Tree"];
         MenuFileExportContent = _localization["Menu.File.Export.Content"];
         MenuFileExportTreeAndContent = _localization["Menu.File.Export.TreeAndContent"];
+        MenuFileExportProjectCopy = _localization["Menu.File.ExportProjectCopy"];
+        MenuFileExportProjectCopyFolder = _localization["Menu.File.ExportProjectCopy.Folder"];
+        MenuFileExportProjectCopyZip = _localization["Menu.File.ExportProjectCopy.Zip"];
+        MenuFileExportProjectCopyHelp = _localization["Menu.File.ExportProjectCopy.Help"];
         MenuFileExit = _localization["Menu.File.Exit"];
         MenuCopy = _localization["Menu.Copy"];
         MenuCopyTree = _localization["Menu.Copy.Tree"];
@@ -1557,6 +1565,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuFileExportTree));
         RaisePropertyChanged(nameof(MenuFileExportContent));
         RaisePropertyChanged(nameof(MenuFileExportTreeAndContent));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopy));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopyFolder));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopyZip));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopyHelp));
         RaisePropertyChanged(nameof(MenuFileExit));
         RaisePropertyChanged(nameof(MenuCopy));
         RaisePropertyChanged(nameof(MenuCopyTree));

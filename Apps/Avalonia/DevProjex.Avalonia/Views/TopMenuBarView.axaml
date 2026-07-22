@@ -32,6 +32,45 @@
           <MenuItem Header="{Binding MenuFileExportContent}" Click="OnExportContentToFile" />
           <MenuItem Header="{Binding MenuFileExportTreeAndContent}" Click="OnExportTreeAndContentToFile" />
         </MenuItem>
+        <MenuItem Name="ExportProjectCopyMenuItem"
+                  IsEnabled="{Binding IsProjectLoaded}"
+                  AutomationProperties.HelpText="{Binding MenuFileExportProjectCopyHelp}">
+          <MenuItem.Header>
+            <StackPanel Orientation="Horizontal" Spacing="7">
+              <TextBlock Text="{Binding MenuFileExportProjectCopy}"
+                         VerticalAlignment="Center" />
+              <Border Width="16"
+                      Height="16"
+                      CornerRadius="8"
+                      BorderThickness="1"
+                      BorderBrush="{DynamicResource AppSecondaryTextBrush}"
+                      Cursor="Help"
+                      VerticalAlignment="Center"
+                      ToolTip.ShowDelay="420"
+                      ToolTip.Placement="Right">
+                <ToolTip.Tip>
+                  <ToolTip Loaded="OnToolTipLoaded" MaxWidth="340">
+                    <TextBlock Text="{Binding MenuFileExportProjectCopyHelp}"
+                               MaxWidth="320"
+                               TextWrapping="Wrap" />
+                  </ToolTip>
+                </ToolTip.Tip>
+                <TextBlock Text="?"
+                           FontSize="10"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource AppSecondaryTextBrush}"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+              </Border>
+            </StackPanel>
+          </MenuItem.Header>
+          <MenuItem Name="ExportProjectCopyFolderMenuItem"
+                    Header="{Binding MenuFileExportProjectCopyFolder}"
+                    Click="OnExportProjectCopyToFolder" />
+          <MenuItem Name="ExportProjectCopyZipMenuItem"
+                    Header="{Binding MenuFileExportProjectCopyZip}"
+                    Click="OnExportProjectCopyToZip" />
+        </MenuItem>
         <MenuItem Header="{Binding MenuFileExit}" Click="OnExit" />
       </MenuItem>
       <MenuItem Name="GitMenuItem" Header="Git">

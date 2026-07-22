@@ -23,6 +23,11 @@ Scorciatoie:
   * Esporta albero
   * Esporta contenuto
   * Esporta albero e contenuto
+* Esporta copia del progetto:
+  * In una cartella…
+  * In un archivio ZIP…
+
+L’esportazione della copia del progetto riproduce l’albero effettivo corrente in una cartella o in un archivio ZIP separato. Vengono rispettati le impostazioni correnti, le esclusioni e gli elementi selezionati; se non è selezionato nulla, viene esportato l’intero albero corrente. Il progetto di origine non viene modificato.
 
 Regole di formato:
 * Esporta albero:

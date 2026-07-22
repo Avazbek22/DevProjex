@@ -10,7 +10,23 @@ public sealed class LocalizationExportMenuKeysTests
 		"Menu.File.Export.TreeAndContent",
 		"Toast.Export.Tree",
 		"Toast.Export.Content",
-		"Toast.Export.TreeAndContent"
+		"Toast.Export.TreeAndContent",
+		"Menu.File.ExportProjectCopy",
+		"Menu.File.ExportProjectCopy.Folder",
+		"Menu.File.ExportProjectCopy.Zip",
+		"Menu.File.ExportProjectCopy.Help",
+		"Toast.ProjectCopy.Folder",
+		"Toast.ProjectCopy.Zip",
+		"Toast.ProjectCopy.Canceled",
+		"Status.Operation.ExportingProjectCopy",
+		"Status.Operation.ExportingProjectCopy.Progress",
+		"Picker.ProjectCopy.Folder",
+		"Picker.ProjectCopy.Zip",
+		"Error.ProjectCopy.LocalDestinationRequired",
+		"Error.ProjectCopy.DestinationInsideSource",
+		"Error.ProjectCopy.SymbolicLinkNotSupported",
+		"Error.ProjectCopy.UnsafeSourcePath",
+		"Error.ProjectCopy.Failed"
 	];
 
 	[Fact]
@@ -27,6 +43,26 @@ public sealed class LocalizationExportMenuKeysTests
 
 			foreach (var required in RequiredExportKeys)
 				Assert.Contains(required, keys);
+		}
+	}
+
+	[Fact]
+	public void ProjectCopyLocalization_UsesNativeTranslationsInsteadOfEnglishFallbacks()
+	{
+		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
+		var english = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "en.json")));
+		foreach (var file in Directory.GetFiles(localizationDir, "*.json"))
+		{
+			if (Path.GetFileName(file).Equals("en.json", StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			var values = ReadKeyValues(File.ReadAllText(file));
+			foreach (var key in RequiredExportKeys.Where(static key => key.Contains("ProjectCopy", StringComparison.Ordinal)))
+			{
+				Assert.NotEqual(
+					english[key],
+					values[key]);
+			}
 		}
 	}
 

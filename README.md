@@ -32,7 +32,7 @@ It’s built for real projects where terminal output is noisy, IDE integrations 
 
 DevProjex is not an autonomous coding agent. It gives you a manual, fully controlled way to prepare project context when agents, IDE plugins, or remote indexing cannot be used.
 
-> 🔒 Read-only & without telemetry by design — DevProjex never modifies your files.
+> 🔒 Read-only & without telemetry by design — DevProjex never modifies the opened source project; project copies are written only to the destination you choose.
 
 ---
 
@@ -71,6 +71,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **ASCII, MD, JSON, and XML tree formats** for AI prompts, documentation, and parsers
 * **Per-project local parameter profiles** (saved per local project path)
 * **Export to file** from menu (tree / content / tree + content)
+* **Export a project copy** as a separate folder or ZIP using the current tree, exclusions, and checkbox selection
 * **Search & name filtering** for large projects
 * **Smart Ignore + .gitignore support** (scope-aware behavior for mixed workspaces)
 * **Extensionless files handling** via dedicated ignore option
@@ -84,7 +85,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
   * Presets stored locally
   * Island-based layout and smooth UI animations
 * **Animated toasts** for user feedback
-* **Localization** (8 languages)
+* **Localization** (11 languages)
 * **Responsive async scanning** (UI stays smooth on big folders)
 * **Terminal automation mode**: generate AI-ready context, JSON reports, CI-friendly diagnostics, and tree/content exports from the same desktop executable
 
@@ -150,6 +151,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
   * tree (`.txt`, `.md`, `.json`, `.xml` depending on the selected tree format)
   * content (`.txt`)
   * tree + content (`.txt`, with selected tree format)
+  * current effective project tree as a separate folder or ZIP, including binary files and empty directories; the source project is never modified
 * Shows preview output before copy/export
 * Shows live output metrics and operation progress in status bar
 * Restores previously applied parameters for each local project folder
@@ -160,7 +162,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
 
 * Edit, rename, move, or delete files
 * Run code or modify your repositories (no commits/merges)
-* Export binary file contents
+* Include binary file contents in text/clipboard exports (binary files are preserved by project-copy export)
 
 ---
 

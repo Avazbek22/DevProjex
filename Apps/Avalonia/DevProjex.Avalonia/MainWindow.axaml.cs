@@ -114,6 +114,7 @@ public partial class MainWindow : Window
     private readonly TreeExportService _treeExport;
     private readonly SelectedContentExportService _contentExport;
     private readonly TreeAndContentExportService _treeAndContentExport;
+    private readonly ProjectCopyExportService _projectCopyExport;
     private readonly PreviewDocumentBuilder _previewDocumentBuilder;
     private readonly RepositoryWebPathPresentationService _repositoryWebPathPresentationService;
     private readonly TextFileExportService _textFileExport;
@@ -217,6 +218,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _applySettingsCts;
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
+    private CancellationTokenSource? _projectCopyExportCts;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
@@ -376,6 +378,7 @@ public partial class MainWindow : Window
         _treeExport = services.TreeExportService;
         _contentExport = services.ContentExportService;
         _treeAndContentExport = services.TreeAndContentExportService;
+        _projectCopyExport = services.ProjectCopyExportService;
         _previewDocumentBuilder = services.PreviewDocumentBuilder;
         _repositoryWebPathPresentationService = services.RepositoryWebPathPresentationService;
         _textFileExport = services.TextFileExportService;
@@ -9319,6 +9322,9 @@ public partial class MainWindow : Window
                 _applySettingsCts?.Cancel();
                 _selectionCoordinator.CancelPendingRefreshes();
                 _refreshPipeline.CancelActiveRefresh();
+                break;
+            case StatusOperationType.ProjectCopyExport:
+                _projectCopyExportCts?.Cancel();
                 break;
             case StatusOperationType.MetricsCalculation:
                 // Metrics cancellation is handled below by dedicated fallback logic.

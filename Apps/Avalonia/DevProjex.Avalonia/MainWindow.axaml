@@ -223,6 +223,8 @@
                           ExportTreeToFileRequested="OnExportTreeToFile"
                           ExportContentToFileRequested="OnExportContentToFile"
                           ExportTreeAndContentToFileRequested="OnExportTreeAndContentToFile"
+                          ExportProjectCopyToFolderRequested="OnExportProjectCopyToFolder"
+                          ExportProjectCopyToZipRequested="OnExportProjectCopyToZip"
                           ExitRequested="OnExit"
                           CopyTreeRequested="OnCopyTree"
                           CopyContentRequested="OnCopyContent"
