@@ -1,3 +1,5 @@
+using DevProjex.Application.Models;
+
 namespace DevProjex.Application.Selection;
 
 public sealed record SelectionRefreshContext(
@@ -17,4 +19,5 @@ public sealed record SelectionRefreshContext(
     IReadOnlyDictionary<string, bool>? RootOptionStateCache = null,
     IReadOnlyDictionary<string, bool>? ExtensionOptionStateCache = null,
     bool IgnoreOptionStateCacheIsComplete = false,
-    bool CaptureTreeInventory = false);
+    bool CaptureTreeInventory = false,
+    IReadOnlyList<SelectionOption>? CurrentRootOptions = null);

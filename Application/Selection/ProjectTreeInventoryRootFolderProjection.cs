@@ -5,6 +5,62 @@ namespace DevProjex.Application.Selection;
 public static class ProjectTreeInventoryRootFolderProjection
 {
     public static IReadOnlyList<SelectionOption> RemoveCheckedRootsWithoutVisibleStructure(
+        ProjectWorkspaceScanBreakdown? breakdown,
+        IReadOnlyList<SelectionOption> rootOptions,
+        out IReadOnlySet<string>? emptyFolderOwnedRemovedRoots,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        emptyFolderOwnedRemovedRoots = null;
+        if (rootOptions.Count == 0 || breakdown is null)
+            return rootOptions;
+
+        List<SelectionOption>? projectedOptions = null;
+        HashSet<string>? emptyFolderOwnedRoots = null;
+        for (var optionIndex = 0; optionIndex < rootOptions.Count; optionIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var option = rootOptions[optionIndex];
+            var keepOption = !option.IsChecked || ShouldKeepCheckedRoot(breakdown, option.Name);
+            if (keepOption)
+            {
+                projectedOptions?.Add(option);
+                continue;
+            }
+
+            if (breakdown.SelectedRoots.TryGetValue(option.Name, out var rootSnapshot) &&
+                rootSnapshot.IgnoreSection.IsTreeStructureHiddenByEmptyFolders)
+            {
+                emptyFolderOwnedRoots ??= new HashSet<string>(PathComparer.Default);
+                emptyFolderOwnedRoots.Add(option.Name);
+            }
+
+            if (projectedOptions is null)
+            {
+                projectedOptions = new List<SelectionOption>(rootOptions.Count - 1);
+                for (var preservedIndex = 0; preservedIndex < optionIndex; preservedIndex++)
+                    projectedOptions.Add(rootOptions[preservedIndex]);
+            }
+        }
+
+        emptyFolderOwnedRemovedRoots = emptyFolderOwnedRoots;
+        return projectedOptions ?? rootOptions;
+    }
+
+    private static bool ShouldKeepCheckedRoot(ProjectWorkspaceScanBreakdown breakdown, string rootName)
+    {
+        if (!breakdown.SelectedRoots.TryGetValue(rootName, out var rootSnapshot))
+        {
+            return breakdown.RootEnumerationAccessDenied || breakdown.RootEnumerationHadAccessDenied;
+        }
+
+        if (rootSnapshot.RootAccessDenied || rootSnapshot.HadAccessDenied)
+            return true;
+
+        return rootSnapshot.IgnoreSection.HasVisibleTreeStructure != false;
+    }
+
+    public static IReadOnlyList<SelectionOption> RemoveCheckedRootsWithoutVisibleStructure(
         ProjectTreeInventorySnapshot inventory,
         IReadOnlyList<SelectionOption> rootOptions,
         IReadOnlySet<string> allowedExtensions,

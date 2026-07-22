@@ -196,7 +196,22 @@ public partial class MainWindow : IRefreshTreePipelineHost
             return;
         }
 
-        var scope = ReferenceEquals(result.Inventory, input.TreeInventory) && input.TreeInventoryScope is not null
+        var reusedInventory = ReferenceEquals(result.Inventory, input.TreeInventory);
+        if (!interactiveFilter &&
+            reusedInventory &&
+            ProjectTreeInventoryRetentionPolicy.RequiresVisibleTreeMeasurement(result.Inventory.Entries.Count) &&
+            ProjectTreeInventoryRetentionPolicy.ShouldReleaseReusedInventory(
+                result.Inventory.Entries.Count,
+                ProjectTreeInventoryRetentionPolicy.CountTreeEntries(result.Tree.Root)))
+        {
+            // A broad inventory makes ignore toggles fast, but retaining it after a drastic
+            // projection keeps the complete unfiltered workspace alive behind a small tree.
+            _currentTreeInventory = null;
+            ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.SelectionProjectionNarrowed);
+            return;
+        }
+
+        var scope = reusedInventory && input.TreeInventoryScope is not null
             ? input.TreeInventoryScope
             : ProjectTreeInventoryReuseScope.Create(
                 input.CurrentPath,

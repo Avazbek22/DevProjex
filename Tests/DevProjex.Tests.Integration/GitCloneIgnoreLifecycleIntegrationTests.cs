@@ -404,18 +404,29 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	}
 
 	[Fact]
-	public void OrdinaryFolderScan_WithoutManagedCloneBoundary_KeepsDotGitUnderNormalIgnoreSemantics()
+	public void OrdinaryFolderScan_GitAdministrativeBoundaryTracksGitIgnoreControllerState()
 	{
 		using var workspace = CreateWorkspace(CloneFixtureKind.DotNet);
 		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
 
-		var snapshot = RefreshFull(
+		var gitIgnoreEnabled = RefreshFull(
 			workspace.Path,
 			services,
 			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(workspace.Path));
 
-		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
-		Assert.Equal(1, snapshot.IgnoreOptionCounts.DotFolders);
+		Assert.DoesNotContain(gitIgnoreEnabled.TreeInventory!.Entries, entry =>
+			entry.RelativePath == ".git" || entry.RelativePath.StartsWith(".git/", StringComparison.Ordinal));
+		Assert.Equal(0, gitIgnoreEnabled.IgnoreOptionCounts.DotFolders);
+
+		var allIgnoresDisabled = ApplyAll(
+			workspace.Path,
+			services,
+			gitIgnoreEnabled,
+			isChecked: false);
+
+		Assert.Contains(allIgnoresDisabled.TreeInventory!.Entries, entry => entry.RelativePath == ".git");
+		Assert.Contains(allIgnoresDisabled.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
+		Assert.Equal(1, allIgnoresDisabled.IgnoreOptionCounts.DotFolders);
 	}
 
 	private static SelectionRefreshSnapshot RefreshFull(

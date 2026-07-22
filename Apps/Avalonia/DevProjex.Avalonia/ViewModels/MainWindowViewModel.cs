@@ -114,6 +114,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _statusPreviewSelectionStatsText = string.Empty;
     private string _statusOperationText = string.Empty;
     private bool _statusBusy;
+    private bool _applySettingsBusyDelayElapsed;
+    private CancellationTokenSource? _applySettingsBusyDelayCts;
     private bool _statusMetricsVisible;
     private bool _statusPreviewSelectionVisible;
     private bool _statusProgressIsIndeterminate = true;
@@ -235,6 +237,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // Also update IsIndeterminate since it depends on StatusBusy
             // This stops the indeterminate animation when progress bar is hidden
             RaisePropertyChanged(nameof(StatusProgressIsIndeterminate));
+            UpdateApplySettingsBusyState(value);
         }
     }
 
@@ -301,6 +304,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(IsSearchFilterAvailable));
             RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
+            RaisePropertyChanged(nameof(CanApplySettings));
             RaisePropertyChanged(nameof(CanRefreshLocalProject));
             RaisePropertyChanged(nameof(CanGetGitUpdates));
         }
@@ -346,6 +350,51 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsSearchFilterAvailable => _isProjectLoaded && IsTreePaneVisible;
 
     public bool AreFilterSettingsEnabled => _isProjectLoaded;
+
+    public bool CanApplySettings => _isProjectLoaded && !_applySettingsBusyDelayElapsed;
+
+    private void UpdateApplySettingsBusyState(bool isBusy)
+    {
+        var previous = Interlocked.Exchange(
+            ref _applySettingsBusyDelayCts,
+            isBusy ? new CancellationTokenSource() : null);
+        previous?.Cancel();
+        previous?.Dispose();
+
+        if (!isBusy)
+        {
+            if (!_applySettingsBusyDelayElapsed)
+                return;
+
+            _applySettingsBusyDelayElapsed = false;
+            RaisePropertyChanged(nameof(CanApplySettings));
+            return;
+        }
+
+        _ = DelayApplySettingsBusyStateAsync(_applySettingsBusyDelayCts!);
+    }
+
+    private async Task DelayApplySettingsBusyStateAsync(CancellationTokenSource delayCts)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), delayCts.Token).ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!_statusBusy || delayCts.IsCancellationRequested ||
+                    !ReferenceEquals(Volatile.Read(ref _applySettingsBusyDelayCts), delayCts))
+                {
+                    return;
+                }
+
+                _applySettingsBusyDelayElapsed = true;
+                RaisePropertyChanged(nameof(CanApplySettings));
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
 
     public bool SettingsVisible
     {
@@ -1673,6 +1722,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        var applySettingsBusyDelayCts = Interlocked.Exchange(ref _applySettingsBusyDelayCts, null);
+        applySettingsBusyDelayCts?.Cancel();
+        applySettingsBusyDelayCts?.Dispose();
 
         // Unsubscribe from collection change events
         IgnoreOptions.CollectionChanged -= _ignoreOptionsChangedHandler;

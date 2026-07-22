@@ -12,8 +12,7 @@ public static class ProjectWorkspaceScanProjection
 	{
 		projected = default!;
 		var breakdown = source.Breakdown;
-		if (source.TreeInventory is null ||
-		    breakdown is null ||
+		if (breakdown is null ||
 		    breakdown.IncludesDirectoryToggleProbeRoots != includeDirectoryToggleProbeRoots ||
 		    breakdown.IncludesControllerImpactProbeRoots != includeControllerImpactProbeRoots)
 		{
@@ -28,8 +27,14 @@ public static class ProjectWorkspaceScanProjection
 		}
 
 		var rootFiles = breakdown.RootFiles;
-		var extensions = new HashSet<string>(rootFiles.Extensions, StringComparer.OrdinalIgnoreCase);
-		var effectiveExtensions = new HashSet<string>(rootFiles.VisibleExtensions, StringComparer.OrdinalIgnoreCase);
+		// Keep extension choices from the original scan so a root hidden by the current
+		// extension filter can be restored without another filesystem traversal.
+		var extensions = new HashSet<string>(
+			source.IgnoreSection.Extensions,
+			StringComparer.OrdinalIgnoreCase);
+		var effectiveExtensions = new HashSet<string>(
+			source.IgnoreSection.VisibleExtensions,
+			StringComparer.OrdinalIgnoreCase);
 		var rawCounts = rootFiles.RawIgnoreOptionCounts;
 		var effectiveCounts = rootFiles.EffectiveIgnoreOptionCounts;
 		var controllerImpactCounts = rootFiles.ControllerImpactCounts;
@@ -40,8 +45,6 @@ public static class ProjectWorkspaceScanProjection
 		{
 			if (selectedNames.Contains(rootName))
 			{
-				extensions.UnionWith(rootSnapshot.IgnoreSection.Extensions);
-				effectiveExtensions.UnionWith(rootSnapshot.IgnoreSection.VisibleExtensions);
 				rawCounts = rawCounts.Add(rootSnapshot.IgnoreSection.RawIgnoreOptionCounts);
 				effectiveCounts = effectiveCounts.Add(rootSnapshot.IgnoreSection.EffectiveIgnoreOptionCounts);
 				controllerImpactCounts = controllerImpactCounts.Add(rootSnapshot.IgnoreSection.ControllerImpactCounts);
@@ -61,8 +64,8 @@ public static class ProjectWorkspaceScanProjection
 				controllerImpactCounts = controllerImpactCounts.Add(rootSnapshot.ControllerImpactProbeCounts);
 			if (retainedRemovedRootEmptyFolderImpactRoots?.Contains(rootName) == true)
 			{
-				// Preserve only roots classified as EmptyFolders-owned by the inventory projection.
-				// Controller-owned roots stay excluded from both the tree and the option count.
+				// Preserve only roots classified as EmptyFolders-owned by the root projection.
+				// Controller-owned roots stay excluded from both the tree and option count.
 				effectiveCounts = effectiveCounts with
 				{
 					EmptyFolders = effectiveCounts.EmptyFolders +

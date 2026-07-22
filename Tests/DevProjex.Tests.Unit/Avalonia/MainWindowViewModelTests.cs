@@ -185,6 +185,33 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void CanApplySettings_RequiresLoadedIdleProjectAndRaisesForBothDependencies()
+    {
+        var viewModel = CreateViewModel();
+        var raisedCount = 0;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.CanApplySettings))
+                raisedCount++;
+        };
+
+        Assert.False(viewModel.CanApplySettings);
+
+        viewModel.IsProjectLoaded = true;
+        Assert.True(viewModel.CanApplySettings);
+
+        viewModel.StatusBusy = true;
+        Assert.True(viewModel.CanApplySettings);
+
+        viewModel.StatusBusy = false;
+        Assert.True(viewModel.CanApplySettings);
+
+        viewModel.IsProjectLoaded = false;
+        Assert.False(viewModel.CanApplySettings);
+        Assert.Equal(2, raisedCount);
+    }
+
+    [Fact]
     public void IsProjectLoaded_CanToggleFalse()
     {
         var viewModel = CreateViewModel();

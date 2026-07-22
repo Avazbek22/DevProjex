@@ -559,7 +559,7 @@ public sealed partial class SelectionSyncCoordinator(
                 if (IsStalePathRequest(currentPath))
                     return;
 
-                ApplySelectionRefreshSnapshot(snapshot, retainPreviousSnapshot: true);
+                ApplyLiveSelectionRefreshSnapshot(snapshot);
             });
         }
         finally
@@ -1515,7 +1515,22 @@ public sealed partial class SelectionSyncCoordinator(
 
     private void ApplySelectionRefreshSnapshot(
         SelectionRefreshSnapshot snapshot,
-        bool retainPreviousSnapshot = false)
+        bool retainPreviousSnapshot = false) =>
+        ApplySelectionRefreshSnapshotCore(
+            snapshot,
+            retainPreviousSnapshot,
+            rootOptionsAreAuthoritative: true);
+
+    private void ApplyLiveSelectionRefreshSnapshot(SelectionRefreshSnapshot snapshot) =>
+        ApplySelectionRefreshSnapshotCore(
+            snapshot,
+            retainPreviousSnapshot: true,
+            rootOptionsAreAuthoritative: false);
+
+    private void ApplySelectionRefreshSnapshotCore(
+        SelectionRefreshSnapshot snapshot,
+        bool retainPreviousSnapshot,
+        bool rootOptionsAreAuthoritative)
     {
         // A full/live selection snapshot is the authoritative count-driven ignore state.
         // Invalidate older standalone availability refreshes so they cannot overwrite it.
@@ -1534,7 +1549,7 @@ public sealed partial class SelectionSyncCoordinator(
         ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
         MarkSelectionRefreshClean();
         var previousSnapshot = retainPreviousSnapshot ? _stableSelectionSnapshot : null;
-        var appliedSnapshot = CaptureStableSelectionSnapshot(snapshot);
+        var appliedSnapshot = CaptureStableSelectionSnapshot(snapshot, rootOptionsAreAuthoritative);
         _stableSelectionSnapshot = appliedSnapshot;
         _reversibleSelectionSnapshot = previousSnapshot is not null &&
                                        PathComparer.Default.Equals(previousSnapshot.Path, appliedSnapshot.Path)
@@ -1542,7 +1557,9 @@ public sealed partial class SelectionSyncCoordinator(
             : null;
     }
 
-    private SelectionRefreshRollbackSnapshot CaptureStableSelectionSnapshot(SelectionRefreshSnapshot snapshot)
+    private SelectionRefreshRollbackSnapshot CaptureStableSelectionSnapshot(
+        SelectionRefreshSnapshot snapshot,
+        bool rootOptionsAreAuthoritative)
     {
         var rootOptions = ResolveStableSelectionOptions(
             viewModel.RootFolders,
@@ -1581,7 +1598,9 @@ public sealed partial class SelectionSyncCoordinator(
             _session.IgnoreOptions.IsInitialized,
             _session.IgnoreOptions.AllPreference,
             _session.IgnoreOptionStateCacheIsComplete,
-            snapshot.RootOptions is not null);
+            // A live refresh can project known roots but cannot discover roots hidden by
+            // its input filters. Structural rollback therefore requires a full snapshot.
+            rootOptionsAreAuthoritative && snapshot.RootOptions is not null);
     }
 
     private bool TryRestoreKnownSelectionSnapshot(
@@ -2206,7 +2225,20 @@ public sealed partial class SelectionSyncCoordinator(
             RootOptionStateCache: SnapshotRootOptionStateCacheOrNull(isInitialized: true),
             ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
             IgnoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
-            CaptureTreeInventory: captureTreeInventory);
+            CaptureTreeInventory: captureTreeInventory,
+            CurrentRootOptions: SnapshotVisibleRootOptions());
+
+    private IReadOnlyList<SelectionOption> SnapshotVisibleRootOptions()
+    {
+        var options = new SelectionOption[viewModel.RootFolders.Count];
+        for (var index = 0; index < viewModel.RootFolders.Count; index++)
+        {
+            var option = viewModel.RootFolders[index];
+            options[index] = new SelectionOption(option.Name, option.IsChecked);
+        }
+
+        return options;
+    }
 
     // UI master checkboxes only describe visible rows; refresh policy also needs
     // explicit states retained for rows temporarily hidden by another section.

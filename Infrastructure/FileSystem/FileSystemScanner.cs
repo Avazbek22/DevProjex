@@ -212,7 +212,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var includeDirectoryToggleProbeRoots = request.IncludeDirectoryToggleProbeRoots;
 		var includeControllerImpactProbeRoots = request.IncludeControllerImpactProbeRoots;
 		var captureTreeInventory = request.CaptureTreeInventory;
-		var captureRootScanBreakdown = request.CaptureRootScanBreakdown && captureTreeInventory;
+		var captureRootScanBreakdown = request.CaptureRootScanBreakdown;
 
 		var scanPlan = BuildRootSelectionScanPlan(
 			rootPath,
@@ -1902,6 +1902,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			}
 
 			var finalizedCounts = FinalizeEffectiveIgnoreCounts(directories, fileMetrics, visibilityStates, effectiveRules);
+			var rootVisibility = visibilityStates[0];
 			if (treeInventoryCapture is not null)
 			{
 				treeInventoryCapture.Inventory = BuildSubtreeInventory(
@@ -1919,7 +1920,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					rawCounts.ToImmutable(),
 					finalizedCounts.IgnoreOptionCounts,
 					finalizedCounts.ControllerImpactCounts,
-					effectiveExtensions),
+					effectiveExtensions,
+					HasVisibleTreeStructure: rootVisibility.BaseFinalVisible,
+					IsTreeStructureHiddenByEmptyFolders:
+						!rootVisibility.BaseFinalVisible && rootVisibility.EmptyFoldersFinalVisible),
 				discovery.RootAccessDenied,
 				hadAccessDenied == 1);
 		}

@@ -5,6 +5,60 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectTreeInventoryRootFolderProjectionTests
 {
     [Theory]
+    [InlineData(true, false, false, true)]
+    [InlineData(false, false, false, false)]
+    [InlineData(null, false, false, true)]
+    [InlineData(false, true, false, true)]
+    [InlineData(false, false, true, true)]
+    public void RemoveCheckedRootsWithoutVisibleStructure_ScanBreakdownVisibilityMatrix(
+        bool? hasVisibleTreeStructure,
+        bool rootAccessDenied,
+        bool hadAccessDenied,
+        bool expectedVisible)
+    {
+        var option = new SelectionOption("project", IsChecked: true);
+        var breakdown = CreateBreakdown(
+            "project",
+            hasVisibleTreeStructure,
+            hiddenByEmptyFolders: hasVisibleTreeStructure == false,
+            rootAccessDenied,
+            hadAccessDenied);
+
+        var projected = ProjectTreeInventoryRootFolderProjection.RemoveCheckedRootsWithoutVisibleStructure(
+            breakdown,
+            [option],
+            out var emptyFolderOwnedRemovedRoots,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(expectedVisible, projected.Contains(option));
+        Assert.Equal(
+            !expectedVisible && !rootAccessDenied && !hadAccessDenied,
+            emptyFolderOwnedRemovedRoots?.Contains("project") == true);
+    }
+
+    [Fact]
+    public void RemoveCheckedRootsWithoutVisibleStructure_ScanBreakdownPreservesUncheckedAndDeniedUnknownRoots()
+    {
+        var hiddenChecked = new SelectionOption("hidden", IsChecked: true);
+        var hiddenUnchecked = new SelectionOption("unchecked", IsChecked: false);
+        var missingChecked = new SelectionOption("missing", IsChecked: true);
+        var breakdown = CreateBreakdown(
+            "hidden",
+            hasVisibleTreeStructure: false,
+            hiddenByEmptyFolders: false,
+            rootEnumerationAccessDenied: true);
+
+        var projected = ProjectTreeInventoryRootFolderProjection.RemoveCheckedRootsWithoutVisibleStructure(
+            breakdown,
+            [hiddenChecked, hiddenUnchecked, missingChecked],
+            out var emptyFolderOwnedRemovedRoots,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal([hiddenUnchecked, missingChecked], projected);
+        Assert.Null(emptyFolderOwnedRemovedRoots);
+    }
+
+    [Theory]
     [InlineData(ProjectionCase.EmptyFolderIgnored, false)]
     [InlineData(ProjectionCase.EmptyFolderVisible, true)]
     [InlineData(ProjectionCase.AllowedFile, true)]
@@ -356,6 +410,45 @@ public sealed class ProjectTreeInventoryRootFolderProjectionTests
         {
             IgnoreEmptyFolders = ignoreEmptyFolders
         };
+
+    private static ProjectWorkspaceScanBreakdown CreateBreakdown(
+        string rootName,
+        bool? hasVisibleTreeStructure,
+        bool hiddenByEmptyFolders,
+        bool rootAccessDenied = false,
+        bool hadAccessDenied = false,
+        bool rootEnumerationAccessDenied = false)
+    {
+        var emptySection = new IgnoreSectionScanData(
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            IgnoreOptionCounts.Empty,
+            IgnoreOptionCounts.Empty);
+        var rootSection = emptySection with
+        {
+            HasVisibleTreeStructure = hasVisibleTreeStructure,
+            IsTreeStructureHiddenByEmptyFolders = hiddenByEmptyFolders
+        };
+
+        return new ProjectWorkspaceScanBreakdown(
+            emptySection,
+            new Dictionary<string, ProjectWorkspaceRootScanSnapshot>(PathComparer.Default)
+            {
+                [rootName] = new(
+                    rootSection,
+                    IgnoreOptionCounts.Empty,
+                    IgnoreControllerImpactCounts.Empty,
+                    rootAccessDenied,
+                    hadAccessDenied)
+            },
+            IgnoreOptionCounts.Empty,
+            IgnoreControllerImpactCounts.Empty,
+            IncludesDirectoryToggleProbeRoots: false,
+            IncludesControllerImpactProbeRoots: false,
+            RootEnumerationAccessDenied: rootEnumerationAccessDenied,
+            RootEnumerationHadAccessDenied: rootEnumerationAccessDenied,
+            RootFilesAccessDenied: false,
+            RootFilesHadAccessDenied: false);
+    }
 
     private static ProjectTreeInventorySnapshot BuildInventory(
         string rootPath,

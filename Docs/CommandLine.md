@@ -47,7 +47,7 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | --- | --- |
 | `--path <folder>` | Opens a project folder. |
 | `<folder>` | Opens a project folder as a positional argument. |
-| `--lang <code>` | Sets UI language: `en`, `ru`, `uz`, `tg`, `kk`, `fr`, `de`, `it`. |
+| `--lang <code>` | Sets UI language: `en`, `ru`, `es`, `pt`, `pt-pt`, `de`, `fr`, `it`, `tg`, `uz`, `kk`. |
 | `--report [file]` | Writes a JSON analysis report. If `file` is omitted, DevProjex writes to the default report folder. Use `--report -` to write JSON to stdout. |
 | `--report-path <file>` | Writes a JSON analysis report to a specific file. |
 | `--report-format json` | Selects the report format. JSON is the v1 format. |

@@ -12,7 +12,13 @@
  <a href="https://avaloniaui.net/showcase"><img alt="Avalonia App Showcase" src="https://img.shields.io/badge/Avalonia%20Team-Showcase%20Selection-7B61FF?logo=avaloniaui&logoColor=white"></a>
 </p>
 
-
+<p align="center">
+  <a href="https://boosty.to/avazbek22/donate">
+    <img
+      alt="Support DevProjex on Boosty"
+      src="https://img.shields.io/badge/Support_DevProjex-on_Boosty-F15F2C?style=for-the-badge&logo=boosty&logoColor=white">
+  </a>
+</p>
 
 <p align="center">
   <strong>The fastest way to turn a real codebase into clean, AI-ready context.</strong>

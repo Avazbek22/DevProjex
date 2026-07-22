@@ -35,6 +35,20 @@
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
     </Style>
+    <Style Selector="Button#ApplySettingsButton:disabled">
+      <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+      <Setter Property="Opacity" Value="0.65" />
+      <Setter Property="RenderTransform" Value="scale(1)" />
+    </Style>
+    <Style Selector="Button#ApplySettingsButton:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+    </Style>
+    <Style Selector="Button#ApplySettingsButton:disabled TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+    </Style>
   </UserControl.Styles>
   <Border Name="PanelRoot"
           MinWidth="285"
@@ -48,6 +62,7 @@
       <Button Name="ApplySettingsButton"
               Grid.Row="0"
               Content="{Binding SettingsApply}"
+              IsEnabled="{Binding CanApplySettings}"
               Click="OnApplySettings"
               Margin="0,5,0,1"
               HorizontalAlignment="Left"

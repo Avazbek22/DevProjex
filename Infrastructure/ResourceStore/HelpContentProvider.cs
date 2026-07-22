@@ -40,7 +40,10 @@ public sealed class HelpContentProvider
             [AppLanguage.Kk] = CreateResource(assembly, "kk"),
             [AppLanguage.Fr] = CreateResource(assembly, "fr"),
             [AppLanguage.De] = CreateResource(assembly, "de"),
-            [AppLanguage.It] = CreateResource(assembly, "it")
+            [AppLanguage.It] = CreateResource(assembly, "it"),
+            [AppLanguage.Es] = CreateResource(assembly, "es"),
+            [AppLanguage.Pt] = CreateResource(assembly, "pt"),
+            [AppLanguage.PtPt] = CreateResource(assembly, "pt-pt")
         };
     }
 

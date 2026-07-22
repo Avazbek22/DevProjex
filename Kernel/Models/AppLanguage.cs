@@ -9,5 +9,8 @@ public enum AppLanguage
 	Kk,
 	Fr,
 	De,
-	It
+	It,
+	Es,
+	Pt,
+	PtPt
 }

@@ -52,6 +52,35 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
     }
 
     [AvaloniaFact]
+    public async Task ApplySettingsButton_DisablesWhileStatusOperationIsActiveAndRecoversAfterCompletion()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            Assert.True(applyButton.IsEnabled);
+
+            viewModel.StatusBusy = true;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !applyButton.IsEnabled,
+                "Apply settings button to disable while a status operation is active");
+
+            viewModel.StatusBusy = false;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => applyButton.IsEnabled,
+                "Apply settings button to recover after the status operation completes");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PreviewAndToastTemplates_BindTypedViewModels()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

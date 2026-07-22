@@ -36,6 +36,9 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? LanguageFrRequested;
     public event EventHandler<RoutedEventArgs>? LanguageDeRequested;
     public event EventHandler<RoutedEventArgs>? LanguageItRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageEsRequested;
+    public event EventHandler<RoutedEventArgs>? LanguagePtRequested;
+    public event EventHandler<RoutedEventArgs>? LanguagePtPtRequested;
     public event EventHandler<RoutedEventArgs>? HelpRequested;
     public event EventHandler<RoutedEventArgs>? TerminalCommandSetupRequested;
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
@@ -74,6 +77,9 @@ public partial class TopMenuBarView : UserControl
     public MenuItem? LanguageFrMenuItemControl => LanguageFrMenuItem;
     public MenuItem? LanguageDeMenuItemControl => LanguageDeMenuItem;
     public MenuItem? LanguageItMenuItemControl => LanguageItMenuItem;
+    public MenuItem? LanguageEsMenuItemControl => LanguageEsMenuItem;
+    public MenuItem? LanguagePtMenuItemControl => LanguagePtMenuItem;
+    public MenuItem? LanguagePtPtMenuItemControl => LanguagePtPtMenuItem;
 
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => OpenFolderRequested?.Invoke(sender, e);
 
@@ -175,6 +181,12 @@ public partial class TopMenuBarView : UserControl
     private void OnLangDe(object? sender, RoutedEventArgs e) => LanguageDeRequested?.Invoke(sender, e);
 
     private void OnLangIt(object? sender, RoutedEventArgs e) => LanguageItRequested?.Invoke(sender, e);
+
+    private void OnLangEs(object? sender, RoutedEventArgs e) => LanguageEsRequested?.Invoke(sender, e);
+
+    private void OnLangPt(object? sender, RoutedEventArgs e) => LanguagePtRequested?.Invoke(sender, e);
+
+    private void OnLangPtPt(object? sender, RoutedEventArgs e) => LanguagePtPtRequested?.Invoke(sender, e);
 
     private void OnHelp(object? sender, RoutedEventArgs e) => HelpRequested?.Invoke(sender, e);
 

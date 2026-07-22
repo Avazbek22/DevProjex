@@ -598,6 +598,9 @@ public sealed record CommandLineOptions(
 			"fr" => AppLanguage.Fr,
 			"de" => AppLanguage.De,
 			"it" => AppLanguage.It,
+			"es" or "es-es" => AppLanguage.Es,
+			"pt" or "pt-br" => AppLanguage.Pt,
+			"pt-pt" or "pt-ao" or "pt-mz" or "pt-cv" or "pt-gw" or "pt-st" or "pt-gq" or "pt-tl" or "pt-mo" => AppLanguage.PtPt,
 			_ => null
 		};
 	}
@@ -612,11 +615,18 @@ public sealed record CommandLineOptions(
 		AppLanguage.Fr => "fr",
 		AppLanguage.De => "de",
 		AppLanguage.It => "it",
+		AppLanguage.Es => "es",
+		AppLanguage.Pt => "pt",
+		AppLanguage.PtPt => "pt-pt",
 		_ => "en"
 	};
 
 	public static AppLanguage DetectSystemLanguage()
 	{
+		var cultureName = CultureInfo.CurrentUICulture.Name.ToLowerInvariant();
+		if (cultureName is "pt-pt" or "pt-ao" or "pt-mz" or "pt-cv" or "pt-gw" or "pt-st" or "pt-gq" or "pt-tl" or "pt-mo")
+			return AppLanguage.PtPt;
+
 		var code = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLowerInvariant();
 		return code switch
 		{
@@ -627,6 +637,8 @@ public sealed record CommandLineOptions(
 			"fr" => AppLanguage.Fr,
 			"de" => AppLanguage.De,
 			"it" => AppLanguage.It,
+			"es" => AppLanguage.Es,
+			"pt" => AppLanguage.Pt,
 			_ => AppLanguage.En
 		};
 	}

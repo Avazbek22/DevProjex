@@ -212,6 +212,10 @@ public sealed record IgnoreRules(
 		string name,
 		bool useCandidates)
 	{
+		// Git administrative entries are outside the working tree and must never be traversed as ignore-pattern content.
+		if ((useCandidates || UseGitIgnore) && IsGitAdministrativeEntry(name))
+			return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
+
 		var scopedMatchersSource = GetScopedGitIgnoreMatchers(useCandidates);
 		var singleMatcher = GetGitIgnoreMatcher(useCandidates);
 		var scopedCount = scopedMatchersSource.Count;
@@ -764,6 +768,8 @@ public sealed record IgnoreRules(
 		{
 			if (!_useCandidates && !_rules.IsGitIgnoreTraversalEnabled)
 				return GitIgnoreEvaluation.NotIgnored;
+			if ((_useCandidates || _rules.UseGitIgnore) && IsGitAdministrativeEntry(name))
+				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 
 			GitIgnoreEvaluation evaluation;
 			if (_relativeMatcher is null)
@@ -1002,6 +1008,10 @@ public sealed record IgnoreRules(
 			}
 		}
 	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static bool IsGitAdministrativeEntry(string name) =>
+		PathStringComparer.Equals(name, ".git");
 }
 
 public sealed record ScopedGitIgnoreMatcher(
