@@ -274,13 +274,18 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 
 	private static string ResolveCanonicalPath(string path)
 	{
+		return ResolveCanonicalPath(path, new HashSet<string>(PathComparer.Default));
+	}
+
+	private static string ResolveCanonicalPath(string path, HashSet<string> resolvingLinks)
+	{
 		var normalizedPath = PathUtility.Normalize(path);
 		var root = Path.GetPathRoot(normalizedPath);
 		if (string.IsNullOrWhiteSpace(root))
 			throw UnsafeDestination($"The destination path has no filesystem root: {normalizedPath}");
 
 		var lexicalPath = PathUtility.Normalize(root);
-		var canonicalPath = ResolveExistingPathSegment(lexicalPath, lexicalPath);
+		var canonicalPath = ResolveExistingPathSegment(lexicalPath, lexicalPath, resolvingLinks);
 		var relativePath = Path.GetRelativePath(root, normalizedPath);
 		if (relativePath == ".")
 			return canonicalPath;
@@ -299,29 +304,44 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				continue;
 			}
 
-			canonicalPath = ResolveExistingPathSegment(lexicalPath, nextCanonicalPath);
+			canonicalPath = ResolveExistingPathSegment(lexicalPath, nextCanonicalPath, resolvingLinks);
 		}
 
 		return PathUtility.Normalize(canonicalPath);
 	}
 
-	private static string ResolveExistingPathSegment(string lexicalPath, string canonicalPath)
+	private static string ResolveExistingPathSegment(
+		string lexicalPath,
+		string canonicalPath,
+		HashSet<string> resolvingLinks)
 	{
 		try
 		{
 			var attributes = File.GetAttributes(lexicalPath);
-			FileSystemInfo link = Directory.Exists(lexicalPath)
+			FileSystemInfo link = (attributes & FileAttributes.Directory) != 0
 				? new DirectoryInfo(lexicalPath)
 				: new FileInfo(lexicalPath);
-			// Unix can expose target attributes for a directory link, so LinkTarget is the primary signal.
-			if (link.LinkTarget is null && (attributes & FileAttributes.ReparsePoint) == 0)
+			var target = link.ResolveLinkTarget(returnFinalTarget: false);
+			if (target is null && (attributes & FileAttributes.ReparsePoint) == 0)
 				return PathUtility.Normalize(canonicalPath);
 
-			var target = link.ResolveLinkTarget(returnFinalTarget: true);
 			if (target is null)
 				throw UnsafeDestination($"The destination link cannot be resolved safely: {lexicalPath}");
 
-			return PathUtility.Normalize(target.FullName);
+			var normalizedLinkPath = PathUtility.Normalize(lexicalPath);
+			if (!resolvingLinks.Add(normalizedLinkPath))
+				throw UnsafeDestination($"The destination path contains a symbolic-link cycle: {lexicalPath}");
+
+			try
+			{
+				// A link target can itself contain aliased ancestors, such as macOS /var -> /private/var.
+				// Re-walking the target is required before source/destination containment is compared.
+				return ResolveCanonicalPath(target.FullName, resolvingLinks);
+			}
+			finally
+			{
+				resolvingLinks.Remove(normalizedLinkPath);
+			}
 		}
 		catch (ProjectCopyExportException)
 		{
