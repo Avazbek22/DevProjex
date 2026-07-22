@@ -84,7 +84,10 @@ public sealed class SelectionRefreshEngine(
         cancellationToken.ThrowIfCancellationRequested();
 
         var selectedIgnoreOptions = BuildInitialLiveRefreshIgnoreSelection(context);
-        var liveRootOptions = BuildLiveRootOptionCandidates(context);
+        var rootCandidateRules = context.CurrentRootOptions is null
+            ? null
+            : BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
+        var liveRootOptions = BuildLiveRootOptionCandidates(context, rootCandidateRules);
         var liveSelectedRoots = liveRootOptions is null
             ? selectedRoots
             : CollectCheckedSelectionNames(liveRootOptions, PathComparer.Default);
@@ -140,32 +143,81 @@ public sealed class SelectionRefreshEngine(
         return true;
     }
 
-    private static IReadOnlyList<SelectionOption>? BuildLiveRootOptionCandidates(SelectionRefreshContext context)
+    private static IReadOnlyList<SelectionOption>? BuildLiveRootOptionCandidates(
+        SelectionRefreshContext context,
+        IgnoreRules? activeRules)
     {
-        if (context.CurrentRootOptions is null)
+        if (context.CurrentRootOptions is null || activeRules is null)
             return null;
 
         var candidates = new List<SelectionOption>(context.CurrentRootOptions.Count);
-        var visibleNames = new HashSet<string>(PathComparer.Default);
+        var candidateNames = new HashSet<string>(PathComparer.Default);
+        var gitIgnoreContext = activeRules.CreateGitIgnoreScanContext(context.Path);
+
         foreach (var option in context.CurrentRootOptions)
         {
-            candidates.Add(option);
-            visibleNames.Add(option.Name);
+            if (IsRootAvailableUnderActiveRules(context.Path, option.Name, activeRules, gitIgnoreContext))
+            {
+                candidates.Add(option);
+                candidateNames.Add(option.Name);
+            }
         }
 
         if (context.RootOptionStateCache is not null)
         {
             foreach (var (name, isChecked) in context.RootOptionStateCache)
             {
-                // Checked roots hidden by a previous extension projection remain scan
-                // candidates so reversing the filter can restore them automatically.
-                if (isChecked && visibleNames.Add(name))
+                // Checked roots hidden only by an extension projection remain candidates so
+                // reversing that filter restores them. Directory/controller-hidden roots are
+                // not selectable and must never leak back from the long-lived state cache.
+                if (isChecked &&
+                    candidateNames.Add(name) &&
+                    IsRootAvailableUnderActiveRules(context.Path, name, activeRules, gitIgnoreContext))
+                {
                     candidates.Add(new SelectionOption(name, IsChecked: true));
+                }
             }
         }
 
         candidates.Sort(static (left, right) => PathComparer.Default.Compare(left.Name, right.Name));
         return candidates;
+    }
+
+    private static bool IsRootAvailableUnderActiveRules(
+        string rootPath,
+        string name,
+        IgnoreRules rules,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
+    {
+        if (PathComparer.Default.Equals(name, rules.ExcludedRootFolderName))
+            return false;
+
+        var fullPath = Path.Combine(rootPath, name);
+        var gitIgnore = rules.IsGitIgnoreTraversalEnabled
+            ? gitIgnoreContext.Evaluate(fullPath, name, isDirectory: true, name)
+            : IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+        return !IgnoreDecisionEngine.EvaluateDirectory(
+            fullPath,
+            name,
+            HasHiddenAttribute(fullPath),
+            rules,
+            gitIgnore).IsIgnored;
+    }
+
+    private static bool HasHiddenAttribute(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.Hidden);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private RootSectionSnapshot BuildRootSection(
