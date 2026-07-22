@@ -8,6 +8,9 @@ public sealed class SearchFilterHelpContentIntegrationTests
     [InlineData("help.de.txt", "Einschränkungen:", "Beim Öffnen der Suche wird der Filter automatisch geschlossen", "Die Suche ist in der Vorschau verfügbar, solange die Bauminsel sichtbar ist", "Wenn der Baum ausgeblendet ist, ist die Suche vorübergehend nicht verfügbar")]
     [InlineData("help.fr.txt", "Limitations :", "à l’ouverture de la recherche, le filtre se ferme automatiquement", "la recherche reste disponible dans l’aperçu tant que le panneau de l’arborescence est visible", "si l’arborescence est masquée, la recherche devient temporairement indisponible")]
     [InlineData("help.it.txt", "Limitazioni:", "all’apertura della ricerca, il filtro si chiude automaticamente", "la ricerca è disponibile in anteprima finché il pannello dell’albero è visibile", "se l’albero è nascosto, la ricerca è temporaneamente non disponibile")]
+    [InlineData("help.es.txt", "Restricciones:", "al abrir la búsqueda se cierra el filtro automáticamente", "La búsqueda está disponible en Vista previa mientras el panel de árbol está visible", "si el árbol está oculto, la búsqueda no está disponible temporalmente")]
+    [InlineData("help.pt.txt", "Restrições:", "abrir a Pesquisa fecha o Filtro automaticamente", "A pesquisa está disponível na Visualização enquanto o painel em árvore está visível", "se a árvore estiver oculta, a Pesquisa ficará temporariamente indisponível")]
+    [InlineData("help.pt-pt.txt", "Restrições:", "abrir a Pesquisa fecha o Filtro automaticamente", "A pesquisa está disponível na Pré-visualização enquanto o painel em árvore está visível", "se a árvore estiver oculta, a Pesquisa ficará temporariamente indisponível")]
     [InlineData("help.kk.txt", "Шектеулер:", "іздеуді ашқанда сүзгі автоматты түрде жабылады", "іздеу превью ішінде ағаш аралы көрініп тұрған кезде қолжетімді", "ағаш жасырылса, іздеу уақытша қолжетімсіз")]
     [InlineData("help.tg.txt", "Маҳдудиятҳо:", "ҳангоми кушодани ҷустуҷӯ, филтр худкор баста мешавад", "ҷустуҷӯ дар пешнамоиш то вақте дастрас аст, ки ҷазираи дарахт намоён бошад", "агар дарахт пинҳон шавад, ҷустуҷӯ муваққатан дастрас нест")]
     [InlineData("help.uz.txt", "Cheklovlar:", "qidiruv ochilganda, filtr avtomatik yopiladi", "qidiruv preview ichida daraxt oroli ko‘rinib turgan paytda mavjud", "daraxt yashirilsa, qidiruv vaqtincha mavjud emas")]
@@ -33,6 +36,9 @@ public sealed class SearchFilterHelpContentIntegrationTests
     [InlineData("help.de.txt", "Einschränkungen:", "Beim Öffnen des Filters wird die Suche automatisch geschlossen", "Der Filter ist in der Vorschau verfügbar, solange die Bauminsel sichtbar ist", "Wenn der Baum ausgeblendet ist, ist der Filter vorübergehend nicht verfügbar")]
     [InlineData("help.fr.txt", "Limitations :", "à l’ouverture du filtre, la recherche se ferme automatiquement", "le filtre reste disponible dans l’aperçu tant que le panneau de l’arborescence est visible", "si l’arborescence est masquée, le filtre devient temporairement indisponible")]
     [InlineData("help.it.txt", "Limitazioni:", "all’apertura del filtro, la ricerca si chiude automaticamente", "il filtro è disponibile in anteprima finché il pannello dell’albero è visibile", "se l’albero è nascosto, il filtro è temporaneamente non disponibile")]
+    [InlineData("help.es.txt", "Restricciones:", "al abrir el filtro se cierra la búsqueda automáticamente", "El filtro está disponible en Vista previa mientras el panel de árbol está visible", "si el árbol está oculto, el filtro no está disponible temporalmente")]
+    [InlineData("help.pt.txt", "Restrições:", "abrir o Filtro fecha a Pesquisa automaticamente", "O filtro está disponível na Visualização enquanto o painel em árvore está visível", "se a árvore estiver oculta, o Filtro ficará temporariamente indisponível")]
+    [InlineData("help.pt-pt.txt", "Restrições:", "abrir o Filtro fecha a Pesquisa automaticamente", "O filtro está disponível na Visualização enquanto o painel em árvore estiver visível", "se a árvore estiver oculta, o Filtro ficará temporariamente indisponível")]
     [InlineData("help.kk.txt", "Шектеулер:", "сүзгіні ашқанда іздеу автоматты түрде жабылады", "сүзгі превью ішінде ағаш аралы көрініп тұрған кезде қолжетімді", "ағаш жасырылса, сүзгі уақытша қолжетімсіз")]
     [InlineData("help.tg.txt", "Маҳдудиятҳо:", "ҳангоми кушодани филтр, ҷустуҷӯ худкор баста мешавад", "филтр дар пешнамоиш то вақте дастрас аст, ки ҷазираи дарахт намоён бошад", "агар дарахт пинҳон шавад, филтр муваққатан дастрас нест")]
     [InlineData("help.uz.txt", "Cheklovlar:", "filtr ochilganda, qidiruv avtomatik yopiladi", "filtr preview ichida daraxt oroli ko‘rinib turgan paytda mavjud", "daraxt yashirilsa, filtr vaqtincha mavjud emas")]
@@ -58,6 +64,9 @@ public sealed class SearchFilterHelpContentIntegrationTests
     [InlineData("help.de.txt")]
     [InlineData("help.fr.txt")]
     [InlineData("help.it.txt")]
+    [InlineData("help.es.txt")]
+    [InlineData("help.pt.txt")]
+    [InlineData("help.pt-pt.txt")]
     [InlineData("help.kk.txt")]
     [InlineData("help.tg.txt")]
     [InlineData("help.uz.txt")]
@@ -80,6 +89,8 @@ public sealed class SearchFilterHelpContentIntegrationTests
             "Einschränkungen:",
             "Limitations :",
             "Limitazioni:",
+            "Restricciones:",
+            "Restrições:",
             "Шектеулер:",
             "Маҳдудиятҳо:",
             "Cheklovlar:"

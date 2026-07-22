@@ -12,7 +12,10 @@ public sealed class LocalizationCatalogAccessDeniedTests
 		AppLanguage.Kk,
 		AppLanguage.Fr,
 		AppLanguage.De,
-		AppLanguage.It
+		AppLanguage.It,
+		AppLanguage.Es,
+		AppLanguage.Pt,
+		AppLanguage.PtPt
 	];
 
 	[Theory]

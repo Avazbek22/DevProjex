@@ -83,14 +83,17 @@
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchFilterAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />
       <MenuItem Header="{Binding MenuLanguage}">
-        <MenuItem Name="LanguageRuMenuItem" Header="Русский" Click="OnLangRu" />
         <MenuItem Name="LanguageEnMenuItem" Header="English" Click="OnLangEn" />
-        <MenuItem Name="LanguageUzMenuItem" Header="Oʻzbek" Click="OnLangUz" />
-        <MenuItem Name="LanguageTgMenuItem" Header="Тоҷикӣ" Click="OnLangTg" />
-        <MenuItem Name="LanguageKkMenuItem" Header="Қазақ" Click="OnLangKk" />
-        <MenuItem Name="LanguageFrMenuItem" Header="Français" Click="OnLangFr" />
+        <MenuItem Name="LanguageRuMenuItem" Header="Русский" Click="OnLangRu" />
+        <MenuItem Name="LanguageEsMenuItem" Header="Español" Click="OnLangEs" />
+        <MenuItem Name="LanguagePtMenuItem" Header="Português (Brasil)" Click="OnLangPt" />
+        <MenuItem Name="LanguagePtPtMenuItem" Header="Português (Portugal)" Click="OnLangPtPt" />
         <MenuItem Name="LanguageDeMenuItem" Header="Deutsch" Click="OnLangDe" />
+        <MenuItem Name="LanguageFrMenuItem" Header="Français" Click="OnLangFr" />
         <MenuItem Name="LanguageItMenuItem" Header="Italiano" Click="OnLangIt" />
+        <MenuItem Name="LanguageTgMenuItem" Header="Тоҷикӣ" Click="OnLangTg" />
+        <MenuItem Name="LanguageUzMenuItem" Header="Oʻzbek" Click="OnLangUz" />
+        <MenuItem Name="LanguageKkMenuItem" Header="Қазақ" Click="OnLangKk" />
       </MenuItem>
       <MenuItem Name="ThemeMenuItem" Header="{Binding MenuTheme}" Click="OnThemeMenuClick" />
       <MenuItem Name="HelpMenuItem" Header="{Binding MenuHelp}">

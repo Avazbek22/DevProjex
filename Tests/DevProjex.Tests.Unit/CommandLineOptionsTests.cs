@@ -1467,6 +1467,53 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(AppLanguage.Ru, result);
 	}
 
+	[Theory]
+	[InlineData("es-ES", AppLanguage.Es)]
+	[InlineData("es-MX", AppLanguage.Es)]
+	[InlineData("pt-BR", AppLanguage.Pt)]
+	[InlineData("pt-PT", AppLanguage.PtPt)]
+	[InlineData("pt-AO", AppLanguage.PtPt)]
+	[InlineData("pt-MZ", AppLanguage.PtPt)]
+	[InlineData("pt-CV", AppLanguage.PtPt)]
+	[InlineData("pt-GW", AppLanguage.PtPt)]
+	[InlineData("pt-ST", AppLanguage.PtPt)]
+	public void DetectSystemLanguage_RecognizesSpanishAndPortugueseCultures(
+		string cultureName,
+		AppLanguage expected)
+	{
+		var original = CultureInfo.CurrentUICulture;
+		try
+		{
+			CultureInfo.CurrentUICulture = new CultureInfo(cultureName);
+
+			Assert.Equal(expected, CommandLineOptions.DetectSystemLanguage());
+		}
+		finally
+		{
+			CultureInfo.CurrentUICulture = original;
+		}
+	}
+
+	[Theory]
+	[InlineData("es", AppLanguage.Es, "es")]
+	[InlineData("ES-ES", AppLanguage.Es, "es")]
+	[InlineData("pt", AppLanguage.Pt, "pt")]
+	[InlineData("pt-BR", AppLanguage.Pt, "pt")]
+	[InlineData("pt-PT", AppLanguage.PtPt, "pt-pt")]
+	[InlineData("pt-AO", AppLanguage.PtPt, "pt-pt")]
+	[InlineData("pt-GQ", AppLanguage.PtPt, "pt-pt")]
+	public void SpanishAndPortugueseLanguageCodes_ParseAndRoundTrip(
+		string code,
+		AppLanguage expected,
+		string canonicalCode)
+	{
+		var parsed = CommandLineOptions.ParseLanguage(code);
+
+		Assert.Equal(expected, parsed);
+		Assert.True(parsed.HasValue);
+		Assert.Equal(canonicalCode, CommandLineOptions.LanguageToCode(parsed.GetValueOrDefault()));
+	}
+
 	[Fact]
 	public void ToArguments_EscapesQuotesInPath()
 	{

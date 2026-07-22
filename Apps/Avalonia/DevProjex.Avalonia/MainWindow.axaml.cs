@@ -5363,6 +5363,9 @@ public partial class MainWindow : Window
     private void OnLangFr(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Fr);
     private void OnLangDe(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.De);
     private void OnLangIt(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.It);
+    private void OnLangEs(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Es);
+    private void OnLangPt(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Pt);
+    private void OnLangPtPt(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.PtPt);
 
     private void OnAbout(object? sender, RoutedEventArgs e)
     {
@@ -5800,14 +5803,17 @@ public partial class MainWindow : Window
         if (topMenuBar is null)
             yield break;
 
-        yield return (topMenuBar.LanguageRuMenuItemControl, AppLanguage.Ru, "Русский");
         yield return (topMenuBar.LanguageEnMenuItemControl, AppLanguage.En, "English");
-        yield return (topMenuBar.LanguageUzMenuItemControl, AppLanguage.Uz, "Oʻzbek");
-        yield return (topMenuBar.LanguageTgMenuItemControl, AppLanguage.Tg, "Тоҷикӣ");
-        yield return (topMenuBar.LanguageKkMenuItemControl, AppLanguage.Kk, "Қазақ");
-        yield return (topMenuBar.LanguageFrMenuItemControl, AppLanguage.Fr, "Français");
+        yield return (topMenuBar.LanguageRuMenuItemControl, AppLanguage.Ru, "Русский");
+        yield return (topMenuBar.LanguageEsMenuItemControl, AppLanguage.Es, "Español");
+        yield return (topMenuBar.LanguagePtMenuItemControl, AppLanguage.Pt, "Português (Brasil)");
+        yield return (topMenuBar.LanguagePtPtMenuItemControl, AppLanguage.PtPt, "Português (Portugal)");
         yield return (topMenuBar.LanguageDeMenuItemControl, AppLanguage.De, "Deutsch");
+        yield return (topMenuBar.LanguageFrMenuItemControl, AppLanguage.Fr, "Français");
         yield return (topMenuBar.LanguageItMenuItemControl, AppLanguage.It, "Italiano");
+        yield return (topMenuBar.LanguageTgMenuItemControl, AppLanguage.Tg, "Тоҷикӣ");
+        yield return (topMenuBar.LanguageUzMenuItemControl, AppLanguage.Uz, "Oʻzbek");
+        yield return (topMenuBar.LanguageKkMenuItemControl, AppLanguage.Kk, "Қазақ");
     }
 
     private static string CreateCheckedMenuHeader(bool isChecked, string label)

@@ -12,7 +12,7 @@ Value syntax:
 
 Options:
   --path <folder>                 Open a project folder.
-  --lang <code>                   UI language: en, ru, uz, tg, kk, fr, de, it.
+  --lang <code>                   UI language: en, ru, es, pt, pt-pt, de, fr, it, tg, uz, kk.
   --report [file]                 Write a JSON analysis report.
                                   Use --report - to write JSON to stdout.
   --report-path <file>            Write a JSON analysis report to a specific file.
