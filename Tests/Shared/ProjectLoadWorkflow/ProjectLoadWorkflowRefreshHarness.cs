@@ -154,7 +154,8 @@ internal static class ProjectLoadWorkflowRefreshHarness
                 snapshot.ExtensionlessEntriesCount),
             RootOptionStateCache: BuildRootOptionStateCache(snapshot),
             ExtensionOptionStateCache: BuildExtensionOptionStateCache(snapshot),
-            IgnoreOptionStateCacheIsComplete: true);
+            IgnoreOptionStateCacheIsComplete: true,
+            CurrentRootOptions: snapshot.RootOptions);
     }
 
     public static SelectionRefreshContext ApplyScenarioStep(

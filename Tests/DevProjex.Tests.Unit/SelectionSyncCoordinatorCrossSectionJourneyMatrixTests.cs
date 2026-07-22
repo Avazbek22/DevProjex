@@ -1438,7 +1438,12 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 					_extensionStates,
 					StringComparer.OrdinalIgnoreCase),
 				IgnoreOptionStateCacheIsComplete: true,
-				CaptureTreeInventory: captureTreeInventory);
+				CaptureTreeInventory: captureTreeInventory,
+				CurrentRootOptions: CurrentSnapshot.RootOptions?
+					.Select(option => new SelectionOption(
+						option.Name,
+						_rootStates.GetValueOrDefault(option.Name)))
+					.ToArray());
 		}
 
 		private HashSet<string> CollectCurrentlySelectedVisibleRoots()

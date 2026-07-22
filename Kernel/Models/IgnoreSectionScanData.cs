@@ -7,7 +7,9 @@ public sealed record IgnoreSectionScanData(
 	IgnoreOptionCounts RawIgnoreOptionCounts,
 	IgnoreOptionCounts EffectiveIgnoreOptionCounts,
 	IgnoreControllerImpactCounts ControllerImpactCounts = default,
-	HashSet<string>? EffectiveExtensions = null)
+	HashSet<string>? EffectiveExtensions = null,
+	bool? HasVisibleTreeStructure = null,
+	bool IsTreeStructureHiddenByEmptyFolders = false)
 {
 	public IReadOnlySet<string> VisibleExtensions => EffectiveExtensions ?? Extensions;
 }

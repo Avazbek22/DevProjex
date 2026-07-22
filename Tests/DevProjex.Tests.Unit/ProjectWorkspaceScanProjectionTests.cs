@@ -16,7 +16,7 @@ public sealed class ProjectWorkspaceScanProjectionTests
 			out var projected);
 
 		Assert.True(reused);
-		Assert.Equal([".cs", ".root"], projected.Value.IgnoreSection.Extensions.Order());
+		Assert.Equal([".cs", ".md", ".root", ".tmp"], projected.Value.IgnoreSection.Extensions.Order());
 		Assert.Equal(
 			new IgnoreOptionCounts(HiddenFolders: 1, EmptyFolders: 2, DotFolders: 1),
 			projected.Value.IgnoreSection.EffectiveIgnoreOptionCounts);
@@ -24,6 +24,24 @@ public sealed class ProjectWorkspaceScanProjectionTests
 			new IgnoreControllerImpactCounts(GitIgnore: 1, SmartIgnore: 1),
 			projected.Value.IgnoreSection.ControllerImpactCounts);
 		Assert.Same(source.TreeInventory, projected.Value.TreeInventory);
+	}
+
+	[Fact]
+	public void TryProjectSelectedRoots_WithoutTreeInventory_ReusesCapturedBreakdown()
+	{
+		var source = CreateSource() with { TreeInventory = null };
+
+		var reused = ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
+			source,
+			["keep"],
+			includeDirectoryToggleProbeRoots: true,
+			includeControllerImpactProbeRoots: true,
+			retainedRemovedRootEmptyFolderImpactRoots: null,
+			out var projected);
+
+		Assert.True(reused);
+		Assert.Null(projected.Value.TreeInventory);
+		Assert.Equal([".cs", ".md", ".root", ".tmp"], projected.Value.IgnoreSection.Extensions.Order());
 	}
 
 	[Fact]
@@ -44,8 +62,8 @@ public sealed class ProjectWorkspaceScanProjectionTests
 		Assert.Equal(
 			new IgnoreOptionCounts(HiddenFolders: 1, EmptyFolders: 5, DotFolders: 1),
 			projected.Value.IgnoreSection.EffectiveIgnoreOptionCounts);
-		Assert.DoesNotContain(".md", projected.Value.IgnoreSection.Extensions);
-		Assert.DoesNotContain(".tmp", projected.Value.IgnoreSection.Extensions);
+		Assert.Contains(".md", projected.Value.IgnoreSection.Extensions);
+		Assert.Contains(".tmp", projected.Value.IgnoreSection.Extensions);
 		Assert.Equal(0, projected.Value.IgnoreSection.EffectiveIgnoreOptionCounts.EmptyFiles);
 	}
 

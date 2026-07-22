@@ -596,6 +596,32 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.Equal(0, collectionEvents);
 	}
 
+	[Fact]
+	public void ApplyRootOptions_WhenFilteredRootDisappears_UpdatesNamesCountAndMasterState()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(viewModel);
+		ApplyRootOptions(
+			coordinator,
+			[
+				new SelectionOption("app", true),
+				new SelectionOption("scripts", true),
+				new SelectionOption("tests", true)
+			]);
+
+		ApplyRootOptions(
+			coordinator,
+			[
+				new SelectionOption("app", true),
+				new SelectionOption("tests", true)
+			]);
+
+		Assert.Equal(["app", "tests"], viewModel.RootFolders.Select(static option => option.Name));
+		Assert.All(viewModel.RootFolders, static option => Assert.True(option.IsChecked));
+		Assert.True(viewModel.AllRootFoldersChecked);
+		Assert.EndsWith(" (2)", viewModel.SettingsAllRootFolders, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData(IgnoreOptionId.SmartIgnore)]
 	[InlineData(IgnoreOptionId.UseGitIgnore)]

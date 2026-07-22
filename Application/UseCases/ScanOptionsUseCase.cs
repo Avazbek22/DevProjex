@@ -445,7 +445,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 		bool includeDirectoryToggleProbeRoots = false,
 		CancellationToken cancellationToken = default,
 		bool includeControllerImpactProbeRoots = false,
-		bool captureRootScanBreakdown = false)
+		bool captureRootScanBreakdown = false,
+		bool captureTreeInventory = true)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -458,7 +459,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 					extensionDiscoveryRules,
 					effectiveRules,
 					effectiveExtensionPolicy,
-					CaptureTreeInventory: true,
+					CaptureTreeInventory: captureTreeInventory,
 					IncludeDirectoryToggleProbeRoots: includeDirectoryToggleProbeRoots,
 					IncludeControllerImpactProbeRoots: includeControllerImpactProbeRoots,
 					CaptureRootScanBreakdown: captureRootScanBreakdown),

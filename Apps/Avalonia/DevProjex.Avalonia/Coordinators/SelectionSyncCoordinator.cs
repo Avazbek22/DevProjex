@@ -2206,7 +2206,20 @@ public sealed partial class SelectionSyncCoordinator(
             RootOptionStateCache: SnapshotRootOptionStateCacheOrNull(isInitialized: true),
             ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
             IgnoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
-            CaptureTreeInventory: captureTreeInventory);
+            CaptureTreeInventory: captureTreeInventory,
+            CurrentRootOptions: SnapshotVisibleRootOptions());
+
+    private IReadOnlyList<SelectionOption> SnapshotVisibleRootOptions()
+    {
+        var options = new SelectionOption[viewModel.RootFolders.Count];
+        for (var index = 0; index < viewModel.RootFolders.Count; index++)
+        {
+            var option = viewModel.RootFolders[index];
+            options[index] = new SelectionOption(option.Name, option.IsChecked);
+        }
+
+        return options;
+    }
 
     // UI master checkboxes only describe visible rows; refresh policy also needs
     // explicit states retained for rows temporarily hidden by another section.

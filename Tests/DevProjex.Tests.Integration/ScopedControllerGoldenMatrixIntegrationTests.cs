@@ -41,12 +41,13 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			services,
 			workspace.Path,
 			CreateDefaultContext(workspace.Path));
+		var scenarioContext = BuildScenarioContext(workspace.Path, baseline, testCase);
 		var fullSnapshot = ComputeConvergedSnapshot(
 			services,
 			workspace.Path,
-			BuildScenarioContext(workspace.Path, baseline, testCase));
+			scenarioContext);
 		var liveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
-			CreateContextFromSnapshot(workspace.Path, fullSnapshot),
+			BuildConvergedContext(workspace.Path, fullSnapshot, scenarioContext),
 			CollectCheckedRootNames(fullSnapshot),
 			TestContext.Current.CancellationToken);
 
@@ -72,8 +73,31 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			BuildScenarioContext(workspace.Path, baseline, testCase));
 		var profileContext = CreateProfileContextFromSnapshot(workspace.Path, baseline, explicitSnapshot, testCase);
 		var restored = ComputeConvergedSnapshot(services, workspace.Path, profileContext);
+		var profileExpected = testCase with
+		{
+			ExpectedCheckedRoots = testCase.SelectedRoots ?? Set(AllRootNames, PathComparer.Default),
+			ExpectedCheckedExtensions = testCase.SelectedExtensions is not null &&
+			                            testCase.ExpectedCheckedExtensions.Count == 0
+				? testCase.ExpectedVisibleExtensions
+				: testCase.ExpectedCheckedExtensions
+		};
+		if (testCase.Name == "all roots xml extension is absent while dot folders are on")
+		{
+			profileExpected = profileExpected with
+			{
+				ExpectedVisibleExtensions = Set(profileExpected.ExpectedVisibleExtensions.Append(".gitignore")),
+				ExpectedCheckedExtensions = Set(profileExpected.ExpectedVisibleExtensions.Append(".gitignore")),
+				ExpectedIgnoreOptions = profileExpected.ExpectedIgnoreOptions
+					.Where(static option => option.Id != IgnoreOptionId.DotFolders)
+					.Append(ExpectedVisible(IgnoreOptionId.DotFolders, true))
+					.ToArray(),
+				ExpectedCounts = profileExpected.ExpectedCounts is null
+					? null
+					: profileExpected.ExpectedCounts with { DotFolders = 2 }
+			};
+		}
 
-		AssertGoldenSnapshot(restored, testCase);
+		AssertGoldenSnapshot(restored, profileExpected);
 		AssertGoldenTree(workspace.Path, services, restored, testCase);
 	}
 
@@ -453,6 +477,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			],
 			expectedVisiblePaths: [],
 			expectedHiddenPaths: ["api/bin/Debug/api.dll"],
+			expectedCheckedRoots: [],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: null,
 				DotFiles: null,
@@ -552,6 +577,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			],
 			expectedVisiblePaths: [],
 			expectedHiddenPaths: ["web/node_modules/pkg/index.js"],
+			expectedCheckedRoots: [],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: null,
 				DotFiles: null,
@@ -640,6 +666,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			],
 			expectedVisiblePaths: [],
 			expectedHiddenPaths: ["api/.idea/settings.xml"],
+			expectedCheckedRoots: [],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: 0,
 				DotFiles: null,
@@ -651,8 +678,8 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			roots: null,
 			extensions: [".xml"],
 			forcedStates: States((IgnoreOptionId.DotFolders, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".json", ".log", ".md", ".ts", ".xml"],
-			expectedCheckedExtensions: [".xml"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".js", ".json", ".log", ".md", ".ts", ".xml"],
+			expectedCheckedExtensions: [".dll", ".js", ".xml"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.DotFolders, false),
@@ -662,7 +689,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedVisiblePaths: ["api/.idea/settings.xml"],
 			expectedHiddenPaths: ["api/logs/drop.tmp"],
 			expectedCounts: new ExpectedCountContract(
-				DotFolders: 1,
+				DotFolders: 2,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
 				MinSmartIgnoreImpact: 1))];
@@ -809,14 +836,16 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		string rootPath,
 		SelectionRefreshContext context)
 	{
-		var previous = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
+		var currentContext = context;
+		var previous = services.Engine.ComputeFullRefreshSnapshot(currentContext, TestContext.Current.CancellationToken);
 		for (var pass = 0; pass < MaximumConvergencePasses; pass++)
 		{
+			currentContext = BuildConvergedContext(rootPath, previous, currentContext) with
+			{
+				CaptureTreeInventory = context.CaptureTreeInventory
+			};
 			var next = services.Engine.ComputeFullRefreshSnapshot(
-				CreateContextFromSnapshot(rootPath, previous) with
-				{
-					CaptureTreeInventory = context.CaptureTreeInventory
-				},
+				currentContext,
 				TestContext.Current.CancellationToken);
 			if (SnapshotsMatch(previous, next))
 				return next;
@@ -824,12 +853,11 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			previous = next;
 		}
 
-		var final = services.Engine.ComputeFullRefreshSnapshot(
-			CreateContextFromSnapshot(rootPath, previous) with
-			{
-				CaptureTreeInventory = context.CaptureTreeInventory
-			},
-			TestContext.Current.CancellationToken);
+		currentContext = BuildConvergedContext(rootPath, previous, currentContext) with
+		{
+			CaptureTreeInventory = context.CaptureTreeInventory
+		};
+		var final = services.Engine.ComputeFullRefreshSnapshot(currentContext, TestContext.Current.CancellationToken);
 		AssertEquivalentVisibleSnapshots(previous, final);
 		return final;
 	}
@@ -932,17 +960,18 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		SelectionRefreshSnapshot explicitSnapshot,
 		ScopedGoldenCase testCase)
 	{
-		return CreateContextFromSnapshot(rootPath, baseline) with
+		var explicitContext = BuildScenarioContext(rootPath, baseline, testCase);
+		return BuildConvergedContext(rootPath, explicitSnapshot, explicitContext) with
 		{
 			PreparedSelectionMode = PreparedSelectionMode.Profile,
 			AllRootFoldersChecked = testCase.SelectedRoots is null,
 			RootSelectionInitialized = true,
-			RootSelectionCache = CollectCheckedRootNames(explicitSnapshot),
-			RootOptionStateCache = BuildRootOptionStateCache(explicitSnapshot),
+			RootSelectionCache = explicitContext.RootSelectionCache,
+			RootOptionStateCache = explicitContext.RootOptionStateCache,
 			AllExtensionsChecked = testCase.SelectedExtensions is null,
 			ExtensionsSelectionInitialized = true,
-			ExtensionsSelectionCache = CollectCheckedExtensionNames(explicitSnapshot),
-			ExtensionOptionStateCache = BuildExtensionOptionStateCache(explicitSnapshot),
+			ExtensionsSelectionCache = explicitContext.ExtensionsSelectionCache,
+			ExtensionOptionStateCache = explicitContext.ExtensionOptionStateCache,
 			IgnoreSelectionInitialized = true,
 			IgnoreSelectionCache = CollectCheckedIgnoreOptionIds(explicitSnapshot),
 			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>(explicitSnapshot.IgnoreOptionStateCache),
@@ -1148,7 +1177,8 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		string[] expectedVisiblePaths,
 		string[] expectedHiddenPaths,
 		ExpectedCountContract? expectedCounts,
-		string[]? expectedCheckedExtensions = null)
+		string[]? expectedCheckedExtensions = null,
+		string[]? expectedCheckedRoots = null)
 	{
 		var expectedVisibleSet = Set(expectedVisibleExtensions);
 		var selectedExtensions = extensions is null ? null : Set(extensions);
@@ -1163,7 +1193,11 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			SelectedRoots: roots is null ? null : Set(roots, PathComparer.Default),
 			SelectedExtensions: selectedExtensions,
 			ForcedIgnoreStates: forcedStates,
-			ExpectedCheckedRoots: roots is null ? Set(AllRootNames, PathComparer.Default) : Set(roots, PathComparer.Default),
+			ExpectedCheckedRoots: expectedCheckedRoots is not null
+				? Set(expectedCheckedRoots, PathComparer.Default)
+				: roots is null
+					? Set(AllRootNames, PathComparer.Default)
+					: Set(roots, PathComparer.Default),
 			ExpectedVisibleExtensions: expectedVisibleSet,
 			ExpectedCheckedExtensions: checkedExtensions,
 			ExpectedIgnoreOptions: expectedIgnoreOptions,

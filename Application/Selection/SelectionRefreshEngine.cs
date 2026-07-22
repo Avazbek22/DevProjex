@@ -84,17 +84,28 @@ public sealed class SelectionRefreshEngine(
         cancellationToken.ThrowIfCancellationRequested();
 
         var selectedIgnoreOptions = BuildInitialLiveRefreshIgnoreSelection(context);
+        var liveRootOptions = BuildLiveRootOptionCandidates(context);
+        var liveSelectedRoots = liveRootOptions is null
+            ? selectedRoots
+            : CollectCheckedSelectionNames(liveRootOptions, PathComparer.Default);
         var dynamicSection = BuildDynamicSection(
             context,
-            rootOptions: null,
-            selectedRoots,
+            liveRootOptions,
+            liveSelectedRoots,
             selectedIgnoreOptions,
             context.IgnoreOptionStateCache,
             context.CurrentSnapshotState,
             cancellationToken);
 
+        var publishedRootOptions = dynamicSection.RootOptions;
+        if (publishedRootOptions is null &&
+            !SelectionOptionsMatch(context.CurrentRootOptions, liveRootOptions))
+        {
+            publishedRootOptions = liveRootOptions;
+        }
+
         return new SelectionRefreshSnapshot(
-            RootOptions: dynamicSection.RootOptions,
+            RootOptions: publishedRootOptions,
             ExtensionOptions: dynamicSection.ExtensionOptions,
             IgnoreOptions: dynamicSection.IgnoreOptions,
             ExtensionlessEntriesCount: dynamicSection.ExtensionlessEntriesCount,
@@ -106,6 +117,55 @@ public sealed class SelectionRefreshEngine(
             HadAccessDenied: dynamicSection.HadAccessDenied,
             TreeInventory: dynamicSection.TreeInventory,
             VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions);
+    }
+
+    private static bool SelectionOptionsMatch(
+        IReadOnlyList<SelectionOption>? left,
+        IReadOnlyList<SelectionOption>? right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+        if (left is null || right is null || left.Count != right.Count)
+            return false;
+
+        for (var index = 0; index < left.Count; index++)
+        {
+            if (!PathComparer.Default.Equals(left[index].Name, right[index].Name) ||
+                left[index].IsChecked != right[index].IsChecked)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<SelectionOption>? BuildLiveRootOptionCandidates(SelectionRefreshContext context)
+    {
+        if (context.CurrentRootOptions is null)
+            return null;
+
+        var candidates = new List<SelectionOption>(context.CurrentRootOptions.Count);
+        var visibleNames = new HashSet<string>(PathComparer.Default);
+        foreach (var option in context.CurrentRootOptions)
+        {
+            candidates.Add(option);
+            visibleNames.Add(option.Name);
+        }
+
+        if (context.RootOptionStateCache is not null)
+        {
+            foreach (var (name, isChecked) in context.RootOptionStateCache)
+            {
+                // Checked roots hidden by a previous extension projection remain scan
+                // candidates so reversing the filter can restore them automatically.
+                if (isChecked && visibleNames.Add(name))
+                    candidates.Add(new SelectionOption(name, IsChecked: true));
+            }
+        }
+
+        candidates.Sort(static (left, right) => PathComparer.Default.Compare(left.Name, right.Name));
+        return candidates;
     }
 
     private RootSectionSnapshot BuildRootSection(
@@ -193,10 +253,10 @@ public sealed class SelectionRefreshEngine(
             hadAccessDenied |= snapshot.HadAccessDenied;
             var rootProjectionChanged = false;
 
-            if (currentRootOptions is not null && snapshot.TreeInventory is not null)
+            if (currentRootOptions is not null)
             {
-                var projectedRootOptions = ProjectTreeInventoryRootFolderProjection
-                    .RemoveCheckedRootsWithoutVisibleStructure(
+                var projectedRootOptions = snapshot.TreeInventory is not null
+                    ? ProjectTreeInventoryRootFolderProjection.RemoveCheckedRootsWithoutVisibleStructure(
                         snapshot.TreeInventory,
                         currentRootOptions,
                         CollectCheckedSelectionNames(
@@ -204,6 +264,11 @@ public sealed class SelectionRefreshEngine(
                             StringComparer.OrdinalIgnoreCase),
                         snapshot.EffectiveRules,
                         out var emptyFolderOwnedRemovedRoots,
+                        cancellationToken)
+                    : ProjectTreeInventoryRootFolderProjection.RemoveCheckedRootsWithoutVisibleStructure(
+                        snapshot.WorkspaceScan.Breakdown,
+                        currentRootOptions,
+                        out emptyFolderOwnedRemovedRoots,
                         cancellationToken);
                 if (!ReferenceEquals(projectedRootOptions, currentRootOptions))
                 {
@@ -431,8 +496,7 @@ public sealed class SelectionRefreshEngine(
         var includeControllerImpactProbeRoots = ShouldIncludeControllerImpactProbeRoots(
             context,
             selectedIgnoreOptions);
-        if (context.CaptureTreeInventory &&
-            reusableWorkspaceScan is not null &&
+        if (reusableWorkspaceScan is not null &&
             ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
                 reusableWorkspaceScan,
                 selectedRoots,
@@ -444,8 +508,7 @@ public sealed class SelectionRefreshEngine(
             return projectedScan;
         }
 
-        return context.CaptureTreeInventory
-            ? scanOptions.GetProjectWorkspaceSnapshotForRootFolders(
+        return scanOptions.GetProjectWorkspaceSnapshotForRootFolders(
                 context.Path,
                 selectedRoots,
                 extensionScanRules,
@@ -454,24 +517,8 @@ public sealed class SelectionRefreshEngine(
                 includeDirectoryToggleProbeRoots,
                 cancellationToken,
                 includeControllerImpactProbeRoots,
-                captureRootScanBreakdown: true)
-            : WrapIgnoreSectionScan(scanOptions.GetIgnoreSectionSnapshotForRootFolders(
-                context.Path,
-                selectedRoots,
-                extensionScanRules,
-                ignoreRules,
-                effectiveExtensionPolicy,
-                includeDirectoryToggleProbeRoots,
-                cancellationToken,
-                includeControllerImpactProbeRoots));
-    }
-
-    private static ScanResult<ProjectWorkspaceScanSnapshot> WrapIgnoreSectionScan(ScanResult<IgnoreSectionScanData> scan)
-    {
-        return new ScanResult<ProjectWorkspaceScanSnapshot>(
-            new ProjectWorkspaceScanSnapshot(scan.Value, TreeInventory: null),
-            scan.RootAccessDenied,
-            scan.HadAccessDenied);
+                captureRootScanBreakdown: true,
+                captureTreeInventory: context.CaptureTreeInventory);
     }
 
     private IgnoreOptionResolutionResult BuildIgnoreOptionState(

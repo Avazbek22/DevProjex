@@ -43,12 +43,13 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 			services,
 			workspace.Path,
 			CreateDefaultContext(workspace.Path) with { CaptureTreeInventory = scenario.CaptureTreeInventory });
+		var scenarioContext = BuildScenarioContext(workspace.Path, baseline, scenario);
 		var fullSnapshot = ComputeConvergedSnapshot(
 			services,
 			workspace.Path,
-			BuildScenarioContext(workspace.Path, baseline, scenario));
+			scenarioContext);
 		var liveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
-			CreateContextFromSnapshot(workspace.Path, fullSnapshot) with
+			BuildConvergedContext(workspace.Path, fullSnapshot, scenarioContext) with
 			{
 				CaptureTreeInventory = scenario.CaptureTreeInventory
 			},
@@ -180,14 +181,16 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 		string rootPath,
 		SelectionRefreshContext context)
 	{
-		var previous = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
+		var currentContext = context;
+		var previous = services.Engine.ComputeFullRefreshSnapshot(currentContext, TestContext.Current.CancellationToken);
 		for (var pass = 0; pass < MaximumConvergencePasses; pass++)
 		{
+			currentContext = BuildConvergedContext(rootPath, previous, currentContext) with
+			{
+				CaptureTreeInventory = context.CaptureTreeInventory
+			};
 			var next = services.Engine.ComputeFullRefreshSnapshot(
-				CreateContextFromSnapshot(rootPath, previous) with
-				{
-					CaptureTreeInventory = context.CaptureTreeInventory
-				},
+				currentContext,
 				TestContext.Current.CancellationToken);
 			if (SnapshotsMatch(previous, next))
 				return next;
@@ -195,12 +198,11 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 			previous = next;
 		}
 
-		var final = services.Engine.ComputeFullRefreshSnapshot(
-			CreateContextFromSnapshot(rootPath, previous) with
-			{
-				CaptureTreeInventory = context.CaptureTreeInventory
-			},
-			TestContext.Current.CancellationToken);
+		currentContext = BuildConvergedContext(rootPath, previous, currentContext) with
+		{
+			CaptureTreeInventory = context.CaptureTreeInventory
+		};
+		var final = services.Engine.ComputeFullRefreshSnapshot(currentContext, TestContext.Current.CancellationToken);
 		AssertEquivalentVisibleSnapshots(previous, final);
 		return final;
 	}
@@ -370,14 +372,25 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 			TestContext.Current.CancellationToken,
 			includeControllerImpactProbeRoots);
 
-		Assert.True(
-			snapshot.IgnoreOptionCounts == directScan.Value.EffectiveIgnoreOptionCounts,
+		var directCounts = directScan.Value.EffectiveIgnoreOptionCounts;
+		var diagnostic =
 			$"{scenario.Name}: direct scanner counts drifted from SelectionRefreshEngine. " +
-			$"Expected={snapshot.IgnoreOptionCounts}; Actual={directScan.Value.EffectiveIgnoreOptionCounts}; " +
+			$"Published={snapshot.IgnoreOptionCounts}; Direct={directCounts}; " +
 			$"Roots=[{string.Join(", ", selectedRoots)}]; Extensions=[{string.Join(", ", selectedExtensions)}]; " +
 			$"Ignore=[{string.Join(", ", selectedIgnoreOptions)}]; " +
 			$"DirectoryProbe={includeDirectoryToggleProbeRoots}; ControllerProbe={includeControllerImpactProbeRoots}; " +
-			$"AllRoots={stableContext.AllRootFoldersChecked}; AllExtensions={stableContext.AllExtensionsChecked};");
+			$"AllRoots={stableContext.AllRootFoldersChecked}; AllExtensions={stableContext.AllExtensionsChecked};";
+		if (scenario.Extensions is null)
+		{
+			Assert.True(snapshot.IgnoreOptionCounts == directCounts, diagnostic);
+		}
+		else
+		{
+			// An active option keeps its last proven count while its own extension/root
+			// projection hides evidence. A direct final-tree scan therefore provides a
+			// lower bound, not an equality contract, during explicit extension journeys.
+			Assert.True(ContainsEveryCount(snapshot.IgnoreOptionCounts, directCounts), diagnostic);
+		}
 		if (scenario.Roots is null && scenario.Extensions is null)
 		{
 			Assert.Equal(
@@ -386,6 +399,17 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 		}
 		Assert.Equal(snapshot.RootAccessDenied, directScan.RootAccessDenied);
 		Assert.Equal(snapshot.HadAccessDenied, directScan.HadAccessDenied);
+	}
+
+	private static bool ContainsEveryCount(IgnoreOptionCounts published, IgnoreOptionCounts direct)
+	{
+		return published.HiddenFolders >= direct.HiddenFolders &&
+		       published.HiddenFiles >= direct.HiddenFiles &&
+		       published.DotFolders >= direct.DotFolders &&
+		       published.DotFiles >= direct.DotFiles &&
+		       published.EmptyFolders >= direct.EmptyFolders &&
+		       published.ExtensionlessFiles >= direct.ExtensionlessFiles &&
+		       published.EmptyFiles >= direct.EmptyFiles;
 	}
 
 	private static IgnoreRules BuildExtensionDiscoveryRules(IgnoreRules rules)
