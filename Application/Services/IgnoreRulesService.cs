@@ -6,19 +6,16 @@ public sealed class IgnoreRulesService(
 	SmartIgnoreService smartIgnore,
 	ProjectScopeDiscoveryService? projectScopeDiscovery = null)
 {
-	private const int CacheLimit = 64;
+	private const int CacheLimit = 512;
 	private static readonly object CacheSync = new();
-	private static readonly Dictionary<string, GitIgnoreCacheEntry> GitIgnoreCache =
-		new(OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
+	private static readonly Dictionary<string, LinkedListNode<GitIgnoreCacheEntry>> GitIgnoreCache =
+		new(PathComparer.Default);
+	private static readonly LinkedList<GitIgnoreCacheEntry> GitIgnoreCacheLru = new();
 	private readonly ProjectScopeDiscoveryService _projectScopeDiscovery =
 		projectScopeDiscovery ?? new ProjectScopeDiscoveryService(smartIgnore);
 
-	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
-		? StringComparer.Ordinal
-		: StringComparer.OrdinalIgnoreCase;
-	private static readonly StringComparison PathStringComparison = OperatingSystem.IsLinux()
-		? StringComparison.Ordinal
-		: StringComparison.OrdinalIgnoreCase;
+	private static readonly StringComparer PathStringComparer = PathComparer.Default;
+	private static readonly StringComparison PathStringComparison = PathComparer.Comparison;
 
 	public IgnoreRules Build(string rootPath, IReadOnlyCollection<IgnoreOptionId> selectedOptions) =>
 		Build(rootPath, selectedOptions, selectedRootFolders: null);
@@ -54,7 +51,7 @@ public sealed class IgnoreRulesService(
 			foreach (var cachePath in GitIgnoreCache.Keys.ToArray())
 			{
 				if (IsSameOrDescendantPath(cachePath, normalizedRoot))
-					GitIgnoreCache.Remove(cachePath);
+					RemoveGitIgnoreCacheEntry(cachePath);
 			}
 		}
 	}
@@ -331,11 +328,15 @@ public sealed class IgnoreRulesService(
 			{
 				lock (CacheSync)
 				{
-					if (GitIgnoreCache.TryGetValue(cacheKey, out var cached) &&
-						cached.Signature.Equals(signature.GetValueOrDefault()))
+					if (GitIgnoreCache.TryGetValue(cacheKey, out var cachedNode) &&
+						cachedNode.Value.Signature.Equals(signature.GetValueOrDefault()))
 					{
-						return cached.Matcher;
+						GitIgnoreCacheLru.Remove(cachedNode);
+						GitIgnoreCacheLru.AddFirst(cachedNode);
+						return cachedNode.Value.Matcher;
 					}
+
+					RemoveGitIgnoreCacheEntry(cacheKey);
 				}
 			}
 
@@ -344,9 +345,20 @@ public sealed class IgnoreRulesService(
 			{
 				lock (CacheSync)
 				{
-					GitIgnoreCache[cacheKey] = new GitIgnoreCacheEntry(signature.GetValueOrDefault(), matcher);
-					if (GitIgnoreCache.Count > CacheLimit)
-						GitIgnoreCache.Clear();
+					RemoveGitIgnoreCacheEntry(cacheKey);
+					var entry = new GitIgnoreCacheEntry(
+						cacheKey,
+						signature.GetValueOrDefault(),
+						matcher);
+					GitIgnoreCache[cacheKey] = GitIgnoreCacheLru.AddFirst(entry);
+
+					// Evict one cold matcher at a time. Clearing the whole cache caused
+					// repeated parse storms in workspaces with many nested repositories.
+					while (GitIgnoreCache.Count > CacheLimit &&
+					       GitIgnoreCacheLru.Last is { } leastRecentlyUsed)
+					{
+						RemoveGitIgnoreCacheEntry(leastRecentlyUsed.Value.CacheKey);
+					}
 				}
 			}
 
@@ -358,7 +370,18 @@ public sealed class IgnoreRulesService(
 		}
 	}
 
-	private sealed record GitIgnoreCacheEntry(ProjectRootFileSignature Signature, GitIgnoreMatcher Matcher);
+	private static void RemoveGitIgnoreCacheEntry(string cacheKey)
+	{
+		if (!GitIgnoreCache.Remove(cacheKey, out var node))
+			return;
+
+		GitIgnoreCacheLru.Remove(node);
+	}
+
+	private sealed record GitIgnoreCacheEntry(
+		string CacheKey,
+		ProjectRootFileSignature Signature,
+		GitIgnoreMatcher Matcher);
 
 	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
 	{

@@ -56,6 +56,7 @@ public static class AvaloniaCompositionRoot
         var projectAnalysisService = new ProjectAnalysisService(
             scanOptionsUseCase,
             buildTreeUseCase,
+            filterSelectionService,
             ignoreOptionsService,
             ignoreRulesService,
             treeExportService,

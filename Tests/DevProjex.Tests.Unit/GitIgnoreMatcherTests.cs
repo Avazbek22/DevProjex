@@ -215,15 +215,10 @@ public sealed class GitIgnoreMatcherTests
 	[Fact]
 	public void IsIgnored_CharacterClass_CaseSensitivityDependsOnPlatform()
 	{
-		// On Windows/macOS, matching is case-insensitive, so [Oo]bj matches OBJ
-		// On Linux, matching is case-sensitive, so [Oo]bj does NOT match OBJ
 		var matcher = GitIgnoreMatcher.Build("/repo", ["[Oo]bj/"]);
 		var result = matcher.IsIgnored("/repo/OBJ", true, "OBJ");
 
-		if (OperatingSystem.IsLinux())
-			Assert.False(result);
-		else
-			Assert.True(result); // Windows/macOS are case-insensitive
+		Assert.Equal(OperatingSystem.IsWindows(), result);
 	}
 
 	[Theory]
@@ -239,8 +234,7 @@ public sealed class GitIgnoreMatcherTests
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", [pattern]);
 		var name = Path.GetFileName(path);
-		// Windows and macOS use case-insensitive regex matching for gitignore rules.
-		if ((OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) &&
+		if (OperatingSystem.IsWindows() &&
 			pattern == "[a-z]" &&
 			path == "/repo/M")
 		{
@@ -325,7 +319,7 @@ public sealed class GitIgnoreMatcherTests
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", [pattern]);
 		var name = Path.GetFileName(path);
-		if (OperatingSystem.IsLinux() &&
+		if (!OperatingSystem.IsWindows() &&
 			pattern == "**/bin/*" &&
 			path.Contains("/Bin/", StringComparison.Ordinal))
 		{

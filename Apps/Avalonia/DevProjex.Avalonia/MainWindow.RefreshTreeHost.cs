@@ -41,7 +41,8 @@ public partial class MainWindow : IRefreshTreePipelineHost
             options,
             nameFilter,
             reusableInventory?.Snapshot,
-            reusableInventory?.Scope);
+            reusableInventory?.Scope,
+            _selectionCoordinator.CurrentSelectionRevision);
     }
 
     void IRefreshTreePipelineHost.BeforeFullTreeRefresh()
@@ -76,6 +77,11 @@ public partial class MainWindow : IRefreshTreePipelineHost
         root.DisplayName = input.DisplayName;
         return root;
     }
+
+    bool IRefreshTreePipelineHost.IsTreeRefreshInputCurrent(TreeRefreshInput input) =>
+        PathComparer.Default.Equals(_currentPath, input.CurrentPath) &&
+        (input.SelectionRevision is null ||
+         input.SelectionRevision.Value == _selectionCoordinator.CurrentSelectionRevision);
 
     void IRefreshTreePipelineHost.ApplyTreeRefreshResult(
         TreeRefreshInput input,

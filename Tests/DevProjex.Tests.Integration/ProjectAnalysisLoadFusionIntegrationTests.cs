@@ -1,18 +1,19 @@
+using DevProjex.Tests.Shared.ProjectLoadWorkflow;
+
 namespace DevProjex.Tests.Integration;
 
 public sealed class ProjectAnalysisLoadFusionIntegrationTests
 {
 	[Fact]
-	public async Task Load_FusedWorkspaceScanMatchesLegacyPipelineAcrossSelectionMatrix()
+	public async Task Load_ExplicitSelectionWorkspaceScanMatchesBatchedSnapshotPipelineAcrossSelectionMatrix()
 	{
 		using var temp = CreateMixedWorkspace();
 		var fusedService = CreateService(new FileSystemScanner(), new TreeBuilder());
-		var legacyService = CreateService(
-			new LegacyForwardingScanner(new FileSystemScanner()),
+		var batchedService = CreateService(
+			new BatchedSnapshotForwardingScanner(new FileSystemScanner()),
 			new TreeBuilder());
 		var requests = new ProjectAnalysisRequest[]
 		{
-			new(temp.Path),
 			new(temp.Path, SelectedRootFolders: ["api"]),
 			new(
 				temp.Path,
@@ -43,21 +44,21 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 
 		foreach (var request in requests)
 		{
-			var legacy = legacyService.Load(request, TestContext.Current.CancellationToken);
+			var batched = batchedService.Load(request, TestContext.Current.CancellationToken);
 			var fused = fusedService.Load(request, TestContext.Current.CancellationToken);
 
-			AssertLoadedProjectEquivalent(legacy, fused);
+			AssertLoadedProjectEquivalent(batched, fused);
 
-			var legacyReport = await legacyService
-				.BuildReportFromTreeAsync(legacy, TestContext.Current.CancellationToken);
+			var batchedReport = await batchedService
+				.BuildReportFromTreeAsync(batched, TestContext.Current.CancellationToken);
 			var fusedReport = await fusedService
 				.BuildReportFromTreeAsync(fused, TestContext.Current.CancellationToken);
-			AssertReportEquivalent(legacyReport, fusedReport);
+			AssertReportEquivalent(batchedReport, fusedReport);
 		}
 	}
 
 	[Fact]
-	public void Load_FusedWorkspaceScanProjectsCapturedInventoryWithoutDirectTreeRead()
+	public void Load_DefaultSelectionProjectsUnifiedSnapshotInventoryWithoutAnotherFilesystemRead()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("src/App.cs", "class App {}\n");
@@ -65,14 +66,73 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		var service = CreateService(new FileSystemScanner(), treeBuilder);
 
 		var loaded = service.Load(
-			new ProjectAnalysisRequest(temp.Path, SelectedIgnoreOptions: []),
+			new ProjectAnalysisRequest(temp.Path),
 			TestContext.Current.CancellationToken);
 
 		Assert.Single(loaded.Tree.OrderedFilePaths!);
 		Assert.Equal(0, treeBuilder.DirectBuildCount);
 		Assert.Equal(0, treeBuilder.InventoryReadCount);
-		Assert.Equal(1, treeBuilder.CompositeInventoryReadCount);
+		Assert.Equal(0, treeBuilder.CompositeInventoryReadCount);
 		Assert.Equal(1, treeBuilder.InventoryProjectionCount);
+	}
+
+	[Fact]
+	public void Load_DefaultSelectionMatchesInteractiveEngineAcrossAllThreeSettingsSections()
+	{
+		using var temp = CreateMixedWorkspace();
+		var workflow = ProjectLoadWorkflowRefreshHarness.CreateServices();
+		var interactive = workflow.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(temp.Path) with
+			{
+				CaptureTreeInventory = true
+			},
+			TestContext.Current.CancellationToken);
+		var headless = CreateService(new FileSystemScanner(), new TreeBuilder()).Load(
+			new ProjectAnalysisRequest(temp.Path),
+			TestContext.Current.CancellationToken);
+		var interactiveRoots = interactive.RootOptions!
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Name)
+			.Order(PathComparer.Default);
+		var interactiveExtensions = interactive.EffectiveExtensionOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Name)
+			.Order(StringComparer.OrdinalIgnoreCase);
+		var interactiveIgnore = interactive.IgnoreOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Id)
+			.Order();
+
+		Assert.Equal(interactiveRoots, headless.SelectedRootFolders.Order(PathComparer.Default));
+		Assert.Equal(
+			interactiveExtensions,
+			headless.SelectedExtensions.Order(StringComparer.OrdinalIgnoreCase));
+		Assert.Equal(interactiveIgnore, headless.SelectedIgnoreOptions.Order());
+	}
+
+	[Fact]
+	public void Load_DefaultSelectionRepeatedlyCanonicalizesCaseVariantExtensions()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("alpha/Upper.CS", "class Upper {}\n");
+		temp.CreateFile("beta/Lower.cs", "class Lower {}\n");
+		temp.CreateFile("gamma/Mixed.Cs", "class Mixed {}\n");
+		var service = CreateService(new FileSystemScanner(), new TreeBuilder());
+		var expected = service.Load(
+			new ProjectAnalysisRequest(temp.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([".cs"], expected.AvailableExtensions);
+		Assert.Equal([".cs"], expected.SelectedExtensions);
+
+		for (var iteration = 0; iteration < 20; iteration++)
+		{
+			var actual = service.Load(
+				new ProjectAnalysisRequest(temp.Path),
+				TestContext.Current.CancellationToken);
+
+			AssertLoadedProjectEquivalent(expected, actual);
+		}
 	}
 
 	[Fact]
@@ -205,6 +265,33 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		Assert.DoesNotContain(".noise", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
 	}
 
+	[Fact]
+	public void Load_OnlyGitIgnoreSelected_DeepTraversalPrunesAdministrativeGitDirectory()
+	{
+		using var temp = new TemporaryDirectory();
+		var segments = new List<string> { "workspace" };
+		for (var depth = 0; depth < 12; depth++)
+			segments.Add($"level-{depth:D2}");
+		segments.Add("repo");
+		var repo = Path.Combine([.. segments]);
+		temp.CreateFile(Path.Combine(repo, ".gitignore"), "*.noise\n");
+		var visiblePath = temp.CreateFile(Path.Combine(repo, "visible.txt"), "visible\n");
+		var ignoredPath = temp.CreateFile(Path.Combine(repo, "generated.noise"), "ignored\n");
+		var gitObjectPath = temp.CreateFile(Path.Combine(repo, ".git", "objects", "probe"), "internal\n");
+		var service = CreateService(new FileSystemScanner(), new TreeBuilder());
+
+		var loaded = service.Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore]),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([IgnoreOptionId.UseGitIgnore], loaded.SelectedIgnoreOptions);
+		Assert.Contains(visiblePath, loaded.Tree.OrderedFilePaths!);
+		Assert.DoesNotContain(ignoredPath, loaded.Tree.OrderedFilePaths!);
+		Assert.DoesNotContain(gitObjectPath, loaded.Tree.OrderedFilePaths!);
+	}
+
 	private static TemporaryDirectory CreateMixedWorkspace()
 	{
 		var temp = new TemporaryDirectory();
@@ -240,6 +327,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 			new BuildTreeUseCase(
 				treeBuilder,
 				new TreeNodePresentationService(localization, new TestIconMapper())),
+			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			rules,
 			new TreeExportService(),
@@ -326,8 +414,11 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		return result;
 	}
 
-	private sealed class LegacyForwardingScanner(FileSystemScanner inner)
-		: IFileSystemScanner, IFileSystemScannerAdvanced
+	private sealed class BatchedSnapshotForwardingScanner(FileSystemScanner inner)
+		: IFileSystemScanner,
+			IFileSystemScannerAdvanced,
+			IFileSystemScannerIgnoreSectionSnapshotProvider,
+			IFileSystemScannerExtensionPolicySnapshotProvider
 	{
 		public bool CanReadRoot(string rootPath) => inner.CanReadRoot(rootPath);
 
@@ -360,6 +451,58 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 			IgnoreRules rules,
 			CancellationToken cancellationToken = default) =>
 			inner.GetRootFileExtensionsWithIgnoreOptionCounts(rootPath, rules, cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IReadOnlySet<string>? effectiveAllowedExtensions,
+			CancellationToken cancellationToken = default) =>
+			inner.GetIgnoreSectionSnapshot(
+				rootPath,
+				extensionDiscoveryRules,
+				effectiveRules,
+				effectiveAllowedExtensions,
+				cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IReadOnlySet<string>? effectiveAllowedExtensions,
+			CancellationToken cancellationToken = default) =>
+			inner.GetRootFileIgnoreSectionSnapshot(
+				rootPath,
+				extensionDiscoveryRules,
+				effectiveRules,
+				effectiveAllowedExtensions,
+				cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			inner.GetIgnoreSectionSnapshot(
+				rootPath,
+				extensionDiscoveryRules,
+				effectiveRules,
+				effectiveExtensionPolicy,
+				cancellationToken);
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
+			inner.GetRootFileIgnoreSectionSnapshot(
+				rootPath,
+				extensionDiscoveryRules,
+				effectiveRules,
+				effectiveExtensionPolicy,
+				cancellationToken);
 	}
 
 	private sealed class CountingInventoryTreeBuilder

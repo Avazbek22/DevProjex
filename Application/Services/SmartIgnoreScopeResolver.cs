@@ -12,6 +12,8 @@ public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 	private readonly FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> _fileRules;
 	private readonly ConcurrentDictionary<string, bool> _directoryResults;
 	private readonly ConcurrentDictionary<string, bool> _fileResults;
+	private readonly ConcurrentQueue<string> _directoryResultOrder = new();
+	private readonly ConcurrentQueue<string> _fileResultOrder = new();
 
 	public SmartIgnoreScopeResolver(
 		string rootPath,
@@ -40,16 +42,17 @@ public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 	}
 
 	public bool IsIgnoredDirectory(string fullPath, string name) =>
-		IsIgnored(fullPath, name, _directoryRules, _directoryResults);
+		IsIgnored(fullPath, name, _directoryRules, _directoryResults, _directoryResultOrder);
 
 	public bool IsIgnoredFile(string fullPath, string name) =>
-		IsIgnored(fullPath, name, _fileRules, _fileResults);
+		IsIgnored(fullPath, name, _fileRules, _fileResults, _fileResultOrder);
 
 	private bool IsIgnored(
 		string fullPath,
 		string name,
 		IReadOnlyDictionary<string, SmartIgnoreRuleDescriptor[]> ruleIndex,
-		ConcurrentDictionary<string, bool> resultCache)
+		ConcurrentDictionary<string, bool> resultCache,
+		ConcurrentQueue<string> insertionOrder)
 	{
 		if (!ruleIndex.TryGetValue(name, out var relevantRules))
 			return false;
@@ -91,9 +94,15 @@ public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 			currentDirectory = Path.GetDirectoryName(currentDirectory);
 		}
 
-		resultCache[normalizedPath] = isIgnored;
-		if (resultCache.Count > ResultCacheLimit)
-			resultCache.Clear();
+		if (resultCache.TryAdd(normalizedPath, isIgnored))
+		{
+			insertionOrder.Enqueue(normalizedPath);
+			while (resultCache.Count > ResultCacheLimit &&
+			       insertionOrder.TryDequeue(out var oldest))
+			{
+				resultCache.TryRemove(oldest, out _);
+			}
+		}
 
 		return isIgnored;
 	}

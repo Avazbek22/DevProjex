@@ -2440,12 +2440,7 @@ public partial class MainWindow : Window
         UpdateTitle();
         UpdateToastHostLayout();
 
-        if (_currentPath is not null)
-        {
-            _ = _selectionCoordinator.PopulateIgnoreOptionsForRootSelectionAsync(
-                _selectionCoordinator.GetSelectedRootFolders(),
-                _currentPath);
-        }
+        _selectionCoordinator.RelabelIgnoreOptions(AdvancedIgnoreCountsAlwaysEnabled);
     }
 
     private async Task ShowErrorAsync(string message)
@@ -7493,14 +7488,21 @@ public partial class MainWindow : Window
                 // Apply must observe the latest converged section state. A user can click Apply
                 // while an earlier ignore refresh is still finishing; rebuilding the tree first
                 // would capture stale root-folder availability and keep newly revealed folders hidden.
-                await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
-                await RefreshTreeAsync(cancellationToken: cancellationToken);
-                // Most checkbox changes already queue and apply a converged selection snapshot
-                // before Apply rebuilds the tree. Running another live refresh unconditionally
-                // doubles the expensive scan path on large projects, so only do it if a new
-                // selection change landed while the tree was rebuilding.
-                await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath, cancellationToken);
-                await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                TreeRefreshOutcome refreshOutcome;
+                do
+                {
+                    await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                    await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
+                        _currentPath,
+                        cancellationToken);
+                    await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                    refreshOutcome = await RefreshTreeAsync(cancellationToken: cancellationToken);
+
+                    // A checkbox can change while a large tree is being materialized. In that
+                    // case the pipeline discards the obsolete graph and Apply converges again
+                    // instead of presenting settings that describe a different tree.
+                } while (refreshOutcome == TreeRefreshOutcome.StaleInput);
+
                 _projectProfiles.PersistIfNeeded(_currentPath);
             }
             catch (OperationCanceledException)
@@ -8432,10 +8434,10 @@ public partial class MainWindow : Window
         return node with { Children = filteredChildren };
     }
 
-    private async Task RefreshTreeAsync(bool interactiveFilter = false, CancellationToken cancellationToken = default)
-    {
-        await _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
-    }
+    private Task<TreeRefreshOutcome> RefreshTreeAsync(
+        bool interactiveFilter = false,
+        CancellationToken cancellationToken = default) =>
+        _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
 
     private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
     {

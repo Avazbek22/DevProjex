@@ -1,4 +1,5 @@
 using DevProjex.Application.Models;
+using DevProjex.Avalonia.Collections;
 
 namespace DevProjex.Tests.Unit;
 
@@ -51,46 +52,125 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
-	public async Task PopulateExtensionsForRootSelectionAsync_EmptyPath_DoesNotChangeExtensions()
+	public void RootFolderReset_UnsubscribesRemovedItemsAndDoesNotDuplicateRetainedSubscriptions()
 	{
 		var viewModel = CreateViewModel();
-		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+		using var coordinator = CreateCoordinator(viewModel);
+		coordinator.HookOptionListeners(viewModel.RootFolders);
+		var options = Assert.IsType<ResettableObservableCollection<SelectionOptionViewModel>>(viewModel.RootFolders);
+		var removed = new SelectionOptionViewModel("removed", true);
+		var retained = new SelectionOptionViewModel("retained", true);
 
-		var coordinator = CreateCoordinator(viewModel);
+		options.ReplaceAll([removed]);
+		options.ReplaceAll([retained]);
+		options.ReplaceAll([retained]);
+		options.ReplaceAll([retained]);
 
-		await coordinator.PopulateExtensionsForRootSelectionAsync(string.Empty, new List<string> { "src" }, cancellationToken: TestContext.Current.CancellationToken);
-
-		Assert.Single(viewModel.Extensions);
-		Assert.Equal(".cs", viewModel.Extensions[0].Name);
+		Assert.Equal(0, GetEventSubscriberCount(removed, nameof(SelectionOptionViewModel.CheckedChanged)));
+		Assert.Equal(1, GetEventSubscriberCount(retained, nameof(SelectionOptionViewModel.CheckedChanged)));
 	}
 
 	[Fact]
-	public async Task PopulateRootFoldersAsync_EmptyPath_DoesNotChangeRootFolders()
+	public void IgnoreReset_UnsubscribesRemovedItemsAndDoesNotDuplicateRetainedSubscriptions()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+		var options = Assert.IsType<ResettableObservableCollection<IgnoreOptionViewModel>>(viewModel.IgnoreOptions);
+		var removed = new IgnoreOptionViewModel(IgnoreOptionId.DotFolders, "removed", true);
+		var retained = new IgnoreOptionViewModel(IgnoreOptionId.SmartIgnore, "retained", true);
+
+		options.ReplaceAll([removed]);
+		options.ReplaceAll([retained]);
+		options.ReplaceAll([retained]);
+		options.ReplaceAll([retained]);
+
+		Assert.Equal(0, GetEventSubscriberCount(removed, nameof(IgnoreOptionViewModel.CheckedChanged)));
+		Assert.Equal(1, GetEventSubscriberCount(retained, nameof(IgnoreOptionViewModel.CheckedChanged)));
+	}
+
+	[Fact]
+	public void RelabelIgnoreOptions_UpdatesOnlyPresentationWithoutAvailabilityScanOrStateMutation()
+	{
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var viewModel = new MainWindowViewModel(localization, new HelpContentProvider());
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+			IgnoreOptionId.SmartIgnore,
+			"Smart ignore",
+			isChecked: false));
+		var availabilityCalls = 0;
+		using var coordinator = new SelectionSyncCoordinator(
+			viewModel,
+			new ScanOptionsUseCase(new StubFileSystemScanner()),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			(_, _, _) => new IgnoreRules(
+				false,
+				false,
+				false,
+				false,
+				new HashSet<string>(),
+				new HashSet<string>()),
+			(_, _) =>
+			{
+				availabilityCalls++;
+				return new IgnoreOptionsAvailability(
+					IncludeGitIgnore: false,
+					IncludeSmartIgnore: true);
+			},
+			_ => false,
+			() => @"C:\Project");
+		var revisionBefore = coordinator.CurrentSelectionRevision;
+
+		localization.SetLanguage(AppLanguage.Ru);
+		coordinator.RelabelIgnoreOptions(showAdvancedCounts: true);
+
+		var option = Assert.Single(viewModel.IgnoreOptions);
+		Assert.Equal("Умное исключение", option.Label);
+		Assert.False(option.IsChecked);
+		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
+		Assert.Equal(0, availabilityCalls);
+	}
+
+	[Fact]
+	public void SelectionRevision_AdvancesForEveryTreeAffectingSettingsMutation()
 	{
 		var viewModel = CreateViewModel();
 		viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-		var coordinator = CreateCoordinator(viewModel);
-
-		await coordinator.PopulateRootFoldersAsync(string.Empty, cancellationToken: TestContext.Current.CancellationToken);
-
-		Assert.Single(viewModel.RootFolders);
-		Assert.Equal("src", viewModel.RootFolders[0].Name);
-	}
-
-	[Fact]
-	public async Task UpdateLiveOptionsFromRootSelectionAsync_EmptyPath_DoesNotChangeOptions()
-	{
-		var viewModel = CreateViewModel();
 		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
-		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "hidden folders", true));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+			IgnoreOptionId.DotFolders,
+			"dot folders",
+			isChecked: true));
+		using var coordinator = CreateCoordinator(viewModel);
+		HookAllOptionListeners(coordinator, viewModel);
+		var expectedRevision = coordinator.CurrentSelectionRevision;
 
-		var coordinator = CreateCoordinator(viewModel);
+		viewModel.RootFolders[0].IsChecked = false;
+		Assert.Equal(++expectedRevision, coordinator.CurrentSelectionRevision);
 
-		await coordinator.UpdateLiveOptionsFromRootSelectionAsync(null, cancellationToken: TestContext.Current.CancellationToken);
+		viewModel.Extensions[0].IsChecked = false;
+		Assert.Equal(++expectedRevision, coordinator.CurrentSelectionRevision);
 
-		Assert.Single(viewModel.Extensions);
-		Assert.Single(viewModel.IgnoreOptions);
+		viewModel.IgnoreOptions[0].IsChecked = false;
+		Assert.Equal(++expectedRevision, coordinator.CurrentSelectionRevision);
+
+		coordinator.HandleRootAllChanged(true, currentPath: null);
+		Assert.Equal(++expectedRevision, coordinator.CurrentSelectionRevision);
+
+		coordinator.HandleExtensionsAllChanged(true);
+		Assert.Equal(++expectedRevision, coordinator.CurrentSelectionRevision);
+
+		coordinator.HandleIgnoreAllChanged(true, currentPath: null);
+		Assert.Equal(++expectedRevision, coordinator.CurrentSelectionRevision);
+
+		coordinator.ApplyProjectProfileSelections(
+			@"C:\Project",
+			new ProjectSelectionProfile([], [], []));
+		Assert.Equal(++expectedRevision, coordinator.CurrentSelectionRevision);
+
+		coordinator.ResetProjectProfileSelections(@"C:\Other");
+		Assert.Equal(++expectedRevision, coordinator.CurrentSelectionRevision);
 	}
 
 	[Fact]
@@ -1523,6 +1603,16 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		return new MainWindowViewModel(localization, new HelpContentProvider());
 	}
 
+	private static int GetEventSubscriberCount(object instance, string eventName)
+	{
+		var eventField = instance.GetType().GetField(
+			eventName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(eventField);
+		var handlers = eventField.GetValue(instance) as Delegate;
+		return handlers?.GetInvocationList().Length ?? 0;
+	}
+
 	private static void HookAllOptionListeners(
 		SelectionSyncCoordinator coordinator,
 		MainWindowViewModel viewModel)
@@ -1898,6 +1988,18 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 				["Settings.Ignore.EmptyFolders"] = "Empty folders",
 				["Settings.Ignore.EmptyFiles"] = "Empty files",
 				["Settings.Ignore.ExtensionlessFiles"] = "Extensionless files"
+			},
+			[AppLanguage.Ru] = new Dictionary<string, string>
+			{
+				["Settings.Ignore.SmartIgnore"] = "Умное исключение",
+				["Settings.Ignore.UseGitIgnore"] = "Использовать .gitignore",
+				["Settings.Ignore.HiddenFolders"] = "Скрытые папки",
+				["Settings.Ignore.HiddenFiles"] = "Скрытые файлы",
+				["Settings.Ignore.DotFolders"] = "Папки с точкой",
+				["Settings.Ignore.DotFiles"] = "Файлы с точкой",
+				["Settings.Ignore.EmptyFolders"] = "Пустые папки",
+				["Settings.Ignore.EmptyFiles"] = "Пустые файлы",
+				["Settings.Ignore.ExtensionlessFiles"] = "Файлы без расширения"
 			}
 		};
 

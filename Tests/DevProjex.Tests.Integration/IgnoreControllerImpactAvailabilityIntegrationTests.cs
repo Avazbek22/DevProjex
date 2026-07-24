@@ -189,7 +189,7 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
 		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".cs");
 		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".config");
-		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".DotSettings");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".dotsettings");
 		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".nupkg");
 		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".dll");
 		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".user");

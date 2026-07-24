@@ -2870,10 +2870,18 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (extension.IsEmpty)
 			return;
 
-		if (extensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup) && lookup.Contains(extension))
+		Span<char> normalized = extension.Length <= 128
+			? stackalloc char[extension.Length]
+			: new char[extension.Length];
+		for (var index = 0; index < extension.Length; index++)
+			normalized[index] = char.ToLowerInvariant(extension[index]);
+
+		// A case-insensitive set otherwise retains whichever casing wins the parallel merge.
+		// Canonical values keep settings snapshots and benchmark fingerprints deterministic.
+		if (extensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup) && lookup.Contains(normalized))
 			return;
 
-		extensions.Add(extension.ToString());
+		extensions.Add(normalized.ToString());
 	}
 
 	private ScanResult<int> ScanEffectiveEmptyFolderCountCore(

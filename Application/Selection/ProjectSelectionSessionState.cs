@@ -2,6 +2,8 @@ namespace DevProjex.Application.Selection;
 
 public sealed class ProjectSelectionSessionState
 {
+    private long _revision;
+
     public SelectionOptionStateCache RootFolders { get; } = new(PathComparer.Default);
 
     public SelectionOptionStateCache Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -15,6 +17,13 @@ public sealed class ProjectSelectionSessionState
     public PreparedSelectionMode PreparedMode { get; private set; }
 
     public bool IgnoreOptionStateCacheIsComplete { get; set; }
+
+    // The revision is the consistency boundary between the three settings sections and
+    // consumers such as tree construction. Any effective selection mutation advances it,
+    // allowing long-running consumers to reject results built from an obsolete snapshot.
+    public long Revision => Interlocked.Read(ref _revision);
+
+    public long AdvanceRevision() => Interlocked.Increment(ref _revision);
 
     public void ApplyProfile(string projectPath, ProjectSelectionProfile profile)
     {

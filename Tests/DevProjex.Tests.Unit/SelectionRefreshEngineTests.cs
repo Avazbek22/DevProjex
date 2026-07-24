@@ -126,6 +126,20 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
+	public void ComputeFullRefreshSnapshot_ExpandingDependencyChain_DoesNotPublishPartialState()
+	{
+		var scanner = new ExpandingIgnoreImpactScanner();
+		var engine = CreateEngine(scanner);
+
+		var exception = Assert.Throws<SelectionRefreshConvergenceException>(() =>
+			engine.ComputeFullRefreshSnapshot(CreateInitializedEmptyIgnoreContext(), CancellationToken.None));
+
+		Assert.Equal(SelectionRefreshConvergenceFailure.PassLimitExceeded, exception.Failure);
+		Assert.Equal(6, exception.CompletedPasses);
+		Assert.Equal(6, scanner.DynamicPassCount);
+	}
+
+	[Fact]
 	public void ComputeFullRefreshSnapshot_ProfileFallback_PreservesDirectoryToggleWhenItAffectsRootList()
 	{
 		var scanner = new ProfileFallbackVisibilityScanner();
@@ -1154,6 +1168,72 @@ public sealed class SelectionRefreshEngineTests
 			CreateEmptySnapshot();
 
 		private static ScanResult<IgnoreSectionScanData> CreateEmptySnapshot() =>
+			new(
+				new IgnoreSectionScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+					IgnoreOptionCounts.Empty,
+					IgnoreOptionCounts.Empty),
+				false,
+				false);
+	}
+
+	private sealed class ExpandingIgnoreImpactScanner
+		: IFileSystemScanner, IFileSystemScannerExtensionPolicySnapshotProvider
+	{
+		public int DynamicPassCount { get; private set; }
+
+		public bool CanReadRoot(string rootPath) => true;
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			new(new List<string> { "src" }, false, false);
+
+		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default)
+		{
+			DynamicPassCount++;
+			var step = DynamicPassCount;
+			var counts = new IgnoreOptionCounts(
+				HiddenFolders: step >= 5 ? 1 : 0,
+				HiddenFiles: step >= 1 ? 1 : 0,
+				DotFolders: step >= 6 ? 1 : 0,
+				DotFiles: step >= 2 ? 1 : 0,
+				EmptyFolders: step >= 7 ? 1 : 0,
+				EmptyFiles: step >= 3 ? 1 : 0,
+				ExtensionlessFiles: step >= 4 ? 1 : 0);
+			return new ScanResult<IgnoreSectionScanData>(
+				new IgnoreSectionScanData(
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+					IgnoreOptionCounts.Empty,
+					counts),
+				false,
+				false);
+		}
+
+		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
+			string rootPath,
+			IgnoreRules extensionDiscoveryRules,
+			IgnoreRules effectiveRules,
+			IExtensionInclusionPolicy? effectiveExtensionPolicy,
+			CancellationToken cancellationToken = default) =>
 			new(
 				new IgnoreSectionScanData(
 					new HashSet<string>(StringComparer.OrdinalIgnoreCase),

@@ -19,6 +19,8 @@ internal interface IRefreshTreePipelineHost
 
     TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result);
 
+    bool IsTreeRefreshInputCurrent(TreeRefreshInput input);
+
     void ApplyTreeRefreshResult(
         TreeRefreshInput input,
         BuildTreeSnapshotResult result,

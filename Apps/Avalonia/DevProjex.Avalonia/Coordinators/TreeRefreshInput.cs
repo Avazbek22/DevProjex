@@ -6,4 +6,5 @@ internal sealed record TreeRefreshInput(
     TreeFilterOptions Options,
     string? NameFilter,
     ProjectTreeInventorySnapshot? TreeInventory = null,
-    ProjectTreeInventoryReuseScope? TreeInventoryScope = null);
+    ProjectTreeInventoryReuseScope? TreeInventoryScope = null,
+    long? SelectionRevision = null);

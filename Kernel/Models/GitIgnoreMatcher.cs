@@ -22,9 +22,7 @@ public sealed class GitIgnoreMatcher
         _normalizedRootPath = normalizedRootPath;
         _rules = rules;
         _hasNegationRules = hasNegationRules;
-        _pathComparison = OperatingSystem.IsLinux()
-            ? StringComparison.Ordinal
-            : StringComparison.OrdinalIgnoreCase;
+        _pathComparison = PathComparer.Comparison;
     }
 
     public bool HasNegationRules => _hasNegationRules;
@@ -53,7 +51,7 @@ public sealed class GitIgnoreMatcher
 
         var rules = new List<Rule>();
         var regexOptions = RegexOptions.Compiled;
-        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        if (PathComparer.Comparison == StringComparison.OrdinalIgnoreCase)
             regexOptions |= RegexOptions.IgnoreCase;
 
         foreach (var raw in lines)

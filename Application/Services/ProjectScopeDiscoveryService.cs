@@ -139,15 +139,12 @@ public sealed class ProjectScopeDiscoveryService(
 		".vcxproj"
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
-		? StringComparer.Ordinal
-		: StringComparer.OrdinalIgnoreCase;
-	private static readonly StringComparison PathStringComparison = OperatingSystem.IsLinux()
-		? StringComparison.Ordinal
-		: StringComparison.OrdinalIgnoreCase;
+	private static readonly StringComparer PathStringComparer = PathComparer.Default;
+	private static readonly StringComparison PathStringComparison = PathComparer.Comparison;
 
 	private readonly object _scopeCacheSync = new();
-	private readonly Dictionary<string, ScopeCacheEntry> _scopeCache = new(PathStringComparer);
+	private readonly Dictionary<string, LinkedListNode<ScopeCacheEntry>> _scopeCache = new(PathStringComparer);
+	private readonly LinkedList<ScopeCacheEntry> _scopeCacheLru = new();
 	private readonly ProjectRootFactsProvider _rootFactsProvider = rootFactsProvider ?? smartIgnore.RootFactsProvider;
 
 	public ProjectScanContext Discover(
@@ -172,11 +169,15 @@ public sealed class ProjectScopeDiscoveryService(
 
 		lock (_scopeCacheSync)
 		{
-			if (_scopeCache.TryGetValue(cacheKey, out var cached) &&
-				now - cached.CachedAtUtc <= ScopeCacheTtl)
+			if (_scopeCache.TryGetValue(cacheKey, out var cachedNode) &&
+				now - cachedNode.Value.CachedAtUtc <= ScopeCacheTtl)
 			{
-				return cached.Context;
+				_scopeCacheLru.Remove(cachedNode);
+				_scopeCacheLru.AddFirst(cachedNode);
+				return cachedNode.Value.Context;
 			}
+
+			RemoveScopeCacheEntry(cacheKey);
 		}
 
 		var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
@@ -188,9 +189,15 @@ public sealed class ProjectScopeDiscoveryService(
 		var discoveryStamp = rootFactsCache.CreateDiscoveryStamp(context.Scopes);
 		lock (_scopeCacheSync)
 		{
-			_scopeCache[cacheKey] = new ScopeCacheEntry(now, context, discoveryStamp);
-			if (_scopeCache.Count > ScopeCacheLimit)
-				_scopeCache.Clear();
+			RemoveScopeCacheEntry(cacheKey);
+			var entry = new ScopeCacheEntry(cacheKey, now, context, discoveryStamp);
+			_scopeCache[cacheKey] = _scopeCacheLru.AddFirst(entry);
+
+			while (_scopeCache.Count > ScopeCacheLimit &&
+			       _scopeCacheLru.Last is { } leastRecentlyUsed)
+			{
+				RemoveScopeCacheEntry(leastRecentlyUsed.Value.CacheKey);
+			}
 		}
 
 		return context;
@@ -215,7 +222,7 @@ public sealed class ProjectScopeDiscoveryService(
 				if (PathStringComparer.Equals(cacheKey, normalizedRoot) ||
 				    cacheKey.StartsWith(normalizedRoot + "::", PathStringComparison))
 				{
-					_scopeCache.Remove(cacheKey);
+					RemoveScopeCacheEntry(cacheKey);
 				}
 			}
 		}
@@ -239,7 +246,7 @@ public sealed class ProjectScopeDiscoveryService(
 			return false;
 		}
 
-		KeyValuePair<string, ScopeCacheEntry>[] candidates;
+		KeyValuePair<string, LinkedListNode<ScopeCacheEntry>>[] candidates;
 		lock (_scopeCacheSync)
 		{
 			candidates = _scopeCache
@@ -256,7 +263,7 @@ public sealed class ProjectScopeDiscoveryService(
 		foreach (var candidate in candidates)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (candidate.Value.DiscoveryStamp.IsCurrent(
+			if (candidate.Value.Value.DiscoveryStamp.IsCurrent(
 				    observedWriteTimes,
 				    observedGitIgnoreSignatures,
 				    cancellationToken))
@@ -274,20 +281,23 @@ public sealed class ProjectScopeDiscoveryService(
 		{
 			foreach (var candidate in candidates)
 			{
-				if (!_scopeCache.TryGetValue(candidate.Key, out var current) ||
-				    !ReferenceEquals(current, candidate.Value))
+				if (!_scopeCache.TryGetValue(candidate.Key, out var currentNode) ||
+				    !ReferenceEquals(currentNode, candidate.Value))
 				{
 					continue;
 				}
 
 				if (!allCurrent)
 				{
-					_scopeCache.Remove(candidate.Key);
+					RemoveScopeCacheEntry(candidate.Key);
 					continue;
 				}
 
-				_scopeCache[candidate.Key] = current with { CachedAtUtc = now };
-				current.DiscoveryStamp.AddPathsTo(retainedPaths);
+				var refreshed = currentNode.Value with { CachedAtUtc = now };
+				currentNode.Value = refreshed;
+				_scopeCacheLru.Remove(currentNode);
+				_scopeCacheLru.AddFirst(currentNode);
+				refreshed.DiscoveryStamp.AddPathsTo(retainedPaths);
 			}
 		}
 
@@ -304,6 +314,14 @@ public sealed class ProjectScopeDiscoveryService(
 	private static bool IsCacheKeyForRoot(string cacheKey, string normalizedRoot) =>
 		PathStringComparer.Equals(cacheKey, normalizedRoot) ||
 		cacheKey.StartsWith(normalizedRoot + "::", PathStringComparison);
+
+	private void RemoveScopeCacheEntry(string cacheKey)
+	{
+		if (!_scopeCache.Remove(cacheKey, out var node))
+			return;
+
+		_scopeCacheLru.Remove(node);
+	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static string BuildScopeCacheKey(
@@ -829,6 +847,7 @@ public sealed class ProjectScopeDiscoveryService(
 	private readonly record struct GitIgnoreWriteStamp(string Path, ProjectRootFileSignature Signature);
 
 	private sealed record ScopeCacheEntry(
+		string CacheKey,
 		DateTime CachedAtUtc,
 		ProjectScanContext Context,
 		ScopeDiscoveryStamp DiscoveryStamp);
@@ -847,9 +866,7 @@ public sealed record ProjectScanContext(
 	bool HasAnyGitIgnore,
 	ConcurrentDictionary<string, SmartIgnoreResult> SmartIgnoreResultCache)
 {
-	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
-		? StringComparer.Ordinal
-		: StringComparer.OrdinalIgnoreCase;
+	private static readonly StringComparer PathStringComparer = PathComparer.Default;
 
 	public static ProjectScanContext Empty => new(
 		[],

@@ -4,9 +4,7 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 internal static class FileSystemEntryEnumerator
 {
-	private static readonly StringComparison FileNameComparison = OperatingSystem.IsLinux()
-		? StringComparison.Ordinal
-		: StringComparison.OrdinalIgnoreCase;
+	private static readonly StringComparison FileNameComparison = PathComparer.Comparison;
 
 	private static readonly EnumerationOptions SingleLevelOptions = new()
 	{
