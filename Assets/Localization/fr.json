@@ -232,7 +232,7 @@
   "Status.Operation.PreparingOutput": "Préparation du résultat",
   "Status.Operation.ExportingProjectCopy": "Exporter le projet",
   "Status.Operation.ExportingProjectCopy.Progress": "Exporter le projet : {0}/{1}",
-  "Picker.ProjectCopy.Folder": "Sélectionner le dossier de destination",
+  "Picker.ProjectCopy.Folder": "Choisissez où créer le dossier « {0} »",
   "Picker.ProjectCopy.Zip": "Enregistrer la copie du projet au format ZIP",
   "Error.ProjectCopy.LocalDestinationRequired": "L’emplacement sélectionné n’est pas disponible sous forme de chemin local.",
   "Error.ProjectCopy.DestinationInsideSource": "La copie du projet ne peut pas être créée dans le projet source.",

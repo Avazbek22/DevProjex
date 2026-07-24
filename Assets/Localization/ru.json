@@ -232,7 +232,7 @@
   "Status.Operation.PreparingOutput": "Подготовка результата",
   "Status.Operation.ExportingProjectCopy": "Экспорт проекта",
   "Status.Operation.ExportingProjectCopy.Progress": "Экспорт проекта: {0}/{1}",
-  "Picker.ProjectCopy.Folder": "Выберите папку назначения",
+  "Picker.ProjectCopy.Folder": "Выберите место для папки «{0}»",
   "Picker.ProjectCopy.Zip": "Сохраните копию проекта как ZIP",
   "Error.ProjectCopy.LocalDestinationRequired": "Выбранное место хранения недоступно как локальный путь.",
   "Error.ProjectCopy.DestinationInsideSource": "Копию проекта нельзя создать внутри исходного проекта.",

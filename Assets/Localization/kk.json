@@ -232,7 +232,7 @@
   "Status.Operation.PreparingOutput": "Нәтиже дайындалуда",
   "Status.Operation.ExportingProjectCopy": "Жобаны экспорттау",
   "Status.Operation.ExportingProjectCopy.Progress": "Жобаны экспорттау: {0}/{1}",
-  "Picker.ProjectCopy.Folder": "Мақсатты қалтаны таңдаңыз",
+  "Picker.ProjectCopy.Folder": "«{0}» қалтасын жасау орнын таңдаңыз",
   "Picker.ProjectCopy.Zip": "Жоба көшірмесін ZIP ретінде сақтаңыз",
   "Error.ProjectCopy.LocalDestinationRequired": "Таңдалған сақтау орны жергілікті жол ретінде қолжетімсіз.",
   "Error.ProjectCopy.DestinationInsideSource": "Жоба көшірмесін бастапқы жобаның ішінде жасауға болмайды.",

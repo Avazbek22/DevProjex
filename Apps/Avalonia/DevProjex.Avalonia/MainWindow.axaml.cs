@@ -3534,6 +3534,23 @@ public partial class MainWindow : Window
         if (file is null)
             return false;
 
+        var destinationPath = file.TryGetLocalPath();
+        if (!string.IsNullOrWhiteSpace(destinationPath) &&
+            !string.IsNullOrWhiteSpace(_currentPath))
+        {
+            try
+            {
+                // Text and physical exports share the same canonical guard so an aliased path
+                // cannot bypass the read-only boundary of the loaded project.
+                ProjectCopyExportService.EnsureDestinationOutsideProject(_currentPath, destinationPath);
+            }
+            catch (ProjectCopyExportException)
+            {
+                _toastService.Show(_localization["Error.ProjectCopy.UnsafeDestinationPath"]);
+                return false;
+            }
+        }
+
         await using var stream = await file.OpenWriteAsync();
         await _textFileExport.WriteAsync(stream, content);
 
@@ -3732,7 +3749,7 @@ public partial class MainWindow : Window
 
     private void OnTogglePreview(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.CanUseProjectWorkspaceActions)
+        if (!_viewModel.CanTogglePreview)
             return;
 
         if (_viewModel.IsPreviewMode)
@@ -3743,7 +3760,7 @@ public partial class MainWindow : Window
 
     private void OnPreviewClose(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.CanUseProjectWorkspaceActions)
+        if (!_viewModel.CanTogglePreview || !_viewModel.IsPreviewMode)
             return;
 
         ClosePreviewMode();

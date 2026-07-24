@@ -6,6 +6,8 @@ namespace DevProjex.Application.Services;
 public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBuilder)
 {
 	private const int CopyBufferSize = 128 * 1024;
+	private const int CleanupAttemptCount = 6;
+	private const int CleanupInitialDelayMilliseconds = 25;
 
 	public async Task<ProjectCopyExportResult> ExportAsync(
 		ProjectCopyExportRequest request,
@@ -42,16 +44,40 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		}
 	}
 
+	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)
+	{
+		try
+		{
+			_ = ResolveSafeDestinationOutsideSource(projectRootPath, destinationPath);
+		}
+		catch (ProjectCopyExportException)
+		{
+			throw;
+		}
+		catch (Exception exception) when (exception is
+			       ArgumentException or
+			       IOException or
+			       UnauthorizedAccessException or
+			       NotSupportedException)
+		{
+			throw UnsafeDestination(
+				$"The destination path cannot be validated safely: {destinationPath}",
+				exception);
+		}
+	}
+
 	private static async Task<ProjectCopyExportResult> ExportFolderAsync(
 		ProjectCopyExportPlan plan,
 		string destinationParentPath,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
-		var destinationParent = PathUtility.Normalize(destinationParentPath);
-		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationParent);
+		var requestedDestinationParent = PathUtility.Normalize(destinationParentPath);
+		var destinationParent = ResolveSafeDestinationOutsideSource(
+			plan.ProjectRootPath,
+			requestedDestinationParent);
 		Directory.CreateDirectory(destinationParent);
-		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationParent);
+		destinationParent = ResolveSafeDestinationOutsideSource(plan.ProjectRootPath, destinationParent);
 		var preferredPath = ResolveAvailableDirectoryPath(destinationParent, $"{plan.ProjectName}-copy");
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, preferredPath);
 		// A sibling staging directory keeps the final rename atomic and prevents partial results from becoming visible.
@@ -98,12 +124,14 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				preferredPath,
 				plan.ProjectName,
 				plan.ProjectRootPath);
-			return new ProjectCopyExportResult(finalPath, processedFiles, plan.DirectoryCount, bytesWritten);
+			var requestedFinalPath = Path.Combine(requestedDestinationParent, Path.GetFileName(finalPath));
+			var reportedPath = ResolveReportedDestinationPath(requestedFinalPath, finalPath);
+			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
 		finally
 		{
 			ArrayPool<byte>.Shared.Return(buffer);
-			TryDeleteDirectory(stagingPath);
+			await TryDeleteDirectoryAsync(stagingPath).ConfigureAwait(false);
 		}
 	}
 
@@ -113,14 +141,19 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
-		var destinationPath = EnsureZipExtension(PathUtility.Normalize(destinationArchivePath));
-		var destinationDirectory = Path.GetDirectoryName(destinationPath);
-		if (string.IsNullOrWhiteSpace(destinationDirectory))
+		var requestedDestinationPath = EnsureZipExtension(PathUtility.Normalize(destinationArchivePath));
+		var requestedDestinationDirectory = Path.GetDirectoryName(requestedDestinationPath);
+		if (string.IsNullOrWhiteSpace(requestedDestinationDirectory))
 			throw new ProjectCopyExportException(ProjectCopyExportError.DestinationUnavailable, "The ZIP destination directory is unavailable.");
 
-		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
+		ValidateDestinationOutsideSource(plan.ProjectRootPath, requestedDestinationPath);
+		var destinationDirectory = ResolveSafeDestinationOutsideSource(
+			plan.ProjectRootPath,
+			requestedDestinationDirectory);
 		Directory.CreateDirectory(destinationDirectory);
-		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
+		destinationDirectory = ResolveSafeDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
+		var destinationPath = Path.Combine(destinationDirectory, Path.GetFileName(requestedDestinationPath));
+		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
 		var stagingPath = Path.Combine(destinationDirectory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
@@ -166,12 +199,13 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 			ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
 			File.Move(stagingPath, destinationPath, overwrite: true);
-			return new ProjectCopyExportResult(destinationPath, processedFiles, plan.DirectoryCount, bytesWritten);
+			var reportedPath = ResolveReportedDestinationPath(requestedDestinationPath, destinationPath);
+			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
 		finally
 		{
 			ArrayPool<byte>.Shared.Return(buffer);
-			TryDeleteFile(stagingPath);
+			await TryDeleteFileAsync(stagingPath).ConfigureAwait(false);
 		}
 	}
 
@@ -259,6 +293,11 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 
 	private static void ValidateDestinationOutsideSource(string rootPath, string path)
 	{
+		EnsureDestinationOutsideProject(rootPath, path);
+	}
+
+	private static string ResolveSafeDestinationOutsideSource(string rootPath, string path)
+	{
 		var normalizedRoot = PathUtility.Normalize(rootPath);
 		var normalizedDestination = PathUtility.Normalize(path);
 		if (PathUtility.IsPathInside(normalizedDestination, normalizedRoot))
@@ -278,6 +317,8 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			throw UnsafeDestination(
 				$"The destination resolves to the source project or a path inside it: {normalizedDestination}");
 		}
+
+		return canonicalDestination;
 	}
 
 	private static string ResolveCanonicalPath(string path)
@@ -392,6 +433,23 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			throw UnsafeDestination($"An export entry escapes the staging directory: {relativePath}");
 
 		return destination;
+	}
+
+	private static string ResolveReportedDestinationPath(string requestedPath, string physicalPath)
+	{
+		try
+		{
+			var canonicalRequestedPath = ResolveCanonicalPath(requestedPath);
+			var canonicalPhysicalPath = ResolveCanonicalPath(physicalPath);
+			return PathComparer.Default.Equals(canonicalRequestedPath, canonicalPhysicalPath)
+				? requestedPath
+				: physicalPath;
+		}
+		catch (ProjectCopyExportException)
+		{
+			// The physical result remains authoritative if a destination alias changes after export.
+			return physicalPath;
+		}
 	}
 
 	private static string ResolveAvailableDirectoryPath(string parentPath, string baseName)
@@ -520,29 +578,44 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		}
 	}
 
-	private static void TryDeleteDirectory(string path)
+	private static async Task TryDeleteDirectoryAsync(string path)
 	{
-		try
+		for (var attempt = 1; attempt <= CleanupAttemptCount; attempt++)
 		{
-			if (Directory.Exists(path))
-				Directory.Delete(path, recursive: true);
-		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-		{
-			// Best-effort cleanup must not hide the original export failure.
+			try
+			{
+				if (Directory.Exists(path))
+					Directory.Delete(path, recursive: true);
+				return;
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+				if (attempt == CleanupAttemptCount)
+					return;
+
+				// Windows scanners can briefly retain a handle after the export stream closes.
+				await Task.Delay(CleanupInitialDelayMilliseconds * attempt).ConfigureAwait(false);
+			}
 		}
 	}
 
-	private static void TryDeleteFile(string path)
+	private static async Task TryDeleteFileAsync(string path)
 	{
-		try
+		for (var attempt = 1; attempt <= CleanupAttemptCount; attempt++)
 		{
-			if (File.Exists(path))
-				File.Delete(path);
-		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-		{
-			// Best-effort cleanup must not hide the original export failure.
+			try
+			{
+				if (File.Exists(path))
+					File.Delete(path);
+				return;
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+				if (attempt == CleanupAttemptCount)
+					return;
+
+				await Task.Delay(CleanupInitialDelayMilliseconds * attempt).ConfigureAwait(false);
+			}
 		}
 	}
 

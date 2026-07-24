@@ -148,7 +148,13 @@ public sealed class LocalizationExportMenuKeysTests
 		var values = ReadKeyValues(File.ReadAllText(localizationPath));
 
 		Assert.False(string.IsNullOrWhiteSpace(values["Picker.ProjectCopy.Folder"]));
-		Assert.DoesNotContain("{0}", values["Picker.ProjectCopy.Folder"], StringComparison.Ordinal);
+		Assert.Contains("{0}", values["Picker.ProjectCopy.Folder"], StringComparison.Ordinal);
+		var pickerTitle = string.Format(
+			CultureInfo.InvariantCulture,
+			values["Picker.ProjectCopy.Folder"],
+			"Project-copy");
+		Assert.Contains("Project-copy", pickerTitle, StringComparison.Ordinal);
+		Assert.DoesNotContain("{0}", pickerTitle, StringComparison.Ordinal);
 		Assert.Contains("\n{0}", values["Toast.ProjectCopy.Folder"], StringComparison.Ordinal);
 		Assert.Contains("\n{0}", values["Toast.ProjectCopy.Zip"], StringComparison.Ordinal);
 	}

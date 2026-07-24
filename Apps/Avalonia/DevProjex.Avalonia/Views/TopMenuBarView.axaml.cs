@@ -140,7 +140,7 @@ public partial class TopMenuBarView : UserControl
 
     private void OnTogglePreview(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: false })
+        if (DataContext is MainWindowViewModel { CanTogglePreview: false })
             return;
 
         TogglePreviewRequested?.Invoke(sender, e);

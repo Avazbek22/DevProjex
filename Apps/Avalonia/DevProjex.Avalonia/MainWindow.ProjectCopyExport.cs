@@ -22,7 +22,7 @@ public partial class MainWindow
             var folderName = $"{GetProjectCopyName()}-copy";
             var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
-                Title = _localization["Picker.ProjectCopy.Folder"],
+                Title = _localization.Format("Picker.ProjectCopy.Folder", folderName),
                 SuggestedFileName = folderName,
                 AllowMultiple = false
             });

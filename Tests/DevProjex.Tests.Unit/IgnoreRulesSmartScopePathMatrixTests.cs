@@ -69,7 +69,7 @@ public sealed class IgnoreRulesSmartScopePathMatrixTests
 		var scopeRoot = temp.CreateFolder("ScopeCase");
 		var rules = CreateRules(useSmartIgnore: true, [scopeRoot]);
 		var candidate = scopeRoot.ToUpperInvariant();
-		var expected = !OperatingSystem.IsLinux() ||
+		var expected = OperatingSystem.IsWindows() ||
 		               string.Equals(scopeRoot, candidate, StringComparison.Ordinal);
 
 		var applies = rules.ShouldApplySmartIgnore(candidate, isDirectory: true);

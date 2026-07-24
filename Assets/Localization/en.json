@@ -232,7 +232,7 @@
   "Status.Operation.PreparingOutput": "Preparing output",
   "Status.Operation.ExportingProjectCopy": "Export Project",
   "Status.Operation.ExportingProjectCopy.Progress": "Export Project: {0}/{1}",
-  "Picker.ProjectCopy.Folder": "Select destination folder",
+  "Picker.ProjectCopy.Folder": "Choose where to create “{0}”",
   "Picker.ProjectCopy.Zip": "Save project copy as ZIP",
   "Error.ProjectCopy.LocalDestinationRequired": "The selected storage location is not available as a local path.",
   "Error.ProjectCopy.DestinationInsideSource": "The project copy cannot be created inside the source project.",

@@ -107,7 +107,7 @@ public sealed class IgnoreRulesScopeResolutionMatrixTests
 		var expectedScope = (ExpectedScope)expectedScopeRaw;
 		if (!useGitIgnore)
 			expectedScope = ExpectedScope.Empty;
-		else if (useUpperCase && OperatingSystem.IsLinux() && expectedScope != ExpectedScope.Empty)
+		else if (useUpperCase && !OperatingSystem.IsWindows() && expectedScope != ExpectedScope.Empty)
 			expectedScope = ExpectedScope.Empty;
 
 		var expectedMatcher = expectedScope switch
@@ -184,7 +184,7 @@ public sealed class IgnoreRulesScopeResolutionMatrixTests
 		var candidatePath = PreparePath(basePath, isDirectory, useUpperCase, appendDirectorySeparator);
 
 		var expected = useSmartIgnore && expectedSmart;
-		if (useUpperCase && OperatingSystem.IsLinux())
+		if (useUpperCase && !OperatingSystem.IsWindows())
 			expected = false;
 
 		Assert.Equal(expected, rules.ShouldApplySmartIgnore(candidatePath));

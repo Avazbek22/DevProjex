@@ -223,6 +223,25 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public void SharedDestinationGuardRejectsTextExportPathInsideSourceAndAllowsSibling()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var insideSource = Path.Combine(workspace.SourceRoot, "tree.txt");
+		var outsideSource = Path.Combine(workspace.DestinationParent, "tree.txt");
+
+		var exception = Assert.Throws<ProjectCopyExportException>(() =>
+			ProjectCopyExportService.EnsureDestinationOutsideProject(
+				workspace.SourceRoot,
+				insideSource));
+		ProjectCopyExportService.EnsureDestinationOutsideProject(
+			workspace.SourceRoot,
+			outsideSource);
+
+		Assert.Equal(ProjectCopyExportError.DestinationInsideSource, exception.Error);
+		Assert.False(File.Exists(insideSource));
+	}
+
+	[Fact]
 	public async Task FolderDestinationSymlinkIntoSourceIsRejectedBeforeStaging()
 	{
 		using var workspace = ProjectCopyWorkspace.Create();
@@ -293,6 +312,60 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 
 			Assert.True(Directory.Exists(result.DestinationPath));
 			Assert.True(File.Exists(Path.Combine(externalTarget, "Sample-copy", "README.md")));
+			Assert.Empty(FindStagingArtifacts(externalTarget));
+		}
+		finally
+		{
+			DeleteDirectoryLink(linkPath);
+		}
+	}
+
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task DestinationSymlinkRetargetedDuringExportCannotRedirectWritesIntoSource(
+		ProjectCopyExportFormat format)
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Atomic symbolic-link retargeting is covered by Unix runners.");
+
+		using var workspace = ProjectCopyWorkspace.Create();
+		var externalTarget = Directory.CreateDirectory(Path.Combine(workspace.DestinationParent, "stable-target")).FullName;
+		var linkPath = Path.Combine(workspace.DestinationParent, "mutable-link");
+		CreateDirectoryLinkOrSkip(linkPath, externalTarget);
+		var retargeted = false;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(value =>
+		{
+			if (retargeted || value.ProcessedEntryCount != 1)
+				return;
+
+			Directory.Delete(linkPath);
+			Directory.CreateSymbolicLink(linkPath, workspace.SourceRoot);
+			retargeted = true;
+		});
+		var destination = format == ProjectCopyExportFormat.Folder
+			? linkPath
+			: Path.Combine(linkPath, "retargeted.zip");
+
+		try
+		{
+			var result = await workspace.ExportAsync(
+				format,
+				destination,
+				[],
+				progress: progress,
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			Assert.True(retargeted);
+			Assert.True(format == ProjectCopyExportFormat.Folder
+				? File.Exists(Path.Combine(externalTarget, "Sample-copy", "README.md"))
+				: File.Exists(Path.Combine(externalTarget, "retargeted.zip")));
+			Assert.True(format == ProjectCopyExportFormat.Folder
+				? Directory.Exists(result.DestinationPath)
+				: File.Exists(result.DestinationPath));
+			Assert.False(Directory.Exists(Path.Combine(workspace.SourceRoot, "Sample-copy")));
+			Assert.False(File.Exists(Path.Combine(workspace.SourceRoot, "retargeted.zip")));
+			Assert.Empty(FindStagingArtifacts(workspace.SourceRoot));
 			Assert.Empty(FindStagingArtifacts(externalTarget));
 		}
 		finally
@@ -442,6 +515,113 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task CancellationRetriesWindowsStagingCleanupAfterTransientFileLock()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows file deletion semantics are required for the transient-lock regression.");
+
+		using var workspace = ProjectCopyWorkspace.Create();
+		using var cancellation = new CancellationTokenSource();
+		FileStream? heldFile = null;
+		Thread? releaseThread = null;
+		var firstFileProgress = CountDirectories(workspace.Root) + 1;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(value =>
+		{
+			if (heldFile is not null || value.ProcessedEntryCount != firstFileProgress)
+				return;
+
+			var stagingPath = Assert.Single(FindStagingArtifacts(workspace.DestinationParent));
+			var copiedFile = Assert.Single(Directory.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories));
+			heldFile = new FileStream(copiedFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+			releaseThread = new Thread(() =>
+			{
+				Thread.Sleep(200);
+				heldFile.Dispose();
+			}) { IsBackground = true };
+			releaseThread.Start();
+			cancellation.Cancel();
+		});
+
+		try
+		{
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+				workspace.ExportAsync(
+					ProjectCopyExportFormat.Folder,
+					workspace.DestinationParent,
+					[],
+					progress: progress,
+					cancellationToken: cancellation.Token));
+			Assert.NotNull(releaseThread);
+			Assert.True(releaseThread.Join(TimeSpan.FromSeconds(5)));
+
+			Assert.False(Directory.Exists(Path.Combine(workspace.DestinationParent, "Sample-copy")));
+			Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+		}
+		finally
+		{
+			heldFile?.Dispose();
+		}
+	}
+
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task SourceDisappearingAfterStagingCreationLeavesNoPartialResult(
+		ProjectCopyExportFormat format)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var sourceRemoved = false;
+		var directoryCount = CountDirectories(workspace.Root);
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(value =>
+		{
+			if (sourceRemoved || value.ProcessedEntryCount != directoryCount)
+				return;
+
+			File.Delete(workspace.Paths["readme"]);
+			sourceRemoved = true;
+		});
+		var destination = format == ProjectCopyExportFormat.Folder
+			? workspace.DestinationParent
+			: Path.Combine(workspace.DestinationParent, "read-failure.zip");
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+			workspace.ExportAsync(
+				format,
+				destination,
+				[],
+				progress: progress,
+				cancellationToken: TestContext.Current.CancellationToken));
+
+		Assert.True(sourceRemoved);
+		Assert.Equal(ProjectCopyExportError.SourceUnavailable, exception.Error);
+		Assert.False(Directory.Exists(Path.Combine(workspace.DestinationParent, "Sample-copy")));
+		Assert.False(File.Exists(Path.Combine(workspace.DestinationParent, "read-failure.zip")));
+		Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+	}
+
+	[Fact]
+	public async Task ExistingZipRemainsUntouchedWhenExportIsCanceledBeforeAtomicReplace()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var destination = Path.Combine(workspace.DestinationParent, "existing.zip");
+		var originalBytes = Encoding.UTF8.GetBytes("existing archive sentinel");
+		await File.WriteAllBytesAsync(destination, originalBytes, TestContext.Current.CancellationToken);
+		using var cancellation = new CancellationTokenSource();
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(_ => cancellation.Cancel());
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+			workspace.ExportAsync(
+				ProjectCopyExportFormat.Zip,
+				destination,
+				[],
+				progress: progress,
+				cancellationToken: cancellation.Token));
+
+		Assert.Equal(originalBytes, await File.ReadAllBytesAsync(destination, TestContext.Current.CancellationToken));
+		Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+	}
+
+	[Fact]
 	public async Task MissingSourceFailsWithoutPartialDestination()
 	{
 		using var workspace = ProjectCopyWorkspace.Create();
@@ -487,6 +667,24 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Directory.Exists(path)
 			? Directory.GetFileSystemEntries(path, "*devprojex*.tmp", SearchOption.TopDirectoryOnly)
 			: [];
+
+	private static int CountDirectories(TreeNodeDescriptor root)
+	{
+		var count = 0;
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(root);
+		while (pending.TryPop(out var node))
+		{
+			if (!node.IsDirectory)
+				continue;
+
+			count++;
+			foreach (var child in node.Children)
+				pending.Push(child);
+		}
+
+		return count;
+	}
 
 	private static void CreateDirectoryLinkOrSkip(string linkPath, string targetPath)
 	{

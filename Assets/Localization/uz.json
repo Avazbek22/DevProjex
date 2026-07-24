@@ -232,7 +232,7 @@
   "Status.Operation.PreparingOutput": "Natija tayyorlanmoqda",
   "Status.Operation.ExportingProjectCopy": "Loyihani eksport qilish",
   "Status.Operation.ExportingProjectCopy.Progress": "Loyihani eksport qilish: {0}/{1}",
-  "Picker.ProjectCopy.Folder": "Maqsad jildini tanlang",
+  "Picker.ProjectCopy.Folder": "“{0}” jildi yaratiladigan joyni tanlang",
   "Picker.ProjectCopy.Zip": "Loyiha nusxasini ZIP sifatida saqlang",
   "Error.ProjectCopy.LocalDestinationRequired": "Tanlangan saqlash joyi mahalliy yo‘l sifatida mavjud emas.",
   "Error.ProjectCopy.DestinationInsideSource": "Loyiha nusxasini asl loyiha ichida yaratib bo‘lmaydi.",

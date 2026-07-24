@@ -17,7 +17,7 @@ public sealed class IgnoreRulesSmartScopeBoundaryMatrixTests
 
 		var upper = inside.ToUpperInvariant();
 		var lower = inside.ToLowerInvariant();
-		var expectedCaseMatch = !OperatingSystem.IsLinux();
+		var expectedCaseMatch = OperatingSystem.IsWindows();
 		yield return [upper, expectedCaseMatch];
 		yield return [lower, expectedCaseMatch];
 

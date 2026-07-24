@@ -309,6 +309,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(CanApplySettings));
             RaisePropertyChanged(nameof(CanExportProjectCopy));
             RaisePropertyChanged(nameof(CanUseProjectWorkspaceActions));
+            RaisePropertyChanged(nameof(CanTogglePreview));
             RaisePropertyChanged(nameof(CanRefreshLocalProject));
             RaisePropertyChanged(nameof(CanGetGitUpdates));
         }
@@ -327,6 +328,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(IsPreviewMode));
             RaisePropertyChanged(nameof(IsPreviewTreeVisible));
             RaisePropertyChanged(nameof(IsPreviewOnlyMode));
+            RaisePropertyChanged(nameof(CanTogglePreview));
             RaisePreviewStatePropertiesChanged();
 
             if (previousCanToggleCompactMode != CanToggleCompactMode)
@@ -362,6 +364,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(CanChangeProjectTree));
             RaisePropertyChanged(nameof(CanExportProjectCopy));
             RaisePropertyChanged(nameof(CanUseProjectWorkspaceActions));
+            RaisePropertyChanged(nameof(CanTogglePreview));
             RaisePropertyChanged(nameof(IsSearchFilterAvailable));
             RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
             RaisePropertyChanged(nameof(CanApplySettings));
@@ -375,6 +378,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool CanExportProjectCopy => _isProjectLoaded && !_isProjectCopyExportInProgress;
 
     public bool CanUseProjectWorkspaceActions => _isProjectLoaded && !_isProjectCopyExportInProgress;
+
+    public bool CanTogglePreview => _isProjectLoaded && (!_isProjectCopyExportInProgress || IsPreviewMode);
 
     public bool IsSearchAvailable => _isProjectLoaded && IsTreePaneVisible;
 

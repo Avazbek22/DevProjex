@@ -86,7 +86,10 @@ public sealed class ProjectCopyExportUiContractTests
         Assert.DoesNotContain("_filterBaseTree", source, StringComparison.Ordinal);
         Assert.Contains("GetCheckedPaths()", source, StringComparison.Ordinal);
         Assert.Contains("Picker.ProjectCopy.Folder", source, StringComparison.Ordinal);
-        Assert.Contains("Title = _localization[\"Picker.ProjectCopy.Folder\"]", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "Title = _localization.Format(\"Picker.ProjectCopy.Folder\", folderName)",
+            source,
+            StringComparison.Ordinal);
         Assert.Contains("SuggestedFileName = folderName", source, StringComparison.Ordinal);
         Assert.Contains("AddPathWrapOpportunities", source, StringComparison.Ordinal);
         Assert.Contains("ProjectCopyResultToastDuration", source, StringComparison.Ordinal);
@@ -96,6 +99,33 @@ public sealed class ProjectCopyExportUiContractTests
         Assert.DoesNotContain("exception.Message", source, StringComparison.Ordinal);
         Assert.DoesNotContain("innerException.Message", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowErrorAsync", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TextFileExport_RejectsCanonicalDestinationInsideLoadedProjectBeforeOpeningStream()
+    {
+        var source = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.axaml.cs");
+        var methodStart = source.IndexOf(
+            "private async Task<bool> TryExportTextToFileAsync",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "private static IReadOnlyList<FilePickerFileType>",
+            methodStart,
+            StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        var guardIndex = method.IndexOf(
+            "ProjectCopyExportService.EnsureDestinationOutsideProject",
+            StringComparison.Ordinal);
+        var streamOpenIndex = method.IndexOf("file.OpenWriteAsync()", StringComparison.Ordinal);
+
+        Assert.Contains("file.TryGetLocalPath()", method, StringComparison.Ordinal);
+        Assert.Contains("Error.ProjectCopy.UnsafeDestinationPath", method, StringComparison.Ordinal);
+        Assert.True(guardIndex >= 0 && guardIndex < streamOpenIndex);
     }
 
     [Fact]
@@ -157,9 +187,13 @@ public sealed class ProjectCopyExportUiContractTests
 
         Assert.Contains("CancelPreviewRefresh();", exportSource, StringComparison.Ordinal);
         Assert.Contains("await Task.Run(", exportSource, StringComparison.Ordinal);
-        Assert.Contains("CanUseProjectWorkspaceActions: false", menuSource, StringComparison.Ordinal);
+        Assert.Contains("CanTogglePreview: false", menuSource, StringComparison.Ordinal);
         Assert.Contains("CanUseProjectWorkspaceActions: true", menuSource, StringComparison.Ordinal);
-        Assert.Contains("if (!_viewModel.CanUseProjectWorkspaceActions)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("if (!_viewModel.CanTogglePreview)", windowSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "if (!_viewModel.CanTogglePreview || !_viewModel.IsPreviewMode)",
+            windowSource,
+            StringComparison.Ordinal);
         Assert.Contains("BeginOutputPreparationStatus()", windowSource, StringComparison.Ordinal);
         Assert.Contains("if (_viewModel.IsProjectCopyExportInProgress)", windowSource, StringComparison.Ordinal);
     }

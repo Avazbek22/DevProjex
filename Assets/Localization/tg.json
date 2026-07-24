@@ -232,7 +232,7 @@
   "Status.Operation.PreparingOutput": "Омодасозии натиҷа",
   "Status.Operation.ExportingProjectCopy": "Содироти лоиҳа",
   "Status.Operation.ExportingProjectCopy.Progress": "Содироти лоиҳа: {0}/{1}",
-  "Picker.ProjectCopy.Folder": "Ҷузвдони таъинотро интихоб кунед",
+  "Picker.ProjectCopy.Folder": "Ҷойи сохтани ҷузвдони «{0}»-ро интихоб кунед",
   "Picker.ProjectCopy.Zip": "Нусхаи лоиҳаро ҳамчун ZIP нигоҳ доред",
   "Error.ProjectCopy.LocalDestinationRequired": "Ҷойи интихобшуда ҳамчун роҳи маҳаллӣ дастрас нест.",
   "Error.ProjectCopy.DestinationInsideSource": "Нусхаи лоиҳаро дар дохили лоиҳаи аслӣ сохтан мумкин нест.",
