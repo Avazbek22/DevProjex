@@ -340,9 +340,11 @@ Una regola che inizia con `!` annulla solo una precedente esclusione Git nella p
 Una riga errata o non supportata viene ignorata singolarmente; le altre regole valide continuano a funzionare. L’opzione comprende solo i file `.gitignore` dell’albero di lavoro. `.git/info/exclude`, le regole Git globali e lo stato dell’indice Git non vengono applicati.
 
 ### 12.4 Relazione tra .gitignore e Smart Ignore
-In un progetto con una sola area e un proprio `.gitignore`, l’interfaccia mostra di solito solo «Usa .gitignore». In questo caso l’opzione attiva sia `.gitignore` sia le regole Smart Ignore applicabili. In uno spazio di lavoro con più progetti, le opzioni possono apparire separatamente e funzionare in modo indipendente nelle rispettive aree.
+`.gitignore` e Smart Ignore sono interruttori indipendenti. Ognuno si applica a tutte le proprie aree a qualsiasi livello di annidamento raggiungibile. Un’opzione viene mostrata solo se la sua modifica può cambiare l’albero effettivo corrente.
 
-Una negazione Git con `!` annulla solo il risultato Git; non prevale su Smart Ignore o su una regola di base. Non esiste quindi una regola globalmente «più forte»: un elemento deve superare tutti i meccanismi attivi per restare visibile.
+Prima viene applicato `.gitignore`, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base. Smart Ignore può quindi restare nascosto finché `.gitignore` copre già tutti i suoi candidati e comparire dopo la disattivazione di `.gitignore`.
+
+Una negazione Git con `!` annulla solo il risultato Git. Non disattiva Smart Ignore né una regola di base.
 
 ### 12.5 Regole di base
 Le regole per il punto iniziale controllano il nome; quelle per gli elementi nascosti controllano l’attributo di sistema Hidden. A seconda della piattaforma possono riguardare lo stesso elemento oppure elementi diversi.

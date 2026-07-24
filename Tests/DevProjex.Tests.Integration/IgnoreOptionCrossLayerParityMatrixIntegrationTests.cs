@@ -27,7 +27,7 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 
 		AssertDirectScannerParity(services, workspace.Path, snapshot, scenario);
 		AssertIgnoreLabelsMatchPublishedCounts(snapshot, scenario);
-		AssertRepeatedRefreshIsStable(services, workspace.Path, snapshot, scenario);
+		AssertRepeatedRefreshIsStable(services, workspace.Path, snapshot, scenarioContext, scenario);
 		AssertTreeInventoryProjectionMatchesDirectTree(workspace.Path, services, snapshot, scenario);
 	}
 
@@ -545,15 +545,22 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshSnapshot snapshot,
+		SelectionRefreshContext previousContext,
 		CrossLayerScenario scenario)
 	{
+		var repeatedContext = BuildConvergedContext(rootPath, snapshot, previousContext) with
+		{
+			// The UI stores aggregate checkbox preferences and hidden option states
+			// independently. Re-inferring either from the filtered public list changes a
+			// partial selection into "All" and loses explicit states for hidden extensions.
+			AllRootFoldersChecked = previousContext.AllRootFoldersChecked,
+			AllExtensionsChecked = previousContext.AllExtensionsChecked,
+			CaptureTreeInventory = scenario.CaptureTreeInventory
+		};
 		var repeated = ComputeConvergedSnapshot(
 			services,
 			rootPath,
-			CreateContextFromSnapshot(rootPath, snapshot) with
-			{
-				CaptureTreeInventory = scenario.CaptureTreeInventory
-			});
+			repeatedContext);
 
 		AssertEquivalentVisibleSnapshots(snapshot, repeated);
 	}

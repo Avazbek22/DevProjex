@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Kernel.Models;
 
@@ -65,7 +66,7 @@ public sealed record IgnoreRules(
 
 	public IReadOnlySet<string>? SmartIgnoreCandidateFiles { get; init; }
 
-	public bool SmartIgnoreFollowsGitIgnore { get; init; }
+	public ISmartIgnoreScopeResolver? SmartIgnoreScopeResolver { get; init; }
 
 	public SmartArtifactIgnoreMatcher SmartArtifactIgnoreMatcher { get; init; } =
 		SmartArtifactIgnoreMatcher.Empty;
@@ -427,7 +428,7 @@ public sealed record IgnoreRules(
 			fullPath,
 			isDirectory: true,
 			useCandidates: false);
-		// Hybrid contract: stack descriptors and stack-adjacent fingerprints remain inside
+		// Smart Ignore contract: stack descriptors and stack-adjacent fingerprints remain inside
 		// their discovered project scope. Only signature-confirmed portable dependency
 		// stores may cross that boundary, so user-level package caches are removed without
 		// treating ordinary sibling folders named bin, obj, packages, or build as artifacts.
@@ -438,14 +439,8 @@ public sealed record IgnoreRules(
 				portableOnly: !appliesToProjectScope))
 			return true;
 
-		if (!appliesToProjectScope)
-			return false;
-
 		if (!SmartIgnoredFolders.Contains(name))
 			return false;
-
-		if (ScopedSmartIgnoreMatchers.Count == 0)
-			return true;
 
 		foreach (var scoped in ScopedSmartIgnoreMatchers)
 		{
@@ -453,7 +448,10 @@ public sealed record IgnoreRules(
 				return true;
 		}
 
-		return false;
+		if (SmartIgnoreScopeResolver is not null)
+			return SmartIgnoreScopeResolver.IsIgnoredDirectory(fullPath, name);
+
+		return appliesToProjectScope && ScopedSmartIgnoreMatchers.Count == 0;
 	}
 
 	public bool IsSmartIgnoredDirectoryCandidate(string fullPath, string name)
@@ -466,24 +464,21 @@ public sealed record IgnoreRules(
 				portableOnly: !appliesToProjectScope))
 			return true;
 
-		if (!appliesToProjectScope)
-			return false;
-
 		var candidateFolders = SmartIgnoreCandidateFolders ?? SmartIgnoredFolders;
 		if (!candidateFolders.Contains(name))
 			return false;
 
 		var scopedMatchers = GetScopedSmartIgnoreMatchers(useCandidates: true);
-		if (scopedMatchers.Count == 0)
-			return true;
-
 		foreach (var scoped in scopedMatchers)
 		{
 			if (scoped.FolderNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
 				return true;
 		}
 
-		return false;
+		if (SmartIgnoreScopeResolver is not null)
+			return SmartIgnoreScopeResolver.IsIgnoredDirectory(fullPath, name);
+
+		return appliesToProjectScope && scopedMatchers.Count == 0;
 	}
 
 	public bool IsSmartIgnoredFile(string fullPath, string name, bool shouldApplySmartIgnore)
@@ -494,22 +489,22 @@ public sealed record IgnoreRules(
 		if (SmartArtifactIgnoreMatcher.IsIgnoredFile(name))
 			return true;
 
-		if (!shouldApplySmartIgnore)
-			return false;
-
 		if (!SmartIgnoredFiles.Contains(name))
 			return false;
 
-		if (ScopedSmartIgnoreMatchers.Count == 0)
-			return true;
-
-		foreach (var scoped in ScopedSmartIgnoreMatchers)
+		if (shouldApplySmartIgnore)
 		{
-			if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-				return true;
+			foreach (var scoped in ScopedSmartIgnoreMatchers)
+			{
+				if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
+					return true;
+			}
 		}
 
-		return false;
+		if (SmartIgnoreScopeResolver is not null)
+			return SmartIgnoreScopeResolver.IsIgnoredFile(fullPath, name);
+
+		return shouldApplySmartIgnore && ScopedSmartIgnoreMatchers.Count == 0;
 	}
 
 	public bool IsSmartIgnoredFileCandidate(string fullPath, string name, bool shouldApplySmartIgnore)
@@ -517,24 +512,24 @@ public sealed record IgnoreRules(
 		if (SmartArtifactIgnoreCandidateMatcher.IsIgnoredFile(name))
 			return true;
 
-		if (!shouldApplySmartIgnore)
-			return false;
-
 		var candidateFiles = SmartIgnoreCandidateFiles ?? SmartIgnoredFiles;
 		if (!candidateFiles.Contains(name))
 			return false;
 
 		var scopedMatchers = GetScopedSmartIgnoreMatchers(useCandidates: true);
-		if (scopedMatchers.Count == 0)
-			return true;
-
-		foreach (var scoped in scopedMatchers)
+		if (shouldApplySmartIgnore)
 		{
-			if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-				return true;
+			foreach (var scoped in scopedMatchers)
+			{
+				if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
+					return true;
+			}
 		}
 
-		return false;
+		if (SmartIgnoreScopeResolver is not null)
+			return SmartIgnoreScopeResolver.IsIgnoredFile(fullPath, name);
+
+		return shouldApplySmartIgnore && scopedMatchers.Count == 0;
 	}
 
 	private static bool IsSmartArtifactIgnoredDirectory(

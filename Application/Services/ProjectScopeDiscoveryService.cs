@@ -844,9 +844,7 @@ public sealed record ProjectScope(
 
 public sealed record ProjectScanContext(
 	IReadOnlyList<ProjectScope> Scopes,
-	bool IsSingleScopeWithGitIgnore,
 	bool HasAnyGitIgnore,
-	bool HasAnyWithoutGitIgnore,
 	ConcurrentDictionary<string, SmartIgnoreResult> SmartIgnoreResultCache)
 {
 	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
@@ -855,9 +853,7 @@ public sealed record ProjectScanContext(
 
 	public static ProjectScanContext Empty => new(
 		[],
-		IsSingleScopeWithGitIgnore: false,
 		HasAnyGitIgnore: false,
-		HasAnyWithoutGitIgnore: false,
 		SmartIgnoreResultCache: []);
 
 	public static ProjectScanContext FromScopes(IEnumerable<ProjectScope> scopes)
@@ -882,27 +878,17 @@ public sealed record ProjectScanContext(
 		var scopesArray = normalizedScopes.ToArray();
 
 		var hasAnyGitIgnore = false;
-		var hasAnyWithoutGitIgnore = false;
 		foreach (var scope in scopesArray)
 		{
 			if (scope.HasGitIgnore)
 				hasAnyGitIgnore = true;
-			else
-				hasAnyWithoutGitIgnore = true;
-
-			if (hasAnyGitIgnore && hasAnyWithoutGitIgnore)
+			if (hasAnyGitIgnore)
 				break;
 		}
 
-		// "Single" is deliberately literal. If any sibling scope exists, Git Ignore and
-		// Smart Ignore must remain independent even when every discovered scope has .gitignore.
-		var isSingleScopeWithGitIgnore = scopesArray.Length == 1 && scopesArray[0].HasGitIgnore;
-
 		return new ProjectScanContext(
 			Scopes: scopesArray,
-			IsSingleScopeWithGitIgnore: isSingleScopeWithGitIgnore,
 			HasAnyGitIgnore: hasAnyGitIgnore,
-			HasAnyWithoutGitIgnore: hasAnyWithoutGitIgnore,
 			SmartIgnoreResultCache: []);
 	}
 

@@ -96,6 +96,13 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 					: profileExpected.ExpectedCounts with { DotFolders = 2 }
 			};
 		}
+		else if (testCase.Name == "all roots xml extension appears when dot folders are off")
+		{
+			profileExpected = profileExpected with
+			{
+				ExpectedCheckedRoots = Set(["api"], PathComparer.Default)
+			};
+		}
 
 		AssertGoldenSnapshot(restored, profileExpected);
 		AssertGoldenTree(workspace.Path, services, restored, testCase);
@@ -333,7 +340,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedCounts: null)];
 
 		yield return [CreateCase(
-			"api root defaults hides git and smart-followed artifacts",
+			"api root defaults keeps git and smart controllers independent",
 			roots: ["api"],
 			extensions: null,
 			forcedStates: null,
@@ -341,7 +348,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, true),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore),
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true),
 				ExpectedVisible(IgnoreOptionId.DotFolders, true),
 				ExpectedVisible(IgnoreOptionId.DotFiles, true)
 			],
@@ -366,18 +373,18 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 				DotFolders: 1,
 				DotFiles: 1,
 				MinGitIgnoreImpact: 3,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
-			"api root git off disables smart-following too",
+			"api root git off keeps smart active",
 			roots: ["api"],
 			extensions: null,
 			forcedStates: States((IgnoreOptionId.UseGitIgnore, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".log", ".tmp"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".log", ".tmp"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore),
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true),
 				ExpectedVisible(IgnoreOptionId.DotFolders, true),
 				ExpectedVisible(IgnoreOptionId.DotFiles, true)
 			],
@@ -385,20 +392,20 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			[
 				"api/logs/drop.log",
 				"api/logs/drop.tmp",
-				"api/generated/drop/old.cs",
-				"api/bin/Debug/api.dll"
+				"api/generated/drop/old.cs"
 			],
 			expectedHiddenPaths:
 			[
 				"api/.gitignore",
 				"api/.idea/settings.xml",
+				"api/bin/Debug/api.dll",
 				"web/package.json"
 			],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: 1,
 				DotFiles: 1,
 				MinGitIgnoreImpact: 3,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"api root cs extension preserves git negation branch",
@@ -410,7 +417,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, true),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore),
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true),
 				ExpectedVisible(IgnoreOptionId.DotFolders, true)
 			],
 			expectedVisiblePaths:
@@ -428,20 +435,20 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 				DotFolders: 1,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"api root cs extension with git off exposes ignored cs branch",
 			roots: ["api"],
 			extensions: [".cs"],
 			forcedStates: States((IgnoreOptionId.UseGitIgnore, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".log", ".tmp"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".log", ".tmp"],
 			// Newly discovered extensions default to checked when opening a controller branch.
-			expectedCheckedExtensions: [".cs", ".dll", ".tmp"],
+			expectedCheckedExtensions: [".cs", ".tmp"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore),
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true),
 				ExpectedVisible(IgnoreOptionId.DotFolders, true)
 			],
 			expectedVisiblePaths:
@@ -449,19 +456,19 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 				"api/src/Program.cs",
 				"api/generated/keep/keep.cs",
 				"api/generated/drop/old.cs",
-				"api/logs/drop.tmp",
-				"api/bin/Debug/api.dll"
+				"api/logs/drop.tmp"
 			],
 			expectedHiddenPaths:
 			[
 				"api/logs/keep.log",
-				"api/App.csproj"
+				"api/App.csproj",
+				"api/bin/Debug/api.dll"
 			],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: 1,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"api root dll extension remains absent while git controller is on",
@@ -473,7 +480,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, true),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore)
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true)
 			],
 			expectedVisiblePaths: [],
 			expectedHiddenPaths: ["api/bin/Debug/api.dll"],
@@ -482,57 +489,61 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 				DotFolders: null,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
-			"api root dll extension appears when git controller is off",
+			"api root dll extension remains absent when only git is off",
 			roots: ["api"],
 			extensions: [".dll"],
 			forcedStates: States((IgnoreOptionId.UseGitIgnore, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".log", ".tmp"],
-			// Git-off reveals .tmp alongside the requested .dll; new extensions are checked by default.
-			expectedCheckedExtensions: [".dll", ".tmp"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".log", ".tmp"],
+			// Git-off reveals .tmp, while Smart Ignore continues to own the .dll artifact.
+			expectedCheckedExtensions: [".tmp"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore)
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true)
 			],
-			expectedVisiblePaths: ["api/bin/Debug/api.dll"],
-			expectedHiddenPaths: ["api/logs/keep.log"],
+			expectedVisiblePaths: ["api/logs/drop.tmp"],
+			expectedHiddenPaths:
+			[
+				"api/bin/Debug/api.dll",
+				"api/logs/keep.log"
+			],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: null,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"api root tmp extension appears only after git is off",
 			roots: ["api"],
 			extensions: [".tmp"],
 			forcedStates: States((IgnoreOptionId.UseGitIgnore, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".log", ".tmp"],
-			// Git-off reveals .dll alongside the requested .tmp; new extensions are checked by default.
-			expectedCheckedExtensions: [".dll", ".tmp"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".log", ".tmp"],
+			// Smart Ignore continues to own .dll while Git-off reveals the requested .tmp.
+			expectedCheckedExtensions: [".tmp"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore)
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true)
 			],
 			expectedVisiblePaths:
 			[
-				"api/logs/drop.tmp",
-				"api/bin/Debug/api.dll"
+				"api/logs/drop.tmp"
 			],
 			expectedHiddenPaths:
 			[
 				"api/logs/keep.log",
-				"api/generated/drop/old.cs"
+				"api/generated/drop/old.cs",
+				"api/bin/Debug/api.dll"
 			],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: null,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"web root defaults exposes only source and package extensions",
@@ -678,8 +689,8 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			roots: null,
 			extensions: [".xml"],
 			forcedStates: States((IgnoreOptionId.DotFolders, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".js", ".json", ".log", ".md", ".ts", ".xml"],
-			expectedCheckedExtensions: [".dll", ".js", ".xml"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".json", ".log", ".md", ".ts", ".xml"],
+			expectedCheckedExtensions: [".xml"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.DotFolders, false),
@@ -688,8 +699,9 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			],
 			expectedVisiblePaths: ["api/.idea/settings.xml"],
 			expectedHiddenPaths: ["api/logs/drop.tmp"],
+			expectedCheckedRoots: ["api"],
 			expectedCounts: new ExpectedCountContract(
-				DotFolders: 2,
+				DotFolders: 1,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
 				MinSmartIgnoreImpact: 1))];

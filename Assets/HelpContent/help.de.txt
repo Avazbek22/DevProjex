@@ -340,9 +340,11 @@ Eine Regel mit `!` hebt nur einen früheren Git-Ausschluss in ihrem Bereich auf.
 Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude`, globale Git-Regeln und der Git-Index werden nicht berücksichtigt.
 
 ### 12.4 Zusammenspiel von .gitignore und Smart Ignore
-Bei einem Projekt mit einem Bereich und eigener `.gitignore` zeigt die Oberfläche meist nur „.gitignore verwenden“. Dann aktiviert diese Option sowohl `.gitignore` als auch passende Smart-Ignore-Regeln. In einem Workspace mit mehreren Projekten können beide Optionen getrennt erscheinen und unabhängig für ihre Bereiche arbeiten.
+`.gitignore` und Smart Ignore sind unabhängige Schalter. Jeder gilt für alle eigenen Bereiche auf jeder erreichbaren Verschachtelungsebene. Eine Option wird nur angezeigt, wenn ihre Änderung den aktuellen effektiven Baum beeinflussen kann.
 
-Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam. Es gibt daher keine gemeinsame „stärkere“ Regel: Ein Element bleibt nur sichtbar, wenn es alle aktivierten Mechanismen durchläuft.
+Zuerst wird `.gitignore` angewendet, danach verarbeitet Smart Ignore die verbleibenden Elemente und zuletzt folgen die Grundregeln. Smart Ignore kann daher ausgeblendet bleiben, solange `.gitignore` bereits alle seine Kandidaten abdeckt, und nach dem Deaktivieren von `.gitignore` erscheinen.
+
+Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam.
 
 ### 12.5 Grundregeln
 Regeln für führende Punkte prüfen den Namen; Regeln für versteckte Elemente prüfen das Hidden-Systemattribut. Beides kann je nach Plattform dasselbe oder verschiedene Elemente betreffen.

@@ -364,7 +364,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			// Keep initial project-load inventory focused on the currently selected roots.
 			// Root-level toggle candidates still affect counts, but reading their full
 			// subtrees here would delay first paint for folders that are invisible now.
-			// This is the core performance trade-off of the hybrid ignore model: root probes
+			// This is the core performance trade-off of controller-aware ignore scanning: root probes
 			// keep checkboxes reversible, while selected-root scans do the expensive content
 			// work only for roots the user can currently see.
 			var rootCandidateCounts = CountRootDirectoryToggleCandidates(
@@ -724,13 +724,19 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		CancellationToken cancellationToken,
 		bool requireVisibleContentWhenEmptyFoldersIgnored = true)
 	{
-		if (!PassesNonControllerDirectoryRules(facts, rules))
-			return IgnoreControllerImpactCounts.Empty;
-
+		// Controller ownership is evaluated before general dot/hidden/empty rules.
+		// Otherwise overlapping candidates oscillate between controllers and lower-priority
+		// toggles instead of leaving the highest-priority applicable option reversible.
 		var gitDirectImpact =
 			facts.GitIgnoreCandidateEvaluation.IsIgnored &&
 			!facts.GitIgnoreCandidateEvaluation.ShouldTraverseIgnoredDirectory;
-		var smartDirectImpact = facts.IsSmartIgnoredCandidate;
+		var activeGitOwnsDirectory =
+			rules.IsGitIgnoreTraversalEnabled &&
+			facts.GitIgnoreEvaluation.IsIgnored &&
+			!facts.GitIgnoreEvaluation.ShouldTraverseIgnoredDirectory;
+		var smartDirectImpact =
+			facts.IsSmartIgnoredCandidate &&
+			(!rules.IsGitIgnoreTraversalEnabled || (!gitDirectImpact && !activeGitOwnsDirectory));
 		if (!gitDirectImpact && !smartDirectImpact)
 			return IgnoreControllerImpactCounts.Empty;
 
@@ -753,7 +759,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 
 		return new IgnoreControllerImpactCounts(
-			GitIgnore: gitDirectImpact || (rules.SmartIgnoreFollowsGitIgnore && smartDirectImpact) ? 1 : 0,
+			GitIgnore: gitDirectImpact ? 1 : 0,
 			SmartIgnore: smartDirectImpact ? 1 : 0);
 	}
 
@@ -814,9 +820,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						IsSmartIgnoredCandidate: false,
 						GitIgnoreEvaluation: IgnoreRules.GitIgnoreEvaluation.NotIgnored,
 						GitIgnoreCandidateEvaluation: IgnoreRules.GitIgnoreEvaluation.NotIgnored);
-					if (!PassesNonControllerDirectoryRules(childFacts, rules))
-						continue;
-
 					pending.Push((directory.FullPath, directory.RelativePath));
 				}
 			}
@@ -856,13 +859,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			IsGitIgnored: false,
 			IsGitIgnoredCandidate: false);
 
-		return PassesControllerImpactExtensionFilter(facts, extensionPolicy) &&
-		       PassesFileIgnoreRules(
-			       facts,
-			       rules.IgnoreHiddenFiles,
-			       rules.IgnoreDotFiles,
-			       rules.IgnoreEmptyFiles,
-			       rules.IgnoreExtensionlessFiles);
+		return PassesControllerImpactExtensionFilter(facts, extensionPolicy);
 	}
 
 	private static bool IsDirectoryLocallyVisible(
@@ -890,18 +887,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules rules,
 		bool allowWhenExtensionsAreDiscovered)
 	{
-		var controllerBaselineVisible =
-			PassesControllerImpactExtensionFilter(facts, extensionPolicy) &&
-			PassesFileIgnoreRules(
-				facts,
-				rules.IgnoreHiddenFiles,
-				rules.IgnoreDotFiles,
-				rules.IgnoreEmptyFiles,
-				rules.IgnoreExtensionlessFiles);
-		var gitIgnoreVisible = controllerBaselineVisible &&
-		                       !facts.IsGitIgnoredCandidate &&
-		                       !(rules.SmartIgnoreFollowsGitIgnore && facts.IsSmartIgnoredCandidate);
-		var smartIgnoreVisible = controllerBaselineVisible && !facts.IsSmartIgnoredCandidate;
+		var controllerBaselineVisible = PassesControllerImpactExtensionFilter(facts, extensionPolicy);
+		var gitIgnoreVisible = controllerBaselineVisible && !facts.IsGitIgnoredCandidate;
+		var smartIgnoreBaselineVisible = rules.IsGitIgnoreTraversalEnabled
+			? gitIgnoreVisible
+			: controllerBaselineVisible;
+		var smartIgnoreVisible = smartIgnoreBaselineVisible && !facts.IsSmartIgnoredCandidate;
 
 		if (facts.IsGitIgnored ||
 		    facts.IsSmartIgnored ||
@@ -1556,7 +1547,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					visibility.ExtensionlessFilesVisible,
 					ref effectiveCounts.ExtensionlessFiles);
 				controllerImpactCounts = controllerImpactCounts.Add(
-					CountFileControllerImpact(visibility));
+					CountFileControllerImpact(visibility, effectiveRules.IsGitIgnoreTraversalEnabled));
 			}
 		}
 		catch (OperationCanceledException)
@@ -2752,16 +2743,22 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				effectiveCounts.EmptyFolders++;
 
 			controllerImpactCounts = controllerImpactCounts.Add(node.DirectControllerImpactCounts);
+			var smartIgnoreBaselineFiles = effectiveRules.IsGitIgnoreTraversalEnabled
+				? metrics.GitIgnoreVisibleFiles
+				: metrics.ControllerBaselineVisibleFiles;
 			if (visibilityState.ControllerBaselineFinalVisible)
 			{
 				controllerImpactCounts = controllerImpactCounts.Add(new IgnoreControllerImpactCounts(
 					GitIgnore: Math.Abs(metrics.ControllerBaselineVisibleFiles - metrics.GitIgnoreVisibleFiles),
-					SmartIgnore: Math.Abs(metrics.ControllerBaselineVisibleFiles - metrics.SmartIgnoreVisibleFiles)));
+					SmartIgnore: Math.Abs(smartIgnoreBaselineFiles - metrics.SmartIgnoreVisibleFiles)));
 			}
 
 			if (visibilityState.ControllerBaselineFinalVisible != visibilityState.GitIgnoreFinalVisible)
 				controllerImpactCounts = controllerImpactCounts.Add(new IgnoreControllerImpactCounts(GitIgnore: 1));
-			if (visibilityState.ControllerBaselineFinalVisible != visibilityState.SmartIgnoreFinalVisible)
+			var smartIgnoreBaselineFinalVisible = effectiveRules.IsGitIgnoreTraversalEnabled
+				? visibilityState.GitIgnoreFinalVisible
+				: visibilityState.ControllerBaselineFinalVisible;
+			if (smartIgnoreBaselineFinalVisible != visibilityState.SmartIgnoreFinalVisible)
 				controllerImpactCounts = controllerImpactCounts.Add(new IgnoreControllerImpactCounts(SmartIgnore: 1));
 		}
 
@@ -2826,11 +2823,15 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static IgnoreControllerImpactCounts CountFileControllerImpact(
-		in EffectiveFileVisibilityProfile visibility)
+		in EffectiveFileVisibilityProfile visibility,
+		bool useGitIgnore)
 	{
+		var smartIgnoreBaselineVisible = useGitIgnore
+			? visibility.GitIgnoreVisible
+			: visibility.ControllerBaselineVisible;
 		return new IgnoreControllerImpactCounts(
 			GitIgnore: visibility.ControllerBaselineVisible != visibility.GitIgnoreVisible ? 1 : 0,
-			SmartIgnore: visibility.ControllerBaselineVisible != visibility.SmartIgnoreVisible ? 1 : 0);
+			SmartIgnore: smartIgnoreBaselineVisible != visibility.SmartIgnoreVisible ? 1 : 0);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]

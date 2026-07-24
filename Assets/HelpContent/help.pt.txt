@@ -378,13 +378,11 @@ Uma linha malformada ou sem suporte é ignorada de forma independente. Outras re
 Esta opção abrange apenas arquivos `.gitignore` da árvore de trabalho. As regras de `.git/info/exclude`, a configuração global do Git e o estado do índice do Git não são aplicadas.
 
 ### 12.4 Relacionamento entre .gitignore e Smart Ignore
-Para um projeto com um escopo e `.gitignore` próprio, a interface geralmente mostra apenas "Usar .gitignore". Neste modo, ele controla a política combinada do projeto ativando as regras `.gitignore` e as regras Smart Ignore aplicáveis.
+`.gitignore` e Smart Ignore são controles independentes. Cada um se aplica a todos os seus escopos em qualquer nível de aninhamento acessível. Uma opção só é exibida quando sua alteração pode afetar a árvore efetiva atual.
 
-Num espaço de trabalho com múltiplos projetos, as opções podem ser mostradas separadamente. Nesse caso, `.gitignore` e Smart Ignore são habilitados independentemente para os escopos aplicáveis.
+Primeiro, o `.gitignore` é aplicado; depois, o Smart Ignore processa os itens restantes; por fim, entram as regras básicas. Assim, o Smart Ignore pode ficar oculto enquanto o `.gitignore` já cobre todos os seus candidatos e aparecer quando o `.gitignore` for desativado.
 
-Uma regra de negação do Git começando com `!` cancela apenas um resultado do Git. Ele não substitui o Smart Ignore ou uma regra básica. Por exemplo, um arquivo restaurado por `!` permanece oculto se Smart Ignore ou "Empty files" o excluir.
-
-Portanto, não existe uma “regra mais forte” compartilhada entre `.gitignore`, Smart Ignore e as regras básicas. Um item deve passar por todos os mecanismos habilitados para permanecer visível.
+Uma regra de negação do Git iniciada por `!` cancela apenas o resultado do Git. Ela não desativa o Smart Ignore nem uma regra básica.
 
 ### 12.5 Regras básicas
 "Pastas com prefixo de ponto" e "Arquivos com prefixo de ponto" inspecionam o nome do item.

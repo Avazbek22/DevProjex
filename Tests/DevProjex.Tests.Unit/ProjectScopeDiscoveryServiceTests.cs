@@ -15,7 +15,6 @@ public sealed class ProjectScopeDiscoveryServiceTests
 
 		Assert.Empty(context.Scopes);
 		Assert.False(context.HasAnyGitIgnore);
-		Assert.False(context.HasAnyWithoutGitIgnore);
 	}
 
 	[Fact]
@@ -69,7 +68,6 @@ public sealed class ProjectScopeDiscoveryServiceTests
 		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
 
 		Assert.True(context.HasAnyGitIgnore);
-		Assert.True(context.HasAnyWithoutGitIgnore);
 		Assert.Contains(context.Scopes, scope => scope.HasGitIgnore && scope.RootPath.EndsWith("api"));
 		Assert.Contains(context.Scopes, scope => scope.HasProjectMarker && scope.RootPath.EndsWith("web"));
 	}
@@ -87,7 +85,6 @@ public sealed class ProjectScopeDiscoveryServiceTests
 		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
 
 		Assert.False(context.HasAnyGitIgnore);
-		Assert.True(context.HasAnyWithoutGitIgnore);
 		Assert.DoesNotContain(context.Scopes, scope => scope.RootPath.EndsWith(".idea", StringComparison.OrdinalIgnoreCase));
 		Assert.Contains(context.Scopes, scope => PathComparer.Default.Equals(scope.RootPath, temp.Path));
 	}
@@ -135,7 +132,6 @@ public sealed class ProjectScopeDiscoveryServiceTests
 		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
 
 		Assert.Contains(context.Scopes, scope => ScopeEndsWith(scope, "apps/domain/team/platform/api"));
-		Assert.True(context.HasAnyWithoutGitIgnore);
 	}
 
 	[Fact]
@@ -149,7 +145,6 @@ public sealed class ProjectScopeDiscoveryServiceTests
 		var context = discovery.Discover(temp.Path, selectedRootFolders: null);
 
 		Assert.Contains(context.Scopes, scope => ScopeEndsWith(scope, "packages/tenant/team/platform/service"));
-		Assert.True(context.HasAnyWithoutGitIgnore);
 	}
 
 	[Fact]

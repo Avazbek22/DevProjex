@@ -65,27 +65,13 @@ public sealed class IgnoreRulesService(
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
-		var availability = BuildRuntimeIgnoreOptionsAvailability(context);
 		// A nested .gitignore can be discovered by the scanner after bounded project-scope
 		// discovery has completed. An explicit/default selection must therefore activate the
 		// traversal controller even when no prebuilt scope matcher exists yet.
 		var requestedGitIgnore = selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
+		var useSmartIgnore = selectedOptions.Contains(IgnoreOptionId.SmartIgnore);
 
-		// Hybrid ignore has two controller modes:
-		// - In mixed workspaces, .gitignore and Smart Ignore are independent because some
-		//   scopes may have repository rules while other scopes only have generated artifacts.
-		// - In a single .gitignore scope, Smart Ignore is intentionally hidden and follows
-		//   Use .gitignore. Users get one practical "respect project ignore policy" switch
-		//   instead of two overlapping switches that hide the same build output.
-		// This is a product contract, not a UI shortcut. Replacing it with a uniform
-		// "selected Smart Ignore only" rule breaks cloned repositories and changes their tree.
-		var smartIgnoreFollowsGitIgnore = !availability.IncludeSmartIgnore &&
-		                                  context.IsSingleScopeWithGitIgnore;
-		var useSmartIgnore = availability.IncludeSmartIgnore
-			? selectedOptions.Contains(IgnoreOptionId.SmartIgnore)
-			: context.IsSingleScopeWithGitIgnore && requestedGitIgnore;
-
-		var candidateScopedGitMatchers = availability.IncludeGitIgnore
+		var candidateScopedGitMatchers = context.HasAnyGitIgnore
 			? BuildScopedGitIgnoreMatchers(context.Scopes).ToArray()
 			: [];
 		var candidateGitIgnoreMatcher = candidateScopedGitMatchers.Length == 1
@@ -99,17 +85,16 @@ public sealed class IgnoreRulesService(
 			? scopedMatchers[0].Matcher
 			: GitIgnoreMatcher.Empty;
 
-		// Candidate smart rules are built even when Smart Ignore is currently unchecked or
-		// hidden under Use .gitignore. The scanner uses candidates to measure whether a
-		// controller would affect the visible tree; without that evidence, a controller can
-		// hide its own root-level artifacts and then disappear from the UI.
-		var smartCandidate = availability.IncludeSmartIgnore || smartIgnoreFollowsGitIgnore
-			? BuildScopedSmartIgnore(context)
-			: ScopedSmartIgnoreBuildResult.Empty;
+		// Candidate rules are independent from selection so disabling Git Ignore can expose
+		// Smart Ignore without requiring a project reload.
+		var smartCandidate = BuildScopedSmartIgnore(context);
 		var candidateSmartScopeRoots = smartCandidate.ScopedMatchers
 			.Select(static matcher => matcher.ScopeRootPath)
 			.Distinct(PathStringComparer)
 			.ToArray();
+		var smartScopeResolver = smartIgnore.Descriptors.Count == 0
+			? null
+			: smartIgnore.CreateScopeResolver(rootPath);
 
 		IReadOnlySet<string> smartFolders;
 		IReadOnlySet<string> smartFiles;
@@ -162,7 +147,7 @@ public sealed class IgnoreRulesService(
 				? SmartArtifactIgnoreMatcher.Default
 				: SmartArtifactIgnoreMatcher.Empty,
 			SmartArtifactIgnoreCandidateMatcher = SmartArtifactIgnoreMatcher.Default,
-			SmartIgnoreFollowsGitIgnore = smartIgnoreFollowsGitIgnore
+			SmartIgnoreScopeResolver = smartScopeResolver
 		};
 	}
 
@@ -177,22 +162,6 @@ public sealed class IgnoreRulesService(
 	private static readonly IReadOnlySet<string> EmptyStringSet =
 		Array.Empty<string>().ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-	private static IgnoreOptionsAvailability BuildRuntimeIgnoreOptionsAvailability(ProjectScanContext context)
-	{
-		if (context.Scopes.Count == 0)
-			return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
-
-		// Runtime availability is broader than UI availability. The rule builder must be
-		// able to construct candidate matchers for impact probes even when the UI later
-		// decides a controller has zero visible effect and hides the checkbox.
-		var includeGitIgnore = context.HasAnyGitIgnore;
-		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore && context.HasAnyWithoutGitIgnore;
-		return new IgnoreOptionsAvailability(
-			includeGitIgnore,
-			includeSmartIgnore,
-			SmartIgnoreFollowsGitIgnore: context.IsSingleScopeWithGitIgnore);
-	}
-
 	private IgnoreOptionsAvailability BuildUiIgnoreOptionsAvailability(ProjectScanContext context)
 	{
 		if (context.Scopes.Count == 0)
@@ -203,13 +172,8 @@ public sealed class IgnoreRulesService(
 		// signature-backed generic artifact candidate. That keeps clean workspaces quiet
 		// while still surfacing the option for messy polyglot folders.
 		var includeGitIgnore = context.HasAnyGitIgnore;
-		var includeSmartIgnore = !context.IsSingleScopeWithGitIgnore &&
-								 context.HasAnyWithoutGitIgnore &&
-								 HasRelevantSmartIgnoreCandidates(context);
-		return new IgnoreOptionsAvailability(
-			includeGitIgnore,
-			includeSmartIgnore,
-			SmartIgnoreFollowsGitIgnore: context.IsSingleScopeWithGitIgnore);
+		var includeSmartIgnore = HasRelevantSmartIgnoreCandidates(context);
+		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
 	}
 
 	private bool HasRelevantSmartIgnoreCandidates(ProjectScanContext context)
@@ -217,9 +181,6 @@ public sealed class IgnoreRulesService(
 		// Direct iteration avoids allocation - early return on first match
 		foreach (var scope in context.Scopes)
 		{
-			if (scope.HasGitIgnore)
-				continue;
-
 			if (scope.HasProjectMarker || HasSmartCandidatesInRootEntries(context, scope.RootPath))
 				return true;
 
@@ -249,6 +210,8 @@ public sealed class IgnoreRulesService(
 		var mergeSync = new object();
 		var folderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var fileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		folderNames.UnionWith(smartIgnore.DescriptorFolderNames);
+		fileNames.UnionWith(smartIgnore.DescriptorFileNames);
 		var scopedMatchers = new List<ScopedSmartIgnoreMatcher>(context.Scopes.Count);
 
 		Parallel.ForEach(
@@ -414,11 +377,7 @@ public sealed class IgnoreRulesService(
 	private sealed record ScopedSmartIgnoreBuildResult(
 		IReadOnlySet<string> FolderNames,
 		IReadOnlySet<string> FileNames,
-		IReadOnlyList<ScopedSmartIgnoreMatcher> ScopedMatchers)
-	{
-		public static readonly ScopedSmartIgnoreBuildResult Empty =
-			new(EmptyStringSet, EmptyStringSet, []);
-	}
+		IReadOnlyList<ScopedSmartIgnoreMatcher> ScopedMatchers);
 
 	private sealed class LocalSmartIgnoreBuildState
 	{

@@ -189,6 +189,41 @@ public sealed class RootFolderFinalTreeParityMatrixIntegrationTests
     }
 
     [Fact]
+    public void EmptyFilesToggle_DoesNotLeakDotOrGitMetadataIntoRootFolderOptions()
+    {
+        using var workspace = new TemporaryDirectory();
+        workspace.CreateFile(".git/objects/aa/object", "git metadata");
+        workspace.CreateFile(".idea/workspace.xml", "<project />");
+        workspace.CreateFile(".tmp/cache.bin", "cache");
+        workspace.CreateFile("src/Program.cs", "class Program {}");
+        workspace.CreateFile("App.csproj", "<Project />");
+        workspace.CreateFile("empty.txt", string.Empty);
+        var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+        var baseline = ComputeBaseline(workspace.Path, services);
+
+        var emptyFilesOff = ComputeFullWithIgnoreOverride(
+            workspace.Path,
+            baseline,
+            services,
+            IgnoreOptionId.EmptyFiles,
+            isChecked: false);
+
+        Assert.DoesNotContain(emptyFilesOff.RootOptions!, static option => option.Name == ".git");
+        Assert.DoesNotContain(emptyFilesOff.RootOptions!, static option => option.Name == ".idea");
+        Assert.DoesNotContain(emptyFilesOff.RootOptions!, static option => option.Name == ".tmp");
+        Assert.Contains(emptyFilesOff.RootOptions!, static option => option.Name == "src" && option.IsChecked);
+        AssertCheckedRootOptionsMatchFinalTree(workspace.Path, emptyFilesOff, services.IgnoreRulesService);
+
+        var repeated = ComputeFullWithIgnoreOverride(
+            workspace.Path,
+            emptyFilesOff,
+            services,
+            IgnoreOptionId.EmptyFiles,
+            isChecked: false);
+        AssertRootOptionsEqual(emptyFilesOff, repeated);
+    }
+
+    [Fact]
     public void ProfileRestoreAndProjectSwitch_DoNotReuseRootNamesOrCheckboxesAcrossProjects()
     {
         using var first = CreateLinkDownloaderBotForGroupsWorkspace();

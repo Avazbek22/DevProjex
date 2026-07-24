@@ -3,7 +3,7 @@ namespace DevProjex.Tests.Unit;
 public sealed class IgnoreRulesServiceAvailabilityTests
 {
 	[Fact]
-	public void GetIgnoreOptionsAvailability_SingleProjectWithGitIgnore_HidesSmartOption()
+	public void GetIgnoreOptionsAvailability_SingleProjectWithGitIgnore_KeepsControllersIndependent()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "bin/");
@@ -13,8 +13,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
 
 		Assert.True(availability.IncludeGitIgnore);
-		Assert.False(availability.IncludeSmartIgnore);
-		Assert.True(availability.SmartIgnoreFollowsGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
 	}
 
 	[Fact]
@@ -103,7 +102,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 	}
 
 	[Fact]
-	public void GetIgnoreOptionsAvailability_SingleGitIgnoreProjectWithExplicitRootSelection_HidesSmartOption()
+	public void GetIgnoreOptionsAvailability_SingleGitIgnoreProjectWithExplicitRootSelection_ShowsBothControllers()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "*.log");
@@ -116,12 +115,11 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["src"]);
 
 		Assert.True(availability.IncludeGitIgnore);
-		Assert.False(availability.IncludeSmartIgnore);
-		Assert.True(availability.SmartIgnoreFollowsGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
 	}
 
 	[Fact]
-	public void Build_SingleGitIgnoreProjectWithExplicitRootSelection_UseGitIgnoreControlsSmartArtifacts()
+	public void Build_SingleGitIgnoreProjectWithExplicitRootSelection_UseGitIgnoreDoesNotControlSmartArtifacts()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "*.log");
@@ -139,9 +137,9 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 			selectedRootFolders: ["src"]);
 
 		Assert.True(rules.UseGitIgnore);
-		Assert.True(rules.UseSmartIgnore);
-		Assert.Contains(temp.Path, rules.SmartIgnoreScopeRoots, PathComparer.Default);
-		Assert.True(rules.IsSmartIgnoredDirectory(
+		Assert.False(rules.UseSmartIgnore);
+		Assert.Empty(rules.SmartIgnoreScopeRoots);
+		Assert.False(rules.IsSmartIgnoredDirectory(
 			Path.Combine(temp.Path, "src", "__pycache__"),
 			"__pycache__"));
 	}
@@ -159,7 +157,6 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
-		Assert.False(availability.SmartIgnoreFollowsGitIgnore);
 	}
 
 	[Fact]

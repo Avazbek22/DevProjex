@@ -3,7 +3,6 @@
 public sealed class IgnoreRulesServiceTests
 {
 	// Verifies selected ignore options and smart-ignore rules are merged into IgnoreRules.
-	// SmartIgnore requires UseGitIgnore to be enabled.
 	[Fact]
 	public void Build_CombinesSelectedOptionsAndSmartIgnore()
 	{
@@ -16,7 +15,7 @@ public sealed class IgnoreRulesServiceTests
 		var smart = new SmartIgnoreService([new StubSmartIgnoreRule(smartResult)]);
 		var service = new IgnoreRulesService(smart);
 
-		var rules = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore, IgnoreOptionId.HiddenFolders, IgnoreOptionId.DotFiles
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore, IgnoreOptionId.HiddenFolders, IgnoreOptionId.DotFiles
 		]);
 
 		Assert.True(rules.IgnoreHiddenFolders);
@@ -44,7 +43,6 @@ public sealed class IgnoreRulesServiceTests
 	}
 
 	// Verifies smart-ignore results are case-insensitive.
-	// SmartIgnore requires UseGitIgnore to be enabled.
 	[Fact]
 	public void Build_MergesSmartIgnoreCaseInsensitive()
 	{
@@ -57,7 +55,7 @@ public sealed class IgnoreRulesServiceTests
 		var smart = new SmartIgnoreService([new StubSmartIgnoreRule(smartResult)]);
 		var service = new IgnoreRulesService(smart);
 
-		var rules = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore]);
 
 		Assert.Contains("cache", rules.SmartIgnoredFolders);
 		Assert.Contains("thumbs.db", rules.SmartIgnoredFiles);
@@ -87,8 +85,7 @@ public sealed class IgnoreRulesServiceTests
 		Assert.True(rules.IgnoreDotFiles);
 	}
 
-	// Verifies SmartIgnore is disabled when UseGitIgnore is not selected.
-	// This allows users to see ALL files (including bin/obj) when gitignore is off.
+	// Verifies SmartIgnore is disabled when it is not selected.
 	[Fact]
 	public void Build_DisablesSmartIgnoreWhenGitIgnoreNotSelected()
 	{
@@ -105,9 +102,9 @@ public sealed class IgnoreRulesServiceTests
 		Assert.Empty(rules.SmartIgnoredFiles);
 	}
 
-	// Verifies SmartIgnore works when UseGitIgnore is selected.
+	// Verifies SmartIgnore works independently from GitIgnore.
 	[Fact]
-	public void Build_UsesSmartIgnoreWhenGitIgnoreSelected()
+	public void Build_UsesSmartIgnoreWhenSmartIgnoreSelected()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "bin/");
@@ -118,7 +115,7 @@ public sealed class IgnoreRulesServiceTests
 		var smart = new SmartIgnoreService([new StubSmartIgnoreRule(smartResult)]);
 		var service = new IgnoreRulesService(smart);
 
-		var rules = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore]);
 
 		Assert.Contains("cache", rules.SmartIgnoredFolders);
 		Assert.Contains("thumbs.db", rules.SmartIgnoredFiles);

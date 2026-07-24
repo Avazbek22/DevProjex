@@ -911,22 +911,18 @@ public sealed class SelectionRefreshEngine(
             {
                 var hasMeasuredGitIgnoreImpact = snapshotState.ControllerImpactCounts.GitIgnore > 0;
                 var hasMeasuredSmartIgnoreImpact = snapshotState.ControllerImpactCounts.SmartIgnore > 0;
-                var canPromoteSmartIgnoreFromMeasuredImpact =
-                    hasMeasuredSmartIgnoreImpact && !availability.SmartIgnoreFollowsGitIgnore;
                 return availability with
                 {
                     // Scoped availability can become false after a controller hides its own
                     // top-level root option. A measured impact count is stronger evidence:
                     // keep the controller visible so the user can reverse that filtering.
-                    // Smart Ignore is the exception when it follows Use .gitignore; then the
-                    // measured smart impact belongs to the gitignore controller in the UI.
                     IncludeGitIgnore = (availability.IncludeGitIgnore || hasMeasuredGitIgnoreImpact) &&
                                        ShouldKeepControllerVisible(
                                            IgnoreOptionId.UseGitIgnore,
                                            snapshotState.ControllerImpactCounts.GitIgnore,
                                            stateCache,
                                            stateCacheIsComplete),
-                    IncludeSmartIgnore = (availability.IncludeSmartIgnore || canPromoteSmartIgnoreFromMeasuredImpact) &&
+                    IncludeSmartIgnore = (availability.IncludeSmartIgnore || hasMeasuredSmartIgnoreImpact) &&
                                           ShouldKeepControllerVisible(
                                               IgnoreOptionId.SmartIgnore,
                                               snapshotState.ControllerImpactCounts.SmartIgnore,

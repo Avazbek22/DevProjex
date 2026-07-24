@@ -77,6 +77,21 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "### 12.2 Smart Ignore", "gibrid", "Xiralashtirish", "oxirgi yakunlangan holatiga" }
     };
 
+    public static TheoryData<string, string> IndependentIgnoreControllerContracts => new()
+    {
+        { "help.ru.txt", "независимые переключатели" },
+        { "help.en.txt", "independent switches" },
+        { "help.de.txt", "unabhängige Schalter" },
+        { "help.fr.txt", "interrupteurs indépendants" },
+        { "help.it.txt", "interruttori indipendenti" },
+        { "help.es.txt", "interruptores independientes" },
+        { "help.pt.txt", "controles independentes" },
+        { "help.pt-pt.txt", "controlos independentes" },
+        { "help.kk.txt", "тәуелсіз ауыстырып-қосқыштар" },
+        { "help.tg.txt", "гузаришҳои мустақиланд" },
+        { "help.uz.txt", "mustaqil almashtirgichlardir" }
+    };
+
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
     {
         { "help.ru.txt", "JSON-экспорт использует такой формат дерева: массивы содержат файлы, объекты содержат подпапки, `/` содержит файлы текущей папки, а `[]` обозначает пустую папку." },
@@ -196,6 +211,17 @@ public sealed class HelpContentDocumentationContractTests
         Assert.DoesNotContain("Acrylic", themeSection, StringComparison.Ordinal);
         Assert.DoesNotContain("[Beta]", themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedCancelRestoreText, progressSection, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(IndependentIgnoreControllerContracts))]
+    public void HelpContent_DescribesIndependentGitAndSmartControllers(
+        string fileName,
+        string expectedIndependentText)
+    {
+        var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
+
+        Assert.Contains(expectedIndependentText, ignoreSection, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

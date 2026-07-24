@@ -284,7 +284,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void LegacySelectedOnlyProfile_LoadThenSave_UpgradesToFullStateSchemaV2()
+	public void LegacySelectedOnlyProfile_LoadThenSave_UpgradesToFullStateSchemaV3()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -332,7 +332,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
 			var root = document.RootElement;
-			Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
+			Assert.Equal(3, root.GetProperty("schemaVersion").GetInt32());
 			var persisted = root.GetProperty("profiles").GetProperty(PathUtility.Normalize(projectPath));
 			Assert.False(persisted.GetProperty("rootFolderStates").GetProperty("docs").GetBoolean());
 			Assert.False(persisted.GetProperty("extensionStates").GetProperty(".csv").GetBoolean());

@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.ProjectProfiles;
 
 public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null) : IProjectProfileStore
 {
-	private const int CurrentSchemaVersion = 2;
+	private const int CurrentSchemaVersion = 3;
 	private const int MaxProfiles = 500;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
@@ -186,7 +186,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		};
 	}
 
-	private static ProjectProfileDb Normalize(ProjectProfileDb db)
+	private static ProjectProfileDb Normalize(ProjectProfileDb db, int sourceSchemaVersion)
 	{
 		db.SchemaVersion = CurrentSchemaVersion;
 		db.Profiles ??= new Dictionary<string, PersistedProjectProfile>(PathComparer.Default);
@@ -200,14 +200,16 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (value is null)
 				continue;
 
-			normalized[normalizedPath] = NormalizePersistedProfile(value);
+			normalized[normalizedPath] = NormalizePersistedProfile(value, sourceSchemaVersion);
 		}
 
 		db.Profiles = normalized;
 		return db;
 	}
 
-	private static PersistedProjectProfile NormalizePersistedProfile(PersistedProjectProfile profile)
+	private static PersistedProjectProfile NormalizePersistedProfile(
+		PersistedProjectProfile profile,
+		int sourceSchemaVersion)
 	{
 		profile.SelectedRootFolders ??= [];
 		profile.SelectedExtensions ??= [];
@@ -227,6 +229,25 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.SelectedIgnoreOptions = profile.SelectedIgnoreOptions
 			.Distinct()
 			.ToList();
+
+		if (sourceSchemaVersion < 3 &&
+		    !profile.IgnoreOptionStates.ContainsKey(IgnoreOptionId.SmartIgnore))
+		{
+			var gitIgnoreWasEnabled = profile.IgnoreOptionStates.TryGetValue(
+				IgnoreOptionId.UseGitIgnore,
+				out var persistedGitIgnoreState)
+				? persistedGitIgnoreState
+				: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.UseGitIgnore);
+			var smartIgnoreWasEnabled =
+				profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.SmartIgnore) ||
+				gitIgnoreWasEnabled;
+			if (smartIgnoreWasEnabled)
+			{
+				profile.IgnoreOptionStates[IgnoreOptionId.SmartIgnore] = true;
+				if (!profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.SmartIgnore))
+					profile.SelectedIgnoreOptions.Add(IgnoreOptionId.SmartIgnore);
+			}
+		}
 
 		if (profile.UpdatedUtc <= DateTimeOffset.UnixEpoch)
 			profile.UpdatedUtc = DateTimeOffset.UtcNow;
@@ -345,7 +366,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			// Only normalize payloads that were parsed successfully.
 			// If parsing fails, keep the file untouched and let the backup act as the recovery source.
 			var originalSnapshot = JsonSerializer.Serialize(deserialized, SerializerOptions);
-			var normalized = Normalize(deserialized);
+			var sourceSchemaVersion = deserialized.SchemaVersion;
+			var normalized = Normalize(deserialized, sourceSchemaVersion);
 			var normalizedSnapshot = JsonSerializer.Serialize(normalized, SerializerOptions);
 			requiresRewrite = !string.Equals(originalSnapshot, normalizedSnapshot, StringComparison.Ordinal);
 			db = normalized;
