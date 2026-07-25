@@ -55,8 +55,12 @@ public partial class MainWindow : IProjectLoadPipelineHost
     void IProjectLoadPipelineHost.RecordRecentFolder(string path) =>
         RecordRecentFolder(path);
 
-    void IProjectLoadPipelineHost.DeleteRepositoryDirectory(string path) =>
-        _repoCacheService.DeleteRepositoryDirectory(path);
+    Task IProjectLoadPipelineHost.DeleteRepositoryDirectoryAsync(
+        string path,
+        CancellationToken cancellationToken) =>
+        Task.Run(
+            () => _repoCacheService.DeleteRepositoryDirectory(path),
+            cancellationToken);
 
     void IProjectLoadPipelineHost.ClearCurrentCachedRepoPath()
     {

@@ -277,13 +277,14 @@ public sealed class TreeNodeViewModel(
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            if (_displayInlines is { Count: > 0 })
-            {
-                _displayInlines.Clear();
-                RaisePropertyChanged(nameof(DisplayInlines));
-            }
+            ClearSearchHighlight();
+            return;
+        }
 
-            HasHighlightedDisplay = false;
+        var firstMatchIndex = DisplayName.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+        if (firstMatchIndex < 0)
+        {
+            ClearSearchHighlight();
             return;
         }
 
@@ -297,7 +298,9 @@ public sealed class TreeNodeViewModel(
         var startIndex = 0;
         while (startIndex < DisplayName.Length)
         {
-            var index = DisplayName.IndexOf(query, startIndex, StringComparison.OrdinalIgnoreCase);
+            var index = startIndex == 0
+                ? firstMatchIndex
+                : DisplayName.IndexOf(query, startIndex, StringComparison.OrdinalIgnoreCase);
             if (index < 0)
             {
                 inlines.Add(new Run(DisplayName[startIndex..]) { Foreground = normalForeground });
@@ -322,6 +325,18 @@ public sealed class TreeNodeViewModel(
 
         HasHighlightedDisplay = true;
         RaisePropertyChanged(nameof(DisplayInlines));
+    }
+
+    private void ClearSearchHighlight()
+    {
+        if (_displayInlines is not null)
+        {
+            _displayInlines.Clear();
+            _displayInlines = null;
+            RaisePropertyChanged(nameof(DisplayInlines));
+        }
+
+        HasHighlightedDisplay = false;
     }
 
     private void SetChecked(bool? value, bool updateChildren, bool updateParent)

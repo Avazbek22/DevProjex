@@ -42,7 +42,8 @@ public partial class MainWindow : IRefreshTreePipelineHost
             nameFilter,
             reusableInventory?.Snapshot,
             reusableInventory?.Scope,
-            _selectionCoordinator.CurrentSelectionRevision);
+            _selectionCoordinator.CurrentSelectionRevision,
+            _filterBaseTree);
     }
 
     void IRefreshTreePipelineHost.BeforeFullTreeRefresh()
@@ -51,14 +52,6 @@ public partial class MainWindow : IRefreshTreePipelineHost
         // Cancel early so obsolete file reads stop before we start the next build.
         _metrics.CancelBackgroundCalculation();
         _viewModel.StatusMetricsVisible = false;
-    }
-
-    bool IRefreshTreePipelineHost.TryBuildInteractiveFilteredTreeResult(
-        string? nameFilter,
-        CancellationToken cancellationToken,
-        out BuildTreeResult result)
-    {
-        return TryBuildInteractiveFilteredTreeResult(nameFilter, cancellationToken, out result);
     }
 
     BuildTreeSnapshotResult IRefreshTreePipelineHost.BuildTree(TreeRefreshInput input, CancellationToken cancellationToken) =>

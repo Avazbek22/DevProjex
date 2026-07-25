@@ -1,5 +1,6 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
@@ -720,47 +721,20 @@ internal static class UiTestDriver
     {
         await WaitForSelectionRefreshIdleAsync(window);
 
-        var currentTree = GetRequiredPrivateField<BuildTreeResult>(window, "_currentTree");
-        var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
-        var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
-        var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
-        var treeAndContentExport = GetRequiredPrivateField<TreeAndContentExportService>(window, "_treeAndContentExport");
-        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
-        var hasSelection = selectedPaths.Count > 0;
-        var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
-        var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
-
-        return mode switch
+        var pipeline = GetRequiredPrivateField<ProjectTextOutputPipeline>(window, "_textOutputPipeline");
+        var snapshot = InvokePrivateMethod<ProjectTextOutputSnapshot>(
+            window,
+            "CaptureProjectTextOutputSnapshot");
+        var outputMode = mode switch
         {
-            PreviewContentMode.Tree => hasSelection
-                ? treeExport.BuildSelectedTree(
-                    currentPath,
-                    currentTree.Root,
-                    selectedPaths,
-                    treeFormat,
-                    pathPresentation?.DisplayRootPath,
-                    pathPresentation?.DisplayRootName)
-                : treeExport.BuildFullTree(
-                    currentPath,
-                    currentTree.Root,
-                    treeFormat,
-                    pathPresentation?.DisplayRootPath,
-                    pathPresentation?.DisplayRootName),
-            PreviewContentMode.Content => await contentExport.BuildAsync(
-                hasSelection
-                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
-                    : BuildOrderedAllFilePaths(currentTree.Root),
-                cancellationToken,
-                pathPresentation?.MapFilePath),
-            PreviewContentMode.TreeAndContent => await treeAndContentExport.BuildAsync(
-                currentPath,
-                currentTree.Root,
-                selectedPaths,
-                treeFormat,
-                cancellationToken,
-                pathPresentation),
+            PreviewContentMode.Tree => ProjectTextOutputMode.Tree,
+            PreviewContentMode.Content => ProjectTextOutputMode.Content,
+            PreviewContentMode.TreeAndContent => ProjectTextOutputMode.TreeAndContent,
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
+
+        var result = await pipeline.BuildAsync(outputMode, snapshot, cancellationToken);
+        return result.Content;
     }
 
     public static string ComputeCurrentPreviewCopyPayload(MainWindow window)

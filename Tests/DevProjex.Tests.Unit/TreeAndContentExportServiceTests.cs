@@ -197,9 +197,8 @@ public sealed class TreeAndContentExportServiceTests
 		Assert.Contains($"\u00A0{nl}\u00A0{nl}", result);
 	}
 
-	// Verifies selecting a directory yields tree output but no content.
 	[Fact]
-	public void Build_ReturnsTreeOnlyWhenSelectionIsDirectory()
+	public void Build_SelectedDirectoryIncludesDescriptorDescendantContent()
 	{
 		using var temp = new TemporaryDirectory();
 		var folder = temp.CreateFolder("src");
@@ -229,7 +228,8 @@ public sealed class TreeAndContentExportServiceTests
 		var result = service.Build(temp.Path, root, new HashSet<string> { folder });
 
 		Assert.Contains("src", result);
-		Assert.DoesNotContain("main.cs:", result);
+		Assert.Contains("src/main.cs:", result);
+		Assert.Contains("class C {}", result);
 	}
 
 	// Verifies a file root is treated as a file when no selection is provided.

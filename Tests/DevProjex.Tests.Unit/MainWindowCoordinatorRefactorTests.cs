@@ -291,6 +291,42 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public async Task ProjectLoadPipeline_AwaitsRepositoryCleanupBeforeReleasingCachedIdentity()
+    {
+        var viewModel = CreateViewModel();
+        var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingProjectLoadHost(viewModel)
+        {
+            CurrentCachedRepoPathValue = @"C:\Cache\Repo",
+            DeleteRepositoryDirectoryHandler = async token =>
+            {
+                cleanupStarted.SetResult();
+                await releaseCleanup.Task.WaitAsync(token);
+            }
+        };
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+        using var pipeline = new ProjectLoadPipeline(host, status);
+
+        var loadTask = pipeline.OpenFolderAsync(
+            @"C:\Project",
+            fromDialog: true,
+            recordRecentFolder: false);
+        await cleanupStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(loadTask.IsCompleted);
+        Assert.Equal(@"C:\Cache\Repo", host.CurrentCachedRepoPath);
+
+        releaseCleanup.SetResult();
+        await loadTask;
+
+        Assert.Null(host.CurrentCachedRepoPath);
+    }
+
+    [Fact]
     public async Task ProjectLoadPipeline_OpenFolderAsync_CancellationAppliesFallbackWithoutSuccessSideEffects()
     {
         var viewModel = CreateViewModel();
@@ -557,6 +593,75 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(1, host.BuildTreeCount);
         Assert.Equal(0, host.ApplyCount);
         Assert.Empty(viewModel.TreeNodes);
+    }
+
+    [Fact]
+    public async Task RefreshTreePipeline_InteractiveFilterUsesSnapshotWithoutFilesystemRescan()
+    {
+        var viewModel = CreateViewModel();
+        var projectRoot = new TreeNodeDescriptor(
+            "ProjectA",
+            @"C:\ProjectA",
+            IsDirectory: true,
+            IsAccessDenied: false,
+            IconKey: "folder",
+            Children:
+            [
+                new TreeNodeDescriptor(
+                    "src",
+                    @"C:\ProjectA\src",
+                    IsDirectory: true,
+                    IsAccessDenied: false,
+                    IconKey: "folder",
+                    Children:
+                    [
+                        new TreeNodeDescriptor(
+                            "keep.cs",
+                            @"C:\ProjectA\src\keep.cs",
+                            IsDirectory: false,
+                            IsAccessDenied: false,
+                            IconKey: "csharp",
+                            Children: []),
+                        new TreeNodeDescriptor(
+                            "drop.cs",
+                            @"C:\ProjectA\src\drop.cs",
+                            IsDirectory: false,
+                            IsAccessDenied: false,
+                            IconKey: "csharp",
+                            Children: [])
+                    ]),
+                new TreeNodeDescriptor(
+                    "README.md",
+                    @"C:\ProjectA\README.md",
+                    IsDirectory: false,
+                    IsAccessDenied: false,
+                    IconKey: "markdown",
+                    Children: [])
+            ]);
+        var host = new RecordingRefreshTreeHost(viewModel)
+        {
+            NameFilter = "keep",
+            InteractiveFilterBaseTree = new BuildTreeResult(
+                projectRoot,
+                RootAccessDenied: false,
+                HadAccessDenied: false)
+        };
+        using var pipeline = new RefreshTreePipeline(host);
+
+        var outcome = await pipeline.RefreshTreeAsync(
+            interactiveFilter: true,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(TreeRefreshOutcome.Applied, outcome);
+        Assert.Equal(0, host.BuildTreeCount);
+        Assert.Equal(1, host.ApplyCount);
+        Assert.True(host.LastUsedInMemoryFilter);
+        var filteredRoot = Assert.IsType<TreeNodeDescriptor>(host.LastAppliedResult?.Tree.Root);
+        var source = Assert.Single(filteredRoot.Children);
+        Assert.Equal("src", source.DisplayName);
+        Assert.Equal("keep.cs", Assert.Single(source.Children).DisplayName);
+        Assert.Equal(2, projectRoot.Children.Count);
+        Assert.Equal(2, projectRoot.Children[0].Children.Count);
     }
 
     [Fact]
@@ -942,6 +1047,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public Func<CancellationToken, Task>? ReloadHandler { get; set; }
 
+        public Func<CancellationToken, Task>? DeleteRepositoryDirectoryHandler { get; set; }
+
         public void CaptureProjectLoadCancellationSnapshot() =>
             Calls.Add(ProjectLoadHostCall.CaptureCancellationSnapshot);
 
@@ -997,10 +1104,13 @@ public sealed class MainWindowCoordinatorRefactorTests
             Calls.Add(ProjectLoadHostCall.RecordRecentFolder);
         }
 
-        public void DeleteRepositoryDirectory(string path)
+        public async Task DeleteRepositoryDirectoryAsync(string path, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _ = path;
             Calls.Add(ProjectLoadHostCall.DeleteRepositoryDirectory);
+            if (DeleteRepositoryDirectoryHandler is not null)
+                await DeleteRepositoryDirectoryHandler(cancellationToken);
         }
 
         public void ClearCurrentCachedRepoPath()
@@ -1318,6 +1428,10 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public long SelectionRevision { get; set; }
 
+        public string? NameFilter { get; set; }
+
+        public BuildTreeResult? InteractiveFilterBaseTree { get; set; }
+
         public Func<CancellationToken, BuildTreeSnapshotResult>? BuildTreeHandler { get; set; }
 
         public Func<TreeRefreshInput, BuildTreeResult, TreeNodeViewModel>? BuildViewModelHandler { get; set; }
@@ -1325,6 +1439,10 @@ public sealed class MainWindowCoordinatorRefactorTests
         public int BuildTreeCount { get; private set; }
 
         public int ApplyCount { get; private set; }
+
+        public bool LastUsedInMemoryFilter { get; private set; }
+
+        public BuildTreeSnapshotResult? LastAppliedResult { get; private set; }
 
         public TreeRefreshInput? CaptureTreeRefreshInput()
         {
@@ -1341,23 +1459,13 @@ public sealed class MainWindowCoordinatorRefactorTests
                         IgnoreDotFiles: false,
                         SmartIgnoredFolders: new HashSet<string>(),
                         SmartIgnoredFiles: new HashSet<string>())),
-                NameFilter: null,
-                SelectionRevision: SelectionRevision);
+                NameFilter: NameFilter,
+                SelectionRevision: SelectionRevision,
+                InteractiveFilterBaseTree: InteractiveFilterBaseTree);
         }
 
         public void BeforeFullTreeRefresh() =>
             viewModel.StatusMetricsVisible = false;
-
-        public bool TryBuildInteractiveFilteredTreeResult(
-            string? nameFilter,
-            CancellationToken cancellationToken,
-            out BuildTreeResult result)
-        {
-            _ = nameFilter;
-            cancellationToken.ThrowIfCancellationRequested();
-            result = null!;
-            return false;
-        }
 
         public BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken)
         {
@@ -1394,9 +1502,7 @@ public sealed class MainWindowCoordinatorRefactorTests
             bool usedInMemoryFilter,
             CancellationToken cancellationToken)
         {
-            _ = result;
             _ = interactiveFilter;
-            _ = usedInMemoryFilter;
             cancellationToken.ThrowIfCancellationRequested();
 
             // Mirrors the production host guard: a project switch can happen after the
@@ -1405,6 +1511,8 @@ public sealed class MainWindowCoordinatorRefactorTests
                 return;
 
             ApplyCount++;
+            LastAppliedResult = result;
+            LastUsedInMemoryFilter = usedInMemoryFilter;
             viewModel.TreeNodes.Add(root);
         }
 

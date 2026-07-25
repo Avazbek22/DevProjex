@@ -1,3 +1,5 @@
+using DevProjex.Application.Selection;
+
 namespace DevProjex.Application.Services;
 
 public sealed class TreeAndContentExportService(
@@ -5,6 +7,7 @@ public sealed class TreeAndContentExportService(
 	SelectedContentExportService contentExport)
 {
 	private const string ClipboardBlankLine = "\u00A0"; // NBSP: looks empty but won't collapse on paste
+	private static readonly IReadOnlySet<string> EmptySelection = new HashSet<string>(PathComparer.Default);
 
 	public string Build(string rootPath, TreeNodeDescriptor root, IReadOnlySet<string> selectedPaths)
 		=> Build(rootPath, root, selectedPaths, TreeTextFormat.Ascii);
@@ -46,9 +49,10 @@ public sealed class TreeAndContentExportService(
 		if (hasSelection && string.IsNullOrWhiteSpace(tree))
 			tree = treeExport.BuildFullTree(rootPath, root, format, displayRootPath, displayRootName);
 
-		var files = hasSelection
-			? GetSelectedFiles(selectedPaths)
-			: GetAllFilePaths(root);
+		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+			root,
+			hasSelection ? selectedPaths : EmptySelection,
+			ensureExists: hasSelection);
 		var contentPathMapper = CreateRelativeContentHeaderPathMapper(rootPath);
 
 		var content = await contentExport.BuildAsync(files, cancellationToken, contentPathMapper).ConfigureAwait(false);
@@ -64,27 +68,6 @@ public sealed class TreeAndContentExportService(
 		sb.Append(content);
 
 		return sb.ToString();
-	}
-
-	private static IEnumerable<string> GetSelectedFiles(IReadOnlySet<string> selectedPaths)
-	{
-		foreach (var path in selectedPaths)
-		{
-			if (File.Exists(path))
-				yield return path;
-		}
-	}
-
-	private static IEnumerable<string> GetAllFilePaths(TreeNodeDescriptor node)
-	{
-		if (!node.IsDirectory)
-			yield return node.FullPath;
-
-		foreach (var child in node.Children)
-		{
-			foreach (var path in GetAllFilePaths(child))
-				yield return path;
-		}
 	}
 
 	public static Func<string, string> CreateRelativeContentHeaderPathMapper(string rootPath)

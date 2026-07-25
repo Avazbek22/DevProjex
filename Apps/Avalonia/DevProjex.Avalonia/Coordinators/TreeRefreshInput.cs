@@ -7,4 +7,5 @@ internal sealed record TreeRefreshInput(
     string? NameFilter,
     ProjectTreeInventorySnapshot? TreeInventory = null,
     ProjectTreeInventoryReuseScope? TreeInventoryScope = null,
-    long? SelectionRevision = null);
+    long? SelectionRevision = null,
+    BuildTreeResult? InteractiveFilterBaseTree = null);

@@ -48,7 +48,7 @@ internal sealed class ProjectLoadPipeline(
 
             if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))
             {
-                host.DeleteRepositoryDirectory(cachedRepoPathToDeleteOnSuccess);
+                await host.DeleteRepositoryDirectoryAsync(cachedRepoPathToDeleteOnSuccess, cancellationToken);
                 host.ClearCurrentCachedRepoPath();
             }
 
