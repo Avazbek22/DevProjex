@@ -361,6 +361,13 @@ public sealed class MainWindowStartupAutomationUiTests
 			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "preview.close"));
 			Assert.Contains(events, static item => item.GetProperty("name").GetString() == "tree.search");
 			Assert.Contains(events, static item => item.GetProperty("name").GetString() == "tree.filter");
+
+			var filterEvents = events
+				.Where(static item => item.GetProperty("name").GetString() == "tree.filter")
+				.ToArray();
+			Assert.Equal(2, filterEvents.Length);
+			Assert.Single(filterEvents, static item => item.GetProperty("queryLength").GetInt32() > 0);
+			Assert.Single(filterEvents, static item => item.GetProperty("queryLength").GetInt32() == 0);
 		}
 		finally
 		{

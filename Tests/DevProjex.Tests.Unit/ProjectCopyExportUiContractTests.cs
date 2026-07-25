@@ -206,11 +206,11 @@ public sealed class ProjectCopyExportUiContractTests
     [Fact]
     public void ClosingWindow_CancelsProjectCopyAndWaitsForStagingCleanupBeforeClosing()
     {
-        var windowSource = ReadRepositoryFile(
+        var compositionSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
             "DevProjex.Avalonia",
-            "MainWindow.axaml.cs");
+            "MainWindow.Composition.cs");
         var lifecycleSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
@@ -222,7 +222,7 @@ public sealed class ProjectCopyExportUiContractTests
             "DevProjex.Avalonia",
             "MainWindow.ProjectCopyExport.cs");
 
-        Assert.Contains("Closing += OnWindowClosing", windowSource, StringComparison.Ordinal);
+        Assert.Contains("Closing += OnWindowClosing", compositionSource, StringComparison.Ordinal);
         Assert.Contains("e.Cancel = true", lifecycleSource, StringComparison.Ordinal);
         Assert.Contains("_projectCopyExportCts.Cancel()", lifecycleSource, StringComparison.Ordinal);
         Assert.Contains("await completion", lifecycleSource, StringComparison.Ordinal);

@@ -91,7 +91,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         // Swap trees only after the new root is fully materialized.
         // This prevents losing the previously visible project on cancellation.
-        _searchCoordinator.ClearSearchState();
+        _searchFilterController.ClearSearchState();
         if (_treeView is not null)
             _treeView.SelectedItem = null;
 
@@ -139,45 +139,8 @@ public partial class MainWindow : IRefreshTreePipelineHost
         SchedulePreviewRefresh(immediate: true);
     }
 
-    private void ReapplyActiveTreeQueryPresentation()
-    {
-        var filterQuery = _viewModel.NameFilter?.Trim();
-        if (!string.IsNullOrWhiteSpace(filterQuery))
-        {
-            ApplyNameFilterPresentation(filterQuery);
-            return;
-        }
-
-        // Project-load and refresh paths usually arrive here with an empty search state.
-        // Skip the tree-wide search normalization unless an active query must be rebound to
-        // the replacement graph.
-        if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
-            _searchCoordinator.UpdateSearchMatches();
-    }
-
-    private int ApplyNameFilterPresentation(string filterQuery)
-    {
-        var matchCount = _currentTree is null
-            ? 0
-            : NameFilterMatchCounter.CountMatchesUnderRoot(_currentTree.Root, filterQuery);
-        _viewModel.UpdateFilterMatchSummary(matchCount);
-        _searchCoordinator.UpdateHighlights(filterQuery);
-
-        // Tree rebuilds replace every view-model instance. Reapply filter expansion to the
-        // new graph so an active query cannot remain visually present while its matches are
-        // collapsed or rendered without highlights.
-        using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-        {
-            TreeSearchEngine.ApplySmartExpandForFilter(
-                _viewModel.TreeNodes,
-                filterQuery,
-                node => node.DisplayName,
-                node => node.Children,
-                (node, expanded) => node.IsExpanded = expanded);
-        }
-
-        return matchCount;
-    }
+    private void ReapplyActiveTreeQueryPresentation() =>
+        _searchFilterController.ReapplyActiveTreeQueryPresentation();
 
     private void UpdateCurrentTreeInventory(
         TreeRefreshInput input,

@@ -4,17 +4,18 @@ namespace DevProjex.Tests.UI;
 
 public sealed class MainWindowLifecycleUiTests
 {
-	private static readonly string[] OwnedCancellationSourceFields =
+	private static readonly OwnedField[] OwnedCancellationSourceFields =
 	[
-		"_previewSelectionMetricsCts",
-		"_previewMemoryCleanupCts",
-		"_searchMemoryCleanupCts",
-		"_backgroundMemoryCleanupCts",
-		"_previewModeSwitchCts",
-		"_windowLifetimeCts",
-		"_projectOperationCts",
-		"_gitCloneCts",
-		"_gitOperationCts"
+		new("_previewSurfaceController", "_selectionMetricsCts"),
+		new("_memoryCleanup", "_previewCleanupCts"),
+		new("_memoryCleanup", "_searchCleanupCts"),
+		new("_memoryCleanup", "_backgroundCleanupCts"),
+		new("_previewWorkspaceController", "_modeSwitchCts"),
+		new(null, "_windowLifetimeCts"),
+		new(null, "_projectOperationCts"),
+		new(null, "_applySettingsCts"),
+		new(null, "_gitCloneCts"),
+		new(null, "_gitOperationCts")
 	];
 
 	[AvaloniaFact]
@@ -72,22 +73,27 @@ public sealed class MainWindowLifecycleUiTests
 
 		try
 		{
-			foreach (var fieldName in OwnedCancellationSourceFields)
+			foreach (var ownedField in OwnedCancellationSourceFields)
 			{
 				var source = new CancellationTokenSource();
 				sources.Add(source);
-				tokensByField[fieldName] = source.Token;
-				SetPrivateField(window, fieldName, source);
+				tokensByField[ownedField.DisplayName] = source.Token;
+				SetPrivateField(window, ownedField, source);
 			}
 
-			SetPrivateField(window, "_previewSelectionMetricsDebounceTimer", debounceTimer);
+			SetPrivateField(
+				window,
+				new OwnedField("_previewSurfaceController", "_selectionMetricsDebounceTimer"),
+				debounceTimer);
 
 			await UiTestDriver.CloseWindowAsync(window);
 
 			foreach (var (fieldName, token) in tokensByField)
 			{
 				Assert.True(token.IsCancellationRequested, $"{fieldName} must be canceled during window shutdown.");
-				Assert.Null(GetPrivateFieldValue(window, fieldName));
+				var ownedField = OwnedCancellationSourceFields.Single(candidate =>
+					candidate.DisplayName == fieldName);
+				Assert.Null(GetPrivateFieldValue(window, ownedField));
 			}
 
 			Assert.False(debounceTimer.IsEnabled);
@@ -127,17 +133,41 @@ public sealed class MainWindowLifecycleUiTests
 		Assert.Null(exception);
 	}
 
-	private static void SetPrivateField(MainWindow window, string fieldName, object? value)
+	private static void SetPrivateField(MainWindow window, OwnedField ownedField, object? value)
 	{
-		var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+		var owner = GetOwner(window, ownedField);
+		var field = owner.GetType().GetField(
+			ownedField.FieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(field);
-		field!.SetValue(window, value);
+		field!.SetValue(owner, value);
 	}
 
-	private static object? GetPrivateFieldValue(MainWindow window, string fieldName)
+	private static object? GetPrivateFieldValue(MainWindow window, OwnedField ownedField)
 	{
-		var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+		var owner = GetOwner(window, ownedField);
+		var field = owner.GetType().GetField(
+			ownedField.FieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(field);
-		return field!.GetValue(window);
+		return field!.GetValue(owner);
+	}
+
+	private static object GetOwner(MainWindow window, OwnedField ownedField)
+	{
+		if (ownedField.OwnerFieldName is null)
+			return window;
+
+		var ownerField = typeof(MainWindow).GetField(
+			ownedField.OwnerFieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(ownerField);
+		return Assert.IsAssignableFrom<object>(ownerField!.GetValue(window));
+	}
+
+	private readonly record struct OwnedField(string? OwnerFieldName, string FieldName)
+	{
+		public string DisplayName =>
+			OwnerFieldName is null ? FieldName : $"{OwnerFieldName}.{FieldName}";
 	}
 }

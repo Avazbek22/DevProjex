@@ -914,21 +914,13 @@ public sealed record IgnoreRules(
 			return $"{_baseRelativePath}/{scanRelativePath}";
 		}
 
-		private sealed class AdditionalGitIgnoreScope
+		private sealed class AdditionalGitIgnoreScope(
+			AdditionalGitIgnoreScope? parent,
+			ScopedGitIgnoreMatcher scopedMatcher,
+			string scopeRelativePath)
 		{
-			private readonly AdditionalGitIgnoreScope? _parent;
-			private readonly ScopedGitIgnoreMatcher _scopedMatcher;
-			private readonly string _scopeRelativePath;
-
-			public AdditionalGitIgnoreScope(
-				AdditionalGitIgnoreScope? parent,
-				ScopedGitIgnoreMatcher scopedMatcher,
-				string scopeRelativePath)
-			{
-				_parent = parent;
-				_scopedMatcher = scopedMatcher;
-				_scopeRelativePath = scopeRelativePath;
-			}
+			private readonly AdditionalGitIgnoreScope? _parent = parent;
+			private readonly ScopedGitIgnoreMatcher _scopedMatcher = scopedMatcher;
 
 			public bool Contains(string scopeRootPath)
 			{
@@ -951,7 +943,7 @@ public sealed record IgnoreRules(
 				var evaluation = inherited;
 				reIncludedIgnoredPath = false;
 				if (_parent is not null)
-			{
+				{
 					evaluation = _parent.Evaluate(
 						scanRelativePath,
 						isDirectory,
@@ -1015,23 +1007,23 @@ public sealed record IgnoreRules(
 				out ReadOnlySpan<char> matcherRelativePath)
 			{
 				var relativePath = scanRelativePath.AsSpan();
-				if (_scopeRelativePath.Length == 0)
+				if (scopeRelativePath.Length == 0)
 				{
 					matcherRelativePath = relativePath;
 					return relativePath.Length > 0;
 				}
 
-				if (relativePath.Length <= _scopeRelativePath.Length ||
-				    relativePath[_scopeRelativePath.Length] != '/' ||
-				    !relativePath[.._scopeRelativePath.Length].Equals(
-					    _scopeRelativePath.AsSpan(),
+				if (relativePath.Length <= scopeRelativePath.Length ||
+				    relativePath[scopeRelativePath.Length] != '/' ||
+				    !relativePath[..scopeRelativePath.Length].Equals(
+					    scopeRelativePath.AsSpan(),
 					    PathComparison))
 				{
 					matcherRelativePath = default;
 					return false;
 				}
 
-				matcherRelativePath = relativePath[(_scopeRelativePath.Length + 1)..];
+				matcherRelativePath = relativePath[(scopeRelativePath.Length + 1)..];
 				return matcherRelativePath.Length > 0;
 			}
 		}

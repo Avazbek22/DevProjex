@@ -4,11 +4,15 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+    private static readonly TimeSpan RecentProjectsStartupStoreLockTimeout =
+        TimeSpan.FromMilliseconds(100);
+
     #region Recent Projects
 
     private void LoadRecentProjects()
     {
-        _recentProjectsDb = _recentProjectsStore.LoadForStartup(StartupStoreLockTimeout);
+        _recentProjectsDb = _recentProjectsStore.LoadForStartup(
+            RecentProjectsStartupStoreLockTimeout);
         SyncRecentProjectsToViewModel();
     }
 

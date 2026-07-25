@@ -94,7 +94,7 @@ internal static class UiTestDriver
 
                     var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
                     return GetActualWidth(settingsContainer) >= 200 &&
-                           !GetRequiredPrivateField<bool>(window, "_settingsAnimating");
+                           !GetWorkspacePresentationController(window).IsSettingsAnimating;
                 },
                 "initial settings pane to become visually available");
         }
@@ -581,7 +581,8 @@ internal static class UiTestDriver
                 var viewModel = GetViewModel(window);
                 var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
                 var isEffectivelyVisible = IsActuallyVisibleHorizontally(settingsContainer);
-                var settingsAnimating = GetRequiredPrivateField<bool>(window, "_settingsAnimating");
+                var settingsAnimating =
+                    GetWorkspacePresentationController(window).IsSettingsAnimating;
 
                 return viewModel.SettingsVisible == visible &&
                        isEffectivelyVisible == visible &&
@@ -950,8 +951,8 @@ internal static class UiTestDriver
     }
 
     private static bool IsPreviewPaneTransitionInProgress(MainWindow window) =>
-        GetRequiredPrivateField<bool>(window, "_previewPaneAnimating") ||
-        GetRequiredPrivateField<bool>(window, "_treePaneAnimating");
+        GetWorkspacePresentationController(window).IsPreviewPaneAnimating ||
+        GetWorkspacePresentationController(window).IsTreePaneAnimating;
 
     public static async Task WaitForFilterAppliedAsync(MainWindow window, string query)
     {
@@ -1405,6 +1406,16 @@ internal static class UiTestDriver
     {
         var field = typeof(MainWindow).GetField("_selectionCoordinator", BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
+    }
+
+    private static Avalonia.Coordinators.WorkspacePresentationController
+        GetWorkspacePresentationController(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_workspacePresentation",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<Avalonia.Coordinators.WorkspacePresentationController>(
+            field?.GetValue(window));
     }
 
     private static bool IsPreviewPipelineIdle(MainWindow window)
