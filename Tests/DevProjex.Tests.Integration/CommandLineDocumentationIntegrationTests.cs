@@ -39,6 +39,15 @@ public sealed class CommandLineDocumentationIntegrationTests
 		Assert.Contains("repairs it silently on startup", docs, StringComparison.Ordinal);
 		Assert.Contains("stdout", docs, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("stderr", docs, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("`--copy <mode>`", docs, StringComparison.Ordinal);
+		Assert.Contains("--copy folder", docs, StringComparison.Ordinal);
+		Assert.Contains("--copy zip", docs, StringComparison.Ordinal);
+		Assert.Contains("parent directory", docs, StringComparison.Ordinal);
+		Assert.Contains("appends `.zip`", docs, StringComparison.Ordinal);
+		Assert.Contains("same root-folder, extension, and ignore selection pipeline", docs, StringComparison.Ordinal);
+		Assert.Contains("source project is never modified", docs, StringComparison.Ordinal);
+		Assert.Contains("symbolic links or junctions", docs, StringComparison.Ordinal);
+		Assert.Contains("stdout contains exactly one line", docs, StringComparison.Ordinal);
 		Assert.Contains("Exit Codes", docs, StringComparison.Ordinal);
 		Assert.Contains($"`{CommandLineExitCodes.Success}`", docs, StringComparison.Ordinal);
 		Assert.Contains($"`{CommandLineExitCodes.RuntimeError}`", docs, StringComparison.Ordinal);

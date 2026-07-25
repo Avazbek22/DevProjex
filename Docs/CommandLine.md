@@ -1,8 +1,8 @@
 # DevProjex Command Line
 
-DevProjex can be launched from a terminal to open a project folder, preselect filters, generate automation reports, and export tree/content text.
+DevProjex can be launched from a terminal to open a project folder, preselect filters, generate automation reports, export tree/content text, and create project copies as folders or ZIP archives.
 
-The desktop UI remains the primary experience. CLI options are for startup automation, repeatable checks, machine-readable project analysis reports, and script-friendly text exports.
+The desktop UI remains the primary experience. CLI options are for startup automation, repeatable checks, machine-readable project analysis reports, script-friendly text exports, and reproducible project copies.
 
 ## Usage
 
@@ -57,7 +57,8 @@ Use **Help → Launch from terminal** in the desktop app to inspect or enable th
 | `--session-metrics <folder>` | Opens the desktop app with a project folder and records low-overhead UI session metrics until the window exits. |
 | `--session-metrics-output <file>` | Writes the detailed session metrics JSON report to a specific file. If omitted, DevProjex writes it under the user's local DevProjex session metrics folder. |
 | `--export <mode>` | Exports project text and exits without showing the window. Supported modes: `tree`, `content`, `tree-content`. |
-| `--output <file\|->`, `-o <file\|->` | Writes export text to a specific file, or to stdout when `-` is used. If omitted, export writes to stdout. |
+| `--copy <mode>` | Exports the effective project tree as physical files and exits without showing the window. Supported modes: `folder`, `zip`. Requires `--output`. |
+| `--output <path\|->`, `-o <path\|->` | Sets the text export or project copy destination. `-` is valid only for text export stdout. Folder copy expects a parent directory; ZIP copy expects an archive path. |
 | `--export-format ascii\|json\|xml\|md`, `--format ascii\|json\|xml\|md` | Selects tree format for `tree` and `tree-content` exports. Content remains plain text. |
 | `--last` | Opens the most recent local project folder in the desktop UI. Cannot be combined with `--path` or a positional folder. |
 | `--preview` | Opens preview after the project is loaded in the desktop UI. |
@@ -105,7 +106,7 @@ devprojex "/home/me/projects/app" --preview-search ProjectAnalysisService
 
 `--tree-filter` and `--preview-search` cannot be combined. The desktop UI intentionally shows only one tree text tool at a time, so the CLI keeps that same rule instead of silently choosing one.
 
-Desktop startup options require either a project path or `--last`. They are not valid with `--no-ui`, `--silent`, or `--export`.
+Desktop startup options require either a project path or `--last`. They are not valid with `--no-ui`, `--silent`, `--export`, or `--copy`.
 
 ## Session Metrics
 
@@ -127,7 +128,7 @@ The detailed JSON report is written automatically when the window closes. If `--
 
 Search and filter text is not stored in the report. DevProjex records only the query length and a salted per-report fingerprint so repeated queries can be correlated inside one report without exposing the query itself.
 
-`--session-metrics` is a desktop UI mode. It can be combined with desktop startup options such as `--preview`, `--preview-mode`, `--tree-format`, `--tree-filter`, and `--preview-search`. It cannot be combined with `--path`, positional folders, `--last`, `--benchmark`, `--report`, `--export`, selection overrides, `--strict`, `--no-ui`, or `--silent`.
+`--session-metrics` is a desktop UI mode. It can be combined with desktop startup options such as `--preview`, `--preview-mode`, `--tree-format`, `--tree-filter`, and `--preview-search`. It cannot be combined with `--path`, positional folders, `--last`, `--benchmark`, `--report`, `--export`, `--copy`, selection overrides, `--strict`, `--no-ui`, or `--silent`.
 
 ## Reports
 
@@ -180,7 +181,7 @@ devprojex --benchmark "C:\Projects\App" --benchmark-output "C:\Reports\devprojex
 
 The benchmark measures wall time, CPU time, process memory, managed memory and GC counts for warm runs, stdout/report size, exit codes, and captured errors for every run. The JSON report also records application/runtime/OS details and the exact child command line used for cold runs.
 
-`--benchmark` is intentionally one fixed scenario: project report analysis. It cannot be combined with `--path`, report/export options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
+`--benchmark` is intentionally one fixed scenario: project report analysis. It cannot be combined with `--path`, report/export/copy options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
 
 ## UI Benchmark
 
@@ -198,9 +199,9 @@ devprojex --benchmark-ui "C:\Projects\App" --benchmark-output "C:\Reports\devpro
 
 The UI benchmark measures child process wall time, CPU time, process memory, project load timing, scripted preview/search/filter timings, session CPU/memory/GC samples, exit codes, and captured errors. The JSON report also records application/runtime/OS details, the exact child command line, and paths to the raw session metrics reports.
 
-`--benchmark-ui` is intentionally one fixed scenario: standard desktop UI workflow. It cannot be combined with `--benchmark`, `--session-metrics`, `--path`, report/export options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
+`--benchmark-ui` is intentionally one fixed scenario: standard desktop UI workflow. It cannot be combined with `--benchmark`, `--session-metrics`, `--path`, report/export/copy options, desktop startup options, selection overrides, `--strict`, `--no-ui`, or `--silent`.
 
-## Exports
+## Text Exports
 
 Exports are human-readable text payloads that match the app's copy/export behavior:
 
@@ -246,15 +247,42 @@ JSON export uses this tree format: arrays contain files, objects contain subfold
 When `--output` is omitted, export writes to stdout. When `--output` points to a file, DevProjex creates parent folders when needed, writes UTF-8 without BOM, prints the absolute output path to stdout, and never modifies the opened project folder unless that folder is explicitly chosen as the output location.
 When report and export are requested together, `--report-path` and `--output` must point to different files.
 
+## Project Copies
+
+`--copy` writes the current effective project tree as real files. It uses the same root-folder, extension, and ignore selection pipeline as reports and text exports. The source project is never modified.
+
+Create a new `<ProjectName>-copy` directory under a destination parent:
+
+```bash
+devprojex "/home/me/projects/app" --copy folder -o ./submissions
+```
+
+Create a ZIP archive:
+
+```bash
+devprojex "C:\Projects\App" --copy zip -o "C:\Submissions\App-copy.zip"
+```
+
+- `folder`: `--output` is the parent directory. Name conflicts are resolved as `<ProjectName>-copy (2)`, `<ProjectName>-copy (3)`, and so on without overwriting existing results.
+- `zip`: `--output` is the archive path. DevProjex appends `.zip` when the extension is omitted.
+- both modes preserve the effective directory structure, empty directories, binary bytes, Unicode names, and safe file timestamps;
+- `--roots`, `--ext`, and `--ignore` restrict the copied effective tree exactly as they do for analysis;
+- folder and ZIP writes use adjacent staging output and publish the final result only after success;
+- destination paths equal to or inside the source project are rejected, including paths that resolve there through symbolic links or junctions;
+- stdout contains exactly one line: the absolute path of the completed folder or ZIP.
+
+`--copy` cannot be combined with reports, `--export`, benchmark modes, session metrics, or desktop startup options. Run each output action as a separate command.
+
 ## Output Contract
 
 Automation-friendly output is kept strict:
 
-- `stdout`: help text, version text, generated file paths, benchmark summaries, implicit or explicit JSON report payloads, or export payloads.
+- `stdout`: help text, version text, generated file paths, benchmark summaries, implicit or explicit JSON report payloads, or text export payloads.
+- `stdout` for `--copy`: exactly one absolute path to the completed folder or ZIP archive.
 - `stdout` for `--session-metrics`: a short line with the saved JSON report path after the desktop window closes.
 - `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
-- no UI is created for `--help`, `--version`, `--no-ui`, `--export`, or `--benchmark`. `--session-metrics` opens one interactive UI session, and `--benchmark-ui` opens real UI child processes for repeatable UI measurement.
-- only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
+- no UI is created for `--help`, `--version`, `--no-ui`, `--export`, `--copy`, or `--benchmark`. `--session-metrics` opens one interactive UI session, and `--benchmark-ui` opens real UI child processes for repeatable UI measurement.
+- only one stdout payload can be produced by one command. Do not combine `--copy` with reports or text exports, and do not combine stdout text export with report output in the same command.
 
 ## Windows Portable EXE Note
 
@@ -288,7 +316,7 @@ Linux and macOS terminal launches use the published executable directly.
 | Code | Meaning |
 | --- | --- |
 | `0` | Success, help, or version output. |
-| `1` | Runtime failure, strict-mode diagnostics, unavailable project path, or failed report/export write. |
+| `1` | Runtime failure, strict-mode diagnostics, unavailable project path, or failed report/export/copy write. |
 | `2` | Invalid arguments or invalid command combination. |
 | `130` | Operation canceled. |
 
@@ -352,6 +380,18 @@ Export Markdown tree and content to a file:
 
 ```bash
 devprojex "/home/me/projects/app" --export tree-content --format md -o ./context.md
+```
+
+Export the selected effective tree to a new folder:
+
+```bash
+devprojex "/home/me/projects/app" --copy folder -o ./submissions --roots src --ext cs --ignore git-ignore
+```
+
+Export the effective tree to a ZIP archive:
+
+```powershell
+DevProjex "C:\Projects\App" --copy zip -o "C:\Submissions\App-copy.zip"
 ```
 
 Pipe the JSON report to stdout:

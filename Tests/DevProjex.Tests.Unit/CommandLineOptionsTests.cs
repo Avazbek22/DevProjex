@@ -176,6 +176,7 @@ public sealed class CommandLineOptionsTests
 	[InlineData("benchmark-ui", CommandLineOptionTokens.BenchmarkUi)]
 	[InlineData("session-metrics", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("export", CommandLineOptionTokens.Export)]
+	[InlineData("copy", CommandLineOptionTokens.Copy)]
 	[InlineData("report", CommandLineOptionTokens.Report)]
 	[InlineData("tree-format", CommandLineOptionTokens.TreeFormat)]
 	[InlineData("tree-formt", CommandLineOptionTokens.TreeFormat)]
@@ -209,6 +210,7 @@ public sealed class CommandLineOptionsTests
 	[InlineData("/help", CommandLineOptionTokens.Help)]
 	[InlineData("/version", CommandLineOptionTokens.Version)]
 	[InlineData("/export", CommandLineOptionTokens.Export)]
+	[InlineData("/copy", CommandLineOptionTokens.Copy)]
 	[InlineData("/preview-serch", CommandLineOptionTokens.PreviewSearch)]
 	public void Parse_RejectsSlashStyleOptionTyposWithoutTreatingThemAsPaths(string value, string expectedSuggestion)
 	{
@@ -951,6 +953,138 @@ public sealed class CommandLineOptionsTests
 		Assert.False(result.Options.Export.Enabled);
 	}
 
+	[Theory]
+	[InlineData("folder", StartupProjectCopyMode.Folder)]
+	[InlineData("zip", StartupProjectCopyMode.Zip)]
+	public void Parse_ReadsProjectCopyModeAndOutputRegardlessOfOptionOrder(
+		string modeName,
+		StartupProjectCopyMode expectedMode)
+	{
+		var outputBeforeCopy = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Output, "/tmp/result",
+			CommandLineOptionTokens.Copy, modeName
+		]);
+		var copyBeforeOutput = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Copy, modeName,
+			CommandLineOptionTokens.ShortOutput, "/tmp/result"
+		]);
+
+		AssertValid(outputBeforeCopy);
+		AssertValid(copyBeforeOutput);
+		foreach (var result in new[] { outputBeforeCopy, copyBeforeOutput })
+		{
+			Assert.True(result.Options.ProjectCopy.Enabled);
+			Assert.Equal(expectedMode, result.Options.ProjectCopy.Mode);
+			Assert.Equal("/tmp/result", result.Options.ProjectCopy.DestinationPath);
+			Assert.False(result.Options.Export.Enabled);
+			Assert.Null(result.Options.Export.Path);
+		}
+	}
+
+	[Fact]
+	public void Parse_ReadsInlineProjectCopyAndOutputValues()
+	{
+		var result = CommandLineOptions.Parse([
+			$"{CommandLineOptionTokens.Copy}=zip",
+			$"{CommandLineOptionTokens.Output}=/tmp/project-copy"
+		]);
+
+		AssertValid(result);
+		Assert.Equal(
+			new StartupProjectCopyOptions(true, StartupProjectCopyMode.Zip, "/tmp/project-copy"),
+			result.Options.ProjectCopy);
+	}
+
+	[Fact]
+	public void Parse_RejectsUnsupportedProjectCopyMode()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Copy, "tar",
+			CommandLineOptionTokens.Output, "/tmp/project-copy"
+		]);
+
+		AssertInvalid(result, "invalid-copy-mode");
+		Assert.False(result.Options.ProjectCopy.Enabled);
+	}
+
+	[Fact]
+	public void Parse_RequiresFilesystemOutputForProjectCopy()
+	{
+		var missingOutput = CommandLineOptions.Parse([CommandLineOptionTokens.Copy, "folder"]);
+		var stdoutOutput = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Copy, "zip",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath
+		]);
+
+		AssertInvalid(missingOutput, "copy-output-required");
+		AssertInvalid(stdoutOutput, "copy-output-requires-path");
+	}
+
+	[Theory]
+	[InlineData("export")]
+	[InlineData("benchmark")]
+	[InlineData("benchmark-ui")]
+	[InlineData("session-metrics")]
+	[InlineData("report")]
+	[InlineData("preview")]
+	public void Parse_RejectsProjectCopyCombinedWithCompetingExecutionMode(string scenario)
+	{
+		string[] args = scenario switch
+		{
+			"export" =>
+			[
+				CommandLineOptionTokens.Path, "/tmp/root",
+				CommandLineOptionTokens.Copy, "folder",
+				CommandLineOptionTokens.Output, "/tmp/result",
+				CommandLineOptionTokens.Export, "tree"
+			],
+			"benchmark" =>
+			[
+				CommandLineOptionTokens.Copy, "folder",
+				CommandLineOptionTokens.Output, "/tmp/result",
+				CommandLineOptionTokens.Benchmark, "/tmp/root"
+			],
+			"benchmark-ui" =>
+			[
+				CommandLineOptionTokens.Copy, "folder",
+				CommandLineOptionTokens.Output, "/tmp/result",
+				CommandLineOptionTokens.BenchmarkUi, "/tmp/root"
+			],
+			"session-metrics" =>
+			[
+				CommandLineOptionTokens.Copy, "folder",
+				CommandLineOptionTokens.Output, "/tmp/result",
+				CommandLineOptionTokens.SessionMetrics, "/tmp/root"
+			],
+			"report" =>
+			[
+				CommandLineOptionTokens.Path, "/tmp/root",
+				CommandLineOptionTokens.Copy, "folder",
+				CommandLineOptionTokens.Output, "/tmp/result",
+				CommandLineOptionTokens.Report
+			],
+			"preview" =>
+			[
+				CommandLineOptionTokens.Path, "/tmp/root",
+				CommandLineOptionTokens.Copy, "folder",
+				CommandLineOptionTokens.Output, "/tmp/result",
+				CommandLineOptionTokens.Preview
+			],
+			_ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unknown project copy conflict.")
+		};
+
+		var result = CommandLineOptions.Parse(args);
+
+		Assert.False(result.Success);
+		Assert.Contains(
+			result.Errors,
+			error => error.Code is
+				"conflicting-export-actions" or
+				"conflicting-copy-mode" or
+				"conflicting-copy-report" or
+				"conflicting-copy-ui-options");
+	}
+
 	[Fact]
 	public void Parse_RejectsUnsupportedExportFormat()
 	{
@@ -1228,6 +1362,34 @@ public sealed class CommandLineOptionsTests
 		Assert.Contains(".cs", args);
 		Assert.Contains("--ignore", args);
 		Assert.Contains("dot-folders", args);
+	}
+
+	[Theory]
+	[InlineData(StartupProjectCopyMode.Folder, "folder")]
+	[InlineData(StartupProjectCopyMode.Zip, "zip")]
+	public void ToArguments_PreservesProjectCopyCommand(
+		StartupProjectCopyMode mode,
+		string expectedModeName)
+	{
+		var options = new CommandLineOptions("/tmp/root folder", AppLanguage.En, false)
+		{
+			ProjectCopy = new StartupProjectCopyOptions(true, mode, "/tmp/export folder/result"),
+			IncludeRootFolders = ["src"],
+			IncludeExtensions = [".cs"],
+			IgnoreOptions = [IgnoreOptionId.UseGitIgnore],
+			IgnoreOptionsSpecified = true
+		};
+
+		var args = options.ToArguments();
+
+		Assert.Contains(CommandLineOptionTokens.Copy, args);
+		Assert.Contains(expectedModeName, args);
+		Assert.Contains(CommandLineOptionTokens.Output, args);
+		Assert.Contains("\"/tmp/export folder/result\"", args);
+		Assert.Contains(CommandLineOptionTokens.IncludeRoot, args);
+		Assert.Contains(CommandLineOptionTokens.IncludeExtension, args);
+		Assert.Contains(CommandLineOptionTokens.Ignore, args);
+		Assert.DoesNotContain(CommandLineOptionTokens.Export, args);
 	}
 
 	[Fact]
@@ -1626,6 +1788,7 @@ public sealed class CommandLineOptionsTests
 		Assert.Equal(expected.UiBenchmarkScript, actual.UiBenchmarkScript);
 		Assert.Equal(expected.Export, actual.Export);
 		Assert.Equal(expected.Export.FormatSpecified, actual.Export.FormatSpecified);
+		Assert.Equal(expected.ProjectCopy, actual.ProjectCopy);
 		Assert.Equal(expected.Ui, actual.Ui);
 		Assert.Equal(expected.IncludeRootFolders, actual.IncludeRootFolders);
 		Assert.Equal(expected.IncludeExtensions, actual.IncludeExtensions);
@@ -1682,6 +1845,7 @@ public sealed class CommandLineOptionsTests
 		CommandLineOptionTokens.SessionMetricsOutput,
 		CommandLineOptionTokens.UiBenchmarkScript,
 		CommandLineOptionTokens.Export,
+		CommandLineOptionTokens.Copy,
 		CommandLineOptionTokens.Output,
 		CommandLineOptionTokens.ShortOutput,
 		CommandLineOptionTokens.ExportFormat,

@@ -95,6 +95,19 @@ public sealed class CommandLineHelpContentProviderTests
 	}
 
 	[Fact]
+	public void GetHelpText_DocumentsProjectCopyModesAndOutputContract()
+	{
+		var help = new CommandLineHelpContentProvider().GetHelpText();
+
+		Assert.Contains("--copy <mode>", help, StringComparison.Ordinal);
+		Assert.Contains("folder, zip", help, StringComparison.Ordinal);
+		Assert.Contains("project copy destination", help, StringComparison.Ordinal);
+		Assert.Contains("Use - only to write text export to stdout", help, StringComparison.Ordinal);
+		Assert.Contains("--copy folder -o", help, StringComparison.Ordinal);
+		Assert.Contains("--copy zip -o", help, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void PublicIgnoreOptionNames_AreUnique()
 	{
 		Assert.Equal(

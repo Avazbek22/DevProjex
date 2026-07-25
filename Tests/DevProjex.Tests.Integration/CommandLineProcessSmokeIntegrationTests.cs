@@ -1778,7 +1778,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 	[Theory]
 	[InlineData("unknown-option", "Unknown option '--unknown'.")]
 	[InlineData("missing-path", "Headless analysis requires --path")]
-	[InlineData("output-without-export", "--output and --export-format require --export")]
+	[InlineData("output-without-export", "--output requires --export or --copy")]
 	[InlineData("content-json-format", "--export-format applies only to tree")]
 	[InlineData("report-stdout-export", "Cannot combine --report - with --export")]
 	[InlineData("export-stdout-report-file", "Cannot combine stdout export with --report")]
@@ -2210,7 +2210,7 @@ public sealed class CommandLineProcessSmokeIntegrationTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
 		Assert.Equal(string.Empty, result.Stdout);
-		Assert.Contains("--output and --export-format require --export", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains("--export-format and --format require --export", result.Stderr, StringComparison.Ordinal);
 	}
 
 	[Theory]
