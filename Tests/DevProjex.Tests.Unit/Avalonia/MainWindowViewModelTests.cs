@@ -261,6 +261,59 @@ public sealed class MainWindowViewModelTests
         Assert.Contains(nameof(MainWindowViewModel.CanGetGitUpdates), raised);
     }
 
+    [Theory]
+    [InlineData(ProjectSourceType.LocalFolder)]
+    [InlineData(ProjectSourceType.GitClone)]
+    public void ProjectCopyExport_DisablesEveryTreeChangingSurface(ProjectSourceType sourceType)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.ProjectSourceType = sourceType;
+
+        viewModel.IsProjectCopyExportInProgress = true;
+
+        Assert.False(viewModel.CanChangeProjectTree);
+        Assert.False(viewModel.CanExportProjectCopy);
+        Assert.False(viewModel.CanUseProjectWorkspaceActions);
+        Assert.False(viewModel.CanTogglePreview);
+        Assert.True(viewModel.IsSearchAvailable);
+        Assert.False(viewModel.IsSearchFilterAvailable);
+        Assert.False(viewModel.AreFilterSettingsEnabled);
+        Assert.False(viewModel.CanApplySettings);
+        Assert.False(viewModel.CanRefreshLocalProject);
+        Assert.False(viewModel.CanGetGitUpdates);
+
+        viewModel.IsProjectCopyExportInProgress = false;
+
+        Assert.True(viewModel.CanChangeProjectTree);
+        Assert.True(viewModel.CanExportProjectCopy);
+        Assert.True(viewModel.CanUseProjectWorkspaceActions);
+        Assert.True(viewModel.CanTogglePreview);
+        Assert.True(viewModel.IsSearchAvailable);
+        Assert.True(viewModel.IsSearchFilterAvailable);
+        Assert.True(viewModel.AreFilterSettingsEnabled);
+    }
+
+    [Fact]
+    public void ProjectCopyExport_AllowsClosingExistingPreviewButBlocksReopeningIt()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        viewModel.IsProjectCopyExportInProgress = true;
+
+        Assert.True(viewModel.CanTogglePreview);
+
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.Off;
+
+        Assert.False(viewModel.CanTogglePreview);
+
+        viewModel.IsProjectCopyExportInProgress = false;
+
+        Assert.True(viewModel.CanTogglePreview);
+    }
+
     [Fact]
     public void SettingsVisible_Changes()
     {

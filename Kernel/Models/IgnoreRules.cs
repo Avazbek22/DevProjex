@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Kernel.Models;
 
@@ -11,12 +12,8 @@ public sealed record IgnoreRules(
 	IReadOnlySet<string> SmartIgnoredFolders,
 	IReadOnlySet<string> SmartIgnoredFiles)
 {
-	private static readonly StringComparison PathComparison = OperatingSystem.IsLinux()
-		? StringComparison.Ordinal
-		: StringComparison.OrdinalIgnoreCase;
-	private static readonly StringComparer PathStringComparer = OperatingSystem.IsLinux()
-		? StringComparer.Ordinal
-		: StringComparer.OrdinalIgnoreCase;
+	private static readonly StringComparison PathComparison = PathComparer.Comparison;
+	private static readonly StringComparer PathStringComparer = PathComparer.Default;
 	private const int ScopedMatcherChainCacheLimit = 2048;
 	private const int SmartScopeApplicabilityCacheLimit = 2048;
 	private readonly ConcurrentDictionary<string, ScopedGitIgnoreMatcher[]> _scopedMatcherChainCache =
@@ -27,6 +24,10 @@ public sealed record IgnoreRules(
 		new(PathStringComparer);
 	private readonly ConcurrentDictionary<string, bool> _candidateSmartScopeApplicabilityCache =
 		new(PathStringComparer);
+	private readonly ConcurrentQueue<string> _scopedMatcherChainCacheOrder = new();
+	private readonly ConcurrentQueue<string> _candidateScopedMatcherChainCacheOrder = new();
+	private readonly ConcurrentQueue<string> _smartScopeApplicabilityCacheOrder = new();
+	private readonly ConcurrentQueue<string> _candidateSmartScopeApplicabilityCacheOrder = new();
 
 	public bool UseGitIgnore { get; init; }
 	public bool EnableGitIgnoreTraversal { get; init; }
@@ -65,7 +66,7 @@ public sealed record IgnoreRules(
 
 	public IReadOnlySet<string>? SmartIgnoreCandidateFiles { get; init; }
 
-	public bool SmartIgnoreFollowsGitIgnore { get; init; }
+	public ISmartIgnoreScopeResolver? SmartIgnoreScopeResolver { get; init; }
 
 	public SmartArtifactIgnoreMatcher SmartArtifactIgnoreMatcher { get; init; } =
 		SmartArtifactIgnoreMatcher.Empty;
@@ -398,6 +399,9 @@ public sealed record IgnoreRules(
 		var cache = useCandidates
 			? _candidateSmartScopeApplicabilityCache
 			: _smartScopeApplicabilityCache;
+		var cacheOrder = useCandidates
+			? _candidateSmartScopeApplicabilityCacheOrder
+			: _smartScopeApplicabilityCacheOrder;
 		if (cache.TryGetValue(probePath, out var cached))
 			return cached;
 
@@ -411,9 +415,11 @@ public sealed record IgnoreRules(
 			break;
 		}
 
-		cache[probePath] = applies;
-		if (cache.Count > SmartScopeApplicabilityCacheLimit)
-			cache.Clear();
+		if (cache.TryAdd(probePath, applies))
+		{
+			cacheOrder.Enqueue(probePath);
+			TrimCache(cache, cacheOrder, SmartScopeApplicabilityCacheLimit);
+		}
 
 		return applies;
 	}
@@ -427,7 +433,7 @@ public sealed record IgnoreRules(
 			fullPath,
 			isDirectory: true,
 			useCandidates: false);
-		// Hybrid contract: stack descriptors and stack-adjacent fingerprints remain inside
+		// Smart Ignore contract: stack descriptors and stack-adjacent fingerprints remain inside
 		// their discovered project scope. Only signature-confirmed portable dependency
 		// stores may cross that boundary, so user-level package caches are removed without
 		// treating ordinary sibling folders named bin, obj, packages, or build as artifacts.
@@ -438,14 +444,8 @@ public sealed record IgnoreRules(
 				portableOnly: !appliesToProjectScope))
 			return true;
 
-		if (!appliesToProjectScope)
-			return false;
-
 		if (!SmartIgnoredFolders.Contains(name))
 			return false;
-
-		if (ScopedSmartIgnoreMatchers.Count == 0)
-			return true;
 
 		foreach (var scoped in ScopedSmartIgnoreMatchers)
 		{
@@ -453,7 +453,10 @@ public sealed record IgnoreRules(
 				return true;
 		}
 
-		return false;
+		if (SmartIgnoreScopeResolver is not null)
+			return SmartIgnoreScopeResolver.IsIgnoredDirectory(fullPath, name);
+
+		return appliesToProjectScope && ScopedSmartIgnoreMatchers.Count == 0;
 	}
 
 	public bool IsSmartIgnoredDirectoryCandidate(string fullPath, string name)
@@ -466,24 +469,21 @@ public sealed record IgnoreRules(
 				portableOnly: !appliesToProjectScope))
 			return true;
 
-		if (!appliesToProjectScope)
-			return false;
-
 		var candidateFolders = SmartIgnoreCandidateFolders ?? SmartIgnoredFolders;
 		if (!candidateFolders.Contains(name))
 			return false;
 
 		var scopedMatchers = GetScopedSmartIgnoreMatchers(useCandidates: true);
-		if (scopedMatchers.Count == 0)
-			return true;
-
 		foreach (var scoped in scopedMatchers)
 		{
 			if (scoped.FolderNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
 				return true;
 		}
 
-		return false;
+		if (SmartIgnoreScopeResolver is not null)
+			return SmartIgnoreScopeResolver.IsIgnoredDirectory(fullPath, name);
+
+		return appliesToProjectScope && scopedMatchers.Count == 0;
 	}
 
 	public bool IsSmartIgnoredFile(string fullPath, string name, bool shouldApplySmartIgnore)
@@ -494,22 +494,22 @@ public sealed record IgnoreRules(
 		if (SmartArtifactIgnoreMatcher.IsIgnoredFile(name))
 			return true;
 
-		if (!shouldApplySmartIgnore)
-			return false;
-
 		if (!SmartIgnoredFiles.Contains(name))
 			return false;
 
-		if (ScopedSmartIgnoreMatchers.Count == 0)
-			return true;
-
-		foreach (var scoped in ScopedSmartIgnoreMatchers)
+		if (shouldApplySmartIgnore)
 		{
-			if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-				return true;
+			foreach (var scoped in ScopedSmartIgnoreMatchers)
+			{
+				if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
+					return true;
+			}
 		}
 
-		return false;
+		if (SmartIgnoreScopeResolver is not null)
+			return SmartIgnoreScopeResolver.IsIgnoredFile(fullPath, name);
+
+		return shouldApplySmartIgnore && ScopedSmartIgnoreMatchers.Count == 0;
 	}
 
 	public bool IsSmartIgnoredFileCandidate(string fullPath, string name, bool shouldApplySmartIgnore)
@@ -517,24 +517,24 @@ public sealed record IgnoreRules(
 		if (SmartArtifactIgnoreCandidateMatcher.IsIgnoredFile(name))
 			return true;
 
-		if (!shouldApplySmartIgnore)
-			return false;
-
 		var candidateFiles = SmartIgnoreCandidateFiles ?? SmartIgnoredFiles;
 		if (!candidateFiles.Contains(name))
 			return false;
 
 		var scopedMatchers = GetScopedSmartIgnoreMatchers(useCandidates: true);
-		if (scopedMatchers.Count == 0)
-			return true;
-
-		foreach (var scoped in scopedMatchers)
+		if (shouldApplySmartIgnore)
 		{
-			if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-				return true;
+			foreach (var scoped in scopedMatchers)
+			{
+				if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
+					return true;
+			}
 		}
 
-		return false;
+		if (SmartIgnoreScopeResolver is not null)
+			return SmartIgnoreScopeResolver.IsIgnoredFile(fullPath, name);
+
+		return shouldApplySmartIgnore && scopedMatchers.Count == 0;
 	}
 
 	private static bool IsSmartArtifactIgnoredDirectory(
@@ -578,6 +578,9 @@ public sealed record IgnoreRules(
 		var cache = useCandidates
 			? _candidateScopedMatcherChainCache
 			: _scopedMatcherChainCache;
+		var cacheOrder = useCandidates
+			? _candidateScopedMatcherChainCacheOrder
+			: _scopedMatcherChainCacheOrder;
 		if (cache.TryGetValue(cacheKeyPath, out var cached))
 			return cached;
 
@@ -591,11 +594,24 @@ public sealed record IgnoreRules(
 		ScopedGitIgnoreMatcher[] resolved = matched.Count == 0
 			? Array.Empty<ScopedGitIgnoreMatcher>()
 			: [.. matched];
-		cache[cacheKeyPath] = resolved;
-		if (cache.Count > ScopedMatcherChainCacheLimit)
-			cache.Clear();
+		if (cache.TryAdd(cacheKeyPath, resolved))
+		{
+			cacheOrder.Enqueue(cacheKeyPath);
+			TrimCache(cache, cacheOrder, ScopedMatcherChainCacheLimit);
+		}
 
 		return resolved;
+	}
+
+	private static void TrimCache<TValue>(
+		ConcurrentDictionary<string, TValue> cache,
+		ConcurrentQueue<string> insertionOrder,
+		int limit)
+	{
+		// Traversal keys are normally written once. Insertion-order eviction avoids a lock
+		// and per-hit LRU writes while preventing the full-cache flush cliff on large trees.
+		while (cache.Count > limit && insertionOrder.TryDequeue(out var oldest))
+			cache.TryRemove(oldest, out _);
 	}
 
 	private GitIgnoreMatcher GetGitIgnoreMatcher(bool useCandidates)
@@ -768,7 +784,7 @@ public sealed record IgnoreRules(
 		{
 			if (!_useCandidates && !_rules.IsGitIgnoreTraversalEnabled)
 				return GitIgnoreEvaluation.NotIgnored;
-			if ((_useCandidates || _rules.UseGitIgnore) && IsGitAdministrativeEntry(name))
+			if (IsGitAdministrativeEntryForActiveScope(fullPath, name))
 				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 
 			GitIgnoreEvaluation evaluation;
@@ -818,6 +834,18 @@ public sealed record IgnoreRules(
 			}
 
 			return evaluation;
+		}
+
+		private bool IsGitAdministrativeEntryForActiveScope(string fullPath, string name)
+		{
+			if (!IsGitAdministrativeEntry(name))
+				return false;
+
+			if (_useCandidates || _rules.UseGitIgnore)
+				return true;
+
+			var parentPath = Path.GetDirectoryName(fullPath);
+			return !string.IsNullOrWhiteSpace(parentPath) && ContainsScope(parentPath);
 		}
 
 		private GitIgnoreMatcher.IgnoreEvaluation EvaluateRulesOnly(

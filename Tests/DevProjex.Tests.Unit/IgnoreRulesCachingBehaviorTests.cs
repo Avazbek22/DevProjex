@@ -24,7 +24,7 @@ public sealed class IgnoreRulesCachingBehaviorTests
 	}
 
 	[Fact]
-	public void ShouldApplySmartIgnore_CacheOverflow_ClearsAndKeepsCorrectSemantics()
+	public void ShouldApplySmartIgnore_CacheOverflowEvictsOldestWithoutFlushingHotEntries()
 	{
 		using var temp = new TemporaryDirectory();
 		var scopeRoot = temp.CreateFolder("workspace");
@@ -40,7 +40,9 @@ public sealed class IgnoreRulesCachingBehaviorTests
 
 		var cache = GetPrivateDictionary(rules, "_smartScopeApplicabilityCache");
 		Assert.NotNull(cache);
-		Assert.True(cache!.Count <= 1);
+		Assert.InRange(cache!.Count, 1, limit);
+		Assert.False(cache.Contains(Path.Combine(scopeRoot, "dir-0000")));
+		Assert.True(cache.Contains(Path.Combine(scopeRoot, $"dir-{limit + 1:D4}")));
 
 		var outsidePath = Path.Combine(temp.Path, "outside", "x.txt");
 		Assert.False(rules.ShouldApplySmartIgnore(outsidePath, isDirectory: false));
@@ -85,7 +87,7 @@ public sealed class IgnoreRulesCachingBehaviorTests
 	}
 
 	[Fact]
-	public void EvaluateGitIgnore_CacheOverflow_ClearsAndKeepsCorrectSemantics()
+	public void EvaluateGitIgnore_CacheOverflowEvictsOldestWithoutFlushingHotEntries()
 	{
 		using var temp = new TemporaryDirectory();
 		var scopeRoot = temp.CreateFolder("repo");
@@ -101,7 +103,9 @@ public sealed class IgnoreRulesCachingBehaviorTests
 
 		var cache = GetPrivateDictionary(rules, "_scopedMatcherChainCache");
 		Assert.NotNull(cache);
-		Assert.True(cache!.Count <= 1);
+		Assert.InRange(cache!.Count, 1, limit);
+		Assert.False(cache.Contains(Path.Combine(scopeRoot, "dir-0000")));
+		Assert.True(cache.Contains(Path.Combine(scopeRoot, $"dir-{limit + 1:D4}")));
 
 		var outside = Path.Combine(temp.Path, "outside", "artifact.tmp");
 		Assert.False(rules.EvaluateGitIgnore(outside, isDirectory: false, name: "artifact.tmp").IsIgnored);

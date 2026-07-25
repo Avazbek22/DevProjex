@@ -3,12 +3,11 @@ namespace DevProjex.Infrastructure.FileSystem;
 internal static class GitIgnoreMatcherFileCache
 {
 	// Refreshes revisit the same repository scopes. Keeping parsed matchers avoids repeated
-	// compiled-regex cost, while the bounded generation queue prevents unbounded process growth.
+	// compiled-regex cost while a bounded LRU prevents unbounded process growth.
 	private const int CacheLimit = 512;
 	private static readonly object CacheSync = new();
-	private static readonly Dictionary<string, CacheEntry> Cache = new(PathComparer.Default);
-	private static readonly Queue<CacheOrderEntry> CacheOrder = new();
-	private static long _generation;
+	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache = new(PathComparer.Default);
+	private static readonly LinkedList<CacheEntry> CacheLru = new();
 
 	public static bool TryLoad(
 		string scopeRootPath,
@@ -23,10 +22,12 @@ internal static class GitIgnoreMatcherFileCache
 			var normalizedPath = Path.GetFullPath(gitIgnorePath);
 			lock (CacheSync)
 			{
-				if (Cache.TryGetValue(normalizedPath, out var cached) &&
-				    string.Equals(cached.Content, content, StringComparison.Ordinal))
+				if (Cache.TryGetValue(normalizedPath, out var cachedNode) &&
+				    string.Equals(cachedNode.Value.Content, content, StringComparison.Ordinal))
 				{
-					scopedMatcher = cached.Matcher;
+					CacheLru.Remove(cachedNode);
+					CacheLru.AddFirst(cachedNode);
+					scopedMatcher = cachedNode.Value.Matcher;
 					return true;
 				}
 			}
@@ -35,9 +36,9 @@ internal static class GitIgnoreMatcherFileCache
 			scopedMatcher = new ScopedGitIgnoreMatcher(Path.GetFullPath(scopeRootPath), matcher);
 			lock (CacheSync)
 			{
-				var generation = ++_generation;
-				Cache[normalizedPath] = new CacheEntry(content, scopedMatcher, generation);
-				CacheOrder.Enqueue(new CacheOrderEntry(normalizedPath, generation));
+				Remove(normalizedPath);
+				var entry = new CacheEntry(normalizedPath, content, scopedMatcher);
+				Cache[normalizedPath] = CacheLru.AddFirst(entry);
 				TrimCache();
 			}
 
@@ -58,19 +59,20 @@ internal static class GitIgnoreMatcherFileCache
 
 	private static void TrimCache()
 	{
-		// A path can appear in the FIFO more than once after edits. Generation matching keeps
-		// an old queue entry from evicting the current matcher without maintaining a linked LRU.
-		while (Cache.Count > CacheLimit && CacheOrder.TryDequeue(out var oldest))
-		{
-			if (Cache.TryGetValue(oldest.Path, out var cached) && cached.Generation == oldest.Generation)
-				Cache.Remove(oldest.Path);
-		}
+		while (Cache.Count > CacheLimit && CacheLru.Last is { } leastRecentlyUsed)
+			Remove(leastRecentlyUsed.Value.Path);
+	}
+
+	private static void Remove(string path)
+	{
+		if (!Cache.Remove(path, out var node))
+			return;
+
+		CacheLru.Remove(node);
 	}
 
 	private sealed record CacheEntry(
+		string Path,
 		string Content,
-		ScopedGitIgnoreMatcher Matcher,
-		long Generation);
-
-	private readonly record struct CacheOrderEntry(string Path, long Generation);
+		ScopedGitIgnoreMatcher Matcher);
 }

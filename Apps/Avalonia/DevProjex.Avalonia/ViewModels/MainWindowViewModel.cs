@@ -120,6 +120,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _statusPreviewSelectionVisible;
     private bool _statusProgressIsIndeterminate = true;
     private double _statusProgressValue;
+    private bool _isProjectCopyExportInProgress;
 
     public MainWindowViewModel(LocalizationService localization, HelpContentProvider helpContentProvider)
     {
@@ -302,9 +303,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_isProjectLoaded == value) return;
             _isProjectLoaded = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsSearchAvailable));
             RaisePropertyChanged(nameof(IsSearchFilterAvailable));
             RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
             RaisePropertyChanged(nameof(CanApplySettings));
+            RaisePropertyChanged(nameof(CanExportProjectCopy));
+            RaisePropertyChanged(nameof(CanUseProjectWorkspaceActions));
+            RaisePropertyChanged(nameof(CanTogglePreview));
             RaisePropertyChanged(nameof(CanRefreshLocalProject));
             RaisePropertyChanged(nameof(CanGetGitUpdates));
         }
@@ -323,6 +328,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(IsPreviewMode));
             RaisePropertyChanged(nameof(IsPreviewTreeVisible));
             RaisePropertyChanged(nameof(IsPreviewOnlyMode));
+            RaisePropertyChanged(nameof(CanTogglePreview));
             RaisePreviewStatePropertiesChanged();
 
             if (previousCanToggleCompactMode != CanToggleCompactMode)
@@ -347,11 +353,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsTreePaneVisible => _previewWorkspaceMode != PreviewWorkspaceMode.PreviewOnly;
 
-    public bool IsSearchFilterAvailable => _isProjectLoaded && IsTreePaneVisible;
+    public bool IsProjectCopyExportInProgress
+    {
+        get => _isProjectCopyExportInProgress;
+        set
+        {
+            if (_isProjectCopyExportInProgress == value) return;
+            _isProjectCopyExportInProgress = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanChangeProjectTree));
+            RaisePropertyChanged(nameof(CanExportProjectCopy));
+            RaisePropertyChanged(nameof(CanUseProjectWorkspaceActions));
+            RaisePropertyChanged(nameof(CanTogglePreview));
+            RaisePropertyChanged(nameof(IsSearchFilterAvailable));
+            RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
+            RaisePropertyChanged(nameof(CanApplySettings));
+            RaisePropertyChanged(nameof(CanRefreshLocalProject));
+            RaisePropertyChanged(nameof(CanGetGitUpdates));
+        }
+    }
 
-    public bool AreFilterSettingsEnabled => _isProjectLoaded;
+    public bool CanChangeProjectTree => !_isProjectCopyExportInProgress;
 
-    public bool CanApplySettings => _isProjectLoaded && !_applySettingsBusyDelayElapsed;
+    public bool CanExportProjectCopy => _isProjectLoaded && !_isProjectCopyExportInProgress;
+
+    public bool CanUseProjectWorkspaceActions => _isProjectLoaded && !_isProjectCopyExportInProgress;
+
+    public bool CanTogglePreview => _isProjectLoaded && (!_isProjectCopyExportInProgress || IsPreviewMode);
+
+    public bool IsSearchAvailable => _isProjectLoaded && IsTreePaneVisible;
+
+    public bool IsSearchFilterAvailable => _isProjectLoaded && IsTreePaneVisible && !_isProjectCopyExportInProgress;
+
+    public bool AreFilterSettingsEnabled => _isProjectLoaded && !_isProjectCopyExportInProgress;
+
+    public bool CanApplySettings => _isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress;
 
     private void UpdateApplySettingsBusyState(bool isBusy)
     {
@@ -803,6 +839,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(IsTreePaneVisible));
         RaisePropertyChanged(nameof(IsPreviewTreeVisible));
         RaisePropertyChanged(nameof(IsPreviewOnlyMode));
+        RaisePropertyChanged(nameof(IsSearchAvailable));
         RaisePropertyChanged(nameof(IsSearchFilterAvailable));
         RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
     }
@@ -897,9 +934,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsGitMode => _projectSourceType == ProjectSourceType.GitClone;
 
-    public bool CanRefreshLocalProject => _isProjectLoaded && !IsGitMode;
+    public bool CanRefreshLocalProject => _isProjectLoaded && !IsGitMode && !_isProjectCopyExportInProgress;
 
-    public bool CanGetGitUpdates => _isProjectLoaded && IsGitMode;
+    public bool CanGetGitUpdates => _isProjectLoaded && IsGitMode && !_isProjectCopyExportInProgress;
 
     public string CurrentBranch
     {
@@ -1262,6 +1299,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuFileExportTree { get; private set; } = string.Empty;
     public string MenuFileExportContent { get; private set; } = string.Empty;
     public string MenuFileExportTreeAndContent { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopy { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopyFolder { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopyZip { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopyFolderHelp { get; private set; } = string.Empty;
+    public string MenuFileExportProjectCopyZipHelp { get; private set; } = string.Empty;
     public string MenuFileExit { get; private set; } = string.Empty;
     public string MenuCopy { get; private set; } = string.Empty;
     public string MenuCopyTree { get; private set; } = string.Empty;
@@ -1419,6 +1461,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuFileExportTree = _localization["Menu.File.Export.Tree"];
         MenuFileExportContent = _localization["Menu.File.Export.Content"];
         MenuFileExportTreeAndContent = _localization["Menu.File.Export.TreeAndContent"];
+        MenuFileExportProjectCopy = _localization["Menu.File.ExportProjectCopy"];
+        MenuFileExportProjectCopyFolder = _localization["Menu.File.ExportProjectCopy.Folder"];
+        MenuFileExportProjectCopyZip = _localization["Menu.File.ExportProjectCopy.Zip"];
+        MenuFileExportProjectCopyFolderHelp = _localization["Menu.File.ExportProjectCopy.Folder.Help"];
+        MenuFileExportProjectCopyZipHelp = _localization["Menu.File.ExportProjectCopy.Zip.Help"];
         MenuFileExit = _localization["Menu.File.Exit"];
         MenuCopy = _localization["Menu.Copy"];
         MenuCopyTree = _localization["Menu.Copy.Tree"];
@@ -1557,6 +1604,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuFileExportTree));
         RaisePropertyChanged(nameof(MenuFileExportContent));
         RaisePropertyChanged(nameof(MenuFileExportTreeAndContent));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopy));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopyFolder));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopyZip));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopyFolderHelp));
+        RaisePropertyChanged(nameof(MenuFileExportProjectCopyZipHelp));
         RaisePropertyChanged(nameof(MenuFileExit));
         RaisePropertyChanged(nameof(MenuCopy));
         RaisePropertyChanged(nameof(MenuCopyTree));

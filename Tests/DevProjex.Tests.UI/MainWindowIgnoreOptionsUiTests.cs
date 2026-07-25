@@ -268,15 +268,23 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
-    public async Task ExplicitUncheckedGitIgnoreController_RemainsVisibleWhenDotFilesMaskItsOnlyImpact()
+    public async Task ExplicitUncheckedGitIgnoreController_RemainsVisibleWhenDotFilesTakesOver()
     {
         using var project = UiTestProject.CreateWithGitIgnoreDotFileOnlyWorkspace();
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
 
         try
         {
-            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
-            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFiles,
+                visible: true,
+                isChecked: true);
 
             await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
@@ -645,7 +653,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.SmartIgnore,
-                visible: false);
+                visible: true,
+                isChecked: true);
             await WaitForProjectTreePathStateAsync(window, exists: false, "logs", "runtime.log");
             await AssertIgnoreOptionsStayStableAsync(window);
         }
@@ -692,7 +701,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.SmartIgnore,
-                visible: false);
+                visible: true,
+                isChecked: true);
             await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "HEAD");
             await WaitForProjectTreePathStateAsync(window, exists: false, "logs", "runtime.log");
             await WaitForProjectTreePathStateAsync(window, exists: false, "obj", "project.assets.json");
@@ -703,7 +713,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 
             await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "HEAD");
             await WaitForProjectTreePathStateAsync(window, exists: true, "logs", "runtime.log");
-            await WaitForProjectTreePathStateAsync(window, exists: true, "obj", "project.assets.json");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "obj", "project.assets.json");
         }
         finally
         {
@@ -1015,7 +1025,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
-    public async Task PythonProjectWithGitIgnore_ShowsGitIgnoreOnlyAndUsesItAsSmartController()
+    public async Task PythonProjectWithGitIgnore_KeepsGitAndSmartControllersIndependent()
     {
         using var project = UiTestProject.CreateWithPythonGitIgnoreWorkspace();
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
@@ -1031,7 +1041,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.SmartIgnore,
-                visible: false);
+                visible: true,
+                isChecked: true);
 
             await WaitForProjectTreePathStateAsync(window, exists: true, "src", "app.py");
             await WaitForProjectTreePathStateAsync(window, exists: false, "src", "__pycache__");
@@ -1047,7 +1058,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.ClickApplySettingsAsync(window);
             await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
 
-            await WaitForProjectTreePathStateAsync(window, exists: true, "src", "__pycache__");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "src", "__pycache__");
             await WaitForProjectTreePathStateAsync(window, exists: true, "logs", "app.log");
         }
         finally

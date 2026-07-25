@@ -23,6 +23,17 @@ Raccourcis :
   * Exporter l’arborescence
   * Exporter le contenu
   * Exporter arborescence et contenu
+* Exporter le projet :
+  * Vers un dossier…
+  * Vers une archive ZIP…
+
+L’export du projet crée un dossier distinct ou une archive ZIP à partir de l’arborescence actuelle, tout en conservant la structure des répertoires.
+
+Les dossiers de premier niveau, types de fichiers, règles d’exclusion et éléments cochés sont pris en compte. Si rien n’est coché, toute l’arborescence actuelle est exportée.
+
+Les fichiers texte et binaires sont copiés, et les dossiers vides inclus sont conservés. Les fichiers sources ne sont pas modifiés. Le résultat ne peut pas être enregistré dans le projet source.
+
+Pendant l’export, vous ne pouvez pas modifier l’arborescence ou les paramètres, utiliser le filtre, changer le format ou le mode d’aperçu, lancer des commandes Git, actualiser ou ouvrir un autre projet.
 
 Règles de format :
 * Exporter l’arborescence :
@@ -329,9 +340,11 @@ Une règle commençant par `!` annule uniquement une exclusion Git antérieure d
 Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude`, les règles Git globales et l’état de l’index Git ne sont pas appliqués.
 
 ### 12.4 Relation entre .gitignore et Smart Ignore
-Dans un projet ayant une seule zone et son propre `.gitignore`, l’interface affiche généralement uniquement « Utiliser .gitignore ». Cette option active alors à la fois `.gitignore` et les règles Smart Ignore applicables. Dans un espace de travail contenant plusieurs projets, les deux options peuvent être affichées séparément et fonctionner indépendamment dans leurs zones.
+`.gitignore` et Smart Ignore sont des interrupteurs indépendants. Chacun s’applique à toutes ses zones, à chaque niveau d’imbrication accessible. Une option n’est affichée que si sa modification peut changer l’arborescence effective actuelle.
 
-Une négation Git avec `!` annule uniquement le résultat Git. Elle ne remplace ni Smart Ignore ni une règle de base. Il n’existe donc pas de règle globalement « plus forte » : un élément doit passer tous les mécanismes actifs pour rester visible.
+`.gitignore` est appliqué en premier, Smart Ignore traite ensuite les éléments restants, puis les règles de base s’appliquent. Smart Ignore peut donc rester masqué tant que `.gitignore` couvre déjà tous ses candidats, puis apparaître après la désactivation de `.gitignore`.
+
+Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
 
 ### 12.5 Règles de base
 Les règles « commençant par un point » vérifient le nom ; les règles « caché » vérifient l’attribut système Hidden. Selon la plateforme, elles peuvent viser le même élément ou des éléments différents.

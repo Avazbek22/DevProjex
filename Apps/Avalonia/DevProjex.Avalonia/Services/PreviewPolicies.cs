@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using DevProjex.Application.Selection;
 using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Services;
@@ -84,7 +85,12 @@ internal static class PreviewWarmupPolicy
         if (hasSelection)
         {
             if (treeRoot is not null)
-                PreviewFileCollectionPolicy.CollectSelectedFilePaths(treeRoot, selectedPaths, uniqueFiles, maxFileCount, ensureExists: true);
+                ProjectTreeSelectionProjection.CollectSelectedFilePaths(
+                    treeRoot,
+                    selectedPaths,
+                    uniqueFiles,
+                    maxFileCount,
+                    ensureExists: true);
         }
         else if (treeRoot is not null)
         {
@@ -205,55 +211,20 @@ internal static class PreviewFileCollectionPolicy
             return 0;
 
         var uniquePaths = new HashSet<string>(PathComparer.Default);
-        CollectSelectedFilePaths(treeRoot, selectedPaths, uniquePaths, maxCount, ensureExists);
+        ProjectTreeSelectionProjection.CollectSelectedFilePaths(
+            treeRoot,
+            selectedPaths,
+            uniquePaths,
+            maxCount,
+            ensureExists);
         return uniquePaths.Count;
     }
 
     public static List<string> BuildOrderedSelectedFilePaths(
         IReadOnlySet<string> selectedPaths,
         TreeNodeDescriptor treeRoot,
-        bool ensureExists = true)
-    {
-        var uniquePaths = new HashSet<string>(PathComparer.Default);
-        CollectSelectedFilePaths(treeRoot, selectedPaths, uniquePaths, maxCount: int.MaxValue, ensureExists);
-
-        var orderedPaths = new List<string>(uniquePaths.Count);
-        orderedPaths.AddRange(uniquePaths);
-        orderedPaths.Sort(PathComparer.Default);
-        return orderedPaths;
-    }
-
-    /// <summary>
-    /// Expands directory selections into their file descendants without requiring the UI tree
-    /// to materialize every node. This keeps preview/export/metrics aligned with subtree
-    /// checkbox semantics while preserving lazy TreeView branches.
-    /// </summary>
-    public static void CollectSelectedFilePaths(
-        TreeNodeDescriptor node,
-        IReadOnlySet<string> selectedPaths,
-        HashSet<string> uniquePaths,
-        int maxCount,
-        bool ensureExists)
-    {
-        if (uniquePaths.Count >= maxCount)
-            return;
-
-        if (selectedPaths.Contains(node.FullPath))
-        {
-            CollectAllFilePaths(node, uniquePaths, maxCount, ensureExists);
-            return;
-        }
-
-        if (!node.IsDirectory)
-            return;
-
-        for (var index = 0; index < node.Children.Count; index++)
-        {
-            CollectSelectedFilePaths(node.Children[index], selectedPaths, uniquePaths, maxCount, ensureExists);
-            if (uniquePaths.Count >= maxCount)
-                break;
-        }
-    }
+        bool ensureExists = true) =>
+        ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(treeRoot, selectedPaths, ensureExists);
 
     public static List<string> BuildOrderedAllFilePaths(TreeNodeDescriptor treeRoot)
     {
@@ -301,29 +272,6 @@ internal static class PreviewFileCollectionPolicy
         }
     }
 
-    private static void CollectAllFilePaths(
-        TreeNodeDescriptor node,
-        HashSet<string> uniquePaths,
-        int maxCount,
-        bool ensureExists)
-    {
-        var stack = new Stack<TreeNodeDescriptor>();
-        stack.Push(node);
-
-        while (stack.Count > 0 && uniquePaths.Count < maxCount)
-        {
-            var current = stack.Pop();
-            if (!current.IsDirectory)
-            {
-                if (!ensureExists || File.Exists(current.FullPath))
-                    uniquePaths.Add(current.FullPath);
-                continue;
-            }
-
-            for (var index = current.Children.Count - 1; index >= 0; index--)
-                stack.Push(current.Children[index]);
-        }
-    }
 }
 
 internal static class PreviewSelectionMetricsPolicy

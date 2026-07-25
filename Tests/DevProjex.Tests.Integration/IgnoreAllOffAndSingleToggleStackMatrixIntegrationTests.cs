@@ -62,7 +62,7 @@ public sealed class IgnoreAllOffAndSingleToggleStackMatrixIntegrationTests
 
 	[Theory]
 	[MemberData(nameof(StackCases))]
-	public void TreeBuilder_GitIgnoreOnly_InSingleGitIgnoreStackProject_HidesGitAndSmartArtifactsByContract(
+	public void TreeBuilder_GitIgnoreOnly_HidesGitCandidatesWithoutActivatingSmartIgnore(
 		StackCase stackCase)
 	{
 		using var temp = CreateStackWorkspace(stackCase, includeGitIgnore: true);
@@ -70,11 +70,11 @@ public sealed class IgnoreAllOffAndSingleToggleStackMatrixIntegrationTests
 			.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], ExpectedAllRootFolders(stackCase));
 
 		Assert.True(rules.UseGitIgnore);
-		Assert.True(rules.UseSmartIgnore);
+		Assert.False(rules.UseSmartIgnore);
 
 		var tree = BuildTree(temp.Path, rules, stackCase);
 		AssertPathHidden(tree, "git-ignored/ignored.log");
-		AssertPathHidden(tree, stackCase.ArtifactPath);
+		AssertPathVisible(tree, stackCase.ArtifactPath);
 		AssertPathVisible(tree, ".idea/workspace.xml");
 		AssertPathVisible(tree, "empty-dir");
 		AssertPathVisible(tree, ".env");

@@ -114,6 +114,7 @@ public partial class MainWindow : Window
     private readonly TreeExportService _treeExport;
     private readonly SelectedContentExportService _contentExport;
     private readonly TreeAndContentExportService _treeAndContentExport;
+    private readonly ProjectCopyExportService _projectCopyExport;
     private readonly PreviewDocumentBuilder _previewDocumentBuilder;
     private readonly RepositoryWebPathPresentationService _repositoryWebPathPresentationService;
     private readonly TextFileExportService _textFileExport;
@@ -217,6 +218,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _applySettingsCts;
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
+    private CancellationTokenSource? _projectCopyExportCts;
+    private TaskCompletionSource<bool>? _projectCopyExportCompletion;
+    private bool _projectCopyExportClosePending;
+    private bool _allowCloseAfterProjectCopyExportCleanup;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
@@ -376,6 +381,7 @@ public partial class MainWindow : Window
         _treeExport = services.TreeExportService;
         _contentExport = services.ContentExportService;
         _treeAndContentExport = services.TreeAndContentExportService;
+        _projectCopyExport = services.ProjectCopyExportService;
         _previewDocumentBuilder = services.PreviewDocumentBuilder;
         _repositoryWebPathPresentationService = services.RepositoryWebPathPresentationService;
         _textFileExport = services.TextFileExportService;
@@ -600,6 +606,7 @@ public partial class MainWindow : Window
         // Prime the saved material/backdrop before the startup reveal gate waits for the
         // first render frames, otherwise the gate would only hide the default XAML surface.
         ApplyStartupThemePreset();
+        Closing += OnWindowClosing;
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
@@ -786,6 +793,7 @@ public partial class MainWindow : Window
 
         // Unsubscribe from window lifecycle events
         Opened -= OnOpened;
+        Closing -= OnWindowClosing;
         Closed -= OnWindowClosed;
         Activated -= OnActivated;
         Deactivated -= OnDeactivated;
@@ -2432,12 +2440,7 @@ public partial class MainWindow : Window
         UpdateTitle();
         UpdateToastHostLayout();
 
-        if (_currentPath is not null)
-        {
-            _ = _selectionCoordinator.PopulateIgnoreOptionsForRootSelectionAsync(
-                _selectionCoordinator.GetSelectedRootFolders(),
-                _currentPath);
-        }
+        _selectionCoordinator.RelabelIgnoreOptions(AdvancedIgnoreCountsAlwaysEnabled);
     }
 
     private async Task ShowErrorAsync(string message)
@@ -2452,6 +2455,9 @@ public partial class MainWindow : Window
 
     private async void OnOpenFolder(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanChangeProjectTree)
+            return;
+
         try
         {
             var options = new FolderPickerOpenOptions
@@ -2504,6 +2510,9 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanChangeProjectTree)
+            return;
+
         await ProjectRefreshRoutingPolicy.ExecuteAsync(
             _viewModel.IsProjectLoaded,
             _viewModel.ProjectSourceType,
@@ -2594,9 +2603,7 @@ public partial class MainWindow : Window
             }
 
             // Run file reading off UI thread
-            statusOperationId = _statusOperations.Begin(
-                _localization["Status.Operation.PreparingOutput"],
-                indeterminate: true);
+            statusOperationId = BeginOutputPreparationStatus();
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2635,9 +2642,7 @@ public partial class MainWindow : Window
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
             // Run file reading off UI thread
-            statusOperationId = _statusOperations.Begin(
-                _localization["Status.Operation.PreparingOutput"],
-                indeterminate: true);
+            statusOperationId = BeginOutputPreparationStatus();
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -2708,9 +2713,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            statusOperationId = _statusOperations.Begin(
-                _localization["Status.Operation.PreparingOutput"],
-                indeterminate: true);
+            statusOperationId = BeginOutputPreparationStatus();
             var pathPresentation = CreateExportPathPresentation();
             var content = await Task.Run(() => _contentExport.BuildAsync(
                 files,
@@ -2759,9 +2762,7 @@ public partial class MainWindow : Window
             var format = GetCurrentTreeTextFormat();
             var pathPresentation = CreateExportPathPresentation();
 
-            statusOperationId = _statusOperations.Begin(
-                _localization["Status.Operation.PreparingOutput"],
-                indeterminate: true);
+            statusOperationId = BeginOutputPreparationStatus();
             var content = await Task.Run(() =>
                 _treeAndContentExport.BuildAsync(
                     _currentPath!,
@@ -3533,6 +3534,23 @@ public partial class MainWindow : Window
         if (file is null)
             return false;
 
+        var destinationPath = file.TryGetLocalPath();
+        if (!string.IsNullOrWhiteSpace(destinationPath) &&
+            !string.IsNullOrWhiteSpace(_currentPath))
+        {
+            try
+            {
+                // Text and physical exports share the same canonical guard so an aliased path
+                // cannot bypass the read-only boundary of the loaded project.
+                ProjectCopyExportService.EnsureDestinationOutsideProject(_currentPath, destinationPath);
+            }
+            catch (ProjectCopyExportException)
+            {
+                _toastService.Show(_localization["Error.ProjectCopy.UnsafeDestinationPath"]);
+                return false;
+            }
+        }
+
         await using var stream = await file.OpenWriteAsync();
         await _textFileExport.WriteAsync(stream, content);
 
@@ -3601,6 +3619,18 @@ public partial class MainWindow : Window
 
         _statusOperations.Complete(operationId.Value);
         operationId = null;
+    }
+
+    private long? BeginOutputPreparationStatus()
+    {
+        // Clipboard and text-file exports are safe against the captured project tree, but
+        // they must not replace the progress or cancellation action of a physical export.
+        if (_viewModel.IsProjectCopyExportInProgress)
+            return null;
+
+        return _statusOperations.Begin(
+            _localization["Status.Operation.PreparingOutput"],
+            indeterminate: true);
     }
 
     private string BuildSuggestedExportFileName(string suffix, string extension)
@@ -3719,7 +3749,7 @@ public partial class MainWindow : Window
 
     private void OnTogglePreview(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.IsProjectLoaded)
+        if (!_viewModel.CanTogglePreview)
             return;
 
         if (_viewModel.IsPreviewMode)
@@ -3730,7 +3760,7 @@ public partial class MainWindow : Window
 
     private void OnPreviewClose(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.IsProjectLoaded)
+        if (!_viewModel.CanTogglePreview || !_viewModel.IsPreviewMode)
             return;
 
         ClosePreviewMode();
@@ -3768,7 +3798,7 @@ public partial class MainWindow : Window
 
     private void OnPreviewTreeHide(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.IsPreviewTreeVisible)
+        if (!_viewModel.CanUseProjectWorkspaceActions || !_viewModel.IsPreviewTreeVisible)
             return;
 
         HidePreviewTreePane();
@@ -3791,7 +3821,8 @@ public partial class MainWindow : Window
 
     private async Task SwitchPreviewModeAsync(PreviewContentMode targetMode)
     {
-        if (_viewModel.SelectedPreviewContentMode == targetMode)
+        if (!_viewModel.CanUseProjectWorkspaceActions ||
+            _viewModel.SelectedPreviewContentMode == targetMode)
             return;
 
         var switchCts = ReplaceCancellationSource(ref _previewModeSwitchCts);
@@ -5658,7 +5689,7 @@ public partial class MainWindow : Window
 
     private async void OnRecentFolderMenuItemClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem { Tag: string path })
+        if (!_viewModel.CanChangeProjectTree || sender is not MenuItem { Tag: string path })
             return;
 
         var lifetimeToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
@@ -5919,6 +5950,9 @@ public partial class MainWindow : Window
 
     private void OnGitClone(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanChangeProjectTree)
+            return;
+
         _viewModel.GitCloneUrl = string.Empty;
         _viewModel.GitCloneStatus = string.Empty;
         _viewModel.GitCloneInProgress = false;
@@ -6158,6 +6192,9 @@ public partial class MainWindow : Window
 
     private async void OnGitGetUpdates(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanGetGitUpdates)
+            return;
+
         await GetGitUpdatesAsync();
         e.Handled = true;
     }
@@ -6237,7 +6274,7 @@ public partial class MainWindow : Window
 
     private async void OnGitBranchSwitch(object? sender, string branchName)
     {
-        if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
+        if (!_viewModel.CanGetGitUpdates || string.IsNullOrEmpty(_currentPath))
             return;
 
         var gitCts = ReplaceCancellationSource(ref _gitOperationCts);
@@ -6358,7 +6395,7 @@ public partial class MainWindow : Window
 
     private void OnBranchMenuItemClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem { Tag: string name })
+        if (_viewModel.CanChangeProjectTree && sender is MenuItem { Tag: string name })
             _topMenuBar?.OnGitBranchSwitch(name);
     }
 
@@ -6396,7 +6433,7 @@ public partial class MainWindow : Window
     private async void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.IsProjectLoaded) return;
-        if (!_viewModel.IsSearchFilterAvailable) return;
+        if (!_viewModel.IsSearchAvailable) return;
 
         if (_viewModel.SearchVisible)
         {
@@ -6677,7 +6714,8 @@ public partial class MainWindow : Window
         // Ctrl+O (always available)
         if (mods == KeyModifiers.Control && e.Key == Key.O)
         {
-            OnOpenFolder(this, new RoutedEventArgs());
+            if (_viewModel.CanChangeProjectTree)
+                OnOpenFolder(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
@@ -6707,7 +6745,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (_viewModel.IsProjectLoaded)
+            if (_viewModel.IsSearchFilterAvailable)
             {
                 ScheduleSearchOrFilterHotkeyToggle(
                     isSearchToggle: false,
@@ -6756,7 +6794,7 @@ public partial class MainWindow : Window
         // F5 refresh (same as WinForms)
         if (e.Key == Key.F5)
         {
-            if (_viewModel.IsProjectLoaded)
+            if (_viewModel.CanChangeProjectTree && _viewModel.IsProjectLoaded)
                 OnRefresh(this, new RoutedEventArgs());
 
             e.Handled = true;
@@ -6954,7 +6992,10 @@ public partial class MainWindow : Window
         {
             try
             {
-                if (!_viewModel.IsProjectLoaded || !_viewModel.IsSearchFilterAvailable)
+                var isAvailable = isSearchToggle
+                    ? _viewModel.IsSearchAvailable
+                    : _viewModel.IsSearchFilterAvailable;
+                if (!isAvailable)
                     return;
 
                 toggleAction(this);
@@ -6972,7 +7013,7 @@ public partial class MainWindow : Window
     private void ShowSearch(bool focusInput = true, bool selectAllOnFocus = true)
     {
         if (!_viewModel.IsProjectLoaded) return;
-        if (!_viewModel.IsSearchFilterAvailable) return;
+        if (!_viewModel.IsSearchAvailable) return;
         if (_searchBarAnimating) return;
 
         SuppressSearchBoxAccentVisual();
@@ -6989,7 +7030,7 @@ public partial class MainWindow : Window
     private async Task FocusSearchBoxAfterOpenAnimationAsync(bool selectAllOnFocus, int focusRequestVersion)
     {
         await WaitForPanelAnimationAsync(SearchBarAnimationDuration);
-        if (!_viewModel.SearchVisible || !_viewModel.IsSearchFilterAvailable || !IsSearchFocusRequestCurrent(focusRequestVersion))
+        if (!_viewModel.SearchVisible || !_viewModel.IsSearchAvailable || !IsSearchFocusRequestCurrent(focusRequestVersion))
             return;
 
         await TryFocusSearchBoxWithRetryAsync(selectAllOnFocus, focusRequestVersion);
@@ -7196,7 +7237,7 @@ public partial class MainWindow : Window
         await YieldUiAsync(DispatcherPriority.Render);
         await YieldUiAsync(DispatcherPriority.Render);
 
-        if (!_viewModel.SearchVisible || !_viewModel.IsSearchFilterAvailable)
+        if (!_viewModel.SearchVisible || !_viewModel.IsSearchAvailable)
             return;
 
         RestoreSearchBoxAccentVisual();
@@ -7464,14 +7505,21 @@ public partial class MainWindow : Window
                 // Apply must observe the latest converged section state. A user can click Apply
                 // while an earlier ignore refresh is still finishing; rebuilding the tree first
                 // would capture stale root-folder availability and keep newly revealed folders hidden.
-                await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
-                await RefreshTreeAsync(cancellationToken: cancellationToken);
-                // Most checkbox changes already queue and apply a converged selection snapshot
-                // before Apply rebuilds the tree. Running another live refresh unconditionally
-                // doubles the expensive scan path on large projects, so only do it if a new
-                // selection change landed while the tree was rebuilding.
-                await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(_currentPath, cancellationToken);
-                await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                TreeRefreshOutcome refreshOutcome;
+                do
+                {
+                    await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                    await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
+                        _currentPath,
+                        cancellationToken);
+                    await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+                    refreshOutcome = await RefreshTreeAsync(cancellationToken: cancellationToken);
+
+                    // A checkbox can change while a large tree is being materialized. In that
+                    // case the pipeline discards the obsolete graph and Apply converges again
+                    // instead of presenting settings that describe a different tree.
+                } while (refreshOutcome == TreeRefreshOutcome.StaleInput);
+
                 _projectProfiles.PersistIfNeeded(_currentPath);
             }
             catch (OperationCanceledException)
@@ -7508,6 +7556,9 @@ public partial class MainWindow : Window
 
     private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
     {
+        if (!_viewModel.CanChangeProjectTree)
+            return false;
+
         var stopwatch = Stopwatch.StartNew();
         string normalizedPath;
         try
@@ -8400,10 +8451,10 @@ public partial class MainWindow : Window
         return node with { Children = filteredChildren };
     }
 
-    private async Task RefreshTreeAsync(bool interactiveFilter = false, CancellationToken cancellationToken = default)
-    {
-        await _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
-    }
+    private Task<TreeRefreshOutcome> RefreshTreeAsync(
+        bool interactiveFilter = false,
+        CancellationToken cancellationToken = default) =>
+        _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
 
     private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
     {
@@ -9319,6 +9370,9 @@ public partial class MainWindow : Window
                 _applySettingsCts?.Cancel();
                 _selectionCoordinator.CancelPendingRefreshes();
                 _refreshPipeline.CancelActiveRefresh();
+                break;
+            case StatusOperationType.ProjectCopyExport:
+                _projectCopyExportCts?.Cancel();
                 break;
             case StatusOperationType.MetricsCalculation:
                 // Metrics cancellation is handled below by dedicated fallback logic.

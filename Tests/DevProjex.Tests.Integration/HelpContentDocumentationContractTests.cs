@@ -77,6 +77,21 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "### 12.2 Smart Ignore", "gibrid", "Xiralashtirish", "oxirgi yakunlangan holatiga" }
     };
 
+    public static TheoryData<string, string> IndependentIgnoreControllerContracts => new()
+    {
+        { "help.ru.txt", "независимые переключатели" },
+        { "help.en.txt", "independent switches" },
+        { "help.de.txt", "unabhängige Schalter" },
+        { "help.fr.txt", "interrupteurs indépendants" },
+        { "help.it.txt", "interruttori indipendenti" },
+        { "help.es.txt", "interruptores independientes" },
+        { "help.pt.txt", "controles independentes" },
+        { "help.pt-pt.txt", "controlos independentes" },
+        { "help.kk.txt", "тәуелсіз ауыстырып-қосқыштар" },
+        { "help.tg.txt", "гузаришҳои мустақиланд" },
+        { "help.uz.txt", "mustaqil almashtirgichlardir" }
+    };
+
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
     {
         { "help.ru.txt", "JSON-экспорт использует такой формат дерева: массивы содержат файлы, объекты содержат подпапки, `/` содержит файлы текущей папки, а `[]` обозначает пустую папку." },
@@ -96,6 +111,36 @@ public sealed class HelpContentDocumentationContractTests
         { "help.kk.txt", "алдымен басқа жүйелік эффектіні қолданып көреді", "негізгі терезенің фоны", "Бұлдырлату қолжетімсіз болса, қолданба Mica-ны қолданып көреді" },
         { "help.tg.txt", "аввал эффекти дигари системавиро месанҷад", "заминаи равзанаи асосӣ", "Агар Тирагӣ дастрас набошад, барнома Mica-ро месанҷад" },
         { "help.uz.txt", "avval boshqa tizim effektini sinab ko‘radi", "asosiy oyna foni", "Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi" }
+    };
+
+    public static TheoryData<string, string, string, string, string, string, string, string> ProjectExportContracts => new()
+    {
+        { "help.ru.txt", "Экспорт проекта", "В папку…", "В ZIP-архив…", "Если ничего не отмечено", "структуры каталогов", "бинарные файлы", "внутрь исходного проекта" },
+        { "help.en.txt", "Export project", "To folder…", "To ZIP archive…", "If nothing is checked", "directory structure", "binary files", "inside the source project" },
+        { "help.de.txt", "Projekt exportieren", "In Ordner…", "In ZIP-Archiv…", "Ist nichts markiert", "Verzeichnisstruktur", "Binärdateien", "innerhalb des Quellprojekts" },
+        { "help.fr.txt", "Exporter le projet", "Vers un dossier…", "Vers une archive ZIP…", "Si rien n’est coché", "structure des répertoires", "fichiers texte et binaires", "dans le projet source" },
+        { "help.it.txt", "Esporta progetto", "In una cartella…", "In un archivio ZIP…", "Se non è selezionato nulla", "struttura delle directory", "file di testo e binari", "all’interno del progetto di origine" },
+        { "help.es.txt", "Exportar proyecto", "A una carpeta…", "A un archivo ZIP…", "Si no hay ninguno marcado", "estructura de directorios", "archivos de texto y binarios", "dentro del proyecto de origen" },
+        { "help.pt.txt", "Exportar projeto", "Para uma pasta…", "Para um arquivo ZIP…", "Se nada estiver marcado", "estrutura de diretórios", "Arquivos de texto e binários", "dentro do projeto de origem" },
+        { "help.pt-pt.txt", "Exportar projeto", "Para uma pasta…", "Para um arquivo ZIP…", "Se nada estiver assinalado", "estrutura dos diretórios", "ficheiros de texto e binários", "dentro do projeto de origem" },
+        { "help.kk.txt", "Жобаны экспорттау", "Қалтаға…", "ZIP мұрағатына…", "Ештеңе белгіленбесе", "каталогтар құрылымын", "бинарлық файлдар", "бастапқы жобаның ішіне" },
+        { "help.tg.txt", "Содироти лоиҳа", "Ба ҷузвдон…", "Ба бойгонии ZIP…", "Агар чизе қайд нашуда бошад", "сохтори каталогҳо", "Файлҳои матнӣ ва бинарӣ", "дохили лоиҳаи аслӣ" },
+        { "help.uz.txt", "Loyihani eksport qilish", "Jildga…", "ZIP arxivga…", "Hech narsa belgilanmasa", "kataloglar tuzilmasini", "Matnli va binar fayllar", "boshlang‘ich loyiha ichiga" }
+    };
+
+    public static TheoryData<string, string> ProjectExportBusyContracts => new()
+    {
+        { "help.ru.txt", "Во время экспорта нельзя изменять дерево и параметры, использовать фильтр, менять формат или режим предпросмотра" },
+        { "help.en.txt", "During export, you cannot change the tree or settings, use the filter, change the format or preview mode" },
+        { "help.de.txt", "Während des Exports können Baum und Einstellungen nicht geändert, Filter, Format oder Vorschaumodus nicht verwendet" },
+        { "help.fr.txt", "Pendant l’export, vous ne pouvez pas modifier l’arborescence ou les paramètres, utiliser le filtre, changer le format ou le mode d’aperçu" },
+        { "help.it.txt", "Durante l’esportazione non è possibile modificare l’albero o le impostazioni, usare il filtro, cambiare formato o modalità di anteprima" },
+        { "help.es.txt", "Durante la exportación no se puede cambiar el árbol ni la configuración, usar el filtro, cambiar el formato o el modo de vista previa" },
+        { "help.pt.txt", "Durante a exportação, não é possível alterar a árvore ou as configurações, usar o filtro, mudar o formato ou o modo de visualização" },
+        { "help.pt-pt.txt", "Durante a exportação, não é possível alterar a árvore ou as definições, usar o filtro, mudar o formato ou o modo de pré-visualização" },
+        { "help.kk.txt", "Экспорт кезінде ағаш пен параметрлерді өзгертуге, сүзгіні пайдалануға, пішімді немесе алдын ала қарау режимін ауыстыруға" },
+        { "help.tg.txt", "Ҳангоми содирот тағйир додани дарахт ё параметрҳо, истифодаи филтр, иваз кардани формат ё реҷаи пешнамоиш" },
+        { "help.uz.txt", "Eksport paytida daraxt yoki parametrlarni o‘zgartirish, filtrdan foydalanish, format yoki ko‘rib chiqish rejimini almashtirish" }
     };
 
     [Theory]
@@ -169,6 +214,17 @@ public sealed class HelpContentDocumentationContractTests
     }
 
     [Theory]
+    [MemberData(nameof(IndependentIgnoreControllerContracts))]
+    public void HelpContent_DescribesIndependentGitAndSmartControllers(
+        string fileName,
+        string expectedIndependentText)
+    {
+        var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
+
+        Assert.Contains(expectedIndependentText, ignoreSection, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
     [MemberData(nameof(JsonTreeFormatContracts))]
     public void HelpContent_JsonTreeFormat_DescribesCurrentContract(string fileName, string expectedText)
     {
@@ -195,6 +251,40 @@ public sealed class HelpContentDocumentationContractTests
         Assert.Contains(expectedNativeFallbackText, themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedTransparentWindowText, themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedDefaultFallbackText, content, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectExportContracts))]
+    public void HelpContent_FileSection_DescribesPhysicalProjectExportContract(
+        string fileName,
+        string expectedParent,
+        string expectedFolderAction,
+        string expectedZipAction,
+        string expectedUncheckedBehavior,
+        string expectedDirectoryStructure,
+        string expectedBinarySupport,
+        string expectedInsideSourceRestriction)
+    {
+        var fileSection = ExtractSection(ReadHelpFile(fileName), "## 3)", "## 4)");
+
+        Assert.Contains(expectedParent, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedFolderAction, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedZipAction, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedUncheckedBehavior, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedDirectoryStructure, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedBinarySupport, fileSection, StringComparison.Ordinal);
+        Assert.Contains(expectedInsideSourceRestriction, fileSection, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectExportBusyContracts))]
+    public void HelpContent_FileSection_DescribesUnavailableTreeChangesDuringProjectExport(
+        string fileName,
+        string expectedBusyBehavior)
+    {
+        var fileSection = ExtractSection(ReadHelpFile(fileName), "## 3)", "## 4)");
+
+        Assert.Contains(expectedBusyBehavior, fileSection, StringComparison.Ordinal);
     }
 
     [Theory]

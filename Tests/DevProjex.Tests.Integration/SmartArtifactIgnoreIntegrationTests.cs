@@ -193,7 +193,7 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 	}
 
 	[Fact]
-	public void IgnoreRulesService_SingleGitIgnoreControllerAlsoControlsGenericArtifacts()
+	public void IgnoreRulesService_SingleGitIgnoreControllerDoesNotControlGenericArtifacts()
 	{
 		using var temp = new TemporaryDirectory();
 		SeedLegacyNuGetWorkspace(temp);
@@ -201,21 +201,22 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		temp.CreateFile("App.csproj", "<Project />\n");
 		var service = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
 
-		var disabledRules = service.Build(temp.Path, [], selectedRootFolders: []);
-		var enabledRules = service.Build(
+		var gitOnlyRules = service.Build(
 			temp.Path,
 			[IgnoreOptionId.UseGitIgnore],
 			selectedRootFolders: []);
+		var smartOnlyRules = service.Build(
+			temp.Path,
+			[IgnoreOptionId.SmartIgnore],
+			selectedRootFolders: []);
 
-		Assert.True(disabledRules.SmartIgnoreFollowsGitIgnore);
-		Assert.False(disabledRules.UseSmartIgnore);
-		Assert.True(enabledRules.SmartIgnoreFollowsGitIgnore);
-		Assert.True(enabledRules.UseSmartIgnore);
+		Assert.False(gitOnlyRules.UseSmartIgnore);
+		Assert.True(smartOnlyRules.UseSmartIgnore);
 		AssertPathVisible(
-			BuildTree(temp.Path, disabledRules),
+			BuildTree(temp.Path, gitOnlyRules),
 			"packages/Alpha.1.0.0/Alpha.1.0.0.nupkg");
 		AssertPathHidden(
-			BuildTree(temp.Path, enabledRules),
+			BuildTree(temp.Path, smartOnlyRules),
 			"packages/Alpha.1.0.0/Alpha.1.0.0.nupkg");
 	}
 

@@ -333,7 +333,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				new IgnoreSectionScanData(
 					rawScan.Value.Extensions,
 					rawScan.Value.IgnoreOptionCounts,
-					effectiveScan.Value),
+					effectiveScan.Value,
+					rawScan.Value.ControllerImpactCounts),
 				rawScan.RootAccessDenied || effectiveScan.RootAccessDenied,
 				rawScan.HadAccessDenied || effectiveScan.HadAccessDenied);
 		}
@@ -419,7 +420,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScanner scanner)
 				new IgnoreSectionScanData(
 					rawScan.Value.Extensions,
 					rawScan.Value.IgnoreOptionCounts,
-					effectiveScan.Value),
+					effectiveScan.Value,
+					rawScan.Value.ControllerImpactCounts),
 				rawScan.RootAccessDenied || effectiveScan.RootAccessDenied,
 				rawScan.HadAccessDenied || effectiveScan.HadAccessDenied);
 		}

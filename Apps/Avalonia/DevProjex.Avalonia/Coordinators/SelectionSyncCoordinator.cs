@@ -21,6 +21,12 @@ public sealed partial class SelectionSyncCoordinator(
     private ObservableCollection<SelectionOptionViewModel>? _hookedRootFolders;
     private ObservableCollection<SelectionOptionViewModel>? _hookedExtensions;
     private ObservableCollection<IgnoreOptionViewModel>? _hookedIgnoreOptions;
+    private readonly HashSet<SelectionOptionViewModel> _subscribedRootFolderItems =
+        new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<SelectionOptionViewModel> _subscribedExtensionItems =
+        new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<IgnoreOptionViewModel> _subscribedIgnoreItems =
+        new(ReferenceEqualityComparer.Instance);
 
     // Named handlers for proper unsubscription
     private NotifyCollectionChangedEventHandler? _rootFoldersCollectionChangedHandler;
@@ -72,6 +78,8 @@ public sealed partial class SelectionSyncCoordinator(
         buildIgnoreRules,
         getIgnoreOptionsAvailability);
 
+    public long CurrentSelectionRevision => _session.Revision;
+
     public SelectionSyncCoordinator(
         MainWindowViewModel viewModel,
         ScanOptionsUseCase scanOptions,
@@ -96,97 +104,158 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void HookOptionListeners(ObservableCollection<SelectionOptionViewModel> options)
     {
-        // Track which collection this is for proper cleanup
+        HashSet<SelectionOptionViewModel> subscribedItems;
+        NotifyCollectionChangedEventHandler? handler;
         if (_hookedRootFolders is null)
         {
             _hookedRootFolders = options;
-            _rootFoldersCollectionChangedHandler = CreateSelectionCollectionChangedHandler(options);
+            subscribedItems = _subscribedRootFolderItems;
+            handler = CreateSelectionCollectionChangedHandler(options, subscribedItems);
+            _rootFoldersCollectionChangedHandler = handler;
         }
         else if (_hookedExtensions is null)
         {
             _hookedExtensions = options;
-            _extensionsCollectionChangedHandler = CreateSelectionCollectionChangedHandler(options);
+            subscribedItems = _subscribedExtensionItems;
+            handler = CreateSelectionCollectionChangedHandler(options, subscribedItems);
+            _extensionsCollectionChangedHandler = handler;
+        }
+        else if (ReferenceEquals(options, _hookedRootFolders))
+        {
+            SynchronizeSelectionItemSubscriptions(options, _subscribedRootFolderItems);
+            return;
+        }
+        else if (ReferenceEquals(options, _hookedExtensions))
+        {
+            SynchronizeSelectionItemSubscriptions(options, _subscribedExtensionItems);
+            return;
+        }
+        else
+        {
+            throw new InvalidOperationException("Only root-folder and extension option collections can be hooked.");
         }
 
-        // Subscribe to existing items
         foreach (var item in options)
-            item.CheckedChanged += OnOptionCheckedChanged;
+            SubscribeSelectionItem(item, subscribedItems);
 
-        // Get the appropriate handler
-        var handler = ReferenceEquals(options, _hookedRootFolders)
-            ? _rootFoldersCollectionChangedHandler
-            : _extensionsCollectionChangedHandler;
-
-        // Handle collection changes - properly unsubscribe old and subscribe new
-        if (handler is not null)
-            options.CollectionChanged += handler;
+        options.CollectionChanged += handler;
     }
 
     private NotifyCollectionChangedEventHandler CreateSelectionCollectionChangedHandler(
-        ObservableCollection<SelectionOptionViewModel> options)
+        ObservableCollection<SelectionOptionViewModel> options,
+        HashSet<SelectionOptionViewModel> subscribedItems)
     {
         return (_, e) =>
         {
-            // Unsubscribe from removed items
             if (e.OldItems is not null)
             {
                 foreach (SelectionOptionViewModel item in e.OldItems)
-                    item.CheckedChanged -= OnOptionCheckedChanged;
+                    UnsubscribeSelectionItem(item, subscribedItems);
             }
 
-            // Subscribe to new items
             if (e.NewItems is not null)
             {
                 foreach (SelectionOptionViewModel item in e.NewItems)
-                    item.CheckedChanged += OnOptionCheckedChanged;
+                    SubscribeSelectionItem(item, subscribedItems);
             }
 
-            // Handle Reset action (Clear)
             if (e.Action == NotifyCollectionChangedAction.Reset)
-            {
-                // Re-subscribe to all current items after reset
-                foreach (var item in options)
-                    item.CheckedChanged += OnOptionCheckedChanged;
-            }
+                SynchronizeSelectionItemSubscriptions(options, subscribedItems);
         };
     }
 
     public void HookIgnoreListeners(ObservableCollection<IgnoreOptionViewModel> options)
     {
+        if (ReferenceEquals(options, _hookedIgnoreOptions))
+        {
+            SynchronizeIgnoreItemSubscriptions(options);
+            return;
+        }
+
+        if (_hookedIgnoreOptions is not null)
+            throw new InvalidOperationException("Only one ignore option collection can be hooked.");
+
         _hookedIgnoreOptions = options;
 
-        // Subscribe to existing items
         foreach (var item in options)
-            item.CheckedChanged += OnIgnoreCheckedChanged;
+            SubscribeIgnoreItem(item);
 
-        // Create named handler for proper cleanup
         _ignoreOptionsCollectionChangedHandler = (_, e) =>
         {
-            // Unsubscribe from removed items
             if (e.OldItems is not null)
             {
                 foreach (IgnoreOptionViewModel item in e.OldItems)
-                    item.CheckedChanged -= OnIgnoreCheckedChanged;
+                    UnsubscribeIgnoreItem(item);
             }
 
-            // Subscribe to new items
             if (e.NewItems is not null)
             {
                 foreach (IgnoreOptionViewModel item in e.NewItems)
-                    item.CheckedChanged += OnIgnoreCheckedChanged;
+                    SubscribeIgnoreItem(item);
             }
 
-            // Handle Reset action (Clear)
             if (e.Action == NotifyCollectionChangedAction.Reset)
-            {
-                // Re-subscribe to all current items after reset
-                foreach (var item in options)
-                    item.CheckedChanged += OnIgnoreCheckedChanged;
-            }
+                SynchronizeIgnoreItemSubscriptions(options);
         };
 
-        // Handle collection changes - properly unsubscribe old and subscribe new
         options.CollectionChanged += _ignoreOptionsCollectionChangedHandler;
+    }
+
+    private void SynchronizeSelectionItemSubscriptions(
+        ObservableCollection<SelectionOptionViewModel> options,
+        HashSet<SelectionOptionViewModel> subscribedItems)
+    {
+        var currentItems = options.ToHashSet(ReferenceEqualityComparer.Instance);
+        foreach (var item in subscribedItems.ToArray())
+        {
+            if (!currentItems.Contains(item))
+                UnsubscribeSelectionItem(item, subscribedItems);
+        }
+
+        foreach (var item in options)
+            SubscribeSelectionItem(item, subscribedItems);
+    }
+
+    private void SubscribeSelectionItem(
+        SelectionOptionViewModel item,
+        HashSet<SelectionOptionViewModel> subscribedItems)
+    {
+        if (subscribedItems.Add(item))
+            item.CheckedChanged += OnOptionCheckedChanged;
+    }
+
+    private void UnsubscribeSelectionItem(
+        SelectionOptionViewModel item,
+        HashSet<SelectionOptionViewModel> subscribedItems)
+    {
+        if (subscribedItems.Remove(item))
+            item.CheckedChanged -= OnOptionCheckedChanged;
+    }
+
+    private void SynchronizeIgnoreItemSubscriptions(
+        ObservableCollection<IgnoreOptionViewModel> options)
+    {
+        var currentItems = options.ToHashSet(ReferenceEqualityComparer.Instance);
+        foreach (var item in _subscribedIgnoreItems.ToArray())
+        {
+            if (!currentItems.Contains(item))
+                UnsubscribeIgnoreItem(item);
+        }
+
+        foreach (var item in options)
+            SubscribeIgnoreItem(item);
+    }
+
+    private void SubscribeIgnoreItem(IgnoreOptionViewModel item)
+    {
+        if (_subscribedIgnoreItems.Add(item))
+            item.CheckedChanged += OnIgnoreCheckedChanged;
+    }
+
+    private void UnsubscribeIgnoreItem(IgnoreOptionViewModel item)
+    {
+        if (_subscribedIgnoreItems.Remove(item))
+            item.CheckedChanged -= OnIgnoreCheckedChanged;
     }
 
     public void HandleRootAllChanged(bool isChecked, string? currentPath)
@@ -199,6 +268,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         SetAllChecked(viewModel.RootFolders, isChecked, ref _suppressRootItemCheck);
         UpdateRootSelectionCache();
+        _session.AdvanceRevision();
         QueueLiveOptionsRefresh(currentPath, SelectionRefreshOrigin.RootSelection);
     }
 
@@ -212,6 +282,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         SetAllChecked(viewModel.Extensions, isChecked, ref _suppressExtensionItemCheck);
         UpdateExtensionsSelectionCache();
+        _session.AdvanceRevision();
 
         // Bulk extension toggles suppress individual item events, so refresh live
         // ignore counts explicitly to keep EmptyFolders aligned with tree semantics.
@@ -232,6 +303,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         SetAllChecked(viewModel.IgnoreOptions, isChecked, ref _suppressIgnoreItemCheck);
         UpdateIgnoreSelectionCache();
+        _session.AdvanceRevision();
         if (!string.IsNullOrEmpty(currentPath))
         {
             QueueFullRefresh(currentPath, changedIgnoreOptionId: null);
@@ -256,7 +328,7 @@ public sealed partial class SelectionSyncCoordinator(
         // ScanOptionsUseCase.GetExtensionsForRootFolders will include root-level files.
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
         var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, rootFolders);
-        var extensionScanRules = BuildExtensionAvailabilityScanRules(ignoreRules);
+        var extensionScanRules = IgnoreRulesProjection.ForExtensionAvailability(ignoreRules);
         var forceAllExtensionsChecked =
             !ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh();
         var includeDirectoryToggleProbeRoots =
@@ -444,6 +516,46 @@ public sealed partial class SelectionSyncCoordinator(
         ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
     }
 
+    public void RelabelIgnoreOptions(bool showAdvancedCounts)
+    {
+        if (viewModel.IgnoreOptions.Count == 0)
+            return;
+
+        var visibleIds = viewModel.IgnoreOptions
+            .Select(static option => option.Id)
+            .ToHashSet();
+        var counts = _ignoreOptionCounts;
+        var availability = new IgnoreOptionsAvailability(
+            IncludeGitIgnore: visibleIds.Contains(IgnoreOptionId.UseGitIgnore),
+            IncludeSmartIgnore: visibleIds.Contains(IgnoreOptionId.SmartIgnore),
+            IncludeHiddenFolders: visibleIds.Contains(IgnoreOptionId.HiddenFolders),
+            HiddenFoldersCount: counts.HiddenFolders,
+            IncludeHiddenFiles: visibleIds.Contains(IgnoreOptionId.HiddenFiles),
+            HiddenFilesCount: counts.HiddenFiles,
+            IncludeDotFolders: visibleIds.Contains(IgnoreOptionId.DotFolders),
+            DotFoldersCount: counts.DotFolders,
+            IncludeDotFiles: visibleIds.Contains(IgnoreOptionId.DotFiles),
+            DotFilesCount: counts.DotFiles,
+            IncludeEmptyFolders: visibleIds.Contains(IgnoreOptionId.EmptyFolders),
+            EmptyFoldersCount: counts.EmptyFolders,
+            IncludeExtensionlessFiles: visibleIds.Contains(IgnoreOptionId.ExtensionlessFiles),
+            ExtensionlessFilesCount: counts.ExtensionlessFiles,
+            IncludeEmptyFiles: visibleIds.Contains(IgnoreOptionId.EmptyFiles),
+            EmptyFilesCount: counts.EmptyFiles,
+            ShowAdvancedCounts: showAdvancedCounts);
+        var localizedDescriptors = ignoreOptionsService.GetOptions(availability);
+        var descriptorsById = localizedDescriptors.ToDictionary(static descriptor => descriptor.Id);
+
+        foreach (var option in viewModel.IgnoreOptions)
+        {
+            if (descriptorsById.TryGetValue(option.Id, out var descriptor))
+                option.Label = descriptor.Label;
+        }
+
+        _ignoreOptions = localizedDescriptors;
+        SynchronizeStableIgnoreOptionLabels();
+    }
+
     public IReadOnlyCollection<string> GetSelectedRootFolders()
     {
         var selected = new List<string>(viewModel.RootFolders.Count);
@@ -459,11 +571,13 @@ public sealed partial class SelectionSyncCoordinator(
     public void ApplyProjectProfileSelections(string projectPath, ProjectSelectionProfile profile)
     {
         _session.ApplyProfile(projectPath, profile);
+        _session.AdvanceRevision();
     }
 
     public void ResetProjectProfileSelections(string projectPath)
     {
         _session.ResetToDefaultsForProject(projectPath);
+        _session.AdvanceRevision();
 
         // Restore defaults for projects without a saved profile.
         viewModel.AllRootFoldersChecked = true;
@@ -841,14 +955,17 @@ public sealed partial class SelectionSyncCoordinator(
     /// </summary>
     private void UnsubscribeFromOptionItems()
     {
-        foreach (var item in viewModel.RootFolders)
+        foreach (var item in _subscribedRootFolderItems)
             item.CheckedChanged -= OnOptionCheckedChanged;
+        _subscribedRootFolderItems.Clear();
 
-        foreach (var item in viewModel.Extensions)
+        foreach (var item in _subscribedExtensionItems)
             item.CheckedChanged -= OnOptionCheckedChanged;
+        _subscribedExtensionItems.Clear();
 
-        foreach (var item in viewModel.IgnoreOptions)
+        foreach (var item in _subscribedIgnoreItems)
             item.CheckedChanged -= OnIgnoreCheckedChanged;
+        _subscribedIgnoreItems.Clear();
     }
 
     public IReadOnlyCollection<IgnoreOptionId> GetSelectedIgnoreOptionIds()
@@ -893,103 +1010,30 @@ public sealed partial class SelectionSyncCoordinator(
         IReadOnlyCollection<string> selectedRootFolders)
     {
         if (string.IsNullOrWhiteSpace(path))
-            return CreateCountDrivenIgnoreAvailability(includeGitIgnore: false, includeSmartIgnore: false);
+            return IgnoreOptionsAvailabilityResolver.CreateUnmeasured(
+                includeGitIgnore: false,
+                includeSmartIgnore: false);
 
         try
         {
-            var availability = CreateCountDrivenIgnoreAvailability(getIgnoreOptionsAvailability(path, selectedRootFolders));
-            if (_hasIgnoreOptionCounts)
-            {
-                return availability with
-                {
-                    IncludeGitIgnore = availability.IncludeGitIgnore &&
-                                       ShouldKeepControllerVisible(
-                                           IgnoreOptionId.UseGitIgnore,
-                                           _ignoreControllerImpactCounts.GitIgnore),
-                    IncludeSmartIgnore = availability.IncludeSmartIgnore &&
-                                         ShouldKeepControllerVisible(
-                                             IgnoreOptionId.SmartIgnore,
-                                             _ignoreControllerImpactCounts.SmartIgnore),
-                    IncludeHiddenFolders = _ignoreOptionCounts.HiddenFolders > 0,
-                    HiddenFoldersCount = _ignoreOptionCounts.HiddenFolders,
-                    IncludeHiddenFiles = _ignoreOptionCounts.HiddenFiles > 0,
-                    HiddenFilesCount = _ignoreOptionCounts.HiddenFiles,
-                    IncludeDotFolders = _ignoreOptionCounts.DotFolders > 0,
-                    DotFoldersCount = _ignoreOptionCounts.DotFolders,
-                    IncludeDotFiles = _ignoreOptionCounts.DotFiles > 0,
-                    DotFilesCount = _ignoreOptionCounts.DotFiles,
-                    IncludeEmptyFolders = _ignoreOptionCounts.EmptyFolders > 0,
-                    EmptyFoldersCount = _ignoreOptionCounts.EmptyFolders,
-                    IncludeEmptyFiles = _ignoreOptionCounts.EmptyFiles > 0,
-                    EmptyFilesCount = _ignoreOptionCounts.EmptyFiles,
-                    IncludeExtensionlessFiles = _ignoreOptionCounts.ExtensionlessFiles > 0,
-                    ExtensionlessFilesCount = _ignoreOptionCounts.ExtensionlessFiles
-                };
-            }
-
-            if (_hasExtensionlessExtensionEntries)
-            {
-                return availability with
-                {
-                    IncludeExtensionlessFiles = true,
-                    ExtensionlessFilesCount = _extensionlessExtensionEntriesCount
-                };
-            }
-
-            return availability;
+            var snapshotState = new IgnoreSectionSnapshotState(
+                _hasIgnoreOptionCounts,
+                _ignoreOptionCounts,
+                _ignoreControllerImpactCounts,
+                _hasExtensionlessExtensionEntries,
+                _extensionlessExtensionEntriesCount);
+            return IgnoreOptionsAvailabilityResolver.Resolve(
+                getIgnoreOptionsAvailability(path, selectedRootFolders),
+                snapshotState,
+                _session.IgnoreOptions.OptionStateCache,
+                _session.IgnoreOptionStateCacheIsComplete);
         }
         catch
         {
-            return CreateCountDrivenIgnoreAvailability(includeGitIgnore: false, includeSmartIgnore: false);
+            return IgnoreOptionsAvailabilityResolver.CreateUnmeasured(
+                includeGitIgnore: false,
+                includeSmartIgnore: false);
         }
-    }
-
-    private bool ShouldKeepControllerVisible(
-        IgnoreOptionId optionId,
-        int controllerImpactCount)
-    {
-        if (controllerImpactCount > 0)
-            return true;
-
-        // Controller toggles must stay reversible after an explicit user choice. Only the
-        // unchecked zero-impact state is forced visible; checked zero-impact profile state
-        // stays hidden so it cannot unexpectedly become an active runtime selection.
-        return _session.IgnoreOptionStateCacheIsComplete &&
-               _session.IgnoreOptions.OptionStateCache.TryGetValue(optionId, out var isChecked) &&
-               !isChecked;
-    }
-
-    private static IgnoreOptionsAvailability CreateCountDrivenIgnoreAvailability(
-        bool includeGitIgnore,
-        bool includeSmartIgnore)
-    {
-        return new IgnoreOptionsAvailability(
-            IncludeGitIgnore: includeGitIgnore,
-            IncludeSmartIgnore: includeSmartIgnore);
-    }
-
-    private static IgnoreOptionsAvailability CreateCountDrivenIgnoreAvailability(
-        IgnoreOptionsAvailability availability)
-    {
-        // Advanced ignore options are driven by live counts coming from the scan layer.
-        // Keep them hidden until the coordinator has computed those values.
-        return availability with
-        {
-            IncludeHiddenFolders = false,
-            HiddenFoldersCount = 0,
-            IncludeHiddenFiles = false,
-            HiddenFilesCount = 0,
-            IncludeDotFolders = false,
-            DotFoldersCount = 0,
-            IncludeDotFiles = false,
-            DotFilesCount = 0,
-            IncludeEmptyFolders = false,
-            EmptyFoldersCount = 0,
-            IncludeEmptyFiles = false,
-            EmptyFilesCount = 0,
-            IncludeExtensionlessFiles = false,
-            ExtensionlessFilesCount = 0
-        };
     }
 
     private void ApplyIgnoreOptions(
@@ -1098,6 +1142,7 @@ public sealed partial class SelectionSyncCoordinator(
                 value => viewModel.AllRootFoldersChecked = value,
                 emptyValue: true);
             UpdateRootSelectionCache();
+            _session.AdvanceRevision();
 
             QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.RootSelection);
         }
@@ -1109,6 +1154,7 @@ public sealed partial class SelectionSyncCoordinator(
                 value => viewModel.AllExtensionsChecked = value);
 
             UpdateExtensionsSelectionCache();
+            _session.AdvanceRevision();
             QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.ExtensionSelection);
         }
     }
@@ -1125,6 +1171,7 @@ public sealed partial class SelectionSyncCoordinator(
             value => viewModel.AllIgnoreChecked = value);
 
         UpdateIgnoreSelectionCache();
+        _session.AdvanceRevision();
 
         var currentPath = currentPathProvider();
         if (!string.IsNullOrEmpty(currentPath))
@@ -1547,6 +1594,7 @@ public sealed partial class SelectionSyncCoordinator(
             snapshot.HasIgnoreOptionCounts);
 
         ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+        _session.AdvanceRevision();
         MarkSelectionRefreshClean();
         var previousSnapshot = retainPreviousSnapshot ? _stableSelectionSnapshot : null;
         var appliedSnapshot = CaptureStableSelectionSnapshot(snapshot, rootOptionsAreAuthoritative);
@@ -2363,28 +2411,6 @@ public sealed partial class SelectionSyncCoordinator(
             _ignoreRulesBuildCache = new IgnoreRulesBuildCacheEntry(cacheKey, rules);
 
         return rules;
-    }
-
-    private static IgnoreRules BuildExtensionAvailabilityScanRules(IgnoreRules rules)
-    {
-        // File-level rules are relaxed only for the internal availability state. The scanner
-        // also returns the effective set used by the visible UI, so ignored-only extensions
-        // never become no-op choices while toggle counters remain reversible.
-        if (!rules.IgnoreHiddenFiles &&
-            !rules.IgnoreDotFiles &&
-            !rules.IgnoreEmptyFiles &&
-            !rules.IgnoreExtensionlessFiles)
-        {
-            return rules;
-        }
-
-        return rules with
-        {
-            IgnoreHiddenFiles = false,
-            IgnoreDotFiles = false,
-            IgnoreEmptyFiles = false,
-            IgnoreExtensionlessFiles = false
-        };
     }
 
     private static void SetAllChecked<T>(

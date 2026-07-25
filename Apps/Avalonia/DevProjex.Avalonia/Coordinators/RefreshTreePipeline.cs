@@ -6,11 +6,13 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
 {
     private CancellationTokenSource? _refreshCts;
 
-    public async Task RefreshTreeAsync(bool interactiveFilter = false, CancellationToken cancellationToken = default)
+    public async Task<TreeRefreshOutcome> RefreshTreeAsync(
+        bool interactiveFilter = false,
+        CancellationToken cancellationToken = default)
     {
         var input = host.CaptureTreeRefreshInput();
         if (input is null)
-            return;
+            return TreeRefreshOutcome.Skipped;
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -48,7 +50,7 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
             linkedToken.ThrowIfCancellationRequested();
 
             if (host.TryHandleRootAccessDenied(input, result.Tree))
-                return;
+                return TreeRefreshOutcome.Skipped;
 
             TreeNodeViewModel root;
             using (PerformanceMetrics.Measure("BuildTreeViewModel"))
@@ -59,6 +61,12 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
             }
 
             linkedToken.ThrowIfCancellationRequested();
+            // Selection changes are allowed while the filesystem walk is running. The
+            // completed graph is immutable, but it is no longer authoritative when its
+            // root/extension/ignore revision has changed, so never publish it.
+            if (!host.IsTreeRefreshInputCurrent(input))
+                return TreeRefreshOutcome.StaleInput;
+
             host.ApplyTreeRefreshResult(
                 input,
                 result,
@@ -66,6 +74,7 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
                 interactiveFilter,
                 usedInMemoryFilter,
                 cancellationToken);
+            return TreeRefreshOutcome.Applied;
         }
         finally
         {
@@ -115,4 +124,11 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
 
         current.Dispose();
     }
+}
+
+internal enum TreeRefreshOutcome
+{
+    Applied,
+    Skipped,
+    StaleInput
 }

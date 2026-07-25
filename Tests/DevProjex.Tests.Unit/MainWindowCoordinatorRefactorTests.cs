@@ -527,6 +527,39 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public async Task RefreshTreePipeline_SelectionChangesDuringBuild_RejectsObsoleteTree()
+    {
+        var viewModel = CreateViewModel();
+        var buildStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBuild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingRefreshTreeHost(viewModel)
+        {
+            SelectionRevision = 41,
+            BuildTreeHandler = token =>
+            {
+                buildStarted.TrySetResult();
+                releaseBuild.Task.Wait(token);
+                return new BuildTreeSnapshotResult(
+                    RecordingRefreshTreeHost.CreateResult("obsolete"),
+                    RecordingRefreshTreeHost.CreateInventorySnapshot());
+            }
+        };
+        using var pipeline = new RefreshTreePipeline(host);
+
+        var refreshTask = pipeline.RefreshTreeAsync(cancellationToken: TestContext.Current.CancellationToken);
+        await buildStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+        host.SelectionRevision++;
+        releaseBuild.SetResult();
+
+        var outcome = await refreshTask;
+
+        Assert.Equal(TreeRefreshOutcome.StaleInput, outcome);
+        Assert.Equal(1, host.BuildTreeCount);
+        Assert.Equal(0, host.ApplyCount);
+        Assert.Empty(viewModel.TreeNodes);
+    }
+
+    [Fact]
     public async Task ProjectLoadSnapshotPipeline_ReloadAsync_BuildsTreeFromSelectionSnapshot()
     {
         var selectionSnapshot = CreateSelectionRefreshSnapshot();
@@ -1283,6 +1316,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public string CurrentPath { get; set; } = @"C:\ProjectA";
 
+        public long SelectionRevision { get; set; }
+
         public Func<CancellationToken, BuildTreeSnapshotResult>? BuildTreeHandler { get; set; }
 
         public Func<TreeRefreshInput, BuildTreeResult, TreeNodeViewModel>? BuildViewModelHandler { get; set; }
@@ -1306,7 +1341,8 @@ public sealed class MainWindowCoordinatorRefactorTests
                         IgnoreDotFiles: false,
                         SmartIgnoredFolders: new HashSet<string>(),
                         SmartIgnoredFiles: new HashSet<string>())),
-                NameFilter: null);
+                NameFilter: null,
+                SelectionRevision: SelectionRevision);
         }
 
         public void BeforeFullTreeRefresh() =>
@@ -1343,8 +1379,12 @@ public sealed class MainWindowCoordinatorRefactorTests
                    new TreeNodeViewModel(result.Root, parent: null, icon: null)
                    {
                        DisplayName = input.DisplayName
-                   };
+            };
         }
+
+        public bool IsTreeRefreshInputCurrent(TreeRefreshInput input) =>
+            PathComparer.Default.Equals(CurrentPath, input.CurrentPath) &&
+            input.SelectionRevision == SelectionRevision;
 
         public void ApplyTreeRefreshResult(
             TreeRefreshInput input,

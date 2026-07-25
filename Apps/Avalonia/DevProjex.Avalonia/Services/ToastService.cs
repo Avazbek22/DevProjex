@@ -11,16 +11,20 @@ public sealed class ToastService : IToastService, IDisposable
 
 	public ObservableCollection<ToastMessageViewModel> Items { get; } = [];
 
-	public void Show(string message)
+	public void Show(string message) => Show(message, DisplayDuration);
+
+	public void Show(string message, TimeSpan duration)
 	{
 		if (string.IsNullOrWhiteSpace(message))
 			return;
+		if (duration <= TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(duration));
 
 		Dispatcher.UIThread.Post(() =>
 		{
 			var toast = new ToastMessageViewModel(message);
 			AddToast(toast);
-			ScheduleDismiss(toast, DisplayDuration);
+			ScheduleDismiss(toast, duration);
 		});
 	}
 

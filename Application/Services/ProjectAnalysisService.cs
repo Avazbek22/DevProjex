@@ -6,6 +6,7 @@ namespace DevProjex.Application.Services;
 public sealed class ProjectAnalysisService(
 	ScanOptionsUseCase scanOptions,
 	BuildTreeUseCase buildTree,
+	FilterOptionSelectionService filterSelectionService,
 	IgnoreOptionsService ignoreOptions,
 	IgnoreRulesService ignoreRules,
 	TreeExportService treeExport,
@@ -14,6 +15,12 @@ public sealed class ProjectAnalysisService(
 {
 	private const int MaximumConcurrentContentMetricReads = 4;
 	private const int ContentMetricBatchSize = 1024;
+	private static readonly IReadOnlySet<string> EmptyRootSelection = new HashSet<string>(PathComparer.Default);
+	private static readonly IReadOnlySet<string> EmptyExtensionSelection =
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	private static readonly IReadOnlySet<IgnoreOptionId> EmptyIgnoreSelection = new HashSet<IgnoreOptionId>();
+	private static readonly IReadOnlyDictionary<IgnoreOptionId, bool> EmptyIgnoreState =
+		new Dictionary<IgnoreOptionId, bool>();
 	private readonly Func<DateTimeOffset> _utcNowProvider = utcNowProvider ?? (() => DateTimeOffset.UtcNow);
 
 	public async Task<ProjectAnalysisReport> AnalyzeAsync(
@@ -36,6 +43,16 @@ public sealed class ProjectAnalysisService(
 			throw new DirectoryNotFoundException($"Project path was not found: {request.RootPath}");
 
 		var loadingStopwatch = Stopwatch.StartNew();
+		if (CanUseUnifiedDefaultSelectionPipeline(request) &&
+		    scanOptions.SupportsWorkspaceSnapshots &&
+		    buildTree.SupportsCompositeInventory)
+		{
+			return LoadWithUnifiedDefaultSelection(
+				rootPath,
+				loadingStopwatch,
+				cancellationToken);
+		}
+
 		var selectedRootFolders = NormalizeRootFolders(request.SelectedRootFolders);
 		var selectedIgnoreOptions = ResolveSelectedIgnoreOptions(
 			rootPath,
@@ -135,6 +152,84 @@ public sealed class ProjectAnalysisService(
 			KnownLoadingElapsed: loadingStopwatch.Elapsed);
 	}
 
+	private static bool CanUseUnifiedDefaultSelectionPipeline(ProjectAnalysisRequest request) =>
+		request.SelectedRootFolders is null &&
+		request.SelectedExtensions is null &&
+		request.SelectedIgnoreOptions is null;
+
+	private LoadedProjectAnalysisRequest LoadWithUnifiedDefaultSelection(
+		string rootPath,
+		Stopwatch loadingStopwatch,
+		CancellationToken cancellationToken)
+	{
+		var selectionRefreshEngine = new SelectionRefreshEngine(
+			scanOptions,
+			filterSelectionService,
+			ignoreOptions,
+			(candidateRootPath, selectedOptions, selectedRootFolders) =>
+				ignoreRules.Build(candidateRootPath, selectedOptions, selectedRootFolders),
+			(candidateRootPath, selectedRootFolders) =>
+				ignoreRules.GetIgnoreOptionsAvailability(candidateRootPath, selectedRootFolders));
+		var snapshot = selectionRefreshEngine.ComputeFullRefreshSnapshot(
+			new SelectionRefreshContext(
+				Path: rootPath,
+				PreparedSelectionMode: PreparedSelectionMode.Defaults,
+				AllRootFoldersChecked: true,
+				AllExtensionsChecked: true,
+				RootSelectionInitialized: false,
+				RootSelectionCache: EmptyRootSelection,
+				ExtensionsSelectionInitialized: false,
+				ExtensionsSelectionCache: EmptyExtensionSelection,
+				IgnoreSelectionInitialized: false,
+				IgnoreSelectionCache: EmptyIgnoreSelection,
+				IgnoreOptionStateCache: EmptyIgnoreState,
+				IgnoreAllPreference: null,
+				CurrentSnapshotState: default,
+				CaptureTreeInventory: true),
+			cancellationToken);
+		var inventory = snapshot.TreeInventory ??
+		                throw new InvalidOperationException(
+			                "The unified project selection scan did not produce a tree inventory.");
+		var rootOptions = snapshot.RootOptions ?? [];
+		var selectedRootFolders = rootOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Name)
+			.ToArray();
+		var extensionOptions = snapshot.EffectiveExtensionOptions;
+		var selectedExtensions = extensionOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Name)
+			.ToArray();
+		var selectedIgnoreOptions = snapshot.IgnoreOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Id)
+			.ToArray();
+		var rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		var treeRequest = new BuildTreeRequest(
+			rootPath,
+			new TreeFilterOptions(
+				AllowedExtensions: selectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
+				AllowedRootFolders: selectedRootFolders.ToHashSet(PathComparer.Default),
+				IgnoreRules: rules));
+		var treeResult = buildTree.ExecuteWithInventory(
+			treeRequest,
+			inventory,
+			cancellationToken).Tree;
+		loadingStopwatch.Stop();
+
+		return new LoadedProjectAnalysisRequest(
+			RootPath: rootPath,
+			Tree: treeResult,
+			AvailableRootFolders: rootOptions.Select(static option => option.Name).ToArray(),
+			AvailableExtensions: extensionOptions.Select(static option => option.Name).ToArray(),
+			SelectedRootFolders: selectedRootFolders,
+			SelectedExtensions: selectedExtensions,
+			SelectedIgnoreOptions: selectedIgnoreOptions,
+			RootAccessDenied: snapshot.RootAccessDenied || treeResult.RootAccessDenied,
+			HadAccessDenied: snapshot.HadAccessDenied || treeResult.HadAccessDenied,
+			KnownLoadingElapsed: loadingStopwatch.Elapsed);
+	}
+
 	private static IReadOnlyList<string> GetVisibleRootFolderNames(TreeNodeDescriptor root)
 	{
 		var names = new List<string>();
@@ -211,27 +306,29 @@ public sealed class ProjectAnalysisService(
 		var discoveryRootFolders = useAllRootFoldersForDefaults
 			? scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken).Value
 			: selectedRootFolders;
-		var scan = scanOptions.GetExtensionsAndIgnoreCountsForRootFolders(
+		var extensionDiscoveryRules = IgnoreRulesProjection.ForExtensionAvailability(discoveryRules);
+		var scan = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
 			rootPath,
 			discoveryRootFolders,
-			discoveryRules,
-			cancellationToken);
-		var counts = scan.Value.IgnoreOptionCounts;
+			extensionDiscoveryRules,
+			effectiveRules: discoveryRules,
+			effectiveAllowedExtensions: (IReadOnlySet<string>?)null,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: cancellationToken,
+			includeControllerImpactProbeRoots: true);
+		var counts = scan.Value.EffectiveIgnoreOptionCounts;
 		var controllerImpactCounts = scan.Value.ControllerImpactCounts;
-
-		// Headless automation has to start from the same dynamic defaults as the UI.
-		// Git/smart/dot/hidden availability is structural, while empty and extensionless
-		// options only exist when the current root selection exposes matching entries.
-		var dynamicAvailability = availability with
-		{
-			IncludeGitIgnore = availability.IncludeGitIgnore || controllerImpactCounts.GitIgnore > 0,
-			IncludeEmptyFolders = counts.EmptyFolders > 0,
-			EmptyFoldersCount = counts.EmptyFolders,
-			IncludeEmptyFiles = counts.EmptyFiles > 0,
-			EmptyFilesCount = counts.EmptyFiles,
-			IncludeExtensionlessFiles = counts.ExtensionlessFiles > 0,
-			ExtensionlessFilesCount = counts.ExtensionlessFiles
-		};
+		var snapshotState = new IgnoreSectionSnapshotState(
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: counts,
+			ControllerImpactCounts: controllerImpactCounts,
+			HasExtensionlessEntries: counts.ExtensionlessFiles > 0,
+			ExtensionlessEntriesCount: counts.ExtensionlessFiles);
+		var dynamicAvailability = IgnoreOptionsAvailabilityResolver.Resolve(
+			availability,
+			snapshotState,
+			new Dictionary<IgnoreOptionId, bool>(),
+			stateCacheIsComplete: false);
 
 		return ignoreOptions.GetOptions(dynamicAvailability)
 			.Where(static option => option.DefaultChecked)

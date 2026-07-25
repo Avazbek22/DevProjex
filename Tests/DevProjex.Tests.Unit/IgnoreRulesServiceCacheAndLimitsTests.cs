@@ -50,7 +50,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 
 		var gitOnly = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-git"]);
 		Assert.True(gitOnly.IncludeGitIgnore);
-		Assert.False(gitOnly.IncludeSmartIgnore);
+		Assert.True(gitOnly.IncludeSmartIgnore);
 	}
 
 	[Fact]
@@ -364,7 +364,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["linked"]);
 
 		Assert.False(availability.IncludeSmartIgnore);
-		Assert.False(rules.UseSmartIgnore);
+		Assert.True(rules.UseSmartIgnore);
 	}
 
 	[Fact]
@@ -381,7 +381,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 
 		Assert.False(availability.IncludeGitIgnore);
 		Assert.False(availability.IncludeSmartIgnore);
-		Assert.False(rules.UseSmartIgnore);
+		Assert.True(rules.UseSmartIgnore);
 	}
 
 	private static void SeedMixedWorkspace(TemporaryDirectory temp)

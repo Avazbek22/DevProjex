@@ -46,7 +46,7 @@ public sealed class IgnoreRulesServiceRootSelectionNormalizationMatrixTests
 
 	public static IEnumerable<object[]> CanonicalBehaviorCases()
 	{
-		yield return ["git-only", new[] { "alpha" }, true, false, true, true];
+		yield return ["git-only", new[] { "alpha" }, true, true, true, true];
 		yield return ["smart-only", new[] { "beta" }, false, true, false, true];
 		yield return ["mixed-git-smart", new[] { "alpha", "beta" }, true, true, true, true];
 		yield return ["nested-smart", new[] { "gamma" }, false, true, false, true];

@@ -56,7 +56,7 @@
           Classes="panel"
           Background="Transparent"
           BorderThickness="0"
-          IsEnabled="{Binding IsProjectLoaded}">
+          IsEnabled="{Binding AreFilterSettingsEnabled}">
     <Grid RowDefinitions="Auto,*,*,*">
       <!-- Apply stays at the top because filter options remain intentionally staged. -->
       <Button Name="ApplySettingsButton"

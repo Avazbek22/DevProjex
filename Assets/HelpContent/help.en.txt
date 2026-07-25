@@ -23,6 +23,17 @@ Hotkeys:
   * Export tree
   * Export content
   * Export tree and content
+* Export project:
+  * To folder…
+  * To ZIP archive…
+
+Export project creates a separate folder or ZIP archive from the current tree while preserving the directory structure.
+
+Selected root folders, file types, exclusion rules, and checked items are respected. If nothing is checked, the entire current tree is exported.
+
+Text and binary files are copied, and included empty folders are preserved. The source files are not modified. The result cannot be saved inside the source project.
+
+During export, you cannot change the tree or settings, use the filter, change the format or preview mode, run Git commands, refresh, or open another project.
 
 Format rules:
 * Export tree:
@@ -367,13 +378,11 @@ A malformed or unsupported line is skipped independently. Other valid rules in t
 This option covers working-tree `.gitignore` files only. Rules from `.git/info/exclude`, global Git configuration, and Git index state are not applied.
 
 ### 12.4 Relationship between .gitignore and Smart Ignore
-For a project with one scope and its own `.gitignore`, the interface usually shows only "Use .gitignore". In this mode, it controls the project's combined policy by enabling both `.gitignore` rules and applicable Smart Ignore rules.
+`.gitignore` and Smart Ignore are independent switches. Each applies to all of its scopes at every reachable nesting level. An option is shown only when changing it can affect the current effective tree.
 
-In a workspace with multiple projects, the options may be shown separately. In that case, `.gitignore` and Smart Ignore are enabled independently for the applicable scopes.
+`.gitignore` runs first, Smart Ignore processes the remaining items, and the basic rules run last. Smart Ignore can therefore stay hidden while `.gitignore` already covers all of its candidates, then appear after `.gitignore` is disabled.
 
-A Git negation rule starting with `!` cancels only a Git result. It does not override Smart Ignore or a basic rule. For example, a file restored by `!` remains hidden if Smart Ignore or "Empty files" excludes it.
-
-There is therefore no shared "stronger rule" between `.gitignore`, Smart Ignore, and the basic rules. An item must pass every enabled mechanism to remain visible.
+A Git negation rule starting with `!` cancels only a Git result. It does not disable Smart Ignore or a basic rule.
 
 ### 12.5 Basic rules
 "Dot-prefixed folders" and "Dot-prefixed files" inspect the item name.

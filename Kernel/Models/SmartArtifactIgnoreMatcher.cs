@@ -3,8 +3,8 @@ using System.IO.Enumeration;
 
 namespace DevProjex.Kernel.Models;
 
-// Smart artifact ignore is the generic half of the hybrid ignore model. Stack-specific
-// smart rules are still preferred when a project marker proves the technology, but real
+// Smart artifact matching is the portable, signature-backed layer of Smart Ignore.
+// Stack-specific rules are still preferred when a project marker proves the technology, but real
 // workspaces often contain generated folders outside a clean project root: copied build
 // artifacts, package caches, temporary publish folders, or dependency stores. This matcher
 // catches those cases without requiring a deep "guess the project type" scan.

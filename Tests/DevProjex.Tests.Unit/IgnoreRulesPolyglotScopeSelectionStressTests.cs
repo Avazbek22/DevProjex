@@ -11,13 +11,6 @@ public sealed class IgnoreRulesPolyglotScopeSelectionStressTests
 		"go-tool"
 	];
 
-	private static readonly HashSet<string> NonGitScopes = new(StringComparer.OrdinalIgnoreCase)
-	{
-		"service-dotnet",
-		"python-worker",
-		"go-tool"
-	};
-
 	public static IEnumerable<object[]> SelectedScopeSubsets()
 	{
 		var max = 1 << ScopeNames.Length;
@@ -96,11 +89,8 @@ public sealed class IgnoreRulesPolyglotScopeSelectionStressTests
 		var availability = service.GetIgnoreOptionsAvailability(Path.Combine(temp.Path, "workspace"), selectedScopes);
 
 		var hasGit = true;
-		var hasNonGit = selectedScopes.Any(scope => NonGitScopes.Contains(scope));
-		var isSingleGitScope = false;
-
 		Assert.Equal(hasGit, availability.IncludeGitIgnore);
-		Assert.Equal(!isSingleGitScope && hasNonGit, availability.IncludeSmartIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
 	}
 
 	[Theory]

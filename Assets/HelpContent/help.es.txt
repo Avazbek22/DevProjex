@@ -23,6 +23,17 @@ Teclas de acceso rápido:
   * Árbol de exportación
   * Exportar contenido
   * Exportar árbol y contenido
+* Exportar proyecto:
+  * A una carpeta…
+  * A un archivo ZIP…
+
+La exportación del proyecto crea una carpeta independiente o un archivo ZIP a partir del árbol actual y conserva la estructura de directorios.
+
+Se respetan las carpetas raíz seleccionadas, los tipos de archivo, las reglas de exclusión y los elementos marcados. Si no hay ninguno marcado, se exporta todo el árbol actual.
+
+Se copian archivos de texto y binarios, y se conservan las carpetas vacías incluidas. Los archivos de origen no se modifican. El resultado no puede guardarse dentro del proyecto de origen.
+
+Durante la exportación no se puede cambiar el árbol ni la configuración, usar el filtro, cambiar el formato o el modo de vista previa, ejecutar comandos de Git, actualizar ni abrir otro proyecto.
 
 Reglas de formato:
 * Árbol de exportación:
@@ -367,13 +378,11 @@ Una línea con formato incorrecto o sin soporte se omite de forma independiente.
 Esta opción cubre únicamente los archivos `.gitignore` del árbol de trabajo. No se aplican las reglas de `.git/info/exclude`, la configuración global de Git y el estado del índice de Git.
 
 ### 12.4 Relación entre .gitignore y Smart Ignore
-Para un proyecto con un alcance y su propio `.gitignore`, la interfaz generalmente muestra solo "Usar .gitignore". En este modo, controla la política combinada del proyecto habilitando tanto las reglas `.gitignore` como las reglas de Smart Ignore aplicables.
+`.gitignore` y Smart Ignore son interruptores independientes. Cada uno se aplica a todos sus ámbitos en cualquier nivel de anidamiento accesible. Una opción solo se muestra si cambiarla puede afectar al árbol efectivo actual.
 
-En un espacio de trabajo con varios proyectos, las opciones pueden mostrarse por separado. En ese caso, `.gitignore` y Smart Ignore se habilitan de forma independiente para los ámbitos aplicables.
+Primero se aplica `.gitignore`, después Smart Ignore procesa los elementos restantes y, por último, actúan las reglas básicas. Por eso Smart Ignore puede permanecer oculto mientras `.gitignore` ya cubra todos sus candidatos y aparecer al desactivar `.gitignore`.
 
-Una regla de negación de Git que comienza con `!` cancela solo un resultado de Git. No anula Smart Ignore ni una regla básica. Por ejemplo, un archivo restaurado por `!` permanece oculto si Smart Ignore o "Archivos vacíos" lo excluye.
-
-Por lo tanto, no existe una "regla más estricta" compartida entre `.gitignore`, Smart Ignore y las reglas básicas. Un elemento debe pasar por todos los mecanismos habilitados para permanecer visible.
+Una regla de negación de Git que comienza con `!` cancela solo un resultado de Git. No desactiva Smart Ignore ni una regla básica.
 
 ### 12.5 Reglas básicas
 Las "carpetas con prefijo de punto" y los "archivos con prefijo de punto" inspeccionan el nombre del elemento.

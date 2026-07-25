@@ -107,6 +107,27 @@ public sealed class FileSystemScannerFilenameEdgeMatrixIntegrationTests
 		}
 	}
 
+	[Fact]
+	public void ExtensionDiscovery_ParallelCaseVariantsUseOneCanonicalValue()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("alpha/one.CS", "x");
+		temp.CreateFile("beta/two.cs", "x");
+		temp.CreateFile("gamma/three.Cs", "x");
+		var scanner = new FileSystemScanner();
+		var rules = CreateRules(ignoreExtensionless: false);
+
+		for (var iteration = 0; iteration < 20; iteration++)
+		{
+			var result = scanner.GetExtensionsWithIgnoreOptionCounts(
+				temp.Path,
+				rules,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(".cs", Assert.Single(result.Value.Extensions));
+		}
+	}
+
 	private static IgnoreRules CreateRules(bool ignoreExtensionless)
 	{
 		return new IgnoreRules(

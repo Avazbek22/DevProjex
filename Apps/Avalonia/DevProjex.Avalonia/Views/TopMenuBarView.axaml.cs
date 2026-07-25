@@ -12,6 +12,8 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? ExportTreeToFileRequested;
     public event EventHandler<RoutedEventArgs>? ExportContentToFileRequested;
     public event EventHandler<RoutedEventArgs>? ExportTreeAndContentToFileRequested;
+    public event EventHandler<RoutedEventArgs>? ExportProjectCopyToFolderRequested;
+    public event EventHandler<RoutedEventArgs>? ExportProjectCopyToZipRequested;
     public event EventHandler<RoutedEventArgs>? ExitRequested;
     public event EventHandler<RoutedEventArgs>? CopyTreeRequested;
     public event EventHandler<RoutedEventArgs>? CopyContentRequested;
@@ -94,6 +96,21 @@ public partial class TopMenuBarView : UserControl
     private void OnExportTreeAndContentToFile(object? sender, RoutedEventArgs e)
         => ExportTreeAndContentToFileRequested?.Invoke(sender, e);
 
+    private void OnExportProjectCopyToFolder(object? sender, RoutedEventArgs e)
+        => ExportProjectCopyToFolderRequested?.Invoke(sender, e);
+
+    private void OnExportProjectCopyToZip(object? sender, RoutedEventArgs e)
+        => ExportProjectCopyToZipRequested?.Invoke(sender, e);
+
+    private void OnProjectCopyHelpIndicatorPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        // The indicator is informational; consuming pointer input keeps the submenu open and prevents export.
+        e.Handled = true;
+    }
+
+    private void OnProjectCopyHelpIndicatorPointerReleased(object? sender, PointerReleasedEventArgs e) =>
+        e.Handled = true;
+
     private void OnExit(object? sender, RoutedEventArgs e) => ExitRequested?.Invoke(sender, e);
 
     private void OnCopyTree(object? sender, RoutedEventArgs e) => CopyTreeRequested?.Invoke(sender, e);
@@ -121,11 +138,17 @@ public partial class TopMenuBarView : UserControl
 
     private void OnToggleSettings(object? sender, RoutedEventArgs e) => ToggleSettingsRequested?.Invoke(sender, e);
 
-    private void OnTogglePreview(object? sender, RoutedEventArgs e) => TogglePreviewRequested?.Invoke(sender, e);
+    private void OnTogglePreview(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel { CanTogglePreview: false })
+            return;
+
+        TogglePreviewRequested?.Invoke(sender, e);
+    }
 
     private void OnToggleSearch(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel { IsSearchFilterAvailable: false })
+        if (DataContext is MainWindowViewModel { IsSearchAvailable: false })
             return;
 
         ToggleSearchRequested?.Invoke(sender, e);
@@ -141,25 +164,25 @@ public partial class TopMenuBarView : UserControl
 
     private void OnAsciiFormatClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: true } vm)
             vm.SelectedExportFormat = ExportFormat.Ascii;
     }
 
     private void OnJsonFormatClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: true } vm)
             vm.SelectedExportFormat = ExportFormat.Json;
     }
 
     private void OnXmlFormatClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: true } vm)
             vm.SelectedExportFormat = ExportFormat.Xml;
     }
 
     private void OnMarkdownFormatClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel { CanUseProjectWorkspaceActions: true } vm)
             vm.SelectedExportFormat = ExportFormat.Markdown;
     }
 

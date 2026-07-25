@@ -70,7 +70,7 @@ public sealed class IgnoreRulesServiceMixedWorkspaceMatrixTests
 	}
 
 	[Fact]
-	public void GetIgnoreOptionsAvailability_SelectedGitProjectOnly_DisablesSmartOption()
+	public void GetIgnoreOptionsAvailability_SelectedGitProjectOnly_KeepsSmartIndependent()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("proj-git/.gitignore", "bin/");
@@ -81,7 +81,7 @@ public sealed class IgnoreRulesServiceMixedWorkspaceMatrixTests
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-git"]);
 
 		Assert.True(availability.IncludeGitIgnore);
-		Assert.False(availability.IncludeSmartIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
 	}
 
 	[Fact]
@@ -100,7 +100,7 @@ public sealed class IgnoreRulesServiceMixedWorkspaceMatrixTests
 	}
 
 	[Fact]
-	public void Build_SelectedGitProjectOnly_EnablesHiddenSmartMode()
+	public void Build_SelectedGitProjectOnly_EnablesExplicitSmartSelection()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("proj-git/.gitignore", "git_only/");

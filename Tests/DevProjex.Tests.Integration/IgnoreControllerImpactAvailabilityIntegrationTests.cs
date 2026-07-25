@@ -41,7 +41,7 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 	}
 
 	[Fact]
-	public void GitIgnoreController_IsHiddenWhenOnlyMatchedFileIsAlreadyMaskedByDotFiles()
+	public void GitIgnoreController_OwnsMatchedDotFileBeforeDotFilesRule()
 	{
 		using var project = new TemporaryDirectory();
 		project.CreateFile(".gitignore", ".env\n");
@@ -51,8 +51,9 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 
 		var snapshot = ComputeDefaultSnapshot(project.Path);
 
-		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedVisible: false, expectedChecked: null);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: true);
 		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFiles, expectedVisible: true, expectedChecked: true);
+		Assert.Equal(1, snapshot.IgnoreOptionCounts.DotFiles);
 	}
 
 	[Fact]
@@ -188,7 +189,7 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
 		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".cs");
 		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".config");
-		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".DotSettings");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".dotsettings");
 		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".nupkg");
 		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".dll");
 		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".user");
@@ -386,7 +387,7 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 	}
 
 	[Fact]
-	public void DotFileOnlyGitIgnoreController_ExplicitUncheckedStateStaysVisibleWhenDotFilesMaskItsImpact()
+	public void DotFileOnlyGitIgnoreController_ExplicitUncheckedStateStaysVisibleWhenDotFilesTakesOver()
 	{
 		using var project = new TemporaryDirectory();
 		project.CreateFile(".gitignore", ".env\n");
@@ -411,7 +412,7 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 
 		AssertIgnoreOption(allOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
 		Assert.True(allOff.ControllerImpactCounts.GitIgnore > 0);
-		Assert.Equal(0, dotFilesOn.ControllerImpactCounts.GitIgnore);
+		Assert.True(dotFilesOn.ControllerImpactCounts.GitIgnore > 0);
 		AssertIgnoreOption(dotFilesOn, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
 		AssertIgnoreOption(dotFilesOn, IgnoreOptionId.DotFiles, expectedVisible: true, expectedChecked: true);
 	}

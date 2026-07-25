@@ -264,6 +264,7 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 		return new ProjectAnalysisService(
 			new ScanOptionsUseCase(scanner),
 			new BuildTreeUseCase(treeBuilder, treePresenter),
+			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			ignoreRules,
 			new TreeExportService(),

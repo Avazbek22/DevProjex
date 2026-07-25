@@ -61,16 +61,12 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 			contract.SelectedRootFolders);
 
 		var expectedUseGitIgnore = contract.HasGitController && gitSelected;
-		var expectedUseSmartIgnore = contract.SmartFollowsGitIgnore
-			? gitSelected
-			: contract.RuntimeSmartAvailable && smartSelected;
+		var expectedUseSmartIgnore = smartSelected;
 
 		Assert.Equal(contract.HasGitController, availability.IncludeGitIgnore);
 		Assert.Equal(contract.HasSmartController, availability.IncludeSmartIgnore);
-		Assert.Equal(contract.SmartFollowsGitIgnore, availability.SmartIgnoreFollowsGitIgnore);
 		Assert.Equal(expectedUseGitIgnore, rules.UseGitIgnore);
 		Assert.Equal(expectedUseSmartIgnore, rules.UseSmartIgnore);
-		Assert.Equal(contract.SmartFollowsGitIgnore, rules.SmartIgnoreFollowsGitIgnore);
 		Assert.Equal(expectedUseGitIgnore, rules.GitIgnoreCandidateMatchesActiveRules);
 		Assert.Equal(expectedUseSmartIgnore, rules.SmartIgnoreCandidateMatchesActiveRules);
 
@@ -178,9 +174,7 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 			var selectedOptions = ResolveSelectedOptions(optionBits);
 			var gitSelected = selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
 			var smartSelected = selectedOptions.Contains(IgnoreOptionId.SmartIgnore);
-			var expectedUseSmartIgnore = contract.SmartFollowsGitIgnore
-				? gitSelected
-				: contract.RuntimeSmartAvailable && smartSelected;
+			var expectedUseSmartIgnore = smartSelected;
 			var context = discovery.Discover(contract.OpenRootPath, contract.SelectedRootFolders);
 			var rules = rulesService.Build(
 				contract.OpenRootPath,
@@ -191,7 +185,6 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 			AssertExactPaths(contract.ExpectedSmartScopes, rules.SmartIgnoreCandidateScopeRoots);
 			Assert.Equal(contract.HasGitController && gitSelected, rules.UseGitIgnore);
 			Assert.Equal(expectedUseSmartIgnore, rules.UseSmartIgnore);
-			Assert.Equal(contract.SmartFollowsGitIgnore, rules.SmartIgnoreFollowsGitIgnore);
 			AssertRuleOwnership(
 				temp.Path,
 				contract,
@@ -257,7 +250,6 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 
 		Assert.False(smartAvailability.IncludeGitIgnore);
 		Assert.True(smartAvailability.IncludeSmartIgnore);
-		Assert.False(smartAvailability.SmartIgnoreFollowsGitIgnore);
 		Assert.False(ContainsPath(smartTree, "beta-cache/artifact.bin"));
 		Assert.True(ContainsPath(smartTree, "git-only/drop.txt"));
 
@@ -268,12 +260,10 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 		var gitTree = BuildTree(projectRoot, selectedRoots, gitRules);
 
 		Assert.True(gitAvailability.IncludeGitIgnore);
-		Assert.False(gitAvailability.IncludeSmartIgnore);
-		Assert.True(gitAvailability.SmartIgnoreFollowsGitIgnore);
+		Assert.True(gitAvailability.IncludeSmartIgnore);
 		Assert.True(gitRules.UseGitIgnore);
-		Assert.True(gitRules.UseSmartIgnore);
-		Assert.True(gitRules.SmartIgnoreFollowsGitIgnore);
-		Assert.False(ContainsPath(gitTree, "beta-cache/artifact.bin"));
+		Assert.False(gitRules.UseSmartIgnore);
+		Assert.True(ContainsPath(gitTree, "beta-cache/artifact.bin"));
 		Assert.False(ContainsPath(gitTree, "git-only/drop.txt"));
 
 		File.Delete(gitIgnorePath);
@@ -284,7 +274,6 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 
 		Assert.False(restoredAvailability.IncludeGitIgnore);
 		Assert.True(restoredAvailability.IncludeSmartIgnore);
-		Assert.False(restoredAvailability.SmartIgnoreFollowsGitIgnore);
 		Assert.False(ContainsPath(restoredTree, "beta-cache/artifact.bin"));
 		Assert.True(ContainsPath(restoredTree, "git-only/drop.txt"));
 	}
@@ -398,9 +387,7 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 				[gitProject],
 				[gitProject],
 				HasGitController: true,
-				HasSmartController: false,
-				RuntimeSmartAvailable: false,
-				SmartFollowsGitIgnore: true,
+				HasSmartController: true,
 				HasSmartImpact: true,
 				DirectProjectName: "git-project"),
 			WorkspaceView.DirectSmartProject => new ViewContract(
@@ -411,8 +398,6 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 				[smartProject],
 				HasGitController: false,
 				HasSmartController: true,
-				RuntimeSmartAvailable: true,
-				SmartFollowsGitIgnore: false,
 				HasSmartImpact: true,
 				DirectProjectName: "smart-project"),
 			WorkspaceView.ParentGitOnly => new ViewContract(
@@ -422,9 +407,7 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 				[gitProject],
 				[gitProject],
 				HasGitController: true,
-				HasSmartController: false,
-				RuntimeSmartAvailable: false,
-				SmartFollowsGitIgnore: true,
+				HasSmartController: true,
 				HasSmartImpact: true),
 			WorkspaceView.ParentSmartOnly => new ViewContract(
 				rootPath,
@@ -434,8 +417,6 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 				[smartProject],
 				HasGitController: false,
 				HasSmartController: true,
-				RuntimeSmartAvailable: true,
-				SmartFollowsGitIgnore: false,
 				HasSmartImpact: true),
 			WorkspaceView.ParentMixed => new ViewContract(
 				rootPath,
@@ -445,8 +426,6 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 				[gitProject, smartProject],
 				HasGitController: true,
 				HasSmartController: true,
-				RuntimeSmartAvailable: true,
-				SmartFollowsGitIgnore: false,
 				HasSmartImpact: true),
 			WorkspaceView.ParentPlainOnly => new ViewContract(
 				rootPath,
@@ -456,8 +435,6 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 				[],
 				HasGitController: false,
 				HasSmartController: false,
-				RuntimeSmartAvailable: true,
-				SmartFollowsGitIgnore: false,
 				HasSmartImpact: false),
 			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};
@@ -585,8 +562,6 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 		string[] ExpectedSmartScopes,
 		bool HasGitController,
 		bool HasSmartController,
-		bool RuntimeSmartAvailable,
-		bool SmartFollowsGitIgnore,
 		bool HasSmartImpact,
 		string? DirectProjectName = null)
 	{

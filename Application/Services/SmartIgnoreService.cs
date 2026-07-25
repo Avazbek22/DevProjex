@@ -6,6 +6,8 @@ public sealed class SmartIgnoreService
 {
 	private readonly IReadOnlyList<ISmartIgnoreRule> _rules;
 	private readonly IReadOnlyList<SmartIgnoreRuleDescriptor> _descriptors;
+	private readonly FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> _directoryScopeRules;
+	private readonly FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> _fileScopeRules;
 
 	public SmartIgnoreService(
 		IEnumerable<ISmartIgnoreRule> rules,
@@ -17,10 +19,35 @@ public sealed class SmartIgnoreService
 			.OfType<ISmartIgnoreRuleDescriptorProvider>()
 			.Select(provider => provider.Descriptor)
 			.ToArray();
+		DescriptorFolderNames = _descriptors
+			.SelectMany(static descriptor => descriptor.FolderNames)
+			.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+		DescriptorFileNames = _descriptors
+			.SelectMany(static descriptor => descriptor.FileNames)
+			.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+		_directoryScopeRules = SmartIgnoreScopeResolver.BuildRuleIndex(
+			_descriptors,
+			static descriptor => descriptor.FolderNames);
+		_fileScopeRules = SmartIgnoreScopeResolver.BuildRuleIndex(
+			_descriptors,
+			static descriptor => descriptor.FileNames);
 		RootFactsProvider = rootFactsProvider ?? new ProjectRootFactsProvider();
 	}
 
 	public ProjectRootFactsProvider RootFactsProvider { get; }
+
+	public IReadOnlyList<SmartIgnoreRuleDescriptor> Descriptors => _descriptors;
+
+	public IReadOnlySet<string> DescriptorFolderNames { get; }
+
+	public IReadOnlySet<string> DescriptorFileNames { get; }
+
+	public ISmartIgnoreScopeResolver CreateScopeResolver(string rootPath) =>
+		new SmartIgnoreScopeResolver(
+			rootPath,
+			RootFactsProvider,
+			_directoryScopeRules,
+			_fileScopeRules);
 
 	public SmartIgnoreResult Build(string rootPath) =>
 		Build(RootFactsProvider.Get(rootPath));

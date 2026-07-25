@@ -82,7 +82,7 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.NotNull(loaded.IgnoreOptionStates);
 		Assert.Empty(loaded.RootFolderStates);
 		Assert.Empty(loaded.ExtensionStates);
-		Assert.Empty(loaded.IgnoreOptionStates);
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.SmartIgnore]);
 
 		store.SaveProfile(projectPath, loaded);
 
@@ -93,10 +93,81 @@ public sealed class InfrastructureJsonPersistenceTests
 			.Single()
 			.Value;
 
-		Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("rootFolderStates").ValueKind);
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("extensionStates").ValueKind);
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("ignoreOptionStates").ValueKind);
+	}
+
+	[Fact]
+	public void ProjectProfileStore_MigratesLegacyHiddenSmartControllerFromEnabledGitState()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new ProjectProfileStore(() => Path.Combine(temp.Path, "appdata"));
+		var projectPath = Path.Combine(temp.Path, "RepoHybrid");
+		var storePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+		var normalizedPath = JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+		File.WriteAllText(storePath, $$"""
+			{
+			  "schemaVersion": 2,
+			  "profiles": {
+			    {{normalizedPath}}: {
+			      "selectedRootFolders": [],
+			      "selectedExtensions": [],
+			      "selectedIgnoreOptions": [ "useGitIgnore" ],
+			      "rootFolderStates": {},
+			      "extensionStates": {},
+			      "ignoreOptionStates": { "useGitIgnore": true },
+			      "updatedUtc": "2026-01-01T00:00:00+00:00"
+			    }
+			  }
+			}
+			""");
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+		Assert.Contains(IgnoreOptionId.SmartIgnore, loaded.SelectedIgnoreOptions);
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.UseGitIgnore]);
+		Assert.True(loaded.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
+
+		using var document = JsonDocument.Parse(File.ReadAllText(storePath));
+		Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+	}
+
+	[Fact]
+	public void ProjectProfileStore_MigrationPreservesExplicitIndependentSmartState()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new ProjectProfileStore(() => Path.Combine(temp.Path, "appdata"));
+		var projectPath = Path.Combine(temp.Path, "RepoIndependent");
+		var storePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+		var normalizedPath = JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+		File.WriteAllText(storePath, $$"""
+			{
+			  "schemaVersion": 2,
+			  "profiles": {
+			    {{normalizedPath}}: {
+			      "selectedRootFolders": [],
+			      "selectedExtensions": [],
+			      "selectedIgnoreOptions": [ "useGitIgnore" ],
+			      "rootFolderStates": {},
+			      "extensionStates": {},
+			      "ignoreOptionStates": {
+			        "useGitIgnore": true,
+			        "smartIgnore": false
+			      },
+			      "updatedUtc": "2026-01-01T00:00:00+00:00"
+			    }
+			  }
+			}
+			""");
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.UseGitIgnore]);
+		Assert.False(loaded.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
+		Assert.DoesNotContain(IgnoreOptionId.SmartIgnore, loaded.SelectedIgnoreOptions);
 	}
 
 	[Fact]

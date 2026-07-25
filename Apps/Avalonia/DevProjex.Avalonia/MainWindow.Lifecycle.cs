@@ -2,6 +2,33 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+    private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_allowCloseAfterProjectCopyExportCleanup || _projectCopyExportCts is null)
+            return;
+
+        e.Cancel = true;
+        if (_projectCopyExportClosePending)
+            return;
+
+        _projectCopyExportClosePending = true;
+        var completion = _projectCopyExportCompletion?.Task;
+        try
+        {
+            _projectCopyExportCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Export completion won the race with window shutdown.
+        }
+
+        if (completion is not null)
+            await completion;
+
+        _allowCloseAfterProjectCopyExportCleanup = true;
+        Close();
+    }
+
     private void CancelAndDisposeWindowOperations()
     {
         CancelAndDispose(ref _windowLifetimeCts);
@@ -21,6 +48,7 @@ public partial class MainWindow
         CancelAndDispose(ref _applySettingsCts);
         CancelAndDispose(ref _gitCloneCts);
         CancelAndDispose(ref _gitOperationCts);
+        CancelAndDispose(ref _projectCopyExportCts);
     }
 
     private void StopMetricsDebounceTimers()
