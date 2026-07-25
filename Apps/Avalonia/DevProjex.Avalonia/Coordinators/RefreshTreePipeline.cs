@@ -5,6 +5,7 @@ namespace DevProjex.Avalonia.Coordinators;
 internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisposable
 {
     private CancellationTokenSource? _refreshCts;
+    private readonly TreeNameFilterSession _nameFilterSession = new();
 
     public async Task<TreeRefreshOutcome> RefreshTreeAsync(
         bool interactiveFilter = false,
@@ -30,9 +31,11 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
             BuildTreeSnapshotResult result;
             var usedInMemoryFilter = false;
 
-            if (interactiveFilter &&
-                host.TryBuildInteractiveFilteredTreeResult(input.NameFilter, linkedToken, out var filteredResult))
+            if (interactiveFilter && input.InteractiveFilterBaseTree is { } baseTree)
             {
+                var filteredResult = await Task.Run(
+                    () => _nameFilterSession.Build(baseTree, input.NameFilter, linkedToken),
+                    linkedToken);
                 result = new BuildTreeSnapshotResult(filteredResult, Inventory: null);
                 usedInMemoryFilter = true;
             }
@@ -87,9 +90,12 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
         _refreshCts?.Cancel();
     }
 
+    public void InvalidateInteractiveFilterCache() => _nameFilterSession.Invalidate();
+
     public void Dispose()
     {
         CancelAndDispose(ref _refreshCts);
+        _nameFilterSession.Invalidate();
     }
 
     private static CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)

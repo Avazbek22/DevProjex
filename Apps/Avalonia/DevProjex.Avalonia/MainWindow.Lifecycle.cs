@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Coordinators;
+
 namespace DevProjex.Avalonia;
 
 public partial class MainWindow
@@ -36,30 +38,15 @@ public partial class MainWindow
         _projectLoadPipeline.Dispose();
         _previewPipeline.Dispose();
         _refreshPipeline.Dispose();
-        StopMetricsDebounceTimers();
 
-        CancelAndDispose(ref _previewSelectionMetricsCts);
-        CancelAndDispose(ref _previewMemoryCleanupCts);
-        CancelAndDispose(ref _searchMemoryCleanupCts);
-        CancelAndDispose(ref _backgroundMemoryCleanupCts);
-        CancelAndDispose(ref _previewModeSwitchCts);
+        _memoryCleanup.CancelAll();
+        _previewWorkspaceController.CancelModeSwitch();
 
         CancelAndDispose(ref _projectOperationCts);
         CancelAndDispose(ref _applySettingsCts);
         CancelAndDispose(ref _gitCloneCts);
         CancelAndDispose(ref _gitOperationCts);
         CancelAndDispose(ref _projectCopyExportCts);
-    }
-
-    private void StopMetricsDebounceTimers()
-    {
-        if (_previewSelectionMetricsDebounceTimer is not null)
-        {
-            _previewSelectionMetricsDebounceTimer.Stop();
-            _previewSelectionMetricsDebounceTimer.Tick -= OnPreviewSelectionMetricsDebounceTick;
-            _previewSelectionMetricsDebounceTimer = null;
-        }
-
     }
 
     private static void CancelAndDispose(ref CancellationTokenSource? source)
@@ -81,5 +68,111 @@ public partial class MainWindow
         }
 
         current.Dispose();
+    }
+
+    private void OnWindowClosed(object? sender, EventArgs e)
+    {
+        CancelAndDispose(ref _windowLifetimeCts);
+        CompleteSessionMetricsRecording();
+        FlushPersistedStateOnWindowClose();
+
+        // Unsubscribe from window events
+        PropertyChanged -= OnWindowPropertyChanged;
+        ScalingChanged -= OnWindowScalingChanged;
+
+        // Unsubscribe from localization service
+        if (_languageChangedHandler is not null)
+            _localization.LanguageChanged -= _languageChangedHandler;
+
+        // Unsubscribe from application theme changes
+        var app = global::Avalonia.Application.Current;
+        if (app is not null && _themeChangedHandler is not null)
+            app.ActualThemeVariantChanged -= _themeChangedHandler;
+
+        // Unsubscribe from ViewModel
+        if (_viewModelPropertyChangedHandler is not null)
+            _viewModel.PropertyChanged -= _viewModelPropertyChangedHandler;
+
+        // Unsubscribe from tree checkbox changes for metrics
+
+        // Unsubscribe from DragDrop events
+        if (_dropZoneContainer is not null)
+        {
+            _dropZoneContainer.RemoveHandler(DragDrop.DragEnterEvent, OnDropZoneDragEnter);
+            _dropZoneContainer.RemoveHandler(DragDrop.DragOverEvent, OnDropZoneDragOver);
+            _dropZoneContainer.RemoveHandler(DragDrop.DragLeaveEvent, OnDropZoneDragLeave);
+            _dropZoneContainer.RemoveHandler(DragDrop.DropEvent, OnDropZoneDrop);
+        }
+
+        // Unsubscribe from tree pointer events
+        if (_treeView is not null)
+            _treeView.PointerEntered -= OnTreePointerEntered;
+        if (_previewSegmentGrid is not null)
+            _previewSegmentGrid.SizeChanged -= OnPreviewSegmentGridSizeChanged;
+        if (_previewBar is not null)
+            _previewBar.SizeChanged -= OnPreviewBarSizeChanged;
+        DetachRecentMenuHandlers();
+        DetachTreeFontMenuHandlers();
+
+        // Unsubscribe from tunneled/bubbled events
+        RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
+        RemoveHandler(KeyDownEvent, OnKeyDown);
+        RemoveHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened);
+        RemoveHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened);
+
+        // Unsubscribe from window lifecycle events
+        Opened -= OnOpened;
+        Closing -= OnWindowClosing;
+        Closed -= OnWindowClosed;
+        Activated -= OnActivated;
+        Deactivated -= OnDeactivated;
+
+        _previewSurfaceController.Dispose();
+        CancelAndDisposeWindowOperations();
+
+        _searchFilterController.ClearProjectState();
+
+        // Dispose coordinators
+        _memoryCleanup.Dispose();
+        _previewWorkspaceController.Dispose();
+        _searchFilterController.Dispose();
+        _workspacePresentation.Dispose();
+        _selectionCoordinator.Dispose();
+        _themeBrushCoordinator.Dispose();
+
+        // Dispose ViewModel to clean up collection event handlers
+        _viewModel.Dispose();
+
+        // Dispose icon cache to release bitmap resources
+        _iconCache.Dispose();
+
+        // Dispose toast service to cancel pending dismiss timers
+        if (_toastService is IDisposable toastDisposable)
+            toastDisposable.Dispose();
+
+        // Clear tree references and release memory
+        foreach (var node in _viewModel.TreeNodes)
+            node.ClearRecursive();
+        _viewModel.TreeNodes.Clear();
+        _currentTree = null;
+        _filterBaseTree = null;
+        _currentTreeInventory = null;
+        ResetPreviewTreePaneVisualState();
+        ResetInteractiveFilterCache();
+        _metrics.InvalidateComputedCaches();
+
+        // Clear file metrics cache
+        _metrics.ClearFileMetricsCache(trimCapacity: true);
+
+        // Clean up repository cache on exit
+        _repoCacheService.ClearAllCache();
+
+        _taskbarProgress.Dispose();
+
+        // Dispose ZipDownloadService
+        if (_zipDownloadService is IDisposable disposable)
+            disposable.Dispose();
+
+        _sessionMetrics.Dispose();
     }
 }

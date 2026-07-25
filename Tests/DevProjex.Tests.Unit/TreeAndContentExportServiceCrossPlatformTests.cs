@@ -99,7 +99,7 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 	}
 
 	[Fact]
-	public void Build_Json_DirectorySelectionReturnsTreeWithoutContentWhenNoFilesSelected()
+	public void Build_Json_DirectorySelectionIncludesDescendantContent()
 	{
 		using var temp = new TemporaryDirectory();
 		var srcFolder = temp.CreateFolder("src");
@@ -110,11 +110,13 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 
 		var export = service.Build(temp.Path, root, selected, TreeTextFormat.Json);
 
-		// When no files selected, only tree JSON is returned (no content part)
-		using var doc = JsonDocument.Parse(export);
+		var (jsonPart, contentPart) = SplitJsonAndContent(export);
+		using var doc = JsonDocument.Parse(jsonPart);
 		var tree = JsonTreeExportTestHelper.GetTree(doc);
 		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
 		Assert.Equal(["src/main.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.Contains("src/main.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("class C {}", contentPart, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -682,8 +684,8 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 		var export = service.Build(temp.Path, root, selected, TreeTextFormat.Ascii);
 
 		Assert.Contains("src", export);
-		Assert.DoesNotContain("class A", export);
-		Assert.DoesNotContain("class B", export);
+		Assert.Contains("class A", export);
+		Assert.Contains("class B", export);
 		Assert.DoesNotContain("class Outside", export);
 	}
 

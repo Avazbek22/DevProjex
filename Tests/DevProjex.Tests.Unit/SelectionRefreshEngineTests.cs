@@ -8,7 +8,7 @@ public sealed class SelectionRefreshEngineTests
 	public void ComputeFullRefreshSnapshot_DefaultDirectoryTogglesUseSinglePassRootProjection()
 	{
 		var scanner = new DotFolderNoiseScanner();
-		var useCase = new ScanOptionsUseCase(scanner);
+		var useCase = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var engine = new SelectionRefreshEngine(
 			useCase,
@@ -63,7 +63,7 @@ public sealed class SelectionRefreshEngineTests
 		var scanner = new SelfHiddenRuntimeOptionsScanner();
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var engine = new SelectionRefreshEngine(
-			new ScanOptionsUseCase(scanner),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			BuildIgnoreRules,
@@ -161,7 +161,7 @@ public sealed class SelectionRefreshEngineTests
 			SmartIgnore: 1));
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var engine = new SelectionRefreshEngine(
-			new ScanOptionsUseCase(scanner),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			BuildIgnoreRules,
@@ -186,7 +186,7 @@ public sealed class SelectionRefreshEngineTests
 		var scanner = new ProfileFallbackVisibilityScanner();
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var engine = new SelectionRefreshEngine(
-			new ScanOptionsUseCase(scanner),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			BuildIgnoreRules,
@@ -209,7 +209,7 @@ public sealed class SelectionRefreshEngineTests
 		var scanner = new ProfileFallbackVisibilityScanner();
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var engine = new SelectionRefreshEngine(
-			new ScanOptionsUseCase(scanner),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			BuildIgnoreRules,
@@ -251,7 +251,7 @@ public sealed class SelectionRefreshEngineTests
 		var scanner = new ProfileFallbackVisibilityScanner();
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var engine = new SelectionRefreshEngine(
-			new ScanOptionsUseCase(scanner),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			BuildIgnoreRules,
@@ -292,7 +292,7 @@ public sealed class SelectionRefreshEngineTests
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var buildCount = 0;
 		var engine = new SelectionRefreshEngine(
-			new ScanOptionsUseCase(scanner),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			(path, selectedIgnoreOptions, selectedRootFolders) =>
@@ -338,7 +338,7 @@ public sealed class SelectionRefreshEngineTests
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		return new SelectionRefreshEngine(
-			new ScanOptionsUseCase(scanner),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
 			BuildIgnoreRules,

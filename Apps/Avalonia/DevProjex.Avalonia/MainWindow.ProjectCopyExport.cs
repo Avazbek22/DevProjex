@@ -108,8 +108,7 @@ public partial class MainWindow
         _projectCopyExportCts = cancellation;
         _projectCopyExportCompletion = completion;
         _viewModel.IsProjectCopyExportInProgress = true;
-        _searchCoordinator.CancelPending();
-        _filterCoordinator.CancelPending();
+        _searchFilterController.CancelPending();
         long? operationId = null;
 
         try

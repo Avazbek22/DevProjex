@@ -9,6 +9,8 @@ namespace DevProjex.Application.Services;
 /// Known binary extensions are rejected without I/O. Other files use a null-byte
 /// probe and, when metrics or content are requested, validation continues through
 /// the complete decoded stream so a binary marker after the probe is not missed.
+/// Operations complete synchronously; ValueTask avoids one completed Task allocation
+/// per file while the caller owns bounded parallel scheduling.
 /// </summary>
 public sealed class FileContentAnalyzer : IFileContentAnalyzer
 {
@@ -46,10 +48,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	/// <inheritdoc />
-	public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
+	public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
 	{
-		// Synchronous implementation - no Task.Run needed when called from Parallel.ForEachAsync
-		return Task.FromResult(IsTextFileSync(path, cancellationToken));
+		return ValueTask.FromResult(IsTextFileSync(path, cancellationToken));
 	}
 
 	private static bool IsTextFileSync(string path, CancellationToken cancellationToken)
@@ -80,11 +81,11 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	}
 
 	/// <inheritdoc />
-	public Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
+	public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+		string path,
+		CancellationToken cancellationToken = default)
 	{
-		// Synchronous implementation - no Task.Run needed when called from Parallel.ForEachAsync
-		// This avoids ThreadPool explosion when processing thousands of files
-		return Task.FromResult(GetTextFileMetricsSync(path, cancellationToken));
+		return ValueTask.FromResult(GetTextFileMetricsSync(path, cancellationToken));
 	}
 
 	private TextFileMetrics? GetTextFileMetricsSync(string path, CancellationToken cancellationToken)
@@ -143,16 +144,20 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	}
 
 	/// <inheritdoc />
-	public Task<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default)
+	public ValueTask<TextFileContent?> TryReadAsTextAsync(
+		string path,
+		CancellationToken cancellationToken = default)
 	{
 		return TryReadAsTextAsync(path, DefaultMaxSizeForFullRead, cancellationToken);
 	}
 
 	/// <inheritdoc />
-	public Task<TextFileContent?> TryReadAsTextAsync(string path, long maxSizeForFullRead, CancellationToken cancellationToken = default)
+	public ValueTask<TextFileContent?> TryReadAsTextAsync(
+		string path,
+		long maxSizeForFullRead,
+		CancellationToken cancellationToken = default)
 	{
-		// Synchronous implementation - no Task.Run needed when called from parallel context
-		return Task.FromResult(TryReadAsTextSync(path, maxSizeForFullRead, cancellationToken));
+		return ValueTask.FromResult(TryReadAsTextSync(path, maxSizeForFullRead, cancellationToken));
 	}
 
 	private TextFileContent? TryReadAsTextSync(string path, long maxSizeForFullRead, CancellationToken cancellationToken)

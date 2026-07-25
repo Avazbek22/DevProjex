@@ -68,8 +68,10 @@ public sealed partial class SelectionSyncCoordinator(
     // cancellation must be cheap and independent of workspace size.
     private SelectionRefreshRollbackSnapshot? _stableSelectionSnapshot;
     private SelectionRefreshRollbackSnapshot? _reversibleSelectionSnapshot;
-    private readonly object _ignoreRulesBuildCacheSync = new();
-    private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
+    private AppliedSelectionState? _appliedSelectionState;
+    private int _pendingApplyEvaluationDeferral;
+    private bool _pendingApplyEvaluationRequested;
+    private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(buildIgnoreRules);
     private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
     private readonly SelectionRefreshEngine _selectionRefreshEngine = new(
         scanOptions,
@@ -79,6 +81,23 @@ public sealed partial class SelectionSyncCoordinator(
         getIgnoreOptionsAvailability);
 
     public long CurrentSelectionRevision => _session.Revision;
+
+    public void AcceptCurrentSelectionsAsApplied(string projectPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        _appliedSelectionState = AppliedSelectionState.Capture(projectPath, viewModel);
+        viewModel.SetPendingFilterSettingsChanges(false);
+    }
+
+    public void ReevaluatePendingApplyChanges() =>
+        RequestPendingApplyEvaluation();
+
+    public void ClearAppliedSelectionState()
+    {
+        _appliedSelectionState = null;
+        _pendingApplyEvaluationRequested = false;
+        viewModel.SetPendingFilterSettingsChanges(false);
+    }
 
     public SelectionSyncCoordinator(
         MainWindowViewModel viewModel,
@@ -269,6 +288,7 @@ public sealed partial class SelectionSyncCoordinator(
         SetAllChecked(viewModel.RootFolders, isChecked, ref _suppressRootItemCheck);
         UpdateRootSelectionCache();
         _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
         QueueLiveOptionsRefresh(currentPath, SelectionRefreshOrigin.RootSelection);
     }
 
@@ -283,6 +303,7 @@ public sealed partial class SelectionSyncCoordinator(
         SetAllChecked(viewModel.Extensions, isChecked, ref _suppressExtensionItemCheck);
         UpdateExtensionsSelectionCache();
         _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
 
         // Bulk extension toggles suppress individual item events, so refresh live
         // ignore counts explicitly to keep EmptyFolders aligned with tree semantics.
@@ -304,6 +325,7 @@ public sealed partial class SelectionSyncCoordinator(
         SetAllChecked(viewModel.IgnoreOptions, isChecked, ref _suppressIgnoreItemCheck);
         UpdateIgnoreSelectionCache();
         _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
         if (!string.IsNullOrEmpty(currentPath))
         {
             QueueFullRefresh(currentPath, changedIgnoreOptionId: null);
@@ -361,7 +383,8 @@ public sealed partial class SelectionSyncCoordinator(
 
             cancellationToken.ThrowIfCancellationRequested();
             var visibleExtensions = new List<string>(scan.Value.VisibleExtensions.Count);
-            var extensionlessEntriesCount = SplitExtensions(scan.Value.VisibleExtensions, visibleExtensions);
+            var extensionlessEntriesCount =
+                ExtensionOptionProjection.SplitAvailableEntries(scan.Value.VisibleExtensions, visibleExtensions);
             extensionlessEntriesCount = Math.Max(
                 extensionlessEntriesCount,
                 scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -380,13 +403,14 @@ public sealed partial class SelectionSyncCoordinator(
                     rootFolders,
                     extensionScanRules,
                     ignoreRules,
-                    BuildResolvedExtensionPolicy(options),
+                    ExtensionOptionProjection.BuildResolvedPolicy(options),
                     includeDirectoryToggleProbeRoots,
                     cancellationToken,
                     includeControllerImpactProbeRoots);
 
                 visibleExtensions = new List<string>(scan.Value.VisibleExtensions.Count);
-                extensionlessEntriesCount = SplitExtensions(scan.Value.VisibleExtensions, visibleExtensions);
+                extensionlessEntriesCount =
+                    ExtensionOptionProjection.SplitAvailableEntries(scan.Value.VisibleExtensions, visibleExtensions);
                 extensionlessEntriesCount = Math.Max(
                     extensionlessEntriesCount,
                     scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -694,8 +718,7 @@ public sealed partial class SelectionSyncCoordinator(
     public void InvalidateFileSystemCaches()
     {
         _selectionRefreshEngine.InvalidateCaches();
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = null;
+        _ignoreRulesBuildCache.Invalidate();
     }
 
     public async Task<SelectionRefreshSnapshot?> BuildRootAndDependentsSnapshotAsync(
@@ -946,8 +969,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         // Clear ignore options
         _ignoreOptions = [];
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = null;
+        _ignoreRulesBuildCache.Invalidate();
     }
 
     /// <summary>
@@ -1069,6 +1091,7 @@ public sealed partial class SelectionSyncCoordinator(
             markStateCacheComplete: false);
         SyncIgnoreAllCheckbox();
         SynchronizeStableIgnoreOptionLabels();
+        RequestPendingApplyEvaluation();
     }
 
     private static bool HasGitIgnore(string? rootPath)
@@ -1095,7 +1118,8 @@ public sealed partial class SelectionSyncCoordinator(
     internal void ApplyExtensionScan(IReadOnlyCollection<string> extensions)
     {
         var visibleExtensions = new List<string>(extensions.Count);
-        var extensionlessEntriesCount = SplitExtensions(extensions, visibleExtensions);
+        var extensionlessEntriesCount =
+            ExtensionOptionProjection.SplitAvailableEntries(extensions, visibleExtensions);
         var prev = _session.Extensions.IsInitialized
             ? _session.Extensions.SnapshotSelectedNames()
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1143,6 +1167,7 @@ public sealed partial class SelectionSyncCoordinator(
                 emptyValue: true);
             UpdateRootSelectionCache();
             _session.AdvanceRevision();
+            RequestPendingApplyEvaluation();
 
             QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.RootSelection);
         }
@@ -1155,6 +1180,7 @@ public sealed partial class SelectionSyncCoordinator(
 
             UpdateExtensionsSelectionCache();
             _session.AdvanceRevision();
+            RequestPendingApplyEvaluation();
             QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.ExtensionSelection);
         }
     }
@@ -1172,6 +1198,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         UpdateIgnoreSelectionCache();
         _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
 
         var currentPath = currentPathProvider();
         if (!string.IsNullOrEmpty(currentPath))
@@ -1478,6 +1505,7 @@ public sealed partial class SelectionSyncCoordinator(
             value => viewModel.AllExtensionsChecked = value);
         if (!_session.Extensions.IsInitialized)
             UpdateExtensionsSelectionCache();
+        RequestPendingApplyEvaluation();
     }
 
     private void ApplyRootOptions(IReadOnlyList<SelectionOption> options)
@@ -1512,6 +1540,7 @@ public sealed partial class SelectionSyncCoordinator(
             value => viewModel.AllRootFoldersChecked = value,
             emptyValue: true);
         UpdateRootSelectionCache();
+        RequestPendingApplyEvaluation();
     }
 
     private void ApplyResolvedIgnoreOptions(
@@ -1558,6 +1587,7 @@ public sealed partial class SelectionSyncCoordinator(
         _session.IgnoreOptions.ReplaceStateCache(stateCache);
         _session.IgnoreOptionStateCacheIsComplete = true;
         SyncIgnoreAllCheckbox();
+        RequestPendingApplyEvaluation();
     }
 
     private void ApplySelectionRefreshSnapshot(
@@ -1583,17 +1613,25 @@ public sealed partial class SelectionSyncCoordinator(
         // Invalidate older standalone availability refreshes so they cannot overwrite it.
         Interlocked.Increment(ref _ignoreOptionsVersion);
 
-        if (snapshot.RootOptions is not null)
-            ApplyRootOptions(snapshot.RootOptions);
+        BeginPendingApplyEvaluationDeferral();
+        try
+        {
+            if (snapshot.RootOptions is not null)
+                ApplyRootOptions(snapshot.RootOptions);
 
-        ApplyExtensionOptions(
-            snapshot.EffectiveExtensionOptions,
-            snapshot.ExtensionlessEntriesCount,
-            snapshot.IgnoreOptionCounts,
-            snapshot.ControllerImpactCounts,
-            snapshot.HasIgnoreOptionCounts);
+            ApplyExtensionOptions(
+                snapshot.EffectiveExtensionOptions,
+                snapshot.ExtensionlessEntriesCount,
+                snapshot.IgnoreOptionCounts,
+                snapshot.ControllerImpactCounts,
+                snapshot.HasIgnoreOptionCounts);
 
-        ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+            ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+        }
+        finally
+        {
+            EndPendingApplyEvaluationDeferral();
+        }
         _session.AdvanceRevision();
         MarkSelectionRefreshClean();
         var previousSnapshot = retainPreviousSnapshot ? _stableSelectionSnapshot : null;
@@ -1859,14 +1897,22 @@ public sealed partial class SelectionSyncCoordinator(
         }
 
         Interlocked.Increment(ref _ignoreOptionsVersion);
-        ApplyRootOptions(snapshot.RootOptions);
-        ApplyExtensionOptions(
-            snapshot.ExtensionOptions,
-            snapshot.ExtensionlessEntriesCount,
-            snapshot.IgnoreOptionCounts,
-            snapshot.ControllerImpactCounts,
-            snapshot.HasIgnoreOptionCounts);
-        ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+        BeginPendingApplyEvaluationDeferral();
+        try
+        {
+            ApplyRootOptions(snapshot.RootOptions);
+            ApplyExtensionOptions(
+                snapshot.ExtensionOptions,
+                snapshot.ExtensionlessEntriesCount,
+                snapshot.IgnoreOptionCounts,
+                snapshot.ControllerImpactCounts,
+                snapshot.HasIgnoreOptionCounts);
+            ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+        }
+        finally
+        {
+            EndPendingApplyEvaluationDeferral();
+        }
 
         RestoreSelectionOptionCache(
             _session.RootFolders,
@@ -1885,8 +1931,7 @@ public sealed partial class SelectionSyncCoordinator(
         _session.IgnoreOptionStateCacheIsComplete = snapshot.IgnoreOptionStateCacheIsComplete;
         MarkSelectionRefreshClean();
 
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = null;
+        _ignoreRulesBuildCache.Invalidate();
 
         return snapshot;
     }
@@ -2238,23 +2283,6 @@ public sealed partial class SelectionSyncCoordinator(
         return selected;
     }
 
-    private static int SplitExtensions(IReadOnlyCollection<string> source, ICollection<string> visibleExtensions)
-    {
-        var extensionlessEntriesCount = 0;
-        foreach (var entry in source)
-        {
-            if (IsExtensionlessEntry(entry))
-            {
-                extensionlessEntriesCount++;
-                continue;
-            }
-
-            visibleExtensions.Add(entry);
-        }
-
-        return extensionlessEntriesCount;
-    }
-
     private SelectionRefreshContext CreateSelectionRefreshContext(string path, bool captureTreeInventory = false) =>
         new(
             Path: path,
@@ -2342,19 +2370,6 @@ public sealed partial class SelectionSyncCoordinator(
             defaultForNewExtension: stateCache is not null);
     }
 
-    private static IExtensionInclusionPolicy BuildResolvedExtensionPolicy(
-        IReadOnlyList<SelectionOption> extensionOptions)
-    {
-        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var option in extensionOptions)
-        {
-            if (option.IsChecked)
-                selected.Add(option.Name);
-        }
-
-        return new ExtensionSetInclusionPolicy(selected);
-    }
-
     private IReadOnlyDictionary<string, bool>? SnapshotRootOptionStateCacheOrNull(bool isInitialized)
     {
         if (!isInitialized)
@@ -2373,15 +2388,6 @@ public sealed partial class SelectionSyncCoordinator(
             suppressLegacySelectedOnlyState: ShouldSuppressAllTogglesOverride());
     }
 
-    private static bool IsExtensionlessEntry(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-
-        var extension = Path.GetExtension(value);
-        return string.IsNullOrEmpty(extension) || extension == ".";
-    }
-
     private IgnoreSectionSnapshotState CaptureIgnoreSectionSnapshotState() =>
         new(
             _hasIgnoreOptionCounts,
@@ -2395,22 +2401,7 @@ public sealed partial class SelectionSyncCoordinator(
         IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyCollection<string>? selectedRootFolders)
     {
-        var cacheKey = IgnoreRulesBuildCacheKeyBuilder.Build(path, selectedIgnoreOptions, selectedRootFolders);
-
-        lock (_ignoreRulesBuildCacheSync)
-        {
-            if (_ignoreRulesBuildCache is not null &&
-                string.Equals(_ignoreRulesBuildCache.Key, cacheKey, StringComparison.Ordinal))
-            {
-                return _ignoreRulesBuildCache.Rules;
-            }
-        }
-
-        var rules = buildIgnoreRules(path, selectedIgnoreOptions, selectedRootFolders);
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = new IgnoreRulesBuildCacheEntry(cacheKey, rules);
-
-        return rules;
+        return _ignoreRulesBuildCache.GetOrBuild(path, selectedIgnoreOptions, selectedRootFolders);
     }
 
     private static void SetAllChecked<T>(
@@ -2496,6 +2487,40 @@ public sealed partial class SelectionSyncCoordinator(
         }
     }
 
+    private void RequestPendingApplyEvaluation()
+    {
+        if (_pendingApplyEvaluationDeferral > 0)
+        {
+            _pendingApplyEvaluationRequested = true;
+            return;
+        }
+
+        EvaluatePendingApplyChanges();
+    }
+
+    private void BeginPendingApplyEvaluationDeferral() =>
+        _pendingApplyEvaluationDeferral++;
+
+    private void EndPendingApplyEvaluationDeferral()
+    {
+        if (_pendingApplyEvaluationDeferral <= 0)
+            throw new InvalidOperationException("Pending Apply evaluation deferral is unbalanced.");
+
+        _pendingApplyEvaluationDeferral--;
+        if (_pendingApplyEvaluationDeferral != 0 || !_pendingApplyEvaluationRequested)
+            return;
+
+        _pendingApplyEvaluationRequested = false;
+        EvaluatePendingApplyChanges();
+    }
+
+    private void EvaluatePendingApplyChanges()
+    {
+        var hasPendingChanges = _appliedSelectionState is not null &&
+                                !_appliedSelectionState.Matches(currentPathProvider(), viewModel);
+        viewModel.SetPendingFilterSettingsChanges(hasPendingChanges);
+    }
+
     /// <summary>
     /// Disposes all event subscriptions and releases resources to prevent memory leaks.
     /// </summary>
@@ -2520,10 +2545,10 @@ public sealed partial class SelectionSyncCoordinator(
             DisposeCancellationSourceWhenTaskCompletes(liveOptionsRefreshCts, latestLiveOptionsRefreshTask);
             DisposeCancellationSourceWhenTaskCompletes(fullRefreshRequestCts, latestFullRefreshTask);
         }
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = null;
+        _ignoreRulesBuildCache.Invalidate();
         _stableSelectionSnapshot = null;
         _reversibleSelectionSnapshot = null;
+        ClearAppliedSelectionState();
 
         // Unsubscribe from collection change events
         if (_hookedRootFolders is not null && _rootFoldersCollectionChangedHandler is not null)

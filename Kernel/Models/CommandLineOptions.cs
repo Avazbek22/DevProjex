@@ -18,6 +18,7 @@ public sealed record CommandLineOptions(
 	public StartupSessionMetricsOptions SessionMetrics { get; init; } = StartupSessionMetricsOptions.Disabled;
 	public StartupUiBenchmarkScriptOptions UiBenchmarkScript { get; init; } = StartupUiBenchmarkScriptOptions.Disabled;
 	public StartupExportOptions Export { get; init; } = StartupExportOptions.Disabled;
+	public StartupProjectCopyOptions ProjectCopy { get; init; } = StartupProjectCopyOptions.Disabled;
 	public StartupUiOptions Ui { get; init; } = StartupUiOptions.Default;
 	public IReadOnlyList<string> IncludeRootFolders { get; init; } = [];
 	public IReadOnlyList<string> IncludeExtensions { get; init; } = [];
@@ -47,6 +48,9 @@ public sealed record CommandLineOptions(
 		var sessionMetrics = StartupSessionMetricsOptions.Disabled;
 		var uiBenchmarkScript = StartupUiBenchmarkScriptOptions.Disabled;
 		var export = StartupExportOptions.Disabled;
+		var projectCopy = StartupProjectCopyOptions.Disabled;
+		string? outputPath = null;
+		var outputPathSpecified = false;
 		var ui = StartupUiOptions.Default;
 		var includeRootFolders = new List<string>();
 		var includeExtensions = new List<string>();
@@ -311,13 +315,29 @@ public sealed record CommandLineOptions(
 				continue;
 			}
 
+			if (arg.Equals(CommandLineOptionTokens.Copy, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
+					continue;
+
+				if (!TryParseProjectCopyMode(value, out var mode))
+				{
+					errors.Add(new CommandLineParseError("invalid-copy-mode", $"Unsupported project copy mode '{value}'.", arg));
+					continue;
+				}
+
+				projectCopy = projectCopy with { Enabled = true, Mode = mode };
+				continue;
+			}
+
 			if (arg.Equals(CommandLineOptionTokens.Output, StringComparison.OrdinalIgnoreCase) ||
 			    arg.Equals(CommandLineOptionTokens.ShortOutput, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryReadRequiredValue(args, ref i, arg, inlineValue, errors, out var value))
 					continue;
 
-				export = export with { Path = value };
+				outputPath = value;
+				outputPathSpecified = true;
 				continue;
 			}
 
@@ -405,10 +425,19 @@ public sealed record CommandLineOptions(
 			hasPositionalPath = true;
 		}
 
+		if (outputPathSpecified)
+		{
+			if (projectCopy.Enabled)
+				projectCopy = projectCopy with { DestinationPath = outputPath };
+			if (export.Enabled || !projectCopy.Enabled)
+				export = export with { Path = outputPath };
+		}
+
 		ValidateStartupUiOptions(path, ui, sessionMetrics, errors);
 		ValidateBenchmarkOptions(path, noUi, strict, report, benchmark, uiBenchmark, export, ui, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
 		ValidateUiBenchmarkOptions(path, noUi, strict, report, benchmark, uiBenchmark, sessionMetrics, uiBenchmarkScript, export, ui, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
 		ValidateSessionMetricsOptions(path, noUi, strict, report, benchmark, uiBenchmark, sessionMetrics, uiBenchmarkScript, export, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
+		ValidateProjectCopyOptions(projectCopy, report, export, benchmark, uiBenchmark, sessionMetrics, ui, errors);
 
 		var options = new CommandLineOptions(path, lang, elevationAttempted)
 		{
@@ -421,6 +450,7 @@ public sealed record CommandLineOptions(
 			SessionMetrics = sessionMetrics,
 			UiBenchmarkScript = uiBenchmarkScript,
 			Export = export,
+			ProjectCopy = projectCopy,
 			Ui = ui,
 			IncludeRootFolders = includeRootFolders.ToArray(),
 			IncludeExtensions = includeExtensions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
@@ -515,10 +545,17 @@ public sealed record CommandLineOptions(
 			parts.Add(FormatExportMode(Export.Mode));
 		}
 
-		if (!string.IsNullOrWhiteSpace(Export.Path))
+		if (ProjectCopy.Enabled)
+		{
+			parts.Add(CommandLineOptionTokens.Copy);
+			parts.Add(FormatProjectCopyMode(ProjectCopy.Mode));
+		}
+
+		var outputPath = ProjectCopy.Enabled ? ProjectCopy.DestinationPath : Export.Path;
+		if (!string.IsNullOrWhiteSpace(outputPath))
 		{
 			parts.Add(CommandLineOptionTokens.Output);
-			parts.Add(Quote(Export.Path!));
+			parts.Add(Quote(outputPath));
 		}
 
 		if (Export.FormatSpecified || Export.Format != TreeTextFormat.Ascii)
@@ -922,6 +959,22 @@ public sealed record CommandLineOptions(
 		}
 	}
 
+	private static bool TryParseProjectCopyMode(string value, out StartupProjectCopyMode mode)
+	{
+		switch (NormalizeOptionName(value))
+		{
+			case "folder":
+				mode = StartupProjectCopyMode.Folder;
+				return true;
+			case "zip":
+				mode = StartupProjectCopyMode.Zip;
+				return true;
+			default:
+				mode = default;
+				return false;
+		}
+	}
+
 	private static bool TryParseStartupPreviewMode(string value, out StartupPreviewMode mode)
 	{
 		switch (NormalizeOptionName(value))
@@ -1177,11 +1230,82 @@ public sealed record CommandLineOptions(
 		}
 	}
 
+	private static void ValidateProjectCopyOptions(
+		StartupProjectCopyOptions projectCopy,
+		StartupReportOptions report,
+		StartupExportOptions export,
+		StartupBenchmarkOptions benchmark,
+		StartupUiBenchmarkOptions uiBenchmark,
+		StartupSessionMetricsOptions sessionMetrics,
+		StartupUiOptions ui,
+		List<CommandLineParseError> errors)
+	{
+		if (!projectCopy.Enabled)
+			return;
+
+		if (!projectCopy.HasDestinationPath)
+		{
+			errors.Add(new CommandLineParseError(
+				"copy-output-required",
+				"--copy requires --output <path> or -o <path>.",
+				CommandLineOptionTokens.Copy));
+		}
+		else if (string.Equals(
+			         projectCopy.DestinationPath!.Trim(),
+			         CommandLineOptionTokens.StandardOutputReportPath,
+			         StringComparison.Ordinal))
+		{
+			errors.Add(new CommandLineParseError(
+				"copy-output-requires-path",
+				"--copy output must be a filesystem path, not stdout '-'.",
+				CommandLineOptionTokens.Output));
+		}
+
+		if (export.Enabled)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-export-actions",
+				"--copy cannot be combined with --export. Run separate commands.",
+				CommandLineOptionTokens.Copy));
+		}
+
+		if (report.Enabled)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-copy-report",
+				"--copy cannot be combined with --report or --report-path. Run separate commands.",
+				CommandLineOptionTokens.Copy));
+		}
+
+		if (benchmark.Enabled || uiBenchmark.Enabled || sessionMetrics.Enabled)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-copy-mode",
+				"--copy cannot be combined with --benchmark, --benchmark-ui, or --session-metrics.",
+				CommandLineOptionTokens.Copy));
+		}
+
+		if (ui.HasStartupActions)
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-copy-ui-options",
+				"--copy runs headlessly and cannot be combined with desktop UI startup options.",
+				CommandLineOptionTokens.Copy));
+		}
+	}
+
 	private static string FormatExportMode(StartupExportMode mode) => mode switch
 	{
 		StartupExportMode.Tree => "tree",
 		StartupExportMode.Content => "content",
 		StartupExportMode.TreeContent => "tree-content",
+		_ => mode.ToString().ToLowerInvariant()
+	};
+
+	private static string FormatProjectCopyMode(StartupProjectCopyMode mode) => mode switch
+	{
+		StartupProjectCopyMode.Folder => "folder",
+		StartupProjectCopyMode.Zip => "zip",
 		_ => mode.ToString().ToLowerInvariant()
 	};
 
@@ -1352,6 +1476,22 @@ public enum StartupExportMode
 	Tree,
 	Content,
 	TreeContent
+}
+
+public sealed record StartupProjectCopyOptions(
+	bool Enabled,
+	StartupProjectCopyMode Mode,
+	string? DestinationPath)
+{
+	public static StartupProjectCopyOptions Disabled { get; } = new(false, StartupProjectCopyMode.Folder, null);
+
+	public bool HasDestinationPath => !string.IsNullOrWhiteSpace(DestinationPath);
+}
+
+public enum StartupProjectCopyMode
+{
+	Folder,
+	Zip
 }
 
 public sealed record StartupUiOptions(

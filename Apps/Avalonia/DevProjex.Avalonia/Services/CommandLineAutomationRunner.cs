@@ -1,3 +1,5 @@
+using DevProjex.Kernel;
+
 namespace DevProjex.Avalonia.Services;
 
 internal static class CommandLineAutomationRunner
@@ -142,6 +144,13 @@ internal static class CommandLineAutomationRunner
 					.ConfigureAwait(false);
 			}
 
+			if (options.ProjectCopy.Enabled)
+			{
+				var copyResult = await ExportProjectCopyAsync(options, services, loadedProject, cancellationToken)
+					.ConfigureAwait(false);
+				context.Output.WriteLine(copyResult.DestinationPath);
+			}
+
 			var diagnostics = report?.Diagnostics ?? ProjectAnalysisService.BuildDiagnostics(loadedProject);
 			return ResolveStrictExitCode(options, diagnostics, context.Error);
 		}
@@ -160,12 +169,14 @@ internal static class CommandLineAutomationRunner
 	private static bool ShouldRunHeadlessAnalysis(CommandLineOptions options) =>
 		options.NoUi ||
 		options.Export.Enabled ||
+		options.ProjectCopy.Enabled ||
 		HasDetachedExportOptions(options);
 
 	private static bool ShouldWriteImplicitStdoutReport(CommandLineOptions options) =>
 		options.NoUi &&
 		!options.Report.Enabled &&
-		!options.Export.Enabled;
+		!options.Export.Enabled &&
+		!options.ProjectCopy.Enabled;
 
 	private static bool HasDetachedExportOptions(CommandLineOptions options) =>
 		!options.Export.Enabled &&
@@ -173,11 +184,15 @@ internal static class CommandLineAutomationRunner
 
 	private static string? ValidateHeadlessOptions(CommandLineOptions options)
 	{
-		if (HasDetachedExportOptions(options))
-			return "--output and --export-format require --export.";
+		if (!options.Export.Enabled && options.Export.HasOutputPath)
+			return "--output requires --export or --copy.";
+
+		if (!options.Export.Enabled &&
+		    (options.Export.FormatSpecified || options.Export.Format != TreeTextFormat.Ascii))
+			return "--export-format and --format require --export.";
 
 		if (options.Ui.HasStartupActions)
-			return "UI startup options cannot be combined with --no-ui, --silent, or --export.";
+			return "UI startup options cannot be combined with --no-ui, --silent, --export, or --copy.";
 
 		if (options.Export.Enabled &&
 		    options.Export.Mode == StartupExportMode.Content &&
@@ -186,6 +201,9 @@ internal static class CommandLineAutomationRunner
 
 		if (ReportAndExportUseSameExplicitFile(options))
 			return "--report-path and --output must point to different files.";
+
+		if (options.Report.Enabled && options.ProjectCopy.Enabled)
+			return "--copy cannot be combined with --report or --report-path. Run separate commands.";
 
 		var reportWritesToStdout = options.Report.Enabled && options.Report.WriteToStandardOutput;
 		var exportWritesToStdout = options.Export.Enabled && options.Export.WriteToStandardOutput;
@@ -286,6 +304,33 @@ internal static class CommandLineAutomationRunner
 		}
 
 		context.Output.WriteLine(exportPath);
+	}
+
+	private static async Task<ProjectCopyExportResult> ExportProjectCopyAsync(
+		CommandLineOptions options,
+		AvaloniaAppServices services,
+		LoadedProjectAnalysisRequest project,
+		CancellationToken cancellationToken)
+	{
+		var destinationPath = ResolveExplicitOutputPath(options.ProjectCopy.DestinationPath!);
+		var projectName = Path.GetFileName(Path.TrimEndingDirectorySeparator(project.RootPath));
+		var format = options.ProjectCopy.Mode switch
+		{
+			StartupProjectCopyMode.Folder => ProjectCopyExportFormat.Folder,
+			StartupProjectCopyMode.Zip => ProjectCopyExportFormat.Zip,
+			_ => throw new InvalidOperationException($"Unsupported project copy mode: {options.ProjectCopy.Mode}.")
+		};
+		var request = new ProjectCopyExportRequest(
+			ProjectRootPath: project.RootPath,
+			ProjectName: projectName,
+			TreeRoot: project.Tree.Root,
+			SelectedPaths: new HashSet<string>(PathComparer.Default),
+			DestinationPath: destinationPath,
+			Format: format);
+
+		return await services.ProjectCopyExportService
+			.ExportAsync(request, cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
 	}
 
 	private static int ResolveStrictExitCode(

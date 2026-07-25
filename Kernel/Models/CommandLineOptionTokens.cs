@@ -15,6 +15,7 @@ public static class CommandLineOptionTokens
 	public const string SessionMetricsOutput = "--session-metrics-output";
 	public const string UiBenchmarkScript = "--ui-benchmark-script";
 	public const string Export = "--export";
+	public const string Copy = "--copy";
 	public const string Output = "--output";
 	public const string ShortOutput = "-o";
 	public const string ExportFormat = "--export-format";
@@ -65,6 +66,7 @@ public static class CommandLineOptionTokens
 		SessionMetrics,
 		SessionMetricsOutput,
 		Export,
+		Copy,
 		Output,
 		ShortOutput,
 		ExportFormat,

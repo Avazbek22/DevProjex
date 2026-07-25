@@ -1,5 +1,6 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
@@ -93,7 +94,7 @@ internal static class UiTestDriver
 
                     var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
                     return GetActualWidth(settingsContainer) >= 200 &&
-                           !GetRequiredPrivateField<bool>(window, "_settingsAnimating");
+                           !GetWorkspacePresentationController(window).IsSettingsAnimating;
                 },
                 "initial settings pane to become visually available");
         }
@@ -580,7 +581,8 @@ internal static class UiTestDriver
                 var viewModel = GetViewModel(window);
                 var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
                 var isEffectivelyVisible = IsActuallyVisibleHorizontally(settingsContainer);
-                var settingsAnimating = GetRequiredPrivateField<bool>(window, "_settingsAnimating");
+                var settingsAnimating =
+                    GetWorkspacePresentationController(window).IsSettingsAnimating;
 
                 return viewModel.SettingsVisible == visible &&
                        isEffectivelyVisible == visible &&
@@ -720,47 +722,20 @@ internal static class UiTestDriver
     {
         await WaitForSelectionRefreshIdleAsync(window);
 
-        var currentTree = GetRequiredPrivateField<BuildTreeResult>(window, "_currentTree");
-        var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
-        var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
-        var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
-        var treeAndContentExport = GetRequiredPrivateField<TreeAndContentExportService>(window, "_treeAndContentExport");
-        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
-        var hasSelection = selectedPaths.Count > 0;
-        var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
-        var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
-
-        return mode switch
+        var pipeline = GetRequiredPrivateField<ProjectTextOutputPipeline>(window, "_textOutputPipeline");
+        var snapshot = InvokePrivateMethod<ProjectTextOutputSnapshot>(
+            window,
+            "CaptureProjectTextOutputSnapshot");
+        var outputMode = mode switch
         {
-            PreviewContentMode.Tree => hasSelection
-                ? treeExport.BuildSelectedTree(
-                    currentPath,
-                    currentTree.Root,
-                    selectedPaths,
-                    treeFormat,
-                    pathPresentation?.DisplayRootPath,
-                    pathPresentation?.DisplayRootName)
-                : treeExport.BuildFullTree(
-                    currentPath,
-                    currentTree.Root,
-                    treeFormat,
-                    pathPresentation?.DisplayRootPath,
-                    pathPresentation?.DisplayRootName),
-            PreviewContentMode.Content => await contentExport.BuildAsync(
-                hasSelection
-                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
-                    : BuildOrderedAllFilePaths(currentTree.Root),
-                cancellationToken,
-                pathPresentation?.MapFilePath),
-            PreviewContentMode.TreeAndContent => await treeAndContentExport.BuildAsync(
-                currentPath,
-                currentTree.Root,
-                selectedPaths,
-                treeFormat,
-                cancellationToken,
-                pathPresentation),
+            PreviewContentMode.Tree => ProjectTextOutputMode.Tree,
+            PreviewContentMode.Content => ProjectTextOutputMode.Content,
+            PreviewContentMode.TreeAndContent => ProjectTextOutputMode.TreeAndContent,
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
+
+        var result = await pipeline.BuildAsync(outputMode, snapshot, cancellationToken);
+        return result.Content;
     }
 
     public static string ComputeCurrentPreviewCopyPayload(MainWindow window)
@@ -976,8 +951,8 @@ internal static class UiTestDriver
     }
 
     private static bool IsPreviewPaneTransitionInProgress(MainWindow window) =>
-        GetRequiredPrivateField<bool>(window, "_previewPaneAnimating") ||
-        GetRequiredPrivateField<bool>(window, "_treePaneAnimating");
+        GetWorkspacePresentationController(window).IsPreviewPaneAnimating ||
+        GetWorkspacePresentationController(window).IsTreePaneAnimating;
 
     public static async Task WaitForFilterAppliedAsync(MainWindow window, string query)
     {
@@ -1431,6 +1406,16 @@ internal static class UiTestDriver
     {
         var field = typeof(MainWindow).GetField("_selectionCoordinator", BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
+    }
+
+    private static Avalonia.Coordinators.WorkspacePresentationController
+        GetWorkspacePresentationController(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_workspacePresentation",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<Avalonia.Coordinators.WorkspacePresentationController>(
+            field?.GetValue(window));
     }
 
     private static bool IsPreviewPipelineIdle(MainWindow window)

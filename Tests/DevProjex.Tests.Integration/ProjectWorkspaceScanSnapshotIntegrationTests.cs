@@ -166,38 +166,6 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 	}
 
 	[Fact]
-	public void WorkspaceSnapshot_FallbackRootToggleProbeUsesHiddenDotContract()
-	{
-		using var temp = new TemporaryDirectory();
-		temp.CreateFile(Path.Combine(".dot-root", "payload.txt"), "payload");
-		var dotRootPath = Path.Combine(temp.Path, ".dot-root");
-		var isHidden = File.GetAttributes(dotRootPath).HasFlag(FileAttributes.Hidden);
-		var rules = CreateRules(temp.Path) with
-		{
-			IgnoreDotFolders = false,
-			IgnoreHiddenFolders = true
-		};
-		var scanOptions = new ScanOptionsUseCase(new LegacyEmptyScanner());
-
-		var result = scanOptions.GetEffectiveIgnoreOptionCountsForRootFolders(
-			temp.Path,
-			rootFolders: [],
-			allowedExtensions: new HashSet<string>([".txt"], StringComparer.OrdinalIgnoreCase),
-			ignoreRules: rules,
-			rawCounts: IgnoreOptionCounts.Empty,
-			includeDirectoryToggleProbeRoots: true,
-			cancellationToken: TestContext.Current.CancellationToken);
-
-		var hiddenOwnsDotRoot = IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
-			ignoreHiddenFolders: true,
-			isHidden,
-			isDot: true,
-			ignoreDotFolders: false);
-		Assert.Equal(hiddenOwnsDotRoot ? 1 : 0, result.Value.HiddenFolders);
-		Assert.Equal(hiddenOwnsDotRoot ? 0 : 1, result.Value.DotFolders);
-	}
-
-	[Fact]
 	public void ProjectWorkspaceScanRequest_CaptureTreeInventoryOnlyChangesInventoryPayload()
 	{
 		using var temp = new TemporaryDirectory();
@@ -227,7 +195,8 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 
 		var light = scanner.ScanProjectWorkspace(lightRequest, TestContext.Current.CancellationToken);
 		var full = scanner.ScanProjectWorkspace(fullRequest, TestContext.Current.CancellationToken);
-		var useCaseIgnoreOnly = new ScanOptionsUseCase(scanner).GetIgnoreSectionSnapshotForRootFolders(
+		var useCaseIgnoreOnly = new ScanOptionsUseCase(
+			LegacyWorkspaceScannerTestAdapter.Adapt(scanner)).GetIgnoreSectionSnapshotForRootFolders(
 			temp.Path,
 			selectedRoots,
 			extensionDiscoveryRules: rules,
@@ -242,6 +211,60 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		AssertIgnoreSectionEquivalent(light.Value.IgnoreSection, full.Value.IgnoreSection);
 		AssertIgnoreSectionEquivalent(useCaseIgnoreOnly.Value, full.Value.IgnoreSection);
 		AssertTreeProjectionEqualsDirectBuild(temp.Path, selectedRoots, selectedExtensions, rules, inventory);
+	}
+
+	[Fact]
+	public void Execute_RootOnlyWorkspaceKeepsRootFileExtensions()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("README.md", "# root");
+		var rules = CreateRules(temp.Path);
+
+		var result = new ScanOptionsUseCase(new FileSystemScanner()).Execute(
+			new ScanOptionsRequest(temp.Path, rules),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([".md"], result.Extensions);
+		Assert.Empty(result.RootFolders);
+		Assert.False(result.RootAccessDenied);
+		Assert.False(result.HadAccessDenied);
+	}
+
+	[Fact]
+	public void WorkspaceSnapshot_IgnoresRootedNestedEscapingAndStaleRootSelections()
+	{
+		using var project = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		project.CreateFile("README.md", "# root");
+		project.CreateFile("src/App.cs", "class App {}");
+		project.CreateFile("docs/guide.txt", "docs");
+		outside.CreateFile("Leak.secret", "outside");
+		var rules = CreateRules(project.Path);
+		var invalidNestedSelection = Path.Combine("src", "nested");
+
+		var result = new ScanOptionsUseCase(new FileSystemScanner())
+			.GetProjectWorkspaceSnapshotForRootFolders(
+				project.Path,
+				["src", "missing", ".", "..", invalidNestedSelection, outside.Path],
+				extensionDiscoveryRules: rules,
+				effectiveRules: rules,
+				effectiveExtensionPolicy: null,
+				cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			[".cs", ".md"],
+			result.Value.IgnoreSection.Extensions.Order(StringComparer.OrdinalIgnoreCase));
+		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(result.Value.TreeInventory);
+		Assert.Contains(inventory.Entries, static entry => entry.Name == "src");
+		Assert.Contains(inventory.Entries, static entry => entry.Name == "App.cs");
+		Assert.Contains(inventory.Entries, static entry => entry.Name == "README.md");
+		Assert.DoesNotContain(inventory.Entries, static entry => entry.Name == "docs");
+		Assert.DoesNotContain(inventory.Entries, static entry => entry.Name == "Leak.secret");
+		Assert.All(inventory.Entries, entry =>
+			Assert.True(
+				PathComparer.Default.Equals(entry.FullPath, project.Path) ||
+				PathUtility.IsPathInside(entry.FullPath, project.Path),
+				$"Inventory entry escaped the project root: {entry.FullPath}"));
 	}
 
 	private static IgnoreRules CreateRules(string rootPath)
@@ -351,41 +374,4 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		return paths;
 	}
 
-	private sealed class LegacyEmptyScanner : IFileSystemScanner
-	{
-		public bool CanReadRoot(string rootPath) => true;
-
-		public ScanResult<HashSet<string>> GetExtensions(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default)
-		{
-			return new ScanResult<HashSet<string>>(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				RootAccessDenied: false,
-				HadAccessDenied: false);
-		}
-
-		public ScanResult<HashSet<string>> GetRootFileExtensions(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default)
-		{
-			return new ScanResult<HashSet<string>>(
-				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-				RootAccessDenied: false,
-				HadAccessDenied: false);
-		}
-
-		public ScanResult<List<string>> GetRootFolderNames(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default)
-		{
-			return new ScanResult<List<string>>(
-				[],
-				RootAccessDenied: false,
-				HadAccessDenied: false);
-		}
-	}
 }

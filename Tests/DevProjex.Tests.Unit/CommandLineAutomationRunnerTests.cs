@@ -217,7 +217,7 @@ public sealed class CommandLineAutomationRunnerTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Equal(string.Empty, output.ToString());
-		Assert.Contains("--output and --export-format require --export", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("--output requires --export or --copy", error.ToString(), StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -243,7 +243,7 @@ public sealed class CommandLineAutomationRunnerTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Equal(string.Empty, output.ToString());
-		Assert.Contains("--output and --export-format require --export", error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("--export-format and --format require --export", error.ToString(), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -363,6 +363,38 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Equal(string.Empty, output.ToString());
 		Assert.Contains("Cannot combine --report - with --export", error.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RunUtilityOrHeadlessAsync_RejectsReportWithProjectCopyBeforeCreatingServices()
+	{
+		using var output = new StringWriter();
+		using var error = new StringWriter();
+		var servicesCreated = false;
+		var context = CreateContext(
+			output,
+			error,
+			servicesFactory: _ =>
+			{
+				servicesCreated = true;
+				throw new InvalidOperationException("Services must not be created for invalid output contracts.");
+			});
+		var parseResult = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Path, "/tmp/project",
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Copy, "folder",
+			CommandLineOptionTokens.Output, "/tmp/copies"
+		]);
+
+		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
+			parseResult,
+			context,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.False(servicesCreated);
+		Assert.Equal(string.Empty, output.ToString());
+		Assert.Contains("--copy cannot be combined with --report", error.ToString(), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -695,6 +727,10 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Version])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.NoUi])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Export, "tree"])));
+		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([
+			CommandLineOptionTokens.Copy, "folder",
+			CommandLineOptionTokens.Output, "/tmp/copies"
+		])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Output, "/tmp/context.txt"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.ShortOutput, "/tmp/context.txt"])));
 		Assert.True(CommandLineAutomationRunner.ShouldRunBeforeAvalonia(CommandLineOptions.Parse([CommandLineOptionTokens.Format, "ascii"])));

@@ -240,20 +240,24 @@ public sealed class PreviewDocumentBuilderTests
 
         public List<string> RequestedPaths { get; } = [];
 
-        public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
+        public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
+        public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+            string path,
+            CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default)
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            CancellationToken cancellationToken = default)
         {
             RequestedPaths.Add(path);
             contentByPath.TryGetValue(path, out var content);
-            return Task.FromResult(content);
+            return ValueTask.FromResult(content);
         }
 
-        public Task<TextFileContent?> TryReadAsTextAsync(
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
             string path,
             long maxSizeForFullRead,
             CancellationToken cancellationToken = default)

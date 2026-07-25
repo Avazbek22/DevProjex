@@ -212,6 +212,57 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void ApplySettingsAttention_RequiresPendingChangesAndPausesDuringBusyOperations()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+
+        viewModel.SetPendingFilterSettingsChanges(true);
+        Assert.True(viewModel.HasPendingFilterSettingsChanges);
+        Assert.True(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.StatusBusy = true;
+        Assert.False(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.StatusBusy = false;
+        Assert.True(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.IsProjectCopyExportInProgress = true;
+        Assert.False(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.IsProjectCopyExportInProgress = false;
+        Assert.True(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.SetPendingFilterSettingsChanges(false);
+        Assert.False(viewModel.IsApplySettingsAttentionActive);
+    }
+
+    [Fact]
+    public void ApplySettingsAttention_RaisesWhenAvailabilityChanges()
+    {
+        var viewModel = CreateViewModel();
+        var attentionPropertyRaised = false;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.IsApplySettingsAttentionActive))
+                attentionPropertyRaised = true;
+        };
+
+        AssertRaisesAttentionChange(() => viewModel.IsProjectLoaded = true);
+        AssertRaisesAttentionChange(() => viewModel.SetPendingFilterSettingsChanges(true));
+        AssertRaisesAttentionChange(() => viewModel.StatusBusy = true);
+        AssertRaisesAttentionChange(() => viewModel.StatusBusy = false);
+        AssertRaisesAttentionChange(() => viewModel.IsProjectCopyExportInProgress = true);
+
+        void AssertRaisesAttentionChange(Action mutation)
+        {
+            attentionPropertyRaised = false;
+            mutation();
+            Assert.True(attentionPropertyRaised);
+        }
+    }
+
+    [Fact]
     public void IsProjectLoaded_CanToggleFalse()
     {
         var viewModel = CreateViewModel();

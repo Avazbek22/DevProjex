@@ -93,7 +93,7 @@ public sealed class FileContentAnalyzerTests
 
 		// TaskCanceledException inherits from OperationCanceledException
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(
-			() => _analyzer.IsTextFileAsync(file, cts.Token));
+			() => _analyzer.IsTextFileAsync(file, cts.Token).AsTask());
 	}
 
 	#endregion
@@ -278,7 +278,7 @@ public sealed class FileContentAnalyzerTests
 
 		// TaskCanceledException inherits from OperationCanceledException
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(
-			() => _analyzer.TryReadAsTextAsync(file, cts.Token));
+			() => _analyzer.TryReadAsTextAsync(file, cts.Token).AsTask());
 	}
 
 	#endregion
@@ -526,7 +526,8 @@ public sealed class FileContentAnalyzerTests
 			.ToArray();
 
 		var tasks = files.Select(path => Task.Run(
-			() => _analyzer.GetTextFileMetricsAsync(path, TestContext.Current.CancellationToken),
+			async () => await _analyzer
+				.GetTextFileMetricsAsync(path, TestContext.Current.CancellationToken),
 			TestContext.Current.CancellationToken));
 		var results = await Task.WhenAll(tasks);
 

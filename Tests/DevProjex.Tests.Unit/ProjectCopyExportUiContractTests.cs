@@ -108,7 +108,7 @@ public sealed class ProjectCopyExportUiContractTests
             "Apps",
             "Avalonia",
             "DevProjex.Avalonia",
-            "MainWindow.axaml.cs");
+            "MainWindow.TextOutput.cs");
         var methodStart = source.IndexOf(
             "private async Task<bool> TryExportTextToFileAsync",
             StringComparison.Ordinal);
@@ -184,6 +184,11 @@ public sealed class ProjectCopyExportUiContractTests
             "Avalonia",
             "DevProjex.Avalonia",
             "MainWindow.axaml.cs");
+        var outputSource = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.TextOutput.cs");
 
         Assert.Contains("CancelPreviewRefresh();", exportSource, StringComparison.Ordinal);
         Assert.Contains("await Task.Run(", exportSource, StringComparison.Ordinal);
@@ -194,18 +199,18 @@ public sealed class ProjectCopyExportUiContractTests
             "if (!_viewModel.CanTogglePreview || !_viewModel.IsPreviewMode)",
             windowSource,
             StringComparison.Ordinal);
-        Assert.Contains("BeginOutputPreparationStatus()", windowSource, StringComparison.Ordinal);
-        Assert.Contains("if (_viewModel.IsProjectCopyExportInProgress)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("BeginOutputPreparationStatus()", outputSource, StringComparison.Ordinal);
+        Assert.Contains("if (_viewModel.IsProjectCopyExportInProgress)", outputSource, StringComparison.Ordinal);
     }
 
     [Fact]
     public void ClosingWindow_CancelsProjectCopyAndWaitsForStagingCleanupBeforeClosing()
     {
-        var windowSource = ReadRepositoryFile(
+        var compositionSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
             "DevProjex.Avalonia",
-            "MainWindow.axaml.cs");
+            "MainWindow.Composition.cs");
         var lifecycleSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
@@ -217,7 +222,7 @@ public sealed class ProjectCopyExportUiContractTests
             "DevProjex.Avalonia",
             "MainWindow.ProjectCopyExport.cs");
 
-        Assert.Contains("Closing += OnWindowClosing", windowSource, StringComparison.Ordinal);
+        Assert.Contains("Closing += OnWindowClosing", compositionSource, StringComparison.Ordinal);
         Assert.Contains("e.Cancel = true", lifecycleSource, StringComparison.Ordinal);
         Assert.Contains("_projectCopyExportCts.Cancel()", lifecycleSource, StringComparison.Ordinal);
         Assert.Contains("await completion", lifecycleSource, StringComparison.Ordinal);

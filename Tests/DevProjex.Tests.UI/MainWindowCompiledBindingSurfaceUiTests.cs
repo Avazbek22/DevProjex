@@ -81,6 +81,36 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
     }
 
     [AvaloniaFact]
+    public async Task ApplySettingsButton_AttentionClassTracksPendingStateAndDetachesWhenClean()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            Assert.DoesNotContain("apply-attention", applyButton.Classes);
+
+            viewModel.SetPendingFilterSettingsChanges(true);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => applyButton.Classes.Contains("apply-attention"),
+                "Apply settings attention class to attach for pending filter changes");
+
+            viewModel.SetPendingFilterSettingsChanges(false);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !applyButton.Classes.Contains("apply-attention") &&
+                      Math.Abs(applyButton.Opacity - 1) < 0.01,
+                "Apply settings attention class and animated opacity to reset when selections are clean");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PreviewAndToastTemplates_BindTypedViewModels()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

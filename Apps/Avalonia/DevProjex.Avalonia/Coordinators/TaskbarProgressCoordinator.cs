@@ -17,6 +17,9 @@ public sealed class TaskbarProgressCoordinator(
 
     public void SyncWithStatusBar()
     {
+        if (_gitCloneProgressActive)
+            return;
+
         if (!viewModel.StatusBusy)
         {
             taskbarProgressService.Clear();

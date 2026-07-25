@@ -26,7 +26,7 @@
 
 DevProjex is a cross-platform desktop app for turning real folders and codebases into **clean, controlled context for AI chats, reviews, and documentation**.
 
-Select only what matters, preview the result, and copy or export it as **tree, content, or both** in ASCII, MD, JSON, or XML.
+Select only what matters, preview the result, copy or export it as **tree, content, or both** in ASCII, MD, JSON, or XML, or create a separate project copy as a folder or ZIP archive.
 
 It’s built for real projects where terminal output is noisy, IDE integrations are limited, and you still need fast, controlled context for an AI chat or a human reviewer.
 
@@ -71,8 +71,9 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **ASCII, MD, JSON, and XML tree formats** for AI prompts, documentation, and parsers
 * **Per-project local parameter profiles** (saved per local project path)
 * **Export to file** from menu (tree / content / tree + content)
+* **Export project copies** to a separate folder or ZIP archive, preserving the effective tree, binary files, and included empty folders
 * **Search & name filtering** for large projects
-* **Smart Ignore + .gitignore support** (scope-aware behavior for mixed workspaces)
+* **Smart Ignore + hierarchical .gitignore support** (scope-aware behavior for mixed workspaces and monorepos)
 * **Extensionless files handling** via dedicated ignore option
 * **Git integration** (clone by URL, switch branches, get updates in cached copies)
 * **Status bar with live metrics** (tree/content lines, chars, ~tokens)
@@ -84,9 +85,70 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
   * Presets stored locally
   * Island-based layout and smooth UI animations
 * **Animated toasts** for user feedback
-* **Localization** (8 languages)
+* **Localization** (11 languages)
 * **Responsive async scanning** (UI stays smooth on big folders)
-* **Terminal automation mode**: generate AI-ready context, JSON reports, CI-friendly diagnostics, and tree/content exports from the same desktop executable
+* **Terminal automation mode**: generate AI-ready context, JSON reports, CI-friendly diagnostics, tree/content exports, and physical project copies from the same desktop executable
+
+---
+
+## How Smart Ignore Works 🧠
+
+**Smart Ignore is DevProjex’s deterministic, local, scope-aware filtering algorithm.** It is not an AI model and it does not treat an opened folder as one global blacklist. Instead, DevProjex combines project ownership and filesystem evidence in its own **Scope + Evidence** pipeline.
+
+### 1. Detect the project scope
+
+DevProjex recognizes project boundaries from markers such as `.csproj`, `package.json`, `pyproject.toml`, `pom.xml`, `go.mod`, `Cargo.toml`, `composer.json`, and `Gemfile`.
+
+Stack-specific rules are applied only inside the scope that owns those markers:
+
+* .NET: `bin`, `obj`
+* JavaScript/frontend: `node_modules`, framework caches, build and coverage output
+* Python: virtual environments, bytecode and tool caches
+* JVM: Gradle/Maven caches and build output
+* Go, Rust, PHP, and Ruby: their corresponding dependency and generated-output folders
+
+### 2. Require evidence for ambiguous folders
+
+A directory name alone is not always enough. Names such as `build`, `dist`, `vendor`, `packages`, `cache`, `pkg`, or `Library` can contain either generated output or real source code.
+
+Smart Ignore first performs a cheap candidate-name check, then looks for strong local signatures such as package metadata, compiler output, cache tags, generated manifests, or known artifact layouts. If the evidence is missing, the folder stays visible. This conservative two-stage check reduces false positives without turning every project load into an expensive deep content scan.
+
+The signature layer also recognizes common generated layouts from CMake, Dart/Flutter, Swift, Unity, Unreal Engine, Terraform, Serverless, Zig, and package-manager caches.
+
+### 3. Keep mixed monorepos isolated
+
+Each nested project keeps its own rules. A .NET service does not make `bin` disappear from an unrelated sibling, and a frontend app does not apply `node_modules` rules to an ordinary folder elsewhere in the workspace.
+
+```text
+repo/
+├── apps/web/package.json       -> frontend artifacts are filtered in this scope
+├── services/api/api.csproj     -> .NET artifacts are filtered in this scope
+├── tools/data/pyproject.toml   -> Python artifacts are filtered in this scope
+└── docs/build/                 -> remains visible without artifact evidence
+```
+
+Deep projects are not limited to the repository root. When an artifact candidate is encountered during tree traversal, DevProjex validates it against the applicable ancestor project markers. This keeps deeply nested and mixed-language workspaces predictable.
+
+### 4. Compose with `.gitignore`, not replace it
+
+Smart Ignore and **Use `.gitignore`** are independent switches:
+
+1. Every reachable `.gitignore` is evaluated in its own directory scope, including nested files and negation rules.
+2. Smart Ignore processes the items that remain.
+3. Explicit dot-file, hidden-item, empty-item, and extensionless-file rules run afterward.
+
+An option appears in the settings panel only when it can change the current effective tree. For example, Smart Ignore may stay hidden while `.gitignore` already excludes all matching artifacts, then appear when `.gitignore` is disabled.
+
+### Control stays with you
+
+* Toggle Smart Ignore and `.gitignore` independently.
+* Put project-specific patterns in `.gitignore`; the curated Smart Ignore rules are intentionally not an arbitrary user-editable pattern list.
+* Control dot-prefixed and hidden items through their separate switches instead of having Smart Ignore hide them implicitly.
+* Narrow the result by top-level folders and file types.
+* Narrow the final export through tree checkboxes and verify it in preview.
+* Applied choices are remembered in local project profiles.
+
+Ignored means excluded from the current tree, copy, and export result — never deleted from the source project. The implementation is open source: see the [stack rules](Infrastructure/SmartIgnore) and the [evidence-based signature matcher](Kernel/Models/SmartArtifactIgnoreMatcher.cs).
 
 ---
 
@@ -104,6 +166,16 @@ DevProjex works with any language, repository, or project structure.
 
 ---
 
+## Project Copy Export 📦
+
+Use **File → Export Project → To Folder…** or **To ZIP Archive…** to create a separate copy of the current effective tree.
+
+Project copies respect the selected root folders, file types, ignore rules, and checked items. If nothing is checked, the entire current tree is exported. Directory structure, binary files, and included empty folders are preserved.
+
+The source project is not modified, and the result cannot be written inside it. The same workflow is available from the terminal through `--copy folder` and `--copy zip`.
+
+---
+
 ## Command Line ⚙️
 
 DevProjex is not only a desktop context builder. The same app can run from the terminal for repeatable, script-friendly project analysis and AI-context export.
@@ -112,6 +184,8 @@ DevProjex is not only a desktop context builder. The same app can run from the t
 devprojex "/path/to/project" --preview-mode tree-content --tree-format md
 devprojex --last --preview
 devprojex "/path/to/project" --export tree-content -o ./context.txt --roots src --ext cs
+devprojex "/path/to/project" --copy folder -o ./submissions
+devprojex "/path/to/project" --copy zip -o ./submissions/project-copy.zip
 devprojex --path "/path/to/project" --no-ui --report -
 devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
 devprojex --benchmark-ui "/path/to/project"
@@ -123,6 +197,7 @@ Use it to:
 * open the desktop app directly in preview/filter/search states;
 * generate clean AI-ready context without opening the UI;
 * export selected tree/content payloads directly to files or stdout;
+* create selection-, filter-, and ignore-aware project copies as folders or ZIP archives;
 * produce machine-readable JSON analysis reports;
 * benchmark the headless report pipeline or a repeatable desktop UI workflow;
 * record interactive UI session metrics for practical CPU/RAM diagnostics;
@@ -150,6 +225,11 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
   * tree (`.txt`, `.md`, `.json`, `.xml` depending on the selected tree format)
   * content (`.txt`)
   * tree + content (`.txt`, with selected tree format)
+* Exports project copies:
+
+  * to a separate folder
+  * to a ZIP archive
+  * with the effective directory structure, binary files, and included empty folders preserved
 * Shows preview output before copy/export
 * Shows live output metrics and operation progress in status bar
 * Restores previously applied parameters for each local project folder
@@ -160,7 +240,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
 
 * Edit, rename, move, or delete files
 * Run code or modify your repositories (no commits/merges)
-* Export binary file contents
+* Include binary file contents in text/context exports
 
 ---
 

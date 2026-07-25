@@ -7,7 +7,8 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
 {
     MainWindowViewModel IPreviewWorkspacePipelineHost.ViewModel => _viewModel;
 
-    bool IPreviewWorkspacePipelineHost.IsPreviewModeSwitchInProgress => _previewModeSwitchInProgress;
+    bool IPreviewWorkspacePipelineHost.IsPreviewModeSwitchInProgress =>
+        _previewWorkspaceController.IsModeSwitchInProgress;
 
     IPreviewTextDocument? IPreviewWorkspacePipelineHost.CurrentPreviewDocument => _viewModel.PreviewDocument;
 

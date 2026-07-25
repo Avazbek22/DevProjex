@@ -33,9 +33,11 @@ public static class IgnoreRulesBuildCacheKeyBuilder
 		if (selectedIgnoreOptions.Count == 0)
 			return "<none>";
 
-		var ordered = new List<int>(selectedIgnoreOptions.Count);
+		var unique = new HashSet<int>(selectedIgnoreOptions.Count);
 		foreach (var option in selectedIgnoreOptions)
-			ordered.Add((int)option);
+			unique.Add((int)option);
+
+		var ordered = new List<int>(unique);
 		ordered.Sort();
 
 		var builder = new StringBuilder(capacity: ordered.Count * 3);

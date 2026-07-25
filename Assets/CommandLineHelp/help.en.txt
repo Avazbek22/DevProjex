@@ -24,7 +24,9 @@ Options:
   --session-metrics-output <file> Write the detailed session metrics JSON to a specific file.
   --export <mode>                 Export project text: tree, content, tree-content.
                                   Defaults to stdout when --output is omitted.
-  --output, -o <file|->           Write export text to a file or stdout with -.
+  --copy <mode>                   Export the effective project as files: folder, zip.
+  --output, -o <path|->           Set the text export or project copy destination.
+                                  Use - only to write text export to stdout.
   --export-format, --format ascii|json|xml|md
                                   Tree format for tree and tree-content exports.
   --last                          Open the most recent local project folder.
@@ -40,7 +42,7 @@ Options:
   --ignore <name|none>            Use exact ignore options for automation. Can be repeated.
   --strict                        Return a failure exit code when the report has diagnostics.
   --no-ui, --silent               Run analysis without showing the window.
-                                  Writes a JSON report to stdout when no report or export is specified.
+                                  Writes a JSON report to stdout when no output action is specified.
   --version                       Print application version.
   --help, -h, /?                  Show help.
 
@@ -63,6 +65,8 @@ Examples:
   devprojex --no-ui --path "/home/me/projects/app" --report -
   devprojex --path "/home/me/projects/app" --export tree -o -
   devprojex --path "/home/me/projects/app" --export tree-content -o context.txt
+  devprojex --path "/home/me/projects/app" --copy folder -o ./submissions
+  devprojex --path "/home/me/projects/app" --copy zip -o ./submissions/app.zip
   devprojex --no-ui --path "/home/me/projects/app" --report --strict
   DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json"
   DevProjex --path "C:\Projects\App" --roots src --ext cs --ignore none --report

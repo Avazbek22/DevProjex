@@ -1,4 +1,5 @@
 using DevProjex.Avalonia;
+using System.IO.Compression;
 using System.Xml.Linq;
 
 namespace DevProjex.Tests.Integration;
@@ -112,6 +113,110 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_ProjectCopyFolder_ExportsOnlyTheEffectiveTreeAndWritesResultPath()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = SeedTerminalWorkspace(temp);
+		var destinationParent = temp.CreateDirectory("folder exports");
+		var sourceAppPath = Path.Combine(projectPath, "src", "App.cs");
+		WriteFile(projectPath, ".gitignore", "src/generated/\n");
+		WriteFile(projectPath, Path.Combine("src", "generated", "Generated.cs"), "internal sealed class Generated {}\n");
+		var sourceBytes = await File.ReadAllBytesAsync(sourceAppPath, TestContext.Current.CancellationToken);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Copy, "folder",
+			CommandLineOptionTokens.Output, destinationParent,
+			CommandLineOptionTokens.Roots, "src",
+			CommandLineOptionTokens.Extensions, "cs",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreGitIgnore);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		AssertNoCommandNoise(result.Stdout);
+
+		var resultPath = AssertSingleOutputLine(result.Stdout);
+		Assert.Equal(
+			Path.Combine(Path.GetFullPath(destinationParent), $"{Path.GetFileName(projectPath)}-copy"),
+			resultPath);
+		Assert.Equal(sourceBytes, await File.ReadAllBytesAsync(
+			Path.Combine(resultPath, "src", "App.cs"),
+			TestContext.Current.CancellationToken));
+		Assert.True(File.Exists(Path.Combine(resultPath, "src", "Utils", "Helper.cs")));
+		Assert.False(Directory.Exists(Path.Combine(resultPath, "src", "generated")));
+		Assert.False(Directory.Exists(Path.Combine(resultPath, "docs")));
+		Assert.False(File.Exists(Path.Combine(resultPath, "README.md")));
+		Assert.False(Directory.Exists(Path.Combine(resultPath, "empty-folder")));
+		Assert.Equal(sourceBytes, await File.ReadAllBytesAsync(sourceAppPath, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task Process_ProjectCopyZip_PreservesBinaryUnicodeEntryAndAddsZipExtension()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = SeedTerminalWorkspace(temp);
+		var destinationWithoutExtension = Path.Combine(temp.Path, "archive exports", "submission");
+		var expectedBytes = File.ReadAllBytes(Path.Combine(projectPath, "assets", "данные.bin"));
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Output, destinationWithoutExtension,
+			CommandLineOptionTokens.Copy, "zip",
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Roots, "assets",
+			CommandLineOptionTokens.Extensions, "bin",
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		AssertNoCommandNoise(result.Stdout);
+
+		var resultPath = AssertSingleOutputLine(result.Stdout);
+		Assert.Equal(Path.GetFullPath(destinationWithoutExtension) + ".zip", resultPath);
+		Assert.True(File.Exists(resultPath));
+		using var archive = ZipFile.OpenRead(resultPath);
+		var rootName = Path.GetFileName(projectPath);
+		var fileEntry = archive.GetEntry($"{rootName}/assets/данные.bin");
+		Assert.NotNull(fileEntry);
+		await using var entryStream = fileEntry.Open();
+		using var content = new MemoryStream();
+		await entryStream.CopyToAsync(content, TestContext.Current.CancellationToken);
+		Assert.Equal(expectedBytes, content.ToArray());
+		Assert.DoesNotContain(
+			archive.Entries,
+			entry => entry.FullName.Contains("README.md", StringComparison.Ordinal) ||
+			         entry.FullName.Contains("src/", StringComparison.Ordinal));
+	}
+
+	[Theory]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task Process_ProjectCopyDestinationInsideSource_IsRejectedWithoutPartialOutput(string mode)
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = SeedTerminalWorkspace(temp);
+		var destinationPath = mode == "folder"
+			? Path.Combine(projectPath, "exports")
+			: Path.Combine(projectPath, "project-copy.zip");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Copy, mode,
+			CommandLineOptionTokens.Output, destinationPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.StartsWith("DevProjex: ", result.Stderr, StringComparison.Ordinal);
+		Assert.Contains("destination", result.Stderr, StringComparison.OrdinalIgnoreCase);
+		Assert.False(Directory.Exists(destinationPath));
+		Assert.False(File.Exists(destinationPath));
+		Assert.Empty(Directory.EnumerateFileSystemEntries(
+			projectPath,
+			"*.tmp",
+			SearchOption.AllDirectories));
+	}
+
+	[Fact]
 	public async Task Process_BenchmarkCommand_WritesSummaryStdoutAndDetailedJsonReport()
 	{
 		using var runCountOverride = TemporaryEnvironmentVariable.Set("DEVPROJEX_BENCHMARK_RUNS", "1");
@@ -163,7 +268,7 @@ public sealed class CommandLineStdoutContractIntegrationTests
 
 	[Theory]
 	[InlineData("unknown-option", "Unknown option '--unknown'.")]
-	[InlineData("detached-format", "--output and --export-format require --export.")]
+	[InlineData("detached-format", "--export-format and --format require --export.")]
 	[InlineData("content-structured-format", "--export-format applies only to tree")]
 	[InlineData("report-and-export-stdout", "Cannot combine --report - with --export.")]
 	[InlineData("same-report-and-export-file", "--report-path and --output must point to different files.")]
@@ -205,6 +310,7 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	[InlineData("benchmark-ui", CommandLineOptionTokens.BenchmarkUi)]
 	[InlineData("session-metrics", CommandLineOptionTokens.SessionMetrics)]
 	[InlineData("export", CommandLineOptionTokens.Export)]
+	[InlineData("copy", CommandLineOptionTokens.Copy)]
 	[InlineData("report", CommandLineOptionTokens.Report)]
 	[InlineData("preview-search", CommandLineOptionTokens.PreviewSearch)]
 	public async Task Process_KnownOptionNameWithoutDashWritesTerminalUsageError(string value, string expectedSuggestion)
@@ -280,6 +386,9 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		WriteFile(projectPath, Path.Combine("src", "Utils", "Helper.cs"), "namespace TerminalSmoke;\npublic static class Helper {}\n");
 		WriteFile(projectPath, Path.Combine("docs", "Guide.md"), "# Guide\n");
 		WriteFile(projectPath, "README.md", "# Readme\n");
+		var binaryPath = Path.Combine(projectPath, "assets", "данные.bin");
+		Directory.CreateDirectory(Path.GetDirectoryName(binaryPath)!);
+		File.WriteAllBytes(binaryPath, [0x00, 0x01, 0x7F, 0x80, 0xFF]);
 		Directory.CreateDirectory(Path.Combine(projectPath, "empty-folder"));
 		return projectPath;
 	}

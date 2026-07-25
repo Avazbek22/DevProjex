@@ -13,7 +13,8 @@ internal static class ProjectLoadWorkflowRefreshHarness
         IFileSystemScanner? scanner = null,
         Func<IgnoreRules, IgnoreRules>? transformRules = null)
     {
-        var scanOptions = new ScanOptionsUseCase(scanner ?? new FileSystemScanner());
+        var scanOptions = new ScanOptionsUseCase(
+            LegacyWorkspaceScannerTestAdapter.Adapt(scanner ?? new FileSystemScanner()));
         var filterSelectionService = new FilterOptionSelectionService();
         var ignoreOptionsService = ProjectLoadWorkflowRuntime.CreateIgnoreOptionsService();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();

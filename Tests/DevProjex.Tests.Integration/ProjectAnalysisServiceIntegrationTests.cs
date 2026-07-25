@@ -279,10 +279,10 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 
 		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
 
-		public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException();
 
-		public async Task<TextFileMetrics?> GetTextFileMetricsAsync(
+		public async ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
 			string path,
 			CancellationToken cancellationToken = default)
 		{
@@ -299,12 +299,12 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 			}
 		}
 
-		public Task<TextFileContent?> TryReadAsTextAsync(
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
 			string path,
 			CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException();
 
-		public Task<TextFileContent?> TryReadAsTextAsync(
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
 			string path,
 			long maxSizeForFullRead,
 			CancellationToken cancellationToken = default) =>

@@ -116,6 +116,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _statusBusy;
     private bool _applySettingsBusyDelayElapsed;
     private CancellationTokenSource? _applySettingsBusyDelayCts;
+    private bool _hasPendingFilterSettingsChanges;
     private bool _statusMetricsVisible;
     private bool _statusPreviewSelectionVisible;
     private bool _statusProgressIsIndeterminate = true;
@@ -238,6 +239,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // Also update IsIndeterminate since it depends on StatusBusy
             // This stops the indeterminate animation when progress bar is hidden
             RaisePropertyChanged(nameof(StatusProgressIsIndeterminate));
+            RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
             UpdateApplySettingsBusyState(value);
         }
     }
@@ -307,6 +309,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(IsSearchFilterAvailable));
             RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
             RaisePropertyChanged(nameof(CanApplySettings));
+            RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
             RaisePropertyChanged(nameof(CanExportProjectCopy));
             RaisePropertyChanged(nameof(CanUseProjectWorkspaceActions));
             RaisePropertyChanged(nameof(CanTogglePreview));
@@ -368,6 +371,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(IsSearchFilterAvailable));
             RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
             RaisePropertyChanged(nameof(CanApplySettings));
+            RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
             RaisePropertyChanged(nameof(CanRefreshLocalProject));
             RaisePropertyChanged(nameof(CanGetGitUpdates));
         }
@@ -389,6 +393,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool CanApplySettings => _isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress;
 
+    public bool HasPendingFilterSettingsChanges => _hasPendingFilterSettingsChanges;
+
+    public bool IsApplySettingsAttentionActive =>
+        _hasPendingFilterSettingsChanges && CanApplySettings && !_statusBusy;
+
+    internal void SetPendingFilterSettingsChanges(bool value)
+    {
+        if (_hasPendingFilterSettingsChanges == value)
+            return;
+
+        _hasPendingFilterSettingsChanges = value;
+        RaisePropertyChanged(nameof(HasPendingFilterSettingsChanges));
+        RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
+    }
+
     private void UpdateApplySettingsBusyState(bool isBusy)
     {
         var previous = Interlocked.Exchange(
@@ -404,6 +423,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             _applySettingsBusyDelayElapsed = false;
             RaisePropertyChanged(nameof(CanApplySettings));
+            RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
             return;
         }
 
@@ -425,6 +445,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
                 _applySettingsBusyDelayElapsed = true;
                 RaisePropertyChanged(nameof(CanApplySettings));
+                RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
             });
         }
         catch (OperationCanceledException)

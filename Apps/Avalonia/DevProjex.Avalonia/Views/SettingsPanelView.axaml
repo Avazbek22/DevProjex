@@ -49,6 +49,26 @@
     <Style Selector="Button#ApplySettingsButton:disabled TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
     </Style>
+    <!-- The class is removed when staged selections match the applied tree,
+         preventing an idle infinite animation from keeping the renderer active. -->
+    <Style Selector="Button#ApplySettingsButton.apply-attention">
+      <Style.Animations>
+        <Animation Duration="0:0:1.8"
+                   IterationCount="INFINITE"
+                   PlaybackBehavior="OnlyIfVisible"
+                   Easing="SineEaseInOut">
+          <KeyFrame Cue="0%">
+            <Setter Property="Opacity" Value="1" />
+          </KeyFrame>
+          <KeyFrame Cue="50%">
+            <Setter Property="Opacity" Value="0.48" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="Opacity" Value="1" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
   </UserControl.Styles>
   <Border Name="PanelRoot"
           MinWidth="285"
@@ -68,6 +88,7 @@
               HorizontalAlignment="Left"
               HorizontalContentAlignment="Center"
               Classes="primary-action"
+              Classes.apply-attention="{Binding IsApplySettingsAttentionActive}"
               CornerRadius="3"/>
 
       <!-- Ignore section - equal star height -->

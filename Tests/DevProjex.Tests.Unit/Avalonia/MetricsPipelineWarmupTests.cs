@@ -226,10 +226,10 @@ public sealed class MetricsPipelineWarmupTests
                 return _metricsCalls.GetValueOrDefault(path);
         }
 
-        public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+        public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
             inner.IsTextFileAsync(path, cancellationToken);
 
-        public Task<TextFileMetrics?> GetTextFileMetricsAsync(
+        public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
             string path,
             CancellationToken cancellationToken = default)
         {
@@ -239,12 +239,12 @@ public sealed class MetricsPipelineWarmupTests
             return inner.GetTextFileMetricsAsync(path, cancellationToken);
         }
 
-        public Task<TextFileContent?> TryReadAsTextAsync(
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
             string path,
             CancellationToken cancellationToken = default) =>
             inner.TryReadAsTextAsync(path, cancellationToken);
 
-        public Task<TextFileContent?> TryReadAsTextAsync(
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
             string path,
             long maxSizeForFullRead,
             CancellationToken cancellationToken = default) =>

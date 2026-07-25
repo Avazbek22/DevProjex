@@ -1600,7 +1600,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             project,
             configureServices: services => services with
             {
-                ScanOptionsUseCase = new ScanOptionsUseCase(blockingScanner)
+                ScanOptionsUseCase = new ScanOptionsUseCase(
+                    LegacyWorkspaceScannerTestAdapter.Adapt(blockingScanner))
             });
 
         try
@@ -1649,7 +1650,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             project,
             configureServices: services => services with
             {
-                ScanOptionsUseCase = new ScanOptionsUseCase(blockingScanner)
+                ScanOptionsUseCase = new ScanOptionsUseCase(
+                    LegacyWorkspaceScannerTestAdapter.Adapt(blockingScanner))
             });
 
         try
@@ -1767,7 +1769,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
             projectA,
             configureServices: services => services with
             {
-                ScanOptionsUseCase = new ScanOptionsUseCase(blockingScanner)
+                ScanOptionsUseCase = new ScanOptionsUseCase(
+                    LegacyWorkspaceScannerTestAdapter.Adapt(blockingScanner))
             });
 
         try
@@ -2228,6 +2231,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             IFileSystemScannerEffectiveIgnoreCountsProvider,
             IFileSystemScannerIgnoreSectionSnapshotProvider,
             IFileSystemScannerExtensionPolicySnapshotProvider,
+            IFileSystemScannerProjectWorkspaceScanner,
             IDisposable
     {
         private readonly FileSystemScanner _inner = new();
@@ -2371,6 +2375,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 extensionDiscoveryRules,
                 effectiveRules,
                 effectiveExtensionPolicy,
+                EffectiveCancellationToken(cancellationToken));
+        }
+
+        public ScanResult<ProjectWorkspaceScanSnapshot> ScanProjectWorkspace(
+            ProjectWorkspaceScanRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            MaybeBlock(request.RootPath, cancellationToken);
+            return _inner.ScanProjectWorkspace(
+                request,
                 EffectiveCancellationToken(cancellationToken));
         }
 

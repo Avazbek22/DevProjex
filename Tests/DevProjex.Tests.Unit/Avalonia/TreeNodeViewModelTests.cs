@@ -1,3 +1,5 @@
+using Avalonia.Controls.Documents;
+using Avalonia.Media;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -197,6 +199,46 @@ public sealed class TreeNodeViewModelTests
         root.EnsureParentsExpanded();
 
         Assert.False(root.IsExpanded);
+    }
+
+    [Fact]
+    public void UpdateSearchHighlight_NonMatchingNodeDoesNotAllocateInlineGraph()
+    {
+        var node = CreateNode("src");
+
+        node.UpdateSearchHighlight(
+            "test",
+            Brushes.Yellow,
+            Brushes.Black,
+            Brushes.White,
+            Brushes.Orange);
+
+        Assert.False(node.HasHighlightedDisplay);
+        Assert.Null(node.DisplayInlines);
+    }
+
+    [Fact]
+    public void UpdateSearchHighlight_QueryChangeReleasesNonMatchingInlineRuns()
+    {
+        var node = CreateNode("test-service");
+        node.UpdateSearchHighlight("test", Brushes.Yellow, Brushes.Black, Brushes.White, Brushes.Orange);
+
+        node.UpdateSearchHighlight("missing", Brushes.Yellow, Brushes.Black, Brushes.White, Brushes.Orange);
+
+        Assert.False(node.HasHighlightedDisplay);
+        Assert.Null(node.DisplayInlines);
+    }
+
+    [Fact]
+    public void UpdateSearchHighlight_MultipleMatchesBuildsOnlyRequiredRuns()
+    {
+        var node = CreateNode("test-test");
+
+        node.UpdateSearchHighlight("test", Brushes.Yellow, Brushes.Black, Brushes.White, Brushes.Orange);
+
+        Assert.True(node.HasHighlightedDisplay);
+        var runs = Assert.IsAssignableFrom<IEnumerable<Inline>>(node.DisplayInlines).OfType<Run>();
+        Assert.Equal(2, runs.Count(run => run.Background is not null));
     }
 
     [Fact]

@@ -198,7 +198,7 @@ public sealed class SelectionSyncCoordinatorEffectiveEmptyFolderCountsTests
 
 		return new SelectionSyncCoordinator(
 			viewModel,
-			new ScanOptionsUseCase(new MinimalScanner()),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(new MinimalScanner())),
 			filterSelectionService,
 			ignoreOptionsService,
 			(_, _, _) => CreateRules(),
