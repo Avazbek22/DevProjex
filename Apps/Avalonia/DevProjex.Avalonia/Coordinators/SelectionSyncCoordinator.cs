@@ -68,6 +68,9 @@ public sealed partial class SelectionSyncCoordinator(
     // cancellation must be cheap and independent of workspace size.
     private SelectionRefreshRollbackSnapshot? _stableSelectionSnapshot;
     private SelectionRefreshRollbackSnapshot? _reversibleSelectionSnapshot;
+    private AppliedSelectionState? _appliedSelectionState;
+    private int _pendingApplyEvaluationDeferral;
+    private bool _pendingApplyEvaluationRequested;
     private readonly object _ignoreRulesBuildCacheSync = new();
     private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
     private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
@@ -79,6 +82,23 @@ public sealed partial class SelectionSyncCoordinator(
         getIgnoreOptionsAvailability);
 
     public long CurrentSelectionRevision => _session.Revision;
+
+    public void AcceptCurrentSelectionsAsApplied(string projectPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        _appliedSelectionState = AppliedSelectionState.Capture(projectPath, viewModel);
+        viewModel.SetPendingFilterSettingsChanges(false);
+    }
+
+    public void ReevaluatePendingApplyChanges() =>
+        RequestPendingApplyEvaluation();
+
+    public void ClearAppliedSelectionState()
+    {
+        _appliedSelectionState = null;
+        _pendingApplyEvaluationRequested = false;
+        viewModel.SetPendingFilterSettingsChanges(false);
+    }
 
     public SelectionSyncCoordinator(
         MainWindowViewModel viewModel,
@@ -269,6 +289,7 @@ public sealed partial class SelectionSyncCoordinator(
         SetAllChecked(viewModel.RootFolders, isChecked, ref _suppressRootItemCheck);
         UpdateRootSelectionCache();
         _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
         QueueLiveOptionsRefresh(currentPath, SelectionRefreshOrigin.RootSelection);
     }
 
@@ -283,6 +304,7 @@ public sealed partial class SelectionSyncCoordinator(
         SetAllChecked(viewModel.Extensions, isChecked, ref _suppressExtensionItemCheck);
         UpdateExtensionsSelectionCache();
         _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
 
         // Bulk extension toggles suppress individual item events, so refresh live
         // ignore counts explicitly to keep EmptyFolders aligned with tree semantics.
@@ -304,6 +326,7 @@ public sealed partial class SelectionSyncCoordinator(
         SetAllChecked(viewModel.IgnoreOptions, isChecked, ref _suppressIgnoreItemCheck);
         UpdateIgnoreSelectionCache();
         _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
         if (!string.IsNullOrEmpty(currentPath))
         {
             QueueFullRefresh(currentPath, changedIgnoreOptionId: null);
@@ -1069,6 +1092,7 @@ public sealed partial class SelectionSyncCoordinator(
             markStateCacheComplete: false);
         SyncIgnoreAllCheckbox();
         SynchronizeStableIgnoreOptionLabels();
+        RequestPendingApplyEvaluation();
     }
 
     private static bool HasGitIgnore(string? rootPath)
@@ -1143,6 +1167,7 @@ public sealed partial class SelectionSyncCoordinator(
                 emptyValue: true);
             UpdateRootSelectionCache();
             _session.AdvanceRevision();
+            RequestPendingApplyEvaluation();
 
             QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.RootSelection);
         }
@@ -1155,6 +1180,7 @@ public sealed partial class SelectionSyncCoordinator(
 
             UpdateExtensionsSelectionCache();
             _session.AdvanceRevision();
+            RequestPendingApplyEvaluation();
             QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.ExtensionSelection);
         }
     }
@@ -1172,6 +1198,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         UpdateIgnoreSelectionCache();
         _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
 
         var currentPath = currentPathProvider();
         if (!string.IsNullOrEmpty(currentPath))
@@ -1478,6 +1505,7 @@ public sealed partial class SelectionSyncCoordinator(
             value => viewModel.AllExtensionsChecked = value);
         if (!_session.Extensions.IsInitialized)
             UpdateExtensionsSelectionCache();
+        RequestPendingApplyEvaluation();
     }
 
     private void ApplyRootOptions(IReadOnlyList<SelectionOption> options)
@@ -1512,6 +1540,7 @@ public sealed partial class SelectionSyncCoordinator(
             value => viewModel.AllRootFoldersChecked = value,
             emptyValue: true);
         UpdateRootSelectionCache();
+        RequestPendingApplyEvaluation();
     }
 
     private void ApplyResolvedIgnoreOptions(
@@ -1558,6 +1587,7 @@ public sealed partial class SelectionSyncCoordinator(
         _session.IgnoreOptions.ReplaceStateCache(stateCache);
         _session.IgnoreOptionStateCacheIsComplete = true;
         SyncIgnoreAllCheckbox();
+        RequestPendingApplyEvaluation();
     }
 
     private void ApplySelectionRefreshSnapshot(
@@ -1583,17 +1613,25 @@ public sealed partial class SelectionSyncCoordinator(
         // Invalidate older standalone availability refreshes so they cannot overwrite it.
         Interlocked.Increment(ref _ignoreOptionsVersion);
 
-        if (snapshot.RootOptions is not null)
-            ApplyRootOptions(snapshot.RootOptions);
+        BeginPendingApplyEvaluationDeferral();
+        try
+        {
+            if (snapshot.RootOptions is not null)
+                ApplyRootOptions(snapshot.RootOptions);
 
-        ApplyExtensionOptions(
-            snapshot.EffectiveExtensionOptions,
-            snapshot.ExtensionlessEntriesCount,
-            snapshot.IgnoreOptionCounts,
-            snapshot.ControllerImpactCounts,
-            snapshot.HasIgnoreOptionCounts);
+            ApplyExtensionOptions(
+                snapshot.EffectiveExtensionOptions,
+                snapshot.ExtensionlessEntriesCount,
+                snapshot.IgnoreOptionCounts,
+                snapshot.ControllerImpactCounts,
+                snapshot.HasIgnoreOptionCounts);
 
-        ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+            ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+        }
+        finally
+        {
+            EndPendingApplyEvaluationDeferral();
+        }
         _session.AdvanceRevision();
         MarkSelectionRefreshClean();
         var previousSnapshot = retainPreviousSnapshot ? _stableSelectionSnapshot : null;
@@ -1859,14 +1897,22 @@ public sealed partial class SelectionSyncCoordinator(
         }
 
         Interlocked.Increment(ref _ignoreOptionsVersion);
-        ApplyRootOptions(snapshot.RootOptions);
-        ApplyExtensionOptions(
-            snapshot.ExtensionOptions,
-            snapshot.ExtensionlessEntriesCount,
-            snapshot.IgnoreOptionCounts,
-            snapshot.ControllerImpactCounts,
-            snapshot.HasIgnoreOptionCounts);
-        ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+        BeginPendingApplyEvaluationDeferral();
+        try
+        {
+            ApplyRootOptions(snapshot.RootOptions);
+            ApplyExtensionOptions(
+                snapshot.ExtensionOptions,
+                snapshot.ExtensionlessEntriesCount,
+                snapshot.IgnoreOptionCounts,
+                snapshot.ControllerImpactCounts,
+                snapshot.HasIgnoreOptionCounts);
+            ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+        }
+        finally
+        {
+            EndPendingApplyEvaluationDeferral();
+        }
 
         RestoreSelectionOptionCache(
             _session.RootFolders,
@@ -2496,6 +2542,40 @@ public sealed partial class SelectionSyncCoordinator(
         }
     }
 
+    private void RequestPendingApplyEvaluation()
+    {
+        if (_pendingApplyEvaluationDeferral > 0)
+        {
+            _pendingApplyEvaluationRequested = true;
+            return;
+        }
+
+        EvaluatePendingApplyChanges();
+    }
+
+    private void BeginPendingApplyEvaluationDeferral() =>
+        _pendingApplyEvaluationDeferral++;
+
+    private void EndPendingApplyEvaluationDeferral()
+    {
+        if (_pendingApplyEvaluationDeferral <= 0)
+            throw new InvalidOperationException("Pending Apply evaluation deferral is unbalanced.");
+
+        _pendingApplyEvaluationDeferral--;
+        if (_pendingApplyEvaluationDeferral != 0 || !_pendingApplyEvaluationRequested)
+            return;
+
+        _pendingApplyEvaluationRequested = false;
+        EvaluatePendingApplyChanges();
+    }
+
+    private void EvaluatePendingApplyChanges()
+    {
+        var hasPendingChanges = _appliedSelectionState is not null &&
+                                !_appliedSelectionState.Matches(currentPathProvider(), viewModel);
+        viewModel.SetPendingFilterSettingsChanges(hasPendingChanges);
+    }
+
     /// <summary>
     /// Disposes all event subscriptions and releases resources to prevent memory leaks.
     /// </summary>
@@ -2524,6 +2604,7 @@ public sealed partial class SelectionSyncCoordinator(
             _ignoreRulesBuildCache = null;
         _stableSelectionSnapshot = null;
         _reversibleSelectionSnapshot = null;
+        ClearAppliedSelectionState();
 
         // Unsubscribe from collection change events
         if (_hookedRootFolders is not null && _rootFoldersCollectionChangedHandler is not null)

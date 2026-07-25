@@ -1472,6 +1472,7 @@ public partial class MainWindow : Window
         _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
         _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
         _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
+        _selectionCoordinator.ReevaluatePendingApplyChanges();
         _metrics.HasCompleteBaseline = snapshot.HasCompleteMetricsBaseline;
         UpdateCompactModeVisualState();
         UpdateWorkspaceLayoutForCurrentMode();
@@ -1539,6 +1540,7 @@ public partial class MainWindow : Window
         _viewModel.RootFolders.Clear();
         _viewModel.Extensions.Clear();
         _viewModel.IgnoreOptions.Clear();
+        _selectionCoordinator.ClearAppliedSelectionState();
         UpdateCompactModeVisualState();
         UpdateWorkspaceLayoutForCurrentMode();
         UpdateBranchMenu();

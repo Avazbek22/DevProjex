@@ -191,10 +191,15 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(TaskbarProgressRecordingState.Progress, taskbar.LastState);
         Assert.Equal(77, taskbar.LastPercent);
 
+        viewModel.StatusBusy = false;
+        coordinator.SyncWithStatusBar();
+
+        Assert.Equal(TaskbarProgressRecordingState.Progress, taskbar.LastState);
+        Assert.Equal(77, taskbar.LastPercent);
+
         coordinator.MarkGitCloneError();
         Assert.Equal(TaskbarProgressRecordingState.Error, taskbar.LastState);
 
-        viewModel.StatusBusy = false;
         coordinator.CompleteGitClone();
         Assert.Equal(TaskbarProgressRecordingState.Clear, taskbar.LastState);
     }

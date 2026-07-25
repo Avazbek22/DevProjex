@@ -7,6 +7,98 @@ namespace DevProjex.Tests.Unit;
 public sealed class SelectionSyncCoordinatorAdditionalTests
 {
 	[Fact]
+	public void PendingApplyState_TracksEverySettingsSectionAndStopsAfterRoundTrip()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		var root = new SelectionOptionViewModel("src", true);
+		var extension = new SelectionOptionViewModel(".cs", true);
+		var ignore = new IgnoreOptionViewModel(IgnoreOptionId.DotFolders, "dot folders", true);
+		viewModel.RootFolders.Add(root);
+		viewModel.Extensions.Add(extension);
+		viewModel.IgnoreOptions.Add(ignore);
+
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+
+		root.IsChecked = false;
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+		root.IsChecked = true;
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+
+		extension.IsChecked = false;
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+		extension.IsChecked = true;
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+
+		ignore.IsChecked = false;
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+		ignore.IsChecked = true;
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+	}
+
+	[Fact]
+	public void PendingApplyState_IgnoresMasterCheckboxChangesWithoutAnEffectiveSelectionChange()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+		coordinator.HandleRootAllChanged(isChecked: false, currentPath: null);
+		coordinator.HandleIgnoreAllChanged(isChecked: false, currentPath: null);
+
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+	}
+
+	[Fact]
+	public void PendingApplyState_AcceptAndProjectResetCannotLeakAcrossProjects()
+	{
+		const string firstProjectPath = @"C:\ProjectA";
+		const string secondProjectPath = @"C:\ProjectB";
+		var currentPath = firstProjectPath;
+		var viewModel = CreateViewModel();
+		viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => currentPath);
+		coordinator.AcceptCurrentSelectionsAsApplied(firstProjectPath);
+
+		viewModel.RootFolders[0].IsChecked = false;
+		coordinator.ReevaluatePendingApplyChanges();
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+
+		coordinator.AcceptCurrentSelectionsAsApplied(firstProjectPath);
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+
+		currentPath = secondProjectPath;
+		coordinator.ReevaluatePendingApplyChanges();
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+
+		coordinator.ClearAppliedSelectionState();
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+	}
+
+	[Fact]
+	public void PendingApplyState_DynamicOptionProjectionReturningToBaselineStopsAttention()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".md", true));
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		coordinator.UpdateExtensionsSelectionCache();
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+		coordinator.ApplyExtensionScan([".cs"]);
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+
+		coordinator.ApplyExtensionScan([".cs", ".md"]);
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+	}
+
+	[Fact]
 	public void HandleRootAllChanged_ChecksAllRootFolderOptions()
 	{
 		var viewModel = CreateViewModel();

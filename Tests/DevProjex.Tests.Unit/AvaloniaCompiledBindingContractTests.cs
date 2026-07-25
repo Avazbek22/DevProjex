@@ -85,6 +85,44 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void SettingsPanel_ApplyAttentionUsesConditionalIdleSafeFadeContract()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"Views",
+			"SettingsPanelView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var applyButton = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Button"),
+			element => element.Attribute("Name")?.Value == "ApplySettingsButton");
+
+		Assert.Equal(
+			"{Binding IsApplySettingsAttentionActive}",
+			applyButton.Attribute("Classes.apply-attention")?.Value);
+
+		var attentionStyle = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Style"),
+			element => element.Attribute("Selector")?.Value == "Button#ApplySettingsButton.apply-attention");
+		var animation = Assert.Single(attentionStyle.Descendants(avaloniaNamespace + "Animation"));
+		Assert.Equal("0:0:1.8", animation.Attribute("Duration")?.Value);
+		Assert.Equal("INFINITE", animation.Attribute("IterationCount")?.Value);
+		Assert.Equal("OnlyIfVisible", animation.Attribute("PlaybackBehavior")?.Value);
+		Assert.Equal("SineEaseInOut", animation.Attribute("Easing")?.Value);
+
+		var opacityValues = animation
+			.Descendants(avaloniaNamespace + "Setter")
+			.Where(element => element.Attribute("Property")?.Value == "Opacity")
+			.Select(element => element.Attribute("Value")?.Value ?? string.Empty)
+			.ToArray();
+		Assert.Equal(["1", "0.48", "1"], opacityValues);
+	}
+
+	[Fact]
 	public void ThemePopover_ExposesOnlyMeaningfulEffectControls()
 	{
 		var viewFile = Path.Combine(
