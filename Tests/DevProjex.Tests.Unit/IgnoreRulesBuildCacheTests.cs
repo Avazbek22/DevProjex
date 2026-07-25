@@ -35,21 +35,22 @@ public sealed class IgnoreRulesBuildCacheTests
 	public async Task GetOrBuild_ConcurrentEquivalentRequestsBuildExactlyOnce()
 	{
 		var buildCount = 0;
+		var cancellationToken = TestContext.Current.CancellationToken;
 		using var releaseBuild = new ManualResetEventSlim();
 		var cache = new IgnoreRulesBuildCache((_, _, _) =>
 		{
 			Interlocked.Increment(ref buildCount);
-			releaseBuild.Wait(TestContext.Current.CancellationToken);
+			releaseBuild.Wait(cancellationToken);
 			return CreateRules();
 		});
 
 		var requests = Enumerable.Range(0, 16)
-			.Select(_ => Task.Run(
+			.Select(_ => RunOnDedicatedThread(
 				() => cache.GetOrBuild(
 					WorkspacePath,
 					[IgnoreOptionId.UseGitIgnore],
 					["src"]),
-				TestContext.Current.CancellationToken))
+				cancellationToken))
 			.ToArray();
 
 		try
@@ -115,6 +116,7 @@ public sealed class IgnoreRulesBuildCacheTests
 	public async Task Invalidate_DuringBuildForcesTheNextRequestToRebuild()
 	{
 		var buildCount = 0;
+		var cancellationToken = TestContext.Current.CancellationToken;
 		using var buildStarted = new ManualResetEventSlim();
 		using var releaseBuild = new ManualResetEventSlim();
 		var cache = new IgnoreRulesBuildCache((_, _, _) =>
@@ -122,34 +124,34 @@ public sealed class IgnoreRulesBuildCacheTests
 			if (Interlocked.Increment(ref buildCount) == 1)
 			{
 				buildStarted.Set();
-				releaseBuild.Wait(TestContext.Current.CancellationToken);
+				releaseBuild.Wait(cancellationToken);
 			}
 
 			return CreateRules();
 		});
 
-		var firstBuild = Task.Run(
+		var firstBuild = RunOnDedicatedThread(
 			() => cache.GetOrBuild(WorkspacePath, [IgnoreOptionId.SmartIgnore], ["src"]),
-			TestContext.Current.CancellationToken);
+			cancellationToken);
 		Assert.True(buildStarted.Wait(
 			TimeSpan.FromSeconds(2),
-			TestContext.Current.CancellationToken));
+			cancellationToken));
 
 		var invalidationStarted = new TaskCompletionSource(
 			TaskCreationOptions.RunContinuationsAsynchronously);
-		var invalidation = Task.Run(
+		var invalidation = RunOnDedicatedThread(
 			() =>
 			{
 				invalidationStarted.SetResult();
 				cache.Invalidate();
 			},
-			TestContext.Current.CancellationToken);
+			cancellationToken);
 
 		try
 		{
 			await invalidationStarted.Task.WaitAsync(
 				TimeSpan.FromSeconds(2),
-				TestContext.Current.CancellationToken);
+				cancellationToken);
 		}
 		finally
 		{
@@ -163,6 +165,24 @@ public sealed class IgnoreRulesBuildCacheTests
 		Assert.NotSame(first, second);
 		Assert.Equal(2, buildCount);
 	}
+
+	private static Task<T> RunOnDedicatedThread<T>(
+		Func<T> action,
+		CancellationToken cancellationToken) =>
+		Task.Factory.StartNew(
+			action,
+			cancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
+
+	private static Task RunOnDedicatedThread(
+		Action action,
+		CancellationToken cancellationToken) =>
+		Task.Factory.StartNew(
+			action,
+			cancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
 
 	private static IgnoreRules CreateRules() =>
 		new(
