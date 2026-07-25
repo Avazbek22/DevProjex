@@ -71,8 +71,7 @@ public sealed partial class SelectionSyncCoordinator(
     private AppliedSelectionState? _appliedSelectionState;
     private int _pendingApplyEvaluationDeferral;
     private bool _pendingApplyEvaluationRequested;
-    private readonly object _ignoreRulesBuildCacheSync = new();
-    private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
+    private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(buildIgnoreRules);
     private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
     private readonly SelectionRefreshEngine _selectionRefreshEngine = new(
         scanOptions,
@@ -384,7 +383,8 @@ public sealed partial class SelectionSyncCoordinator(
 
             cancellationToken.ThrowIfCancellationRequested();
             var visibleExtensions = new List<string>(scan.Value.VisibleExtensions.Count);
-            var extensionlessEntriesCount = SplitExtensions(scan.Value.VisibleExtensions, visibleExtensions);
+            var extensionlessEntriesCount =
+                ExtensionOptionProjection.SplitAvailableEntries(scan.Value.VisibleExtensions, visibleExtensions);
             extensionlessEntriesCount = Math.Max(
                 extensionlessEntriesCount,
                 scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -403,13 +403,14 @@ public sealed partial class SelectionSyncCoordinator(
                     rootFolders,
                     extensionScanRules,
                     ignoreRules,
-                    BuildResolvedExtensionPolicy(options),
+                    ExtensionOptionProjection.BuildResolvedPolicy(options),
                     includeDirectoryToggleProbeRoots,
                     cancellationToken,
                     includeControllerImpactProbeRoots);
 
                 visibleExtensions = new List<string>(scan.Value.VisibleExtensions.Count);
-                extensionlessEntriesCount = SplitExtensions(scan.Value.VisibleExtensions, visibleExtensions);
+                extensionlessEntriesCount =
+                    ExtensionOptionProjection.SplitAvailableEntries(scan.Value.VisibleExtensions, visibleExtensions);
                 extensionlessEntriesCount = Math.Max(
                     extensionlessEntriesCount,
                     scan.Value.EffectiveIgnoreOptionCounts.ExtensionlessFiles);
@@ -717,8 +718,7 @@ public sealed partial class SelectionSyncCoordinator(
     public void InvalidateFileSystemCaches()
     {
         _selectionRefreshEngine.InvalidateCaches();
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = null;
+        _ignoreRulesBuildCache.Invalidate();
     }
 
     public async Task<SelectionRefreshSnapshot?> BuildRootAndDependentsSnapshotAsync(
@@ -969,8 +969,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         // Clear ignore options
         _ignoreOptions = [];
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = null;
+        _ignoreRulesBuildCache.Invalidate();
     }
 
     /// <summary>
@@ -1119,7 +1118,8 @@ public sealed partial class SelectionSyncCoordinator(
     internal void ApplyExtensionScan(IReadOnlyCollection<string> extensions)
     {
         var visibleExtensions = new List<string>(extensions.Count);
-        var extensionlessEntriesCount = SplitExtensions(extensions, visibleExtensions);
+        var extensionlessEntriesCount =
+            ExtensionOptionProjection.SplitAvailableEntries(extensions, visibleExtensions);
         var prev = _session.Extensions.IsInitialized
             ? _session.Extensions.SnapshotSelectedNames()
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1931,8 +1931,7 @@ public sealed partial class SelectionSyncCoordinator(
         _session.IgnoreOptionStateCacheIsComplete = snapshot.IgnoreOptionStateCacheIsComplete;
         MarkSelectionRefreshClean();
 
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = null;
+        _ignoreRulesBuildCache.Invalidate();
 
         return snapshot;
     }
@@ -2284,23 +2283,6 @@ public sealed partial class SelectionSyncCoordinator(
         return selected;
     }
 
-    private static int SplitExtensions(IReadOnlyCollection<string> source, ICollection<string> visibleExtensions)
-    {
-        var extensionlessEntriesCount = 0;
-        foreach (var entry in source)
-        {
-            if (IsExtensionlessEntry(entry))
-            {
-                extensionlessEntriesCount++;
-                continue;
-            }
-
-            visibleExtensions.Add(entry);
-        }
-
-        return extensionlessEntriesCount;
-    }
-
     private SelectionRefreshContext CreateSelectionRefreshContext(string path, bool captureTreeInventory = false) =>
         new(
             Path: path,
@@ -2388,19 +2370,6 @@ public sealed partial class SelectionSyncCoordinator(
             defaultForNewExtension: stateCache is not null);
     }
 
-    private static IExtensionInclusionPolicy BuildResolvedExtensionPolicy(
-        IReadOnlyList<SelectionOption> extensionOptions)
-    {
-        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var option in extensionOptions)
-        {
-            if (option.IsChecked)
-                selected.Add(option.Name);
-        }
-
-        return new ExtensionSetInclusionPolicy(selected);
-    }
-
     private IReadOnlyDictionary<string, bool>? SnapshotRootOptionStateCacheOrNull(bool isInitialized)
     {
         if (!isInitialized)
@@ -2419,15 +2388,6 @@ public sealed partial class SelectionSyncCoordinator(
             suppressLegacySelectedOnlyState: ShouldSuppressAllTogglesOverride());
     }
 
-    private static bool IsExtensionlessEntry(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-
-        var extension = Path.GetExtension(value);
-        return string.IsNullOrEmpty(extension) || extension == ".";
-    }
-
     private IgnoreSectionSnapshotState CaptureIgnoreSectionSnapshotState() =>
         new(
             _hasIgnoreOptionCounts,
@@ -2441,22 +2401,7 @@ public sealed partial class SelectionSyncCoordinator(
         IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyCollection<string>? selectedRootFolders)
     {
-        var cacheKey = IgnoreRulesBuildCacheKeyBuilder.Build(path, selectedIgnoreOptions, selectedRootFolders);
-
-        lock (_ignoreRulesBuildCacheSync)
-        {
-            if (_ignoreRulesBuildCache is not null &&
-                string.Equals(_ignoreRulesBuildCache.Key, cacheKey, StringComparison.Ordinal))
-            {
-                return _ignoreRulesBuildCache.Rules;
-            }
-        }
-
-        var rules = buildIgnoreRules(path, selectedIgnoreOptions, selectedRootFolders);
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = new IgnoreRulesBuildCacheEntry(cacheKey, rules);
-
-        return rules;
+        return _ignoreRulesBuildCache.GetOrBuild(path, selectedIgnoreOptions, selectedRootFolders);
     }
 
     private static void SetAllChecked<T>(
@@ -2600,8 +2545,7 @@ public sealed partial class SelectionSyncCoordinator(
             DisposeCancellationSourceWhenTaskCompletes(liveOptionsRefreshCts, latestLiveOptionsRefreshTask);
             DisposeCancellationSourceWhenTaskCompletes(fullRefreshRequestCts, latestFullRefreshTask);
         }
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = null;
+        _ignoreRulesBuildCache.Invalidate();
         _stableSelectionSnapshot = null;
         _reversibleSelectionSnapshot = null;
         ClearAppliedSelectionState();

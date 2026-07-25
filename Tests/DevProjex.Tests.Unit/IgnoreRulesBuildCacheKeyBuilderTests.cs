@@ -7,7 +7,7 @@ public sealed class IgnoreRulesBuildCacheKeyBuilderTests
 		yield return
 		[
 			new[] { IgnoreOptionId.DotFolders, IgnoreOptionId.UseGitIgnore },
-			new[] { IgnoreOptionId.UseGitIgnore, IgnoreOptionId.DotFolders },
+			new[] { IgnoreOptionId.UseGitIgnore, IgnoreOptionId.DotFolders, IgnoreOptionId.UseGitIgnore },
 			new[] { "src", "docs" },
 			new[] { "docs", "src", "src" }
 		];

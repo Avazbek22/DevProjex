@@ -1554,16 +1554,20 @@ public sealed class MainWindowCoordinatorRefactorTests
 
     private sealed class StubFileContentAnalyzer : IFileContentAnalyzer
     {
-        public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
-            => Task.FromResult(true);
+        public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(true);
 
-        public Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
-            => Task.FromResult<TextFileMetrics?>(null);
+        public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+            string path,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<TextFileMetrics?>(null);
 
-        public Task<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default)
-            => Task.FromResult<TextFileContent?>(null);
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<TextFileContent?>(null);
 
-        public Task<TextFileContent?> TryReadAsTextAsync(
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
             string path,
             long maxSizeForFullRead,
             CancellationToken cancellationToken = default)

@@ -521,7 +521,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			var viewModel = CreateViewModel();
 			var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 			var scanner = new StubFileSystemScanner();
-			var scanOptions = new ScanOptionsUseCase(scanner);
+			var scanOptions = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 			var coordinator = new SelectionSyncCoordinator(
 				viewModel,
 				scanOptions,
@@ -551,7 +551,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			var viewModel = CreateViewModel();
 			var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 			var scanner = new StubFileSystemScanner();
-			var scanOptions = new ScanOptionsUseCase(scanner);
+			var scanOptions = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 			var coordinator = new SelectionSyncCoordinator(
 				viewModel,
 				scanOptions,
@@ -1739,7 +1739,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		scanner ??= new StubFileSystemScanner();
-		var scanOptions = new ScanOptionsUseCase(scanner);
+		var scanOptions = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 		var filterService = new FilterOptionSelectionService();
 		var ignoreService = new IgnoreOptionsService(localization);
 		Func<string, IgnoreRules> buildIgnoreRules = _ => new IgnoreRules(false,

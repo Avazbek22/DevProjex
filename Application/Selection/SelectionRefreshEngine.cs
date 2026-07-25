@@ -22,13 +22,11 @@ public sealed class SelectionRefreshEngine(
         ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
         HasExtensionlessEntries: false,
         ExtensionlessEntriesCount: 0);
-    private readonly object _ignoreRulesBuildCacheSync = new();
-    private IgnoreRulesBuildCacheEntry? _ignoreRulesBuildCache;
+    private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(buildIgnoreRules);
 
 	public void InvalidateCaches()
 	{
-		lock (_ignoreRulesBuildCacheSync)
-			_ignoreRulesBuildCache = null;
+		_ignoreRulesBuildCache.Invalidate();
 	}
 
     public SelectionRefreshSnapshot ComputeFullRefreshSnapshot(
@@ -441,7 +439,8 @@ public sealed class SelectionRefreshEngine(
             selectedIgnoreOptions);
 
         var visibleExtensions = new List<string>(scanData.Extensions.Count);
-        var extensionlessEntriesCount = SplitExtensions(scanData.Extensions, visibleExtensions);
+        var extensionlessEntriesCount =
+            ExtensionOptionProjection.SplitAvailableEntries(scanData.Extensions, visibleExtensions);
         extensionlessEntriesCount = Math.Max(
             extensionlessEntriesCount,
             snapshotState.IgnoreOptionCounts.ExtensionlessFiles);
@@ -477,7 +476,7 @@ public sealed class SelectionRefreshEngine(
                 selectedIgnoreOptions,
                 extensionScanRules,
                 ignoreRules,
-                BuildResolvedExtensionPolicy(extensionOptions),
+                ExtensionOptionProjection.BuildResolvedPolicy(extensionOptions),
                 reusableWorkspaceScan: null,
                 retainedRemovedRootEmptyFolderImpactRoots: null,
                 cancellationToken);
@@ -492,7 +491,8 @@ public sealed class SelectionRefreshEngine(
                 selectedIgnoreOptions);
 
             visibleExtensions = new List<string>(scanData.Extensions.Count);
-            extensionlessEntriesCount = SplitExtensions(scanData.Extensions, visibleExtensions);
+            extensionlessEntriesCount =
+                ExtensionOptionProjection.SplitAvailableEntries(scanData.Extensions, visibleExtensions);
             extensionlessEntriesCount = Math.Max(
                 extensionlessEntriesCount,
                 snapshotState.IgnoreOptionCounts.ExtensionlessFiles);
@@ -1005,19 +1005,6 @@ public sealed class SelectionRefreshEngine(
             defaultForNewExtension: stateCache is not null);
     }
 
-    private static IExtensionInclusionPolicy BuildResolvedExtensionPolicy(
-        IReadOnlyList<SelectionOption> extensionOptions)
-    {
-        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var option in extensionOptions)
-        {
-            if (option.IsChecked)
-                selected.Add(option.Name);
-        }
-
-        return new ExtensionSetInclusionPolicy(selected);
-    }
-
     private static bool ResolveIgnoreOptionCheckedState(
         IgnoreOptionDescriptor option,
         IReadOnlySet<IgnoreOptionId> previousSelections,
@@ -1093,23 +1080,7 @@ public sealed class SelectionRefreshEngine(
         IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyCollection<string>? selectedRootFolders)
     {
-        var cacheKey = IgnoreRulesBuildCacheKeyBuilder.Build(path, selectedIgnoreOptions, selectedRootFolders);
-
-        lock (_ignoreRulesBuildCacheSync)
-        {
-            if (_ignoreRulesBuildCache is not null &&
-                string.Equals(_ignoreRulesBuildCache.Key, cacheKey, StringComparison.Ordinal))
-            {
-                return _ignoreRulesBuildCache.Rules;
-            }
-        }
-
-        var rules = buildIgnoreRules(path, selectedIgnoreOptions, selectedRootFolders);
-
-        lock (_ignoreRulesBuildCacheSync)
-            _ignoreRulesBuildCache = new IgnoreRulesBuildCacheEntry(cacheKey, rules);
-
-        return rules;
+        return _ignoreRulesBuildCache.GetOrBuild(path, selectedIgnoreOptions, selectedRootFolders);
     }
 
 	private static HashSet<IgnoreOptionId> BuildSelectedIgnoreOptionSet(
@@ -1140,32 +1111,6 @@ public sealed class SelectionRefreshEngine(
         }
 
         return selected;
-    }
-
-    private static int SplitExtensions(IReadOnlyCollection<string> source, ICollection<string> visibleExtensions)
-    {
-        var extensionlessEntriesCount = 0;
-        foreach (var entry in source)
-        {
-            if (IsExtensionlessEntry(entry))
-            {
-                extensionlessEntriesCount++;
-                continue;
-            }
-
-            visibleExtensions.Add(entry);
-        }
-
-        return extensionlessEntriesCount;
-    }
-
-    private static bool IsExtensionlessEntry(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-
-        var extension = Path.GetExtension(value);
-        return string.IsNullOrEmpty(extension) || extension == ".";
     }
 
     private static bool ShouldSuppressAllTogglesOverride(SelectionRefreshContext context)
@@ -1338,5 +1283,4 @@ public sealed class SelectionRefreshEngine(
         }
     }
 
-    private sealed record IgnoreRulesBuildCacheEntry(string Key, IgnoreRules Rules);
 }

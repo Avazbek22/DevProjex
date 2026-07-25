@@ -15,7 +15,7 @@ public interface IFileContentAnalyzer
 	/// <param name="path">Absolute path to the file.</param>
 	/// <param name="cancellationToken">Cancellation token.</param>
 	/// <returns>True if file appears to be text, false if binary or on error.</returns>
-	Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default);
+	ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default);
 
 	/// <summary>
 	/// Gets metrics for a text file using streaming (no full content in memory).
@@ -25,7 +25,7 @@ public interface IFileContentAnalyzer
 	/// <param name="path">Absolute path to the file.</param>
 	/// <param name="cancellationToken">Cancellation token.</param>
 	/// <returns>File metrics, or null if not a text file.</returns>
-	Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default);
+	ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default);
 
 	/// <summary>
 	/// Tries to read file as text content with full content loaded.
@@ -35,7 +35,7 @@ public interface IFileContentAnalyzer
 	/// <param name="path">Absolute path to the file.</param>
 	/// <param name="cancellationToken">Cancellation token.</param>
 	/// <returns>Text content with metrics, or null if not a text file.</returns>
-	Task<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default);
+	ValueTask<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default);
 
 	/// <summary>
 	/// Tries to read file as text content with size limit for large files.
@@ -45,7 +45,10 @@ public interface IFileContentAnalyzer
 	/// <param name="maxSizeForFullRead">Maximum file size in bytes for full content read.</param>
 	/// <param name="cancellationToken">Cancellation token.</param>
 	/// <returns>Text content with metrics (may be estimated for large files), or null if not a text file.</returns>
-	Task<TextFileContent?> TryReadAsTextAsync(string path, long maxSizeForFullRead, CancellationToken cancellationToken = default);
+	ValueTask<TextFileContent?> TryReadAsTextAsync(
+		string path,
+		long maxSizeForFullRead,
+		CancellationToken cancellationToken = default);
 }
 
 /// <summary>

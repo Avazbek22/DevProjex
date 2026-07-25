@@ -44,7 +44,6 @@ public sealed class ProjectAnalysisService(
 
 		var loadingStopwatch = Stopwatch.StartNew();
 		if (CanUseUnifiedDefaultSelectionPipeline(request) &&
-		    scanOptions.SupportsWorkspaceSnapshots &&
 		    buildTree.SupportsCompositeInventory)
 		{
 			return LoadWithUnifiedDefaultSelection(
@@ -66,7 +65,6 @@ public sealed class ProjectAnalysisService(
 		IReadOnlyList<string> allowedRootFolders;
 		IgnoreRules rules;
 		if (request.SelectedRootFolders is null &&
-		    scanOptions.SupportsWorkspaceSnapshots &&
 		    buildTree.SupportsCompositeInventory)
 		{
 			var rootFolders = scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken);

@@ -13,6 +13,7 @@ global using DevProjex.Kernel.Contracts;
 global using DevProjex.Kernel.Abstractions;
 global using DevProjex.Kernel.Models;
 global using DevProjex.Tests.Integration.Helpers;
+global using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 global using System.Diagnostics;
 global using System.Reflection;
 global using System.Text;

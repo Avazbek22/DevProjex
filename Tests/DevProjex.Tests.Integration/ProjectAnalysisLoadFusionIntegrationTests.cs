@@ -5,13 +5,11 @@ namespace DevProjex.Tests.Integration;
 public sealed class ProjectAnalysisLoadFusionIntegrationTests
 {
 	[Fact]
-	public async Task Load_ExplicitSelectionWorkspaceScanMatchesBatchedSnapshotPipelineAcrossSelectionMatrix()
+	public async Task Load_ExplicitSelectionCanonicalPipelineIsDeterministicAcrossSelectionMatrix()
 	{
 		using var temp = CreateMixedWorkspace();
-		var fusedService = CreateService(new FileSystemScanner(), new TreeBuilder());
-		var batchedService = CreateService(
-			new BatchedSnapshotForwardingScanner(new FileSystemScanner()),
-			new TreeBuilder());
+		var firstService = CreateService(new FileSystemScanner(), new TreeBuilder());
+		var secondService = CreateService(new FileSystemScanner(), new TreeBuilder());
 		var requests = new ProjectAnalysisRequest[]
 		{
 			new(temp.Path, SelectedRootFolders: ["api"]),
@@ -44,16 +42,16 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 
 		foreach (var request in requests)
 		{
-			var batched = batchedService.Load(request, TestContext.Current.CancellationToken);
-			var fused = fusedService.Load(request, TestContext.Current.CancellationToken);
+			var first = firstService.Load(request, TestContext.Current.CancellationToken);
+			var second = secondService.Load(request, TestContext.Current.CancellationToken);
 
-			AssertLoadedProjectEquivalent(batched, fused);
+			AssertLoadedProjectEquivalent(first, second);
 
-			var batchedReport = await batchedService
-				.BuildReportFromTreeAsync(batched, TestContext.Current.CancellationToken);
-			var fusedReport = await fusedService
-				.BuildReportFromTreeAsync(fused, TestContext.Current.CancellationToken);
-			AssertReportEquivalent(batchedReport, fusedReport);
+			var firstReport = await firstService
+				.BuildReportFromTreeAsync(first, TestContext.Current.CancellationToken);
+			var secondReport = await secondService
+				.BuildReportFromTreeAsync(second, TestContext.Current.CancellationToken);
+			AssertReportEquivalent(firstReport, secondReport);
 		}
 	}
 
@@ -323,7 +321,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		var rules = CreateIgnoreRulesService();
 
 		return new ProjectAnalysisService(
-			new ScanOptionsUseCase(scanner),
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
 			new BuildTreeUseCase(
 				treeBuilder,
 				new TreeNodePresentationService(localization, new TestIconMapper())),
@@ -412,97 +410,6 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		}
 
 		return result;
-	}
-
-	private sealed class BatchedSnapshotForwardingScanner(FileSystemScanner inner)
-		: IFileSystemScanner,
-			IFileSystemScannerAdvanced,
-			IFileSystemScannerIgnoreSectionSnapshotProvider,
-			IFileSystemScannerExtensionPolicySnapshotProvider
-	{
-		public bool CanReadRoot(string rootPath) => inner.CanReadRoot(rootPath);
-
-		public ScanResult<HashSet<string>> GetExtensions(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default) =>
-			inner.GetExtensions(rootPath, rules, cancellationToken);
-
-		public ScanResult<HashSet<string>> GetRootFileExtensions(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default) =>
-			inner.GetRootFileExtensions(rootPath, rules, cancellationToken);
-
-		public ScanResult<List<string>> GetRootFolderNames(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default) =>
-			inner.GetRootFolderNames(rootPath, rules, cancellationToken);
-
-		public ScanResult<ExtensionsScanData> GetExtensionsWithIgnoreOptionCounts(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default) =>
-			inner.GetExtensionsWithIgnoreOptionCounts(rootPath, rules, cancellationToken);
-
-		public ScanResult<ExtensionsScanData> GetRootFileExtensionsWithIgnoreOptionCounts(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default) =>
-			inner.GetRootFileExtensionsWithIgnoreOptionCounts(rootPath, rules, cancellationToken);
-
-		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
-			string rootPath,
-			IgnoreRules extensionDiscoveryRules,
-			IgnoreRules effectiveRules,
-			IReadOnlySet<string>? effectiveAllowedExtensions,
-			CancellationToken cancellationToken = default) =>
-			inner.GetIgnoreSectionSnapshot(
-				rootPath,
-				extensionDiscoveryRules,
-				effectiveRules,
-				effectiveAllowedExtensions,
-				cancellationToken);
-
-		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
-			string rootPath,
-			IgnoreRules extensionDiscoveryRules,
-			IgnoreRules effectiveRules,
-			IReadOnlySet<string>? effectiveAllowedExtensions,
-			CancellationToken cancellationToken = default) =>
-			inner.GetRootFileIgnoreSectionSnapshot(
-				rootPath,
-				extensionDiscoveryRules,
-				effectiveRules,
-				effectiveAllowedExtensions,
-				cancellationToken);
-
-		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
-			string rootPath,
-			IgnoreRules extensionDiscoveryRules,
-			IgnoreRules effectiveRules,
-			IExtensionInclusionPolicy? effectiveExtensionPolicy,
-			CancellationToken cancellationToken = default) =>
-			inner.GetIgnoreSectionSnapshot(
-				rootPath,
-				extensionDiscoveryRules,
-				effectiveRules,
-				effectiveExtensionPolicy,
-				cancellationToken);
-
-		public ScanResult<IgnoreSectionScanData> GetRootFileIgnoreSectionSnapshot(
-			string rootPath,
-			IgnoreRules extensionDiscoveryRules,
-			IgnoreRules effectiveRules,
-			IExtensionInclusionPolicy? effectiveExtensionPolicy,
-			CancellationToken cancellationToken = default) =>
-			inner.GetRootFileIgnoreSectionSnapshot(
-				rootPath,
-				extensionDiscoveryRules,
-				effectiveRules,
-				effectiveExtensionPolicy,
-				cancellationToken);
 	}
 
 	private sealed class CountingInventoryTreeBuilder
