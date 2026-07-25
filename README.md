@@ -26,7 +26,7 @@
 
 DevProjex is a cross-platform desktop app for turning real folders and codebases into **clean, controlled context for AI chats, reviews, and documentation**.
 
-Select only what matters, preview the result, and copy or export it as **tree, content, or both** in ASCII, MD, JSON, or XML.
+Select only what matters, preview the result, copy or export it as **tree, content, or both** in ASCII, MD, JSON, or XML, or create a separate project copy as a folder or ZIP archive.
 
 It’s built for real projects where terminal output is noisy, IDE integrations are limited, and you still need fast, controlled context for an AI chat or a human reviewer.
 
@@ -71,6 +71,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **ASCII, MD, JSON, and XML tree formats** for AI prompts, documentation, and parsers
 * **Per-project local parameter profiles** (saved per local project path)
 * **Export to file** from menu (tree / content / tree + content)
+* **Export project copies** to a separate folder or ZIP archive, preserving the effective tree, binary files, and included empty folders
 * **Search & name filtering** for large projects
 * **Smart Ignore + .gitignore support** (scope-aware behavior for mixed workspaces)
 * **Extensionless files handling** via dedicated ignore option
@@ -84,9 +85,9 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
   * Presets stored locally
   * Island-based layout and smooth UI animations
 * **Animated toasts** for user feedback
-* **Localization** (8 languages)
+* **Localization** (11 languages)
 * **Responsive async scanning** (UI stays smooth on big folders)
-* **Terminal automation mode**: generate AI-ready context, JSON reports, CI-friendly diagnostics, and tree/content exports from the same desktop executable
+* **Terminal automation mode**: generate AI-ready context, JSON reports, CI-friendly diagnostics, tree/content exports, and physical project copies from the same desktop executable
 
 ---
 
@@ -104,6 +105,16 @@ DevProjex works with any language, repository, or project structure.
 
 ---
 
+## Project Copy Export 📦
+
+Use **File → Export Project → To Folder…** or **To ZIP Archive…** to create a separate copy of the current effective tree.
+
+Project copies respect the selected root folders, file types, ignore rules, and checked items. If nothing is checked, the entire current tree is exported. Directory structure, binary files, and included empty folders are preserved.
+
+The source project is not modified, and the result cannot be written inside it. The same workflow is available from the terminal through `--copy folder` and `--copy zip`.
+
+---
+
 ## Command Line ⚙️
 
 DevProjex is not only a desktop context builder. The same app can run from the terminal for repeatable, script-friendly project analysis and AI-context export.
@@ -112,6 +123,8 @@ DevProjex is not only a desktop context builder. The same app can run from the t
 devprojex "/path/to/project" --preview-mode tree-content --tree-format md
 devprojex --last --preview
 devprojex "/path/to/project" --export tree-content -o ./context.txt --roots src --ext cs
+devprojex "/path/to/project" --copy folder -o ./submissions
+devprojex "/path/to/project" --copy zip -o ./submissions/project-copy.zip
 devprojex --path "/path/to/project" --no-ui --report -
 devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
 devprojex --benchmark-ui "/path/to/project"
@@ -123,6 +136,7 @@ Use it to:
 * open the desktop app directly in preview/filter/search states;
 * generate clean AI-ready context without opening the UI;
 * export selected tree/content payloads directly to files or stdout;
+* create selection-, filter-, and ignore-aware project copies as folders or ZIP archives;
 * produce machine-readable JSON analysis reports;
 * benchmark the headless report pipeline or a repeatable desktop UI workflow;
 * record interactive UI session metrics for practical CPU/RAM diagnostics;
@@ -150,6 +164,11 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
   * tree (`.txt`, `.md`, `.json`, `.xml` depending on the selected tree format)
   * content (`.txt`)
   * tree + content (`.txt`, with selected tree format)
+* Exports project copies:
+
+  * to a separate folder
+  * to a ZIP archive
+  * with the effective directory structure, binary files, and included empty folders preserved
 * Shows preview output before copy/export
 * Shows live output metrics and operation progress in status bar
 * Restores previously applied parameters for each local project folder
@@ -160,7 +179,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, suppor
 
 * Edit, rename, move, or delete files
 * Run code or modify your repositories (no commits/merges)
-* Export binary file contents
+* Include binary file contents in text/context exports
 
 ---
 

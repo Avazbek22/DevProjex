@@ -64,6 +64,18 @@ public sealed class CommandLineDocumentationIntegrationTests
 
 		var readme = File.ReadAllText(readmePath);
 		Assert.Contains("Docs/CommandLine.md", readme, StringComparison.Ordinal);
+		Assert.Contains("project copy as a folder or ZIP archive", readme, StringComparison.Ordinal);
+		Assert.Contains("--copy folder", readme, StringComparison.Ordinal);
+		Assert.Contains("--copy zip", readme, StringComparison.Ordinal);
+		Assert.Contains("If nothing is checked, the entire current tree is exported.", readme, StringComparison.Ordinal);
+		Assert.Contains("binary files", readme, StringComparison.Ordinal);
+		Assert.Contains("result cannot be written inside it", readme, StringComparison.Ordinal);
+		Assert.Contains("Localization** (11 languages)", readme, StringComparison.Ordinal);
+		Assert.Contains(
+			"Read-only & without telemetry by design — DevProjex never modifies your files.",
+			readme,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("* Export binary file contents", readme, StringComparison.Ordinal);
 	}
 
 	private static string ExtractFirstJsonFence(string markdown)
