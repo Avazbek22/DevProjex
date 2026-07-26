@@ -227,7 +227,8 @@ public partial class MainWindow
             GetCheckedPaths,
             GetCurrentTreeTextFormat,
             CreateExportPathPresentation,
-            () => Bounds.Width);
+            () => Bounds.Width,
+            ScheduleBackgroundMemoryCleanup);
         _previewPipeline = new PreviewWorkspacePipeline(
             this,
             // 350ms delay ensures thumb animation (250ms) completes fully before loading.
@@ -363,6 +364,11 @@ public partial class MainWindow
         {
             _treeView.PointerEntered += OnTreePointerEntered;
         }
+        AddHandler(
+            PointerPressedEvent,
+            OnWindowPointerPressedForMemoryCleanup,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
         AddHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged, RoutingStrategies.Tunnel, true);
 
         _searchFilterController = new SearchFilterInteractionController(
@@ -378,14 +384,14 @@ public partial class MainWindow
             _sessionMetrics,
             _toastService,
             _localization,
-            ScheduleSearchMemoryCleanupAfterRender,
             () => _currentPath,
             () => _currentTree,
             (interactive, token) => RefreshTreeAsync(interactive, token),
             ResetInteractiveFilterCache,
             () => _lastInteractiveFilterUsedInMemory,
             ex => ShowErrorAsync(ex.Message),
-            ScheduleBackgroundMemoryCleanup);
+            ScheduleBackgroundMemoryCleanup,
+            CancelAllMemoryCleanup);
         _previewSurfaceController = new PreviewSurfaceController(
             this,
             _viewModel,
@@ -450,7 +456,8 @@ public partial class MainWindow
             immediate => SchedulePreviewRefresh(immediate),
             _previewSurfaceController.ClearSelectionMetrics,
             ClearPreviewMemory,
-            force => SchedulePreviewMemoryCleanup(force),
+            SchedulePreviewMemoryCleanup,
+            CancelAllMemoryCleanup,
             UpdateCompactModeVisualState);
         _startupInteractions = new StartupInteractionController(
             _startupOptions,
@@ -463,6 +470,10 @@ public partial class MainWindow
             () => _currentPath,
             () => _currentTree?.Root,
             () => RefreshTreeAsync(),
+            path => TryOpenFolderAsync(
+                path,
+                fromDialog: false,
+                recordRecentFolder: false),
             Close);
         _memoryCleanup = new MemoryCleanupCoordinator(
             _sessionMetrics,
@@ -470,6 +481,9 @@ public partial class MainWindow
                   !_viewModel.StatusBusy &&
                   !_viewModel.IsPreviewLoading &&
                   !_workspacePresentation.IsSettingsAnimating &&
+                  !_workspacePresentation.IsPreviewPaneAnimating &&
+                  !_workspacePresentation.IsTreePaneAnimating &&
+                  !_searchFilterController.IsAnimating &&
                   !_previewWorkspaceController.IsModeSwitchInProgress,
             SettingsPanelAnimationDuration);
         _treeViewport = new TreeViewportController(
@@ -490,10 +504,10 @@ public partial class MainWindow
                 _previewTextScrollViewer ??
                 throw new InvalidOperationException(
                     "Preview scroll viewer was not found."),
-                _previewLineNumbersControl ??
+            _previewLineNumbersControl ??
                 throw new InvalidOperationException(
                     "Preview line numbers control was not found.")),
-            CancelBackgroundMemoryCleanup,
+            CancelAllMemoryCleanup,
             ScheduleBackgroundMemoryCleanup);
         _themeBrushCoordinator = new ThemeBrushCoordinator(this, _viewModel, () => _topMenuBar?.MainMenuControl);
         _appearanceSettings = new AppearanceSettingsController(

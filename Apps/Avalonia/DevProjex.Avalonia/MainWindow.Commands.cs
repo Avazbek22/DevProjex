@@ -297,6 +297,7 @@ public partial class MainWindow
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        CancelAllMemoryCleanup();
         var mods = e.KeyModifiers;
 
         // Ctrl+O (always available)
@@ -431,7 +432,10 @@ public partial class MainWindow
         => _treeViewport.HandleTreePointerEntered();
 
     private void OnWindowPointerWheelChanged(object? sender, PointerWheelEventArgs e)
-        => _treeViewport.HandlePointerWheelChanged(e);
+    {
+        CancelAllMemoryCleanup();
+        _treeViewport.HandlePointerWheelChanged(e);
+    }
 
     private void ShowSearch(bool focusInput = true, bool selectAllOnFocus = true) =>
         _searchFilterController.ShowSearch(focusInput, selectAllOnFocus);

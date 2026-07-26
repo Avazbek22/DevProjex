@@ -27,7 +27,9 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
             var filterToggleButton = UiTestDriver.GetRequiredTopMenuControl<Button>(window, "FilterToggleButton");
 
             Assert.Equal(viewModel.Title, window.Title);
-            Assert.Same(viewModel.TreeNodes, projectTree.ItemsSource);
+            Assert.Same(
+                viewModel.TreeNodes,
+                projectTree.ItemsSource);
             Assert.Equal(viewModel.SelectedFontFamily, projectTree.FontFamily);
             Assert.Equal(viewModel.TreeFontSize, projectTree.FontSize);
 

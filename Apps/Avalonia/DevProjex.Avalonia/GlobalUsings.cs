@@ -15,6 +15,7 @@ global using DevProjex.Application.Preview;
 global using DevProjex.Application.Selection;
 global using DevProjex.Application.Services;
 global using DevProjex.Application.UseCases;
+global using DevProjex.Avalonia.Controls;
 global using DevProjex.Infrastructure.ResourceStore;
 global using DevProjex.Kernel.Abstractions;
 global using DevProjex.Kernel.Contracts;

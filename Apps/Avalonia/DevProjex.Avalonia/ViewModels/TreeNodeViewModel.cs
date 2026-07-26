@@ -1,4 +1,6 @@
 using Avalonia.Controls.Documents;
+using DevProjex.Avalonia.Collections;
+using DevProjex.Kernel;
 using System.Runtime.CompilerServices;
 
 namespace DevProjex.Avalonia.ViewModels;
@@ -12,7 +14,6 @@ public sealed class TreeNodeViewModel(
     : ViewModelBase
 {
     private const double DefaultTreeIndentSize = 16;
-    private static readonly IReadOnlyList<TreeNodeViewModel> EmptyChildItems = [];
     private static int _preserveDescendantExpansionStateDepth;
 
     private bool? _isChecked = false;
@@ -25,7 +26,8 @@ public sealed class TreeNodeViewModel(
     private int _searchSelfMatchEpoch;
     private int _searchDescendantMatchEpoch;
     private bool _deferredChildCheckedState;
-    private List<TreeNodeViewModel> _children = new(descriptor.Children.Count);
+    private readonly ResettableObservableCollection<TreeNodeViewModel> _children =
+        new(descriptor.Children.Count);
     private Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? _childrenFactory = childrenFactory;
     private bool _childrenInitialized = childrenFactory is null || descriptor.Children.Count == 0;
     private readonly Action<TreeNodeViewModel>? _checkedChanged = checkedChanged ?? parent?._checkedChanged;
@@ -40,13 +42,15 @@ public sealed class TreeNodeViewModel(
         new(Math.Max(0, parent is null ? 0 : parent.Depth + 1) * DefaultTreeIndentSize);
 
     public IList<TreeNodeViewModel> Children => EnsureChildrenRealized();
-    public IEnumerable<TreeNodeViewModel> ChildItemsSource => HasChildren ? EnsureChildrenRealized() : EmptyChildItems;
+    public IEnumerable<TreeNodeViewModel> ChildItemsSource => _children;
 
     /// <summary>
     /// Indicates whether this node has children. Used to control expander visibility
     /// independently of VirtualizingStackPanel's cached :empty pseudo-class state.
     /// </summary>
     public bool HasChildren => _children.Count > 0 || (!_childrenInitialized && Descriptor is not null && Descriptor.Children.Count > 0);
+
+    internal bool AreChildrenRealized => _childrenInitialized;
 
     public IImage? Icon { get; set; } = icon;
 
@@ -108,6 +112,9 @@ public sealed class TreeNodeViewModel(
         set
         {
             if (_isExpanded == value) return;
+            if (value && !_childrenInitialized)
+                EnsureChildrenRealized();
+
             _isExpanded = value;
 
             if (!value && _children.Count > 0 && Volatile.Read(ref _preserveDescendantExpansionStateDepth) == 0)
@@ -139,11 +146,18 @@ public sealed class TreeNodeViewModel(
         if (!expanded)
         {
             using var _ = BeginPreserveDescendantExpansionStateScope();
-            SetExpandedRecursiveCore(this, expanded);
+            SetExpandedRecursiveCore(this, expanded, realizeLazyChildren: false);
             return;
         }
 
-        SetExpandedRecursiveCore(this, expanded);
+        SetExpandedRecursiveCore(this, expanded, realizeLazyChildren: true);
+    }
+
+    internal void CollapseRealizedDescendants()
+    {
+        using var _ = BeginPreserveDescendantExpansionStateScope();
+        foreach (var child in _children)
+            SetExpandedRecursiveCore(child, expanded: false, realizeLazyChildren: false);
     }
 
     /// <summary>
@@ -183,6 +197,28 @@ public sealed class TreeNodeViewModel(
         }
     }
 
+    /// <summary>
+    /// Traverses only the view models that have already been materialized.
+    /// UI-only cleanup must not turn a lazy project tree into a full object graph.
+    /// </summary>
+    public static void ForEachRealizedDescendant(
+        IList<TreeNodeViewModel> roots,
+        Action<TreeNodeViewModel> action)
+    {
+        var stack = new Stack<TreeNodeViewModel>();
+        for (var index = roots.Count - 1; index >= 0; index--)
+            stack.Push(roots[index]);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            action(current);
+
+            for (var childIndex = current._children.Count - 1; childIndex >= 0; childIndex--)
+                stack.Push(current._children[childIndex]);
+        }
+    }
+
     public void EnsureParentsExpanded()
     {
         var current = Parent;
@@ -206,9 +242,6 @@ public sealed class TreeNodeViewModel(
             return;
         }
 
-        if (!_childrenInitialized)
-            return;
-
         foreach (var child in _children)
             child.CollectCheckedPaths(selected);
     }
@@ -226,34 +259,74 @@ public sealed class TreeNodeViewModel(
     }
 
     /// <summary>
-    /// Recursively clears all children and releases references to help GC.
-    /// Call before removing from parent collection.
+    /// Detaches an obsolete view-model graph without realizing lazy branches.
+    /// The graph is about to leave ItemsSource, so per-node binding notifications only
+    /// add UI work and keep dispatcher queues alive longer.
     /// </summary>
     public void ClearRecursive()
     {
-        // Clear children recursively first
-        foreach (var child in _children)
-            child.ClearRecursive();
+        var stack = new Stack<TreeNodeViewModel>();
+        stack.Push(this);
 
-        // Clear the children list
-        _children.Clear();
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            for (var index = 0; index < current._children.Count; index++)
+                stack.Push(current._children[index]);
+
+            // Avalonia can retain the published ChildItemsSource after the node leaves the
+            // visual tree, so clear the same list instance to release its child graph.
+            current._children.Clear();
+            current._children.TrimExcess();
+            current._childrenInitialized = true;
+            current._childrenFactory = null;
+            current._displayInlines?.Clear();
+            current._displayInlines = null;
+            current._hasHighlightedDisplay = false;
+            current._searchSelfMatchEpoch = 0;
+            current._searchDescendantMatchEpoch = 0;
+            current.Icon = null;
+            current.Parent = null;
+            current.Descriptor = null!;
+        }
+    }
+
+    internal bool TryReleaseChildrenToLazyState(
+        TreeNodeViewModel? preservedDescendant = null)
+    {
+        if (!_childrenInitialized ||
+            _childrenFactory is null ||
+            _isExpanded)
+        {
+            return false;
+        }
+
+        var preservedChild = FindDirectChildOnPath(preservedDescendant);
+        List<TreeNodeViewModel>? retainedChildren = null;
+        for (var index = 0; index < _children.Count; index++)
+        {
+            var child = _children[index];
+            var retainsSelectionState =
+                _isChecked != true &&
+                child._isChecked != false;
+            if (!retainsSelectionState &&
+                !ReferenceEquals(child, preservedChild))
+            {
+                continue;
+            }
+
+            retainedChildren ??= new List<TreeNodeViewModel>();
+            retainedChildren.Add(child);
+        }
+
+        // TreeDataTemplate retains ChildItemsSource even after its parent is collapsed.
+        // A single Reset notification detaches recycled containers before the backing
+        // references are trimmed; a plain List<T>.RemoveRange leaves the old UI graph alive.
+        _children.ReplaceAll(retainedChildren ?? []);
         _children.TrimExcess();
-        _childrenInitialized = true;
-        _childrenFactory = null;
-        RaisePropertyChanged(nameof(ChildItemsSource));
-        RaisePropertyChanged(nameof(HasChildren));
 
-        // Clear UI-related objects
-        _displayInlines?.Clear();
-        _displayInlines = null;
-        _hasHighlightedDisplay = false;
-        _searchSelfMatchEpoch = 0;
-        _searchDescendantMatchEpoch = 0;
-        Icon = null;
-
-        // Break circular references to help GC
-        Parent = null;
-        Descriptor = null!;
+        _childrenInitialized = false;
+        return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -404,14 +477,20 @@ public sealed class TreeNodeViewModel(
         Parent?.UpdateCheckedFromChildren();
     }
 
-    private static void SetExpandedRecursiveCore(TreeNodeViewModel node, bool expanded)
+    private static void SetExpandedRecursiveCore(
+        TreeNodeViewModel node,
+        bool expanded,
+        bool realizeLazyChildren)
     {
         node.IsExpanded = expanded;
-        foreach (var child in node.EnsureChildrenRealized())
-            SetExpandedRecursiveCore(child, expanded);
+        var children = realizeLazyChildren
+            ? node.EnsureChildrenRealized()
+            : node._children;
+        foreach (var child in children)
+            SetExpandedRecursiveCore(child, expanded, realizeLazyChildren);
     }
 
-    private List<TreeNodeViewModel> EnsureChildrenRealized()
+    private IList<TreeNodeViewModel> EnsureChildrenRealized()
     {
         if (_childrenInitialized)
             return _children;
@@ -419,17 +498,70 @@ public sealed class TreeNodeViewModel(
         // Deeper branches are materialized on demand so initial project load does not pay
         // for the entire view-model graph before the user expands or traverses that subtree.
         var builtChildren = _childrenFactory?.Invoke(this) ?? [];
-        _children = builtChildren as List<TreeNodeViewModel> ?? new List<TreeNodeViewModel>(builtChildren);
-        _childrenFactory = null;
+        var preservedChildren = _children.Count == 0
+            ? null
+            : _children.ToArray();
+        var nextChildren = new List<TreeNodeViewModel>(builtChildren.Count);
+        foreach (var builtChild in builtChildren)
+        {
+            var preservedChild = FindPreservedChild(
+                preservedChildren,
+                builtChild.Descriptor);
+            if (preservedChild is not null)
+            {
+                nextChildren.Add(preservedChild);
+                continue;
+            }
+
+            builtChild.SetChecked(
+                _deferredChildCheckedState,
+                updateChildren: false,
+                updateParent: false);
+            nextChildren.Add(builtChild);
+        }
+
+        _children.ReplaceAll(nextChildren);
+        _children.TrimExcess();
         _childrenInitialized = true;
 
-        // Newly materialized children must inherit the last explicit subtree state without
-        // forcing recursive realization of their own descendants.
-        foreach (var child in _children)
-            child.SetChecked(_deferredChildCheckedState, updateChildren: false, updateParent: false);
-
-        RaisePropertyChanged(nameof(ChildItemsSource));
         return _children;
+    }
+
+    private TreeNodeViewModel? FindDirectChildOnPath(
+        TreeNodeViewModel? descendant)
+    {
+        var current = descendant;
+        while (current?.Parent is not null &&
+               !ReferenceEquals(current.Parent, this))
+        {
+            current = current.Parent;
+        }
+
+        return current is not null && ReferenceEquals(current.Parent, this)
+            ? current
+            : null;
+    }
+
+    private static TreeNodeViewModel? FindPreservedChild(
+        IReadOnlyList<TreeNodeViewModel>? preservedChildren,
+        TreeNodeDescriptor descriptor)
+    {
+        if (preservedChildren is null)
+            return null;
+
+        for (var index = 0; index < preservedChildren.Count; index++)
+        {
+            var candidate = preservedChildren[index];
+            if (ReferenceEquals(candidate.Descriptor, descriptor) ||
+                PathComparer.Default.Equals(
+                    candidate.FullPath,
+                    descriptor.FullPath))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private readonly struct DescendantExpansionStateScope : IDisposable

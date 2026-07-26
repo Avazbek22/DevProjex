@@ -76,19 +76,6 @@ public sealed class MainWindowPreviewInternalsTests
         Assert.Equal(200_000, result);
     }
 
-    [Theory]
-    [InlineData(0, 0, false)]
-    [InlineData(1_499_999, 34_999, false)]
-    [InlineData(1_500_000, 10, true)]
-    [InlineData(10, 35_000, true)]
-    [InlineData(2_000_000, 100_000, true)]
-    public void ShouldForcePreviewMemoryCleanup_UsesThresholdPolicy(int textLength, int lineCount, bool expected)
-    {
-        var result = PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(textLength, lineCount);
-
-        Assert.Equal(expected, result);
-    }
-
     [Fact]
     public void BuildPathSetHash_EmptySet_IsZero()
     {

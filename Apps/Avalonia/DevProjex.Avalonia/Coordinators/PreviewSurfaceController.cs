@@ -1,5 +1,6 @@
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Services;
+using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -13,7 +14,14 @@ internal sealed record PreviewSurfaceControls(
 
 internal sealed class PreviewSurfaceController : IDisposable
 {
-    private const int PreviewWarmupFileLimit = 24;
+    private const int PreviewWarmupTreeNodeLimit = 192;
+    private const int PreviewWarmupCandidateFileLimit = 24;
+    private const int PreviewWarmupCandidateNodeVisitLimit = 512;
+    private const int PreviewWarmupContentFileLimit = 6;
+    private const int PreviewWarmupMaxFileBytes = 64 * 1024;
+    private const int PreviewWarmupMaxCharacters = 96 * 1024;
+    private static readonly IReadOnlySet<string> EmptySelectedPaths =
+        new HashSet<string>(PathComparer.Default);
     private static readonly TimeSpan SelectionMetricsDebounceInterval =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(80));
 
@@ -306,6 +314,7 @@ internal sealed class PreviewSurfaceController : IDisposable
             IReadOnlySet<string> selectedPaths,
             string? currentPath,
             TreeNodeDescriptor? currentTreeRoot,
+            IReadOnlyList<string>? currentTreeOrderedFilePaths,
             ExportPathPresentation? pathPresentation,
             string noTextContentText,
             string noCheckedFilesText,
@@ -323,12 +332,16 @@ internal sealed class PreviewSurfaceController : IDisposable
         return await Task.Run<PreviewWarmupSnapshot?>(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var files =
-                PreviewWarmupPolicy.CollectInitialPreviewFiles(
-                    selectedPaths,
-                    hasSelection,
-                    currentTreeRoot,
-                    PreviewWarmupFileLimit);
+            var selectionPlan = PreviewWarmupPolicy.CreateSelectionPlan(
+                currentTreeRoot,
+                hasSelection ? selectedPaths : EmptySelectedPaths);
+            var files = mode == PreviewContentMode.Tree
+                ? []
+                : PreviewWarmupPolicy.CollectInitialPreviewFiles(
+                    selectionPlan,
+                    PreviewWarmupCandidateFileLimit,
+                    PreviewWarmupCandidateNodeVisitLimit,
+                    currentTreeOrderedFilePaths);
 
             if (mode == PreviewContentMode.Content)
             {
@@ -340,8 +353,11 @@ internal sealed class PreviewSurfaceController : IDisposable
                     return CreateWarmupSnapshot(fallbackText);
                 }
 
-                var contentText = _contentExport.BuildAsync(
+                var contentText = _contentExport.BuildBoundedPreviewAsync(
                         files,
+                        PreviewWarmupContentFileLimit,
+                        PreviewWarmupMaxFileBytes,
+                        PreviewWarmupMaxCharacters,
                         cancellationToken,
                         pathPresentation?.MapFilePath)
                     .GetAwaiter()
@@ -352,18 +368,23 @@ internal sealed class PreviewSurfaceController : IDisposable
                 return CreateWarmupSnapshot(contentText);
             }
 
-            if (mode != PreviewContentMode.TreeAndContent ||
-                string.IsNullOrWhiteSpace(currentPath) ||
+            if (string.IsNullOrWhiteSpace(currentPath) ||
                 currentTreeRoot is null)
             {
                 return null;
             }
 
+            var projectedTree = PreviewWarmupPolicy.CreateBoundedTreeProjection(
+                selectionPlan,
+                PreviewWarmupTreeNodeLimit);
+            if (projectedTree is null)
+                return null;
+
             var treeText = _textOutputPipeline.BuildTree(
                 new ProjectTextOutputSnapshot(
                     currentPath,
-                    currentTreeRoot,
-                    selectedPaths,
+                    projectedTree,
+                    EmptySelectedPaths,
                     OrderedFilePaths: null,
                     treeFormat,
                     pathPresentation),
@@ -371,11 +392,20 @@ internal sealed class PreviewSurfaceController : IDisposable
             if (string.IsNullOrWhiteSpace(treeText))
                 return null;
 
+            if (mode == PreviewContentMode.Tree)
+                return CreateWarmupSnapshot(treeText);
+
+            if (mode != PreviewContentMode.TreeAndContent)
+                return null;
+
             if (files.Count == 0)
                 return CreateWarmupSnapshot(treeText);
 
-            var combinedContent = _contentExport.BuildAsync(
+            var combinedContent = _contentExport.BuildBoundedPreviewAsync(
                     files,
+                    PreviewWarmupContentFileLimit,
+                    PreviewWarmupMaxFileBytes,
+                    PreviewWarmupMaxCharacters,
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(

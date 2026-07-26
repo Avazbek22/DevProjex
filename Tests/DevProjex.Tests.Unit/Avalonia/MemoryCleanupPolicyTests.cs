@@ -4,44 +4,82 @@ namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MemoryCleanupPolicyTests
 {
+    private const long Megabyte = 1024L * 1024L;
+
     [Theory]
-    [InlineData((int)MemoryCleanupReason.ProjectSwitchPostLoad, true, 400)]
-    [InlineData((int)MemoryCleanupReason.GitPullUpdate, true, 400)]
-    [InlineData((int)MemoryCleanupReason.GitBranchSwitch, true, 400)]
-    [InlineData((int)MemoryCleanupReason.SelectionProjectionNarrowed, true, 400)]
-    [InlineData((int)MemoryCleanupReason.TreeCollapseCompleted, true, 400)]
-    [InlineData((int)MemoryCleanupReason.SearchClose, false, 400)]
-    [InlineData((int)MemoryCleanupReason.FilterClose, false, 400)]
-    [InlineData((int)MemoryCleanupReason.PreviewClose, false, 140)]
-    [InlineData((int)MemoryCleanupReason.PreviewRebuildCompleted, false, 400)]
-    public void CreateDeferredPlan_ReturnsStableReasonSpecificContract(
+    [InlineData(
+        (int)MemoryCleanupReason.ProjectSwitchPostLoad,
+        450,
+        (int)MemoryCleanupCollectionMode.Aggressive)]
+    [InlineData(
+        (int)MemoryCleanupReason.GitPullUpdate,
+        450,
+        (int)MemoryCleanupCollectionMode.Aggressive)]
+    [InlineData(
+        (int)MemoryCleanupReason.GitBranchSwitch,
+        450,
+        (int)MemoryCleanupCollectionMode.Aggressive)]
+    [InlineData(
+        (int)MemoryCleanupReason.SelectionProjectionNarrowed,
+        450,
+        (int)MemoryCleanupCollectionMode.Aggressive)]
+    [InlineData(
+        (int)MemoryCleanupReason.TreeCollapseCompleted,
+        450,
+        (int)MemoryCleanupCollectionMode.Aggressive)]
+    [InlineData(
+        (int)MemoryCleanupReason.SearchClose,
+        400,
+        (int)MemoryCleanupCollectionMode.Aggressive)]
+    [InlineData(
+        (int)MemoryCleanupReason.FilterClose,
+        400,
+        (int)MemoryCleanupCollectionMode.Aggressive)]
+    [InlineData(
+        (int)MemoryCleanupReason.PreviewClose,
+        350,
+        (int)MemoryCleanupCollectionMode.Aggressive)]
+    [InlineData(
+        (int)MemoryCleanupReason.PreviewRebuildCompleted,
+        450,
+        (int)MemoryCleanupCollectionMode.Background)]
+    public void CreateDeferredPlan_ReturnsReasonSpecificContract(
         int reasonRaw,
-        bool expectedWaitForUiSettled,
-        int expectedDelayMilliseconds)
+        int expectedDelayMilliseconds,
+        int expectedCollectionModeRaw)
     {
-        var reason = (MemoryCleanupReason)reasonRaw;
         var result = MemoryCleanupPolicy.CreateDeferredPlan(
-            reason,
+            (MemoryCleanupReason)reasonRaw,
             settingsPanelAnimationDuration: TimeSpan.FromMilliseconds(180));
 
-        Assert.Equal(expectedWaitForUiSettled, result.WaitForUiSettled);
-        Assert.Equal(TimeSpan.FromMilliseconds(expectedDelayMilliseconds), result.Delay);
+        Assert.True(result.WaitForUiSettled);
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(expectedDelayMilliseconds),
+            result.Delay);
+        Assert.Equal(
+            (MemoryCleanupCollectionMode)expectedCollectionModeRaw,
+            result.CollectionMode);
     }
 
     [Theory]
-    [InlineData(0, 500)]
-    [InlineData(180, 680)]
-    [InlineData(350, 850)]
+    [InlineData(0, 400)]
+    [InlineData(180, 580)]
+    [InlineData(350, 750)]
     public void CreateDeferredPlan_InitialProjectLoad_UsesSettingsAnimationAwareDelay(
         int settingsAnimationMilliseconds,
         int expectedTotalDelayMilliseconds)
     {
         var result = MemoryCleanupPolicy.CreateDeferredPlan(
             MemoryCleanupReason.InitialProjectLoad,
-            settingsPanelAnimationDuration: TimeSpan.FromMilliseconds(settingsAnimationMilliseconds));
+            TimeSpan.FromMilliseconds(settingsAnimationMilliseconds));
 
         Assert.True(result.WaitForUiSettled);
-        Assert.Equal(TimeSpan.FromMilliseconds(expectedTotalDelayMilliseconds), result.Delay);
+        Assert.Equal(
+            MemoryCleanupCollectionMode.Aggressive,
+            result.CollectionMode);
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(expectedTotalDelayMilliseconds),
+            result.Delay);
     }
 
     [Theory]
@@ -54,26 +92,36 @@ public sealed class MemoryCleanupPolicyTests
     {
         var result = MemoryCleanupPolicy.CreateDeferredPlan(
             MemoryCleanupReason.RefreshProject,
-            settingsPanelAnimationDuration: TimeSpan.FromMilliseconds(settingsAnimationMilliseconds));
+            TimeSpan.FromMilliseconds(settingsAnimationMilliseconds));
 
         Assert.True(result.WaitForUiSettled);
-        Assert.Equal(TimeSpan.FromMilliseconds(expectedTotalDelayMilliseconds), result.Delay);
+        Assert.Equal(
+            MemoryCleanupCollectionMode.Aggressive,
+            result.CollectionMode);
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(expectedTotalDelayMilliseconds),
+            result.Delay);
     }
 
     [Fact]
-    public void CreateDeferredPlan_NonAnimationReasons_DoNotDependOnSettingsDuration()
+    public void CreateDeferredPlan_FilterAppliedWaitsForPublishedMetricsAndStableUi()
     {
-        var shortDelayPlan = MemoryCleanupPolicy.CreateDeferredPlan(
-            MemoryCleanupReason.SearchClose,
-            settingsPanelAnimationDuration: TimeSpan.FromMilliseconds(120));
-        var longDelayPlan = MemoryCleanupPolicy.CreateDeferredPlan(
-            MemoryCleanupReason.SearchClose,
-            settingsPanelAnimationDuration: TimeSpan.FromSeconds(3));
+        var result = MemoryCleanupPolicy.CreateDeferredPlan(
+            MemoryCleanupReason.FilterApplied,
+            settingsPanelAnimationDuration: TimeSpan.Zero);
 
-        Assert.Equal(shortDelayPlan, longDelayPlan);
+        Assert.True(result.WaitForUiSettled);
+        Assert.Equal(TimeSpan.FromMilliseconds(400), result.Delay);
+        Assert.Equal(
+            MemoryCleanupCollectionMode.Aggressive,
+            result.CollectionMode);
     }
 
     [Theory]
+    [InlineData((int)MemoryCleanupReason.SearchClose)]
+    [InlineData((int)MemoryCleanupReason.FilterClose)]
+    [InlineData((int)MemoryCleanupReason.FilterApplied)]
+    [InlineData((int)MemoryCleanupReason.PreviewClose)]
     [InlineData((int)MemoryCleanupReason.InitialProjectLoad)]
     [InlineData((int)MemoryCleanupReason.ProjectSwitchPostLoad)]
     [InlineData((int)MemoryCleanupReason.RefreshProject)]
@@ -81,55 +129,78 @@ public sealed class MemoryCleanupPolicyTests
     [InlineData((int)MemoryCleanupReason.GitBranchSwitch)]
     [InlineData((int)MemoryCleanupReason.SelectionProjectionNarrowed)]
     [InlineData((int)MemoryCleanupReason.TreeCollapseCompleted)]
-    [InlineData((int)MemoryCleanupReason.SearchClose)]
-    [InlineData((int)MemoryCleanupReason.FilterClose)]
+    public void CreateDeferredPlan_ReleasedGraphsUseAggressiveCleanup(
+        int reasonRaw)
+    {
+        var plan = CreatePlan((MemoryCleanupReason)reasonRaw);
+
+        Assert.Equal(
+            MemoryCleanupCollectionMode.Aggressive,
+            plan.CollectionMode);
+    }
+
+    [Theory]
     [InlineData((int)MemoryCleanupReason.PreviewRebuildCompleted)]
-    public void ShouldRun_RoutineLifecycleCleanup_RequiresMaterialManagedHeap(int reasonRaw)
+    public void CreateDeferredPlan_NonDetachingWorkUsesBackgroundCleanup(
+        int reasonRaw)
     {
-        var plan = MemoryCleanupPolicy.CreateDeferredPlan(
-            (MemoryCleanupReason)reasonRaw,
-            settingsPanelAnimationDuration: TimeSpan.Zero);
+        var plan = CreatePlan((MemoryCleanupReason)reasonRaw);
 
-        Assert.False(MemoryCleanupPolicy.ShouldRun(
-            plan,
-            MemoryCleanupPolicy.RoutineCleanupMinimumManagedHeapBytes - 1));
-        Assert.True(MemoryCleanupPolicy.ShouldRun(
-            plan,
-            MemoryCleanupPolicy.RoutineCleanupMinimumManagedHeapBytes));
+        Assert.Equal(
+            MemoryCleanupCollectionMode.Background,
+            plan.CollectionMode);
+    }
+
+    [Theory]
+    [InlineData(127, 100, false)]
+    [InlineData(128, 31, false)]
+    [InlineData(159, 32, true)]
+    [InlineData(160, 32, true)]
+    [InlineData(161, 32, false)]
+    [InlineData(200, 40, true)]
+    public void ShouldCompactAfterBackgroundCollection_UsesReservedHeapFragmentation(
+        long heapSizeMegabytes,
+        long fragmentedMegabytes,
+        bool expected)
+    {
+        var snapshot = Snapshot(
+            managedHeapBytes: 1 * Megabyte,
+            heapSizeBytes: heapSizeMegabytes * Megabyte,
+            fragmentedBytes: fragmentedMegabytes * Megabyte);
+
+        Assert.Equal(
+            expected,
+            MemoryCleanupPolicy.ShouldCompactAfterBackgroundCollection(
+                snapshot));
     }
 
     [Fact]
-    public void ShouldRun_HeavyPreviewCleanup_RemainsUnconditional()
+    public void ShouldCompactAfterBackgroundCollection_LowLiveBytesDoNotHideFragmentedReservedHeap()
     {
-        var plan = MemoryCleanupPolicy.CreateDeferredPlan(
-            MemoryCleanupReason.PreviewClose,
+        var snapshot = Snapshot(
+            managedHeapBytes: 20 * Megabyte,
+            heapSizeBytes: 466 * Megabyte,
+            fragmentedBytes: 339 * Megabyte);
+
+        Assert.True(
+            MemoryCleanupPolicy.ShouldCompactAfterBackgroundCollection(
+                snapshot));
+    }
+
+    private static MemoryCleanupPlan CreatePlan(
+        MemoryCleanupReason reason) =>
+        MemoryCleanupPolicy.CreateDeferredPlan(
+            reason,
             settingsPanelAnimationDuration: TimeSpan.Zero);
 
-        Assert.True(MemoryCleanupPolicy.ShouldRun(plan, managedHeapBytes: 0));
-    }
-
-    [Fact]
-    public void ShouldRun_PreviewRebuildCleanup_RemainsThresholdGated()
-    {
-        var plan = MemoryCleanupPolicy.CreateDeferredPlan(
-            MemoryCleanupReason.PreviewRebuildCompleted,
-            settingsPanelAnimationDuration: TimeSpan.Zero);
-
-        Assert.False(MemoryCleanupPolicy.ShouldRun(
-            plan,
-            MemoryCleanupPolicy.RoutineCleanupMinimumManagedHeapBytes - 1));
-        Assert.True(MemoryCleanupPolicy.ShouldRun(
-            plan,
-            MemoryCleanupPolicy.RoutineCleanupMinimumManagedHeapBytes));
-    }
-
-    [Fact]
-    public void ShouldRunRoutineCleanup_UsesStableInclusiveThreshold()
-    {
-        Assert.False(MemoryCleanupPolicy.ShouldRunRoutineCleanup(0));
-        Assert.False(MemoryCleanupPolicy.ShouldRunRoutineCleanup(
-            MemoryCleanupPolicy.RoutineCleanupMinimumManagedHeapBytes - 1));
-        Assert.True(MemoryCleanupPolicy.ShouldRunRoutineCleanup(
-            MemoryCleanupPolicy.RoutineCleanupMinimumManagedHeapBytes));
-    }
+    private static MemoryCleanupSnapshot Snapshot(
+        long managedHeapBytes,
+        long heapSizeBytes = 0,
+        long fragmentedBytes = 0) =>
+        new(
+            managedHeapBytes,
+            heapSizeBytes,
+            fragmentedBytes,
+            MemoryLoadBytes: 0,
+            HighMemoryLoadThresholdBytes: 0);
 }

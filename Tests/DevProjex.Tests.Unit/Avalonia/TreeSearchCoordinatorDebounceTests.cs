@@ -42,6 +42,35 @@ public sealed class TreeSearchCoordinatorDebounceTests
 	}
 
 	[Fact]
+	public void QueryChangeCancelAndResultReplacement_InvalidatePendingBringIntoView()
+	{
+		var (viewModel, treeView) = CreateContext();
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(
+			new TreeNodeDescriptor(
+				"Root",
+				"C:\\Root",
+				IsDirectory: true,
+				IsAccessDenied: false,
+				IconKey: "folder",
+				Children: []),
+			null,
+			null));
+		using var coordinator = new TreeSearchCoordinator(viewModel, treeView);
+
+		var initialVersion = GetPrivateField<int>(coordinator, "_bringIntoViewVersion");
+		coordinator.OnSearchQueryChanged();
+		var afterQueryChange = GetPrivateField<int>(coordinator, "_bringIntoViewVersion");
+		coordinator.CancelPending();
+		var afterCancel = GetPrivateField<int>(coordinator, "_bringIntoViewVersion");
+		coordinator.UpdateSearchMatches();
+		var afterResultReplacement = GetPrivateField<int>(coordinator, "_bringIntoViewVersion");
+
+		Assert.True(afterQueryChange > initialVersion);
+		Assert.True(afterCancel > afterQueryChange);
+		Assert.True(afterResultReplacement > afterCancel);
+	}
+
+	[Fact]
 	public void CancelPending_CancelsDebounceAndActiveSearchAndHighlightTokens()
 	{
 		var (viewModel, treeView) = CreateContext();

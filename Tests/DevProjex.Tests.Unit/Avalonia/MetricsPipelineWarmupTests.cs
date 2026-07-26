@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Avalonia.Threading;
 using DevProjex.Application.Preview;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -70,6 +71,80 @@ public sealed class MetricsPipelineWarmupTests
         Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
         Assert.True(pipeline.HasCompleteBaseline);
         Assert.Contains(100, observedProgressValues);
+    }
+
+    [AvaloniaFact]
+    public async Task InitializeFileMetricsCacheAsync_InvalidatedWhileWaitingNeverReadsObsoleteTree()
+    {
+        using var temp = new TemporaryDirectory();
+        var textFile = temp.CreateFile(
+            "Program.cs",
+            "Console.WriteLine(\"obsolete\");");
+        var treeRoot = new TreeNodeDescriptor(
+            "root",
+            temp.Path,
+            true,
+            false,
+            "folder",
+            [
+                new TreeNodeDescriptor(
+                    "Program.cs",
+                    textFile,
+                    false,
+                    false,
+                    "csharp",
+                    [])
+            ]);
+        var currentTree = new BuildTreeResult(
+            treeRoot,
+            RootAccessDenied: false,
+            HadAccessDenied: false,
+            [textFile]);
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.TreeNodes.Add(
+            new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+        var analyzer = new CountingFileContentAnalyzer(
+            new FileContentAnalyzer());
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider:
+                () => viewModel.StatusOperationCalculatingData);
+        using var pipeline = new MetricsPipeline(
+            viewModel,
+            CreateLocalization(),
+            analyzer,
+            new TreeExportService(),
+            status,
+            currentTreeProvider: () => currentTree,
+            currentPathProvider: () => temp.Path,
+            selectedPathsProvider:
+                () => new HashSet<string>(PathComparer.Default),
+            treeFormatProvider: () => TreeTextFormat.Ascii,
+            exportPathPresentationProvider: () => null,
+            boundsWidthProvider: () => 1400);
+        var visualReady =
+            new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var warmup = pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+            currentTree,
+            visualReady.Task,
+            TestContext.Current.CancellationToken);
+        await Task.Delay(
+            100,
+            TestContext.Current.CancellationToken);
+
+        pipeline.CancelAndDiscardBackgroundCalculation();
+        visualReady.SetResult();
+        await warmup.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
+        Assert.False(pipeline.IsBackgroundActive);
+        Assert.False(pipeline.HasCompleteBaseline);
     }
 
     [AvaloniaFact]
@@ -143,6 +218,153 @@ public sealed class MetricsPipelineWarmupTests
         {
             await Dispatcher.UIThread.InvokeAsync(pipeline.Dispose);
         }
+    }
+
+    [AvaloniaFact]
+    public async Task Recalculate_FilterCleanupIsScheduledAfterCurrentMetricsFinish()
+    {
+        using var temp = new TemporaryDirectory();
+        var textFile = temp.CreateFile(
+            "src/Program.cs",
+            "Console.WriteLine(\"ready\");");
+        var treeRoot = new TreeNodeDescriptor(
+            "root",
+            temp.Path,
+            true,
+            false,
+            "folder",
+            [
+                new TreeNodeDescriptor(
+                    "Program.cs",
+                    textFile,
+                    false,
+                    false,
+                    "csharp",
+                    [])
+            ]);
+        var currentTree = new BuildTreeResult(
+            treeRoot,
+            RootAccessDenied: false,
+            HadAccessDenied: false,
+            [textFile]);
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.TreeNodes.Add(
+            new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider:
+                () => viewModel.StatusOperationCalculatingData);
+        var analyzer = new BlockingMetricsFileContentAnalyzer(
+            new FileContentAnalyzer());
+        var cleanupScheduled =
+            new TaskCompletionSource<MemoryCleanupReason>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+        using var pipeline = new MetricsPipeline(
+            viewModel,
+            CreateLocalization(),
+            analyzer,
+            new TreeExportService(),
+            status,
+            currentTreeProvider: () => currentTree,
+            currentPathProvider: () => temp.Path,
+            selectedPathsProvider:
+                () => new HashSet<string>(PathComparer.Default),
+            treeFormatProvider: () => TreeTextFormat.Ascii,
+            exportPathPresentationProvider: () => null,
+            boundsWidthProvider: () => 1400,
+            scheduleMemoryCleanup:
+                reason => cleanupScheduled.TrySetResult(reason));
+
+        pipeline.Recalculate(MemoryCleanupReason.FilterApplied);
+        await analyzer.Started.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(cleanupScheduled.Task.IsCompleted);
+
+        analyzer.Release();
+        var reason = await cleanupScheduled.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(MemoryCleanupReason.FilterApplied, reason);
+        Assert.True(pipeline.HasStatusMetricsSnapshot);
+    }
+
+    [AvaloniaFact]
+    public async Task CancelAndDiscard_ObsoleteWarmupCannotRepopulateMetricsCache()
+    {
+        using var temp = new TemporaryDirectory();
+        var textFile = temp.CreateFile("Program.cs", "class Program { }");
+        var treeRoot = new TreeNodeDescriptor(
+            "root",
+            temp.Path,
+            true,
+            false,
+            "folder",
+            [
+                new TreeNodeDescriptor(
+                    "Program.cs",
+                    textFile,
+                    false,
+                    false,
+                    "csharp",
+                    [])
+            ]);
+        var currentTree = new BuildTreeResult(
+            treeRoot,
+            RootAccessDenied: false,
+            HadAccessDenied: false,
+            [textFile]);
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.TreeNodes.Add(
+            new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider:
+                () => viewModel.StatusOperationCalculatingData);
+        var analyzer = new FirstCallBlockingMetricsAnalyzer(
+            new FileContentAnalyzer());
+        using var pipeline = new MetricsPipeline(
+            viewModel,
+            CreateLocalization(),
+            analyzer,
+            new TreeExportService(),
+            status,
+            currentTreeProvider: () => currentTree,
+            currentPathProvider: () => temp.Path,
+            selectedPathsProvider:
+                () => new HashSet<string>(PathComparer.Default),
+            treeFormatProvider: () => TreeTextFormat.Ascii,
+            exportPathPresentationProvider: () => null,
+            boundsWidthProvider: () => 1400);
+
+        var warmup = pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+            currentTree,
+            TestContext.Current.CancellationToken);
+        await analyzer.FirstCallStarted.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        pipeline.CancelAndDiscardBackgroundCalculation();
+        analyzer.ReleaseFirstCall();
+        await warmup.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, analyzer.MetricsCallCount);
+
+        pipeline.Recalculate();
+        await WaitUntilAsync(
+            () => analyzer.MetricsCallCount == 2 &&
+                  pipeline.HasStatusMetricsSnapshot,
+            TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, analyzer.MetricsCallCount);
     }
 
     private static TreeNodeDescriptor CreateTree(
@@ -249,5 +471,104 @@ public sealed class MetricsPipelineWarmupTests
             long maxSizeForFullRead,
             CancellationToken cancellationToken = default) =>
             inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+    }
+
+    private sealed class BlockingMetricsFileContentAnalyzer(
+        IFileContentAnalyzer inner) : IFileContentAnalyzer
+    {
+        private readonly TaskCompletionSource _started =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        public ValueTask<bool> IsTextFileAsync(
+            string path,
+            CancellationToken cancellationToken = default) =>
+            inner.IsTextFileAsync(path, cancellationToken);
+
+        public async ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+            string path,
+            CancellationToken cancellationToken = default)
+        {
+            _started.TrySetResult();
+            await _release.Task.WaitAsync(cancellationToken);
+            return await inner.GetTextFileMetricsAsync(
+                path,
+                cancellationToken);
+        }
+
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            CancellationToken cancellationToken = default) =>
+            inner.TryReadAsTextAsync(path, cancellationToken);
+
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            long maxSizeForFullRead,
+            CancellationToken cancellationToken = default) =>
+            inner.TryReadAsTextAsync(
+                path,
+                maxSizeForFullRead,
+                cancellationToken);
+    }
+
+    private sealed class FirstCallBlockingMetricsAnalyzer(
+        IFileContentAnalyzer inner) : IFileContentAnalyzer
+    {
+        private readonly TaskCompletionSource _firstCallStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseFirstCall =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _metricsCallCount;
+
+        public Task FirstCallStarted => _firstCallStarted.Task;
+
+        public int MetricsCallCount =>
+            Volatile.Read(ref _metricsCallCount);
+
+        public void ReleaseFirstCall() =>
+            _releaseFirstCall.TrySetResult();
+
+        public ValueTask<bool> IsTextFileAsync(
+            string path,
+            CancellationToken cancellationToken = default) =>
+            inner.IsTextFileAsync(path, cancellationToken);
+
+        public async ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+            string path,
+            CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref _metricsCallCount);
+            if (call == 1)
+            {
+                _firstCallStarted.TrySetResult();
+                await _releaseFirstCall.Task;
+                return await inner.GetTextFileMetricsAsync(
+                    path,
+                    CancellationToken.None);
+            }
+
+            return await inner.GetTextFileMetricsAsync(
+                path,
+                cancellationToken);
+        }
+
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            CancellationToken cancellationToken = default) =>
+            inner.TryReadAsTextAsync(path, cancellationToken);
+
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            long maxSizeForFullRead,
+            CancellationToken cancellationToken = default) =>
+            inner.TryReadAsTextAsync(
+                path,
+                maxSizeForFullRead,
+                cancellationToken);
     }
 }

@@ -8,6 +8,8 @@ internal interface IRefreshTreePipelineHost
 
     void BeforeFullTreeRefresh();
 
+    void BeforeInteractiveFilterRefresh();
+
     BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken);
 
     bool TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result);

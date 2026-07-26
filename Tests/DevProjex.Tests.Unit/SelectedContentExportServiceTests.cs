@@ -185,4 +185,48 @@ public sealed class SelectedContentExportServiceTests
 		var nl = Environment.NewLine;
 		Assert.DoesNotContain($"\u00A0{nl}\u00A0{nl}", result);
 	}
+
+	[Fact]
+	public async Task BuildBoundedPreviewAsync_EnforcesFileAndCharacterBudgets()
+	{
+		using var temp = new TemporaryDirectory();
+		var first = temp.CreateFile("a.txt", new string('a', 120));
+		var second = temp.CreateFile("b.txt", new string('b', 120));
+		var third = temp.CreateFile("c.txt", new string('c', 120));
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
+
+		var result = await service.BuildBoundedPreviewAsync(
+			[third, second, first],
+			maxFileCount: 2,
+			maxFileSizeForFullRead: 1024,
+			maxOutputCharacters: 180,
+			CancellationToken.None,
+			displayPathMapper: Path.GetFileName);
+
+		Assert.Equal(180, result.Length);
+		Assert.Contains("a.txt:", result, StringComparison.Ordinal);
+		Assert.Contains("b.txt:", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("c.txt:", result, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BuildBoundedPreviewAsync_DoesNotLoadFileBeyondReadBudget()
+	{
+		using var temp = new TemporaryDirectory();
+		var largePayload = new string('x', 256 * 1024);
+		var largeFile = temp.CreateFile("large.txt", largePayload);
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
+
+		var result = await service.BuildBoundedPreviewAsync(
+			[largeFile],
+			maxFileCount: 1,
+			maxFileSizeForFullRead: 4096,
+			maxOutputCharacters: 8192,
+			CancellationToken.None,
+			displayPathMapper: Path.GetFileName);
+
+		Assert.Contains("large.txt:", result, StringComparison.Ordinal);
+		Assert.DoesNotContain(largePayload[..4096], result, StringComparison.Ordinal);
+		Assert.True(result.Length < 256);
+	}
 }

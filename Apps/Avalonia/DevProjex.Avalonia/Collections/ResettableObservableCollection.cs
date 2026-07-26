@@ -7,6 +7,15 @@ namespace DevProjex.Avalonia.Collections;
 /// </summary>
 internal sealed class ResettableObservableCollection<T> : ObservableCollection<T>
 {
+    public ResettableObservableCollection()
+    {
+    }
+
+    public ResettableObservableCollection(int capacity)
+    {
+        EnsureCapacity(capacity);
+    }
+
     public void ReplaceAll(IEnumerable<T> items)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -17,6 +26,24 @@ internal sealed class ResettableObservableCollection<T> : ObservableCollection<T
         foreach (var item in items)
             Items.Add(item);
 
+        RaiseReset();
+    }
+
+    public void EnsureCapacity(int capacity)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(capacity);
+        if (Items is List<T> list)
+            list.EnsureCapacity(capacity);
+    }
+
+    public void TrimExcess()
+    {
+        if (Items is List<T> list)
+            list.TrimExcess();
+    }
+
+    private void RaiseReset()
+    {
         OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
         OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
         OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));

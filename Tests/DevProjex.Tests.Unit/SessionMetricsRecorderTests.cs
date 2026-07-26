@@ -22,6 +22,10 @@ public sealed class SessionMetricsRecorderTests
 		sampler.WorkingSetBytes = 256 * 1024 * 1024;
 		sampler.PrivateMemoryBytes = 192 * 1024 * 1024;
 		sampler.ManagedMemoryBytes = 64 * 1024 * 1024;
+		sampler.ManagedHeapSizeBytes = 56 * 1024 * 1024;
+		sampler.ManagedFragmentedBytes = 8 * 1024 * 1024;
+		sampler.ManagedCommittedBytes = 80 * 1024 * 1024;
+		sampler.MemoryLoadBytes = 512 * 1024 * 1024;
 		sampler.Gen0Collections = 2;
 		recorder.CaptureSample();
 
@@ -61,6 +65,19 @@ public sealed class SessionMetricsRecorderTests
 		Assert.Equal(4, summary.GetProperty("eventCount").GetInt32());
 		Assert.True(summary.GetProperty("peakWorkingSetBytes").GetInt64() >= 256 * 1024 * 1024);
 		Assert.Equal(2, summary.GetProperty("gen0Collections").GetInt32());
+		var lastSample = root.GetProperty("samples").EnumerateArray().Last();
+		Assert.Equal(
+			56 * 1024 * 1024,
+			lastSample.GetProperty("managedHeapSizeBytes").GetInt64());
+		Assert.Equal(
+			8 * 1024 * 1024,
+			lastSample.GetProperty("managedFragmentedBytes").GetInt64());
+		Assert.Equal(
+			80 * 1024 * 1024,
+			lastSample.GetProperty("managedCommittedBytes").GetInt64());
+		Assert.Equal(
+			512 * 1024 * 1024,
+			lastSample.GetProperty("memoryLoadBytes").GetInt64());
 
 		var events = root.GetProperty("events").EnumerateArray().ToArray();
 		Assert.Contains(events, static item => item.GetProperty("name").GetString() == "session.started");
@@ -122,6 +139,42 @@ public sealed class SessionMetricsRecorderTests
 	}
 
 	[Fact]
+	public void UiBenchmarkStep_PersistsMaximumUiDispatchLatency()
+	{
+		using var temp = new TemporaryDirectory();
+		var outputPath = Path.Combine(temp.Path, "session.json");
+		var timeProvider = new ManualTimeProvider(
+			new DateTimeOffset(2026, 7, 11, 10, 0, 0, TimeSpan.Zero));
+		var recorder = CreateRecorder(
+			temp.Path,
+			outputPath,
+			new FakeSessionMetricsSampler(),
+			timeProvider);
+
+		recorder.Start(temp.Path, "test");
+		recorder.RecordUiBenchmarkStep(
+			"search.apply",
+			TimeSpan.FromMilliseconds(800),
+			success: true,
+			maximumUiDispatchLatency: TimeSpan.FromMilliseconds(275.25));
+
+		var completion = recorder.Complete();
+
+		Assert.NotNull(completion);
+		Assert.True(completion.Success, completion.ErrorMessage);
+		using var document = JsonDocument.Parse(File.ReadAllText(outputPath));
+		var benchmarkStep = Assert.Single(
+			document.RootElement.GetProperty("events").EnumerateArray(),
+			static item =>
+				item.GetProperty("name").GetString() == "ui.benchmark.step");
+		Assert.Equal(
+			275.25,
+			benchmarkStep
+				.GetProperty("maximumUiDispatchLatencyMilliseconds")
+				.GetDouble());
+	}
+
+	[Fact]
 	public void Complete_WithoutExplicitOutputWritesUnderLocalAppDataSessionMetricsFolder()
 	{
 		using var temp = new TemporaryDirectory();
@@ -173,6 +226,10 @@ public sealed class SessionMetricsRecorderTests
 		public long WorkingSetBytes { get; set; }
 		public long PrivateMemoryBytes { get; set; }
 		public long ManagedMemoryBytes { get; set; }
+		public long ManagedHeapSizeBytes { get; set; }
+		public long ManagedFragmentedBytes { get; set; }
+		public long ManagedCommittedBytes { get; set; }
+		public long MemoryLoadBytes { get; set; }
 		public int Gen0Collections { get; set; }
 		public int Gen1Collections { get; set; }
 		public int Gen2Collections { get; set; }
@@ -186,7 +243,11 @@ public sealed class SessionMetricsRecorderTests
 			ManagedMemoryBytes,
 			Gen0Collections,
 			Gen1Collections,
-			Gen2Collections);
+			Gen2Collections,
+			ManagedHeapSizeBytes,
+			ManagedFragmentedBytes,
+			ManagedCommittedBytes,
+			MemoryLoadBytes);
 	}
 
 	private sealed class ManualTimeProvider(DateTimeOffset initialUtcNow) : TimeProvider

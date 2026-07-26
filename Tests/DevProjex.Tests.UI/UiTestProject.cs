@@ -46,6 +46,37 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithDeepHorizontalSearchWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            // Keep the result vertically realized so this fixture isolates horizontal navigation.
+            var segments = Enumerable.Range(1, 5)
+                .Select(static level => $"d{level:00}")
+                .ToArray();
+            WriteFile(
+                rootPath,
+                Path.Combine(
+                    Path.Combine(segments),
+                    "horizontal-search-target-with-a-deliberately-long-name-that-exceeds-the-visible-tree-width.cs"),
+                "internal sealed class HorizontalSearchTarget {}\n");
+        });
+    }
+
+    public static UiTestProject CreateWithLargeFlatTree(int fileCount = 2000)
+    {
+        return Create(rootPath =>
+        {
+            for (var index = 0; index < fileCount; index++)
+            {
+                WriteFile(
+                    rootPath,
+                    Path.Combine("bulk", $"file-{index:0000}.txt"),
+                    $"content {index}");
+            }
+        });
+    }
+
     public static UiTestProject CreateWithExtensionSensitiveEmptyFolders()
     {
         return Create(static rootPath =>

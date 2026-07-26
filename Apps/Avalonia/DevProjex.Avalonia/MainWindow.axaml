@@ -19,9 +19,8 @@
       <Setter Property="IsSelected" Value="{CompiledBinding IsSelected, Mode=TwoWay}" />
       <Setter Property="Padding" Value="{DynamicResource TreeItemPaddingResource}" />
     </Style>
-    <!-- Fix for virtualization cache bug: the :empty pseudo-class may not update correctly
-         when VirtualizingStackPanel recycles TreeViewItem containers. We use Opacity binding
-         instead of IsVisible to hide the expander while preserving layout space for alignment. -->
+    <!-- ProjectTreeViewItem owns chevron visibility at local-binding priority because Fluent's
+         :empty state cannot represent lazy children. Opacity remains a recycling-safe fallback. -->
     <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron"
            x:DataType="vm:TreeNodeViewModel">
       <Setter Property="Opacity" Value="{CompiledBinding HasChildren,

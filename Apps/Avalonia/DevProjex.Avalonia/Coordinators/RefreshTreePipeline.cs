@@ -23,7 +23,9 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(refreshCts.Token, cancellationToken);
         var linkedToken = linkedCts.Token;
 
-        if (!interactiveFilter)
+        if (interactiveFilter)
+            host.BeforeInteractiveFilterRefresh();
+        else
             host.BeforeFullTreeRefresh();
 
         try

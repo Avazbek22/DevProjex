@@ -462,7 +462,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         using var pipeline = new PreviewWorkspacePipeline(host, TimeSpan.FromMilliseconds(1));
         pipeline.CachePreview(host.Input.CacheKey);
 
-        await pipeline.RefreshNowAsync();
+        await pipeline.RefreshNowAsync().Completion;
 
         Assert.Equal(1, host.ApplyDocumentCount);
         Assert.Equal(0, host.BuildDocumentCount);
@@ -481,12 +481,62 @@ public sealed class MainWindowCoordinatorRefactorTests
         var host = new RecordingPreviewWorkspaceHost(viewModel);
         using var pipeline = new PreviewWorkspacePipeline(host, TimeSpan.FromMilliseconds(1));
 
-        await pipeline.RefreshNowAsync();
+        await pipeline.RefreshNowAsync().Completion;
 
         Assert.Equal(1, host.ApplyDocumentCount);
         Assert.Equal(1, host.BuildDocumentCount);
         Assert.Equal(1, host.PreviewDocumentCleanupRequestCount);
         viewModel.PreviewDocument?.Dispose();
+    }
+
+    [Fact]
+    public async Task PreviewWorkspacePipeline_ModeSwitchBuildKeepsCurrentDocumentUntilReplacementIsReady()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+        using var currentDocument = new InMemoryPreviewTextDocument("current");
+        viewModel.PreviewDocument = currentDocument;
+
+        var buildStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBuild = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            IsPreviewModeSwitchInProgress = true,
+            AllowCacheHit = false,
+            BuildDocumentHandler = cancellationToken =>
+            {
+                buildStarted.TrySetResult();
+                releaseBuild.Task.Wait(cancellationToken);
+                return new PreviewBuildResult(
+                    new InMemoryPreviewTextDocument("replacement"));
+            }
+        };
+        using var pipeline = new PreviewWorkspacePipeline(
+            host,
+            TimeSpan.FromMilliseconds(1));
+
+        var refreshOperation = pipeline.RefreshNowAsync(
+            allowDuringModeSwitch: true);
+        await buildStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(host.IsPreviewModeSwitchInProgress);
+        Assert.Same(currentDocument, viewModel.PreviewDocument);
+        Assert.Equal(0, host.ClearDocumentCount);
+        Assert.False(refreshOperation.Completion.IsCompleted);
+
+        releaseBuild.TrySetResult();
+        await refreshOperation.Completion;
+
+        Assert.NotNull(viewModel.PreviewDocument);
+        Assert.NotSame(currentDocument, viewModel.PreviewDocument);
+        Assert.Equal("replacement", viewModel.PreviewDocument.GetLineText(1));
+        viewModel.PreviewDocument.Dispose();
+        viewModel.PreviewDocument = null;
     }
 
     [Fact]
@@ -507,12 +557,319 @@ public sealed class MainWindowCoordinatorRefactorTests
         };
         pipeline = new PreviewWorkspacePipeline(host, TimeSpan.FromMilliseconds(1));
 
-        await pipeline.RefreshNowAsync();
+        await pipeline.RefreshNowAsync().Completion;
         pipeline.Dispose();
 
         Assert.Equal(1, host.BuildDocumentCount);
         Assert.Equal(0, host.ApplyDocumentCount);
         Assert.False(viewModel.IsPreviewLoading);
+    }
+
+    [Fact]
+    public async Task PreviewWorkspacePipeline_FirstContentReadyCompletesAfterWarmupWithoutWaitingForFullBuild()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        var buildStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBuild = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            WarmupSnapshot = new PreviewWarmupSnapshot("warmup", 1),
+            BuildDocumentHandler = cancellationToken =>
+            {
+                buildStarted.TrySetResult();
+                releaseBuild.Task.Wait(cancellationToken);
+                return new PreviewBuildResult(
+                    new InMemoryPreviewTextDocument("complete"));
+            }
+        };
+        using var pipeline = new PreviewWorkspacePipeline(
+            host,
+            TimeSpan.FromMilliseconds(1));
+
+        var refreshOperation = pipeline.RefreshNowAsync();
+        await refreshOperation.FirstContentReady.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        await buildStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, host.ApplyTextCount);
+        Assert.Equal("warmup", viewModel.PreviewText);
+        Assert.False(refreshOperation.Completion.IsCompleted);
+
+        releaseBuild.TrySetResult();
+        await refreshOperation.Completion;
+
+        Assert.Equal(1, host.ApplyDocumentCount);
+        Assert.Equal("complete", viewModel.PreviewDocument?.GetLineText(1));
+        viewModel.PreviewDocument?.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PreviewWorkspacePipeline_CanceledBuildCannotPublishLateResult(
+        bool cancelActiveBuild)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        var buildStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBuild = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            BuildDocumentHandler = _ =>
+            {
+                buildStarted.TrySetResult();
+                releaseBuild.Task.Wait(TestContext.Current.CancellationToken);
+                return new PreviewBuildResult(
+                    new InMemoryPreviewTextDocument("late"));
+            }
+        };
+        using var pipeline = new PreviewWorkspacePipeline(
+            host,
+            TimeSpan.FromMilliseconds(1));
+
+        var refreshOperation = pipeline.RefreshNowAsync();
+        await buildStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        if (cancelActiveBuild)
+            pipeline.CancelActiveBuild();
+        else
+            pipeline.CancelRefresh();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await refreshOperation.FirstContentReady)
+            .WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+        Assert.False(refreshOperation.Completion.IsCompleted);
+
+        releaseBuild.TrySetResult();
+        await refreshOperation.Completion;
+
+        Assert.Equal(0, host.ApplyDocumentCount);
+        Assert.Null(viewModel.PreviewDocument);
+        Assert.False(viewModel.IsPreviewLoading);
+        Assert.True(pipeline.IsIdle);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PreviewWorkspacePipeline_CancelOrDisposeCompletesStatusBeforeNonCooperativeBuildReturns(
+        bool disposePipeline)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        var buildStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBuild = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            BuildDocumentHandler = _ =>
+            {
+                buildStarted.TrySetResult();
+                releaseBuild.Task.Wait(TestContext.Current.CancellationToken);
+                return new PreviewBuildResult(
+                    new InMemoryPreviewTextDocument("late"));
+            }
+        };
+        var pipeline = new PreviewWorkspacePipeline(
+            host,
+            TimeSpan.FromMilliseconds(1));
+
+        try
+        {
+            var refreshOperation = pipeline.RefreshNowAsync();
+            await buildStarted.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+
+            if (disposePipeline)
+                pipeline.Dispose();
+            else
+                pipeline.CancelRefresh();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                    async () => await refreshOperation.FirstContentReady)
+                .WaitAsync(
+                    TimeSpan.FromSeconds(5),
+                    TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, host.CompletedPreviewBuildOperationCount);
+            Assert.False(refreshOperation.Completion.IsCompleted);
+
+            releaseBuild.TrySetResult();
+            await refreshOperation.Completion;
+
+            Assert.Equal(1, host.CompletedPreviewBuildOperationCount);
+            Assert.Equal(0, host.ApplyDocumentCount);
+        }
+        finally
+        {
+            releaseBuild.TrySetResult();
+            pipeline.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task PreviewWorkspacePipeline_ScheduledRefreshTransfersPendingFirstContentSignal()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        var firstBuildStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstBuild = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondBuildCompleted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var buildOrdinal = 0;
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            BuildDocumentHandler = _ =>
+            {
+                var ordinal = Interlocked.Increment(ref buildOrdinal);
+                if (ordinal == 1)
+                {
+                    firstBuildStarted.TrySetResult();
+                    releaseFirstBuild.Task.Wait(
+                        TestContext.Current.CancellationToken);
+                    return new PreviewBuildResult(
+                        new InMemoryPreviewTextDocument("stale"));
+                }
+
+                secondBuildCompleted.TrySetResult();
+                return new PreviewBuildResult(
+                    new InMemoryPreviewTextDocument("latest"));
+            }
+        };
+        using var pipeline = new PreviewWorkspacePipeline(
+            host,
+            TimeSpan.FromMilliseconds(1));
+
+        var initialRefresh = pipeline.RefreshNowAsync();
+        await firstBuildStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        pipeline.ScheduleRefresh(immediate: true);
+        await secondBuildCompleted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        await initialRefresh.FirstContentReady.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("latest", viewModel.PreviewDocument?.GetLineText(1));
+        Assert.Equal(1, host.ApplyDocumentCount);
+        Assert.False(initialRefresh.Completion.IsCompleted);
+
+        releaseFirstBuild.TrySetResult();
+        await initialRefresh.Completion;
+
+        Assert.Equal(1, host.ApplyDocumentCount);
+        Assert.Equal("latest", viewModel.PreviewDocument?.GetLineText(1));
+        viewModel.PreviewDocument?.Dispose();
+    }
+
+    [Fact]
+    public async Task PreviewWorkspacePipeline_OlderBuildCannotConsumeNewerDebouncedRefresh()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        var firstBuildStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstBuild = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var buildOrdinal = 0;
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            BuildDocumentHandler = cancellationToken =>
+            {
+                var ordinal = Interlocked.Increment(ref buildOrdinal);
+                if (ordinal == 1)
+                {
+                    firstBuildStarted.TrySetResult();
+                    releaseFirstBuild.Task.Wait(cancellationToken);
+                    return new PreviewBuildResult(
+                        new InMemoryPreviewTextDocument("stale"));
+                }
+
+                return new PreviewBuildResult(
+                    new InMemoryPreviewTextDocument("latest"));
+            }
+        };
+        using var pipeline = new PreviewWorkspacePipeline(
+            host,
+            TimeSpan.FromMinutes(1));
+
+        var initialRefresh = pipeline.RefreshNowAsync();
+        await firstBuildStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        pipeline.ScheduleRefresh();
+        releaseFirstBuild.TrySetResult();
+        await initialRefresh.Completion;
+
+        Assert.True(pipeline.IsRefreshRequested);
+        Assert.False(pipeline.IsIdle);
+        Assert.Null(viewModel.PreviewDocument);
+
+        await pipeline.RefreshAsync();
+        await initialRefresh.FirstContentReady.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, host.BuildDocumentCount);
+        Assert.Equal(1, host.ApplyDocumentCount);
+        Assert.Equal("latest", viewModel.PreviewDocument?.GetLineText(1));
+        Assert.False(pipeline.IsRefreshRequested);
+        Assert.True(pipeline.IsIdle);
+        viewModel.PreviewDocument?.Dispose();
+        viewModel.PreviewDocument = null;
+    }
+
+    [Fact]
+    public async Task PreviewWorkspacePipeline_HandledFailureCompletesRefreshRequest()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            BuildDocumentHandler = _ =>
+                throw new IOException("diagnostic failure")
+        };
+        using var pipeline = new PreviewWorkspacePipeline(
+            host,
+            TimeSpan.FromMilliseconds(1));
+
+        await pipeline.RefreshNowAsync().Completion;
+
+        Assert.False(pipeline.IsRefreshRequested);
+        Assert.True(pipeline.IsIdle);
+        Assert.False(viewModel.IsPreviewLoading);
+        Assert.Equal("diagnostic failure", viewModel.PreviewText);
     }
 
     [Fact]
@@ -660,6 +1017,8 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(TreeRefreshOutcome.Applied, outcome);
         Assert.Equal(0, host.BuildTreeCount);
         Assert.Equal(1, host.ApplyCount);
+        Assert.Equal(1, host.BeforeInteractiveFilterRefreshCount);
+        Assert.Equal(0, host.BeforeFullTreeRefreshCount);
         Assert.True(host.LastUsedInMemoryFilter);
         var filteredRoot = Assert.IsType<TreeNodeDescriptor>(host.LastAppliedResult?.Tree.Root);
         var source = Assert.Single(filteredRoot.Children);
@@ -1307,6 +1666,10 @@ public sealed class MainWindowCoordinatorRefactorTests
 
     private sealed class RecordingPreviewWorkspaceHost(MainWindowViewModel viewModel) : IPreviewWorkspacePipelineHost
     {
+        private readonly object _statusOperationSync = new();
+        private readonly HashSet<long> _completedPreviewBuildOperations = [];
+        private long _previewBuildOperationSequence;
+
         private static readonly TreeNodeDescriptor EmptyRoot = new(
             "root",
             @"C:\Project",
@@ -1341,11 +1704,28 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public Func<CancellationToken, PreviewBuildResult>? BuildDocumentHandler { get; set; }
 
+        public PreviewWarmupSnapshot? WarmupSnapshot { get; set; }
+
+        public bool AllowCacheHit { get; set; } = true;
+
         public int ApplyDocumentCount { get; private set; }
+
+        public int ApplyTextCount { get; private set; }
 
         public int BuildDocumentCount { get; private set; }
 
         public int PreviewDocumentCleanupRequestCount { get; private set; }
+
+        public int ClearDocumentCount { get; private set; }
+
+        public int CompletedPreviewBuildOperationCount
+        {
+            get
+            {
+                lock (_statusOperationSync)
+                    return _completedPreviewBuildOperations.Count;
+            }
+        }
 
         public bool EnsurePreviewTreeReady() => true;
 
@@ -1355,16 +1735,26 @@ public sealed class MainWindowCoordinatorRefactorTests
         public long BeginPreviewBuildOperation(CancellationTokenSource previewCts)
         {
             _ = previewCts;
-            return 1;
+            return Interlocked.Increment(
+                ref _previewBuildOperationSequence);
         }
 
-        public void CompletePreviewBuildOperation(long operationId) =>
-            Assert.Equal(1, operationId);
+        public void CompletePreviewBuildOperation(long operationId)
+        {
+            lock (_statusOperationSync)
+            {
+                Assert.True(
+                    _completedPreviewBuildOperations.Add(operationId),
+                    $"Preview build operation {operationId} completed more than once.");
+            }
+        }
 
         public PreviewRefreshInput CapturePreviewRefreshInput() => Input;
 
         public bool IsCurrentPreviewCacheHit(PreviewCacheKeyData key) =>
-            key == Input.CacheKey && viewModel.PreviewDocument is not null;
+            AllowCacheHit &&
+            key == Input.CacheKey &&
+            viewModel.PreviewDocument is not null;
 
         public IPreviewTextDocument? CurrentPreviewDocument => viewModel.PreviewDocument;
 
@@ -1374,17 +1764,24 @@ public sealed class MainWindowCoordinatorRefactorTests
             viewModel.PreviewDocument = document;
         }
 
-        public void ApplyPreviewText(string text) =>
+        public void ApplyPreviewText(string text)
+        {
+            ApplyTextCount++;
             viewModel.PreviewText = text;
+        }
 
         public void ApplyPreviewText(string text, int lineCount)
         {
+            ApplyTextCount++;
             viewModel.PreviewText = text;
             viewModel.PreviewLineCount = lineCount;
         }
 
-        public void ClearPreviewDocument() =>
+        public void ClearPreviewDocument()
+        {
+            ClearDocumentCount++;
             viewModel.PreviewDocument = null;
+        }
 
         public Task<PreviewWarmupSnapshot?> TryBuildPreviewWarmupSnapshotAsync(
             PreviewRefreshInput input,
@@ -1392,7 +1789,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         {
             _ = input;
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<PreviewWarmupSnapshot?>(null);
+            return Task.FromResult(WarmupSnapshot);
         }
 
         public PreviewBuildResult BuildPreviewDocument(
@@ -1413,14 +1810,12 @@ public sealed class MainWindowCoordinatorRefactorTests
         {
         }
 
-        public void SchedulePreviewMemoryCleanup(bool force)
+        public void SchedulePreviewMemoryCleanup()
         {
-            _ = force;
         }
 
-        public void SchedulePreviewMemoryCleanupForDocument(IPreviewTextDocument document)
+        public void SchedulePreviewRebuildMemoryCleanup()
         {
-            _ = document;
             PreviewDocumentCleanupRequestCount++;
         }
     }
@@ -1444,6 +1839,10 @@ public sealed class MainWindowCoordinatorRefactorTests
         public int BuildTreeCount { get; private set; }
 
         public int ApplyCount { get; private set; }
+
+        public int BeforeFullTreeRefreshCount { get; private set; }
+
+        public int BeforeInteractiveFilterRefreshCount { get; private set; }
 
         public bool LastUsedInMemoryFilter { get; private set; }
 
@@ -1469,8 +1868,14 @@ public sealed class MainWindowCoordinatorRefactorTests
                 InteractiveFilterBaseTree: InteractiveFilterBaseTree);
         }
 
-        public void BeforeFullTreeRefresh() =>
+        public void BeforeFullTreeRefresh()
+        {
+            BeforeFullTreeRefreshCount++;
             viewModel.StatusMetricsVisible = false;
+        }
+
+        public void BeforeInteractiveFilterRefresh() =>
+            BeforeInteractiveFilterRefreshCount++;
 
         public BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken)
         {

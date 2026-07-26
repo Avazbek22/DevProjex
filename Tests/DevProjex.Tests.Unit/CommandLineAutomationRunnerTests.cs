@@ -6,6 +6,55 @@ namespace DevProjex.Tests.Unit;
 public sealed class CommandLineAutomationRunnerTests
 {
 	[Fact]
+	public void UiBenchmarkIdleSettle_DefaultCoversDeferredCleanupWindow()
+	{
+		using var idleOverride = TemporaryEnvironmentVariable.Set(
+			"DEVPROJEX_UI_BENCHMARK_IDLE_SECONDS",
+			string.Empty);
+
+		var duration = StartupInteractionController.ResolveBenchmarkIdleSettleDuration();
+
+		Assert.Equal(TimeSpan.FromSeconds(8), duration);
+		Assert.True(duration > TimeSpan.FromSeconds(2));
+	}
+
+	[Theory]
+	[InlineData("15", 15)]
+	[InlineData("0", 1)]
+	[InlineData("120", 60)]
+	public void UiBenchmarkIdleSettle_UsesBoundedEnvironmentOverride(
+		string configuredSeconds,
+		int expectedSeconds)
+	{
+		using var idleOverride = TemporaryEnvironmentVariable.Set(
+			"DEVPROJEX_UI_BENCHMARK_IDLE_SECONDS",
+			configuredSeconds);
+
+		var duration = StartupInteractionController.ResolveBenchmarkIdleSettleDuration();
+
+		Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), duration);
+	}
+
+	[Theory]
+	[InlineData("", 3)]
+	[InlineData("0", 1)]
+	[InlineData("5", 5)]
+	[InlineData("20", 8)]
+	public void UiBenchmarkProjectReloadCount_UsesBoundedEnvironmentOverride(
+		string configuredCount,
+		int expectedCount)
+	{
+		using var reloadOverride = TemporaryEnvironmentVariable.Set(
+			"DEVPROJEX_UI_BENCHMARK_PROJECT_RELOADS",
+			configuredCount);
+
+		var count =
+			StartupInteractionController.ResolveBenchmarkProjectReloadCount();
+
+		Assert.Equal(expectedCount, count);
+	}
+
+	[Fact]
 	public async Task RunUtilityOrHeadlessAsync_HelpWinsOverOtherParseErrorsAndWritesStdout()
 	{
 		using var output = new StringWriter();
@@ -656,6 +705,14 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.Contains("DevProjex UI benchmark", summary, StringComparison.Ordinal);
 		Assert.Contains("Cold UI process:", summary, StringComparison.Ordinal);
 		Assert.Contains("Scenario: standard-ui", summary, StringComparison.Ordinal);
+		Assert.Contains(
+			"end-of-idle retained: 220 MB",
+			summary,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"post-close rebound: 20 MB",
+			summary,
+			StringComparison.Ordinal);
 		Assert.Contains(Path.GetFullPath(reportPath).Replace('\\', '/'), summary, StringComparison.Ordinal);
 		Assert.DoesNotContain("{", summary, StringComparison.Ordinal);
 		Assert.True(File.Exists(reportPath));
@@ -681,8 +738,51 @@ public sealed class CommandLineAutomationRunnerTests
 		Assert.False(root.GetProperty("hasFailures").GetBoolean());
 		Assert.Equal(1, root.GetProperty("coldUiProcess").GetProperty("warmupRuns").GetArrayLength());
 		Assert.Equal(2, root.GetProperty("coldUiProcess").GetProperty("runs").GetArrayLength());
-		Assert.True(root.GetProperty("coldUiProcess").GetProperty("summary").GetProperty("avgPreviewOpenMilliseconds").GetDouble() > 0);
-		Assert.True(root.GetProperty("coldUiProcess").GetProperty("summary").GetProperty("avgSearchMilliseconds").GetDouble() > 0);
+		var benchmarkSummary = root
+			.GetProperty("coldUiProcess")
+			.GetProperty("summary");
+		Assert.True(benchmarkSummary.GetProperty("avgPreviewOpenMilliseconds").GetDouble() > 0);
+		Assert.True(benchmarkSummary.GetProperty("avgSearchMilliseconds").GetDouble() > 0);
+		var retainedMemory = benchmarkSummary.GetProperty(
+			"averageRetainedMemory");
+		AssertBenchmarkMemorySnapshot(
+			retainedMemory.GetProperty("postClose"),
+			workingSetBytes: 209715200,
+			privateMemoryBytes: 188743680,
+			managedMemoryBytes: 104857600,
+			managedHeapSizeBytes: 94371840,
+			managedFragmentedBytes: 20971520,
+			managedCommittedBytes: 125829120,
+			memoryLoadBytes: 4294967296);
+		AssertBenchmarkMemorySnapshot(
+			retainedMemory.GetProperty("endOfIdle"),
+			workingSetBytes: 230686720,
+			privateMemoryBytes: 199229440,
+			managedMemoryBytes: 110100480,
+			managedHeapSizeBytes: 99614720,
+			managedFragmentedBytes: 26214400,
+			managedCommittedBytes: 136314880,
+			memoryLoadBytes: 4311744512);
+		AssertBenchmarkMemorySnapshot(
+			retainedMemory.GetProperty("rebound"),
+			workingSetBytes: 20971520,
+			privateMemoryBytes: 10485760,
+			managedMemoryBytes: 5242880,
+			managedHeapSizeBytes: 5242880,
+			managedFragmentedBytes: 5242880,
+			managedCommittedBytes: 10485760,
+			memoryLoadBytes: 16777216);
+		var firstRunRetainedMemory = root
+			.GetProperty("coldUiProcess")
+			.GetProperty("runs")[0]
+			.GetProperty("session")
+			.GetProperty("retainedMemory");
+		Assert.Equal(
+			230686720,
+			firstRunRetainedMemory
+				.GetProperty("endOfIdle")
+				.GetProperty("workingSetBytes")
+				.GetInt64());
 		Assert.Contains(CommandLineOptionTokens.UiBenchmarkScript, root.GetProperty("executable").GetProperty("arguments").EnumerateArray().Select(static item => item.GetString()));
 	}
 
@@ -769,6 +869,39 @@ public sealed class CommandLineAutomationRunnerTests
 			BenchmarkProcessRunner: benchmarkProcessRunner,
 			UiBenchmarkProcessRunner: uiBenchmarkProcessRunner,
 			BenchmarkLocalAppDataProvider: benchmarkLocalAppDataProvider);
+
+	private static void AssertBenchmarkMemorySnapshot(
+		JsonElement snapshot,
+		long workingSetBytes,
+		long privateMemoryBytes,
+		long managedMemoryBytes,
+		long managedHeapSizeBytes,
+		long managedFragmentedBytes,
+		long managedCommittedBytes,
+		long memoryLoadBytes)
+	{
+		Assert.Equal(
+			workingSetBytes,
+			snapshot.GetProperty("workingSetBytes").GetInt64());
+		Assert.Equal(
+			privateMemoryBytes,
+			snapshot.GetProperty("privateMemoryBytes").GetInt64());
+		Assert.Equal(
+			managedMemoryBytes,
+			snapshot.GetProperty("managedMemoryBytes").GetInt64());
+		Assert.Equal(
+			managedHeapSizeBytes,
+			snapshot.GetProperty("managedHeapSizeBytes").GetInt64());
+		Assert.Equal(
+			managedFragmentedBytes,
+			snapshot.GetProperty("managedFragmentedBytes").GetInt64());
+		Assert.Equal(
+			managedCommittedBytes,
+			snapshot.GetProperty("managedCommittedBytes").GetInt64());
+		Assert.Equal(
+			memoryLoadBytes,
+			snapshot.GetProperty("memoryLoadBytes").GetInt64());
+	}
 
 	private sealed class FakeBenchmarkProcessRunner : ICommandLineBenchmarkProcessRunner
 	{
@@ -868,13 +1001,48 @@ public sealed class CommandLineAutomationRunnerTests
 			    "gen1Collections": 1,
 			    "gen2Collections": 0
 			  },
-			  "samples": [],
+			  "samples": [
+			    {
+			      "atMilliseconds": 1200,
+			      "workingSetBytes": 209715200,
+			      "privateMemoryBytes": 188743680,
+			      "managedMemoryBytes": 104857600,
+			      "managedHeapSizeBytes": 94371840,
+			      "managedFragmentedBytes": 20971520,
+			      "managedCommittedBytes": 125829120,
+			      "memoryLoadBytes": 4294967296,
+			      "isIdle": true
+			    },
+			    {
+			      "atMilliseconds": 1600,
+			      "workingSetBytes": 419430400,
+			      "privateMemoryBytes": 398458880,
+			      "managedMemoryBytes": 314572800,
+			      "managedHeapSizeBytes": 304087040,
+			      "managedFragmentedBytes": 104857600,
+			      "managedCommittedBytes": 335544320,
+			      "memoryLoadBytes": 5368709120,
+			      "isIdle": true
+			    },
+			    {
+			      "atMilliseconds": 2600,
+			      "workingSetBytes": 230686720,
+			      "privateMemoryBytes": 199229440,
+			      "managedMemoryBytes": 110100480,
+			      "managedHeapSizeBytes": 99614720,
+			      "managedFragmentedBytes": 26214400,
+			      "managedCommittedBytes": 136314880,
+			      "memoryLoadBytes": 4311744512,
+			      "isIdle": true
+			    }
+			  ],
 			  "events": [
 			    { "name": "project.load", "atMilliseconds": 100, "durationMilliseconds": {{100 + index}}, "success": true },
 			    { "name": "ui.benchmark.step", "atMilliseconds": 500, "stepName": "preview.open", "durationMilliseconds": {{200 + index}}, "success": true },
 			    { "name": "ui.benchmark.step", "atMilliseconds": 800, "stepName": "search.apply", "durationMilliseconds": {{20 + index}}, "success": true },
 			    { "name": "ui.benchmark.step", "atMilliseconds": 900, "stepName": "filter.apply", "durationMilliseconds": {{40 + index}}, "success": true },
-			    { "name": "ui.benchmark.step", "atMilliseconds": 950, "stepName": "idle.settle", "durationMilliseconds": 1500, "success": true }
+			    { "name": "ui.benchmark.step", "atMilliseconds": 1100, "stepName": "preview.close", "durationMilliseconds": 100, "success": true },
+			    { "name": "ui.benchmark.step", "atMilliseconds": 2500, "stepName": "idle.settle", "durationMilliseconds": 1500, "success": true }
 			  ]
 			}
 			""";

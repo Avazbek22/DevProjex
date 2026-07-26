@@ -1,3 +1,5 @@
+using Avalonia.Data;
+
 namespace DevProjex.Avalonia.Controls;
 
 public class ProjectTreeView : TreeView
@@ -29,7 +31,28 @@ public class ProjectTreeView : TreeView
 
 internal sealed class ProjectTreeViewItem : TreeViewItem
 {
+    private IDisposable? _chevronVisibilityBinding;
+
     protected override Type StyleKeyOverride => typeof(TreeViewItem);
+
+    protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
+    {
+        base.OnApplyTemplate(e);
+
+        _chevronVisibilityBinding?.Dispose();
+        _chevronVisibilityBinding = null;
+
+        if (e.NameScope.Find<ToggleButton>(
+                "PART_ExpandCollapseChevron") is { } chevron)
+        {
+            // Fluent derives chevron visibility from ItemsSource emptiness. A lazy node
+            // intentionally has an empty source before expansion, so descriptor metadata
+            // must own this property at local-binding priority across container recycling.
+            _chevronVisibilityBinding = chevron.Bind(
+                IsVisibleProperty,
+                new Binding(nameof(TreeNodeViewModel.HasChildren)));
+        }
+    }
 
     protected override void OnHeaderDoubleTapped(TappedEventArgs e)
     {

@@ -1071,6 +1071,12 @@ public sealed record CommandLineOptions(
 			case "standard-ui":
 				script = StartupUiBenchmarkScript.Standard;
 				return true;
+			case "preview-search-retention":
+				script = StartupUiBenchmarkScript.PreviewSearchRetention;
+				return true;
+			case "project-memory-lifecycle":
+				script = StartupUiBenchmarkScript.ProjectMemoryLifecycle;
+				return true;
 			default:
 				script = default;
 				return false;
@@ -1329,6 +1335,10 @@ public sealed record CommandLineOptions(
 	private static string FormatUiBenchmarkScript(StartupUiBenchmarkScript script) => script switch
 	{
 		StartupUiBenchmarkScript.Standard => "standard",
+		StartupUiBenchmarkScript.PreviewSearchRetention =>
+			"preview-search-retention",
+		StartupUiBenchmarkScript.ProjectMemoryLifecycle =>
+			"project-memory-lifecycle",
 		_ => script.ToString().ToLowerInvariant()
 	};
 
@@ -1450,7 +1460,9 @@ public sealed record StartupUiBenchmarkScriptOptions(
 
 public enum StartupUiBenchmarkScript
 {
-	Standard
+	Standard,
+	PreviewSearchRetention,
+	ProjectMemoryLifecycle
 }
 
 public sealed record StartupExportOptions(

@@ -50,8 +50,15 @@ public partial class MainWindow : IRefreshTreePipelineHost
     {
         // Full-tree refresh invalidates the active metrics baseline.
         // Cancel early so obsolete file reads stop before we start the next build.
-        _metrics.CancelBackgroundCalculation();
+        _metrics.CancelAndDiscardBackgroundCalculation();
         _viewModel.StatusMetricsVisible = false;
+    }
+
+    void IRefreshTreePipelineHost.BeforeInteractiveFilterRefresh()
+    {
+        // A filter projects a new graph from the in-memory baseline. Stop metrics that still
+        // reference the previous full graph before that graph becomes eligible for collection.
+        _metrics.CancelAndDiscardBackgroundCalculation();
     }
 
     BuildTreeSnapshotResult IRefreshTreePipelineHost.BuildTree(TreeRefreshInput input, CancellationToken cancellationToken) =>
@@ -136,7 +143,10 @@ public partial class MainWindow : IRefreshTreePipelineHost
         }
         else
         {
-            _metrics.Recalculate();
+            _metrics.Recalculate(
+                string.IsNullOrWhiteSpace(input.NameFilter)
+                    ? null
+                    : MemoryCleanupReason.FilterApplied);
         }
 
         SchedulePreviewRefresh(immediate: true);
