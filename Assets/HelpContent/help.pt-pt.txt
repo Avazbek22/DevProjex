@@ -328,6 +328,7 @@ Dependendo do conteúdo do projeto, poderão ser apresentadas as seguintes opç�
 
 * Ignorar inteligente
 * Utilizar .gitignore
+* Apenas ficheiros controlados pelo Git
 * Pastas vazias
 * Arquivos vazios
 * Pastas ocultas
@@ -336,7 +337,7 @@ Dependendo do conteúdo do projeto, poderão ser apresentadas as seguintes opç�
 * Ficheiros com prefixo de ponto
 * Ficheiros sem extensão
 
-É mostrada uma opção quando a sua regra pode alterar a árvore atual. A lista pode, portanto, mudar após a alteração de outra regra, uma pasta de nível superior ou um tipo de ficheiro.
+Dentro de um repositório Git, "Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" permanecem visíveis como um par estável de opções. As restantes opções são mostradas quando as suas regras podem alterar a árvore atual. A lista pode, portanto, mudar após a alteração de outra regra, uma pasta de nível superior ou um tipo de ficheiro.
 
 Uma nova opção é ativada por defeito quando aparece pela primeira vez. Uma opção conhecida mantém a escolha do utilizador mesmo que desapareça temporariamente da lista.
 
@@ -358,7 +359,7 @@ Alguns armazenamentos de dependências e diretórios de serviços podem ser reco
 
 A descoberta do âmbito do projeto é limitada, pelo que carregar uma pasta de utilizador grande não se torna uma análise completa e repetida de cada diretório. As estruturas regulares utilizam a descoberta superficial, enquanto os monorepos reconhecidos são pesquisados ​​mais profundamente. Depois de encontrado um âmbito, o Smart Ignore aplica-se a toda a sua subárvore sem limite de profundidade.
 
-### 12.3 Utilizar . gitignore
+### 12.3 Utilizar .gitignore
 Quando ativado, o DevProjex aplica todos os `.gitignore` acessíveis, e não apenas o ficheiro na raiz da pasta aberta.
 
 Cada `.gitignore` aplica-se:
@@ -377,14 +378,21 @@ Uma linha malformada ou sem suporte é ignorada de forma independente. Outras re
 
 Esta opção apenas abrange os ficheiros `.gitignore` da árvore de trabalho. As regras de `.git/info/exclude` e a configuração global do Git não são aplicadas. Quando existe um índice Git legível, os ficheiros controlados permanecem visíveis mesmo que correspondam ao `.gitignore`; sem índice ou Git CLI, o DevProjex regressa em segurança à avaliação apenas por padrões.
 
-### 12.4 Relação entre .gitignore e Smart Ignore
-O `.gitignore` e o Smart Ignore são controlos independentes. Cada um aplica-se a todos os seus âmbitos em qualquer nível de profundidade acessível. Uma opção só é apresentada quando a sua alteração pode afetar a árvore efetiva atual.
+### 12.4 Apenas ficheiros controlados pelo Git
+"Apenas ficheiros controlados pelo Git" constrói a etapa Git da árvore a partir dos ficheiros existentes na árvore de trabalho registados em cada índice Git legível. Os ficheiros controlados modificados e os novos ficheiros adicionados ao índice continuam incluídos; os ficheiros não controlados são excluídos. Esta é a árvore de trabalho atual, não uma captura histórica do `HEAD` nem de um repositório remoto.
 
-Primeiro é aplicado o `.gitignore`; depois, o Smart Ignore processa os elementos restantes; por fim, atuam as regras básicas. Assim, o Smart Ignore pode ficar oculto enquanto o `.gitignore` já abranger todos os seus candidatos e aparecer quando o `.gitignore` for desativado.
+Cada repositório aninhado e worktree acessível é processado de forma independente em qualquer nível de profundidade acessível. Um repositório filho não herda os caminhos controlados do repositório pai nem de um repositório irmão. Se um índice não puder ser lido em segurança, o modo estrito não o substitui silenciosamente pela avaliação de padrões `.gitignore`.
+
+"Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" são mutuamente exclusivos: ativar um desativa o outro. Nos projetos locais que suportam perfis, o modo escolhido é guardado com as pastas de nível superior, os tipos de ficheiro e as restantes regras de exclusão.
+
+### 12.5 Relação entre a filtragem Git e o Smart Ignore
+O modo Git selecionado e o Smart Ignore são controlos independentes. O modo Git é aplicado primeiro em cada âmbito Git acessível; depois, o Smart Ignore processa os elementos restantes; por fim, atuam as regras básicas.
+
+O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger todos os seus candidatos e aparecer depois de esse modo ser alterado. Dentro de um repositório Git, os dois modos Git permanecem visíveis como um par estável.
 
 Uma regra de negação Git iniciada por `!` cancela apenas o resultado Git. Não desativa o Smart Ignore nem uma regra básica.
 
-### 12.5 Regras básicas
+### 12.6 Regras básicas
 "Pastas com prefixo de ponto" e "Ficheiros com prefixo de ponto" inspecionam o nome do item.
 
 "Pastas ocultas" e "Ficheiros ocultos" inspecionam o atributo oculto do sistema. Em algumas plataformas, um nome com prefixo de ponto e o atributo do sistema podem descrever o mesmo item ou itens diferentes.
@@ -397,7 +405,7 @@ Uma regra de negação Git iniciada por `!` cancela apenas o resultado Git. Não
 
 A contagem de pastas vazias pode, portanto, mudar depois de outra regra ser alterada: ocultar ficheiros pode tornar as pastas que os contêm logicamente vazias.
 
-### 12.6 Contadores
+### 12.7 Contadores
 A contagem junto a uma regra mostra a sua contribuição direta nas definições atuais, e não o número físico de itens semelhantes no disco.
 
 Um item não é atribuído a vários contadores sobrepostos ao mesmo tempo. Por exemplo, a pasta `.git` pode ter um nome com prefixo de ponto e o atributo Hidden do sistema, mas a sua eliminação é atribuída apenas a uma regra.
@@ -409,7 +417,7 @@ Uma ordem estável é utilizada para selecionar o proprietário de uma eliminaç
 
 Esta ordem afeta apenas os contadores. A visibilidade final segue uma regra mais simples: um item fica oculto se algum mecanismo habilitado o eliminar.
 
-### 12.7 Aplicando alterações
+### 12.8 Aplicando alterações
 A troca das caixas de seleção atualiza primeiro as definições e os contadores disponíveis no painel. A árvore final é reconstruída após a seleção de "Aplicar definições".
 
 Se a preparação das definições for cancelada, o DevProjex faz com que o painel regresse ao último estado totalmente concluído. As regras parcialmente calculadas não são aplicadas.

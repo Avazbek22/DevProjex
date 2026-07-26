@@ -107,6 +107,21 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "kuzatiladigan fayllar", "indeks yoki Git CLI bo‘lmasa" }
     };
 
+    public static TheoryData<string, string, string, string, string, string> TrackedOnlyGitModeContracts => new()
+    {
+        { "help.ru.txt", "### 12.4 Только отслеживаемые Git-файлы", "неотслеживаемые файлы исключаются", "взаимно исключают", "поддержкой профилей", "стабильной парой" },
+        { "help.en.txt", "### 12.4 Tracked Git files only", "untracked files are excluded", "mutually exclusive", "support profiles", "stable pair" },
+        { "help.de.txt", "### 12.4 Nur von Git verfolgte Dateien", "nicht verfolgte Dateien werden ausgeschlossen", "schließen sich gegenseitig aus", "Profilunterstützung", "stabiles Schalterpaar" },
+        { "help.fr.txt", "### 12.4 Uniquement les fichiers suivis par Git", "les fichiers non suivis sont exclus", "s’excluent mutuellement", "prenant en charge les profils", "paire stable" },
+        { "help.it.txt", "### 12.4 Solo file tracciati da Git", "i file non tracciati vengono esclusi", "si escludono a vicenda", "supportano i profili", "coppia stabile" },
+        { "help.es.txt", "### 12.4 Solo archivos rastreados por Git", "los archivos no rastreados quedan excluidos", "se excluyen mutuamente", "admiten perfiles", "par estable" },
+        { "help.pt.txt", "### 12.4 Somente arquivos rastreados pelo Git", "arquivos não rastreados são excluídos", "mutuamente exclusivos", "compatíveis com perfis", "par estável" },
+        { "help.pt-pt.txt", "### 12.4 Apenas ficheiros controlados pelo Git", "os ficheiros não controlados são excluídos", "mutuamente exclusivos", "suportam perfis", "par estável" },
+        { "help.kk.txt", "### 12.4 Тек Git бақылайтын файлдар", "бақыланбайтын файлдар алынып тасталады", "бір-бірін өзара жоққа шығарады", "Профильдерді қолдайтын", "тұрақты" },
+        { "help.tg.txt", "### 12.4 Танҳо файлҳои пайгиришавандаи Git", "файлҳои пайгиринашаванда хориҷ мешаванд", "ҳамдигарро истисно мекунанд", "профилҳоро дастгирӣ мекунанд", "ҷуфти устувор" },
+        { "help.uz.txt", "### 12.4 Faqat Git kuzatadigan fayllar", "kuzatilmaydigan fayllar chiqariladi", "o‘zaro istisno qilinadi", "Profillarni qo‘llaydigan", "barqaror" }
+    };
+
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
     {
         { "help.ru.txt", "JSON-экспорт использует такой формат дерева: массивы содержат файлы, объекты содержат подпапки, `/` содержит файлы текущей папки, а `[]` обозначает пустую папку." },
@@ -250,6 +265,28 @@ public sealed class HelpContentDocumentationContractTests
 
         Assert.Contains(expectedTrackedBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(expectedFallbackBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [MemberData(nameof(TrackedOnlyGitModeContracts))]
+    public void HelpContent_TrackedOnlySection_DescribesIndexOwnershipAndStableGitModePair(
+        string fileName,
+        string expectedHeading,
+        string expectedUntrackedBehavior,
+        string expectedMutualExclusion,
+        string expectedProfilePersistence,
+        string expectedStablePair)
+    {
+        var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
+        var trackedOnlySection = ExtractSection(ignoreSection, expectedHeading, "### 12.5");
+
+        Assert.Contains(expectedUntrackedBehavior, trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedMutualExclusion, trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedProfilePersistence, trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains("worktree", trackedOnlySection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("HEAD", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(".gitignore", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedStablePair, ignoreSection, StringComparison.Ordinal);
     }
 
     [Theory]

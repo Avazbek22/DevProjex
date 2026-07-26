@@ -118,6 +118,32 @@ public sealed class StoreListingImportFolderIntegrationTests
     }
 
     [Fact]
+    public void ImportFolder_FeatureSummaryAdvertisesBothGitAwareFilteringModes()
+    {
+        var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
+        var feature = document.RowsByField["Feature4"];
+        var expectedValues = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["en-us"] = "Smart Ignore and two Git-aware filtering modes",
+            ["en"] = "Smart Ignore and two Git-aware filtering modes",
+            ["ru"] = "Smart Ignore и два режима Git-фильтрации",
+            ["ru-ru"] = "Smart Ignore и два режима Git-фильтрации",
+            ["kk-kz"] = "Smart Ignore және Git-сүзудің екі режимі",
+            ["de-de"] = "Smart Ignore und zwei Git-Filtermodi",
+            ["it-it"] = "Smart Ignore e due modalità di filtro Git",
+            ["tg-cyrl-tj"] = "Smart Ignore ва ду реҷаи филтркунии Git",
+            ["uz-latn-uz"] = "Smart Ignore va Git filtrlashning ikki rejimi",
+            ["fr-fr"] = "Smart Ignore et deux modes de filtrage Git"
+        };
+
+        Assert.Equal(
+            expectedValues.Keys,
+            StoreListingPaths.GetLocaleColumns(document.Headers));
+        foreach (var (locale, expectedValue) in expectedValues)
+            Assert.Equal(expectedValue, feature.GetValue(locale));
+    }
+
+    [Fact]
     public void ImportFolder_UsesConsistentTgScreenshotNaming()
     {
         var importCsvPath = StoreListingPaths.GetImportCsvPath(RepoRoot.Value);

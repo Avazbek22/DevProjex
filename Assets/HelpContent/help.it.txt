@@ -319,9 +319,9 @@ Il blocco «Ignora» controlla quali file e cartelle vengono esclusi dall’albe
 Un elemento viene mostrato solo se la cartella di primo livello e il tipo di file sono selezionati e nessuna regola attiva lo esclude. Le regole si sommano: se almeno una nasconde un elemento, un’altra non può renderlo visibile.
 
 ### 12.1 Regole disponibili
-In base al contenuto del progetto possono comparire Smart Ignore, «Usa .gitignore», cartelle e file vuoti, nascosti o con punto iniziale e file senza estensione.
+In base al contenuto del progetto possono comparire Smart Ignore, «Usa .gitignore», «Solo file tracciati da Git», cartelle e file vuoti, nascosti o con punto iniziale e file senza estensione.
 
-Un’opzione appare quando può modificare l’albero corrente. L’elenco può quindi cambiare dopo la modifica di un’altra regola, di una cartella di primo livello o di un tipo di file. Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
+In un repository Git, «Usa .gitignore» e «Solo file tracciati da Git» restano visibili come una coppia stabile. Le altre opzioni appaiono quando possono modificare l’albero corrente. L’elenco può quindi cambiare dopo la modifica di un’altra regola, di una cartella di primo livello o di un tipo di file. Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
 
 ### 12.2 Smart Ignore
 Smart Ignore nasconde dipendenze, risultati di build, cache e altri artefatti di servizio. DevProjex identifica il tipo di progetto dalla struttura e da file marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml`. Le regole dello stack rilevato restano nell’area del progetto e non si estendono ai progetti vicini di un altro stack.
@@ -339,26 +339,33 @@ Una regola che inizia con `!` annulla solo una precedente esclusione Git nella p
 
 Una riga errata o non supportata viene ignorata singolarmente; le altre regole valide continuano a funzionare. L’opzione comprende solo i file `.gitignore` dell’albero di lavoro. `.git/info/exclude` e le regole Git globali non vengono applicati. Se è disponibile un indice Git leggibile, i file tracciati restano visibili anche quando corrispondono a `.gitignore`; senza indice o Git CLI, DevProjex torna in modo sicuro alla sola valutazione dei pattern.
 
-### 12.4 Relazione tra .gitignore e Smart Ignore
-`.gitignore` e Smart Ignore sono interruttori indipendenti. Ognuno si applica a tutte le proprie aree a qualsiasi livello di annidamento raggiungibile. Un’opzione viene mostrata solo se la sua modifica può cambiare l’albero effettivo corrente.
+### 12.4 Solo file tracciati da Git
+«Solo file tracciati da Git» costruisce la fase Git dell’albero dai file esistenti nell’albero di lavoro registrati in ogni indice Git leggibile. I file tracciati modificati e i nuovi file aggiunti all’indice restano inclusi; i file non tracciati vengono esclusi. Questo è l’albero di lavoro corrente, non un’istantanea storica di `HEAD` o di un repository remoto.
 
-Prima viene applicato `.gitignore`, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base. Smart Ignore può quindi restare nascosto finché `.gitignore` copre già tutti i suoi candidati e comparire dopo la disattivazione di `.gitignore`.
+Ogni repository annidato e worktree raggiungibile viene elaborato in modo indipendente a qualsiasi livello di annidamento raggiungibile. Un repository figlio non eredita i percorsi tracciati dal repository padre o da uno adiacente. Se un indice non può essere letto in sicurezza, la modalità rigorosa non lo sostituisce silenziosamente con la valutazione dei pattern `.gitignore`.
+
+«Usa .gitignore» e «Solo file tracciati da Git» si escludono a vicenda: l’attivazione di uno disattiva l’altro. Nei progetti locali che supportano i profili, la modalità scelta viene salvata insieme alle cartelle di primo livello, ai tipi di file e alle altre regole di esclusione.
+
+### 12.5 Relazione tra il filtro Git e Smart Ignore
+La modalità Git selezionata e Smart Ignore sono interruttori indipendenti. La modalità Git viene applicata per prima in ogni area Git raggiungibile, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base.
+
+Smart Ignore può restare nascosto finché la modalità Git selezionata copre già tutti i suoi candidati e comparire dopo un cambio di modalità. In un repository Git, le due modalità Git restano visibili come una coppia stabile.
 
 Una negazione Git con `!` annulla solo il risultato Git. Non disattiva Smart Ignore né una regola di base.
 
-### 12.5 Regole di base
+### 12.6 Regole di base
 Le regole per il punto iniziale controllano il nome; quelle per gli elementi nascosti controllano l’attributo di sistema Hidden. A seconda della piattaforma possono riguardare lo stesso elemento oppure elementi diversi.
 
 «File vuoti» nasconde i file di 0 byte. «File senza estensione» nasconde, ad esempio, `Dockerfile`, `Makefile` e `README`.
 
 «Cartelle vuote» nasconde le cartelle logicamente vuote. Una cartella è logicamente vuota quando, dopo i tipi di file selezionati e tutte le altre regole, non rimangono file o sottocartelle visibili. Il relativo contatore può quindi cambiare quando viene modificata un’altra regola.
 
-### 12.6 Contatori
+### 12.7 Contatori
 Un contatore mostra il contributo diretto della regola con le impostazioni correnti, non il numero fisico di elementi simili sul disco. Lo stesso elemento non viene attribuito contemporaneamente a più contatori sovrapposti.
 
 L’ordine stabile di attribuzione è: per le cartelle, `.gitignore`, Smart Ignore, punto iniziale, attributo Hidden; per i file, `.gitignore`, Smart Ignore, punto iniziale, nessuna estensione, file vuoto, attributo Hidden. Questo ordine riguarda solo i contatori. Per la visibilità è sufficiente che un qualsiasi meccanismo attivo escluda l’elemento.
 
-### 12.7 Applicazione delle modifiche
+### 12.8 Applicazione delle modifiche
 Le caselle aggiornano prima le opzioni disponibili e i contatori. L’albero finale viene ricostruito dopo «Applica impostazioni». Se la preparazione viene annullata, DevProjex torna all’ultimo stato completato; le regole calcolate solo in parte non vengono applicate.
 
 ## 13) Come vengono calcolati albero e metriche

@@ -327,7 +327,8 @@ Las reglas de ignorar son acumulativas. Si al menos una regla habilitada oculta 
 Dependiendo del contenido del proyecto, se pueden mostrar las siguientes opciones:
 
 * Ignorar inteligentemente
-* Utilice .gitignore
+* Usar .gitignore
+* Solo archivos rastreados por Git
 * Carpetas vacias
 * Archivos vacios
 * Carpetas ocultas
@@ -336,7 +337,7 @@ Dependiendo del contenido del proyecto, se pueden mostrar las siguientes opcione
 * Archivos con prefijo de punto
 * Archivos sin extensión
 
-Se muestra una opción cuando su regla puede cambiar el árbol actual. Por lo tanto, la lista puede cambiar después de cambiar otra regla, una carpeta de nivel superior o un tipo de archivo.
+Dentro de un repositorio Git, "Usar .gitignore" y "Solo archivos rastreados por Git" permanecen visibles como un par estable de opciones. Las demás opciones se muestran cuando sus reglas pueden cambiar el árbol actual. Por lo tanto, la lista puede cambiar después de cambiar otra regla, una carpeta de nivel superior o un tipo de archivo.
 
 Una nueva opción está habilitada de forma predeterminada cuando aparece por primera vez. Una opción conocida mantiene la elección del usuario incluso si desaparece temporalmente de la lista.
 
@@ -358,7 +359,7 @@ Algunos almacenes de dependencias y directorios de servicios pueden reconocerse 
 
 El descubrimiento del alcance del proyecto está limitado, por lo que cargar una carpeta de usuario grande no se convierte en un análisis completo y repetido de cada directorio. Las estructuras regulares utilizan un descubrimiento superficial, mientras que los monorepos reconocidos se buscan más profundamente. Una vez que se encuentra un alcance, Smart Ignore se aplica a todo su subárbol sin límite de profundidad.
 
-### 12.3 Utilice .gitignore
+### 12.3 Usar .gitignore
 Cuando está habilitado, DevProjex aplica todos los `.gitignore` accesibles, no solo el archivo en la raíz de la carpeta abierta.
 
 Cada `.gitignore` aplica:
@@ -377,14 +378,21 @@ Una línea con formato incorrecto o sin soporte se omite de forma independiente.
 
 Esta opción cubre únicamente los archivos `.gitignore` del árbol de trabajo. No se aplican las reglas de `.git/info/exclude` ni la configuración global de Git. Si hay un índice de Git legible, los archivos con seguimiento permanecen visibles aunque coincidan con `.gitignore`; sin índice o Git CLI, DevProjex vuelve de forma segura a evaluar solo los patrones.
 
-### 12.4 Relación entre .gitignore y Smart Ignore
-`.gitignore` y Smart Ignore son interruptores independientes. Cada uno se aplica a todos sus ámbitos en cualquier nivel de anidamiento accesible. Una opción solo se muestra si cambiarla puede afectar al árbol efectivo actual.
+### 12.4 Solo archivos rastreados por Git
+"Solo archivos rastreados por Git" construye la etapa Git del árbol a partir de los archivos existentes del árbol de trabajo registrados en cada índice Git legible. Los archivos rastreados modificados y los archivos nuevos añadidos al índice siguen incluidos; los archivos no rastreados quedan excluidos. Se trata del árbol de trabajo actual, no de una instantánea histórica de `HEAD` ni de un repositorio remoto.
 
-Primero se aplica `.gitignore`, después Smart Ignore procesa los elementos restantes y, por último, actúan las reglas básicas. Por eso Smart Ignore puede permanecer oculto mientras `.gitignore` ya cubra todos sus candidatos y aparecer al desactivar `.gitignore`.
+Cada repositorio anidado y worktree accesible se procesa de forma independiente en cualquier nivel de anidamiento accesible. Un repositorio secundario no hereda las rutas rastreadas de su repositorio principal ni de uno hermano. Si un índice no puede leerse de forma segura, el modo estricto no lo sustituye silenciosamente por la evaluación de patrones `.gitignore`.
+
+"Usar .gitignore" y "Solo archivos rastreados por Git" se excluyen mutuamente: al activar uno se desactiva el otro. En los proyectos locales que admiten perfiles, el modo elegido se guarda junto con las carpetas de nivel superior, los tipos de archivo y las demás reglas de exclusión.
+
+### 12.5 Relación entre el filtrado Git y Smart Ignore
+El modo Git seleccionado y Smart Ignore son interruptores independientes. El modo Git se aplica primero en cada ámbito Git accesible; después Smart Ignore procesa los elementos restantes y, por último, actúan las reglas básicas.
+
+Smart Ignore puede permanecer oculto mientras el modo Git seleccionado ya cubra todos sus candidatos y aparecer después de cambiar dicho modo. Dentro de un repositorio Git, los dos modos Git permanecen visibles como un par estable.
 
 Una regla de negación de Git que comienza con `!` cancela solo un resultado de Git. No desactiva Smart Ignore ni una regla básica.
 
-### 12.5 Reglas básicas
+### 12.6 Reglas básicas
 Las "carpetas con prefijo de punto" y los "archivos con prefijo de punto" inspeccionan el nombre del elemento.
 
 "Carpetas ocultas" y "Archivos ocultos" inspeccionan el atributo oculto del sistema. En algunas plataformas, un nombre con prefijo de punto y el atributo del sistema pueden describir el mismo elemento o elementos diferentes.
@@ -397,7 +405,7 @@ Las "carpetas con prefijo de punto" y los "archivos con prefijo de punto" inspec
 
 Por lo tanto, el recuento de carpetas vacías puede cambiar después de que se cambia otra regla: ocultar archivos puede hacer que las carpetas que los contienen estén lógicamente vacías.
 
-### 12.6 Contadores
+### 12.7 Contadores
 El recuento junto a una regla muestra su contribución directa según la configuración actual, no la cantidad física de elementos similares en el disco.
 
 Un artículo no se atribuye a varios contadores superpuestos al mismo tiempo. Por ejemplo, la carpeta `.git` puede tener un nombre con prefijo de punto y el atributo Oculto del sistema, pero su exclusión se atribuye a una sola regla.
@@ -409,7 +417,7 @@ Se utiliza un orden estable para seleccionar el propietario de una exclusión:
 
 Esta orden afecta sólo a los contadores. La visibilidad final sigue una regla más simple: un elemento está oculto si algún mecanismo habilitado lo excluye.
 
-### 12.7 Aplicar cambios
+### 12.8 Aplicar cambios
 Al cambiar las casillas de verificación, primero se actualizan las configuraciones y los contadores disponibles en el panel. El árbol final se reconstruye después de seleccionar "Aplicar configuración".
 
 Si se cancela la preparación de la configuración, DevProjex devuelve el panel al último estado completamente completado. No se aplican reglas parcialmente calculadas.
