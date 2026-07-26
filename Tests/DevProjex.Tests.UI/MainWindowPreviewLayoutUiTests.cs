@@ -1,8 +1,41 @@
+using Avalonia.Controls.Primitives;
+using Avalonia.Layout;
+using Avalonia.VisualTree;
+using DevProjex.Avalonia.Controls;
+
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 {
+    [AvaloniaFact]
+    public async Task ProjectTreeVerticalScrollBar_SpansFluentHorizontalScrollBarCorner()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var projectTree = UiTestDriver.GetRequiredControl<ProjectTreeView>(window, "ProjectTree");
+            var treeScrollViewer = Assert.Single(
+                projectTree.GetVisualDescendants().OfType<ScrollViewer>());
+            var verticalScrollBar = Assert.Single(
+                treeScrollViewer.GetVisualDescendants()
+                    .OfType<ScrollBar>(),
+                scrollBar => scrollBar.Orientation == Orientation.Vertical);
+            var scrollBarsSeparator = Assert.Single(
+                treeScrollViewer.GetVisualDescendants()
+                    .OfType<Panel>(),
+                panel => panel.Name == "PART_ScrollBarsSeparator");
+
+            Assert.Equal(2, Grid.GetRowSpan(verticalScrollBar));
+            Assert.False(scrollBarsSeparator.IsVisible);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task LoadedProject_SettingsIslandLeftEdgeAlignsWithFormatSwitcher()
     {
