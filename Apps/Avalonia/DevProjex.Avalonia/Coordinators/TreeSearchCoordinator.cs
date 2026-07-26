@@ -98,8 +98,6 @@ public sealed class TreeSearchCoordinator(
     private TreeNodeViewModel? _searchRetainedSelectionNode;
     private TreeNodeViewModel? _searchRoot;
     private TreeDescriptorSearchIndex? _currentSearchIndex;
-    private double? _preferredSearchHorizontalOffset;
-    private double? _lastAppliedSearchHorizontalOffset;
     private string? _activeHighlightQuery;
     private string? _lastComputedQuery;
     private int _searchVersion;
@@ -352,8 +350,6 @@ public sealed class TreeSearchCoordinator(
         _descriptorSearch.Clear();
         _currentSearchIndex = null;
         _searchRoot = null;
-        _preferredSearchHorizontalOffset = null;
-        _lastAppliedSearchHorizontalOffset = null;
         _searchExpandedNodes.Clear();
         _searchExpandedNodes.TrimExcess();
         _nextSearchExpandedNodes.Clear();
@@ -430,8 +426,6 @@ public sealed class TreeSearchCoordinator(
         _searchRetainedSelectionNode = null;
         _currentSearchIndex = null;
         _searchRoot = null;
-        _preferredSearchHorizontalOffset = null;
-        _lastAppliedSearchHorizontalOffset = null;
         _activeHighlightQuery = null;
         _lastComputedQuery = null;
         UpdateSearchMatchSummary();
@@ -866,8 +860,6 @@ public sealed class TreeSearchCoordinator(
             _lastComputedQuery = null;
             _currentSearchIndex = null;
             _searchRoot = null;
-            _preferredSearchHorizontalOffset = null;
-            _lastAppliedSearchHorizontalOffset = null;
             _resolvedSearchNodes.Clear();
             _descriptorSearch.Clear();
             _autoExpandAllMatches = false;
@@ -884,12 +876,6 @@ public sealed class TreeSearchCoordinator(
 
         _currentSearchIndex = searchResult.Value.Index;
         _searchRoot = root;
-        if (!string.Equals(_lastComputedQuery, query, StringComparison.OrdinalIgnoreCase))
-        {
-            _preferredSearchHorizontalOffset =
-                GetTreeScrollViewer()?.Offset.X;
-            _lastAppliedSearchHorizontalOffset = null;
-        }
         _resolvedSearchNodes.Clear();
         _resolvedSearchNodes[0] = root;
         CancelPendingSearchMaterializedBranchRelease();
@@ -1592,13 +1578,20 @@ public sealed class TreeSearchCoordinator(
             directContainer is not null)
         {
             deepestRealizedSegment = request.Path.Length - 1;
-            RestoreCapturedHorizontalOffset(request);
+            if (!BringContainerIntoViewForSearchNavigation(
+                    directContainer,
+                    request.AdjustHorizontalOffset,
+                    request.OriginalHorizontalOffset))
+            {
+                RestoreCapturedHorizontalOffset(request);
+                return BringIntoViewResult.Pending;
+            }
+
             request.HorizontalAdjustmentApplied =
                 request.AdjustHorizontalOffset;
-            BringContainerIntoViewForSearchNavigation(
-                directContainer,
-                request.AdjustHorizontalOffset);
-            if (!IsContainerVisibleInViewport(directContainer))
+            if (!IsContainerPositionedForSearchNavigation(
+                    directContainer,
+                    request.AdjustHorizontalOffset))
                 return BringIntoViewResult.Pending;
 
             return !request.AdjustHorizontalOffset ||
@@ -1732,20 +1725,21 @@ public sealed class TreeSearchCoordinator(
         return path;
     }
 
-    private void BringContainerIntoViewForSearchNavigation(
+    private bool BringContainerIntoViewForSearchNavigation(
         TreeViewItem container,
-        bool adjustHorizontalOffset)
+        bool adjustHorizontalOffset,
+        double? originalHorizontalOffset)
     {
         var scrollViewer = GetTreeScrollViewer();
         if (scrollViewer is null)
         {
             container.BringIntoView();
-            return;
+            return true;
         }
 
         var containerTopLeft = container.TranslatePoint(default, scrollViewer);
         if (containerTopLeft is null)
-            return;
+            return false;
 
         var horizontalTarget =
             ResolveTreeItemHorizontalScrollTarget(container);
@@ -1753,37 +1747,45 @@ public sealed class TreeSearchCoordinator(
             horizontalTarget.TranslatePoint(default, scrollViewer) ??
             containerTopLeft.Value;
         var currentOffset = scrollViewer.Offset;
-        var targetY = ResolveVerticalOffsetForSearchNavigation(
-            currentOffset.Y,
-            containerTopLeft.Value.Y,
-            containerTopLeft.Value.Y + container.Bounds.Height,
-            scrollViewer.Viewport.Height,
-            scrollViewer.Extent.Height);
-        var targetX = currentOffset.X;
+        var targetY = adjustHorizontalOffset
+            ? ResolveComfortableVerticalOffsetForSearchNavigation(
+                currentOffset.Y,
+                containerTopLeft.Value.Y,
+                containerTopLeft.Value.Y + container.Bounds.Height,
+                scrollViewer.Viewport.Height,
+                scrollViewer.Extent.Height)
+            : ResolveVerticalOffsetForSearchNavigation(
+                currentOffset.Y,
+                containerTopLeft.Value.Y,
+                containerTopLeft.Value.Y + container.Bounds.Height,
+                scrollViewer.Viewport.Height,
+                scrollViewer.Extent.Height);
+        var baselineOffsetX = ResolveClampedTreeHorizontalOffset(
+            originalHorizontalOffset ?? currentOffset.X,
+            scrollViewer.Extent.Width,
+            scrollViewer.Viewport.Width);
+        var targetX = baselineOffsetX;
         if (adjustHorizontalOffset)
         {
-            UpdatePreferredHorizontalOffset(
-                currentOffset.X,
-                scrollViewer.Extent.Width,
-                scrollViewer.Viewport.Width);
-            var preferredOffsetX =
-                _preferredSearchHorizontalOffset ?? currentOffset.X;
-            var itemLeftAtPreferredOffset =
-                currentOffset.X + horizontalTopLeft.X - preferredOffsetX;
+            // TranslatePoint observes the current scroll position, which may have been
+            // changed by TreeView while realizing a lazy path. Convert it back to the
+            // captured navigation baseline before deciding whether X must move.
+            var itemLeftAtBaselineOffset =
+                currentOffset.X + horizontalTopLeft.X - baselineOffsetX;
             targetX = ResolveHorizontalOffsetForSearchNavigation(
-                preferredOffsetX,
-                itemLeftAtPreferredOffset,
-                itemLeftAtPreferredOffset + horizontalTarget.Bounds.Width,
+                baselineOffsetX,
+                itemLeftAtBaselineOffset,
+                itemLeftAtBaselineOffset + horizontalTarget.Bounds.Width,
                 scrollViewer.Viewport.Width,
                 scrollViewer.Extent.Width,
                 horizontalTarget.Bounds.Width);
-            _lastAppliedSearchHorizontalOffset = targetX;
         }
 
         if (Math.Abs(targetX - currentOffset.X) < 0.5 && Math.Abs(targetY - currentOffset.Y) < 0.5)
-            return;
+            return true;
 
         scrollViewer.Offset = new Vector(targetX, targetY);
+        return true;
     }
 
     private static Control ResolveTreeItemHorizontalScrollTarget(
@@ -1795,19 +1797,6 @@ public sealed class TreeSearchCoordinator(
             includeSelf: false,
             visual => visual is Control { Name: "TreeItemContent" }) ??
                container;
-    }
-
-    private void UpdatePreferredHorizontalOffset(
-        double currentOffsetX,
-        double extentWidth,
-        double viewportWidth)
-    {
-        _preferredSearchHorizontalOffset = ResolvePreferredSearchHorizontalOffset(
-            currentOffsetX,
-            _preferredSearchHorizontalOffset,
-            _lastAppliedSearchHorizontalOffset,
-            extentWidth,
-            viewportWidth);
     }
 
     private bool TryGetContainer(TreeNodeViewModel node, out TreeViewItem? container)
@@ -1822,7 +1811,9 @@ public sealed class TreeSearchCoordinator(
         return false;
     }
 
-    private bool IsContainerVisibleInViewport(TreeViewItem container)
+    private bool IsContainerPositionedForSearchNavigation(
+        TreeViewItem container,
+        bool preferComfortZone)
     {
         var scrollViewer = GetTreeScrollViewer();
         if (scrollViewer is null)
@@ -1830,14 +1821,36 @@ public sealed class TreeSearchCoordinator(
 
         var topLeft = container.TranslatePoint(default, scrollViewer);
         if (topLeft is null)
-            return true;
+            return false;
 
         var top = topLeft.Value.Y;
         var bottom = top + container.Bounds.Height;
         var viewportHeight = scrollViewer.Viewport.Height;
+        if (viewportHeight <= 0)
+            return false;
 
         const double tolerance = 1.0;
-        return bottom >= -tolerance && top <= viewportHeight + tolerance;
+        var fullyVisible = container.Bounds.Height > viewportHeight
+            ? top <= tolerance && bottom >= viewportHeight - tolerance
+            : top >= -tolerance && bottom <= viewportHeight + tolerance;
+        if (!fullyVisible)
+            return false;
+
+        var currentOffsetY = scrollViewer.Offset.Y;
+        var settledOffsetY = preferComfortZone
+            ? ResolveComfortableVerticalOffsetForSearchNavigation(
+                currentOffsetY,
+                top,
+                bottom,
+                viewportHeight,
+                scrollViewer.Extent.Height)
+            : ResolveVerticalOffsetForSearchNavigation(
+                currentOffsetY,
+                top,
+                bottom,
+                viewportHeight,
+                scrollViewer.Extent.Height);
+        return Math.Abs(settledOffsetY - currentOffsetY) < 0.5;
     }
 
     private bool IsHorizontalTargetVisibleInViewport(TreeViewItem container)
@@ -1875,30 +1888,8 @@ public sealed class TreeSearchCoordinator(
         return Math.Clamp(preservedOffsetX, 0, maxX);
     }
 
-    internal static double ResolvePreferredSearchHorizontalOffset(
-        double currentOffsetX,
-        double? preferredOffsetX,
-        double? lastAppliedOffsetX,
-        double extentWidth,
-        double viewportWidth)
-    {
-        if (preferredOffsetX is null || lastAppliedOffsetX is null)
-            return currentOffsetX;
-
-        if (Math.Abs(currentOffsetX - lastAppliedOffsetX.Value) < 0.5)
-            return preferredOffsetX.Value;
-
-        var layoutClampedOffset = ResolveClampedTreeHorizontalOffset(
-            preferredOffsetX.Value,
-            extentWidth,
-            viewportWidth);
-        return Math.Abs(currentOffsetX - layoutClampedOffset) < 0.5
-            ? preferredOffsetX.Value
-            : currentOffsetX;
-    }
-
     internal static double ResolveHorizontalOffsetForSearchNavigation(
-        double preferredOffsetX,
+        double baselineOffsetX,
         double itemLeft,
         double itemRight,
         double viewportWidth,
@@ -1911,18 +1902,21 @@ public sealed class TreeSearchCoordinator(
             itemRight <= viewportWidth + tolerance)
         {
             return ResolveClampedTreeHorizontalOffset(
-                preferredOffsetX,
+                baselineOffsetX,
                 extentWidth,
                 viewportWidth);
         }
 
         // When a label itself is wider than the viewport, aligning its start is more
         // predictable than jumping to an arbitrary suffix on every navigation step.
+        var comfortPadding = itemWidth >= viewportWidth
+            ? 0
+            : Math.Min(12, Math.Max(0, (viewportWidth - itemWidth) / 2));
         var targetX = itemWidth > viewportWidth
-            ? preferredOffsetX + itemLeft
+            ? baselineOffsetX + itemLeft
             : itemLeft < 0
-                ? preferredOffsetX + itemLeft
-                : preferredOffsetX + itemRight - viewportWidth;
+                ? baselineOffsetX + itemLeft - comfortPadding
+                : baselineOffsetX + itemRight - viewportWidth + comfortPadding;
 
         return ResolveClampedTreeHorizontalOffset(
             targetX,
@@ -1939,14 +1933,61 @@ public sealed class TreeSearchCoordinator(
     {
         // Avalonia BringIntoView can adjust both axes too eagerly. Search navigation uses
         // explicit offsets so horizontal scrolling happens only when the target is clipped.
-        if (viewportHeight <= 0 || itemBottom >= 0 && itemTop <= viewportHeight)
+        if (viewportHeight <= 0)
+            return currentOffsetY;
+
+        var maxY = Math.Max(0, extentHeight - viewportHeight);
+        var itemHeight = Math.Max(0, itemBottom - itemTop);
+        if (itemHeight >= viewportHeight)
+            return Math.Clamp(currentOffsetY + itemTop, 0, maxY);
+
+        if (itemTop >= 0 && itemBottom <= viewportHeight)
             return currentOffsetY;
 
         var targetY = itemTop < 0
             ? currentOffsetY + itemTop
             : currentOffsetY + itemBottom - viewportHeight;
+        return Math.Clamp(targetY, 0, maxY);
+    }
 
+    internal static double ResolveComfortableVerticalOffsetForSearchNavigation(
+        double currentOffsetY,
+        double itemTop,
+        double itemBottom,
+        double viewportHeight,
+        double extentHeight)
+    {
+        if (viewportHeight <= 0)
+            return currentOffsetY;
+
+        var itemHeight = Math.Max(0, itemBottom - itemTop);
         var maxY = Math.Max(0, extentHeight - viewportHeight);
+        if (itemHeight >= viewportHeight)
+            return Math.Clamp(currentOffsetY + itemTop, 0, maxY);
+
+        const double comfortInsetRatio = 0.2;
+        var maximumInset = Math.Max(0, (viewportHeight - itemHeight) / 2);
+        var comfortInset = Math.Min(
+            viewportHeight * comfortInsetRatio,
+            maximumInset);
+        var comfortTop = comfortInset;
+        var comfortBottom = viewportHeight - comfortInset;
+        if (itemTop >= comfortTop && itemBottom <= comfortBottom)
+            return currentOffsetY;
+
+        // A directional anchor near the center provides hysteresis: adjacent results
+        // can move inside the comfort band without scrolling on every navigation step.
+        var preferredCenter = viewportHeight *
+                              (itemTop < comfortTop ? 0.45 : 0.55);
+        var halfItemHeight = itemHeight / 2;
+        var minimumCenter = comfortTop + halfItemHeight;
+        var maximumCenter = comfortBottom - halfItemHeight;
+        var anchoredCenter = Math.Clamp(
+            preferredCenter,
+            minimumCenter,
+            maximumCenter);
+        var itemCenter = (itemTop + itemBottom) / 2;
+        var targetY = currentOffsetY + itemCenter - anchoredCenter;
         return Math.Clamp(targetY, 0, maxY);
     }
 

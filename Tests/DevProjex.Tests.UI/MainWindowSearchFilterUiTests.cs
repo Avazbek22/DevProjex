@@ -502,7 +502,7 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
-    public async Task SearchNavigation_MinimallyScrollsDeepClippedResultIntoHorizontalView()
+    public async Task SearchNavigation_NarrowPreview_RevealsClippedResultWithoutSnappingBackForVisibleSibling()
     {
         using var project =
             UiTestProject.CreateWithDeepHorizontalSearchWorkspace();
@@ -511,6 +511,7 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
         try
         {
             window.Width = Math.Max(window.MinWidth, 900);
+            window.Height = window.MinHeight;
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
             await UiTestDriver.OpenPreviewAsync(window);
             await UiTestDriver.OpenSearchAsync(window);
@@ -570,7 +571,290 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
                 },
                 "deep search result to become horizontally visible");
 
-            Assert.True(scrollViewer.Offset.X > 0);
+            var shiftedOffsetX = scrollViewer.Offset.X;
+            Assert.True(shiftedOffsetX > 0);
+
+            var navigationOffsets = new List<double>();
+            void RecordNavigationOffset(
+                object? _,
+                ScrollChangedEventArgs __) =>
+                navigationOffsets.Add(scrollViewer.Offset.X);
+
+            scrollViewer.ScrollChanged += RecordNavigationOffset;
+            try
+            {
+                var nextButton = Assert.IsType<Button>(
+                    searchBar.FindControl<Button>("SearchNextButton"));
+                nextButton.RaiseEvent(
+                    new RoutedEventArgs(Button.ClickEvent));
+                await UiTestDriver.WaitForConditionAsync(
+                    window,
+                    () => tree.SelectedItem is TreeNodeViewModel
+                    {
+                        DisplayName:
+                        "horizontal-search-target-c-short.cs"
+                    },
+                    "next visible sibling search result to be selected");
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+            }
+            finally
+            {
+                scrollViewer.ScrollChanged -= RecordNavigationOffset;
+            }
+
+            Assert.InRange(
+                Math.Abs(scrollViewer.Offset.X - shiftedOffsetX),
+                0,
+                0.5);
+            Assert.All(
+                navigationOffsets,
+                offset => Assert.InRange(
+                    Math.Abs(offset - shiftedOffsetX),
+                    0,
+                    0.5));
+            AssertTreeItemIsHorizontallyVisible(tree, scrollViewer);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchNavigation_WideTreePane_DoesNotResetHorizontalPositionBetweenVisibleResults()
+    {
+        using var project =
+            UiTestProject.CreateWithDeepHorizontalSearchWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            window.Width = Math.Max(window.MinWidth, 900);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+            await UiTestDriver.OpenSearchAsync(window);
+            var tree =
+                UiTestDriver.GetRequiredControl<ProjectTreeView>(
+                    window,
+                    "ProjectTree");
+            var scrollViewer = Assert.IsType<ScrollViewer>(
+                tree.FindDescendantOfType<ScrollViewer>());
+            scrollViewer.Offset = new Vector(0, scrollViewer.Offset.Y);
+            var searchBar =
+                UiTestDriver.GetRequiredControl<SearchBarView>(
+                    window,
+                    "SearchBar");
+            const string query = "horizontal-search-target";
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(searchBar.SearchBoxControl),
+                query);
+            await UiTestDriver.WaitForSearchAppliedAsync(window, query);
+
+            await UiTestDriver.PressKeyAsync(window, Key.Enter);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => scrollViewer.Offset.X > 0,
+                "wide tree search result to require horizontal scrolling");
+            var shiftedOffsetX = scrollViewer.Offset.X;
+
+            var navigationOffsets = new List<double>();
+            void RecordNavigationOffset(
+                object? _,
+                ScrollChangedEventArgs __) =>
+                navigationOffsets.Add(scrollViewer.Offset.X);
+
+            scrollViewer.ScrollChanged += RecordNavigationOffset;
+            try
+            {
+                var nextButton = Assert.IsType<Button>(
+                    searchBar.FindControl<Button>("SearchNextButton"));
+                nextButton.RaiseEvent(
+                    new RoutedEventArgs(Button.ClickEvent));
+                await UiTestDriver.WaitForConditionAsync(
+                    window,
+                    () => tree.SelectedItem is TreeNodeViewModel
+                    {
+                        DisplayName:
+                        "horizontal-search-target-c-short.cs"
+                    },
+                    "wide tree sibling search result to be selected");
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+            }
+            finally
+            {
+                scrollViewer.ScrollChanged -= RecordNavigationOffset;
+            }
+
+            Assert.InRange(
+                Math.Abs(scrollViewer.Offset.X - shiftedOffsetX),
+                0,
+                0.5);
+            Assert.All(
+                navigationOffsets,
+                offset => Assert.InRange(
+                    Math.Abs(offset - shiftedOffsetX),
+                    0,
+                    0.5));
+            AssertTreeItemIsHorizontallyVisible(tree, scrollViewer);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchNavigation_NarrowPreview_KeepsCurrentResultInsideVerticalComfortZone()
+    {
+        using var project =
+            UiTestProject.CreateWithLargeFlatTree(fileCount: 120);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            window.Width = Math.Max(window.MinWidth, 900);
+            window.Height = window.MinHeight;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.OpenSearchAsync(window);
+            var tree =
+                UiTestDriver.GetRequiredControl<ProjectTreeView>(
+                    window,
+                    "ProjectTree");
+            var scrollViewer = Assert.IsType<ScrollViewer>(
+                tree.FindDescendantOfType<ScrollViewer>());
+            var searchBar =
+                UiTestDriver.GetRequiredControl<SearchBarView>(
+                    window,
+                    "SearchBar");
+            const string query = "file-0060";
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(searchBar.SearchBoxControl),
+                query);
+            await UiTestDriver.WaitForSearchAppliedAsync(window, query);
+
+            var nextButton = Assert.IsType<Button>(
+                searchBar.FindControl<Button>("SearchNextButton"));
+            nextButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var bounds = GetSelectedTreeItemVerticalBounds(
+                        tree,
+                        scrollViewer);
+                    return bounds is { } current &&
+                           IsInsideVerticalComfortZone(current);
+                },
+                "selected search result to enter the vertical comfort zone");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var positionedBounds = Assert.NotNull(
+                GetSelectedTreeItemVerticalBounds(tree, scrollViewer));
+            Assert.True(IsInsideVerticalComfortZone(positionedBounds));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchNavigation_AdjacentResultsInsideComfortZone_DoNotMoveVerticalOffset()
+    {
+        using var project =
+            UiTestProject.CreateWithLargeFlatTree(fileCount: 120);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            window.Width = Math.Max(window.MinWidth, 900);
+            window.Height = window.MinHeight;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.OpenSearchAsync(window);
+            var tree =
+                UiTestDriver.GetRequiredControl<ProjectTreeView>(
+                    window,
+                    "ProjectTree");
+            var scrollViewer = Assert.IsType<ScrollViewer>(
+                tree.FindDescendantOfType<ScrollViewer>());
+            var searchBar =
+                UiTestDriver.GetRequiredControl<SearchBarView>(
+                    window,
+                    "SearchBar");
+            const string query = "file-004";
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(searchBar.SearchBoxControl),
+                query);
+            await UiTestDriver.WaitForSearchAppliedAsync(window, query);
+            var nextButton = Assert.IsType<Button>(
+                searchBar.FindControl<Button>("SearchNextButton"));
+
+            nextButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var bounds = GetSelectedTreeItemVerticalBounds(
+                        tree,
+                        scrollViewer);
+                    return tree.SelectedItem is TreeNodeViewModel
+                           {
+                               DisplayName: "file-0041.txt"
+                           } &&
+                           bounds is { } current &&
+                           IsInsideVerticalComfortZone(current);
+                },
+                "first navigated result to enter the vertical comfort zone");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var stableOffsetY = scrollViewer.Offset.Y;
+            var navigationOffsets = new List<double>();
+            void RecordNavigationOffset(
+                object? _,
+                ScrollChangedEventArgs __) =>
+                navigationOffsets.Add(scrollViewer.Offset.Y);
+
+            scrollViewer.ScrollChanged += RecordNavigationOffset;
+            try
+            {
+                for (var index = 42; index <= 44; index++)
+                {
+                    nextButton.RaiseEvent(
+                        new RoutedEventArgs(Button.ClickEvent));
+                    var expectedName = $"file-{index:0000}.txt";
+                    await UiTestDriver.WaitForConditionAsync(
+                        window,
+                        () => tree.SelectedItem is TreeNodeViewModel node &&
+                              string.Equals(
+                                  node.DisplayName,
+                                  expectedName,
+                                  StringComparison.Ordinal),
+                        $"search result '{expectedName}' to be selected");
+                    await UiTestDriver.WaitForSettledFramesAsync(
+                        frameCount: 2);
+                }
+            }
+            finally
+            {
+                scrollViewer.ScrollChanged -= RecordNavigationOffset;
+            }
+
+            Assert.InRange(
+                Math.Abs(scrollViewer.Offset.Y - stableOffsetY),
+                0,
+                0.5);
+            Assert.All(
+                navigationOffsets,
+                offset => Assert.InRange(
+                    Math.Abs(offset - stableOffsetY),
+                    0,
+                    0.5));
+            Assert.True(IsInsideVerticalComfortZone(Assert.NotNull(
+                GetSelectedTreeItemVerticalBounds(tree, scrollViewer))));
         }
         finally
         {
@@ -860,5 +1144,65 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             topLeft.Value.X + content.Bounds.Width,
             content.Bounds.Width,
             scrollViewer.Viewport.Width);
+    }
+
+    private static void AssertTreeItemIsHorizontallyVisible(
+        ProjectTreeView tree,
+        ScrollViewer scrollViewer)
+    {
+        var bounds = Assert.NotNull(
+            GetSelectedTreeItemHorizontalBounds(tree, scrollViewer));
+        Assert.True(
+            bounds.Left >= -1,
+            $"Selected item begins outside the viewport: {bounds.Left:F2}.");
+        Assert.True(
+            bounds.ContentWidth > bounds.ViewportWidth ||
+            bounds.Right <= bounds.ViewportWidth + 1,
+            $"Selected item ends outside the viewport: {bounds.Right:F2} > {bounds.ViewportWidth:F2}.");
+    }
+
+    private static (
+        double Top,
+        double Bottom,
+        double ViewportHeight)?
+        GetSelectedTreeItemVerticalBounds(
+            ProjectTreeView tree,
+            ScrollViewer scrollViewer)
+    {
+        var selectedNode = tree.SelectedItem as TreeNodeViewModel;
+        if (selectedNode is null)
+            return null;
+
+        var container = tree.FindDescendantOfType<TreeViewItem>(
+            includeSelf: false,
+            visual => visual is TreeViewItem item &&
+                      ReferenceEquals(
+                          item.DataContext,
+                          selectedNode));
+        var topLeft = container?.TranslatePoint(
+            default,
+            scrollViewer);
+        if (container is null || topLeft is null)
+            return null;
+
+        return (
+            topLeft.Value.Y,
+            topLeft.Value.Y + container.Bounds.Height,
+            scrollViewer.Viewport.Height);
+    }
+
+    private static bool IsInsideVerticalComfortZone(
+        (
+            double Top,
+            double Bottom,
+            double ViewportHeight) bounds)
+    {
+        const double tolerance = 2;
+        const double comfortInsetRatio = 0.2;
+        var comfortTop = bounds.ViewportHeight * comfortInsetRatio;
+        var comfortBottom =
+            bounds.ViewportHeight * (1 - comfortInsetRatio);
+        return bounds.Top >= comfortTop - tolerance &&
+               bounds.Bottom <= comfortBottom + tolerance;
     }
 }

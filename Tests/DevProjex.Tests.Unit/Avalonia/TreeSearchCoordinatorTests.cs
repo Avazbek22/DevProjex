@@ -523,13 +523,15 @@ public sealed class TreeSearchCoordinatorTests
 	}
 
 	[Theory]
-	[InlineData(100, 0, 30)]
-	[InlineData(100, -20, 10)]
-	[InlineData(100, 190, 230)]
-	public void ResolveVerticalOffsetForSearchNavigation_WhenTargetIsAlreadyPartlyVisible_KeepsCurrentOffset(
+	[InlineData(100, 0, 30, 100)]
+	[InlineData(100, -20, 10, 80)]
+	[InlineData(100, 190, 230, 130)]
+	[InlineData(100, 20, 250, 120)]
+	public void ResolveVerticalOffsetForSearchNavigation_MovesOnlyWhenRequiredToFullyRevealTarget(
 		double currentOffsetY,
 		double itemTop,
-		double itemBottom)
+		double itemBottom,
+		double expectedOffsetY)
 	{
 		var targetOffsetY = TreeSearchCoordinator.ResolveVerticalOffsetForSearchNavigation(
 			currentOffsetY,
@@ -538,7 +540,35 @@ public sealed class TreeSearchCoordinatorTests
 			viewportHeight: 200,
 			extentHeight: 1000);
 
-		Assert.Equal(currentOffsetY, targetOffsetY);
+		Assert.Equal(expectedOffsetY, targetOffsetY);
+	}
+
+	[Theory]
+	[InlineData(100, 60, 90, 200, 1000, 100)]
+	[InlineData(100, 0, 30, 200, 1000, 25)]
+	[InlineData(100, -20, 10, 200, 1000, 5)]
+	[InlineData(100, 190, 230, 200, 1000, 200)]
+	[InlineData(0, 0, 30, 200, 1000, 0)]
+	[InlineData(780, 190, 230, 200, 1000, 800)]
+	[InlineData(100, 10, 190, 200, 1000, 100)]
+	[InlineData(100, 20, 250, 200, 1000, 120)]
+	public void ResolveComfortableVerticalOffsetForSearchNavigation_KeepsTargetInCentralBandAndClampsAtContentEdges(
+		double currentOffsetY,
+		double itemTop,
+		double itemBottom,
+		double viewportHeight,
+		double extentHeight,
+		double expectedOffsetY)
+	{
+		var targetOffsetY =
+			TreeSearchCoordinator.ResolveComfortableVerticalOffsetForSearchNavigation(
+				currentOffsetY,
+				itemTop,
+				itemBottom,
+				viewportHeight,
+				extentHeight);
+
+		Assert.Equal(expectedOffsetY, targetOffsetY);
 	}
 
 	[Theory]
@@ -562,38 +592,16 @@ public sealed class TreeSearchCoordinatorTests
 	}
 
 	[Theory]
-	[InlineData(120.0, 120.0, 120.0, 500.0, 200.0, 120.0)]
-	[InlineData(0.0, 120.0, 120.0, 150.0, 200.0, 120.0)]
-	[InlineData(80.0, 120.0, 0.0, 500.0, 200.0, 80.0)]
-	[InlineData(300.0, null, null, 800.0, 200.0, 300.0)]
-	public void ResolvePreferredSearchHorizontalOffset_DistinguishesLayoutClampFromUserScroll(
-		double currentOffsetX,
-		double? preferredOffsetX,
-		double? lastAppliedOffsetX,
-		double extentWidth,
-		double viewportWidth,
-		double expectedOffsetX)
-	{
-		var result = TreeSearchCoordinator.ResolvePreferredSearchHorizontalOffset(
-			currentOffsetX,
-			preferredOffsetX,
-			lastAppliedOffsetX,
-			extentWidth,
-			viewportWidth);
-
-		Assert.Equal(expectedOffsetX, result);
-	}
-
-	[Theory]
 	[InlineData(0, 12, 120, 200, 500, 108, 0)]
 	[InlineData(80, 0, 200.5, 200, 500, 200.5, 80)]
-	[InlineData(120, -30, 90, 200, 500, 120, 90)]
-	[InlineData(120, 160, 260, 200, 500, 100, 180)]
+	[InlineData(120, -30, 90, 200, 500, 120, 78)]
+	[InlineData(120, 160, 260, 200, 500, 100, 192)]
 	[InlineData(10, -50, 90, 200, 500, 140, 0)]
 	[InlineData(260, 170, 260, 200, 500, 90, 300)]
 	[InlineData(120, 80, 380, 200, 800, 300, 200)]
-	public void ResolveHorizontalOffsetForSearchNavigation_MovesOnlyEnoughToRevealContent(
-		double preferredOffsetX,
+	[InlineData(180, 12, 112, 200, 500, 100, 180)]
+	public void ResolveHorizontalOffsetForSearchNavigation_PreservesVisibleBaselineOrRevealsClippedContentWithPadding(
+		double baselineOffsetX,
 		double itemLeft,
 		double itemRight,
 		double viewportWidth,
@@ -603,7 +611,7 @@ public sealed class TreeSearchCoordinatorTests
 	{
 		var targetOffsetX =
 			TreeSearchCoordinator.ResolveHorizontalOffsetForSearchNavigation(
-				preferredOffsetX,
+				baselineOffsetX,
 				itemLeft,
 				itemRight,
 				viewportWidth,

@@ -50,16 +50,29 @@ internal sealed class UiTestProject : IDisposable
     {
         return Create(static rootPath =>
         {
-            // Keep the result vertically realized so this fixture isolates horizontal navigation.
+            // Keep the results vertically realized so this fixture isolates horizontal navigation.
             var segments = Enumerable.Range(1, 5)
                 .Select(static level => $"d{level:00}")
                 .ToArray();
+            var resultDirectory = Path.Combine(segments);
             WriteFile(
                 rootPath,
                 Path.Combine(
-                    Path.Combine(segments),
-                    "horizontal-search-target-with-a-deliberately-long-name-that-exceeds-the-visible-tree-width.cs"),
+                    resultDirectory,
+                    "horizontal-search-target-a-initial.cs"),
+                "internal sealed class InitialHorizontalSearchTarget {}\n");
+            WriteFile(
+                rootPath,
+                Path.Combine(
+                    resultDirectory,
+                    "horizontal-search-target-b-with-a-deliberately-long-name-that-exceeds-the-visible-tree-width-and-remains-clipped-in-a-wide-tree-pane.cs"),
                 "internal sealed class HorizontalSearchTarget {}\n");
+            WriteFile(
+                rootPath,
+                Path.Combine(
+                    resultDirectory,
+                    "horizontal-search-target-c-short.cs"),
+                "internal sealed class FinalHorizontalSearchTarget {}\n");
         });
     }
 
