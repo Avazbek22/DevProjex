@@ -3459,6 +3459,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				activeContext = activeContext.WithTrackedPathIndex(trackedPathIndex);
 				candidateContext = candidateContext.WithTrackedPathIndex(trackedPathIndex);
 			}
+			else if (reachedRepositoryBoundary)
+			{
+				// A repository boundary always ends ownership by an ancestor index. An
+				// empty projection keeps tracked-only mode fail-closed when the nested
+				// index is missing, unreadable, or being replaced concurrently.
+				var unavailableBoundaryIndex = new GitTrackedPathIndex(directoryPath, []);
+				discoveredTrackedPathIndexes?.Add(unavailableBoundaryIndex);
+				activeContext = activeContext.WithTrackedPathIndex(unavailableBoundaryIndex);
+				candidateContext = candidateContext.WithTrackedPathIndex(unavailableBoundaryIndex);
+			}
 		}
 
 		if (scopedMatcher is null)

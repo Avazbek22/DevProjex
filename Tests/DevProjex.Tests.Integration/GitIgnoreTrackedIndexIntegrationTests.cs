@@ -57,7 +57,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			RootSet(),
 			ExtensionSet(".tmp"));
 
-		Assert.Empty(observation.Inventory.DiscoveredGitTrackedPathIndexes);
+		Assert.Equal(0, Assert.Single(observation.Inventory.DiscoveredGitTrackedPathIndexes).Count);
 		AssertHidden(observation.Paths, "untracked.tmp");
 	}
 
@@ -540,6 +540,73 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 	}
 
 	[Fact]
+	public void TrackedOnlyModeHandlesRootFilesAndPathologicalGitNamesWithoutSplittingIndexOutput()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		var trackedPaths = new List<string>
+		{
+			"LICENSE",
+			".editorconfig",
+			"src/file with spaces.txt",
+			"src/-leading-name.txt",
+			"src/данные-ß.txt",
+			"src/empty.txt"
+		};
+		if (!OperatingSystem.IsWindows())
+		{
+			trackedPaths.Add("src/line\nbreak.txt");
+			trackedPaths.Add("src/tab\tname.txt");
+		}
+
+		foreach (var trackedPath in trackedPaths)
+			temp.CreateFile(Path.Combine("repo", trackedPath), trackedPath == "src/empty.txt" ? string.Empty : "tracked");
+		temp.CreateFile("repo/src/local with spaces.txt", "untracked");
+		temp.CreateFile("repo/UNTRACKED", "untracked");
+		InitializeIndex(repositoryRoot, [.. trackedPaths]);
+		var rules = CreateTrackedOnlyRules(repositoryRoot);
+
+		var tree = BuildTree(
+			repositoryRoot,
+			RootSet("src"),
+			ExtensionSet(".txt", ".editorconfig"),
+			rules);
+
+		foreach (var trackedPath in trackedPaths)
+			AssertVisible(tree.Paths, trackedPath.Replace('\\', '/'));
+		AssertHidden(tree.Paths, "src/local with spaces.txt");
+		AssertHidden(tree.Paths, "UNTRACKED");
+		Assert.Equal(trackedPaths.Count, Assert.Single(tree.Inventory.DiscoveredGitTrackedPathIndexes).Count);
+	}
+
+	[Fact]
+	public void TrackedOnlyModeReflectsIntentToAddAndStagedRename()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		temp.CreateFile("repo/src/old-name.txt", "tracked");
+		InitializeIndex(repositoryRoot, "src/old-name.txt");
+		RunGit(repositoryRoot, "mv", "--", "src/old-name.txt", "src/new-name.txt");
+		temp.CreateFile("repo/src/intent-to-add.txt", "present in the index without staged content");
+		RunGit(repositoryRoot, "add", "-N", "--", "src/intent-to-add.txt");
+		temp.CreateFile("repo/src/untracked.txt", "untracked");
+		var rules = CreateTrackedOnlyRules(repositoryRoot);
+
+		var tree = BuildTree(
+			repositoryRoot,
+			RootSet("src"),
+			ExtensionSet(".txt"),
+			rules);
+
+		AssertVisible(tree.Paths, "src/new-name.txt");
+		AssertVisible(tree.Paths, "src/intent-to-add.txt");
+		AssertHidden(tree.Paths, "src/old-name.txt");
+		AssertHidden(tree.Paths, "src/untracked.txt");
+	}
+
+	[Fact]
 	public void TrackedOnlyModeOpenedBelowRepositoryRootUsesNearestIndex()
 	{
 		EnsureGitAvailable();
@@ -629,6 +696,65 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 	}
 
 	[Fact]
+	public void TrackedOnlyModeComposesRootAndExtensionSelectionsWithoutLeakingOtherTrackedPaths()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		temp.CreateFile("repo/LICENSE", "tracked root file without extension");
+		temp.CreateFile("repo/src/app.cs", "tracked selected extension");
+		temp.CreateFile("repo/src/readme.md", "tracked excluded extension");
+		temp.CreateFile("repo/src/local.cs", "untracked selected extension");
+		temp.CreateFile("repo/docs/guide.cs", "tracked unselected root");
+		InitializeIndex(
+			repositoryRoot,
+			"LICENSE",
+			"src/app.cs",
+			"src/readme.md",
+			"docs/guide.cs");
+		var rules = CreateTrackedOnlyRules(repositoryRoot);
+
+		var tree = BuildTree(
+			repositoryRoot,
+			RootSet("src"),
+			ExtensionSet(".cs"),
+			rules);
+
+		AssertVisible(tree.Paths, "LICENSE");
+		AssertVisible(tree.Paths, "src/app.cs");
+		AssertHidden(tree.Paths, "src/readme.md");
+		AssertHidden(tree.Paths, "src/local.cs");
+		AssertHidden(tree.Paths, "docs/guide.cs");
+	}
+
+	[Fact]
+	public void TrackedOnlyModeMasksOuterIndexAtNestedRepositoryBoundaryWithoutReadableIndex()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var outerRoot = temp.CreateDirectory("outer");
+		temp.CreateFile("outer/nested/previously-outer-tracked.txt", "tracked only by the outer index");
+		InitializeIndex(outerRoot, "nested/previously-outer-tracked.txt");
+		var nestedRoot = Path.Combine(outerRoot, "nested");
+		RunGit(nestedRoot, "init", "--quiet");
+		temp.CreateFile("outer/nested/local.txt", "untracked in the nested repository");
+		var rules = CreateTrackedOnlyRules(outerRoot);
+
+		var tree = BuildTree(
+			outerRoot,
+			RootSet("nested"),
+			ExtensionSet(".txt"),
+			rules);
+
+		AssertHidden(tree.Paths, "nested/previously-outer-tracked.txt");
+		AssertHidden(tree.Paths, "nested/local.txt");
+		var nestedBoundary = Assert.Single(
+			tree.Inventory.DiscoveredGitTrackedPathIndexes,
+			index => PathComparer.Default.Equals(index.RepositoryRootPath, nestedRoot));
+		Assert.Equal(0, nestedBoundary.Count);
+	}
+
+	[Fact]
 	public void TrackedOnlyModeStillAppliesSmartAndOrdinaryFiltersAfterGitOwnership()
 	{
 		EnsureGitAvailable();
@@ -682,7 +808,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			rules);
 
 		AssertHidden(tree.Paths, "src/untracked.cs");
-		Assert.Empty(tree.Inventory.DiscoveredGitTrackedPathIndexes);
+		Assert.Equal(0, Assert.Single(tree.Inventory.DiscoveredGitTrackedPathIndexes).Count);
 	}
 
 	private static TreeObservation BuildTree(

@@ -48,6 +48,41 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
+	public void DescendantLookups_DoNotConfuseSiblingPrefixes()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repo");
+		var index = new GitTrackedPathIndex(
+			repositoryRoot,
+			[
+				"src-old/file.txt",
+				"source/file.txt",
+				"tests/deep/test.cs"
+			]);
+
+		Assert.False(index.HasDescendant(Path.Combine(repositoryRoot, "src")));
+		Assert.False(index.ContainsOrHasDescendant(Path.Combine(repositoryRoot, "test")));
+		Assert.True(index.HasDescendant(Path.Combine(repositoryRoot, "src-old")));
+		Assert.True(index.HasDescendant(Path.Combine(repositoryRoot, "source")));
+		Assert.True(index.HasDescendant(Path.Combine(repositoryRoot, "tests", "deep")));
+		Assert.False(index.HasDescendant(repositoryRoot + "-other"));
+	}
+
+	[Fact]
+	public void Lookups_FollowPlatformPathCaseSemantics()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repo");
+		var index = new GitTrackedPathIndex(repositoryRoot, ["Src/App.cs"]);
+		var differentlyCasedDirectory = Path.Combine(repositoryRoot, "src");
+		var differentlyCasedFile = Path.Combine(differentlyCasedDirectory, "app.cs");
+		var expectedMatch = OperatingSystem.IsWindows();
+
+		Assert.Equal(expectedMatch, index.HasDescendant(differentlyCasedDirectory));
+		Assert.Equal(expectedMatch, index.Contains(differentlyCasedFile));
+	}
+
+	[Fact]
 	public void ScanContext_TrackedFilesOverrideGitIgnoreButNotOtherIgnoreControllers()
 	{
 		using var temp = new TemporaryDirectory();
@@ -163,6 +198,37 @@ public sealed class GitTrackedPathIndexTests
 		Assert.False(untracked.ShouldTraverseIgnoredDirectory);
 		Assert.True(traversalOnly.IsIgnored);
 		Assert.True(traversalOnly.ShouldTraverseIgnoredDirectory);
+	}
+
+	[Fact]
+	public void TrackedOnlyScanContext_NeverExposesGitAdministrativeDirectory()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repo");
+		var gitDirectory = temp.CreateFolder("repo/.git");
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseTrackedGitFilesOnly = true,
+			EnableGitIgnoreTraversal = true
+		};
+		var context = rules
+			.CreateGitIgnoreScanContext(repositoryRoot)
+			.WithTrackedPathIndex(new GitTrackedPathIndex(repositoryRoot, [".git/config"]));
+
+		var evaluation = context.Evaluate(
+			gitDirectory,
+			".git",
+			isDirectory: true,
+			".git");
+
+		Assert.True(evaluation.IsIgnored);
+		Assert.False(evaluation.ShouldTraverseIgnoredDirectory);
 	}
 
 	[Fact]

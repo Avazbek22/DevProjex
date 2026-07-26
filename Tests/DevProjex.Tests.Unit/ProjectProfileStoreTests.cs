@@ -77,6 +77,53 @@ public sealed class ProjectProfileStoreTests
 		}
 	}
 
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(true, false)]
+	[InlineData(false, true)]
+	public void SaveProfile_ValidGitModeMatrixRoundTripsWithoutChangingUserIntent(
+		bool useGitIgnore,
+		bool trackedOnly)
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			var selected = new List<IgnoreOptionId> { IgnoreOptionId.SmartIgnore };
+			if (useGitIgnore)
+				selected.Add(IgnoreOptionId.UseGitIgnore);
+			if (trackedOnly)
+				selected.Add(IgnoreOptionId.TrackedGitFilesOnly);
+
+			store.SaveProfile(
+				projectPath,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: [],
+					SelectedExtensions: [],
+					SelectedIgnoreOptions: selected,
+					IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.UseGitIgnore] = useGitIgnore,
+						[IgnoreOptionId.TrackedGitFilesOnly] = trackedOnly,
+						[IgnoreOptionId.SmartIgnore] = true
+					}));
+
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.Equal(useGitIgnore, loaded.SelectedIgnoreOptions.Contains(IgnoreOptionId.UseGitIgnore));
+			Assert.Equal(trackedOnly, loaded.SelectedIgnoreOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly));
+			Assert.Contains(IgnoreOptionId.SmartIgnore, loaded.SelectedIgnoreOptions);
+			Assert.NotNull(loaded.IgnoreOptionStates);
+			Assert.Equal(useGitIgnore, loaded.IgnoreOptionStates![IgnoreOptionId.UseGitIgnore]);
+			Assert.Equal(trackedOnly, loaded.IgnoreOptionStates[IgnoreOptionId.TrackedGitFilesOnly]);
+			Assert.True(loaded.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
 	[Fact]
 	public void TryLoadProfile_MissingFile_ReturnsFalse_AndDoesNotCreateStorageFile()
 	{
