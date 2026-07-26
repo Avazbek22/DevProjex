@@ -76,6 +76,52 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithHierarchicalAppSearchWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            for (var index = 1; index <= 12; index++)
+            {
+                WriteFile(
+                    rootPath,
+                    Path.Combine(
+                        "Application",
+                        $"Area{index:00}",
+                        "SelectionOption.cs"),
+                    $"internal sealed class SelectionOption{index:00} {{}}\n");
+            }
+
+            WriteFile(
+                rootPath,
+                Path.Combine("Application", "Application.csproj"),
+                "<Project />\n");
+            WriteFile(
+                rootPath,
+                Path.Combine(
+                    "Apps",
+                    "Avalonia",
+                    "DevProjex.Avalonia",
+                    "Coordinators",
+                    "AppearanceSettingsController.cs"),
+                "internal sealed class AppearanceSettingsController {}\n");
+            for (var index = 1; index <= 24; index++)
+            {
+                WriteFile(
+                    rootPath,
+                    Path.Combine(
+                        "Apps",
+                        $"Module{index:00}",
+                        "SelectionOption.cs"),
+                    $"internal sealed class SelectionOption{index:00} {{}}\n");
+            }
+
+            WriteFile(
+                rootPath,
+                Path.Combine("Assets", "Localization", "en.json"),
+                "{}\n");
+        });
+    }
+
     public static UiTestProject CreateWithLargeFlatTree(int fileCount = 2000)
     {
         return Create(rootPath =>

@@ -863,6 +863,128 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task SearchNavigation_VisibleHierarchicalSibling_DoesNotSnapToViewportTop()
+    {
+        using var project =
+            UiTestProject.CreateWithHierarchicalAppSearchWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            window.Width = Math.Max(window.MinWidth, 900);
+            window.Height = window.MinHeight;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.OpenSearchAsync(window);
+            var tree =
+                UiTestDriver.GetRequiredControl<ProjectTreeView>(
+                    window,
+                    "ProjectTree");
+            var scrollViewer = Assert.IsType<ScrollViewer>(
+                tree.FindDescendantOfType<ScrollViewer>());
+            var searchBar =
+                UiTestDriver.GetRequiredControl<SearchBarView>(
+                    window,
+                    "SearchBar");
+            const string query = "App";
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(searchBar.SearchBoxControl),
+                query);
+            await UiTestDriver.WaitForSearchAppliedAsync(window, query);
+
+            var root = Assert.Single(
+                UiTestDriver.GetViewModel(window).TreeNodes);
+            var appsNode = root.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "Apps",
+                    StringComparison.Ordinal));
+            tree.ScrollIntoView(appsNode);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var appsContainer = Assert.IsAssignableFrom<TreeViewItem>(
+                tree.TreeContainerFromItem(appsNode));
+            var appsTop = Assert.NotNull(
+                appsContainer.TranslatePoint(default, scrollViewer)).Y;
+            var centeredOffset = Math.Clamp(
+                scrollViewer.Offset.Y +
+                appsTop -
+                (scrollViewer.Viewport.Height * 0.45),
+                0,
+                Math.Max(
+                    0,
+                    scrollViewer.Extent.Height -
+                    scrollViewer.Viewport.Height));
+            scrollViewer.Offset = new Vector(
+                scrollViewer.Offset.X,
+                centeredOffset);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var initialOffsetY = scrollViewer.Offset.Y;
+            var nextButton = Assert.IsType<Button>(
+                searchBar.FindControl<Button>("SearchNextButton"));
+            var navigationOffsets = new List<double>();
+            void RecordNavigationOffset(
+                object? _,
+                ScrollChangedEventArgs __) =>
+                navigationOffsets.Add(scrollViewer.Offset.Y);
+
+            scrollViewer.ScrollChanged += RecordNavigationOffset;
+            try
+            {
+                nextButton.RaiseEvent(
+                    new RoutedEventArgs(Button.ClickEvent));
+                await UiTestDriver.WaitForConditionAsync(
+                    window,
+                    () => tree.SelectedItem is TreeNodeViewModel
+                    {
+                        DisplayName: "Application.csproj"
+                    },
+                    "Application.csproj search result to be selected");
+                await UiTestDriver.WaitForSettledFramesAsync(
+                    frameCount: 4);
+
+                nextButton.RaiseEvent(
+                    new RoutedEventArgs(Button.ClickEvent));
+                await UiTestDriver.WaitForConditionAsync(
+                    window,
+                    () => ReferenceEquals(tree.SelectedItem, appsNode),
+                    "Apps search result to be selected");
+                await UiTestDriver.WaitForSettledFramesAsync(
+                    frameCount: 8);
+            }
+            finally
+            {
+                scrollViewer.ScrollChanged -= RecordNavigationOffset;
+            }
+
+            var selectedBounds = Assert.NotNull(
+                GetSelectedTreeItemVerticalBounds(
+                    tree,
+                    scrollViewer));
+            Assert.InRange(
+                selectedBounds.Top,
+                selectedBounds.ViewportHeight * 0.2,
+                selectedBounds.ViewportHeight * 0.7);
+            Assert.InRange(
+                Math.Abs(scrollViewer.Offset.Y - initialOffsetY),
+                0,
+                0.5);
+            Assert.All(
+                navigationOffsets,
+                offset => Assert.InRange(
+                    Math.Abs(offset - initialOffsetY),
+                    0,
+                    0.5));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task RepeatedSearchCycles_DoNotMaterializeAdditionalViewModelBranches()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

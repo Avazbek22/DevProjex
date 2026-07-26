@@ -114,7 +114,6 @@ public sealed class TreeSearchCoordinator(
     private const int HighlightBatchSize = 256;
     private const int ProgressiveMaterializationMatchThreshold = 48;
     private const int MaterializationBatchSize = 32;
-    private const int SearchAutoExpandMatchCap = 2500;
     private const int SearchGlobalHighlightMatchCap = 3500;
     private static readonly TimeSpan DispatcherWorkSlice =
         TimeSpan.FromMilliseconds(6);
@@ -250,10 +249,7 @@ public sealed class TreeSearchCoordinator(
             root.DisplayName,
             query,
             CancellationToken.None);
-        ApplySearchResultCore(
-            query,
-            searchResult,
-            ShouldAutoExpandAllMatches(searchResult));
+        ApplySearchResultCore(query, searchResult);
         metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
             query,
             stopwatch.Elapsed,
@@ -711,13 +707,8 @@ public sealed class TreeSearchCoordinator(
                     query,
                     token),
                 token).ConfigureAwait(false);
-            var autoExpandAllMatches =
-                ShouldAutoExpandAllMatches(searchResult);
-
-            if (autoExpandAllMatches &&
-                searchResult.MatchIndices.Length >=
-                ProgressiveMaterializationMatchThreshold &&
-                searchResult.MatchIndices.Length <= SearchAutoExpandMatchCap)
+            if (searchResult.MatchIndices.Length >=
+                ProgressiveMaterializationMatchThreshold)
             {
                 await ApplySearchResultProgressivelyAsync(
                     query,
@@ -740,10 +731,7 @@ public sealed class TreeSearchCoordinator(
                         return;
                     }
 
-                    ApplySearchResultCore(
-                        query,
-                        searchResult,
-                        autoExpandAllMatches);
+                    ApplySearchResultCore(query, searchResult);
                 }, DispatcherPriority.Background);
             }
 
@@ -886,8 +874,7 @@ public sealed class TreeSearchCoordinator(
 
         List<TreeNodeViewModel>? resolvedMatches = null;
         TreeNodeViewModel? firstResolvedMatch = null;
-        if (resolveAllMatches &&
-            _searchMatches.Length <= SearchAutoExpandMatchCap)
+        if (resolveAllMatches)
         {
             resolvedMatches = ResolveSearchNodes(_searchMatches);
             firstResolvedMatch = resolvedMatches.FirstOrDefault();
@@ -895,9 +882,8 @@ public sealed class TreeSearchCoordinator(
         }
         else
         {
-            // Keep one navigable path for broad searches without materializing every
-            // matching branch. Applying this as a normal diff also removes expansions
-            // left by a previous, narrower query.
+            // Progressive searches publish one navigable path while the remaining
+            // matches are materialized in dispatcher-sized batches.
             firstResolvedMatch = _searchMatches.Length > 0
                 ? ResolveSearchNode(_searchMatches[0])
                 : null;
@@ -1114,17 +1100,17 @@ public sealed class TreeSearchCoordinator(
 
             _autoExpandAllMatches = true;
             ApplySmartExpandFromMatches(resolvedMatches);
+            var highlightedMatches =
+                _searchMatches.Length <= SearchGlobalHighlightMatchCap
+                    ? CollectRealizedSearchMatches(_searchMatches)
+                    : resolvedMatches.Count == 0
+                        ? []
+                        : [resolvedMatches[0]];
             ApplySearchHighlightDiff(
                 query,
-                CollectRealizedSearchMatches(_searchMatches));
+                highlightedMatches);
         }, DispatcherPriority.Background);
     }
-
-    private static bool ShouldAutoExpandAllMatches(
-        TreeDescriptorSearchResult searchResult) =>
-        // A sibling-count budget changes visible search semantics on wide trees:
-        // matches become materialized only when the user navigates to them.
-        searchResult.MatchIndices.Length <= SearchAutoExpandMatchCap;
 
     private void SeedExpandedNodesSnapshot()
     {
@@ -1737,27 +1723,30 @@ public sealed class TreeSearchCoordinator(
             return true;
         }
 
-        var containerTopLeft = container.TranslatePoint(default, scrollViewer);
-        if (containerTopLeft is null)
+        var navigationTarget =
+            ResolveTreeItemNavigationTarget(container);
+        var navigationTopLeft =
+            navigationTarget.TranslatePoint(default, scrollViewer);
+        if (navigationTopLeft is null ||
+            navigationTarget.Bounds.Height <= 0)
+        {
             return false;
+        }
 
-        var horizontalTarget =
-            ResolveTreeItemHorizontalScrollTarget(container);
-        var horizontalTopLeft =
-            horizontalTarget.TranslatePoint(default, scrollViewer) ??
-            containerTopLeft.Value;
         var currentOffset = scrollViewer.Offset;
         var targetY = adjustHorizontalOffset
             ? ResolveComfortableVerticalOffsetForSearchNavigation(
                 currentOffset.Y,
-                containerTopLeft.Value.Y,
-                containerTopLeft.Value.Y + container.Bounds.Height,
+                navigationTopLeft.Value.Y,
+                navigationTopLeft.Value.Y +
+                navigationTarget.Bounds.Height,
                 scrollViewer.Viewport.Height,
                 scrollViewer.Extent.Height)
             : ResolveVerticalOffsetForSearchNavigation(
                 currentOffset.Y,
-                containerTopLeft.Value.Y,
-                containerTopLeft.Value.Y + container.Bounds.Height,
+                navigationTopLeft.Value.Y,
+                navigationTopLeft.Value.Y +
+                navigationTarget.Bounds.Height,
                 scrollViewer.Viewport.Height,
                 scrollViewer.Extent.Height);
         var baselineOffsetX = ResolveClampedTreeHorizontalOffset(
@@ -1771,14 +1760,17 @@ public sealed class TreeSearchCoordinator(
             // changed by TreeView while realizing a lazy path. Convert it back to the
             // captured navigation baseline before deciding whether X must move.
             var itemLeftAtBaselineOffset =
-                currentOffset.X + horizontalTopLeft.X - baselineOffsetX;
+                currentOffset.X +
+                navigationTopLeft.Value.X -
+                baselineOffsetX;
             targetX = ResolveHorizontalOffsetForSearchNavigation(
                 baselineOffsetX,
                 itemLeftAtBaselineOffset,
-                itemLeftAtBaselineOffset + horizontalTarget.Bounds.Width,
+                itemLeftAtBaselineOffset +
+                navigationTarget.Bounds.Width,
                 scrollViewer.Viewport.Width,
                 scrollViewer.Extent.Width,
-                horizontalTarget.Bounds.Width);
+                navigationTarget.Bounds.Width);
         }
 
         if (Math.Abs(targetX - currentOffset.X) < 0.5 && Math.Abs(targetY - currentOffset.Y) < 0.5)
@@ -1788,14 +1780,21 @@ public sealed class TreeSearchCoordinator(
         return true;
     }
 
-    private static Control ResolveTreeItemHorizontalScrollTarget(
+    private static Control ResolveTreeItemNavigationTarget(
         TreeViewItem container)
     {
-        // TreeViewItem is a stretched row. Search navigation must measure the actual
-        // icon/text block or every result would look horizontally clipped.
+        // An expanded TreeViewItem includes its descendants in Bounds. Measuring the
+        // data-template content keeps both axes anchored to the node's own header row.
         return container.FindDescendantOfType<Control>(
             includeSelf: false,
-            visual => visual is Control { Name: "TreeItemContent" }) ??
+            visual =>
+                visual is Control
+                {
+                    Name: "TreeItemContent"
+                } content &&
+                ReferenceEquals(
+                    content.FindAncestorOfType<TreeViewItem>(),
+                    container)) ??
                container;
     }
 
@@ -1819,18 +1818,19 @@ public sealed class TreeSearchCoordinator(
         if (scrollViewer is null)
             return true;
 
-        var topLeft = container.TranslatePoint(default, scrollViewer);
-        if (topLeft is null)
+        var target = ResolveTreeItemNavigationTarget(container);
+        var topLeft = target.TranslatePoint(default, scrollViewer);
+        if (topLeft is null || target.Bounds.Height <= 0)
             return false;
 
         var top = topLeft.Value.Y;
-        var bottom = top + container.Bounds.Height;
+        var bottom = top + target.Bounds.Height;
         var viewportHeight = scrollViewer.Viewport.Height;
         if (viewportHeight <= 0)
             return false;
 
         const double tolerance = 1.0;
-        var fullyVisible = container.Bounds.Height > viewportHeight
+        var fullyVisible = target.Bounds.Height > viewportHeight
             ? top <= tolerance && bottom >= viewportHeight - tolerance
             : top >= -tolerance && bottom <= viewportHeight + tolerance;
         if (!fullyVisible)
@@ -1859,7 +1859,7 @@ public sealed class TreeSearchCoordinator(
         if (scrollViewer is null)
             return true;
 
-        var target = ResolveTreeItemHorizontalScrollTarget(container);
+        var target = ResolveTreeItemNavigationTarget(container);
         var topLeft = target.TranslatePoint(default, scrollViewer);
         var viewportWidth = scrollViewer.Viewport.Width;
         if (topLeft is null || viewportWidth <= 0)

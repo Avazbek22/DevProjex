@@ -809,7 +809,7 @@ public sealed class TreeSearchCoordinatorTests
 	[Fact]
 	public void SearchClose_ReturnsSearchOnlyBranchesToLazyState()
 	{
-		const int branchCount = 1_000;
+		const int branchCount = 3_000;
 		var (viewModel, treeView) = CreateContext();
 		var branchDescriptors = Enumerable
 			.Range(0, branchCount)
@@ -1105,35 +1105,12 @@ public sealed class TreeSearchCoordinatorTests
 	[Theory]
 	[InlineData(3_000)]
 	[InlineData(4_000)]
-	public void UpdateSearchMatches_BroadDispersedMatchSetMaterializesOnlyCurrentResultPath(
+	public void UpdateSearchMatches_BroadDispersedMatchSetSettlesBeforeNavigation(
 		int branchCount)
 	{
 		var (viewModel, treeView) = CreateContext();
-		var branchDescriptors = new TreeNodeDescriptor[branchCount];
-		for (var index = 0; index < branchDescriptors.Length; index++)
-		{
-			branchDescriptors[index] = CreateDescriptor(
-				$"group-{index:D4}",
-				CreateDescriptor($"match-{index:D4}.txt"));
-		}
-
-		var rootDescriptor = CreateDescriptor("Root", branchDescriptors);
-		var realizedFactories = 0;
-		var root = new TreeNodeViewModel(rootDescriptor, null, null);
-		for (var index = 0; index < branchDescriptors.Length; index++)
-		{
-			var branchDescriptor = branchDescriptors[index];
-			root.Children.Add(new TreeNodeViewModel(
-				branchDescriptor,
-				root,
-				null,
-				parent =>
-				{
-					Interlocked.Increment(ref realizedFactories);
-					var childDescriptor = parent.Descriptor.Children[0];
-					return [new TreeNodeViewModel(childDescriptor, parent, null)];
-				}));
-		}
+		var (root, getRealizedFactoryCount) =
+			CreateBroadLazySearchTree(branchCount);
 
 		viewModel.TreeNodes.Add(root);
 		using var coordinator = new TreeSearchCoordinator(viewModel, treeView);
@@ -1142,12 +1119,56 @@ public sealed class TreeSearchCoordinatorTests
 		coordinator.UpdateSearchMatches();
 
 		Assert.Equal(branchCount, viewModel.SearchTotalMatches);
-		Assert.Equal(1, realizedFactories);
+		Assert.Equal(branchCount, getRealizedFactoryCount());
 		Assert.Equal("match-0000.txt", Assert.IsType<TreeNodeViewModel>(treeView.SelectedItem).DisplayName);
+
+		var expandedBeforeNavigation = root.Children
+			.Select(node => node.IsExpanded)
+			.ToArray();
+		coordinator.Navigate(1);
+
+		Assert.Equal(branchCount, getRealizedFactoryCount());
+		Assert.Equal(
+			expandedBeforeNavigation,
+			root.Children.Select(node => node.IsExpanded));
+		Assert.Equal(
+			"match-0001.txt",
+			Assert.IsType<TreeNodeViewModel>(treeView.SelectedItem).DisplayName);
+	}
+
+	[AvaloniaFact]
+	public async Task UpdateSearchMatchesAsync_BroadDispersedMatchSetSettlesBeforeNavigation()
+	{
+		const int branchCount = 2_501;
+		var (viewModel, treeView) = CreateContext();
+		var (root, getRealizedFactoryCount) =
+			CreateBroadLazySearchTree(branchCount);
+		viewModel.TreeNodes.Add(root);
+		using var coordinator = new TreeSearchCoordinator(viewModel, treeView);
+		viewModel.SearchQuery = "match-";
+
+		await coordinator.UpdateSearchMatchesAsync();
+
+		Assert.False(viewModel.IsSearchInProgress);
+		Assert.Equal(branchCount, viewModel.SearchTotalMatches);
+		Assert.Equal(branchCount, getRealizedFactoryCount());
+		var expandedBeforeNavigation = root.Children
+			.Select(node => node.IsExpanded)
+			.ToArray();
+
+		coordinator.Navigate(1);
+
+		Assert.Equal(branchCount, getRealizedFactoryCount());
+		Assert.Equal(
+			expandedBeforeNavigation,
+			root.Children.Select(node => node.IsExpanded));
+		Assert.Equal(
+			"match-0001.txt",
+			Assert.IsType<TreeNodeViewModel>(treeView.SelectedItem).DisplayName);
 	}
 
 	[Fact]
-	public void UpdateSearchMatches_WideTreeWithinMatchCapPreparesEveryResultBeforeNavigation()
+	public void UpdateSearchMatches_WideTreePreparesEveryResultBeforeNavigation()
 	{
 		const int matchCount = 360;
 		const int branchCount = 3_000;
@@ -1247,7 +1268,7 @@ public sealed class TreeSearchCoordinatorTests
 	}
 
 	[AvaloniaFact]
-	public void UpdateSearchMatches_NarrowThenOverCapQueryCancelsStaleExpansionBatches()
+	public void UpdateSearchMatches_NarrowThenBroadQueryReplacesExpansionState()
 	{
 		const int narrowBranchCount = 320;
 		const int totalBranchCount = 2_700;
@@ -1271,10 +1292,7 @@ public sealed class TreeSearchCoordinatorTests
 		coordinator.UpdateSearchMatches();
 		Dispatcher.UIThread.RunJobs(DispatcherPriority.Background);
 
-		Assert.True(root.Children[0].IsExpanded);
-		Assert.All(
-			root.Children.Skip(1),
-			node => Assert.False(node.IsExpanded));
+		Assert.All(root.Children, node => Assert.True(node.IsExpanded));
 		Assert.Equal(totalBranchCount, viewModel.SearchTotalMatches);
 	}
 
@@ -1322,6 +1340,46 @@ public sealed class TreeSearchCoordinatorTests
 					.ToArray());
 
 		return CreateNode(rootDescriptor, parent: null);
+	}
+
+	private static (
+		TreeNodeViewModel Root,
+		Func<int> GetRealizedFactoryCount)
+		CreateBroadLazySearchTree(int branchCount)
+	{
+		var branchDescriptors = Enumerable
+			.Range(0, branchCount)
+			.Select(index => CreateDescriptor(
+				$"group-{index:D4}",
+				CreateDescriptor($"match-{index:D4}.txt")))
+			.ToArray();
+		var root = new TreeNodeViewModel(
+			CreateDescriptor("Root", branchDescriptors),
+			null,
+			null);
+		var realizedFactoryCount = 0;
+		foreach (var branchDescriptor in branchDescriptors)
+		{
+			root.Children.Add(new TreeNodeViewModel(
+				branchDescriptor,
+				root,
+				null,
+				parent =>
+				{
+					Interlocked.Increment(ref realizedFactoryCount);
+					return
+					[
+						new TreeNodeViewModel(
+							parent.Descriptor.Children[0],
+							parent,
+							null)
+					];
+				}));
+		}
+
+		return (
+			root,
+			() => Volatile.Read(ref realizedFactoryCount));
 	}
 
 	private static TreeNodeDescriptor CreateDescriptor(string name, params TreeNodeDescriptor[] children)
