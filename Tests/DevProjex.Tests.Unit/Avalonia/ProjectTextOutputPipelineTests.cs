@@ -2,6 +2,44 @@ namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class ProjectTextOutputPipelineTests
 {
+    [Theory]
+    [InlineData((int)ProjectTextOutputMode.Tree)]
+    [InlineData((int)ProjectTextOutputMode.Content)]
+    [InlineData((int)ProjectTextOutputMode.TreeAndContent)]
+    public async Task BuildAsync_CheckedRootMatchesImplicitFullTree(
+        int modeValue)
+    {
+        using var temp = new TemporaryDirectory();
+        var sourceFile = temp.CreateFile(
+            Path.Combine("src", "Program.cs"),
+            "class Program {}");
+        var root = DirectoryNode(
+            temp.Path,
+            DirectoryNode(
+                Path.GetDirectoryName(sourceFile)!,
+                FileNode(sourceFile)));
+        var pipeline = CreatePipeline();
+        var implicitResult = await pipeline.BuildAsync(
+            (ProjectTextOutputMode)modeValue,
+            CreateSnapshot(
+                temp.Path,
+                root,
+                new HashSet<string>(PathComparer.Default)),
+            TestContext.Current.CancellationToken);
+        var checkedRootResult = await pipeline.BuildAsync(
+            (ProjectTextOutputMode)modeValue,
+            CreateSnapshot(
+                temp.Path,
+                root,
+                new HashSet<string>(PathComparer.Default)
+                {
+                    root.FullPath
+                }),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(implicitResult, checkedRootResult);
+    }
+
     [Fact]
     public async Task BuildAsync_SelectedDirectoryIncludesLazyDescriptorDescendantsInBothContentModes()
     {

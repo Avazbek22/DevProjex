@@ -720,11 +720,15 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (currentTreeRoot is null)
             return [];
 
-        if (hasSelection)
+        var effectiveSelectedPaths =
+            ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                currentTreeRoot,
+                selectedPaths);
+        if (hasSelection && effectiveSelectedPaths.Count > 0)
         {
             return PreviewFileCollectionPolicy
                 .BuildOrderedSelectedFilePaths(
-                    selectedPaths,
+                    effectiveSelectedPaths,
                     currentTreeRoot);
         }
 

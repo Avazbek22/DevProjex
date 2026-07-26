@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace DevProjex.Application.Selection;
 
 /// <summary>
@@ -7,6 +9,38 @@ namespace DevProjex.Application.Selection;
 /// </summary>
 public static class ProjectTreeSelectionProjection
 {
+	private static readonly IReadOnlySet<string> FullTreeSelection =
+		Array.Empty<string>().ToFrozenSet(PathComparer.Default);
+
+	/// <summary>
+	/// Converts the two UI representations of the complete tree into the canonical
+	/// empty-path representation consumed by preview, metrics, and export pipelines.
+	/// Explicit checkbox state remains in the view model so users can still uncheck
+	/// individual descendants after selecting the project root.
+	/// </summary>
+	public static IReadOnlySet<string> NormalizeSelectedPaths(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedPaths)
+	{
+		ArgumentNullException.ThrowIfNull(root);
+		ArgumentNullException.ThrowIfNull(selectedPaths);
+
+		return CoversWholeTree(root, selectedPaths)
+			? FullTreeSelection
+			: selectedPaths;
+	}
+
+	public static bool CoversWholeTree(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedPaths)
+	{
+		ArgumentNullException.ThrowIfNull(root);
+		ArgumentNullException.ThrowIfNull(selectedPaths);
+
+		return selectedPaths.Count == 0 ||
+		       selectedPaths.Contains(root.FullPath);
+	}
+
 	public static IReadOnlyList<TreeNodeDescriptor> BuildIncludedNodes(
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths)
@@ -14,12 +48,13 @@ public static class ProjectTreeSelectionProjection
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(selectedPaths);
 
+		var effectiveSelectedPaths = NormalizeSelectedPaths(root, selectedPaths);
 		var included = new List<TreeNodeDescriptor>();
 		var uniquePaths = new HashSet<string>(PathComparer.Default);
 		VisitIncludedTree(
 			root,
-			selectedPaths,
-			ancestorSelected: selectedPaths.Count == 0,
+			effectiveSelectedPaths,
+			ancestorSelected: effectiveSelectedPaths.Count == 0,
 			node =>
 			{
 				if (uniquePaths.Add(node.FullPath))
@@ -37,11 +72,12 @@ public static class ProjectTreeSelectionProjection
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(selectedPaths);
 
+		var effectiveSelectedPaths = NormalizeSelectedPaths(root, selectedPaths);
 		var uniquePaths = new HashSet<string>(PathComparer.Default);
 		VisitIncludedTree(
 			root,
-			selectedPaths,
-			ancestorSelected: selectedPaths.Count == 0,
+			effectiveSelectedPaths,
+			ancestorSelected: effectiveSelectedPaths.Count == 0,
 			node =>
 			{
 				if (!node.IsDirectory && (!ensureExists || File.Exists(node.FullPath)))

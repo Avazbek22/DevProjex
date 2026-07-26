@@ -1574,8 +1574,15 @@ public partial class MainWindow : Window
         return selected;
     }
 
-    private HashSet<string> GetCheckedPaths()
-        => _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
+    private IReadOnlySet<string> GetCheckedPaths()
+    {
+        var selectedPaths = _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
+        return _currentTree is null
+            ? selectedPaths
+            : ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                _currentTree.Root,
+                selectedPaths);
+    }
 
     private static List<string> BuildOrderedSelectedFilePaths(
         TreeNodeDescriptor treeRoot,

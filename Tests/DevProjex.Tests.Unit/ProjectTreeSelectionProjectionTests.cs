@@ -4,6 +4,54 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ProjectTreeSelectionProjectionTests
 {
+	[Fact]
+	public void NormalizeSelectedPaths_ImplicitAndCheckedRootUseCanonicalFullTreeScope()
+	{
+		var fixture = SelectionFixture.Create();
+		var implicitSelection = new HashSet<string>(PathComparer.Default);
+		var checkedRoot = new HashSet<string>(PathComparer.Default)
+		{
+			fixture.Root.FullPath
+		};
+
+		var implicitResult =
+			ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+				fixture.Root,
+				implicitSelection);
+		var checkedRootResult =
+			ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+				fixture.Root,
+				checkedRoot);
+
+		Assert.Empty(implicitResult);
+		Assert.Empty(checkedRootResult);
+		Assert.True(ProjectTreeSelectionProjection.CoversWholeTree(
+			fixture.Root,
+			implicitSelection));
+		Assert.True(ProjectTreeSelectionProjection.CoversWholeTree(
+			fixture.Root,
+			checkedRoot));
+	}
+
+	[Fact]
+	public void NormalizeSelectedPaths_PartialSelectionPreservesExplicitSet()
+	{
+		var fixture = SelectionFixture.Create();
+		var selected = new HashSet<string>(PathComparer.Default)
+		{
+			fixture.Paths["src"]
+		};
+
+		var result = ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+			fixture.Root,
+			selected);
+
+		Assert.Same(selected, result);
+		Assert.False(ProjectTreeSelectionProjection.CoversWholeTree(
+			fixture.Root,
+			selected));
+	}
+
 	[Theory]
 	[MemberData(nameof(SelectionCases))]
 	public void BuildIncludedNodes_SelectionMatrixPreservesExactEffectiveSubtree(
@@ -45,6 +93,34 @@ public sealed class ProjectTreeSelectionProjectionTests
 	}
 
 	[Fact]
+	public void ExportPlan_CheckedRootMatchesImplicitFullTree()
+	{
+		var fixture = SelectionFixture.Create();
+		var builder = new ProjectCopyExportPlanBuilder();
+		var implicitPlan = builder.Build(new ProjectCopyExportRequest(
+			fixture.Root.FullPath,
+			"root",
+			fixture.Root,
+			new HashSet<string>(PathComparer.Default),
+			Path.GetTempPath(),
+			ProjectCopyExportFormat.Folder));
+		var checkedRootPlan = builder.Build(new ProjectCopyExportRequest(
+			fixture.Root.FullPath,
+			"root",
+			fixture.Root,
+			new HashSet<string>(PathComparer.Default)
+			{
+				fixture.Root.FullPath
+			},
+			Path.GetTempPath(),
+			ProjectCopyExportFormat.Folder));
+
+		Assert.Equal(implicitPlan.Entries, checkedRootPlan.Entries);
+		Assert.Equal(implicitPlan.FileCount, checkedRootPlan.FileCount);
+		Assert.Equal(implicitPlan.DirectoryCount, checkedRootPlan.DirectoryCount);
+	}
+
+	[Fact]
 	public void ExportPlan_CaseVariantPathsFollowCurrentPlatformFilesystemSemantics()
 	{
 		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project-copy-case-root"));
@@ -73,6 +149,11 @@ public sealed class ProjectTreeSelectionProjectionTests
 		{
 			"nothing selected exports complete effective tree",
 			[],
+			[".", "README.md", "docs", "docs/empty", "docs/guide.md", "src", "src/Program.cs", "src/assets.bin"]
+		},
+		{
+			"checked project root exports complete effective tree",
+			["root"],
 			[".", "README.md", "docs", "docs/empty", "docs/guide.md", "src", "src/Program.cs", "src/assets.bin"]
 		},
 		{

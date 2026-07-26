@@ -997,7 +997,10 @@ internal sealed class MetricsPipeline(
         if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
             return ExportOutputMetrics.Empty;
 
-        var isFullTreeSelection = hasSelection && IsFullTreeSelection(currentTree.Root, selectedPaths);
+        var isFullTreeSelection =
+            ProjectTreeSelectionProjection.CoversWholeTree(
+                currentTree.Root,
+                selectedPaths);
         var effectiveHasSelection = hasSelection && !isFullTreeSelection;
         var pathPresentation = exportPathPresentationProvider();
         var pathPresentationIdentity = pathPresentation is null
@@ -1055,7 +1058,10 @@ internal sealed class MetricsPipeline(
         var pathPresentation = exportPathPresentationProvider();
         var contentOnlyPathMapper = pathPresentation?.MapFilePath;
         var treeAndContentPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath);
-        var isFullTreeSelection = hasSelection && IsFullTreeSelection(currentTree.Root, selectedPaths);
+        var isFullTreeSelection =
+            ProjectTreeSelectionProjection.CoversWholeTree(
+                currentTree.Root,
+                selectedPaths);
         var effectiveHasSelection = hasSelection && !isFullTreeSelection;
         var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
         var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
@@ -1187,9 +1193,6 @@ internal sealed class MetricsPipeline(
 
     private bool ShouldUseCompactStatusMetrics() =>
         boundsWidthProvider() > 0 && boundsWidthProvider() <= CompactStatusMetricsThresholdWidth;
-
-    private static bool IsFullTreeSelection(TreeNodeDescriptor treeRoot, IReadOnlySet<string> selectedPaths) =>
-        selectedPaths.Contains(treeRoot.FullPath);
 
     private static int BuildPathPresentationIdentity(ExportPathPresentation? pathPresentation)
     {

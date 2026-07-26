@@ -366,6 +366,50 @@ public sealed class MainWindowPreviewInternalsTests
     }
 
     [Fact]
+    public void BuildPreviewCacheKey_ImplicitAndCheckedRootSelectionProduceEqualKey()
+    {
+        var root = CreateTree("root");
+        var implicitSelection = new HashSet<string>(PathComparer.Default);
+        var checkedRoot = new HashSet<string>(PathComparer.Default)
+        {
+            root.FullPath
+        };
+
+        var implicitKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+            "/root",
+            root,
+            PreviewContentMode.Content,
+            TreeTextFormat.Ascii,
+            implicitSelection);
+        var checkedRootKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+            "/root",
+            root,
+            PreviewContentMode.Content,
+            TreeTextFormat.Ascii,
+            checkedRoot);
+
+        Assert.Equal(implicitKey, checkedRootKey);
+        Assert.Equal(0, checkedRootKey.SelectedCount);
+        Assert.Equal(0, checkedRootKey.SelectedHash);
+    }
+
+    [Fact]
+    public void CollectOrderedPreviewFiles_CheckedRootMatchesImplicitFullTree()
+    {
+        var root = CreateTree("root");
+        var implicitFiles = PreviewFileCollectionPolicy.CollectOrderedPreviewFiles(
+            new HashSet<string>(PathComparer.Default),
+            hasSelection: false,
+            root);
+        var checkedRootFiles = PreviewFileCollectionPolicy.CollectOrderedPreviewFiles(
+            new HashSet<string>(PathComparer.Default) { root.FullPath },
+            hasSelection: true,
+            root);
+
+        Assert.Equal(implicitFiles, checkedRootFiles);
+    }
+
+    [Fact]
     public void BuildPreviewCacheKey_DifferentMode_ProduceDifferentKey()
     {
         var root = CreateTree("root");

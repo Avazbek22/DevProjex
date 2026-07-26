@@ -13,10 +13,11 @@ internal sealed class ProjectTextOutputPipeline(
         ArgumentNullException.ThrowIfNull(snapshot);
         cancellationToken.ThrowIfCancellationRequested();
 
+        var effectiveSnapshot = NormalizeSelection(snapshot);
         // Tree rendering and selection projection are CPU-bound and can be large enough
         // to stall Avalonia input. Start the complete operation outside the UI context.
         return Task.Run(
-            () => BuildOnWorkerAsync(mode, snapshot, cancellationToken),
+            () => BuildOnWorkerAsync(mode, effectiveSnapshot, cancellationToken),
             cancellationToken);
     }
 
@@ -72,6 +73,7 @@ internal sealed class ProjectTextOutputPipeline(
         ArgumentNullException.ThrowIfNull(snapshot);
         cancellationToken.ThrowIfCancellationRequested();
 
+        snapshot = NormalizeSelection(snapshot);
         var displayRootPath = snapshot.PathPresentation?.DisplayRootPath;
         var displayRootName = snapshot.PathPresentation?.DisplayRootName;
         if (snapshot.SelectedPaths.Count == 0)
@@ -104,6 +106,7 @@ internal sealed class ProjectTextOutputPipeline(
 
     private static IReadOnlyList<string> ResolveContentFiles(ProjectTextOutputSnapshot snapshot)
     {
+        snapshot = NormalizeSelection(snapshot);
         if (snapshot.SelectedPaths.Count > 0)
         {
             return ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
@@ -117,6 +120,20 @@ internal sealed class ProjectTextOutputPipeline(
                    snapshot.Root,
                    snapshot.SelectedPaths,
                    ensureExists: false);
+    }
+
+    private static ProjectTextOutputSnapshot NormalizeSelection(
+        ProjectTextOutputSnapshot snapshot)
+    {
+        var effectiveSelectedPaths =
+            ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                snapshot.Root,
+                snapshot.SelectedPaths);
+        return ReferenceEquals(
+            effectiveSelectedPaths,
+            snapshot.SelectedPaths)
+            ? snapshot
+            : snapshot with { SelectedPaths = effectiveSelectedPaths };
     }
 }
 

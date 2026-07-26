@@ -58,7 +58,11 @@ internal static class PreviewWarmupPolicy
         if (treeRoot is null)
             return null;
 
-        if (selectedPaths.Count == 0)
+        var effectiveSelectedPaths =
+            ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                treeRoot,
+                selectedPaths);
+        if (effectiveSelectedPaths.Count == 0)
         {
             return new PreviewWarmupSelectionPlan(
                 treeRoot,
@@ -70,7 +74,9 @@ internal static class PreviewWarmupPolicy
                 hasExplicitSelection: false);
         }
 
-        var selectionTrie = BuildSelectionTrie(treeRoot.FullPath, selectedPaths);
+        var selectionTrie = BuildSelectionTrie(
+            treeRoot.FullPath,
+            effectiveSelectedPaths);
         var selectedRoot = ResolveSelectedNode(
             treeRoot,
             sourceIndex: -1,
@@ -696,15 +702,17 @@ internal static class PreviewFileCollectionPolicy
         bool hasSelection,
         TreeNodeDescriptor? treeRoot)
     {
-        if (hasSelection)
-        {
-            return treeRoot is null
-                ? []
-                : BuildOrderedSelectedFilePaths(selectedPaths, treeRoot);
-        }
+        if (treeRoot is null)
+            return [];
 
-        return treeRoot is null
-            ? []
+        var effectiveSelectedPaths =
+            ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                treeRoot,
+                selectedPaths);
+        return hasSelection && effectiveSelectedPaths.Count > 0
+            ? BuildOrderedSelectedFilePaths(
+                effectiveSelectedPaths,
+                treeRoot)
             : BuildOrderedAllFilePaths(treeRoot);
     }
 
@@ -715,13 +723,19 @@ internal static class PreviewFileCollectionPolicy
         TreeTextFormat treeFormat,
         IReadOnlySet<string> selectedPaths)
     {
+        var effectiveSelectedPaths = treeRoot is null
+            ? selectedPaths
+            : ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                treeRoot,
+                selectedPaths);
+
         return new PreviewCacheKeyData(
             ProjectPath: projectPath,
             TreeIdentity: treeRoot is null ? 0 : RuntimeHelpers.GetHashCode(treeRoot),
             Mode: mode,
             TreeFormat: treeFormat,
-            SelectedCount: selectedPaths.Count,
-            SelectedHash: BuildPathSetHash(selectedPaths));
+            SelectedCount: effectiveSelectedPaths.Count,
+            SelectedHash: BuildPathSetHash(effectiveSelectedPaths));
     }
 
     public static int BuildPathSetHash(IReadOnlySet<string> selectedPaths)

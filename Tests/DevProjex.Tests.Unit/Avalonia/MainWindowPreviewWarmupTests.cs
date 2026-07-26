@@ -5,6 +5,23 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class MainWindowPreviewWarmupTests
 {
     [Fact]
+    public void CreateSelectionPlan_CheckedRootUsesImplicitFullTreePlan()
+    {
+        var root = CreateFlatRoot(
+            CreatePath("root"),
+            CreatePath("root", "a.txt"));
+
+        var plan = PreviewWarmupPolicy.CreateSelectionPlan(
+            root,
+            new HashSet<string>(PathComparer.Default) { root.FullPath });
+
+        Assert.NotNull(plan);
+        Assert.False(plan.HasExplicitSelection);
+        Assert.NotNull(plan.SelectedRoot);
+        Assert.True(plan.SelectedRoot.IncludesWholeSubtree);
+    }
+
+    [Fact]
     public void CountSelectedFilesUpToLimit_IgnoresMissingFilesAndStopsAtLimit()
     {
         using var temp = new TemporaryDirectory();
