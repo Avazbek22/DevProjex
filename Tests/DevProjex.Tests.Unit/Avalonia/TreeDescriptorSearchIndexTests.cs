@@ -84,28 +84,25 @@ public sealed class TreeDescriptorSearchIndexTests
     }
 
     [Fact]
-    public void AncestorExpansionBudget_CountsWideSiblingCollectionsOnlyOnce()
+    public void Build_CapturesParentAndChildIndexForDirectViewModelResolution()
     {
-        var children = Enumerable.Range(0, 3_000)
-            .Select(index => File(
-                index < 360
-                    ? $"match-{index:D4}.txt"
-                    : $"other-{index:D4}.txt"))
-            .ToArray();
-        var root = Directory("root", children);
+        var target = File("target.cs");
+        var root = Directory(
+            "root",
+            Directory("src", File("first.cs"), target));
         var result = new TreeDescriptorSearchSession().Search(
             root,
             "Project",
-            "match-",
+            "target",
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(360, result.MatchIndices.Length);
-        Assert.False(result.Index.IsAncestorExpansionWithinBudget(
-            result.MatchIndices,
-            TreeSearchCoordinator.MaximumAutoExpandedItemCount));
-        Assert.True(result.Index.IsAncestorExpansionWithinBudget(
-            result.MatchIndices,
-            children.Length));
+        var targetIndex = Assert.Single(result.MatchIndices);
+        var targetEntry = result.Index[targetIndex];
+        var parentEntry = result.Index[targetEntry.ParentIndex];
+
+        Assert.Equal(1, targetEntry.ChildIndex);
+        Assert.Equal("src", parentEntry.Descriptor.DisplayName);
+        Assert.Equal(0, parentEntry.ChildIndex);
     }
 
     [Fact]

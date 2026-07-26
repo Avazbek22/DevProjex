@@ -1139,7 +1139,7 @@ public sealed class TreeSearchCoordinatorTests
 	}
 
 	[Fact]
-	public void UpdateSearchMatches_WideTreeWithinMatchCapMaterializesOnlyCurrentResultPath()
+	public void UpdateSearchMatches_WideTreeWithinMatchCapPreparesEveryResultBeforeNavigation()
 	{
 		const int matchCount = 360;
 		const int branchCount = 3_000;
@@ -1181,15 +1181,28 @@ public sealed class TreeSearchCoordinatorTests
 		coordinator.UpdateSearchMatches();
 
 		Assert.Equal(matchCount, viewModel.SearchTotalMatches);
-		Assert.Equal(1, realizedFactories);
-		Assert.True(root.Children[0].IsExpanded);
+		Assert.Equal(matchCount, realizedFactories);
 		Assert.All(
-			root.Children.Skip(1).Take(matchCount - 1),
+			root.Children.Take(matchCount),
+			node => Assert.True(node.IsExpanded));
+		Assert.All(
+			root.Children.Skip(matchCount),
 			node => Assert.False(node.IsExpanded));
 		Assert.Equal(
 			"match-0000.txt",
 			Assert.IsType<TreeNodeViewModel>(
 				treeView.SelectedItem).DisplayName);
+
+		var expandedBeforeNavigation = root.Children
+			.Select(node => node.IsExpanded)
+			.ToArray();
+		for (var index = 0; index < 50; index++)
+			coordinator.Navigate(1);
+
+		Assert.Equal(matchCount, realizedFactories);
+		Assert.Equal(
+			expandedBeforeNavigation,
+			root.Children.Select(node => node.IsExpanded));
 	}
 
 	[AvaloniaFact]

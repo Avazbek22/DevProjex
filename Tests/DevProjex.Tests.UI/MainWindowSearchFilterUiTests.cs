@@ -1,5 +1,6 @@
 using DevProjex.Kernel.Contracts;
 using Avalonia.VisualTree;
+using Avalonia.Interactivity;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using System.Reflection;
@@ -32,6 +33,52 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
                 window,
                 () => !UiTestDriver.GetViewModel(window).SearchVisible,
                 "search bar to close");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchNextButton_DoesNotRevealAdditionalBranchesAfterSearchSettles()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenSearchAsync(window);
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(
+                window,
+                "SearchBar");
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(searchBar.SearchBoxControl),
+                "app");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "app");
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            Assert.True(viewModel.SearchTotalMatches > 1);
+            var root = Assert.Single(viewModel.TreeNodes);
+            var realizedBeforeNavigation = CollectRealizedPaths(root);
+            var expandedBeforeNavigation = CollectExpandedPaths(root);
+            var nextButton = Assert.IsType<Button>(
+                searchBar.FindControl<Button>("SearchNextButton"));
+
+            for (var index = 0;
+                 index < Math.Min(5, viewModel.SearchTotalMatches - 1);
+                 index++)
+            {
+                nextButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            }
+
+            Assert.Equal(
+                realizedBeforeNavigation,
+                CollectRealizedPaths(root));
+            Assert.Equal(
+                expandedBeforeNavigation,
+                CollectExpandedPaths(root));
         }
         finally
         {
@@ -690,6 +737,20 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
         TreeNodeViewModel.ForEachRealizedDescendant(
             new List<TreeNodeViewModel> { root },
             node => paths.Add(node.FullPath));
+        paths.Sort(PathComparer.Default);
+        return [.. paths];
+    }
+
+    private static string[] CollectExpandedPaths(TreeNodeViewModel root)
+    {
+        var paths = new List<string>();
+        TreeNodeViewModel.ForEachRealizedDescendant(
+            new List<TreeNodeViewModel> { root },
+            node =>
+            {
+                if (node.IsExpanded)
+                    paths.Add(node.FullPath);
+            });
         paths.Sort(PathComparer.Default);
         return [.. paths];
     }

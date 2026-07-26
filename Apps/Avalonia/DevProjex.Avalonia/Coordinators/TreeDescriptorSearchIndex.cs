@@ -9,7 +9,8 @@ internal sealed class TreeDescriptorSearchIndex
 {
     internal readonly record struct Entry(
         TreeNodeDescriptor Descriptor,
-        int ParentIndex);
+        int ParentIndex,
+        int ChildIndex);
 
     private readonly Entry[] _entries;
 
@@ -22,46 +23,6 @@ internal sealed class TreeDescriptorSearchIndex
 
     public Entry this[int index] => _entries[index];
 
-    public bool IsAncestorExpansionWithinBudget(
-        ReadOnlySpan<int> matchIndices,
-        int maximumRealizedItemCount)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
-            maximumRealizedItemCount);
-
-        if (matchIndices.IsEmpty)
-            return true;
-
-        var expandedAncestors = new HashSet<int>();
-        var realizedItemCount = 0;
-        foreach (var matchIndex in matchIndices)
-        {
-            if (matchIndex < 0 || matchIndex >= _entries.Length)
-                return false;
-
-            var ancestorIndex = _entries[matchIndex].ParentIndex;
-            while (ancestorIndex >= 0)
-            {
-                if (expandedAncestors.Add(ancestorIndex))
-                {
-                    var childCount =
-                        _entries[ancestorIndex].Descriptor.Children.Count;
-                    if (childCount >
-                        maximumRealizedItemCount - realizedItemCount)
-                    {
-                        return false;
-                    }
-
-                    realizedItemCount += childCount;
-                }
-
-                ancestorIndex = _entries[ancestorIndex].ParentIndex;
-            }
-        }
-
-        return true;
-    }
-
     public static TreeDescriptorSearchIndex Build(
         TreeNodeDescriptor root,
         CancellationToken cancellationToken)
@@ -69,19 +30,22 @@ internal sealed class TreeDescriptorSearchIndex
         ArgumentNullException.ThrowIfNull(root);
 
         var entries = new List<Entry>();
-        var stack = new Stack<(TreeNodeDescriptor Node, int ParentIndex)>();
-        stack.Push((root, -1));
+        var stack = new Stack<(
+            TreeNodeDescriptor Node,
+            int ParentIndex,
+            int ChildIndex)>();
+        stack.Push((root, -1, -1));
 
         while (stack.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var (node, parentIndex) = stack.Pop();
+            var (node, parentIndex, childIndex) = stack.Pop();
             var nodeIndex = entries.Count;
-            entries.Add(new Entry(node, parentIndex));
+            entries.Add(new Entry(node, parentIndex, childIndex));
 
             for (var index = node.Children.Count - 1; index >= 0; index--)
-                stack.Push((node.Children[index], nodeIndex));
+                stack.Push((node.Children[index], nodeIndex, index));
         }
 
         return new TreeDescriptorSearchIndex([.. entries]);

@@ -92,9 +92,7 @@ public sealed class TreeSearchCoordinator(
     private readonly List<TreeNodeViewModel> _highlightAddedNodes = [];
     private readonly List<TreeNodeViewModel> _highlightRemovedNodes = [];
     private readonly object _highlightCtsLock = new();
-    private readonly object _expansionCtsLock = new();
     private CancellationTokenSource? _highlightApplyCts;
-    private CancellationTokenSource? _expansionApplyCts;
     private int _searchMatchIndex = -1;
     private TreeNodeViewModel? _currentSearchMatch;
     private TreeNodeViewModel? _searchRetainedSelectionNode;
@@ -116,11 +114,8 @@ public sealed class TreeSearchCoordinator(
     private bool _restoreTreeAutoScroll;
     internal int LastBringIntoViewAttemptCount { get; private set; }
     private const int HighlightBatchSize = 256;
-    private const int ExpansionBatchSize = 24;
-    private const int ExpansionBatchThreshold = 256;
     private const int ProgressiveMaterializationMatchThreshold = 48;
     private const int MaterializationBatchSize = 32;
-    internal const int MaximumAutoExpandedItemCount = 2048;
     private const int SearchAutoExpandMatchCap = 2500;
     private const int SearchGlobalHighlightMatchCap = 3500;
     private static readonly TimeSpan DispatcherWorkSlice =
@@ -192,7 +187,6 @@ public sealed class TreeSearchCoordinator(
         }
 
         CancelPendingHighlightApply();
-        CancelPendingExpansionApply();
     }
 
     private void CancelPendingHighlightApply()
@@ -202,16 +196,6 @@ public sealed class TreeSearchCoordinator(
             _highlightApplyCts?.Cancel();
             _highlightApplyCts?.Dispose();
             _highlightApplyCts = null;
-        }
-    }
-
-    private void CancelPendingExpansionApply()
-    {
-        lock (_expansionCtsLock)
-        {
-            _expansionApplyCts?.Cancel();
-            _expansionApplyCts?.Dispose();
-            _expansionApplyCts = null;
         }
     }
 
@@ -231,7 +215,6 @@ public sealed class TreeSearchCoordinator(
         var query = viewModel.SearchQuery ?? string.Empty;
         if (string.IsNullOrWhiteSpace(query))
         {
-            CancelPendingExpansionApply();
             if (!normalizeTreeWhenEmptyQuery)
             {
                 _searchMatches = [];
@@ -350,7 +333,6 @@ public sealed class TreeSearchCoordinator(
         Interlocked.Increment(ref _bringIntoViewVersion);
         if (!preservePendingHighlightCleanup)
             CancelPendingHighlightApply();
-        CancelPendingExpansionApply();
         viewModel.SetSearchInProgress(false);
 
         // Clear current match reference first
@@ -418,7 +400,6 @@ public sealed class TreeSearchCoordinator(
         Interlocked.Increment(ref _bringIntoViewVersion);
         RestoreTreeAutoScroll();
         CancelPendingHighlightApply();
-        CancelPendingExpansionApply();
         viewModel.SetSearchInProgress(false);
         lock (_searchCtsLock)
         {
@@ -845,7 +826,6 @@ public sealed class TreeSearchCoordinator(
     {
         Interlocked.Increment(ref _bringIntoViewVersion);
         RestoreTreeAutoScroll();
-        CancelPendingExpansionApply();
         if (string.IsNullOrWhiteSpace(query))
         {
             var selectedNode = treeView.SelectedItem as TreeNodeViewModel;
@@ -878,7 +858,6 @@ public sealed class TreeSearchCoordinator(
                 node.IsExpanded = true;
                 CollapseAllExceptRoot(node);
             }
-
             PrepareSearchMaterializedBranchRelease();
             _searchExpandedNodes.Clear();
             _nextSearchExpandedNodes.Clear();
@@ -970,9 +949,9 @@ public sealed class TreeSearchCoordinator(
         _lastComputedQuery = query;
     }
 
-    private void ApplySmartExpandFromMatches(IReadOnlyList<TreeNodeViewModel> matches)
+    private void ApplySmartExpandFromMatches(
+        IReadOnlyList<TreeNodeViewModel> matches)
     {
-        CancelPendingExpansionApply();
         if (!_searchExpansionStateInitialized)
         {
             SeedExpandedNodesSnapshot();
@@ -1026,27 +1005,23 @@ public sealed class TreeSearchCoordinator(
 
         ApplyExpansionDiff(
             removedNodes,
-            addedNodes,
-            matches.Count > 0 ? matches[0] : null);
+            addedNodes);
     }
 
     private void ApplyExpansionDiff(
         List<TreeNodeViewModel>? removedNodes,
-        List<TreeNodeViewModel>? addedNodes,
-        TreeNodeViewModel? firstMatch)
+        List<TreeNodeViewModel>? addedNodes)
     {
         var removedCount = removedNodes?.Count ?? 0;
         var addedCount = addedNodes?.Count ?? 0;
         if (removedCount == 0 && addedCount == 0)
-        {
-            CancelPendingExpansionApply();
             return;
-        }
 
-        if (removedCount + addedCount < ExpansionBatchThreshold)
+        // Navigation must observe a settled hierarchy. Delayed expansion makes every
+        // Next action reveal more rows and causes the scroll position to move underneath
+        // the user, so apply the model diff before search is reported as complete.
+        using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
         {
-            CancelPendingExpansionApply();
-            using var _ = TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope();
             if (removedNodes is not null)
             {
                 foreach (var node in removedNodes)
@@ -1064,34 +1039,8 @@ public sealed class TreeSearchCoordinator(
                     _searchExpandedNodes.Add(node);
                 }
             }
-
-            return;
         }
 
-        if (firstMatch is not null)
-        {
-            // Keep the first selected match path expanded synchronously so selection and bring-into-view
-            // stay responsive while the rest of a large expansion diff is applied in background batches.
-            using var _ = TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope();
-            firstMatch.EnsureParentsExpanded();
-            AddAncestorPathNodes(_searchExpandedNodes, firstMatch);
-            if (addedNodes is not null)
-                RemoveAncestorPathNodes(addedNodes, firstMatch);
-        }
-
-        ScheduleExpansionDiffApplication(
-            removedNodes?.ToArray() ?? Array.Empty<TreeNodeViewModel>(),
-            addedNodes?.ToArray() ?? Array.Empty<TreeNodeViewModel>());
-    }
-
-    private static void RemoveAncestorPathNodes(List<TreeNodeViewModel> addedNodes, TreeNodeViewModel firstMatch)
-    {
-        var ancestor = firstMatch.Parent;
-        while (ancestor is not null)
-        {
-            addedNodes.Remove(ancestor);
-            ancestor = ancestor.Parent;
-        }
     }
 
     private async Task ApplySearchResultProgressivelyAsync(
@@ -1187,108 +1136,9 @@ public sealed class TreeSearchCoordinator(
 
     private static bool ShouldAutoExpandAllMatches(
         TreeDescriptorSearchResult searchResult) =>
-        searchResult.MatchIndices.Length <= SearchAutoExpandMatchCap &&
-        searchResult.Index.IsAncestorExpansionWithinBudget(
-            searchResult.MatchIndices,
-            MaximumAutoExpandedItemCount);
-
-    private static void AddAncestorPathNodes(
-        HashSet<TreeNodeViewModel> expandedNodes,
-        TreeNodeViewModel firstMatch)
-    {
-        var ancestor = firstMatch.Parent;
-        while (ancestor is not null)
-        {
-            expandedNodes.Add(ancestor);
-            ancestor = ancestor.Parent;
-        }
-    }
-
-    private void ScheduleExpansionDiffApplication(
-        TreeNodeViewModel[] removedNodes,
-        TreeNodeViewModel[] addedNodes)
-    {
-        CancellationToken token;
-        lock (_expansionCtsLock)
-        {
-            _expansionApplyCts?.Cancel();
-            _expansionApplyCts?.Dispose();
-            _expansionApplyCts = new CancellationTokenSource();
-            token = _expansionApplyCts.Token;
-        }
-
-        void ApplyRemovedBatch(int startIndex)
-        {
-            if (token.IsCancellationRequested)
-                return;
-
-            int endIndex;
-            using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-            {
-                endIndex = ApplyExpansionBatch(
-                    removedNodes,
-                    startIndex,
-                    expanded: false);
-            }
-
-            if (endIndex < removedNodes.Length)
-            {
-                treeView.Dispatcher.Post(() => ApplyRemovedBatch(endIndex), DispatcherPriority.Background);
-                return;
-            }
-
-            ApplyAddedBatch(0);
-        }
-
-        void ApplyAddedBatch(int startIndex)
-        {
-            if (token.IsCancellationRequested)
-                return;
-
-            int endIndex;
-            using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-            {
-                endIndex = ApplyExpansionBatch(
-                    addedNodes,
-                    startIndex,
-                    expanded: true);
-            }
-
-            if (endIndex < addedNodes.Length)
-                treeView.Dispatcher.Post(() => ApplyAddedBatch(endIndex), DispatcherPriority.Background);
-        }
-
-        ApplyRemovedBatch(0);
-    }
-
-    private int ApplyExpansionBatch(
-        TreeNodeViewModel[] nodes,
-        int startIndex,
-        bool expanded)
-    {
-        var maximumIndex = Math.Min(
-            startIndex + ExpansionBatchSize,
-            nodes.Length);
-        var sliceStarted = Stopwatch.GetTimestamp();
-        var index = startIndex;
-        while (index < maximumIndex)
-        {
-            nodes[index].IsExpanded = expanded;
-            if (expanded)
-                _searchExpandedNodes.Add(nodes[index]);
-            else
-                _searchExpandedNodes.Remove(nodes[index]);
-
-            index++;
-            if (index < maximumIndex &&
-                Stopwatch.GetElapsedTime(sliceStarted) >= DispatcherWorkSlice)
-            {
-                break;
-            }
-        }
-
-        return index;
-    }
+        // A sibling-count budget changes visible search semantics on wide trees:
+        // matches become materialized only when the user navigates to them.
+        searchResult.MatchIndices.Length <= SearchAutoExpandMatchCap;
 
     private void SeedExpandedNodesSnapshot()
     {
@@ -1422,8 +1272,11 @@ public sealed class TreeSearchCoordinator(
         while (unresolvedPath.Count > 0)
         {
             var childIndex = unresolvedPath.Pop();
-            var childDescriptor = _currentSearchIndex[childIndex].Descriptor;
-            var child = FindChild(resolved, childDescriptor);
+            var childEntry = _currentSearchIndex[childIndex];
+            var child = FindChild(
+                resolved,
+                childEntry.Descriptor,
+                childEntry.ChildIndex);
             if (child is null)
                 return null;
 
@@ -1436,10 +1289,26 @@ public sealed class TreeSearchCoordinator(
 
     private TreeNodeViewModel? FindChild(
         TreeNodeViewModel parent,
-        TreeNodeDescriptor childDescriptor)
+        TreeNodeDescriptor childDescriptor,
+        int childIndex)
     {
         TrackSearchMaterializedParent(parent);
-        foreach (var child in parent.Children)
+        var children = parent.Children;
+        if ((uint)childIndex < (uint)children.Count)
+        {
+            var indexedChild = children[childIndex];
+            if (ReferenceEquals(indexedChild.Descriptor, childDescriptor) ||
+                PathComparer.Default.Equals(
+                    indexedChild.FullPath,
+                    childDescriptor.FullPath))
+            {
+                return indexedChild;
+            }
+        }
+
+        // A fallback keeps search correct if a future projection no longer preserves
+        // descriptor order in its view-model child collection.
+        foreach (var child in children)
         {
             if (ReferenceEquals(child.Descriptor, childDescriptor) ||
                 PathComparer.Default.Equals(child.FullPath, childDescriptor.FullPath))
