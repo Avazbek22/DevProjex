@@ -137,7 +137,6 @@ public sealed class MemoryCleanupCoordinatorTests
             });
 
         coordinator.Schedule(MemoryCleanupReason.PreviewRebuildCompleted);
-        await Task.Delay(50);
         coordinator.Schedule(MemoryCleanupReason.PreviewRebuildCompleted);
 
         var mode = await completion.Task.WaitAsync(CompletionTimeout);

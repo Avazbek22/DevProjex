@@ -642,7 +642,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		InitializeIndex(temp.Path, "outer-tracked.txt");
 		var repositoryRelativePath = string.Join(
 			Path.DirectorySeparatorChar,
-			new[] { "workspace" }.Concat(Enumerable.Range(1, 12).Select(static index => $"level-{index}"))
+			new[] { "workspace" }.Concat(Enumerable.Range(1, 12).Select(static index => $"d{index:D2}"))
 				.Append("repo"));
 		var repositoryRoot = temp.CreateDirectory(repositoryRelativePath);
 		var trackedPath = Path.Combine(repositoryRelativePath, "src", "tracked.cs");
@@ -811,6 +811,159 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		Assert.Equal(0, Assert.Single(tree.Inventory.DiscoveredGitTrackedPathIndexes).Count);
 	}
 
+	[Fact]
+	public void GitFilteringModesComposeWithRootExtensionSmartAndDotSelectionsAcrossFullMatrix()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = CreateSettingsIslandRepository(temp);
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+
+		foreach (var gitMode in Enum.GetValues<GitFilteringMode>())
+		{
+			foreach (var selectAllPayloadRoots in new[] { false, true })
+			{
+				foreach (var selectAllPayloadExtensions in new[] { false, true })
+				{
+					foreach (var useSmartIgnore in new[] { false, true })
+					{
+						foreach (var ignoreDotFiles in new[] { false, true })
+						{
+							var context = CreateSettingsIslandContext(
+								repositoryRoot,
+								gitMode,
+								selectAllPayloadRoots,
+								selectAllPayloadExtensions,
+								useSmartIgnore,
+								ignoreDotFiles);
+							var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+								context,
+								TestContext.Current.CancellationToken);
+
+							SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+								repositoryRoot,
+								services.IgnoreRulesService,
+								snapshot);
+							AssertGitFilteringMode(snapshot, gitMode);
+
+							var actualFiles = BuildEffectiveFileSet(
+								repositoryRoot,
+								snapshot,
+								services.IgnoreRulesService,
+								payloadOnly: true);
+							var expectedFiles = BuildExpectedPayloadFileSet(
+								gitMode,
+								selectAllPayloadRoots,
+								selectAllPayloadExtensions,
+								useSmartIgnore,
+								ignoreDotFiles);
+							var scenario =
+								$"git={gitMode}, rootsAll={selectAllPayloadRoots}, " +
+								$"extensionsAll={selectAllPayloadExtensions}, smart={useSmartIgnore}, " +
+								$"dotFiles={ignoreDotFiles}";
+
+							Assert.True(
+								expectedFiles.SetEquals(actualFiles),
+								$"{scenario}. Expected=[{string.Join(", ", expectedFiles.Order())}], " +
+								$"Actual=[{string.Join(", ", actualFiles.Order())}]");
+						}
+					}
+				}
+			}
+		}
+	}
+
+	[Fact]
+	public void TrackedOnlyProfileRoundTripRestoresAllSettingsSectionsAndExactTree()
+	{
+		EnsureGitAvailable();
+		using var project = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var repositoryRoot = CreateSettingsIslandRepository(project);
+		var store = new ProjectProfileStore(() => appData.Path);
+		var profile = new ProjectSelectionProfile(
+			SelectedRootFolders: ["api"],
+			SelectedExtensions: [".cs"],
+			SelectedIgnoreOptions:
+			[
+				IgnoreOptionId.TrackedGitFilesOnly,
+				IgnoreOptionId.SmartIgnore,
+				IgnoreOptionId.DotFiles
+			],
+			RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+			{
+				["api"] = true,
+				["web"] = false,
+				["docs"] = false
+			},
+			ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = true,
+				[".dll"] = false,
+				[".md"] = false,
+				[".ignored"] = false,
+				[".ts"] = false,
+				[".js"] = false,
+				[".csproj"] = false,
+				[".json"] = false,
+				[".gitignore"] = false
+			},
+			IgnoreOptionStates: Enum.GetValues<IgnoreOptionId>().ToDictionary(
+				static optionId => optionId,
+				static optionId => optionId is
+					IgnoreOptionId.TrackedGitFilesOnly or
+					IgnoreOptionId.SmartIgnore or
+					IgnoreOptionId.DotFiles));
+
+		store.SaveProfile(repositoryRoot, profile);
+
+		Assert.True(store.TryLoadProfile(repositoryRoot, out var loaded));
+		Assert.Contains(IgnoreOptionId.TrackedGitFilesOnly, loaded.SelectedIgnoreOptions);
+		Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+		Assert.NotNull(loaded.IgnoreOptionStates);
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.TrackedGitFilesOnly]);
+		Assert.False(loaded.IgnoreOptionStates[IgnoreOptionId.UseGitIgnore]);
+
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+		var context = ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(repositoryRoot) with
+		{
+			PreparedSelectionMode = PreparedSelectionMode.Profile,
+			AllRootFoldersChecked = false,
+			AllExtensionsChecked = false,
+			RootSelectionInitialized = true,
+			RootSelectionCache = new HashSet<string>(loaded.SelectedRootFolders, PathComparer.Default),
+			RootOptionStateCache = loaded.RootFolderStates,
+			ExtensionsSelectionInitialized = true,
+			ExtensionsSelectionCache = new HashSet<string>(
+				loaded.SelectedExtensions,
+				StringComparer.OrdinalIgnoreCase),
+			ExtensionOptionStateCache = loaded.ExtensionStates,
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(loaded.SelectedIgnoreOptions),
+			IgnoreOptionStateCache = loaded.IgnoreOptionStates,
+			IgnoreOptionStateCacheIsComplete = true,
+			CaptureTreeInventory = true
+		};
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			context,
+			TestContext.Current.CancellationToken);
+
+		SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+			repositoryRoot,
+			services.IgnoreRulesService,
+			snapshot);
+		AssertGitFilteringMode(snapshot, GitFilteringMode.TrackedFilesOnly);
+		Assert.Equal(["api"], ProjectLoadWorkflowRefreshHarness.CollectCheckedRootNames(snapshot));
+		Assert.Equal([".cs"], ProjectLoadWorkflowRefreshHarness.CollectCheckedExtensionNames(snapshot));
+		Assert.Equal(
+			new HashSet<string>(StringComparer.Ordinal) { "root.cs", "api/main.cs" },
+			BuildEffectiveFileSet(
+				repositoryRoot,
+				snapshot,
+				services.IgnoreRulesService,
+				payloadOnly: false));
+	}
+
 	private static TreeObservation BuildTree(
 		string rootPath,
 		IReadOnlySet<string> allowedRoots,
@@ -837,6 +990,187 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 
 		Assert.Equal(projectedPaths, directPaths);
 		return new TreeObservation(inventory, projectedPaths);
+	}
+
+	private static string CreateSettingsIslandRepository(TemporaryDirectory temp)
+	{
+		var repositoryRoot = temp.CreateDirectory("repo");
+		temp.CreateFile("repo/.gitignore", "*.ignored\n");
+		temp.CreateFile("repo/App.csproj", "<Project />\n");
+		temp.CreateFile("repo/package.json", "{}\n");
+		temp.CreateFile("repo/root.cs", "tracked root file");
+		temp.CreateFile("repo/local-root.cs", "untracked root file");
+		temp.CreateFile("repo/api/main.cs", "tracked");
+		temp.CreateFile("repo/api/.secret.cs", "tracked dot file");
+		temp.CreateFile("repo/api/bin/Debug/generated.dll", "tracked smart artifact");
+		temp.CreateFile("repo/api/readme.md", "tracked");
+		temp.CreateFile("repo/api/local.cs", "untracked");
+		temp.CreateFile("repo/api/drop.ignored", "untracked and ignored");
+		temp.CreateFile("repo/web/app.ts", "tracked");
+		temp.CreateFile("repo/web/node_modules/pkg/index.js", "tracked smart artifact");
+		temp.CreateFile("repo/web/local.ts", "untracked");
+		temp.CreateFile("repo/docs/guide.md", "tracked");
+		InitializeIndex(
+			repositoryRoot,
+			".gitignore",
+			"App.csproj",
+			"package.json",
+			"root.cs",
+			"api/main.cs",
+			"api/.secret.cs",
+			"api/bin/Debug/generated.dll",
+			"api/readme.md",
+			"web/app.ts",
+			"web/node_modules/pkg/index.js",
+			"docs/guide.md");
+		return repositoryRoot;
+	}
+
+	private static SelectionRefreshContext CreateSettingsIslandContext(
+		string repositoryRoot,
+		GitFilteringMode gitMode,
+		bool selectAllPayloadRoots,
+		bool selectAllPayloadExtensions,
+		bool useSmartIgnore,
+		bool ignoreDotFiles)
+	{
+		var selectedRoots = selectAllPayloadRoots
+			? RootSet("api", "web", "docs")
+			: RootSet("api");
+		var selectedExtensions = selectAllPayloadExtensions
+			? ExtensionSet(".cs", ".dll", ".md", ".ignored", ".ts", ".js")
+			: ExtensionSet(".cs");
+		var selectedIgnoreOptions = new HashSet<IgnoreOptionId>();
+		if (gitMode == GitFilteringMode.RespectGitIgnore)
+			selectedIgnoreOptions.Add(IgnoreOptionId.UseGitIgnore);
+		else if (gitMode == GitFilteringMode.TrackedFilesOnly)
+			selectedIgnoreOptions.Add(IgnoreOptionId.TrackedGitFilesOnly);
+		if (useSmartIgnore)
+			selectedIgnoreOptions.Add(IgnoreOptionId.SmartIgnore);
+		if (ignoreDotFiles)
+			selectedIgnoreOptions.Add(IgnoreOptionId.DotFiles);
+
+		var rootStates = new Dictionary<string, bool>(PathComparer.Default)
+		{
+			["api"] = true,
+			["web"] = selectAllPayloadRoots,
+			["docs"] = selectAllPayloadRoots
+		};
+		var extensionStates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+		foreach (var extension in new[] { ".cs", ".dll", ".md", ".ignored", ".ts", ".js" })
+			extensionStates[extension] = selectedExtensions.Contains(extension);
+		var ignoreStates = Enum.GetValues<IgnoreOptionId>().ToDictionary(
+			static optionId => optionId,
+			selectedIgnoreOptions.Contains);
+
+		return ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(repositoryRoot) with
+		{
+			AllRootFoldersChecked = false,
+			AllExtensionsChecked = false,
+			RootSelectionInitialized = true,
+			RootSelectionCache = selectedRoots,
+			RootOptionStateCache = rootStates,
+			ExtensionsSelectionInitialized = true,
+			ExtensionsSelectionCache = selectedExtensions,
+			ExtensionOptionStateCache = extensionStates,
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = selectedIgnoreOptions,
+			IgnoreOptionStateCache = ignoreStates,
+			IgnoreOptionStateCacheIsComplete = true,
+			CaptureTreeInventory = true
+		};
+	}
+
+	private static HashSet<string> BuildExpectedPayloadFileSet(
+		GitFilteringMode gitMode,
+		bool selectAllPayloadRoots,
+		bool selectAllPayloadExtensions,
+		bool useSmartIgnore,
+		bool ignoreDotFiles)
+	{
+		var expected = new HashSet<string>(StringComparer.Ordinal)
+		{
+			"api/main.cs"
+		};
+		if (!ignoreDotFiles)
+			expected.Add("api/.secret.cs");
+		if (gitMode != GitFilteringMode.TrackedFilesOnly)
+			expected.Add("api/local.cs");
+
+		if (selectAllPayloadExtensions)
+		{
+			expected.Add("api/readme.md");
+			if (!useSmartIgnore)
+				expected.Add("api/bin/Debug/generated.dll");
+			if (gitMode == GitFilteringMode.None)
+				expected.Add("api/drop.ignored");
+		}
+
+		if (!selectAllPayloadRoots || !selectAllPayloadExtensions)
+			return expected;
+
+		expected.Add("web/app.ts");
+		expected.Add("docs/guide.md");
+		if (gitMode != GitFilteringMode.TrackedFilesOnly)
+			expected.Add("web/local.ts");
+		if (!useSmartIgnore)
+			expected.Add("web/node_modules/pkg/index.js");
+		return expected;
+	}
+
+	private static HashSet<string> BuildEffectiveFileSet(
+		string repositoryRoot,
+		SelectionRefreshSnapshot snapshot,
+		IgnoreRulesService ignoreRulesService,
+		bool payloadOnly)
+	{
+		var selectedRoots = ProjectLoadWorkflowRefreshHarness.CollectCheckedRootNames(snapshot);
+		var selectedExtensions = snapshot.EffectiveExtensionOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Name)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var selectedIgnoreOptions =
+			ProjectLoadWorkflowRefreshHarness.CollectCheckedIgnoreOptionIds(snapshot);
+		var rules = ignoreRulesService.Build(repositoryRoot, selectedIgnoreOptions, selectedRoots);
+		var tree = new TreeBuilder().Build(
+			Assert.IsType<ProjectTreeInventorySnapshot>(snapshot.TreeInventory),
+			new TreeFilterOptions(selectedExtensions, selectedRoots, rules),
+			TestContext.Current.CancellationToken);
+		var payloadRoots = new[] { "api/", "web/", "docs/" };
+		var files = new HashSet<string>(StringComparer.Ordinal);
+		var pending = new Stack<FileSystemNode>(tree.Root.Children.Reverse());
+		while (pending.Count > 0)
+		{
+			var node = pending.Pop();
+			var relativePath = Path.GetRelativePath(repositoryRoot, node.FullPath).Replace('\\', '/');
+			if (!node.IsDirectory &&
+			    (!payloadOnly ||
+			     payloadRoots.Any(root => relativePath.StartsWith(root, StringComparison.Ordinal))))
+			{
+				files.Add(relativePath);
+			}
+
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				pending.Push(node.Children[index]);
+		}
+
+		return files;
+	}
+
+	private static void AssertGitFilteringMode(
+		SelectionRefreshSnapshot snapshot,
+		GitFilteringMode expectedMode)
+	{
+		var useGitIgnore = Assert.Single(
+			snapshot.IgnoreOptions,
+			static option => option.Id == IgnoreOptionId.UseGitIgnore);
+		var trackedOnly = Assert.Single(
+			snapshot.IgnoreOptions,
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly);
+
+		Assert.Equal(expectedMode == GitFilteringMode.RespectGitIgnore, useGitIgnore.IsChecked);
+		Assert.Equal(expectedMode == GitFilteringMode.TrackedFilesOnly, trackedOnly.IsChecked);
+		Assert.False(useGitIgnore.IsChecked && trackedOnly.IsChecked);
 	}
 
 	private static IgnoreRules CreateTraversalRules() =>

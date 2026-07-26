@@ -138,17 +138,17 @@ public sealed class IgnoreSelectionStateTests
 			[IgnoreOptionId.DotFolders] = false
 		});
 
+		state.ApplyAllPreferenceToKnownStates(false);
+
+		Assert.Empty(state.SelectedOptions);
+		Assert.All(state.OptionStateCache, static pair => Assert.False(pair.Value));
+
 		state.ApplyAllPreferenceToKnownStates(true);
 
 		Assert.False(state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
 		Assert.True(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
 		Assert.True(state.OptionStateCache[IgnoreOptionId.SmartIgnore]);
 		Assert.True(state.OptionStateCache[IgnoreOptionId.DotFolders]);
-
-		state.ApplyAllPreferenceToKnownStates(false);
-
-		Assert.Empty(state.SelectedOptions);
-		Assert.All(state.OptionStateCache, static pair => Assert.False(pair.Value));
 	}
 
 	[Fact]
@@ -182,5 +182,15 @@ public sealed class IgnoreSelectionStateTests
 		Assert.Null(state.AllPreference);
 		Assert.Empty(state.SelectedOptions);
 		Assert.Empty(state.OptionStateCache);
+
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.UseGitIgnore] = false,
+			[IgnoreOptionId.TrackedGitFilesOnly] = false
+		});
+		state.ApplyAllPreferenceToKnownStates(true);
+
+		Assert.True(state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
+		Assert.False(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
 	}
 }
