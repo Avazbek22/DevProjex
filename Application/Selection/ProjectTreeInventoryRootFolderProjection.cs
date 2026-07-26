@@ -99,7 +99,8 @@ public static class ProjectTreeInventoryRootFolderProjection
 
         var gitIgnoreContext = rules.CreateGitIgnoreScanContext(
             inventoryRoot.FullPath,
-            inventory.DiscoveredGitIgnoreMatchers);
+            inventory.DiscoveredGitIgnoreMatchers,
+            inventory.DiscoveredGitTrackedPathIndexes);
         var pendingDirectories = new Stack<int>();
         List<SelectionOption>? projectedOptions = null;
         HashSet<string>? emptyFolderOwnedRoots = null;

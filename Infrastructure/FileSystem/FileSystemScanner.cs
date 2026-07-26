@@ -263,6 +263,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var projectGitIgnoreCandidateContext = captureRootScanBreakdown
 			? effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath)
 			: IgnoreRules.GitIgnoreScanContext.Disabled(effectiveRules);
+		if (captureRootScanBreakdown && effectiveRules.IsGitIgnoreTraversalEnabled)
+		{
+			(projectGitIgnoreContext, projectGitIgnoreCandidateContext, _) =
+				EnterNearestGitTrackedPathIndex(
+					rootPath,
+					projectGitIgnoreContext,
+					projectGitIgnoreCandidateContext,
+					cancellationToken);
+		}
+
 		if (scanPlan.SelectedRoots.Count > 0)
 		{
 			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
@@ -300,7 +310,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					if (localState.RootSnapshots is not null)
 					{
 						var directoryToggleProbeCounts = includeDirectoryToggleProbeRoots
-							? CountRootDirectoryToggleCandidate(folder, effectiveRules)
+							? CountRootDirectoryToggleCandidate(
+								folder,
+								effectiveRules,
+								parallelOptions.CancellationToken)
 							: IgnoreOptionCounts.Empty;
 						var controllerImpactProbeCounts = includeControllerImpactProbeRoots
 							? CountRootDirectoryControllerImpactCandidate(
@@ -407,7 +420,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				rootFileInventoryEntries!,
 				subtreeInventories!,
 				rootAccessDenied == 1,
-				hadAccessDenied == 1)
+				hadAccessDenied == 1,
+				TryLoadRootTrackedPathIndex(
+					rootPath,
+					effectiveRules,
+					cancellationToken))
 			: null;
 		var breakdown = captureRootScanBreakdown
 			? new ProjectWorkspaceScanBreakdown(
@@ -462,6 +479,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		try
 		{
+			if (useGitIgnore &&
+			    gitIgnoreContext.HasIgnoreRules &&
+			    GitTrackedPathIndexCache.TryLoadNearest(
+				    rootPath,
+				    cancellationToken,
+				    out var trackedPathIndex))
+			{
+				gitIgnoreContext = gitIgnoreContext.WithTrackedPathIndex(trackedPathIndex);
+			}
+
 			foreach (var dir in FileSystemEntryEnumerator.EnumerateDirectories(rootPath))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -763,26 +790,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			SmartIgnore: smartDirectImpact ? 1 : 0);
 	}
 
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static bool PassesNonControllerDirectoryRules(
-		in DirectoryScanFacts facts,
-		IgnoreRules rules)
-	{
-		if (IgnoreRuleSemantics.ShouldIgnoreDotDirectory(rules.IgnoreDotFolders, facts.IsDot))
-			return false;
-
-		if (IgnoreRuleSemantics.ShouldIgnoreHiddenDirectory(
-			    rules.IgnoreHiddenFolders,
-			    facts.IsHidden,
-			    facts.IsDot,
-			    rules.IgnoreDotFolders))
-		{
-			return false;
-		}
-
-		return true;
-	}
-
 	private static bool HasVisibleContentForControllerImpactCandidate(
 		string rootPath,
 		string rootRelativePath,
@@ -1055,6 +1062,15 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadAccessDenied: false);
 		}
 
+		if (useGitIgnore)
+		{
+			(gitIgnoreContext, gitIgnoreCandidateContext, _) = EnterNearestGitTrackedPathIndex(
+				rootPath,
+				gitIgnoreContext,
+				gitIgnoreCandidateContext,
+				cancellationToken);
+		}
+
 		var normalizedRootPath = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		var rootName = Path.GetFileName(normalizedRootPath);
 		var rootGitIgnore = useGitIgnore
@@ -1127,8 +1143,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					dir,
 					relativePath,
 					directoryBatch.GitIgnorePath,
+					directoryBatch.GitMetadataPath,
 					directoryGitIgnoreContext,
-					directoryGitIgnoreCandidateContext);
+					directoryGitIgnoreCandidateContext,
+					cancellationToken);
 				directories.Add(new DirectoryScanNode(
 					dir,
 					relativePath,
@@ -1365,6 +1383,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadAccessDenied: false);
 		}
 
+		if (useGitIgnore &&
+		    gitIgnoreContext.HasIgnoreRules &&
+		    GitTrackedPathIndexCache.TryLoadNearest(
+			    rootPath,
+			    cancellationToken,
+			    out var trackedPathIndex))
+		{
+			gitIgnoreContext = gitIgnoreContext.WithTrackedPathIndex(trackedPathIndex);
+		}
+
 		var counts = default(MutableIgnoreOptionCounts);
 		var shouldApplySmartIgnoreForFiles = rules.ShouldApplySmartIgnore(rootPath, isDirectory: true);
 		try
@@ -1490,6 +1518,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		// keep structural ignore semantics aligned between discovery and effective rules.
 		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
 		var effectiveGitIgnoreCandidateContext = effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath);
+		if (effectiveRules.IsGitIgnoreTraversalEnabled)
+		{
+			(effectiveGitIgnoreContext, effectiveGitIgnoreCandidateContext, _) =
+				EnterNearestGitTrackedPathIndex(
+					rootPath,
+					effectiveGitIgnoreContext,
+					effectiveGitIgnoreCandidateContext,
+					cancellationToken);
+		}
+
 		var shouldApplySmartIgnoreForFiles = effectiveRules.ShouldApplySmartIgnore(rootPath, isDirectory: true);
 		var shouldApplySmartIgnoreCandidateForFiles =
 			effectiveRules.ShouldApplySmartIgnoreCandidate(rootPath, isDirectory: true);
@@ -1902,7 +1940,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					treeInventoryDirectoryIncluded!,
 					discovery.RootAccessDenied,
 					hadAccessDenied == 1,
-					discovery.Value.DiscoveredGitIgnoreMatchers);
+					discovery.Value.DiscoveredGitIgnoreMatchers,
+					discovery.Value.DiscoveredGitTrackedPathIndexes);
 			}
 
 			return new ScanResult<IgnoreSectionScanData>(
@@ -1933,7 +1972,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool[] treeInventoryDirectoryIncluded,
 		bool rootAccessDenied,
 		bool hadAccessDenied,
-		IReadOnlyList<ScopedGitIgnoreMatcher> discoveredGitIgnoreMatchers)
+		IReadOnlyList<ScopedGitIgnoreMatcher> discoveredGitIgnoreMatchers,
+		IReadOnlyList<GitTrackedPathIndex> discoveredGitTrackedPathIndexes)
 	{
 		if (directories.Count == 0 || !treeInventoryDirectoryIncluded[0])
 			return null;
@@ -1947,7 +1987,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			entries,
 			rootAccessDenied,
 			hadAccessDenied,
-			discoveredGitIgnoreMatchers);
+			discoveredGitIgnoreMatchers,
+			discoveredGitTrackedPathIndexes);
 
 		int AddDirectoryShell(int sourceIndex, int parentIndex)
 		{
@@ -2049,7 +2090,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		List<ProjectTreeInventoryEntry> rootFileEntries,
 		List<ProjectTreeInventorySnapshot> subtreeInventories,
 		bool rootAccessDenied,
-		bool hadAccessDenied)
+		bool hadAccessDenied,
+		GitTrackedPathIndex? rootTrackedPathIndex)
 	{
 		var rootName = Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 		if (string.IsNullOrEmpty(rootName))
@@ -2071,6 +2113,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		subtreeInventories.Sort(CompareInventoryRootNames);
 		SortInventoryEntries(rootFileEntries);
 		var discoveredGitIgnoreMatchers = MergeDiscoveredGitIgnoreMatchers(subtreeInventories);
+		var discoveredGitTrackedPathIndexes = MergeDiscoveredGitTrackedPathIndexes(
+			subtreeInventories,
+			rootTrackedPathIndex);
 
 		var firstChildIndex = entries.Count;
 		var rootChildIndexes = new List<int>(subtreeInventories.Count);
@@ -2131,7 +2176,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			entries,
 			rootAccessDenied,
 			hadAccessDenied,
-			discoveredGitIgnoreMatchers);
+			discoveredGitIgnoreMatchers,
+			discoveredGitTrackedPathIndexes);
 	}
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(
@@ -2153,6 +2199,59 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var merged = unique.Values.ToList();
 		merged.Sort(CompareScopedGitIgnoreMatchers);
 		return merged;
+	}
+
+	private static IReadOnlyList<GitTrackedPathIndex> MergeDiscoveredGitTrackedPathIndexes(
+		IReadOnlyList<ProjectTreeInventorySnapshot> inventories,
+		GitTrackedPathIndex? additionalIndex = null)
+	{
+		Dictionary<string, GitTrackedPathIndex>? unique = null;
+		foreach (var inventory in inventories)
+		{
+			foreach (var index in inventory.DiscoveredGitTrackedPathIndexes)
+			{
+				unique ??= new Dictionary<string, GitTrackedPathIndex>(PathComparer.Default);
+				unique[index.RepositoryRootPath] = index;
+			}
+		}
+
+		if (additionalIndex is not null)
+		{
+			unique ??= new Dictionary<string, GitTrackedPathIndex>(PathComparer.Default);
+			unique[additionalIndex.RepositoryRootPath] = additionalIndex;
+		}
+
+		if (unique is null)
+			return [];
+
+		var merged = unique.Values.ToList();
+		merged.Sort(static (left, right) =>
+		{
+			var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
+			return depth != 0
+				? depth
+				: PathComparer.Default.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
+		});
+		return merged;
+	}
+
+	private static GitTrackedPathIndex? TryLoadRootTrackedPathIndex(
+		string rootPath,
+		IgnoreRules rules,
+		CancellationToken cancellationToken)
+	{
+		if (!rules.IsGitIgnoreTraversalEnabled)
+			return null;
+
+		var activeContext = rules.CreateGitIgnoreScanContext(rootPath);
+		var candidateContext = rules.CreateGitIgnoreCandidateScanContext(rootPath);
+		return (activeContext.HasIgnoreRules || candidateContext.HasIgnoreRules) &&
+		       GitTrackedPathIndexCache.TryLoadNearest(
+			       rootPath,
+			       cancellationToken,
+			       out var trackedPathIndex)
+			? trackedPathIndex
+			: null;
 	}
 
 	private static void AppendSubtreeInventory(
@@ -2256,7 +2355,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
-				new EffectiveIgnoreScanDiscovery([], []),
+				new EffectiveIgnoreScanDiscovery([], [], []),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
@@ -2264,6 +2363,17 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var rootName = Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
 		var effectiveGitIgnoreCandidateContext = effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath);
+		GitTrackedPathIndex? inheritedTrackedPathIndex = null;
+		if (effectiveRules.IsGitIgnoreTraversalEnabled)
+		{
+			(effectiveGitIgnoreContext, effectiveGitIgnoreCandidateContext, inheritedTrackedPathIndex) =
+				EnterNearestGitTrackedPathIndex(
+					rootPath,
+					effectiveGitIgnoreContext,
+					effectiveGitIgnoreCandidateContext,
+					cancellationToken);
+		}
+
 		var rootFacts = AnalyzeDirectory(
 			rootPath,
 			string.Empty,
@@ -2292,13 +2402,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		    rootDirectControllerImpactCounts == IgnoreControllerImpactCounts.Empty)
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
-				new EffectiveIgnoreScanDiscovery([], []),
+				new EffectiveIgnoreScanDiscovery([], [], []),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
 
 		var directories = new List<EffectiveIgnoreScanNode>(capacity: 256);
 		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
+		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
+		if (inheritedTrackedPathIndex is not null)
+			discoveredGitTrackedPathIndexes.Add(inheritedTrackedPathIndex);
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
 		var pending =
@@ -2362,9 +2475,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						facts.FullPath,
 						facts.RelativePath,
 						directoryBatch.GitIgnorePath,
+						directoryBatch.GitMetadataPath,
 						gitIgnoreContext,
 						gitIgnoreCandidateContext,
-						discoveredGitIgnoreMatchers);
+						cancellationToken,
+						discoveredGitIgnoreMatchers,
+						discoveredGitTrackedPathIndexes);
 				}
 				catch (OperationCanceledException)
 				{
@@ -2492,7 +2608,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		discoveredGitIgnoreMatchers.Sort(CompareScopedGitIgnoreMatchers);
 		return new ScanResult<EffectiveIgnoreScanDiscovery>(
-			new EffectiveIgnoreScanDiscovery(directories, discoveredGitIgnoreMatchers),
+			new EffectiveIgnoreScanDiscovery(
+				directories,
+				discoveredGitIgnoreMatchers,
+				discoveredGitTrackedPathIndexes),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1);
 	}
@@ -2927,6 +3046,15 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
 		var effectiveGitIgnoreCandidateContext = effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath);
+		if (effectiveRules.IsGitIgnoreTraversalEnabled)
+		{
+			(effectiveGitIgnoreContext, effectiveGitIgnoreCandidateContext, _) =
+				EnterNearestGitTrackedPathIndex(
+					rootPath,
+					effectiveGitIgnoreContext,
+					effectiveGitIgnoreCandidateContext,
+					cancellationToken);
+		}
 
 		try
 		{
@@ -2959,7 +3087,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						effectiveGitIgnoreContext,
 						effectiveGitIgnoreCandidateContext);
 					facts = PromoteRootControllerImpactCandidate(facts, effectiveRules);
-					if (IsPotentialControllerImpactCandidate(facts, effectiveRules))
+					if (IsPotentialControllerImpactCandidate(facts))
 						controllerImpactCandidates.Add(facts);
 				}
 			}
@@ -3066,12 +3194,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	}
 
 	private static bool IsPotentialControllerImpactCandidate(
-		in DirectoryScanFacts facts,
-		IgnoreRules effectiveRules)
+		in DirectoryScanFacts facts)
 	{
-		if (!PassesNonControllerDirectoryRules(facts, effectiveRules))
-			return false;
-
 		if (facts.GitIgnoreCandidateEvaluation.IsIgnored &&
 		    !facts.GitIgnoreCandidateEvaluation.ShouldTraverseIgnoredDirectory)
 		{
@@ -3124,7 +3248,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			(directory, _, localCounts) =>
 			{
 				parallelOptions.CancellationToken.ThrowIfCancellationRequested();
-				var contribution = CountRootDirectoryToggleCandidate(directory, effectiveRules);
+				var contribution = CountRootDirectoryToggleCandidate(
+					directory,
+					effectiveRules,
+					parallelOptions.CancellationToken);
 				localCounts.DotFolders += contribution.DotFolders;
 				localCounts.HiddenFolders += contribution.HiddenFolders;
 
@@ -3147,10 +3274,15 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 	private static IgnoreOptionCounts CountRootDirectoryToggleCandidate(
 		in FileSystemDirectoryEntry directory,
-		IgnoreRules effectiveRules)
+		IgnoreRules effectiveRules,
+		CancellationToken cancellationToken)
 	{
 		if ((!effectiveRules.IgnoreDotFolders && !effectiveRules.IgnoreHiddenFolders) ||
-		    IsSuppressedByNonDirectoryToggleRule(directory.FullPath, directory.Name, effectiveRules))
+		    IsSuppressedByNonDirectoryToggleRule(
+			    directory.FullPath,
+			    directory.Name,
+			    effectiveRules,
+			    cancellationToken))
 		{
 			return IgnoreOptionCounts.Empty;
 		}
@@ -3190,7 +3322,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			gitIgnoreContext,
 			gitIgnoreCandidateContext);
 		facts = PromoteRootControllerImpactCandidate(facts, effectiveRules);
-		if (!IsPotentialControllerImpactCandidate(facts, effectiveRules))
+		if (!IsPotentialControllerImpactCandidate(facts))
 			return IgnoreControllerImpactCounts.Empty;
 
 		return CountDirectDirectoryControllerImpact(
@@ -3251,7 +3383,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	private static bool IsSuppressedByNonDirectoryToggleRule(
 		string directoryPath,
 		string name,
-		IgnoreRules rules)
+		IgnoreRules rules,
+		CancellationToken cancellationToken)
 	{
 		if (rules.IsSmartIgnoredDirectory(directoryPath, name))
 			return true;
@@ -3260,6 +3393,15 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			return false;
 
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(directoryPath);
+		if (gitIgnoreContext.HasIgnoreRules &&
+		    GitTrackedPathIndexCache.TryLoadNearest(
+			    directoryPath,
+			    cancellationToken,
+			    out var trackedPathIndex))
+		{
+			gitIgnoreContext = gitIgnoreContext.WithTrackedPathIndex(trackedPathIndex);
+		}
+
 		var gitIgnore = gitIgnoreContext.Evaluate(directoryPath, string.Empty, isDirectory: true, name);
 		return gitIgnore.IsIgnored && !gitIgnore.ShouldTraverseIgnoredDirectory;
 	}
@@ -3270,21 +3412,59 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		string directoryPath,
 		string directoryRelativePath,
 		string? gitIgnorePath,
+		string? gitMetadataPath,
 		IgnoreRules.GitIgnoreScanContext activeContext,
 		IgnoreRules.GitIgnoreScanContext candidateContext,
-		List<ScopedGitIgnoreMatcher>? discoveredMatchers = null)
+		CancellationToken cancellationToken,
+		List<ScopedGitIgnoreMatcher>? discoveredMatchers = null,
+		List<GitTrackedPathIndex>? discoveredTrackedPathIndexes = null)
 	{
-		if (string.IsNullOrWhiteSpace(gitIgnorePath))
+		ScopedGitIgnoreMatcher? scopedMatcher = null;
+		if (!string.IsNullOrWhiteSpace(gitIgnorePath) &&
+		    (!activeContext.ContainsScope(directoryPath) ||
+		     !candidateContext.ContainsScope(directoryPath) ||
+		     discoveredMatchers is not null))
+		{
+			GitIgnoreMatcherFileCache.TryLoad(directoryPath, gitIgnorePath, out scopedMatcher);
+		}
+
+		var requiresTrackedPathIndex =
+			activeContext.HasIgnoreRules ||
+			candidateContext.HasIgnoreRules ||
+			scopedMatcher is not null &&
+			!ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty);
+		var reachedRepositoryBoundary = !string.IsNullOrWhiteSpace(gitMetadataPath);
+		if (requiresTrackedPathIndex && (reachedRepositoryBoundary || scopedMatcher is not null))
+		{
+			GitTrackedPathIndex? trackedPathIndex = null;
+			var loadedTrackedPathIndex = reachedRepositoryBoundary
+				? GitTrackedPathIndexCache.TryLoad(
+					directoryPath,
+					gitMetadataPath!,
+					cancellationToken,
+					out trackedPathIndex)
+				: GitTrackedPathIndexCache.TryLoadNearest(
+					directoryPath,
+					cancellationToken,
+					out trackedPathIndex);
+			if (loadedTrackedPathIndex)
+			{
+				if (!activeContext.ContainsTrackedPathIndex(trackedPathIndex.RepositoryRootPath) ||
+				    !candidateContext.ContainsTrackedPathIndex(trackedPathIndex.RepositoryRootPath))
+				{
+					discoveredTrackedPathIndexes?.Add(trackedPathIndex);
+				}
+
+				activeContext = activeContext.WithTrackedPathIndex(trackedPathIndex);
+				candidateContext = candidateContext.WithTrackedPathIndex(trackedPathIndex);
+			}
+		}
+
+		if (scopedMatcher is null)
 			return (activeContext, candidateContext);
 
 		var activeContainsScope = activeContext.ContainsScope(directoryPath);
 		var candidateContainsScope = candidateContext.ContainsScope(directoryPath);
-		if (activeContainsScope && candidateContainsScope && discoveredMatchers is null)
-			return (activeContext, candidateContext);
-
-		if (!GitIgnoreMatcherFileCache.TryLoad(directoryPath, gitIgnorePath, out var scopedMatcher))
-			return (activeContext, candidateContext);
-
 		discoveredMatchers?.Add(scopedMatcher);
 		return (
 			activeContainsScope
@@ -3293,6 +3473,32 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			candidateContainsScope
 				? candidateContext
 				: candidateContext.WithScope(scopedMatcher, directoryRelativePath));
+	}
+
+	private static (
+		IgnoreRules.GitIgnoreScanContext Active,
+		IgnoreRules.GitIgnoreScanContext Candidate,
+		GitTrackedPathIndex? Index) EnterNearestGitTrackedPathIndex(
+		string scanRootPath,
+		IgnoreRules.GitIgnoreScanContext activeContext,
+		IgnoreRules.GitIgnoreScanContext candidateContext,
+		CancellationToken cancellationToken)
+	{
+		if (!activeContext.HasIgnoreRules && !candidateContext.HasIgnoreRules)
+			return (activeContext, candidateContext, null);
+
+		if (!GitTrackedPathIndexCache.TryLoadNearest(
+			    scanRootPath,
+			    cancellationToken,
+			    out var trackedPathIndex))
+		{
+			return (activeContext, candidateContext, null);
+		}
+
+		return (
+			activeContext.WithTrackedPathIndex(trackedPathIndex),
+			candidateContext.WithTrackedPathIndex(trackedPathIndex),
+			trackedPathIndex);
 	}
 
 	private static int CompareScopedGitIgnoreMatchers(

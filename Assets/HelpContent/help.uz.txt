@@ -337,7 +337,7 @@ Muayyan yo‘l uchun qoidalar ota `.gitignore` faylidan chuqurroq fayllarga, bit
 
 `!` bilan boshlangan qoida faqat o‘z hududidagi oldingi Git istisnosini bekor qiladi. Ota papka hali ham chiqarilgan bo‘lsa, faylni qaytara olmaydi. To‘liq chiqarilgan va yetib bo‘lmaydigan papka ichidagi `.gitignore` ishlanmaydi.
 
-Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘g‘ri qoidalar ishlashda davom etadi. Bu band faqat ishchi daraxtdagi `.gitignore` fayllariga tegishli; `.git/info/exclude`, global Git qoidalari va Git index holati qo‘llanmaydi.
+Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘g‘ri qoidalar ishlashda davom etadi. Bu band faqat ishchi daraxtdagi `.gitignore` fayllariga tegishli; `.git/info/exclude` va global Git qoidalari qo‘llanmaydi. O‘qiladigan Git indeksi mavjud bo‘lsa, kuzatiladigan fayllar `.gitignore` ga mos kelsa ham ko‘rinadi; indeks yoki Git CLI bo‘lmasa, DevProjex xavfsiz tarzda faqat andozalarni baholashga qaytadi.
 
 ### 12.4 .gitignore va Smart Ignore aloqasi
 `.gitignore` va Smart Ignore mustaqil almashtirgichlardir. Har biri barcha o‘z hududlarida, ichma-ich joylashuvning har qanday erishiladigan darajasida ishlaydi. Band faqat uni o‘zgartirish joriy samarali daraxtga ta’sir qilishi mumkin bo‘lsa ko‘rsatiladi.

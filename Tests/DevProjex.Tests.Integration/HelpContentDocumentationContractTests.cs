@@ -92,6 +92,21 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "mustaqil almashtirgichlardir" }
     };
 
+    public static TheoryData<string, string, string> GitIndexContracts => new()
+    {
+        { "help.ru.txt", "отслеживаемые файлы остаются видимыми", "без индекса или Git CLI" },
+        { "help.en.txt", "tracked files remain visible", "without an index or Git CLI" },
+        { "help.de.txt", "verfolgte Dateien", "ohne Index oder Git CLI" },
+        { "help.fr.txt", "les fichiers suivis restent visibles", "sans index ou Git CLI" },
+        { "help.it.txt", "i file tracciati restano visibili", "senza indice o Git CLI" },
+        { "help.es.txt", "los archivos con seguimiento permanecen visibles", "sin índice o Git CLI" },
+        { "help.pt.txt", "os arquivos rastreados permanecem visíveis", "sem índice ou Git CLI" },
+        { "help.pt-pt.txt", "os ficheiros controlados permanecem visíveis", "sem índice ou Git CLI" },
+        { "help.kk.txt", "бақыланатын файлдар", "индекс немесе Git CLI болмаса" },
+        { "help.tg.txt", "файлҳои пайгиришаванда", "бе индекс ё Git CLI" },
+        { "help.uz.txt", "kuzatiladigan fayllar", "indeks yoki Git CLI bo‘lmasa" }
+    };
+
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
     {
         { "help.ru.txt", "JSON-экспорт использует такой формат дерева: массивы содержат файлы, объекты содержат подпапки, `/` содержит файлы текущей папки, а `[]` обозначает пустую папку." },
@@ -222,6 +237,19 @@ public sealed class HelpContentDocumentationContractTests
         var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
 
         Assert.Contains(expectedIndependentText, ignoreSection, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [MemberData(nameof(GitIndexContracts))]
+    public void HelpContent_GitIgnoreSection_DescribesTrackedIndexAndPatternOnlyFallback(
+        string fileName,
+        string expectedTrackedBehavior,
+        string expectedFallbackBehavior)
+    {
+        var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
+
+        Assert.Contains(expectedTrackedBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedFallbackBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

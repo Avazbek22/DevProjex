@@ -75,7 +75,8 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		ref readonly var rootEntry = ref inventory.GetEntryRef(0);
 		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(
 			rootEntry.FullPath,
-			inventory.DiscoveredGitIgnoreMatchers);
+			inventory.DiscoveredGitIgnoreMatchers,
+			inventory.DiscoveredGitTrackedPathIndexes);
 		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
 		var root = new FileSystemNode(
 			name: rootEntry.Name,

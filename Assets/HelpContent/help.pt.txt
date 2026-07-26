@@ -375,7 +375,7 @@ Uma regra que começa com `!` cancela uma exclusão anterior do Git apenas dentr
 
 Uma linha malformada ou sem suporte é ignorada de forma independente. Outras regras válidas nesse arquivo e regras em escopos vizinhos continuam funcionando.
 
-Esta opção abrange apenas arquivos `.gitignore` da árvore de trabalho. As regras de `.git/info/exclude`, a configuração global do Git e o estado do índice do Git não são aplicadas.
+Esta opção abrange apenas arquivos `.gitignore` da árvore de trabalho. As regras de `.git/info/exclude` e a configuração global do Git não são aplicadas. Quando há um índice Git legível, os arquivos rastreados permanecem visíveis mesmo que correspondam ao `.gitignore`; sem índice ou Git CLI, o DevProjex volta com segurança à avaliação apenas por padrões.
 
 ### 12.4 Relacionamento entre .gitignore e Smart Ignore
 `.gitignore` e Smart Ignore são controles independentes. Cada um se aplica a todos os seus escopos em qualquer nível de aninhamento acessível. Uma opção só é exibida quando sua alteração pode afetar a árvore efetiva atual.

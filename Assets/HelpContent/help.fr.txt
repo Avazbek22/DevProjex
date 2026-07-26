@@ -337,7 +337,7 @@ Pour un chemin donné, les règles sont évaluées du `.gitignore` parent vers l
 
 Une règle commençant par `!` annule uniquement une exclusion Git antérieure dans sa zone. Elle ne peut pas restaurer un fichier tant que son dossier parent reste exclu. Un `.gitignore` situé dans un dossier entièrement exclu et inaccessible n’est pas évalué.
 
-Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude`, les règles Git globales et l’état de l’index Git ne sont pas appliqués.
+Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude` et les règles Git globales ne sont pas appliqués. Si un index Git lisible est disponible, les fichiers suivis restent visibles même s’ils correspondent à `.gitignore` ; sans index ou Git CLI, DevProjex revient en toute sécurité à l’évaluation des motifs seuls.
 
 ### 12.4 Relation entre .gitignore et Smart Ignore
 `.gitignore` et Smart Ignore sont des interrupteurs indépendants. Chacun s’applique à toutes ses zones, à chaque niveau d’imbrication accessible. Une option n’est affichée que si sa modification peut changer l’arborescence effective actuelle.

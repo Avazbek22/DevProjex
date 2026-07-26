@@ -91,6 +91,8 @@ none
 
 `--ignore none` means "use an explicit empty ignore set". It is different from omitting `--ignore`, where DevProjex uses the current default ignore behavior.
 
+`git-ignore` evaluates reachable working-tree `.gitignore` files. When a readable Git index is available, tracked files remain included even if they match a pattern; without an index or Git CLI, DevProjex safely uses pattern-only evaluation.
+
 ## Desktop Startup
 
 Desktop startup options make the visible app open directly in a useful state without changing the headless export/report contract:

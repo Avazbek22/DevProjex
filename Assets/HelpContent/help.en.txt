@@ -375,7 +375,7 @@ A rule starting with `!` cancels an earlier Git exclusion only within its scope.
 
 A malformed or unsupported line is skipped independently. Other valid rules in that file and rules in neighboring scopes continue to work.
 
-This option covers working-tree `.gitignore` files only. Rules from `.git/info/exclude`, global Git configuration, and Git index state are not applied.
+This option covers working-tree `.gitignore` files only. Rules from `.git/info/exclude` and global Git configuration are not applied. When a readable Git index is available, tracked files remain visible even if they match `.gitignore`; without an index or Git CLI, DevProjex safely falls back to pattern-only evaluation.
 
 ### 12.4 Relationship between .gitignore and Smart Ignore
 `.gitignore` and Smart Ignore are independent switches. Each applies to all of its scopes at every reachable nesting level. An option is shown only when changing it can affect the current effective tree.

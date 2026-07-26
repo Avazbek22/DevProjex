@@ -134,8 +134,9 @@ Deep projects are not limited to the repository root. When an artifact candidate
 Smart Ignore and **Use `.gitignore`** are independent switches:
 
 1. Every reachable `.gitignore` is evaluated in its own directory scope, including nested files and negation rules.
-2. Smart Ignore processes the items that remain.
-3. Explicit dot-file, hidden-item, empty-item, and extensionless-file rules run afterward.
+2. When a readable Git index is available, tracked files remain visible even if they match `.gitignore`; without an index or Git CLI, evaluation safely remains pattern-only.
+3. Smart Ignore processes the items that remain.
+4. Explicit dot-file, hidden-item, empty-item, and extensionless-file rules run afterward.
 
 An option appears in the settings panel only when it can change the current effective tree. For example, Smart Ignore may stay hidden while `.gitignore` already excludes all matching artifacts, then appear when `.gitignore` is disabled.
 

@@ -91,6 +91,17 @@ public sealed record IgnoreRules(
 		string scanRootPath,
 		IReadOnlyList<ScopedGitIgnoreMatcher> additionalMatchers)
 	{
+		return CreateGitIgnoreScanContext(
+			scanRootPath,
+			additionalMatchers,
+			additionalTrackedPathIndexes: []);
+	}
+
+	public GitIgnoreScanContext CreateGitIgnoreScanContext(
+		string scanRootPath,
+		IReadOnlyList<ScopedGitIgnoreMatcher> additionalMatchers,
+		IReadOnlyList<GitTrackedPathIndex> additionalTrackedPathIndexes)
+	{
 		var context = CreateGitIgnoreScanContext(scanRootPath);
 		foreach (var matcher in additionalMatchers)
 		{
@@ -99,6 +110,9 @@ public sealed record IgnoreRules(
 
 			context = context.WithScope(matcher, scopeRelativePath);
 		}
+
+		foreach (var trackedPathIndex in additionalTrackedPathIndexes)
+			context = context.WithTrackedPathIndex(trackedPathIndex);
 
 		return context;
 	}
@@ -705,6 +719,7 @@ public sealed record IgnoreRules(
 		private readonly bool _useCandidates;
 		private readonly bool _evaluateRulesFallback;
 		private readonly AdditionalGitIgnoreScope? _additionalScopes;
+		private readonly AdditionalGitTrackedPathIndex? _trackedPathIndexes;
 
 		private GitIgnoreScanContext(
 			IgnoreRules rules,
@@ -712,7 +727,8 @@ public sealed record IgnoreRules(
 			string baseRelativePath,
 			bool useCandidates,
 			bool evaluateRulesFallback = false,
-			AdditionalGitIgnoreScope? additionalScopes = null)
+			AdditionalGitIgnoreScope? additionalScopes = null,
+			AdditionalGitTrackedPathIndex? trackedPathIndexes = null)
 		{
 			_rules = rules;
 			_relativeMatcher = relativeMatcher;
@@ -720,6 +736,7 @@ public sealed record IgnoreRules(
 			_useCandidates = useCandidates;
 			_evaluateRulesFallback = evaluateRulesFallback;
 			_additionalScopes = additionalScopes;
+			_trackedPathIndexes = trackedPathIndexes;
 		}
 
 		public static GitIgnoreScanContext Disabled(IgnoreRules rules, bool useCandidates = false) =>
@@ -754,6 +771,22 @@ public sealed record IgnoreRules(
 			return _relativeMatcher?.IsRootPath(scopeRootPath) == true;
 		}
 
+		public bool HasIgnoreRules
+		{
+			get
+			{
+				if (_relativeMatcher is not null ||
+				    _additionalScopes is not null)
+				{
+					return true;
+				}
+
+				return _evaluateRulesFallback &&
+				       (!ReferenceEquals(_rules.GetGitIgnoreMatcher(_useCandidates), GitIgnoreMatcher.Empty) ||
+				        _rules.GetScopedGitIgnoreMatchers(_useCandidates).Count > 0);
+			}
+		}
+
 		public GitIgnoreScanContext WithScope(
 			ScopedGitIgnoreMatcher scopedMatcher,
 			string scopeRelativePath)
@@ -773,7 +806,36 @@ public sealed record IgnoreRules(
 				new AdditionalGitIgnoreScope(
 					_additionalScopes,
 					scopedMatcher,
-					scopeRelativePath));
+					scopeRelativePath),
+				_trackedPathIndexes);
+		}
+
+		public bool ContainsTrackedPathIndex(string repositoryRootPath)
+		{
+			try
+			{
+				return _trackedPathIndexes?.Contains(PathUtility.Normalize(repositoryRootPath)) == true;
+			}
+			catch
+			{
+				return false;
+			}
+		}
+
+		public GitIgnoreScanContext WithTrackedPathIndex(GitTrackedPathIndex trackedPathIndex)
+		{
+			ArgumentNullException.ThrowIfNull(trackedPathIndex);
+			if (ContainsTrackedPathIndex(trackedPathIndex.RepositoryRootPath))
+				return this;
+
+			return new GitIgnoreScanContext(
+				_rules,
+				_relativeMatcher,
+				_baseRelativePath,
+				_useCandidates,
+				_evaluateRulesFallback,
+				_additionalScopes,
+				new AdditionalGitTrackedPathIndex(_trackedPathIndexes, trackedPathIndex));
 		}
 
 		public GitIgnoreEvaluation Evaluate(
@@ -822,7 +884,7 @@ public sealed record IgnoreRules(
 			if (!evaluation.IsIgnored && reIncludedIgnoredPath &&
 			    HasExplicitlyIgnoredAncestor(fullPath, relativePath))
 			{
-				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
+				evaluation = new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 			}
 
 			if (isDirectory && evaluation.IsIgnored && !evaluation.ShouldTraverseIgnoredDirectory &&
@@ -830,10 +892,37 @@ public sealed record IgnoreRules(
 			    (_rules.HasGitIgnoreTraversalCandidate(fullPath, name, _useCandidates) ||
 			     _additionalScopes?.HasTraversalCandidate(relativePath, name) == true))
 			{
-				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: true);
+				evaluation = new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: true);
 			}
 
-			return evaluation;
+			return ApplyTrackedPathOverride(fullPath, isDirectory, evaluation);
+		}
+
+		private GitIgnoreEvaluation ApplyTrackedPathOverride(
+			string fullPath,
+			bool isDirectory,
+			GitIgnoreEvaluation evaluation)
+		{
+			if (!evaluation.IsIgnored)
+				return evaluation;
+
+			var trackedPathIndex = _trackedPathIndexes?.Resolve(fullPath);
+			if (trackedPathIndex is null)
+				return evaluation;
+
+			if (!isDirectory)
+			{
+				return trackedPathIndex.Contains(fullPath)
+					? GitIgnoreEvaluation.NotIgnored
+					: evaluation;
+			}
+
+			if (trackedPathIndex.Contains(fullPath))
+				return GitIgnoreEvaluation.NotIgnored;
+
+			return trackedPathIndex.HasDescendant(fullPath)
+				? new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: true)
+				: evaluation;
 		}
 
 		private bool IsGitAdministrativeEntryForActiveScope(string fullPath, string name)
@@ -1025,6 +1114,48 @@ public sealed record IgnoreRules(
 
 				matcherRelativePath = relativePath[(scopeRelativePath.Length + 1)..];
 				return matcherRelativePath.Length > 0;
+			}
+		}
+
+		private sealed class AdditionalGitTrackedPathIndex(
+			AdditionalGitTrackedPathIndex? parent,
+			GitTrackedPathIndex trackedPathIndex)
+		{
+			private readonly AdditionalGitTrackedPathIndex? _parent = parent;
+			private readonly GitTrackedPathIndex _trackedPathIndex = trackedPathIndex;
+
+			public bool Contains(string repositoryRootPath)
+			{
+				for (var current = this; current is not null; current = current._parent)
+				{
+					if (string.Equals(
+						    current._trackedPathIndex.RepositoryRootPath,
+						    repositoryRootPath,
+						    PathComparison))
+					{
+						return true;
+					}
+				}
+
+				return false;
+			}
+
+			public GitTrackedPathIndex? Resolve(string fullPath)
+			{
+				GitTrackedPathIndex? bestMatch = null;
+				for (var current = this; current is not null; current = current._parent)
+				{
+					var candidate = current._trackedPathIndex;
+					if (!PathUtility.IsPathInside(fullPath, candidate.RepositoryRootPath))
+						continue;
+					if (bestMatch is null ||
+					    candidate.RepositoryRootPath.Length > bestMatch.RepositoryRootPath.Length)
+					{
+						bestMatch = candidate;
+					}
+				}
+
+				return bestMatch;
 			}
 		}
 	}
