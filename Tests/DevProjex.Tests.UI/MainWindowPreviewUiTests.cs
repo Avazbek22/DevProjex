@@ -440,6 +440,68 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
         }
     }
 
+    [AvaloniaTheory]
+    [InlineData(PreviewContentMode.Tree)]
+    [InlineData(PreviewContentMode.Content)]
+    [InlineData(PreviewContentMode.TreeAndContent)]
+    public async Task PreviewOpen_PublishesFirstContentBeforePaneAnimationStarts(
+        PreviewContentMode mode)
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var previewController = GetPreviewWorkspaceController(window);
+            viewModel.SelectedPreviewContentMode = mode;
+            Assert.Null(viewModel.PreviewDocument);
+
+            var openTask = previewController.OpenAsync();
+            await openTask;
+
+            Assert.True(previewController.WasFirstContentReadyBeforeLastOpenAnimation);
+            Assert.NotNull(viewModel.PreviewDocument);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewCloseRequestedDuringOpen_IsQueuedAndAllowsCleanReopen()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var previewController = GetPreviewWorkspaceController(window);
+            viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+
+            var openTask = previewController.OpenAsync();
+            Assert.True(viewModel.IsPreviewMode);
+            Assert.False(openTask.IsCompleted);
+
+            await previewController.CloseAsync();
+            await openTask;
+
+            Assert.False(viewModel.IsPreviewMode);
+            Assert.Null(viewModel.PreviewDocument);
+
+            await previewController.OpenAsync();
+            await UiTestDriver.WaitForPreviewReadyAsync(window);
+
+            Assert.True(viewModel.IsPreviewMode);
+            Assert.NotNull(viewModel.PreviewDocument);
+            Assert.False(viewModel.IsPreviewLoading);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task PreviewCopyButton_IsPlacedBeforeModeSelector_AndMatchesCloseButtonSize()
     {
@@ -1112,4 +1174,17 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             _ => payload.Contains("\n├── ", StringComparison.Ordinal)
         };
     }
+
+    private static DevProjex.Avalonia.Coordinators.PreviewWorkspaceController
+        GetPreviewWorkspaceController(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_previewWorkspaceController",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic);
+        return Assert.IsType<
+            DevProjex.Avalonia.Coordinators.PreviewWorkspaceController>(
+            field?.GetValue(window));
+    }
+
 }

@@ -15,7 +15,8 @@ public static class ProjectTreeInventoryExtensionDiscovery
 		ref readonly var root = ref inventory.GetEntryRef(0);
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(
 			root.FullPath,
-			inventory.DiscoveredGitIgnoreMatchers);
+			inventory.DiscoveredGitIgnoreMatchers,
+			inventory.DiscoveredGitTrackedPathIndexes);
 		var rootGitIgnore = rules.IsGitIgnoreTraversalEnabled
 			? gitIgnoreContext.Evaluate(root.FullPath, root.RelativePath, isDirectory: true, root.Name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;

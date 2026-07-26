@@ -46,6 +46,96 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithDeepHorizontalSearchWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            // Keep the results vertically realized so this fixture isolates horizontal navigation.
+            var segments = Enumerable.Range(1, 5)
+                .Select(static level => $"d{level:00}")
+                .ToArray();
+            var resultDirectory = Path.Combine(segments);
+            WriteFile(
+                rootPath,
+                Path.Combine(
+                    resultDirectory,
+                    "horizontal-search-target-a-initial.cs"),
+                "internal sealed class InitialHorizontalSearchTarget {}\n");
+            WriteFile(
+                rootPath,
+                Path.Combine(
+                    resultDirectory,
+                    "horizontal-search-target-b-with-a-deliberately-long-name-that-exceeds-the-visible-tree-width-and-remains-clipped-in-a-wide-tree-pane.cs"),
+                "internal sealed class HorizontalSearchTarget {}\n");
+            WriteFile(
+                rootPath,
+                Path.Combine(
+                    resultDirectory,
+                    "horizontal-search-target-c-short.cs"),
+                "internal sealed class FinalHorizontalSearchTarget {}\n");
+        });
+    }
+
+    public static UiTestProject CreateWithHierarchicalAppSearchWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            for (var index = 1; index <= 12; index++)
+            {
+                WriteFile(
+                    rootPath,
+                    Path.Combine(
+                        "Application",
+                        $"Area{index:00}",
+                        "SelectionOption.cs"),
+                    $"internal sealed class SelectionOption{index:00} {{}}\n");
+            }
+
+            WriteFile(
+                rootPath,
+                Path.Combine("Application", "Application.csproj"),
+                "<Project />\n");
+            WriteFile(
+                rootPath,
+                Path.Combine(
+                    "Apps",
+                    "Avalonia",
+                    "DevProjex.Avalonia",
+                    "Coordinators",
+                    "AppearanceSettingsController.cs"),
+                "internal sealed class AppearanceSettingsController {}\n");
+            for (var index = 1; index <= 24; index++)
+            {
+                WriteFile(
+                    rootPath,
+                    Path.Combine(
+                        "Apps",
+                        $"Module{index:00}",
+                        "SelectionOption.cs"),
+                    $"internal sealed class SelectionOption{index:00} {{}}\n");
+            }
+
+            WriteFile(
+                rootPath,
+                Path.Combine("Assets", "Localization", "en.json"),
+                "{}\n");
+        });
+    }
+
+    public static UiTestProject CreateWithLargeFlatTree(int fileCount = 2000)
+    {
+        return Create(rootPath =>
+        {
+            for (var index = 0; index < fileCount; index++)
+            {
+                WriteFile(
+                    rootPath,
+                    Path.Combine("bulk", $"file-{index:0000}.txt"),
+                    $"content {index}");
+            }
+        });
+    }
+
     public static UiTestProject CreateWithExtensionSensitiveEmptyFolders()
     {
         return Create(static rootPath =>

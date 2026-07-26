@@ -1,5 +1,4 @@
 using System.Runtime;
-using System.Runtime.InteropServices;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Coordinators;
@@ -10,12 +9,67 @@ internal sealed class MemoryCleanupCoordinator(
     TimeSpan animationDuration)
     : IDisposable
 {
+    private static readonly TimeSpan BackgroundCollectionObservationTimeout =
+        TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan BackgroundCollectionPollInterval =
+        TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan AggressiveCleanupIdleDelay =
+        TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan UiReadinessTimeout =
+        TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan UiReadinessPollInterval =
+        TimeSpan.FromMilliseconds(120);
+    private const int UiReadinessRequiredStableSamples = 3;
+    private const int UiReadinessMaximumAttempts = 24;
+
+    private readonly Func<MemoryCleanupSnapshot> _captureMemorySnapshot =
+        MemoryCleanupSnapshot.Capture;
+    private readonly Action<MemoryCleanupCollectionMode> _collect =
+        CollectMemory;
+    private readonly Action _trimWorkingSet =
+        ProcessWorkingSetTrimmer.TrimCurrentProcess;
+    private readonly TimeSpan _uiReadinessTimeout = UiReadinessTimeout;
+    private readonly TimeSpan _uiReadinessPollInterval =
+        UiReadinessPollInterval;
+    private readonly int _uiReadinessMaximumAttempts =
+        UiReadinessMaximumAttempts;
+    private readonly object _backgroundCleanupGate = new();
     private CancellationTokenSource? _backgroundCleanupCts;
-    private CancellationTokenSource? _searchCleanupCts;
+    private MemoryCleanupCollectionMode _backgroundCleanupMode;
     private CancellationTokenSource? _previewCleanupCts;
-    private int _searchCleanupVersion;
     private int _previewCleanupVersion;
+    private int _cleanupInProgress;
     private int _disposed;
+
+    internal bool IsCleanupPendingOrRunning =>
+        Volatile.Read(ref _cleanupInProgress) != 0 ||
+        Volatile.Read(ref _backgroundCleanupCts) is not null ||
+        Volatile.Read(ref _previewCleanupCts) is not null;
+
+    internal MemoryCleanupCoordinator(
+        SessionMetricsRecorder sessionMetrics,
+        Func<bool> uiReady,
+        TimeSpan animationDuration,
+        Func<MemoryCleanupSnapshot> captureMemorySnapshot,
+        Action<MemoryCleanupCollectionMode> collect,
+        TimeSpan? uiReadinessTimeout = null,
+        TimeSpan? uiReadinessPollInterval = null,
+        int uiReadinessMaximumAttempts = UiReadinessMaximumAttempts,
+        Action? trimWorkingSet = null)
+        : this(sessionMetrics, uiReady, animationDuration)
+    {
+        _captureMemorySnapshot = captureMemorySnapshot;
+        _collect = collect;
+        _trimWorkingSet =
+            trimWorkingSet ?? ProcessWorkingSetTrimmer.TrimCurrentProcess;
+        _uiReadinessTimeout =
+            uiReadinessTimeout ?? UiReadinessTimeout;
+        _uiReadinessPollInterval =
+            uiReadinessPollInterval ?? UiReadinessPollInterval;
+        _uiReadinessMaximumAttempts = Math.Max(
+            UiReadinessRequiredStableSamples,
+            uiReadinessMaximumAttempts);
+    }
 
     public void Schedule(MemoryCleanupReason reason)
     {
@@ -24,62 +78,36 @@ internal sealed class MemoryCleanupCoordinator(
 
         var cleanupPlan =
             MemoryCleanupPolicy.CreateDeferredPlan(reason, animationDuration);
-        if (!MemoryCleanupPolicy.ShouldRun(
-                cleanupPlan,
-                GC.GetTotalMemory(forceFullCollection: false)))
-        {
+        if (cleanupPlan.CollectionMode == MemoryCleanupCollectionMode.None)
             return;
-        }
 
         ScheduleCore(reason, cleanupPlan);
     }
 
-    public void ScheduleSearchAfterRender()
+    public void SchedulePreview(MemoryCleanupReason reason)
     {
         if (Volatile.Read(ref _disposed) != 0)
             return;
 
-        var cleanupCts = ReplaceCancellationSource(ref _searchCleanupCts);
-        var cleanupVersion = Interlocked.Increment(ref _searchCleanupVersion);
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await WaitForRenderPassesAsync(cleanupCts.Token);
-                if (cleanupVersion != Volatile.Read(ref _searchCleanupVersion))
-                    return;
-
-                Schedule(MemoryCleanupReason.SearchClose);
-            }
-            catch (OperationCanceledException)
-            {
-                // A newer search result superseded this cleanup request.
-            }
-            finally
-            {
-                DisposeIfCurrent(ref _searchCleanupCts, cleanupCts);
-            }
-        });
-    }
-
-    public void SchedulePreview(bool force, MemoryCleanupReason reason)
-    {
-        if (!force || Volatile.Read(ref _disposed) != 0)
+        var cleanupPlan =
+            MemoryCleanupPolicy.CreateDeferredPlan(reason, animationDuration);
+        if (cleanupPlan.CollectionMode == MemoryCleanupCollectionMode.None)
             return;
 
         var cleanupCts = ReplaceCancellationSource(ref _previewCleanupCts);
+        var cleanupToken = cleanupCts.Token;
         var cleanupVersion = Interlocked.Increment(ref _previewCleanupVersion);
 
         _ = Task.Run(async () =>
         {
             try
             {
-                await WaitForRenderPassesAsync(cleanupCts.Token);
+                await WaitForRenderPassesAsync(cleanupToken);
                 if (cleanupVersion != Volatile.Read(ref _previewCleanupVersion))
                     return;
 
-                Schedule(reason);
+                cleanupToken.ThrowIfCancellationRequested();
+                ScheduleCore(reason, cleanupPlan, cleanupToken);
             }
             catch (OperationCanceledException)
             {
@@ -92,8 +120,8 @@ internal sealed class MemoryCleanupCoordinator(
         });
     }
 
-    public void CancelBackground()
-        => CancelAndDispose(ref _backgroundCleanupCts);
+    public void CancelBackground() =>
+        CancelBackgroundCleanup();
 
     public void CancelPreview()
     {
@@ -103,25 +131,17 @@ internal sealed class MemoryCleanupCoordinator(
 
     public void RunImmediate(bool compactLargeObjectHeap)
     {
-        if (compactLargeObjectHeap)
-        {
-            ForceMemoryCleanup();
-            return;
-        }
-
-        GC.Collect(
-            generation: 2,
-            GCCollectionMode.Forced,
-            blocking: true);
+        CollectAndTrim(
+            compactLargeObjectHeap
+                ? MemoryCleanupCollectionMode.Aggressive
+                : MemoryCleanupCollectionMode.Background);
     }
 
     public void CancelAll()
     {
-        Interlocked.Increment(ref _searchCleanupVersion);
         Interlocked.Increment(ref _previewCleanupVersion);
-        CancelAndDispose(ref _searchCleanupCts);
         CancelAndDispose(ref _previewCleanupCts);
-        CancelAndDispose(ref _backgroundCleanupCts);
+        CancelBackgroundCleanup();
     }
 
     public void Dispose()
@@ -134,36 +154,58 @@ internal sealed class MemoryCleanupCoordinator(
 
     private void ScheduleCore(
         MemoryCleanupReason reason,
-        MemoryCleanupPlan cleanupPlan)
+        MemoryCleanupPlan cleanupPlan,
+        CancellationToken triggerCancellationToken = default)
     {
+        if (!TryScheduleBackgroundCleanup(
+                cleanupPlan.CollectionMode,
+                triggerCancellationToken,
+                out var cleanupCts))
+        {
+            return;
+        }
+
         sessionMetrics.RecordMemoryCleanupScheduled(reason);
-        var cleanupCts =
-            ReplaceCancellationSource(ref _backgroundCleanupCts);
+        var cleanupToken = cleanupCts.Token;
 
         _ = Task.Run(async () =>
         {
             try
             {
-                if (cleanupPlan.WaitForUiSettled)
-                    await WaitForUiReadyAsync(cleanupCts.Token);
-
-                var scaledDelay = UiTimingProfile.Scale(cleanupPlan.Delay);
-                if (scaledDelay > TimeSpan.Zero)
-                    await Task.Delay(scaledDelay, cleanupCts.Token);
-
-                cleanupCts.Token.ThrowIfCancellationRequested();
-                if (!MemoryCleanupPolicy.ShouldRun(
-                        cleanupPlan,
-                        GC.GetTotalMemory(forceFullCollection: false)))
+                if (cleanupPlan.WaitForUiSettled &&
+                    !await WaitForUiReadyAsync(cleanupToken))
                 {
                     return;
                 }
 
+                var scaledDelay = UiTimingProfile.Scale(cleanupPlan.Delay);
+                if (scaledDelay > TimeSpan.Zero)
+                    await Task.Delay(scaledDelay, cleanupToken);
+
+                cleanupToken.ThrowIfCancellationRequested();
                 var stopwatch = Stopwatch.StartNew();
-                ForceMemoryCleanup();
-                sessionMetrics.RecordMemoryCleanupCompleted(
-                    reason,
-                    stopwatch.Elapsed);
+                Interlocked.Exchange(ref _cleanupInProgress, 1);
+                try
+                {
+                    var snapshotBeforeCollection = _captureMemorySnapshot();
+                    CollectAndTrim(cleanupPlan.CollectionMode);
+                    if (cleanupPlan.CollectionMode ==
+                        MemoryCleanupCollectionMode.Background)
+                    {
+                        await RunAggressiveCleanupIfStillMateriallyFragmentedAsync(
+                            snapshotBeforeCollection.CollectionIndex,
+                            cleanupPlan.WaitForUiSettled,
+                            cleanupToken);
+                    }
+
+                    sessionMetrics.RecordMemoryCleanupCompleted(
+                        reason,
+                        stopwatch.Elapsed);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _cleanupInProgress, 0);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -171,26 +213,175 @@ internal sealed class MemoryCleanupCoordinator(
             }
             finally
             {
-                DisposeIfCurrent(ref _backgroundCleanupCts, cleanupCts);
+                DisposeBackgroundCleanupIfCurrent(cleanupCts);
             }
         });
     }
 
-    private async Task WaitForUiReadyAsync(
+    private bool TryScheduleBackgroundCleanup(
+        MemoryCleanupCollectionMode collectionMode,
+        CancellationToken triggerCancellationToken,
+        out CancellationTokenSource cleanupCts)
+    {
+        CancellationTokenSource? previous;
+        lock (_backgroundCleanupGate)
+        {
+            if (_backgroundCleanupCts is not null &&
+                _backgroundCleanupMode > collectionMode)
+            {
+                cleanupCts = null!;
+                return false;
+            }
+
+            cleanupCts = triggerCancellationToken.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(
+                    triggerCancellationToken)
+                : new CancellationTokenSource();
+            previous = _backgroundCleanupCts;
+            _backgroundCleanupCts = cleanupCts;
+            _backgroundCleanupMode = collectionMode;
+        }
+
+        CancelAndDispose(previous);
+        return true;
+    }
+
+    private void CancelBackgroundCleanup()
+    {
+        CancellationTokenSource? cleanupCts;
+        lock (_backgroundCleanupGate)
+        {
+            cleanupCts = _backgroundCleanupCts;
+            _backgroundCleanupCts = null;
+            _backgroundCleanupMode = MemoryCleanupCollectionMode.None;
+        }
+
+        CancelAndDispose(cleanupCts);
+    }
+
+    private void DisposeBackgroundCleanupIfCurrent(
+        CancellationTokenSource cleanupCts)
+    {
+        lock (_backgroundCleanupGate)
+        {
+            if (!ReferenceEquals(_backgroundCleanupCts, cleanupCts))
+                return;
+
+            _backgroundCleanupCts = null;
+            _backgroundCleanupMode = MemoryCleanupCollectionMode.None;
+        }
+
+        cleanupCts.Dispose();
+    }
+
+    private async Task RunAggressiveCleanupIfStillMateriallyFragmentedAsync(
+        long collectionIndexBeforeCleanup,
+        bool waitForUiSettled,
         CancellationToken cancellationToken)
     {
-        var stableSamples = 0;
-        while (stableSamples < 3)
+        if (collectionIndexBeforeCleanup <= 0)
+            return;
+
+        var snapshot = await WaitForBackgroundCollectionAsync(
+            collectionIndexBeforeCleanup,
+            cancellationToken);
+        if (snapshot is null ||
+            !MemoryCleanupPolicy.ShouldCompactAfterBackgroundCollection(
+                snapshot.Value))
+        {
+            return;
+        }
+
+        var scaledDelay = UiTimingProfile.Scale(AggressiveCleanupIdleDelay);
+        if (scaledDelay > TimeSpan.Zero)
+            await Task.Delay(scaledDelay, cancellationToken);
+
+        if (waitForUiSettled &&
+            !await WaitForUiReadyAsync(cancellationToken))
+        {
+            return;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        snapshot = _captureMemorySnapshot();
+        if (!MemoryCleanupPolicy.ShouldCompactAfterBackgroundCollection(
+                snapshot.Value))
+        {
+            return;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Aggressive cleanup is reserved for severe fragmentation left after background
+        // reclamation. Any new interaction cancels this decommit-heavy second phase.
+        CollectAndTrim(MemoryCleanupCollectionMode.Aggressive);
+    }
+
+    private async Task<MemoryCleanupSnapshot?> WaitForBackgroundCollectionAsync(
+        long collectionIndexBeforeCleanup,
+        CancellationToken cancellationToken)
+    {
+        var timeout = UiTimingProfile.Scale(
+            BackgroundCollectionObservationTimeout);
+        var pollInterval = UiTimingProfile.Scale(
+            BackgroundCollectionPollInterval);
+        var stopwatch = Stopwatch.StartNew();
+
+        while (stopwatch.Elapsed < timeout)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var isUiReady = await Dispatcher.UIThread.InvokeAsync(
-                uiReady,
-                DispatcherPriority.Background);
-            stableSamples = isUiReady ? stableSamples + 1 : 0;
-            await Task.Delay(
-                UiTimingProfile.Scale(TimeSpan.FromMilliseconds(120)),
-                cancellationToken);
+            var snapshot = _captureMemorySnapshot();
+            if (snapshot.CollectionIndex > collectionIndexBeforeCleanup)
+                return snapshot;
+
+            await Task.Delay(pollInterval, cancellationToken);
         }
+
+        return null;
+    }
+
+    private async Task<bool> WaitForUiReadyAsync(
+        CancellationToken cancellationToken)
+    {
+        var timeout = UiTimingProfile.Scale(_uiReadinessTimeout);
+        var pollInterval = UiTimingProfile.Scale(
+            _uiReadinessPollInterval);
+
+        // The deadline bounds an unavailable dispatcher; the attempt budget
+        // bounds a responsive UI whose readiness state keeps oscillating.
+        using var deadlineCts =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+        deadlineCts.CancelAfter(timeout);
+        var readinessToken = deadlineCts.Token;
+        var stableSamples = 0;
+
+        try
+        {
+            for (var attempt = 0;
+                 attempt < _uiReadinessMaximumAttempts;
+                 attempt++)
+            {
+                readinessToken.ThrowIfCancellationRequested();
+                var isUiReady = await Dispatcher.UIThread.InvokeAsync(
+                    uiReady,
+                    DispatcherPriority.Background,
+                    readinessToken);
+                stableSamples = isUiReady ? stableSamples + 1 : 0;
+                if (stableSamples >= UiReadinessRequiredStableSamples)
+                    return true;
+
+                await Task.Delay(pollInterval, readinessToken);
+            }
+        }
+        catch (OperationCanceledException)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return false;
     }
 
     private static async Task WaitForRenderPassesAsync(
@@ -207,46 +398,54 @@ internal sealed class MemoryCleanupCoordinator(
         cancellationToken.ThrowIfCancellationRequested();
     }
 
-    private static void ForceMemoryCleanup()
+    private static void CollectMemory(MemoryCleanupCollectionMode mode)
     {
-        GCSettings.LargeObjectHeapCompactionMode =
-            GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(
-            generation: 2,
-            GCCollectionMode.Aggressive,
-            blocking: true,
-            compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(
-            generation: 1,
-            GCCollectionMode.Forced,
-            blocking: false);
-        TrimNativeWorkingSet();
-    }
-
-    private static void TrimNativeWorkingSet()
-    {
-        if (!OperatingSystem.IsWindows())
+        if (mode == MemoryCleanupCollectionMode.None)
             return;
 
-        try
+        if (mode == MemoryCleanupCollectionMode.Aggressive)
         {
-            using var process = Process.GetCurrentProcess();
-            SetProcessWorkingSetSize(
-                process.Handle,
-                minWorkingSetSize: -1,
-                maxWorkingSetSize: -1);
+            GCSettings.LargeObjectHeapCompactionMode =
+                GCLargeObjectHeapCompactionMode.CompactOnce;
+
+            // Released project/search/preview graphs are known garbage. Aggressive mode asks
+            // CoreCLR to compact the LOH and decommit their empty segments instead of keeping
+            // a workload-sized reservation until an unrelated future collection.
+            GC.Collect(
+                generation: GC.MaxGeneration,
+                GCCollectionMode.Aggressive,
+                blocking: true,
+                compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(
+                generation: GC.MaxGeneration,
+                GCCollectionMode.Aggressive,
+                blocking: true,
+                compacting: true);
+            return;
         }
-        catch
-        {
-            // Working-set trimming is optional in sandboxed and packaged apps.
-        }
+
+        GC.Collect(
+            generation: 2,
+            GCCollectionMode.Forced,
+            blocking: false,
+            compacting: false);
+    }
+
+    private void CollectAndTrim(MemoryCleanupCollectionMode mode)
+    {
+        _collect(mode);
+        if (mode == MemoryCleanupCollectionMode.Aggressive)
+            _trimWorkingSet();
     }
 
     private static CancellationTokenSource ReplaceCancellationSource(
-        ref CancellationTokenSource? target)
+        ref CancellationTokenSource? target,
+        CancellationToken linkedToken = default)
     {
-        var next = new CancellationTokenSource();
+        var next = linkedToken.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(linkedToken)
+            : new CancellationTokenSource();
         var previous = Interlocked.Exchange(ref target, next);
         CancelAndDispose(previous);
         return next;
@@ -284,10 +483,4 @@ internal sealed class MemoryCleanupCoordinator(
 
         source.Dispose();
     }
-
-    [DllImport("kernel32.dll")]
-    private static extern bool SetProcessWorkingSetSize(
-        IntPtr process,
-        nint minWorkingSetSize,
-        nint maxWorkingSetSize);
 }

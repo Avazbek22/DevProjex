@@ -154,7 +154,8 @@ public sealed partial class FileSystemScanner
 
     private sealed record EffectiveIgnoreScanDiscovery(
         List<EffectiveIgnoreScanNode> Nodes,
-        IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers);
+        IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers,
+        IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes);
 
     private struct EffectiveIgnoreNodeFileMetrics
     {

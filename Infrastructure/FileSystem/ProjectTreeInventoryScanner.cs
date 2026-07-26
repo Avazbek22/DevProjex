@@ -63,11 +63,28 @@ internal static class ProjectTreeInventoryScanner
 		}
 
 		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
-		var rootGitIgnoreContexts = initialGitIgnoreContexts.EnterDirectory(
+		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
+		var inheritedGitIgnoreContexts = initialGitIgnoreContexts;
+		if (initialGitIgnoreContexts.HasIgnoreRules &&
+		    GitTrackedPathIndexCache.TryLoadNearest(
+			    rootPath,
+			    cancellationToken,
+			    out var inheritedTrackedPathIndex))
+		{
+			discoveredGitTrackedPathIndexes.Add(inheritedTrackedPathIndex);
+			inheritedGitIgnoreContexts = inheritedGitIgnoreContexts.WithTrackedPathIndex(
+				inheritedTrackedPathIndex);
+		}
+
+		var rootGitControlPaths = FindGitControlPaths(rootChildren);
+		var rootGitIgnoreContexts = inheritedGitIgnoreContexts.EnterDirectory(
 			rootPath,
 			directoryRelativePath: string.Empty,
-			FindGitIgnorePath(rootChildren),
-			discoveredGitIgnoreMatchers);
+			rootGitControlPaths.GitIgnorePath,
+			rootGitControlPaths.GitMetadataPath,
+			discoveredGitIgnoreMatchers,
+			discoveredGitTrackedPathIndexes,
+			cancellationToken);
 		var rootDirectoryChildren = AddProjectRootChildren(
 			entries,
 			rootChildren,
@@ -81,7 +98,8 @@ internal static class ProjectTreeInventoryScanner
 				entries,
 				rootAccessDenied,
 				hadAccessDenied,
-				discoveredGitIgnoreMatchers);
+				discoveredGitIgnoreMatchers,
+				discoveredGitTrackedPathIndexes);
 		}
 
 		var subtreeResults = new SubtreeScanResult[rootDirectoryChildren.Count];
@@ -121,14 +139,17 @@ internal static class ProjectTreeInventoryScanner
 
 			MergeSubtree(entries, result);
 			discoveredGitIgnoreMatchers.AddRange(result.DiscoveredGitIgnoreMatchers);
+			discoveredGitTrackedPathIndexes.AddRange(result.DiscoveredGitTrackedPathIndexes);
 		}
 
 		var uniqueMatchers = MergeDiscoveredGitIgnoreMatchers(discoveredGitIgnoreMatchers);
+		var uniqueTrackedPathIndexes = MergeDiscoveredGitTrackedPathIndexes(discoveredGitTrackedPathIndexes);
 		return new ProjectTreeInventorySnapshot(
 			entries,
 			rootAccessDenied,
 			hadAccessDenied,
-			uniqueMatchers);
+			uniqueMatchers,
+			uniqueTrackedPathIndexes);
 	}
 
 	private static List<int> AddProjectRootChildren(
@@ -183,6 +204,7 @@ internal static class ProjectTreeInventoryScanner
 		};
 		var hadAccessDenied = false;
 		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
+		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
 		var pendingDirectories = new Stack<(int Index, ProjectTreeGitIgnoreContexts GitIgnoreContexts)>();
 		pendingDirectories.Push((0, inheritedGitIgnoreContexts));
 
@@ -215,11 +237,15 @@ internal static class ProjectTreeInventoryScanner
 			if (childEntries.Count == 0)
 				continue;
 
+			var gitControlPaths = FindGitControlPaths(childEntries);
 			var gitIgnoreContexts = parentGitIgnoreContexts.EnterDirectory(
 				parent.FullPath,
 				parent.RelativePath,
-				FindGitIgnorePath(childEntries),
-				discoveredGitIgnoreMatchers);
+				gitControlPaths.GitIgnorePath,
+				gitControlPaths.GitMetadataPath,
+				discoveredGitIgnoreMatchers,
+				discoveredGitTrackedPathIndexes,
+				cancellationToken);
 
 			var firstChildIndex = entries.Count;
 			var childDirectoryIndices = new List<int>();
@@ -258,7 +284,8 @@ internal static class ProjectTreeInventoryScanner
 			rootGlobalIndex,
 			entries,
 			hadAccessDenied,
-			discoveredGitIgnoreMatchers);
+			discoveredGitIgnoreMatchers,
+			discoveredGitTrackedPathIndexes);
 	}
 
 	private static void MergeSubtree(
@@ -334,15 +361,22 @@ internal static class ProjectTreeInventoryScanner
 		return entries;
 	}
 
-	private static string? FindGitIgnorePath(IReadOnlyList<FileSystemTreeEntry> entries)
+	private static GitControlPaths FindGitControlPaths(IReadOnlyList<FileSystemTreeEntry> entries)
 	{
+		string? gitIgnorePath = null;
+		string? gitMetadataPath = null;
 		foreach (var entry in entries)
 		{
 			if (!entry.IsDirectory && PathComparer.Default.Equals(entry.Name, ".gitignore"))
-				return entry.FullPath;
+				gitIgnorePath = entry.FullPath;
+			else if (PathComparer.Default.Equals(entry.Name, ".git"))
+				gitMetadataPath = entry.FullPath;
+
+			if (gitIgnorePath is not null && gitMetadataPath is not null)
+				break;
 		}
 
-		return null;
+		return new GitControlPaths(gitIgnorePath, gitMetadataPath);
 	}
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(
@@ -362,6 +396,27 @@ internal static class ProjectTreeInventoryScanner
 			return depth != 0
 				? depth
 				: PathComparer.Default.Compare(left.ScopeRootPath, right.ScopeRootPath);
+		});
+		return merged;
+	}
+
+	private static IReadOnlyList<GitTrackedPathIndex> MergeDiscoveredGitTrackedPathIndexes(
+		IReadOnlyList<GitTrackedPathIndex> indexes)
+	{
+		if (indexes.Count <= 1)
+			return indexes;
+
+		var unique = new Dictionary<string, GitTrackedPathIndex>(PathComparer.Default);
+		foreach (var index in indexes)
+			unique[index.RepositoryRootPath] = index;
+
+		var merged = unique.Values.ToList();
+		merged.Sort(static (left, right) =>
+		{
+			var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
+			return depth != 0
+				? depth
+				: PathComparer.Default.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
 		});
 		return merged;
 	}
@@ -389,7 +444,12 @@ internal static class ProjectTreeInventoryScanner
 		int RootGlobalIndex,
 		List<ProjectTreeInventoryEntry> Entries,
 		bool HadAccessDenied,
-		IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers);
+		IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers,
+		IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes);
+
+	private readonly record struct GitControlPaths(
+		string? GitIgnorePath,
+		string? GitMetadataPath);
 }
 
 internal readonly record struct ProjectTreeGitIgnoreContexts(
@@ -404,30 +464,86 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 		IgnoreRules.GitIgnoreScanContext secondary) =>
 		new(Enabled: true, primary, secondary);
 
+	public bool HasIgnoreRules =>
+		Enabled && (Primary.HasIgnoreRules || Secondary.HasIgnoreRules);
+
+	public ProjectTreeGitIgnoreContexts WithTrackedPathIndex(GitTrackedPathIndex trackedPathIndex) =>
+		this with
+		{
+			Primary = Primary.WithTrackedPathIndex(trackedPathIndex),
+			Secondary = Secondary.WithTrackedPathIndex(trackedPathIndex)
+		};
+
 	public ProjectTreeGitIgnoreContexts EnterDirectory(
 		string directoryPath,
 		string directoryRelativePath,
 		string? gitIgnorePath,
-		List<ScopedGitIgnoreMatcher> discoveredMatchers)
+		string? gitMetadataPath,
+		List<ScopedGitIgnoreMatcher> discoveredMatchers,
+		List<GitTrackedPathIndex> discoveredTrackedPathIndexes,
+		CancellationToken cancellationToken)
 	{
-		if (!Enabled || string.IsNullOrWhiteSpace(gitIgnorePath))
+		if (!Enabled)
 			return this;
 
-		var primaryContainsScope = Primary.ContainsScope(directoryPath);
-		var secondaryContainsScope = Secondary.ContainsScope(directoryPath);
+		var primaryContext = Primary;
+		var secondaryContext = Secondary;
+		ScopedGitIgnoreMatcher? matcher = null;
+		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
+			GitIgnoreMatcherFileCache.TryLoad(directoryPath, gitIgnorePath, out matcher);
 
-		if (!GitIgnoreMatcherFileCache.TryLoad(directoryPath, gitIgnorePath, out var matcher))
-			return this;
+		var requiresTrackedPathIndex =
+			primaryContext.HasIgnoreRules ||
+			secondaryContext.HasIgnoreRules ||
+			matcher is not null &&
+			!ReferenceEquals(matcher.Matcher, GitIgnoreMatcher.Empty);
+		var reachedRepositoryBoundary = !string.IsNullOrWhiteSpace(gitMetadataPath);
+		if (requiresTrackedPathIndex && (reachedRepositoryBoundary || matcher is not null))
+		{
+			GitTrackedPathIndex? trackedPathIndex = null;
+			var loadedTrackedPathIndex = reachedRepositoryBoundary
+				? GitTrackedPathIndexCache.TryLoad(
+					directoryPath,
+					gitMetadataPath!,
+					cancellationToken,
+					out trackedPathIndex)
+				: GitTrackedPathIndexCache.TryLoadNearest(
+					directoryPath,
+					cancellationToken,
+					out trackedPathIndex);
+			if (loadedTrackedPathIndex)
+			{
+				if (!primaryContext.ContainsTrackedPathIndex(trackedPathIndex.RepositoryRootPath) ||
+				    !secondaryContext.ContainsTrackedPathIndex(trackedPathIndex.RepositoryRootPath))
+				{
+					discoveredTrackedPathIndexes.Add(trackedPathIndex);
+				}
 
+				primaryContext = primaryContext.WithTrackedPathIndex(trackedPathIndex);
+				secondaryContext = secondaryContext.WithTrackedPathIndex(trackedPathIndex);
+			}
+		}
+
+		if (matcher is null)
+		{
+			return this with
+			{
+				Primary = primaryContext,
+				Secondary = secondaryContext
+			};
+		}
+
+		var primaryContainsScope = primaryContext.ContainsScope(directoryPath);
+		var secondaryContainsScope = secondaryContext.ContainsScope(directoryPath);
 		discoveredMatchers.Add(matcher);
 		return this with
 		{
 			Primary = primaryContainsScope
-				? Primary
-				: Primary.WithScope(matcher, directoryRelativePath),
+				? primaryContext
+				: primaryContext.WithScope(matcher, directoryRelativePath),
 			Secondary = secondaryContainsScope
-				? Secondary
-				: Secondary.WithScope(matcher, directoryRelativePath)
+				? secondaryContext
+				: secondaryContext.WithScope(matcher, directoryRelativePath)
 		};
 	}
 }

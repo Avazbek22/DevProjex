@@ -153,6 +153,7 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 		var root = document.RootElement;
 		var summary = root.GetProperty("summary");
 		var steps = ReadStepDurations(root);
+		var retainedMemory = ReadRetainedMemory(root);
 
 		return new CommandLineUiBenchmarkSessionSnapshot(
 			TargetPath: root.GetProperty("targetPath").GetString() ?? string.Empty,
@@ -174,11 +175,13 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 			Gen2Collections: ReadInt(summary, "gen2Collections"),
 			ProjectLoadMilliseconds: ReadFirstEventDuration(root, "project.load"),
 			PreviewOpenMilliseconds: steps.GetValueOrDefault("preview.open"),
+			PreviewFirstContentMilliseconds: ReadPreviewFirstContentDelay(root),
 			PreviewCloseMilliseconds: steps.GetValueOrDefault("preview.close"),
 			SearchMilliseconds: steps.GetValueOrDefault("search.apply") ?? ReadFirstEventDuration(root, "tree.search"),
 			FilterMilliseconds: steps.GetValueOrDefault("filter.apply") ?? ReadFirstEventDuration(root, "tree.filter"),
 			IdleSettleMilliseconds: steps.GetValueOrDefault("idle.settle"),
-			StepDurations: steps);
+			StepDurations: steps,
+			RetainedMemory: retainedMemory);
 	}
 
 	private static Dictionary<string, double?> ReadStepDurations(JsonElement root)
@@ -226,6 +229,147 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 
 		return null;
 	}
+
+	private static double? ReadPreviewFirstContentDelay(JsonElement root)
+	{
+		if (!root.TryGetProperty("events", out var events) ||
+		    events.ValueKind != JsonValueKind.Array)
+		{
+			return null;
+		}
+
+		long? previewOpenedAt = null;
+		foreach (var item in events.EnumerateArray())
+		{
+			if (!item.TryGetProperty("name", out var name))
+				continue;
+
+			var eventName = name.GetString();
+			if (previewOpenedAt is null &&
+			    string.Equals(eventName, "preview.mode.changed", StringComparison.Ordinal) &&
+			    item.TryGetProperty("previewVisible", out var visible) &&
+			    visible.ValueKind == JsonValueKind.True)
+			{
+				previewOpenedAt = ReadLong(item, "atMilliseconds");
+				continue;
+			}
+
+			if (previewOpenedAt is not null &&
+			    string.Equals(eventName, "preview.content.published", StringComparison.Ordinal))
+			{
+				return Math.Max(
+					0,
+					ReadLong(item, "atMilliseconds") - previewOpenedAt.Value);
+			}
+		}
+
+		return null;
+	}
+
+	private static CommandLineUiBenchmarkRetainedMemory? ReadRetainedMemory(
+		JsonElement root)
+	{
+		var postCloseAt = ReadBenchmarkStepCompletedAt(
+			root,
+			"preview.close");
+		var endOfIdleAt = ReadBenchmarkStepCompletedAt(
+			root,
+			"idle.settle");
+		if (postCloseAt is null ||
+		    endOfIdleAt is null ||
+		    !root.TryGetProperty("samples", out var samples) ||
+		    samples.ValueKind != JsonValueKind.Array)
+		{
+			return null;
+		}
+
+		JsonElement? postCloseSample = null;
+		JsonElement? endOfIdleSample = null;
+		var postCloseSampleAt = long.MaxValue;
+		var endOfIdleSampleAt = long.MinValue;
+
+		foreach (var sample in samples.EnumerateArray())
+		{
+			var sampleAt = ReadLong(sample, "atMilliseconds");
+			if (sampleAt >= postCloseAt.Value &&
+			    sampleAt <= postCloseSampleAt)
+			{
+				postCloseSample = sample;
+				postCloseSampleAt = sampleAt;
+			}
+
+			if (sampleAt >= endOfIdleAt.Value &&
+			    sampleAt >= endOfIdleSampleAt)
+			{
+				endOfIdleSample = sample;
+				endOfIdleSampleAt = sampleAt;
+			}
+		}
+
+		var postClose = postCloseSample is null
+			? null
+			: ReadMemorySnapshot(postCloseSample.Value);
+		var endOfIdle = endOfIdleSample is null
+			? null
+			: ReadMemorySnapshot(endOfIdleSample.Value);
+		return new CommandLineUiBenchmarkRetainedMemory(
+			PostClose: postClose,
+			EndOfIdle: endOfIdle,
+			Rebound: postClose is not null && endOfIdle is not null
+				? CommandLineUiBenchmarkMemorySnapshot.Subtract(
+					endOfIdle,
+					postClose)
+				: null);
+	}
+
+	private static long? ReadBenchmarkStepCompletedAt(
+		JsonElement root,
+		string stepName)
+	{
+		if (!root.TryGetProperty("events", out var events) ||
+		    events.ValueKind != JsonValueKind.Array)
+		{
+			return null;
+		}
+
+		foreach (var item in events.EnumerateArray())
+		{
+			if (!item.TryGetProperty("name", out var name) ||
+			    !string.Equals(
+				    name.GetString(),
+				    "ui.benchmark.step",
+				    StringComparison.Ordinal) ||
+			    !item.TryGetProperty("stepName", out var actualStepName) ||
+			    !string.Equals(
+				    actualStepName.GetString(),
+				    stepName,
+				    StringComparison.Ordinal))
+			{
+				continue;
+			}
+
+			return ReadLong(item, "atMilliseconds");
+		}
+
+		return null;
+	}
+
+	private static CommandLineUiBenchmarkMemorySnapshot ReadMemorySnapshot(
+		JsonElement sample) =>
+		new(
+			WorkingSetBytes: ReadLong(sample, "workingSetBytes"),
+			PrivateMemoryBytes: ReadLong(sample, "privateMemoryBytes"),
+			ManagedMemoryBytes: ReadLong(sample, "managedMemoryBytes"),
+			ManagedHeapSizeBytes: ReadLong(
+				sample,
+				"managedHeapSizeBytes"),
+			ManagedFragmentedBytes: ReadLong(
+				sample,
+				"managedFragmentedBytes"),
+			ManagedCommittedBytes: ReadLong(
+				sample,
+				"managedCommittedBytes"),
+			MemoryLoadBytes: ReadLong(sample, "memoryLoadBytes"));
 
 	private static CommandLineBenchmarkRunConfiguration ResolveRunConfiguration()
 	{
@@ -379,9 +523,12 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 			$"  median wall: {FormatMilliseconds(report.ColdUiProcess.Summary.MedianWallMilliseconds)}",
 			$"  avg project load: {FormatMilliseconds(report.ColdUiProcess.Summary.AvgProjectLoadMilliseconds)}",
 			$"  avg preview open: {FormatMilliseconds(report.ColdUiProcess.Summary.AvgPreviewOpenMilliseconds)}",
+			$"  avg preview first content: {FormatMilliseconds(report.ColdUiProcess.Summary.AvgPreviewFirstContentMilliseconds)}",
 			$"  avg search: {FormatMilliseconds(report.ColdUiProcess.Summary.AvgSearchMilliseconds)}",
 			$"  avg filter: {FormatMilliseconds(report.ColdUiProcess.Summary.AvgFilterMilliseconds)}",
 			$"  peak memory: {FormatMegabytes(report.ColdUiProcess.Summary.PeakWorkingSetBytes)}",
+			$"  end-of-idle retained: {FormatMegabytes(report.ColdUiProcess.Summary.AverageRetainedMemory?.EndOfIdle?.WorkingSetBytes)}",
+			$"  post-close rebound: {FormatMegabytes(report.ColdUiProcess.Summary.AverageRetainedMemory?.Rebound?.WorkingSetBytes)}",
 			string.Empty,
 			"Result:",
 			$"  {report.OutputPath}"
@@ -511,11 +658,13 @@ internal sealed record CommandLineUiBenchmarkSummary(
 	long? PeakManagedMemoryBytes,
 	double? AvgProjectLoadMilliseconds,
 	double? AvgPreviewOpenMilliseconds,
+	double? AvgPreviewFirstContentMilliseconds,
 	double? AvgSearchMilliseconds,
 	double? AvgFilterMilliseconds,
 	double? AvgIdleSettleMilliseconds,
 	double? AvgSessionCpuPercent,
-	double? PeakSessionCpuPercent)
+	double? PeakSessionCpuPercent,
+	CommandLineUiBenchmarkRetainedMemory? AverageRetainedMemory)
 {
 	public static CommandLineUiBenchmarkSummary FromRuns(IReadOnlyList<CommandLineUiBenchmarkProcessRun> runs)
 	{
@@ -537,11 +686,18 @@ internal sealed record CommandLineUiBenchmarkSummary(
 			PeakManagedMemoryBytes: MaxNullable(successfulRuns.Select(static run => (long?)run.Session!.PeakManagedMemoryBytes)),
 			AvgProjectLoadMilliseconds: AverageNullable(successfulRuns.Select(static run => run.Session!.ProjectLoadMilliseconds)),
 			AvgPreviewOpenMilliseconds: AverageNullable(successfulRuns.Select(static run => run.Session!.PreviewOpenMilliseconds)),
+			AvgPreviewFirstContentMilliseconds: AverageNullable(successfulRuns.Select(static run => run.Session!.PreviewFirstContentMilliseconds)),
 			AvgSearchMilliseconds: AverageNullable(successfulRuns.Select(static run => run.Session!.SearchMilliseconds)),
 			AvgFilterMilliseconds: AverageNullable(successfulRuns.Select(static run => run.Session!.FilterMilliseconds)),
 			AvgIdleSettleMilliseconds: AverageNullable(successfulRuns.Select(static run => run.Session!.IdleSettleMilliseconds)),
 			AvgSessionCpuPercent: AverageNullable(successfulRuns.Select(static run => (double?)run.Session!.AverageCpuPercent)),
-			PeakSessionCpuPercent: MaxNullableDouble(successfulRuns.Select(static run => (double?)run.Session!.PeakCpuPercent)));
+			PeakSessionCpuPercent: MaxNullableDouble(successfulRuns.Select(static run => (double?)run.Session!.PeakCpuPercent)),
+			AverageRetainedMemory: CommandLineUiBenchmarkRetainedMemory.Average(
+				successfulRuns
+					.Select(static run => run.Session!.RetainedMemory)
+					.Where(static retained => retained is not null)
+					.Select(static retained => retained!)
+					.ToArray()));
 	}
 
 	private static double Average(IReadOnlyList<double> values) =>
@@ -614,8 +770,103 @@ internal sealed record CommandLineUiBenchmarkSessionSnapshot(
 	int Gen2Collections,
 	double? ProjectLoadMilliseconds,
 	double? PreviewOpenMilliseconds,
+	double? PreviewFirstContentMilliseconds,
 	double? PreviewCloseMilliseconds,
 	double? SearchMilliseconds,
 	double? FilterMilliseconds,
 	double? IdleSettleMilliseconds,
-	IReadOnlyDictionary<string, double?> StepDurations);
+	IReadOnlyDictionary<string, double?> StepDurations,
+	CommandLineUiBenchmarkRetainedMemory? RetainedMemory);
+
+internal sealed record CommandLineUiBenchmarkRetainedMemory(
+	CommandLineUiBenchmarkMemorySnapshot? PostClose,
+	CommandLineUiBenchmarkMemorySnapshot? EndOfIdle,
+	CommandLineUiBenchmarkMemorySnapshot? Rebound)
+{
+	public static CommandLineUiBenchmarkRetainedMemory? Average(
+		IReadOnlyList<CommandLineUiBenchmarkRetainedMemory> values)
+	{
+		if (values.Count == 0)
+			return null;
+
+		return new CommandLineUiBenchmarkRetainedMemory(
+			PostClose: CommandLineUiBenchmarkMemorySnapshot.Average(
+				values
+					.Select(static value => value.PostClose)
+					.Where(static value => value is not null)
+					.Select(static value => value!)
+					.ToArray()),
+			EndOfIdle: CommandLineUiBenchmarkMemorySnapshot.Average(
+				values
+					.Select(static value => value.EndOfIdle)
+					.Where(static value => value is not null)
+					.Select(static value => value!)
+					.ToArray()),
+			Rebound: CommandLineUiBenchmarkMemorySnapshot.Average(
+				values
+					.Select(static value => value.Rebound)
+					.Where(static value => value is not null)
+					.Select(static value => value!)
+					.ToArray()));
+	}
+}
+
+internal sealed record CommandLineUiBenchmarkMemorySnapshot(
+	long WorkingSetBytes,
+	long PrivateMemoryBytes,
+	long ManagedMemoryBytes,
+	long ManagedHeapSizeBytes,
+	long ManagedFragmentedBytes,
+	long ManagedCommittedBytes,
+	long MemoryLoadBytes)
+{
+	public static CommandLineUiBenchmarkMemorySnapshot Subtract(
+		CommandLineUiBenchmarkMemorySnapshot left,
+		CommandLineUiBenchmarkMemorySnapshot right) =>
+		new(
+			WorkingSetBytes:
+				left.WorkingSetBytes - right.WorkingSetBytes,
+			PrivateMemoryBytes:
+				left.PrivateMemoryBytes - right.PrivateMemoryBytes,
+			ManagedMemoryBytes:
+				left.ManagedMemoryBytes - right.ManagedMemoryBytes,
+			ManagedHeapSizeBytes:
+				left.ManagedHeapSizeBytes - right.ManagedHeapSizeBytes,
+			ManagedFragmentedBytes:
+				left.ManagedFragmentedBytes - right.ManagedFragmentedBytes,
+			ManagedCommittedBytes:
+				left.ManagedCommittedBytes - right.ManagedCommittedBytes,
+			MemoryLoadBytes:
+				left.MemoryLoadBytes - right.MemoryLoadBytes);
+
+	public static CommandLineUiBenchmarkMemorySnapshot? Average(
+		IReadOnlyList<CommandLineUiBenchmarkMemorySnapshot> values)
+	{
+		if (values.Count == 0)
+			return null;
+
+		return new CommandLineUiBenchmarkMemorySnapshot(
+			WorkingSetBytes: Average(
+				values.Select(static value => value.WorkingSetBytes)),
+			PrivateMemoryBytes: Average(
+				values.Select(static value => value.PrivateMemoryBytes)),
+			ManagedMemoryBytes: Average(
+				values.Select(static value => value.ManagedMemoryBytes)),
+			ManagedHeapSizeBytes: Average(
+				values.Select(static value => value.ManagedHeapSizeBytes)),
+			ManagedFragmentedBytes: Average(
+				values.Select(static value => value.ManagedFragmentedBytes)),
+			ManagedCommittedBytes: Average(
+				values.Select(static value => value.ManagedCommittedBytes)),
+			MemoryLoadBytes: Average(
+				values.Select(static value => value.MemoryLoadBytes)));
+	}
+
+	private static long Average(IEnumerable<long> values)
+	{
+		var actual = values.ToArray();
+		return (long)Math.Round(
+			actual.Average(),
+			MidpointRounding.AwayFromZero);
+	}
+}

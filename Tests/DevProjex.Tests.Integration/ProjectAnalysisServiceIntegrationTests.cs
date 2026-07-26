@@ -94,6 +94,30 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task AnalyzeAsync_AllExtensionsWithIgnoreOff_PreservesExtensionlessOptionNames()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("LICENSE", "license\n");
+		temp.CreateFile("README", "readme\n");
+		temp.CreateFile("notes.readme", "notes\n");
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		var service = CreateService();
+
+		var report = await service.AnalyzeAsync(
+			new ProjectAnalysisRequest(
+				RootPath: temp.Path,
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(report.Inventory.AvailableExtensions, report.Selection.SelectedExtensions);
+		Assert.Contains("LICENSE", report.Selection.SelectedExtensions);
+		Assert.Contains("README", report.Selection.SelectedExtensions);
+		Assert.Contains(".readme", report.Selection.SelectedExtensions);
+		Assert.DoesNotContain(".LICENSE", report.Selection.SelectedExtensions);
+		Assert.Equal(4, report.Inventory.Tree.FileCount);
+	}
+
+	[Fact]
 	public async Task AnalyzeAsync_UnknownRequestedRootAndExtension_AreReportedAsWarnings()
 	{
 		using var temp = new TemporaryDirectory();

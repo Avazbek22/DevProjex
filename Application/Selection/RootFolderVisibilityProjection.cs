@@ -9,23 +9,19 @@ public static class RootFolderVisibilityProjection
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (candidateRootFolders.Count == 0 || (!rules.IsGitIgnoreTraversalEnabled && !rules.UseSmartIgnore))
+        if (candidateRootFolders.Count == 0 || !rules.UseSmartIgnore)
             return candidateRootFolders;
 
+        // The filesystem scanner already applies index-aware Git rules before producing
+        // candidate roots. This second projection exists only for Smart Ignore because its
+        // project scopes can change after the final root selection becomes known.
         List<string>? visibleRootFolders = null;
-        var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
         for (var index = 0; index < candidateRootFolders.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var name = candidateRootFolders[index];
             var fullPath = Path.Combine(rootPath, name);
-            var gitIgnore = rules.IsGitIgnoreTraversalEnabled
-                ? gitIgnoreContext.Evaluate(fullPath, name, isDirectory: true, name)
-                : IgnoreRules.GitIgnoreEvaluation.NotIgnored;
-            var isControllerIgnored =
-                (gitIgnore.IsIgnored && !gitIgnore.ShouldTraverseIgnoredDirectory) ||
-                rules.IsSmartIgnoredDirectory(fullPath, name);
-            if (!isControllerIgnored)
+            if (!rules.IsSmartIgnoredDirectory(fullPath, name))
             {
                 visibleRootFolders?.Add(name);
                 continue;

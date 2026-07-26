@@ -547,6 +547,42 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Fact]
+	public void Parse_ReadsPreviewSearchRetentionBenchmarkScript()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+			CommandLineOptionTokens.SessionMetricsOutput, "/tmp/session.json",
+			CommandLineOptionTokens.UiBenchmarkScript, "preview-search-retention"
+		]);
+
+		AssertValid(result);
+		Assert.Equal(
+			StartupUiBenchmarkScript.PreviewSearchRetention,
+			result.Options.UiBenchmarkScript.Script);
+		Assert.Contains(
+			"preview-search-retention",
+			result.Options.ToArguments());
+	}
+
+	[Fact]
+	public void Parse_ReadsProjectMemoryLifecycleBenchmarkScript()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.SessionMetrics, "/tmp/root",
+			CommandLineOptionTokens.SessionMetricsOutput, "/tmp/session.json",
+			CommandLineOptionTokens.UiBenchmarkScript, "project-memory-lifecycle"
+		]);
+
+		AssertValid(result);
+		Assert.Equal(
+			StartupUiBenchmarkScript.ProjectMemoryLifecycle,
+			result.Options.UiBenchmarkScript.Script);
+		Assert.Contains(
+			"project-memory-lifecycle",
+			result.Options.ToArguments());
+	}
+
+	[Fact]
 	public void Parse_RejectsInternalUiBenchmarkScriptWithoutSessionMetrics()
 	{
 		var result = CommandLineOptions.Parse([CommandLineOptionTokens.UiBenchmarkScript, "standard"]);

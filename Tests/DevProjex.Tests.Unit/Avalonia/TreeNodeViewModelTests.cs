@@ -165,6 +165,32 @@ public sealed class TreeNodeViewModelTests
     }
 
     [Fact]
+    public void ForEachRealizedDescendant_DoesNotMaterializeLazyChildren()
+    {
+        var childDescriptor = CreateDescriptor("Child");
+        var rootDescriptor = CreateDescriptor("Root", childDescriptor);
+        var factoryCalls = 0;
+        var root = new TreeNodeViewModel(
+            rootDescriptor,
+            null,
+            null,
+            parent =>
+            {
+                factoryCalls++;
+                return [new TreeNodeViewModel(childDescriptor, parent, null)];
+            });
+        var visited = new List<string>();
+
+        TreeNodeViewModel.ForEachRealizedDescendant(
+            new List<TreeNodeViewModel> { root },
+            node => visited.Add(node.DisplayName));
+
+        Assert.Equal(["Root"], visited);
+        Assert.Equal(0, factoryCalls);
+        Assert.False(root.AreChildrenRealized);
+    }
+
+    [Fact]
     public void EnsureParentsExpanded_SetsAncestors()
     {
         var root = CreateTree();
@@ -519,11 +545,11 @@ public sealed class TreeNodeViewModelTests
         var itemsSource = leaf.ChildItemsSource;
 
         Assert.Empty(itemsSource);
-        Assert.NotSame(leaf.Children, itemsSource);
+        Assert.Same(leaf.Children, itemsSource);
     }
 
     [Fact]
-    public void ChildItemsSource_ReturnsSameEmptyInstance_ForDifferentLeafNodes()
+    public void ChildItemsSource_ReturnsStableCollectionOwnedByEachNode()
     {
         var leaf1 = CreateNode("Leaf1");
         var leaf2 = CreateNode("Leaf2");
@@ -531,8 +557,9 @@ public sealed class TreeNodeViewModelTests
         var source1 = leaf1.ChildItemsSource;
         var source2 = leaf2.ChildItemsSource;
 
-        // Both should return the same static empty array instance
-        Assert.Same(source1, source2);
+        Assert.Same(source1, leaf1.ChildItemsSource);
+        Assert.Same(source2, leaf2.ChildItemsSource);
+        Assert.NotSame(source1, source2);
     }
 
     [Fact]
@@ -572,6 +599,31 @@ public sealed class TreeNodeViewModelTests
 
         Assert.False(root.HasChildren);
         Assert.Empty(root.Children);
+    }
+
+    [Fact]
+    public void ClearRecursive_ClearsPublishedChildItemSourcesInPlace_ForDeepTree()
+    {
+        const int depth = 4_096;
+        var root = CreateNode("Root");
+        var current = root;
+        var publishedSources = new List<IList<TreeNodeViewModel>>(depth);
+
+        for (var level = 0; level < depth; level++)
+        {
+            var child = new TreeNodeViewModel(CreateDescriptor($"Node{level}"), current, null);
+            current.Children.Add(child);
+            publishedSources.Add(Assert.IsAssignableFrom<IList<TreeNodeViewModel>>(current.ChildItemsSource));
+            current = child;
+        }
+
+        var rootItemsSource = publishedSources[0];
+
+        root.ClearRecursive();
+
+        Assert.Same(rootItemsSource, root.Children);
+        Assert.All(publishedSources, Assert.Empty);
+        Assert.False(root.HasChildren);
     }
 
     [Fact]
@@ -619,19 +671,30 @@ public sealed class TreeNodeViewModelTests
     }
 
     [Fact]
-    public void ChildItemsSource_RealizesLazyChildrenOnDemand()
+    public void ChildItemsSource_DoesNotRealizeLazyChildrenUntilExpanded()
     {
         var descriptor = CreateDescriptor(
             "Root",
             new TreeNodeDescriptor("Child", @"C:\Root\Child", true, false, "icon", []));
-
-        var node = new TreeNodeViewModel(descriptor, null, null, BuildChildrenFromDescriptor);
+        var factoryCallCount = 0;
+        var node = new TreeNodeViewModel(descriptor, null, null, parent =>
+        {
+            factoryCallCount++;
+            return BuildChildrenFromDescriptor(parent);
+        });
 
         var itemsSource = node.ChildItemsSource.ToList();
 
-        Assert.Single(itemsSource);
-        Assert.Equal("Child", itemsSource[0].DisplayName);
+        Assert.Empty(itemsSource);
+        Assert.Equal(0, factoryCallCount);
+        Assert.False(node.AreChildrenRealized);
+
+        node.IsExpanded = true;
+
+        Assert.Equal(1, factoryCallCount);
         Assert.Single(node.Children);
+        Assert.Equal("Child", node.Children[0].DisplayName);
+        Assert.Same(node.Children, node.ChildItemsSource);
     }
 
     [Fact]
@@ -706,6 +769,254 @@ public sealed class TreeNodeViewModelTests
 
         Assert.Equal(0, factoryCallCount);
         Assert.Equal(new[] { root.FullPath }, selected);
+    }
+
+    [Fact]
+    public void SetExpandedRecursive_CollapseDoesNotMaterializeLazyChildren()
+    {
+        var leafDescriptor = new TreeNodeDescriptor(
+            "Leaf",
+            @"C:\Root\Child\Leaf",
+            false,
+            false,
+            "icon",
+            []);
+        var childDescriptor = new TreeNodeDescriptor(
+            "Child",
+            @"C:\Root\Child",
+            true,
+            false,
+            "icon",
+            [leafDescriptor]);
+        var factoryCallCount = 0;
+        var root = new TreeNodeViewModel(
+            CreateDescriptor("Root", childDescriptor),
+            null,
+            null,
+            parent =>
+            {
+                factoryCallCount++;
+                return parent.Descriptor.Children
+                    .Select(child => new TreeNodeViewModel(
+                        child,
+                        parent,
+                        null,
+                        _ =>
+                        {
+                            factoryCallCount++;
+                            return [];
+                        }))
+                    .ToList();
+            });
+
+        root.SetExpandedRecursive(false);
+
+        Assert.Equal(0, factoryCallCount);
+        Assert.False(root.AreChildrenRealized);
+    }
+
+    [Fact]
+    public void SetExpandedRecursive_CollapseVisitsRealizedNodesWithoutRealizingTheirLazyChildren()
+    {
+        var leafDescriptor = new TreeNodeDescriptor(
+            "Leaf",
+            @"C:\Root\Child\Leaf",
+            false,
+            false,
+            "icon",
+            []);
+        var childDescriptor = new TreeNodeDescriptor(
+            "Child",
+            @"C:\Root\Child",
+            true,
+            false,
+            "icon",
+            [leafDescriptor]);
+        var nestedFactoryCallCount = 0;
+        var root = new TreeNodeViewModel(
+            CreateDescriptor("Root", childDescriptor),
+            null,
+            null,
+            parent =>
+            [
+                new TreeNodeViewModel(
+                    childDescriptor,
+                    parent,
+                    null,
+                    _ =>
+                    {
+                        nestedFactoryCallCount++;
+                        return [];
+                    })
+            ]);
+        root.IsExpanded = true;
+        var child = Assert.Single(root.Children);
+        Assert.False(child.AreChildrenRealized);
+        Assert.Equal(0, nestedFactoryCallCount);
+
+        root.SetExpandedRecursive(false);
+
+        Assert.False(root.IsExpanded);
+        Assert.False(child.IsExpanded);
+        Assert.False(child.AreChildrenRealized);
+        Assert.Equal(0, nestedFactoryCallCount);
+    }
+
+    [Fact]
+    public void TryReleaseChildrenToLazyState_KeepsExpanderMetadataAndCanRematerialize()
+    {
+        var childDescriptor = new TreeNodeDescriptor(
+            "Child",
+            @"C:\Root\Child",
+            true,
+            false,
+            "icon",
+            []);
+        var root = new TreeNodeViewModel(
+            CreateDescriptor("Root", childDescriptor),
+            null,
+            null,
+            BuildChildrenFromDescriptor);
+        Assert.Single(root.Children);
+        Assert.True(root.TryReleaseChildrenToLazyState());
+        Assert.False(root.AreChildrenRealized);
+        Assert.Empty(root.ChildItemsSource);
+        Assert.True(root.HasChildren);
+
+        Assert.Single(root.Children);
+        Assert.True(root.AreChildrenRealized);
+    }
+
+    [Fact]
+    public void TryReleaseChildrenToLazyState_PreservesOnlyCheckedBranches()
+    {
+        var checkedDescriptor = new TreeNodeDescriptor(
+            "Checked",
+            @"C:\Root\Checked",
+            true,
+            false,
+            "icon",
+            []);
+        var uncheckedDescriptor = new TreeNodeDescriptor(
+            "Unchecked",
+            @"C:\Root\Unchecked",
+            true,
+            false,
+            "icon",
+            []);
+        var root = new TreeNodeViewModel(
+            CreateDescriptor("Root", checkedDescriptor, uncheckedDescriptor),
+            null,
+            null,
+            BuildChildrenFromDescriptor);
+        root.Children[0].IsChecked = true;
+
+        Assert.True(root.TryReleaseChildrenToLazyState());
+        Assert.False(root.AreChildrenRealized);
+
+        var realized = new List<TreeNodeViewModel>();
+        TreeNodeViewModel.ForEachRealizedDescendant([root], realized.Add);
+        Assert.Equal(2, realized.Count);
+        Assert.Equal("Checked", realized[1].DisplayName);
+
+        var selectedPaths = new HashSet<string>(PathComparer.Default);
+        root.CollectCheckedPaths(selectedPaths);
+        Assert.Equal([@"C:\Root\Checked"], selectedPaths);
+
+        root.IsExpanded = true;
+        Assert.Equal(2, root.Children.Count);
+        Assert.True(root.Children[0].IsChecked);
+        Assert.False(root.Children[1].IsChecked);
+    }
+
+    [Fact]
+    public void TryReleaseChildrenToLazyState_KeepsOnlySelectedPathAndReusesIt()
+    {
+        var selectedDescriptor = new TreeNodeDescriptor(
+            "Selected",
+            @"C:\Root\Selected",
+            false,
+            false,
+            "icon",
+            []);
+        var siblingDescriptor = new TreeNodeDescriptor(
+            "Sibling",
+            @"C:\Root\Sibling",
+            false,
+            false,
+            "icon",
+            []);
+        var root = new TreeNodeViewModel(
+            CreateDescriptor("Root", selectedDescriptor, siblingDescriptor),
+            null,
+            null,
+            BuildChildrenFromDescriptor);
+        var selected = root.Children[0];
+        Assert.True(root.TryReleaseChildrenToLazyState(selected));
+
+        var retainedNodes = new List<TreeNodeViewModel>();
+        TreeNodeViewModel.ForEachRealizedDescendant(
+            [root],
+            retainedNodes.Add);
+        Assert.Equal([root, selected], retainedNodes);
+
+        root.IsExpanded = true;
+        Assert.Equal(2, root.Children.Count);
+        Assert.Same(selected, root.Children[0]);
+    }
+
+    [Fact]
+    public void TryReleaseChildrenToLazyState_PreservesMultipleCheckedChildrenAcrossRematerialization()
+    {
+        var firstDescriptor = new TreeNodeDescriptor(
+            "First",
+            @"C:\Root\First",
+            false,
+            false,
+            "icon",
+            []);
+        var middleDescriptor = new TreeNodeDescriptor(
+            "Middle",
+            @"C:\Root\Middle",
+            false,
+            false,
+            "icon",
+            []);
+        var lastDescriptor = new TreeNodeDescriptor(
+            "Last",
+            @"C:\Root\Last",
+            false,
+            false,
+            "icon",
+            []);
+        var root = new TreeNodeViewModel(
+            CreateDescriptor(
+                "Root",
+                firstDescriptor,
+                middleDescriptor,
+                lastDescriptor),
+            null,
+            null,
+            BuildChildrenFromDescriptor);
+        root.Children[0].IsChecked = true;
+        root.Children[2].IsChecked = true;
+
+        Assert.True(root.TryReleaseChildrenToLazyState());
+        Assert.False(root.AreChildrenRealized);
+
+        var checkedPaths = new HashSet<string>(PathComparer.Default);
+        root.CollectCheckedPaths(checkedPaths);
+        Assert.Equal(
+            new HashSet<string>(
+                [firstDescriptor.FullPath, lastDescriptor.FullPath],
+                PathComparer.Default),
+            checkedPaths);
+
+        root.IsExpanded = true;
+        Assert.Equal(3, root.Children.Count);
+        Assert.True(root.Children[0].IsChecked);
+        Assert.False(root.Children[1].IsChecked);
+        Assert.True(root.Children[2].IsChecked);
     }
 
     #endregion

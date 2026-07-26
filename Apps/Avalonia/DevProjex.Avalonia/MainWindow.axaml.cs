@@ -380,6 +380,7 @@ public partial class MainWindow : Window
         IReadOnlySet<string> selectedPaths,
         string? currentPath,
         TreeNodeDescriptor? currentTreeRoot,
+        IReadOnlyList<string>? currentTreeOrderedFilePaths,
         ExportPathPresentation? pathPresentation,
         string noTextContentText,
         string noCheckedFilesText,
@@ -391,6 +392,7 @@ public partial class MainWindow : Window
             selectedPaths,
             currentPath,
             currentTreeRoot,
+            currentTreeOrderedFilePaths,
             pathPresentation,
             noTextContentText,
             noCheckedFilesText,
@@ -477,9 +479,6 @@ public partial class MainWindow : Window
 
     private void InvalidatePreviewCache()
         => _previewSurfaceController.InvalidateCache();
-
-    private static bool ShouldForcePreviewMemoryCleanup(long textLength, int lineCount) =>
-        PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(textLength, lineCount);
 
 
     private void OnExpandAll(object? sender, RoutedEventArgs e)
@@ -589,15 +588,19 @@ public partial class MainWindow : Window
     private void CancelBackgroundMemoryCleanup()
         => _memoryCleanup.CancelBackground();
 
-    private void ScheduleSearchMemoryCleanupAfterRender()
-        => _memoryCleanup.ScheduleSearchAfterRender();
+    private void CancelAllMemoryCleanup()
+        => _memoryCleanup.CancelAll();
 
-    private void SchedulePreviewMemoryCleanup(bool force)
-        => _memoryCleanup.SchedulePreview(force, MemoryCleanupReason.PreviewClose);
+    private void OnWindowPointerPressedForMemoryCleanup(
+        object? sender,
+        PointerPressedEventArgs e)
+        => CancelAllMemoryCleanup();
 
-    private void SchedulePreviewRebuildMemoryCleanup(bool force)
+    private void SchedulePreviewMemoryCleanup()
+        => _memoryCleanup.SchedulePreview(MemoryCleanupReason.PreviewClose);
+
+    private void SchedulePreviewRebuildMemoryCleanup()
         => _memoryCleanup.SchedulePreview(
-            force,
             MemoryCleanupReason.PreviewRebuildCompleted);
     private async Task WaitForTreeRenderStabilizationAsync(CancellationToken cancellationToken)
     {
@@ -1007,13 +1010,10 @@ public partial class MainWindow : Window
         if (_treeView is not null)
         {
             _treeView.SelectedItem = null;
-            var savedItemTemplate = _treeView.ItemTemplate;
-            _treeView.ItemTemplate = null;
             _treeView.ItemsSource = null;
             _treeView.InvalidateMeasure();
             _treeView.InvalidateArrange();
             _treeView.InvalidateVisual();
-            _treeView.ItemTemplate = savedItemTemplate;
         }
 
         // Recursively clear all tree nodes to break circular references and release memory
@@ -1042,19 +1042,11 @@ public partial class MainWindow : Window
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
 
-        // A small project is cheaper to leave to generational GC. Forcing Gen2 here and then
-        // again after the new load used to create two avoidable pauses on routine switches.
-        // Large abandoned trees still cross this threshold and are reclaimed immediately.
-        var shouldRunImmediateCleanup = MemoryCleanupPolicy.ShouldRunRoutineCleanup(
-            GC.GetTotalMemory(forceFullCollection: false));
-        if (forceCompactingGc && shouldRunImmediateCleanup)
-        {
-            _memoryCleanup.RunImmediate(compactLargeObjectHeap: true);
-        }
-        else if (shouldRunImmediateCleanup)
-        {
-            _memoryCleanup.RunImmediate(compactLargeObjectHeap: false);
-        }
+        // The detached graph is known garbage regardless of its size. Project switches publish
+        // a loading frame before this call, so reclaim it now instead of retaining generations
+        // from every previously opened project.
+        _memoryCleanup.RunImmediate(
+            compactLargeObjectHeap: forceCompactingGc);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1582,8 +1574,15 @@ public partial class MainWindow : Window
         return selected;
     }
 
-    private HashSet<string> GetCheckedPaths()
-        => _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
+    private IReadOnlySet<string> GetCheckedPaths()
+    {
+        var selectedPaths = _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
+        return _currentTree is null
+            ? selectedPaths
+            : ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                _currentTree.Root,
+                selectedPaths);
+    }
 
     private static List<string> BuildOrderedSelectedFilePaths(
         TreeNodeDescriptor treeRoot,

@@ -192,6 +192,31 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
         });
     }
 
+    internal void RecordPreviewBuildStarted(PreviewContentMode mode)
+    {
+        RecordEvent(new SessionMetricsEvent
+        {
+            Name = "preview.build.started",
+            AtMilliseconds = GetElapsedMilliseconds(),
+            PreviewMode = mode.ToString()
+        });
+    }
+
+    internal void RecordPreviewContentPublished(
+        PreviewContentMode mode,
+        long characterCount,
+        int lineCount)
+    {
+        RecordEvent(new SessionMetricsEvent
+        {
+            Name = "preview.content.published",
+            AtMilliseconds = GetElapsedMilliseconds(),
+            PreviewMode = mode.ToString(),
+            PayloadCharacters = characterCount,
+            LineCount = lineCount
+        });
+    }
+
     public void RecordClipboard(string kind, TreeTextFormat? format, int payloadCharacters, bool success)
     {
         RecordEvent(new SessionMetricsEvent
@@ -218,7 +243,12 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
         });
     }
 
-    internal void RecordUiBenchmarkStep(string stepName, TimeSpan duration, bool success, string? errorCode = null)
+    internal void RecordUiBenchmarkStep(
+        string stepName,
+        TimeSpan duration,
+        bool success,
+        string? errorCode = null,
+        TimeSpan? maximumUiDispatchLatency = null)
     {
         RecordEvent(new SessionMetricsEvent
         {
@@ -227,7 +257,11 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
             StepName = stepName,
             DurationMilliseconds = RoundMilliseconds(duration),
             Success = success,
-            ErrorCode = errorCode
+            ErrorCode = errorCode,
+            MaximumUiDispatchLatencyMilliseconds =
+                maximumUiDispatchLatency is null
+                    ? null
+                    : RoundMilliseconds(maximumUiDispatchLatency.Value)
         });
     }
 
@@ -309,6 +343,10 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
                     WorkingSetBytes = measurement.WorkingSetBytes,
                     PrivateMemoryBytes = measurement.PrivateMemoryBytes,
                     ManagedMemoryBytes = measurement.ManagedMemoryBytes,
+                    ManagedHeapSizeBytes = measurement.ManagedHeapSizeBytes,
+                    ManagedFragmentedBytes = measurement.ManagedFragmentedBytes,
+                    ManagedCommittedBytes = measurement.ManagedCommittedBytes,
+                    MemoryLoadBytes = measurement.MemoryLoadBytes,
                     Gen0Collections = measurement.Gen0Collections,
                     Gen1Collections = measurement.Gen1Collections,
                     Gen2Collections = measurement.Gen2Collections,
@@ -539,6 +577,7 @@ internal sealed class CurrentProcessSessionMetricsSampler : ISessionMetricsProce
     public SessionProcessMeasurement Capture()
     {
         _process.Refresh();
+        var memory = GC.GetGCMemoryInfo();
         return new SessionProcessMeasurement(
             TotalProcessorTime: _process.TotalProcessorTime,
             WorkingSetBytes: _process.WorkingSet64,
@@ -546,7 +585,11 @@ internal sealed class CurrentProcessSessionMetricsSampler : ISessionMetricsProce
             ManagedMemoryBytes: GC.GetTotalMemory(forceFullCollection: false),
             Gen0Collections: GC.CollectionCount(0),
             Gen1Collections: GC.CollectionCount(1),
-            Gen2Collections: GC.CollectionCount(2));
+            Gen2Collections: GC.CollectionCount(2),
+            ManagedHeapSizeBytes: memory.HeapSizeBytes,
+            ManagedFragmentedBytes: memory.FragmentedBytes,
+            ManagedCommittedBytes: memory.TotalCommittedBytes,
+            MemoryLoadBytes: memory.MemoryLoadBytes);
     }
 
     public void Dispose() => _process.Dispose();
@@ -573,7 +616,11 @@ internal sealed record SessionProcessMeasurement(
     long ManagedMemoryBytes,
     int Gen0Collections,
     int Gen1Collections,
-    int Gen2Collections);
+    int Gen2Collections,
+    long ManagedHeapSizeBytes = 0,
+    long ManagedFragmentedBytes = 0,
+    long ManagedCommittedBytes = 0,
+    long MemoryLoadBytes = 0);
 
 internal sealed record SessionMetricsCompletion(
     bool Success,
@@ -682,6 +729,10 @@ internal sealed class SessionMetricsSample
     public long WorkingSetBytes { get; init; }
     public long PrivateMemoryBytes { get; init; }
     public long ManagedMemoryBytes { get; init; }
+    public long ManagedHeapSizeBytes { get; init; }
+    public long ManagedFragmentedBytes { get; init; }
+    public long ManagedCommittedBytes { get; init; }
+    public long MemoryLoadBytes { get; init; }
     public int Gen0Collections { get; init; }
     public int Gen1Collections { get; init; }
     public int Gen2Collections { get; init; }
@@ -707,10 +758,12 @@ internal sealed class SessionMetricsEvent
     public bool? PreviewVisible { get; init; }
     public string? OperationKind { get; init; }
     public string? StepName { get; init; }
-    public int? PayloadCharacters { get; init; }
+    public long? PayloadCharacters { get; init; }
+    public int? LineCount { get; init; }
     public bool? Success { get; init; }
     public string? CleanupReason { get; init; }
     public string? ErrorCode { get; init; }
+    public double? MaximumUiDispatchLatencyMilliseconds { get; init; }
 }
 
 internal readonly record struct PrivateQuerySnapshot(int Length, string? Fingerprint);

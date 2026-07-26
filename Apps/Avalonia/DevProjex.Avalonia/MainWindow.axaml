@@ -19,9 +19,8 @@
       <Setter Property="IsSelected" Value="{CompiledBinding IsSelected, Mode=TwoWay}" />
       <Setter Property="Padding" Value="{DynamicResource TreeItemPaddingResource}" />
     </Style>
-    <!-- Fix for virtualization cache bug: the :empty pseudo-class may not update correctly
-         when VirtualizingStackPanel recycles TreeViewItem containers. We use Opacity binding
-         instead of IsVisible to hide the expander while preserving layout space for alignment. -->
+    <!-- ProjectTreeViewItem owns chevron visibility at local-binding priority because Fluent's
+         :empty state cannot represent lazy children. Opacity remains a recycling-safe fallback. -->
     <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron"
            x:DataType="vm:TreeNodeViewModel">
       <Setter Property="Opacity" Value="{CompiledBinding HasChildren,
@@ -584,6 +583,16 @@
                                             Padding="0,0,0,4"
                                             FontFamily="{Binding SelectedFontFamily}"
                                             FontSize="{Binding TreeFontSize}">
+                    <controls:ProjectTreeView.Styles>
+                      <!-- Fluent reserves a corner row where both scrollbars meet. The vertical
+                           rail spans that row so it reaches the bottom edge, just like preview. -->
+                      <Style Selector="ScrollViewer /template/ ScrollBar#PART_VerticalScrollBar">
+                        <Setter Property="Grid.RowSpan" Value="2" />
+                      </Style>
+                      <Style Selector="ScrollViewer /template/ Panel#PART_ScrollBarsSeparator">
+                        <Setter Property="IsVisible" Value="False" />
+                      </Style>
+                    </controls:ProjectTreeView.Styles>
                     <controls:ProjectTreeView.ItemsPanel>
                       <ItemsPanelTemplate>
                         <VirtualizingStackPanel CacheLength="2" />

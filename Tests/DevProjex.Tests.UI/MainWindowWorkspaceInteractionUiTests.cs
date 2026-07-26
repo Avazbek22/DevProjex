@@ -1,4 +1,5 @@
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
@@ -103,6 +104,87 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.DoubleClickAsync(window, checkBox);
 
             Assert.False(srcNode.IsExpanded);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task LazyTreeNode_ChevronIsVisibleBeforeMaterialization_AndExpandsOnClick()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var srcNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            Assert.True(srcNode.HasChildren);
+            Assert.False(srcNode.AreChildrenRealized);
+
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, srcNode));
+
+            Assert.True(chevron.IsVisible);
+            Assert.True(chevron.Opacity > 0);
+
+            var readmeNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "README.md",
+                    StringComparison.Ordinal));
+            var leafChevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, readmeNode));
+            Assert.False(readmeNode.HasChildren);
+            Assert.False(leafChevron.IsVisible);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => srcNode.IsExpanded &&
+                      srcNode.AreChildrenRealized &&
+                      srcNode.Children.Count > 0,
+                "lazy tree node to materialize after chevron click");
+
+            Assert.True(srcNode.IsExpanded);
+            Assert.NotEmpty(srcNode.Children);
+
+            srcNode.IsChecked = true;
+            srcNode.IsExpanded = false;
+            Assert.True(srcNode.TryReleaseChildrenToLazyState());
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var releasedChevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, srcNode));
+            Assert.False(srcNode.AreChildrenRealized);
+            Assert.Empty(srcNode.ChildItemsSource);
+            Assert.True(srcNode.HasChildren);
+            Assert.True(
+                releasedChevron.IsVisible,
+                string.Join(
+                    Environment.NewLine,
+                    releasedChevron
+                        .GetVisualAncestors()
+                        .Select(visual =>
+                            $"{visual.GetType().Name} '{(visual as Control)?.Name}': IsVisible={visual.IsVisible}")));
         }
         finally
         {

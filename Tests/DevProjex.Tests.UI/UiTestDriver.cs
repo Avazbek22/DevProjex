@@ -679,7 +679,9 @@ internal static class UiTestDriver
         var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
         var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
         var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
-        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
+        var selectedPaths = InvokePrivateMethodAssignable<IReadOnlySet<string>>(
+            window,
+            "GetCheckedPaths");
         var hasSelection = selectedPaths.Count > 0;
         var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
         var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
@@ -1449,6 +1451,12 @@ internal static class UiTestDriver
     {
         var method = typeof(MainWindow).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<T>(method?.Invoke(window, null));
+    }
+
+    private static T InvokePrivateMethodAssignable<T>(MainWindow window, string methodName)
+    {
+        var method = typeof(MainWindow).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsAssignableFrom<T>(method?.Invoke(window, null));
     }
 
     private static T? InvokePrivateMethodAllowNull<T>(MainWindow window, string methodName)

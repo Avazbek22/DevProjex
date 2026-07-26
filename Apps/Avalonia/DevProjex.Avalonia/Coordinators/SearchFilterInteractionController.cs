@@ -32,6 +32,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private readonly Func<bool> _wasLastInteractiveFilterInMemory;
     private readonly Func<Exception, Task> _showErrorAsync;
     private readonly Action<MemoryCleanupReason> _scheduleMemoryCleanup;
+    private readonly Action _cancelMemoryCleanup;
+    private readonly CancellationTokenSource _lifetimeCts = new();
+    private readonly CancellationToken _lifetimeToken;
 
     private HashSet<string>? _filterExpansionSnapshot;
     private SuspendedTextTool _suspendedTool;
@@ -41,6 +44,8 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private long _lastFilterHotkeyTimestamp;
     private int _pendingSearchHotkeyToggle;
     private int _pendingFilterHotkeyToggle;
+    private Task? _searchCloseTask;
+    private Task? _filterCloseTask;
     private bool _disposed;
 
     public SearchFilterInteractionController(
@@ -54,15 +59,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
         SessionMetricsRecorder sessionMetrics,
         IToastService toastService,
         LocalizationService localization,
-        Action scheduleSearchMemoryCleanup,
         Func<string?> getCurrentPath,
         Func<BuildTreeResult?> getCurrentTree,
         Func<bool, CancellationToken, Task<TreeRefreshOutcome>> refreshTreeAsync,
         Action resetInteractiveFilterCache,
         Func<bool> wasLastInteractiveFilterInMemory,
         Func<Exception, Task> showErrorAsync,
-        Action<MemoryCleanupReason> scheduleMemoryCleanup)
+        Action<MemoryCleanupReason> scheduleMemoryCleanup,
+        Action cancelMemoryCleanup)
     {
+        _lifetimeToken = _lifetimeCts.Token;
         _window = window;
         _viewModel = viewModel;
         _treeView = treeView;
@@ -76,6 +82,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _wasLastInteractiveFilterInMemory = wasLastInteractiveFilterInMemory;
         _showErrorAsync = showErrorAsync;
         _scheduleMemoryCleanup = scheduleMemoryCleanup;
+        _cancelMemoryCleanup = cancelMemoryCleanup;
 
         _search = CreateToolState(
             TextToolKind.Search,
@@ -91,7 +98,6 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _searchCoordinator = new TreeSearchCoordinator(
             viewModel,
             treeView,
-            scheduleSearchMemoryCleanup,
             sessionMetrics);
         _filterCoordinator = new NameFilterCoordinator(
             ApplyFilterRealtime,
@@ -112,14 +118,20 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     public void OnSearchQueryChanged()
     {
-        if (!IsRealtimeSuppressed)
+        if (!_disposed && !IsRealtimeSuppressed)
+        {
+            _cancelMemoryCleanup();
             _searchCoordinator.OnSearchQueryChanged();
+        }
     }
 
     public void OnNameFilterChanged()
     {
-        if (!IsRealtimeSuppressed)
+        if (!_disposed && !IsRealtimeSuppressed)
+        {
+            _cancelMemoryCleanup();
             _filterCoordinator.OnNameFilterChanged();
+        }
     }
 
     public void UpdateHighlights(string? query) => _searchCoordinator.UpdateHighlights(query);
@@ -130,16 +142,33 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     public void NavigateSearch(int step)
     {
-        if (string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
+        _ = NavigateSearchAsync(step);
+    }
+
+    internal async Task NavigateSearchAsync(int step)
+    {
+        if (_disposed)
             return;
 
-        if (!_searchCoordinator.TryNavigateForCurrentQuery(step))
+        var query = _viewModel.SearchQuery;
+        if (string.IsNullOrWhiteSpace(query))
+            return;
+
+        var result = await _searchCoordinator.TryNavigateForCurrentQueryAsync(step);
+        if (!_disposed &&
+            result == TreeSearchCoordinator.NavigationResult.NoMatches &&
+            _viewModel.SearchVisible &&
+            string.Equals(query, _viewModel.SearchQuery, StringComparison.Ordinal))
+        {
             _toastService.Show(_localization["Toast.NoMatches"]);
+        }
     }
 
     public async Task ToggleSearchAsync()
     {
-        if (!_viewModel.IsProjectLoaded || !_viewModel.IsSearchAvailable)
+        if (_disposed ||
+            !_viewModel.IsProjectLoaded ||
+            !_viewModel.IsSearchAvailable)
             return;
 
         if (_viewModel.SearchVisible)
@@ -151,12 +180,17 @@ internal sealed class SearchFilterInteractionController : IDisposable
         if (IsEffectivelyVisible(_filter))
             await CloseFilterAsync(focusTree: false);
 
+        if (_disposed)
+            return;
+
         ShowSearch();
     }
 
     public async Task ToggleFilterAsync()
     {
-        if (!_viewModel.IsProjectLoaded || !_viewModel.IsSearchFilterAvailable)
+        if (_disposed ||
+            !_viewModel.IsProjectLoaded ||
+            !_viewModel.IsSearchFilterAvailable)
             return;
 
         if (_viewModel.FilterVisible)
@@ -168,6 +202,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
         if (IsEffectivelyVisible(_search))
             await CloseSearchAsync(focusTree: false);
 
+        if (_disposed)
+            return;
+
         ShowFilter();
     }
 
@@ -177,45 +214,79 @@ internal sealed class SearchFilterInteractionController : IDisposable
     public void ShowFilter(bool focusInput = true, bool selectAllOnFocus = true) =>
         Show(_filter, focusInput, selectAllOnFocus);
 
-    public async Task CloseSearchAsync(bool focusTree = true)
+    public Task CloseSearchAsync(bool focusTree = true)
     {
+        if (_disposed)
+            return Task.CompletedTask;
+
+        if (_searchCloseTask is { IsCompleted: false } pendingClose)
+            return pendingClose;
+
         if (!IsEffectivelyVisible(_search))
-            return;
+            return Task.CompletedTask;
 
-        InvalidateFocusRequest(_search);
-        PrepareForClose(_search, focusTree);
-        await WaitForAnimationAsync(_search);
-
-        if (_viewModel.SearchVisible)
-            return;
-
-        if (string.IsNullOrEmpty(_viewModel.SearchQuery))
-        {
-            _searchCoordinator.CancelPending();
-            return;
-        }
-
-        _viewModel.SearchQuery = string.Empty;
-        _searchCoordinator.CancelPending();
-        if (_searchCoordinator.HasMatches)
-            _searchCoordinator.UpdateSearchMatches();
-
-        _scheduleMemoryCleanup(MemoryCleanupReason.SearchClose);
+        var closeTask = CloseSearchCoreAsync(focusTree);
+        _searchCloseTask = closeTask;
+        return closeTask;
     }
 
-    public async Task CloseFilterAsync(bool focusTree = true)
+    private async Task CloseSearchCoreAsync(bool focusTree)
     {
-        if (!IsEffectivelyVisible(_filter))
+        InvalidateFocusRequest(_search);
+        PrepareForClose(_search, focusTree);
+        if (!await WaitForAnimationAsync(_search, _lifetimeToken))
             return;
 
+        if (_disposed || _viewModel.SearchVisible)
+            return;
+
+        var shouldNormalizeTree = _searchCoordinator.HasAppliedSearchState;
+        using (SuppressRealtimeUpdates())
+            _viewModel.SearchQuery = string.Empty;
+        _searchCoordinator.CancelPending();
+        if (shouldNormalizeTree)
+        {
+            _searchCoordinator.UpdateSearchMatches();
+            _searchCoordinator.ClearSearchState(preservePendingHighlightCleanup: true);
+        }
+        else
+        {
+            _searchCoordinator.ClearSearchState();
+        }
+
+        await _searchCoordinator.CompleteSearchCloseAsync();
+        if (!_disposed && shouldNormalizeTree)
+            _scheduleMemoryCleanup(MemoryCleanupReason.SearchClose);
+    }
+
+    public Task CloseFilterAsync(bool focusTree = true)
+    {
+        if (_disposed)
+            return Task.CompletedTask;
+
+        if (_filterCloseTask is { IsCompleted: false } pendingClose)
+            return pendingClose;
+
+        if (!IsEffectivelyVisible(_filter))
+            return Task.CompletedTask;
+
+        var closeTask = CloseFilterCoreAsync(focusTree);
+        _filterCloseTask = closeTask;
+        return closeTask;
+    }
+
+    private async Task CloseFilterCoreAsync(bool focusTree)
+    {
         InvalidateFocusRequest(_filter);
         PrepareForClose(_filter, focusTree);
-        await WaitForAnimationAsync(_filter);
-
-        if (_viewModel.FilterVisible)
+        if (!await WaitForAnimationAsync(_filter, _lifetimeToken))
             return;
 
-        if (string.IsNullOrEmpty(_viewModel.NameFilter))
+        if (_disposed || _viewModel.FilterVisible)
+            return;
+
+        if (string.IsNullOrEmpty(_viewModel.NameFilter) &&
+            _filterExpansionSnapshot is null)
         {
             _filterCoordinator.CancelPending();
             return;
@@ -223,8 +294,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
         _viewModel.NameFilter = string.Empty;
         _filterCoordinator.CancelPending();
-        _ = ApplyFilterRealtimeAsync(CancellationToken.None);
-        _scheduleMemoryCleanup(MemoryCleanupReason.FilterClose);
+        await ApplyFilterRealtimeAsync(_lifetimeToken);
+        if (!_disposed)
+            _scheduleMemoryCleanup(MemoryCleanupReason.FilterClose);
     }
 
     public void HandleSearchInputKey(KeyEventArgs e)
@@ -254,6 +326,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     public bool TryHandleToggleHotkey(KeyEventArgs e)
     {
+        if (_disposed)
+            return false;
+
         var modifiers = e.KeyModifiers;
         if (modifiers == KeyModifiers.Control && e.Key == Key.F)
         {
@@ -276,6 +351,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     public bool TryHandleActiveToolKey(KeyEventArgs e)
     {
+        if (_disposed)
+            return false;
+
         if (e.Key == Key.Escape && _viewModel.SearchVisible)
         {
             _ = CloseSearchAsync();
@@ -300,6 +378,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     public async Task ApplyFilterRealtimeAsync(CancellationToken cancellationToken)
     {
+        if (_disposed)
+            return;
+
         var stopwatch = Stopwatch.StartNew();
         var version = 0;
         try
@@ -319,10 +400,13 @@ internal sealed class SearchFilterInteractionController : IDisposable
                 _filterExpansionSnapshot = CaptureExpandedNodes();
 
             cancellationToken.ThrowIfCancellationRequested();
+            _lifetimeToken.ThrowIfCancellationRequested();
             await _refreshTreeAsync(true, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            _lifetimeToken.ThrowIfCancellationRequested();
 
-            if (version != Volatile.Read(ref _filterApplyVersion))
+            if (_disposed ||
+                version != Volatile.Read(ref _filterApplyVersion))
                 return;
 
             var matchCount = hasQuery ? ApplyNameFilterPresentation(query!) : 0;
@@ -348,39 +432,38 @@ internal sealed class SearchFilterInteractionController : IDisposable
         }
         catch (Exception ex)
         {
-            await _showErrorAsync(ex);
+            if (!_disposed)
+                await _showErrorAsync(ex);
         }
         finally
         {
-            if (version == 0 || version == Volatile.Read(ref _filterApplyVersion))
+            if (!_disposed &&
+                (version == 0 ||
+                 version == Volatile.Read(ref _filterApplyVersion)))
+            {
                 _viewModel.SetFilterInProgress(false);
+            }
         }
     }
 
     public int ApplyNameFilterPresentation(string filterQuery)
     {
-        var currentTree = _getCurrentTree();
-        var matchCount = currentTree is null
-            ? 0
-            : NameFilterMatchCounter.CountMatchesUnderRoot(currentTree.Root, filterQuery);
-        _viewModel.UpdateFilterMatchSummary(matchCount);
-        _searchCoordinator.UpdateHighlights(filterQuery);
+        if (_disposed)
+            return 0;
 
-        using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-        {
-            TreeSearchEngine.ApplySmartExpandForFilter(
-                _viewModel.TreeNodes,
-                filterQuery,
-                node => node.DisplayName,
-                node => node.Children,
-                (node, expanded) => node.IsExpanded = expanded);
-        }
+        var matchCount = _getCurrentTree() is null
+            ? 0
+            : _searchCoordinator.ApplyFilterPresentation(filterQuery);
+        _viewModel.UpdateFilterMatchSummary(matchCount);
 
         return matchCount;
     }
 
     public void ReapplyActiveTreeQueryPresentation()
     {
+        if (_disposed)
+            return;
+
         var filterQuery = _viewModel.NameFilter?.Trim();
         if (!string.IsNullOrWhiteSpace(filterQuery))
         {
@@ -389,11 +472,14 @@ internal sealed class SearchFilterInteractionController : IDisposable
         }
 
         if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
-            _searchCoordinator.UpdateSearchMatches();
+            _ = _searchCoordinator.UpdateSearchMatchesAsync();
     }
 
     public void SuspendForPreviewOnly()
     {
+        if (_disposed)
+            return;
+
         InvalidateFocusRequests();
 
         var searchWasVisible = _viewModel.SearchVisible || IsEffectivelyVisible(_search);
@@ -415,6 +501,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     public void RestoreAfterPreviewOnly()
     {
+        if (_disposed)
+            return;
+
         var suspendedTool = _suspendedTool;
         _suspendedTool = SuspendedTextTool.None;
 
@@ -440,6 +529,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     public void SyncVisualState()
     {
+        if (_disposed)
+            return;
+
         ResetAnimationState();
         if (_viewModel.SearchVisible && _viewModel.FilterVisible)
             _viewModel.FilterVisible = false;
@@ -450,6 +542,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     public async Task PrepareForProjectLoadAsync()
     {
+        if (_disposed)
+            return;
+
         var searchWasVisible = IsEffectivelyVisible(_search);
         var filterWasVisible = IsEffectivelyVisible(_filter);
 
@@ -467,7 +562,17 @@ internal sealed class SearchFilterInteractionController : IDisposable
                 _ = AnimateAsync(_filter, show: false);
 
             if (searchWasVisible || filterWasVisible)
-                await WaitForAnimationAsync(_search);
+            {
+                if (!await WaitForAnimationAsync(
+                        _search,
+                        _lifetimeToken))
+                {
+                    return;
+                }
+            }
+
+            if (_disposed)
+                return;
 
             CancelPending();
             _viewModel.SearchQuery = string.Empty;
@@ -487,11 +592,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
     public async Task ApplyStartupFilterAsync(string query)
     {
         var normalizedQuery = query.Trim();
-        if (normalizedQuery.Length == 0 || !_viewModel.IsSearchFilterAvailable)
+        if (_disposed ||
+            normalizedQuery.Length == 0 ||
+            !_viewModel.IsSearchFilterAvailable)
             return;
 
         if (IsEffectivelyVisible(_search))
             await CloseSearchAsync(focusTree: false);
+
+        if (_disposed)
+            return;
 
         ShowFilter(focusInput: false, selectAllOnFocus: false);
         using (SuppressRealtimeUpdates())
@@ -502,17 +612,22 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
         _filterCoordinator.CancelPending();
         _viewModel.SetFilterInProgress(true);
-        await ApplyFilterRealtimeAsync(CancellationToken.None);
+        await ApplyFilterRealtimeAsync(_lifetimeToken);
     }
 
     public async Task ApplyStartupSearchAsync(string query)
     {
         var normalizedQuery = query.Trim();
-        if (normalizedQuery.Length == 0 || !_viewModel.IsSearchFilterAvailable)
+        if (_disposed ||
+            normalizedQuery.Length == 0 ||
+            !_viewModel.IsSearchFilterAvailable)
             return;
 
         if (IsEffectivelyVisible(_filter))
             await CloseFilterAsync(focusTree: false);
+
+        if (_disposed)
+            return;
 
         ShowSearch(focusInput: false, selectAllOnFocus: false);
         using (SuppressRealtimeUpdates())
@@ -522,11 +637,12 @@ internal sealed class SearchFilterInteractionController : IDisposable
         }
 
         _searchCoordinator.CancelPending();
-        _searchCoordinator.UpdateSearchMatches();
+        await _searchCoordinator.UpdateSearchMatchesAsync();
     }
 
     public void ClearProjectState()
     {
+        _searchCoordinator.CancelPending();
         _searchCoordinator.ClearSearchState();
         _filterCoordinator.CancelPending();
         _filterExpansionSnapshot = null;
@@ -553,9 +669,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
             return;
 
         _disposed = true;
+        _lifetimeCts.Cancel();
+        InvalidateFocusRequests();
+        Interlocked.Increment(ref _filterApplyVersion);
+        Interlocked.Exchange(ref _pendingSearchHotkeyToggle, 0);
+        Interlocked.Exchange(ref _pendingFilterHotkeyToggle, 0);
+        ResetAnimationState();
         _searchCoordinator.Dispose();
         _filterCoordinator.Dispose();
         _filterExpansionSnapshot = null;
+        _lifetimeCts.Dispose();
     }
 
     private void ApplyFilterRealtime(CancellationToken cancellationToken) =>
@@ -563,9 +686,13 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     private void Show(TextToolState tool, bool focusInput, bool selectAllOnFocus)
     {
-        if (!_viewModel.IsProjectLoaded || !IsAvailable(tool) || tool.IsAnimating)
+        if (_disposed ||
+            !_viewModel.IsProjectLoaded ||
+            !IsAvailable(tool) ||
+            tool.IsAnimating)
             return;
 
+        _cancelMemoryCleanup();
         SuppressAccent(tool);
         SetLogicalVisibility(tool, true);
         _ = AnimateAsync(tool, show: true);
@@ -579,6 +706,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     private void PrepareForClose(TextToolState tool, bool focusTree)
     {
+        if (_disposed)
+            return;
+
         if (tool.GetInput()?.IsFocused == true)
             _treeView.Focus();
 
@@ -595,7 +725,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     private async Task AnimateAsync(TextToolState tool, bool show)
     {
-        if (tool.IsAnimating)
+        if (_disposed || tool.IsAnimating)
             return;
 
         tool.IsAnimating = true;
@@ -617,7 +747,11 @@ internal sealed class SearchFilterInteractionController : IDisposable
             tool.Container.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0.0);
             tool.Transform.Y = 0.0;
             tool.Surface.Opacity = show ? 1.0 : 0.0;
-            await WaitForAnimationAsync(tool);
+            if (!await WaitForAnimationAsync(tool, _lifetimeToken))
+                return;
+
+            if (_disposed)
+                return;
 
             if (!show && !IsLogicallyVisible(tool))
                 ForceHidden(tool);
@@ -626,10 +760,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
             await RefreshVisualHostAsync();
         }
+        catch (OperationCanceledException)
+            when (_lifetimeToken.IsCancellationRequested)
+        {
+        }
         finally
         {
             tool.IsAnimating = false;
-            if (tool.ClosePending && !IsLogicallyVisible(tool))
+            if (!_disposed &&
+                tool.ClosePending &&
+                !IsLogicallyVisible(tool))
             {
                 tool.ClosePending = false;
                 _ = AnimateAsync(tool, show: false);
@@ -642,25 +782,46 @@ internal sealed class SearchFilterInteractionController : IDisposable
         bool selectAllOnFocus,
         int focusVersion)
     {
-        await WaitForAnimationAsync(tool);
-        if (!IsLogicallyVisible(tool) || !IsAvailable(tool) || !IsFocusRequestCurrent(tool, focusVersion))
+        if (!await WaitForAnimationAsync(tool, _lifetimeToken))
+            return;
+
+        if (_disposed ||
+            !IsLogicallyVisible(tool) ||
+            !IsAvailable(tool) ||
+            !IsFocusRequestCurrent(tool, focusVersion))
             return;
 
         const int maxAttempts = 4;
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
-            if (!IsFocusRequestCurrent(tool, focusVersion))
+            if (_disposed ||
+                !IsFocusRequestCurrent(tool, focusVersion))
                 return;
 
-            var focused = await Dispatcher.UIThread.InvokeAsync(() =>
+            bool focused;
+            try
             {
-                var input = tool.GetInput();
-                if (!IsInputReady(tool, input))
-                    return false;
+                focused = await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (_disposed)
+                        return false;
 
-                FocusInput(input!, selectAllOnFocus);
-                return input!.IsFocused;
-            }, DispatcherPriority.Input);
+                    var input = tool.GetInput();
+                    if (!IsInputReady(tool, input))
+                        return false;
+
+                    FocusInput(
+                        input!,
+                        selectAllOnFocus,
+                        _lifetimeToken);
+                    return input!.IsFocused;
+                }, DispatcherPriority.Input, _lifetimeToken);
+            }
+            catch (OperationCanceledException)
+                when (_lifetimeToken.IsCancellationRequested)
+            {
+                return;
+            }
 
             if (focused)
                 return;
@@ -669,7 +830,10 @@ internal sealed class SearchFilterInteractionController : IDisposable
         }
     }
 
-    private static void FocusInput(TextBox input, bool selectAllOnFocus)
+    private static void FocusInput(
+        TextBox input,
+        bool selectAllOnFocus,
+        CancellationToken cancellationToken)
     {
         input.Focus();
         if (selectAllOnFocus)
@@ -679,7 +843,13 @@ internal sealed class SearchFilterInteractionController : IDisposable
         }
 
         PlaceCaretAtEnd(input);
-        _ = input.Dispatcher.InvokeAsync(() => PlaceCaretAtEnd(input), DispatcherPriority.Input);
+        _ = input.Dispatcher.InvokeAsync(
+            () =>
+            {
+                if (!cancellationToken.IsCancellationRequested)
+                    PlaceCaretAtEnd(input);
+            },
+            DispatcherPriority.Input);
     }
 
     private static void PlaceCaretAtEnd(TextBox input)
@@ -693,20 +863,39 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private async Task RestoreAccentAfterOpenAsync(TextToolState tool)
     {
         await DispatcherTaskSchedulerProvider.YieldAsync(DispatcherPriority.Render);
+        if (_disposed || _lifetimeToken.IsCancellationRequested)
+            return;
+
         await DispatcherTaskSchedulerProvider.YieldAsync(DispatcherPriority.Render);
-        if (IsLogicallyVisible(tool) && IsAvailable(tool))
+        if (!_disposed &&
+            !_lifetimeToken.IsCancellationRequested &&
+            IsLogicallyVisible(tool) &&
+            IsAvailable(tool))
             RestoreAccent(tool);
     }
 
     private async Task RefreshVisualHostAsync()
     {
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        try
         {
-            InvalidateTool(_search);
-            InvalidateTool(_filter);
-            _window.InvalidateVisual();
-        }, DispatcherPriority.Render);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_disposed)
+                    return;
 
+                InvalidateTool(_search);
+                InvalidateTool(_filter);
+                _window.InvalidateVisual();
+            }, DispatcherPriority.Render, _lifetimeToken);
+        }
+        catch (OperationCanceledException)
+            when (_lifetimeToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (_disposed || _lifetimeToken.IsCancellationRequested)
+            return;
         await DispatcherTaskSchedulerProvider.YieldAsync(DispatcherPriority.Render);
     }
 
@@ -722,6 +911,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     private void ScheduleHotkeyToggle(TextToolKind kind)
     {
+        if (_disposed)
+            return;
+
         ref var pending = ref kind == TextToolKind.Search
             ? ref _pendingSearchHotkeyToggle
             : ref _pendingFilterHotkeyToggle;
@@ -732,6 +924,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
         {
             try
             {
+                if (_disposed)
+                    return;
+
                 if (kind == TextToolKind.Search)
                 {
                     if (_viewModel.IsSearchAvailable)
@@ -770,7 +965,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private HashSet<string> CaptureExpandedNodes()
     {
         var result = new HashSet<string>(PathComparer.Default);
-        TreeNodeViewModel.ForEachDescendant(_viewModel.TreeNodes, node =>
+        TreeNodeViewModel.ForEachRealizedDescendant(_viewModel.TreeNodes, node =>
         {
             if (node.IsExpanded)
                 result.Add(node.FullPath);
@@ -782,9 +977,24 @@ internal sealed class SearchFilterInteractionController : IDisposable
     {
         using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
         {
-            TreeNodeViewModel.ForEachDescendant(
-                _viewModel.TreeNodes,
-                node => node.IsExpanded = expandedPaths.Contains(node.FullPath));
+            var stack = new Stack<TreeNodeViewModel>();
+            for (var index = _viewModel.TreeNodes.Count - 1; index >= 0; index--)
+                stack.Push(_viewModel.TreeNodes[index]);
+
+            while (stack.Count > 0)
+            {
+                var node = stack.Pop();
+                var shouldExpand = node.Parent is null || expandedPaths.Contains(node.FullPath);
+                node.IsExpanded = shouldExpand;
+
+                // Only an expanded branch can contain another expansion state worth restoring.
+                if (!shouldExpand || !node.HasChildren)
+                    continue;
+
+                var children = node.Children;
+                for (var index = children.Count - 1; index >= 0; index--)
+                    stack.Push(children[index]);
+            }
         }
 
         if (_viewModel.TreeNodes.FirstOrDefault() is { } root && !root.IsExpanded)
@@ -906,8 +1116,24 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private static void InvalidateFocusRequest(TextToolState tool) =>
         Interlocked.Increment(ref tool.FocusVersion);
 
-    private static Task WaitForAnimationAsync(TextToolState _) =>
-        Task.Delay(ToolBarAnimationDuration + UiTimingProfile.AnimationSettleBuffer);
+    private static async Task<bool> WaitForAnimationAsync(
+        TextToolState _,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(
+                ToolBarAnimationDuration +
+                UiTimingProfile.AnimationSettleBuffer,
+                cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
 
     private void ResetAnimationState()
     {

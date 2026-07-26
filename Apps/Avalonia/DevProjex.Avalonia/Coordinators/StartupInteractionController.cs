@@ -14,8 +14,20 @@ internal sealed class StartupInteractionController(
     Func<string?> projectPathProvider,
     Func<TreeNodeDescriptor?> treeRootProvider,
     Func<Task> refreshTreeAsync,
+    Func<string, Task<bool>> openProjectAsync,
     Action closeWindow)
 {
+    private const string BenchmarkIdleSecondsEnvironmentVariable =
+        "DEVPROJEX_UI_BENCHMARK_IDLE_SECONDS";
+    private const string BenchmarkSecondaryProjectEnvironmentVariable =
+        "DEVPROJEX_UI_BENCHMARK_SECONDARY_PATH";
+    private const string BenchmarkProjectReloadCountEnvironmentVariable =
+        "DEVPROJEX_UI_BENCHMARK_PROJECT_RELOADS";
+    private static readonly TimeSpan DefaultBenchmarkIdleSettleDuration =
+        TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan UiDispatchProbeInterval =
+        TimeSpan.FromMilliseconds(25);
+
     public async Task ApplySelectionOverridesAsync()
     {
         if (!options.HasSelectionOverrides ||
@@ -115,6 +127,16 @@ internal sealed class StartupInteractionController(
                 StartupUiBenchmarkScript.Standard)
             {
                 await RunStandardBenchmarkScriptAsync();
+            }
+            else if (options.UiBenchmarkScript.Script ==
+                     StartupUiBenchmarkScript.PreviewSearchRetention)
+            {
+                await RunPreviewSearchRetentionBenchmarkScriptAsync();
+            }
+            else if (options.UiBenchmarkScript.Script ==
+                     StartupUiBenchmarkScript.ProjectMemoryLifecycle)
+            {
+                await RunProjectMemoryLifecycleBenchmarkScriptAsync();
             }
         }
         catch (Exception ex)
@@ -273,36 +295,221 @@ internal sealed class StartupInteractionController(
             await SettleBenchmarkStepAsync(
                 TimeSpan.FromMilliseconds(500));
         });
+        sessionMetrics.CaptureSample();
 
         await RunBenchmarkStepAsync(
             "idle.settle",
             () => SettleBenchmarkStepAsync(
-                TimeSpan.FromMilliseconds(1500)));
+                ResolveBenchmarkIdleSettleDuration()));
+        sessionMetrics.CaptureSample();
+    }
+
+    private async Task RunPreviewSearchRetentionBenchmarkScriptAsync()
+    {
+        await RunBenchmarkStepAsync("startup.settle", async () =>
+        {
+            await selection.WaitForPendingRefreshesAsync();
+            await SettleBenchmarkStepAsync(TimeSpan.FromSeconds(1));
+        });
+
+        await RunBenchmarkStepAsync("preview.open", async () =>
+        {
+            await preview.OpenAsync();
+            await WaitForConditionAsync(
+                () => viewModel.IsPreviewMode &&
+                      !viewModel.IsPreviewLoading &&
+                      !workspace.IsPreviewPaneAnimating,
+                TimeSpan.FromSeconds(30),
+                "preview did not open");
+            await SettleBenchmarkStepAsync(TimeSpan.FromSeconds(1));
+        });
+
+        await RunPreviewSearchRetentionCycleAsync(
+            stepSuffix: string.Empty,
+            idleStepName: "search-cycle.idle-settle");
+        await RunPreviewSearchRetentionCycleAsync(
+            stepSuffix: ".repeat",
+            idleStepName: "search-cycle.repeat.idle-settle");
+    }
+
+    private async Task RunProjectMemoryLifecycleBenchmarkScriptAsync()
+    {
+        var primaryPath = projectPathProvider();
+        if (string.IsNullOrWhiteSpace(primaryPath))
+            throw new InvalidOperationException("The primary benchmark project is unavailable.");
+
+        var secondaryPath = Environment.GetEnvironmentVariable(
+            BenchmarkSecondaryProjectEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(secondaryPath))
+        {
+            throw new InvalidOperationException(
+                $"{BenchmarkSecondaryProjectEnvironmentVariable} must point to the secondary benchmark project.");
+        }
+
+        await RunBenchmarkStepAsync("startup.settle", async () =>
+        {
+            await selection.WaitForPendingRefreshesAsync();
+            await SettleBenchmarkStepAsync(TimeSpan.FromSeconds(1));
+        });
+        sessionMetrics.CaptureSample();
+
+        var reloadCount = ResolveBenchmarkProjectReloadCount();
+        for (var iteration = 1; iteration <= reloadCount; iteration++)
+        {
+            await RunProjectLoadCycleAsync(
+                primaryPath,
+                $"project.reload.{iteration}");
+        }
+
+        await RunProjectLoadCycleAsync(
+            secondaryPath,
+            "project.switch.secondary");
+    }
+
+    private async Task RunProjectLoadCycleAsync(
+        string path,
+        string stepName)
+    {
+        await RunBenchmarkStepAsync(stepName, async () =>
+        {
+            if (!await openProjectAsync(path))
+                throw new InvalidOperationException($"Project load failed for benchmark step {stepName}.");
+
+            await selection.WaitForPendingRefreshesAsync();
+            await WaitForConditionAsync(
+                () => viewModel.IsProjectLoaded &&
+                      !viewModel.StatusBusy &&
+                      PathsEqual(projectPathProvider(), path),
+                TimeSpan.FromMinutes(2),
+                $"project load did not settle for {stepName}");
+            await SettleBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+        sessionMetrics.CaptureSample();
+
+        await RunBenchmarkStepAsync(
+            $"{stepName}.idle-settle",
+            () => SettleBenchmarkStepAsync(
+                ResolveBenchmarkIdleSettleDuration()));
+        sessionMetrics.CaptureSample();
+    }
+
+    private async Task RunPreviewSearchRetentionCycleAsync(
+        string stepSuffix,
+        string idleStepName)
+    {
+        const string searchQuery = "app";
+        await RunBenchmarkStepAsync($"search.apply{stepSuffix}", async () =>
+        {
+            await searchFilter.ApplyStartupSearchAsync(searchQuery);
+            await WaitForConditionAsync(
+                () => viewModel.SearchVisible &&
+                      string.Equals(
+                          viewModel.SearchQuery,
+                          searchQuery,
+                          StringComparison.Ordinal) &&
+                      !viewModel.IsSearchInProgress,
+                TimeSpan.FromSeconds(30),
+                "search did not apply");
+            await SettleBenchmarkStepAsync(TimeSpan.FromSeconds(2));
+        });
+        sessionMetrics.CaptureSample();
+
+        await RunBenchmarkStepAsync($"search.close{stepSuffix}", async () =>
+        {
+            await searchFilter.CloseSearchAsync(focusTree: false);
+            await WaitForConditionAsync(
+                () => !viewModel.SearchVisible &&
+                      string.IsNullOrEmpty(viewModel.SearchQuery) &&
+                      !viewModel.IsSearchInProgress,
+                TimeSpan.FromSeconds(15),
+                "search did not close");
+            await SettleBenchmarkStepAsync(TimeSpan.FromMilliseconds(500));
+        });
+        sessionMetrics.CaptureSample();
+
+        await RunBenchmarkStepAsync(
+            idleStepName,
+            () => SettleBenchmarkStepAsync(
+                ResolveBenchmarkIdleSettleDuration()));
+        sessionMetrics.CaptureSample();
     }
 
     private async Task RunBenchmarkStepAsync(
         string stepName,
         Func<Task> action)
     {
+        using var responsivenessCts = new CancellationTokenSource();
+        var responsivenessTask = Task.Run(
+            () => MeasureMaximumUiDispatchLatencyAsync(
+                responsivenessCts.Token));
         var stopwatch = Stopwatch.StartNew();
         try
         {
             await action();
             stopwatch.Stop();
+            var maximumUiDispatchLatency =
+                await StopUiDispatchProbeAsync(
+                    responsivenessCts,
+                    responsivenessTask);
             sessionMetrics.RecordUiBenchmarkStep(
                 stepName,
                 stopwatch.Elapsed,
-                success: true);
+                success: true,
+                maximumUiDispatchLatency:
+                    maximumUiDispatchLatency);
         }
         catch
         {
             stopwatch.Stop();
+            var maximumUiDispatchLatency =
+                await StopUiDispatchProbeAsync(
+                    responsivenessCts,
+                    responsivenessTask);
             sessionMetrics.RecordUiBenchmarkStep(
                 stepName,
                 stopwatch.Elapsed,
-                success: false);
+                success: false,
+                maximumUiDispatchLatency:
+                    maximumUiDispatchLatency);
             throw;
         }
+    }
+
+    private static async Task<TimeSpan> MeasureMaximumUiDispatchLatencyAsync(
+        CancellationToken cancellationToken)
+    {
+        var maximumLatency = TimeSpan.Zero;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(
+                    UiDispatchProbeInterval,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            var startedAt = Stopwatch.GetTimestamp();
+            await Dispatcher.UIThread.InvokeAsync(
+                static () => { },
+                DispatcherPriority.Input);
+            var latency = Stopwatch.GetElapsedTime(startedAt);
+            if (latency > maximumLatency)
+                maximumLatency = latency;
+        }
+
+        return maximumLatency;
+    }
+
+    private static async Task<TimeSpan> StopUiDispatchProbeAsync(
+        CancellationTokenSource cancellationSource,
+        Task<TimeSpan> responsivenessTask)
+    {
+        cancellationSource.Cancel();
+        return await responsivenessTask;
     }
 
     private async Task ApplyTreeFormatAsync(ExportFormat format)
@@ -379,5 +586,48 @@ internal sealed class StartupInteractionController(
         await Task.Delay(minimumDelay);
         await DispatcherTaskSchedulerProvider.YieldAsync(
             DispatcherPriority.Background);
+    }
+
+    internal static TimeSpan ResolveBenchmarkIdleSettleDuration()
+    {
+        var configured = Environment.GetEnvironmentVariable(
+            BenchmarkIdleSecondsEnvironmentVariable);
+        return int.TryParse(
+            configured,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out var seconds)
+            ? TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 60))
+            : DefaultBenchmarkIdleSettleDuration;
+    }
+
+    internal static int ResolveBenchmarkProjectReloadCount()
+    {
+        var configured = Environment.GetEnvironmentVariable(
+            BenchmarkProjectReloadCountEnvironmentVariable);
+        return int.TryParse(
+            configured,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out var reloadCount)
+            ? Math.Clamp(reloadCount, 1, 8)
+            : 3;
+    }
+
+    private static bool PathsEqual(string? left, string right)
+    {
+        if (string.IsNullOrWhiteSpace(left))
+            return false;
+
+        try
+        {
+            return PathComparer.Default.Equals(
+                Path.GetFullPath(left),
+                Path.GetFullPath(right));
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

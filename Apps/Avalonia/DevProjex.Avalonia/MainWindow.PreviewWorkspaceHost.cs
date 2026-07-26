@@ -19,6 +19,8 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
 
     long IPreviewWorkspacePipelineHost.BeginPreviewBuildOperation(CancellationTokenSource previewCts)
     {
+        _sessionMetrics.RecordPreviewBuildStarted(
+            _viewModel.SelectedPreviewContentMode);
         return _statusOperations.Begin(
             _viewModel.StatusOperationPreparingPreview,
             indeterminate: true,
@@ -70,14 +72,32 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
     bool IPreviewWorkspacePipelineHost.IsCurrentPreviewCacheHit(PreviewCacheKeyData key) =>
         IsCurrentPreviewCacheHit(key);
 
-    void IPreviewWorkspacePipelineHost.ApplyPreviewDocument(IPreviewTextDocument document) =>
+    void IPreviewWorkspacePipelineHost.ApplyPreviewDocument(IPreviewTextDocument document)
+    {
         ApplyPreviewDocument(document);
+        _sessionMetrics.RecordPreviewContentPublished(
+            _viewModel.SelectedPreviewContentMode,
+            document.CharacterCount,
+            document.LineCount);
+    }
 
-    void IPreviewWorkspacePipelineHost.ApplyPreviewText(string text) =>
+    void IPreviewWorkspacePipelineHost.ApplyPreviewText(string text)
+    {
         ApplyPreviewText(text);
+        _sessionMetrics.RecordPreviewContentPublished(
+            _viewModel.SelectedPreviewContentMode,
+            text.Length,
+            PreviewFileCollectionPolicy.CountPreviewLines(text));
+    }
 
-    void IPreviewWorkspacePipelineHost.ApplyPreviewText(string text, int lineCount) =>
+    void IPreviewWorkspacePipelineHost.ApplyPreviewText(string text, int lineCount)
+    {
         ApplyPreviewText(text, lineCount);
+        _sessionMetrics.RecordPreviewContentPublished(
+            _viewModel.SelectedPreviewContentMode,
+            text.Length,
+            lineCount);
+    }
 
     void IPreviewWorkspacePipelineHost.ClearPreviewDocument() =>
         ClearPreviewDocument();
@@ -93,6 +113,7 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
             selectedPaths: input.SelectedPaths,
             currentPath: input.CurrentPath,
             currentTreeRoot: input.CurrentTreeRoot,
+            currentTreeOrderedFilePaths: input.CurrentTreeOrderedFilePaths,
             pathPresentation: input.PathPresentation,
             noTextContentText: input.NoTextContentText,
             noCheckedFilesText: input.NoCheckedFilesText,
@@ -124,14 +145,9 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
     void IPreviewWorkspacePipelineHost.InvalidatePreviewCache() =>
         InvalidatePreviewCache();
 
-    void IPreviewWorkspacePipelineHost.SchedulePreviewMemoryCleanup(bool force) =>
-        SchedulePreviewMemoryCleanup(force);
+    void IPreviewWorkspacePipelineHost.SchedulePreviewMemoryCleanup() =>
+        SchedulePreviewMemoryCleanup();
 
-    void IPreviewWorkspacePipelineHost.SchedulePreviewMemoryCleanupForDocument(IPreviewTextDocument document)
-    {
-        SchedulePreviewRebuildMemoryCleanup(
-            force: PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
-                document.CharacterCount,
-                document.LineCount));
-    }
+    void IPreviewWorkspacePipelineHost.SchedulePreviewRebuildMemoryCleanup() =>
+        SchedulePreviewRebuildMemoryCleanup();
 }

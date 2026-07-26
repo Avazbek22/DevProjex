@@ -337,7 +337,7 @@ Für einen Pfad werden die Regeln von der übergeordneten zur tieferen `.gitigno
 
 Eine Regel mit `!` hebt nur einen früheren Git-Ausschluss in ihrem Bereich auf. Sie kann keine Datei zurückholen, solange deren übergeordneter Ordner ausgeschlossen bleibt. Eine `.gitignore` in einem vollständig ausgeschlossenen und unerreichbaren Ordner wird nicht ausgewertet.
 
-Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude`, globale Git-Regeln und der Git-Index werden nicht berücksichtigt.
+Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude` und globale Git-Regeln werden nicht berücksichtigt. Ist ein lesbarer Git-Index verfügbar, bleiben verfolgte Dateien trotz eines Treffers in `.gitignore` sichtbar; ohne Index oder Git CLI fällt DevProjex sicher auf die reine Musterauswertung zurück.
 
 ### 12.4 Zusammenspiel von .gitignore und Smart Ignore
 `.gitignore` und Smart Ignore sind unabhängige Schalter. Jeder gilt für alle eigenen Bereiche auf jeder erreichbaren Verschachtelungsebene. Eine Option wird nur angezeigt, wenn ihre Änderung den aktuellen effektiven Baum beeinflussen kann.

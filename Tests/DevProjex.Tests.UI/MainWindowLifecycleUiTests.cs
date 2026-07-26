@@ -1,4 +1,6 @@
 using System.Reflection;
+using DevProjex.Avalonia.Coordinators;
+using DevProjex.Avalonia.Views;
 
 namespace DevProjex.Tests.UI;
 
@@ -8,7 +10,6 @@ public sealed class MainWindowLifecycleUiTests
 	[
 		new("_previewSurfaceController", "_selectionMetricsCts"),
 		new("_memoryCleanup", "_previewCleanupCts"),
-		new("_memoryCleanup", "_searchCleanupCts"),
 		new("_memoryCleanup", "_backgroundCleanupCts"),
 		new("_previewWorkspaceController", "_modeSwitchCts"),
 		new(null, "_windowLifetimeCts"),
@@ -131,6 +132,110 @@ public sealed class MainWindowLifecycleUiTests
 		});
 
 		Assert.Null(exception);
+	}
+
+	[AvaloniaFact]
+	public async Task ClosingWindow_CancelsPendingSearchAnimationAndFocusContinuation()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var controller = Assert.IsType<SearchFilterInteractionController>(
+			GetPrivateFieldValue(
+				window,
+				new OwnedField(null, "_searchFilterController")));
+		var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(
+			window,
+			"SearchBar");
+		var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+
+		controller.ShowSearch();
+		var closeTask = controller.CloseSearchAsync();
+		await UiTestDriver.CloseWindowAsync(window);
+
+		await closeTask.WaitAsync(TimeSpan.FromSeconds(2));
+		await Task.Delay(
+			UiTimingProfile.Scale(TimeSpan.FromMilliseconds(400)));
+		Dispatcher.UIThread.RunJobs(DispatcherPriority.Background);
+
+		Assert.True(closeTask.IsCompletedSuccessfully);
+		Assert.False(searchBox.IsFocused);
+	}
+
+	[AvaloniaFact]
+	public async Task DisposedSearchController_IgnoresAlreadyPostedHotkeyToggle()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var controller = Assert.IsType<SearchFilterInteractionController>(
+			GetPrivateFieldValue(
+				window,
+				new OwnedField(null, "_searchFilterController")));
+
+		try
+		{
+			var scheduleMethod = typeof(SearchFilterInteractionController)
+				.GetMethod(
+					"ScheduleHotkeyToggle",
+					BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(scheduleMethod);
+			var toolKind = Enum.ToObject(
+				scheduleMethod!.GetParameters()[0].ParameterType,
+				0);
+			scheduleMethod.Invoke(controller, [toolKind]);
+
+			controller.Dispose();
+			Dispatcher.UIThread.RunJobs(DispatcherPriority.Background);
+
+			Assert.False(UiTestDriver.GetViewModel(window).SearchVisible);
+		}
+		finally
+		{
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PointerWheel_CancelsPendingMemoryCleanup()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var coordinator = Assert.IsType<
+			DevProjex.Avalonia.Coordinators.MemoryCleanupCoordinator>(
+			GetPrivateFieldValue(
+				window,
+				new OwnedField(null, "_memoryCleanup")));
+
+		try
+		{
+			coordinator.SchedulePreview(
+				MemoryCleanupReason.PreviewClose);
+			Assert.True(coordinator.IsCleanupPendingOrRunning);
+
+			using var pointer = new global::Avalonia.Input.Pointer(
+				global::Avalonia.Input.Pointer.GetNextFreeId(),
+				PointerType.Mouse,
+				isPrimary: true);
+			window.RaiseEvent(new PointerWheelEventArgs(
+				window,
+				pointer,
+				window,
+				default,
+				timestamp: 0,
+				new PointerPointProperties(),
+				KeyModifiers.None,
+				new Vector(0, -1)));
+
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !coordinator.IsCleanupPendingOrRunning,
+				"pointer wheel interaction to cancel pending memory cleanup");
+		}
+		finally
+		{
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window);
+		}
 	}
 
 	private static void SetPrivateField(MainWindow window, OwnedField ownedField, object? value)

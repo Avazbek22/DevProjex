@@ -288,6 +288,27 @@ public sealed class ProjectTreeInventoryRootFolderProjectionTests
     }
 
     [Fact]
+    public void ApplyScopedControllerRules_DoesNotReapplyGitRulesToScannerValidatedRoots()
+    {
+        var rootPath = CreateSyntheticRootPath();
+        IReadOnlyList<string> candidates = ["data", "src"];
+        var rules = CreateRules(ignoreEmptyFolders: false) with
+        {
+            UseGitIgnore = true,
+            EnableGitIgnoreTraversal = true,
+            GitIgnoreMatcher = GitIgnoreMatcher.Build(rootPath, ["data/"])
+        };
+
+        var projected = RootFolderVisibilityProjection.ApplyScopedControllerRules(
+            rootPath,
+            candidates,
+            rules,
+            TestContext.Current.CancellationToken);
+
+        Assert.Same(candidates, projected);
+    }
+
+    [Fact]
     public void ApplyScopedControllerRules_Canceled_ThrowsBeforeProjection()
     {
         using var cancellation = new CancellationTokenSource();

@@ -42,7 +42,7 @@ internal interface IPreviewWorkspacePipelineHost
 
     void InvalidatePreviewCache();
 
-    void SchedulePreviewMemoryCleanup(bool force);
+    void SchedulePreviewMemoryCleanup();
 
-    void SchedulePreviewMemoryCleanupForDocument(IPreviewTextDocument document);
+    void SchedulePreviewRebuildMemoryCleanup();
 }

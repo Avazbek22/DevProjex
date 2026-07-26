@@ -17,23 +17,97 @@ internal readonly record struct StatusMetricLabels(
     string CharsPrefix,
     string TokensPrefix);
 
+internal sealed class PreviewWarmupSelectionPlan(
+    TreeNodeDescriptor root,
+    PreviewWarmupSelectedNode? selectedRoot,
+    bool hasExplicitSelection)
+{
+    public TreeNodeDescriptor Root { get; } = root;
+    public PreviewWarmupSelectedNode? SelectedRoot { get; } = selectedRoot;
+    public bool HasExplicitSelection { get; } = hasExplicitSelection;
+}
+
+internal sealed class PreviewWarmupSelectedNode(
+    TreeNodeDescriptor source,
+    int sourceIndex,
+    bool includesWholeSubtree,
+    IReadOnlyList<PreviewWarmupSelectedNode> children)
+{
+    public TreeNodeDescriptor Source { get; } = source;
+    public int SourceIndex { get; } = sourceIndex;
+    public bool IncludesWholeSubtree { get; } = includesWholeSubtree;
+    public IReadOnlyList<PreviewWarmupSelectedNode> Children { get; } = children;
+}
+
 internal static class PreviewWarmupPolicy
 {
-    internal const int PreviewWarmupFileThreshold = 140;
+    private const int SmallChildListLinearLookupThreshold = 32;
+    private const int MaxCaseEquivalentNameProbes = 32;
 
     public static bool ShouldBuildPreviewWarmup(
         PreviewContentMode mode,
         bool hasSelection,
         IReadOnlySet<string> selectedPaths,
         TreeNodeDescriptor? treeRoot)
+        => treeRoot is not null;
+
+    public static PreviewWarmupSelectionPlan? CreateSelectionPlan(
+        TreeNodeDescriptor? treeRoot,
+        IReadOnlySet<string> selectedPaths)
     {
-        if (mode == PreviewContentMode.Tree)
-            return false;
+        if (treeRoot is null)
+            return null;
 
-        if (hasSelection)
-            return CountSelectedFilesUpToLimit(selectedPaths, treeRoot, PreviewWarmupFileThreshold) >= PreviewWarmupFileThreshold;
+        var effectiveSelectedPaths =
+            ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                treeRoot,
+                selectedPaths);
+        if (effectiveSelectedPaths.Count == 0)
+        {
+            return new PreviewWarmupSelectionPlan(
+                treeRoot,
+                new PreviewWarmupSelectedNode(
+                    treeRoot,
+                    sourceIndex: -1,
+                    includesWholeSubtree: true,
+                    children: []),
+                hasExplicitSelection: false);
+        }
 
-        return CountTreeFilesUpToLimit(treeRoot, PreviewWarmupFileThreshold) >= PreviewWarmupFileThreshold;
+        var selectionTrie = BuildSelectionTrie(
+            treeRoot.FullPath,
+            effectiveSelectedPaths);
+        var selectedRoot = ResolveSelectedNode(
+            treeRoot,
+            sourceIndex: -1,
+            selectionTrie);
+        return new PreviewWarmupSelectionPlan(
+            treeRoot,
+            selectedRoot,
+            hasExplicitSelection: true);
+    }
+
+    public static TreeNodeDescriptor? CreateBoundedTreeProjection(
+        TreeNodeDescriptor? treeRoot,
+        IReadOnlySet<string> selectedPaths,
+        int maxNodeCount)
+    {
+        var selectionPlan = CreateSelectionPlan(treeRoot, selectedPaths);
+        return CreateBoundedTreeProjection(selectionPlan, maxNodeCount);
+    }
+
+    public static TreeNodeDescriptor? CreateBoundedTreeProjection(
+        PreviewWarmupSelectionPlan? selectionPlan,
+        int maxNodeCount)
+    {
+        if (selectionPlan is null || maxNodeCount <= 0)
+            return null;
+
+        var remainingNodeCount = maxNodeCount;
+        return selectionPlan.SelectedRoot is not null
+            ? CloneSelectedNode(selectionPlan.SelectedRoot, ref remainingNodeCount)
+            // The final tree preview falls back to the full tree when every captured path is stale.
+            : CloneWholeSubtree(selectionPlan.Root, ref remainingNodeCount);
     }
 
     public static int CountSelectedFilesUpToLimit(
@@ -78,23 +152,52 @@ internal static class PreviewWarmupPolicy
         TreeNodeDescriptor? treeRoot,
         int maxFileCount)
     {
-        if (maxFileCount <= 0)
+        var effectiveSelectedPaths = hasSelection
+            ? selectedPaths
+            : EmptySelectedPaths;
+        var selectionPlan = CreateSelectionPlan(
+            treeRoot,
+            effectiveSelectedPaths);
+        var maxNodeVisitCount = maxFileCount > (int.MaxValue / 32)
+            ? int.MaxValue
+            : Math.Max(64, maxFileCount * 32);
+        return CollectInitialPreviewFiles(
+            selectionPlan,
+            maxFileCount,
+            maxNodeVisitCount);
+    }
+
+    public static List<string> CollectInitialPreviewFiles(
+        PreviewWarmupSelectionPlan? selectionPlan,
+        int maxFileCount,
+        int maxNodeVisitCount,
+        IReadOnlyList<string>? orderedFilePaths = null)
+    {
+        if (selectionPlan is null ||
+            maxFileCount <= 0 ||
+            maxNodeVisitCount <= 0)
+        {
             return [];
+        }
 
         var uniqueFiles = new HashSet<string>(PathComparer.Default);
-        if (hasSelection)
+        if (!selectionPlan.HasExplicitSelection &&
+            orderedFilePaths is not null)
         {
-            if (treeRoot is not null)
-                ProjectTreeSelectionProjection.CollectSelectedFilePaths(
-                    treeRoot,
-                    selectedPaths,
-                    uniqueFiles,
-                    maxFileCount,
-                    ensureExists: true);
+            CollectInitialPreviewFiles(
+                orderedFilePaths,
+                uniqueFiles,
+                maxFileCount,
+                maxNodeVisitCount);
         }
-        else if (treeRoot is not null)
+        else if (selectionPlan.SelectedRoot is not null)
         {
-            CollectInitialPreviewFilesFromTree(treeRoot, uniqueFiles, maxFileCount);
+            var remainingNodeVisits = maxNodeVisitCount;
+            CollectInitialPreviewFiles(
+                selectionPlan.SelectedRoot,
+                uniqueFiles,
+                maxFileCount,
+                ref remainingNodeVisits);
         }
 
         if (uniqueFiles.Count == 0)
@@ -108,14 +211,98 @@ internal static class PreviewWarmupPolicy
         return files;
     }
 
-    private static void CollectInitialPreviewFilesFromTree(
+    private static void CollectInitialPreviewFiles(
+        IReadOnlyList<string> orderedFilePaths,
+        HashSet<string> uniqueFiles,
+        int maxFileCount,
+        int maxPathChecks)
+    {
+        var pathCheckCount = Math.Min(
+            orderedFilePaths.Count,
+            maxPathChecks);
+        for (var index = 0;
+             index < pathCheckCount &&
+             uniqueFiles.Count < maxFileCount;
+             index++)
+        {
+            var path = orderedFilePaths[index];
+            if (File.Exists(path))
+                uniqueFiles.Add(path);
+        }
+    }
+
+    private static void CollectInitialPreviewFiles(
+        PreviewWarmupSelectedNode selectedNode,
+        HashSet<string> uniqueFiles,
+        int maxFileCount,
+        ref int remainingNodeVisits)
+    {
+        if (remainingNodeVisits <= 0 ||
+            uniqueFiles.Count >= maxFileCount)
+        {
+            return;
+        }
+
+        remainingNodeVisits--;
+        var node = selectedNode.Source;
+
+        if (!node.IsDirectory)
+        {
+            if (File.Exists(node.FullPath))
+                uniqueFiles.Add(node.FullPath);
+            return;
+        }
+
+        if (selectedNode.IncludesWholeSubtree)
+        {
+            foreach (var child in node.Children)
+            {
+                CollectInitialPreviewFilesFromWholeSubtree(
+                    child,
+                    uniqueFiles,
+                    maxFileCount,
+                    ref remainingNodeVisits);
+                if (remainingNodeVisits <= 0 ||
+                    uniqueFiles.Count >= maxFileCount)
+                {
+                    break;
+                }
+            }
+
+            return;
+        }
+
+        foreach (var child in selectedNode.Children)
+        {
+            CollectInitialPreviewFiles(
+                child,
+                uniqueFiles,
+                maxFileCount,
+                ref remainingNodeVisits);
+            if (remainingNodeVisits <= 0 ||
+                uniqueFiles.Count >= maxFileCount)
+            {
+                break;
+            }
+        }
+    }
+
+    private static readonly IReadOnlySet<string> EmptySelectedPaths =
+        new HashSet<string>(PathComparer.Default);
+
+    private static void CollectInitialPreviewFilesFromWholeSubtree(
         TreeNodeDescriptor node,
         HashSet<string> uniqueFiles,
-        int maxFileCount)
+        int maxFileCount,
+        ref int remainingNodeVisits)
     {
-        if (uniqueFiles.Count >= maxFileCount)
+        if (remainingNodeVisits <= 0 ||
+            uniqueFiles.Count >= maxFileCount)
+        {
             return;
+        }
 
+        remainingNodeVisits--;
         if (!node.IsDirectory)
         {
             if (File.Exists(node.FullPath))
@@ -125,18 +312,379 @@ internal static class PreviewWarmupPolicy
 
         foreach (var child in node.Children)
         {
-            CollectInitialPreviewFilesFromTree(child, uniqueFiles, maxFileCount);
-            if (uniqueFiles.Count >= maxFileCount)
+            CollectInitialPreviewFilesFromWholeSubtree(
+                child,
+                uniqueFiles,
+                maxFileCount,
+                ref remainingNodeVisits);
+            if (remainingNodeVisits <= 0 ||
+                uniqueFiles.Count >= maxFileCount)
+            {
+                break;
+            }
+        }
+    }
+
+    private static TreeNodeDescriptor? CloneSelectedNode(
+        PreviewWarmupSelectedNode selectedNode,
+        ref int remainingNodeCount)
+    {
+        if (remainingNodeCount <= 0)
+            return null;
+
+        var node = selectedNode.Source;
+        remainingNodeCount--;
+        if (!node.IsDirectory || remainingNodeCount == 0)
+            return node with { Children = [] };
+
+        if (selectedNode.IncludesWholeSubtree)
+        {
+            var wholeChildren = CloneWholeChildren(
+                node.Children,
+                ref remainingNodeCount);
+            return node with { Children = wholeChildren };
+        }
+
+        var children = new List<TreeNodeDescriptor>(
+            Math.Min(selectedNode.Children.Count, remainingNodeCount));
+        foreach (var selectedChild in selectedNode.Children)
+        {
+            var projectedChild = CloneSelectedNode(
+                selectedChild,
+                ref remainingNodeCount);
+            if (projectedChild is not null)
+                children.Add(projectedChild);
+            if (remainingNodeCount == 0)
                 break;
         }
+
+        return node with { Children = children };
+    }
+
+    private static TreeNodeDescriptor? CloneWholeSubtree(
+        TreeNodeDescriptor node,
+        ref int remainingNodeCount)
+    {
+        if (remainingNodeCount <= 0)
+            return null;
+
+        remainingNodeCount--;
+        if (!node.IsDirectory || remainingNodeCount == 0)
+            return node with { Children = [] };
+
+        var children = CloneWholeChildren(
+            node.Children,
+            ref remainingNodeCount);
+        return node with { Children = children };
+    }
+
+    private static IReadOnlyList<TreeNodeDescriptor> CloneWholeChildren(
+        IReadOnlyList<TreeNodeDescriptor> sourceChildren,
+        ref int remainingNodeCount)
+    {
+        var children = new List<TreeNodeDescriptor>(
+            Math.Min(sourceChildren.Count, remainingNodeCount));
+        foreach (var child in sourceChildren)
+        {
+            var clonedChild = CloneWholeSubtree(
+                child,
+                ref remainingNodeCount);
+            if (clonedChild is not null)
+                children.Add(clonedChild);
+            if (remainingNodeCount == 0)
+                break;
+        }
+
+        return children;
+    }
+
+    private static SelectionPathTrieNode BuildSelectionTrie(
+        string rootPath,
+        IReadOnlySet<string> selectedPaths)
+    {
+        var root = new SelectionPathTrieNode();
+        var normalizedRootPath = NormalizePathOrOriginal(rootPath);
+
+        foreach (var selectedPath in selectedPaths)
+        {
+            var normalizedSelectedPath = NormalizePathOrOriginal(selectedPath);
+            if (!IsPathInside(normalizedSelectedPath, normalizedRootPath))
+                continue;
+
+            if (PathComparer.Default.Equals(
+                    normalizedSelectedPath,
+                    normalizedRootPath))
+            {
+                root.IsSelected = true;
+                continue;
+            }
+
+            string relativePath;
+            try
+            {
+                relativePath = Path.GetRelativePath(
+                    normalizedRootPath,
+                    normalizedSelectedPath);
+            }
+            catch
+            {
+                continue;
+            }
+
+            var current = root;
+            foreach (var segment in relativePath.Split(
+                         DirectorySeparators,
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (segment is "." or "..")
+                {
+                    current = null!;
+                    break;
+                }
+
+                if (!current.Children.TryGetValue(segment, out var child))
+                {
+                    child = new SelectionPathTrieNode();
+                    current.Children.Add(segment, child);
+                }
+
+                current = child;
+            }
+
+            if (current is not null)
+                current.IsSelected = true;
+        }
+
+        return root;
+    }
+
+    private static PreviewWarmupSelectedNode? ResolveSelectedNode(
+        TreeNodeDescriptor source,
+        int sourceIndex,
+        SelectionPathTrieNode selection)
+    {
+        if (selection.IsSelected)
+        {
+            return new PreviewWarmupSelectedNode(
+                source,
+                sourceIndex,
+                includesWholeSubtree: true,
+                children: []);
+        }
+
+        if (!source.IsDirectory ||
+            selection.Children.Count == 0)
+        {
+            return null;
+        }
+
+        var selectedChildren = new List<PreviewWarmupSelectedNode>(
+            selection.Children.Count);
+        foreach (var (childName, childSelection) in selection.Children)
+        {
+            if (!TryFindChild(
+                    source,
+                    childName,
+                    out var child,
+                    out var childIndex))
+            {
+                continue;
+            }
+
+            var selectedChild = ResolveSelectedNode(
+                child,
+                childIndex,
+                childSelection);
+            if (selectedChild is not null)
+                selectedChildren.Add(selectedChild);
+        }
+
+        if (selectedChildren.Count == 0)
+            return null;
+
+        selectedChildren.Sort(static (left, right) =>
+            left.SourceIndex.CompareTo(right.SourceIndex));
+        return new PreviewWarmupSelectedNode(
+            source,
+            sourceIndex,
+            includesWholeSubtree: false,
+            children: selectedChildren);
+    }
+
+    private static bool TryFindChild(
+        TreeNodeDescriptor parent,
+        string childName,
+        out TreeNodeDescriptor child,
+        out int childIndex)
+    {
+        var children = parent.Children;
+        var expectedPath = NormalizePathOrOriginal(
+            Path.Combine(parent.FullPath, childName));
+        if (children.Count <= SmallChildListLinearLookupThreshold)
+        {
+            for (var index = 0; index < children.Count; index++)
+            {
+                var candidate = children[index];
+                if (!PathsEqual(candidate.FullPath, expectedPath))
+                    continue;
+
+                child = candidate;
+                childIndex = index;
+                return true;
+            }
+
+            child = null!;
+            childIndex = -1;
+            return false;
+        }
+
+        // Runtime descriptors preserve inventory order: directories first, then
+        // ordinal-ignore-case names. Binary lookup keeps first-content work independent
+        // of the number of siblings while the small-list path remains test-friendly.
+        var firstFileIndex = FindFirstFileIndex(children);
+        if (TryFindChildInSortedRange(
+                children,
+                childName,
+                expectedPath,
+                startIndex: 0,
+                endIndex: firstFileIndex,
+                out child,
+                out childIndex))
+        {
+            return true;
+        }
+
+        return TryFindChildInSortedRange(
+            children,
+            childName,
+            expectedPath,
+            firstFileIndex,
+            children.Count,
+            out child,
+            out childIndex);
+    }
+
+    private static int FindFirstFileIndex(
+        IReadOnlyList<TreeNodeDescriptor> children)
+    {
+        var low = 0;
+        var high = children.Count;
+        while (low < high)
+        {
+            var middle = low + ((high - low) / 2);
+            if (children[middle].IsDirectory)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        return low;
+    }
+
+    private static bool TryFindChildInSortedRange(
+        IReadOnlyList<TreeNodeDescriptor> children,
+        string childName,
+        string expectedPath,
+        int startIndex,
+        int endIndex,
+        out TreeNodeDescriptor child,
+        out int childIndex)
+    {
+        var low = startIndex;
+        var high = endIndex;
+        while (low < high)
+        {
+            var middle = low + ((high - low) / 2);
+            if (ComparePathName(children[middle].FullPath, childName) < 0)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        var equivalentNameProbes = 0;
+        for (var index = low;
+             index < endIndex &&
+             equivalentNameProbes < MaxCaseEquivalentNameProbes;
+             index++, equivalentNameProbes++)
+        {
+            var candidate = children[index];
+            if (ComparePathName(candidate.FullPath, childName) != 0)
+                break;
+            if (!PathsEqual(candidate.FullPath, expectedPath))
+                continue;
+
+            child = candidate;
+            childIndex = index;
+            return true;
+        }
+
+        child = null!;
+        childIndex = -1;
+        return false;
+    }
+
+    private static int ComparePathName(
+        string path,
+        string expectedName)
+    {
+        var name = Path.GetFileName(path.AsSpan());
+        return name.CompareTo(
+            expectedName.AsSpan(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool PathsEqual(
+        string candidate,
+        string expected)
+    {
+        if (PathComparer.Default.Equals(candidate, expected))
+            return true;
+
+        return PathComparer.Default.Equals(
+            NormalizePathOrOriginal(candidate),
+            expected);
+    }
+
+    private static bool IsPathInside(string path, string rootPath)
+    {
+        try
+        {
+            return PathUtility.IsPathInside(path, rootPath);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string NormalizePathOrOriginal(string path)
+    {
+        try
+        {
+            return PathUtility.Normalize(path);
+        }
+        catch
+        {
+            return path;
+        }
+    }
+
+    private static readonly char[] DirectorySeparators =
+        Path.DirectorySeparatorChar == Path.AltDirectorySeparatorChar
+            ? [Path.DirectorySeparatorChar]
+            : [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+
+    private sealed class SelectionPathTrieNode
+    {
+        public Dictionary<string, SelectionPathTrieNode> Children { get; } =
+            new(PathComparer.Default);
+
+        public bool IsSelected { get; set; }
     }
 }
 
 internal static class PreviewFileCollectionPolicy
 {
-    private const long HeavyTextThreshold = 1_500_000;
-    private const int HeavyLineThreshold = 35_000;
-
     public static int CountPreviewLines(string text)
     {
         var lineCount = 1;
@@ -149,23 +697,22 @@ internal static class PreviewFileCollectionPolicy
         return lineCount;
     }
 
-    public static bool ShouldForcePreviewMemoryCleanup(long textLength, int lineCount) =>
-        textLength >= HeavyTextThreshold || lineCount >= HeavyLineThreshold;
-
     public static List<string> CollectOrderedPreviewFiles(
         IReadOnlySet<string> selectedPaths,
         bool hasSelection,
         TreeNodeDescriptor? treeRoot)
     {
-        if (hasSelection)
-        {
-            return treeRoot is null
-                ? []
-                : BuildOrderedSelectedFilePaths(selectedPaths, treeRoot);
-        }
+        if (treeRoot is null)
+            return [];
 
-        return treeRoot is null
-            ? []
+        var effectiveSelectedPaths =
+            ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                treeRoot,
+                selectedPaths);
+        return hasSelection && effectiveSelectedPaths.Count > 0
+            ? BuildOrderedSelectedFilePaths(
+                effectiveSelectedPaths,
+                treeRoot)
             : BuildOrderedAllFilePaths(treeRoot);
     }
 
@@ -176,13 +723,19 @@ internal static class PreviewFileCollectionPolicy
         TreeTextFormat treeFormat,
         IReadOnlySet<string> selectedPaths)
     {
+        var effectiveSelectedPaths = treeRoot is null
+            ? selectedPaths
+            : ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+                treeRoot,
+                selectedPaths);
+
         return new PreviewCacheKeyData(
             ProjectPath: projectPath,
             TreeIdentity: treeRoot is null ? 0 : RuntimeHelpers.GetHashCode(treeRoot),
             Mode: mode,
             TreeFormat: treeFormat,
-            SelectedCount: selectedPaths.Count,
-            SelectedHash: BuildPathSetHash(selectedPaths));
+            SelectedCount: effectiveSelectedPaths.Count,
+            SelectedHash: BuildPathSetHash(effectiveSelectedPaths));
     }
 
     public static int BuildPathSetHash(IReadOnlySet<string> selectedPaths)

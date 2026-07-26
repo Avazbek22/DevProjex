@@ -297,23 +297,31 @@ public sealed class MainWindowStartupAutomationUiTests
 	public async Task StartupSessionMetrics_LoadsProjectAndWritesPrivateReportOnClose()
 	{
 		using var project = UiTestProject.CreateDefault();
+		const string privateSearchQuery = "PrivateSearchNeedle";
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, $"{privateSearchQuery}.txt"),
+			"private search fixture",
+			TestContext.Current.CancellationToken);
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
 		var outputPath = Path.Combine(project.AppDataPath, "session-metrics", "session.json");
 		var options = ParseValidOptions(
 			CommandLineOptionTokens.SessionMetrics, project.RootPath,
 			CommandLineOptionTokens.SessionMetricsOutput, outputPath,
-			CommandLineOptionTokens.PreviewSearch, "Preview");
+			CommandLineOptionTokens.PreviewSearch, privateSearchQuery);
 		var window = CreateStartupWindow(options, appDataPath);
 
 		window.Show();
 		await UiTestDriver.WaitForPreviewReadyAsync(window);
-		await UiTestDriver.WaitForSearchAppliedAsync(window, "Preview");
+		await UiTestDriver.WaitForSearchAppliedAsync(window, privateSearchQuery);
 
 		await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 
 		Assert.True(File.Exists(outputPath));
 		var json = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
-		Assert.DoesNotContain("Preview", json, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			privateSearchQuery,
+			json,
+			StringComparison.Ordinal);
 		using var document = JsonDocument.Parse(json);
 		var root = document.RootElement;
 		Assert.Equal("interactive-session", root.GetProperty("kind").GetString());
@@ -368,6 +376,53 @@ public sealed class MainWindowStartupAutomationUiTests
 			Assert.Equal(2, filterEvents.Length);
 			Assert.Single(filterEvents, static item => item.GetProperty("queryLength").GetInt32() > 0);
 			Assert.Single(filterEvents, static item => item.GetProperty("queryLength").GetInt32() == 0);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUiBenchmarkScript_RepeatsPreviewSearchCloseCycle()
+	{
+		using var idleOverride = TemporaryEnvironmentVariable.Set(
+			"DEVPROJEX_UI_BENCHMARK_IDLE_SECONDS",
+			"1");
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var outputPath = Path.Combine(project.AppDataPath, "session-metrics", "search-retention-session.json");
+		var options = ParseValidOptions(
+			CommandLineOptionTokens.SessionMetrics, project.RootPath,
+			CommandLineOptionTokens.SessionMetricsOutput, outputPath,
+			CommandLineOptionTokens.UiBenchmarkScript, "preview-search-retention");
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !window.IsVisible && File.Exists(outputPath),
+				"repeated search-retention benchmark to close the window and write its report",
+				TimeSpan.FromSeconds(45));
+
+			var json = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
+			using var document = JsonDocument.Parse(json);
+			var events = document.RootElement.GetProperty("events").EnumerateArray().ToArray();
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "search.apply"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "search.close"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "search-cycle.idle-settle"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "search.apply.repeat"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "search.close.repeat"));
+			Assert.Contains(events, static item => HasSuccessfulBenchmarkStep(item, "search-cycle.repeat.idle-settle"));
+
+			var searchEvents = events
+				.Where(static item => item.GetProperty("name").GetString() == "tree.search")
+				.ToArray();
+			Assert.Equal(4, searchEvents.Length);
+			Assert.Equal(2, searchEvents.Count(static item => item.GetProperty("queryLength").GetInt32() > 0));
+			Assert.Equal(2, searchEvents.Count(static item => item.GetProperty("queryLength").GetInt32() == 0));
 		}
 		finally
 		{
@@ -531,5 +586,22 @@ public sealed class MainWindowStartupAutomationUiTests
 		return OperatingSystem.IsMacOS()
 			? value.Replace(privateVarPrefix, varPrefix, StringComparison.Ordinal)
 			: value;
+	}
+
+	private sealed class TemporaryEnvironmentVariable : IDisposable
+	{
+		private readonly string _name;
+		private readonly string? _previousValue;
+
+		private TemporaryEnvironmentVariable(string name, string value)
+		{
+			_name = name;
+			_previousValue = Environment.GetEnvironmentVariable(name);
+			Environment.SetEnvironmentVariable(name, value);
+		}
+
+		public static TemporaryEnvironmentVariable Set(string name, string value) => new(name, value);
+
+		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
 	}
 }

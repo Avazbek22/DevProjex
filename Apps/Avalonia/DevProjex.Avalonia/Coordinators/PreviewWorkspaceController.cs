@@ -46,7 +46,8 @@ internal sealed class PreviewWorkspaceController : IDisposable
     private readonly Action<bool> _schedulePreviewRefresh;
     private readonly Action _clearPreviewSelectionMetrics;
     private readonly Action _clearPreviewMemory;
-    private readonly Action<bool> _schedulePreviewMemoryCleanup;
+    private readonly Action _schedulePreviewMemoryCleanup;
+    private readonly Action _cancelPendingMemoryCleanup;
     private readonly Action _updateCompactModeVisualState;
     private readonly TranslateTransform _treePaneSnapshotTransform;
     private readonly TranslateTransform _previewSegmentThumbTransform;
@@ -56,6 +57,8 @@ internal sealed class PreviewWorkspaceController : IDisposable
     private RenderTargetBitmap? _previewPaneSnapshotBitmap;
     private int _modeSwitchVersion;
     private bool _previewFontInitialized;
+    private bool _isOpeningPreview;
+    private bool _closeRequestedDuringOpen;
     private bool _disposed;
 
     public PreviewWorkspaceController(
@@ -68,7 +71,8 @@ internal sealed class PreviewWorkspaceController : IDisposable
         Action<bool> schedulePreviewRefresh,
         Action clearPreviewSelectionMetrics,
         Action clearPreviewMemory,
-        Action<bool> schedulePreviewMemoryCleanup,
+        Action schedulePreviewMemoryCleanup,
+        Action cancelPendingMemoryCleanup,
         Action updateCompactModeVisualState)
     {
         _window = window;
@@ -81,6 +85,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
         _clearPreviewSelectionMetrics = clearPreviewSelectionMetrics;
         _clearPreviewMemory = clearPreviewMemory;
         _schedulePreviewMemoryCleanup = schedulePreviewMemoryCleanup;
+        _cancelPendingMemoryCleanup = cancelPendingMemoryCleanup;
         _updateCompactModeVisualState = updateCompactModeVisualState;
 
         _treePaneSnapshotTransform =
@@ -96,6 +101,11 @@ internal sealed class PreviewWorkspaceController : IDisposable
     }
 
     public bool IsModeSwitchInProgress { get; private set; }
+
+    internal bool WasFirstContentReadyBeforeLastOpenAnimation { get; private set; }
+
+    internal bool WasTreeDocumentReadyBeforeLastOpenAnimation =>
+        WasFirstContentReadyBeforeLastOpenAnimation;
 
     public void UpdatePreviewSegmentThumbPosition(bool animate)
     {
@@ -125,6 +135,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
             return;
         }
 
+        _cancelPendingMemoryCleanup();
         var switchCts = ReplaceModeSwitchCancellation();
         var switchVersion = Interlocked.Increment(ref _modeSwitchVersion);
         IsModeSwitchInProgress = true;
@@ -134,6 +145,8 @@ internal sealed class PreviewWorkspaceController : IDisposable
             _previewPipeline.CancelActiveBuildAndInvalidate();
             _viewModel.SelectedPreviewContentMode = targetMode;
             UpdatePreviewSegmentThumbPosition(animate: true);
+            var previewRefreshOperation =
+                _previewPipeline.RefreshNowAsync(allowDuringModeSwitch: true);
 
             await WaitForPanelAnimationAsync(
                 PreviewSegmentThumbAnimationDuration,
@@ -143,8 +156,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
                 return;
 
             IsModeSwitchInProgress = false;
-            _previewPipeline.MarkClearBeforeNextRefresh();
-            _schedulePreviewRefresh(true);
+            await previewRefreshOperation.Completion;
             _window.Dispatcher.Post(FocusPreviewSurface, DispatcherPriority.Background);
         }
         catch (OperationCanceledException)
@@ -175,6 +187,9 @@ internal sealed class PreviewWorkspaceController : IDisposable
             return;
         }
 
+        _cancelPendingMemoryCleanup();
+        _closeRequestedDuringOpen = false;
+        WasFirstContentReadyBeforeLastOpenAnimation = false;
         PreparePreviewPane();
         _workspace.CaptureNonSplitSettingsPanelWidth();
         _workspace.ResetSettingsPanelWidthForPreview();
@@ -191,29 +206,76 @@ internal sealed class PreviewWorkspaceController : IDisposable
             _workspace.ResolveDesiredPreviewPaneWidth(targetTreeWidth);
         _workspace.SetCurrentPreviewTreePaneWidth(targetTreeWidth);
 
-        _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
-        PreparePreviewPaneOpenLayout(initialTreeWidth);
-        UpdatePreviewSegmentThumbPosition(animate: false);
+        var openCanceledBeforeAnimation = false;
+        var openAnimationStarted = false;
+        _isOpeningPreview = true;
+        try
+        {
+            _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+            PreparePreviewPaneOpenLayout(initialTreeWidth);
+            UpdatePreviewSegmentThumbPosition(animate: false);
+            var previewRefreshOperation = _previewPipeline.RefreshNowAsync();
 
-        await AnimatePreviewPaneOpenAsync(targetTreeWidth, targetPreviewWidth);
-        _viewModel.SetPreviewCompactModeActive(true);
-        _updateCompactModeVisualState();
-        await WaitForPreviewRenderPassesAsync();
-        _workspace.CaptureSplitPaneLayout();
-        _workspace.UpdateWorkspaceLayoutForCurrentMode();
-        UpdatePreviewSegmentThumbPosition(animate: false);
+            try
+            {
+                await previewRefreshOperation.FirstContentReady;
+            }
+            catch (OperationCanceledException)
+            {
+                openCanceledBeforeAnimation = true;
+            }
+
+            if (!openCanceledBeforeAnimation && !_closeRequestedDuringOpen)
+            {
+                WasFirstContentReadyBeforeLastOpenAnimation =
+                    _viewModel.PreviewDocument is not null;
+                openAnimationStarted = true;
+                await AnimatePreviewPaneOpenAsync(
+                    targetTreeWidth,
+                    targetPreviewWidth);
+                _viewModel.SetPreviewCompactModeActive(true);
+                _updateCompactModeVisualState();
+                await WaitForPreviewRenderPassesAsync();
+                _workspace.CaptureSplitPaneLayout();
+                _workspace.UpdateWorkspaceLayoutForCurrentMode();
+                UpdatePreviewSegmentThumbPosition(animate: false);
+            }
+        }
+        finally
+        {
+            _isOpeningPreview = false;
+        }
+
+        if (openCanceledBeforeAnimation || _closeRequestedDuringOpen)
+        {
+            _closeRequestedDuringOpen = false;
+            if (openAnimationStarted)
+                await CloseAsync();
+            else
+                await AbortPreviewOpenAsync();
+            return;
+        }
+
         _controls.TreeView.Focus();
-        _schedulePreviewRefresh(true);
     }
 
     public async Task CloseAsync()
     {
-        if (_workspace.IsPreviewPaneAnimating ||
-            _workspace.IsTreePaneAnimating)
+        if (_isOpeningPreview || _workspace.IsPreviewPaneAnimating)
+        {
+            _closeRequestedDuringOpen = _viewModel.IsPreviewMode;
+            if (_closeRequestedDuringOpen)
+                _previewPipeline.CancelRefresh();
+            return;
+        }
+
+        if (_workspace.IsTreePaneAnimating)
         {
             return;
         }
 
+        _cancelPendingMemoryCleanup();
+        _closeRequestedDuringOpen = false;
         SetPreviewToolbarInteractionSuspended(true);
         try
         {
@@ -258,16 +320,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
             if (startedFromPreviewOnly)
                 _searchFilter.RestoreAfterPreviewOnly();
 
-            var previewDocument = _viewModel.PreviewDocument;
-            var forceMemoryCleanup =
-                previewDocument is not null &&
-                PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(
-                    previewDocument.CharacterCount,
-                    previewDocument.LineCount);
-
-            _clearPreviewSelectionMetrics();
-            _clearPreviewMemory();
-            _schedulePreviewMemoryCleanup(forceMemoryCleanup);
+            ReleasePreviewDocumentAndScheduleCleanup();
             _controls.TreeView.Focus();
         }
         finally
@@ -359,6 +412,29 @@ internal sealed class PreviewWorkspaceController : IDisposable
         CancelModeSwitch();
         ResetPreviewTreePaneSnapshotVisualState();
         ResetPreviewPaneSnapshotVisualState();
+    }
+
+    private async Task AbortPreviewOpenAsync()
+    {
+        CancelModeSwitch();
+        _previewPipeline.CancelRefresh();
+        _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.Off;
+        _viewModel.SetPreviewCompactModeActive(false);
+        _updateCompactModeVisualState();
+        _workspace.RestoreNonSplitSettingsPanelWidth();
+        _workspace.UpdateWorkspaceLayoutForCurrentMode();
+        await WaitForPreviewRenderPassesAsync();
+        ResetPreviewTreePaneVisualState();
+        CollapsePreviewPaneVisualState();
+        ReleasePreviewDocumentAndScheduleCleanup();
+        _controls.TreeView.Focus();
+    }
+
+    private void ReleasePreviewDocumentAndScheduleCleanup()
+    {
+        _clearPreviewSelectionMetrics();
+        _clearPreviewMemory();
+        _schedulePreviewMemoryCleanup();
     }
 
     private void PreparePreviewPane()

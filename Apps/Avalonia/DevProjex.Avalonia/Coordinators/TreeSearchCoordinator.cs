@@ -1,12 +1,60 @@
+using DevProjex.Kernel;
+
 namespace DevProjex.Avalonia.Coordinators;
 
 public sealed class TreeSearchCoordinator(
     MainWindowViewModel viewModel,
     TreeView treeView,
-    Action? onSearchApplied = null,
     ITreeSearchMetricsSink? metricsSink = null)
     : IDisposable
 {
+    internal enum NavigationResult
+    {
+        Canceled = 0,
+        Navigated = 1,
+        NoMatches = 2
+    }
+
+    internal sealed class BringIntoViewPathProgress(int segmentCount)
+    {
+        internal const int MaxNoProgressAttempts = 4;
+
+        public int SegmentCount { get; } = segmentCount;
+        public int DeepestRealizedSegment { get; private set; } = -1;
+        public int NoProgressAttempts { get; private set; }
+        public int TotalAttempts { get; private set; }
+
+        public bool Observe(int deepestRealizedSegment)
+        {
+            TotalAttempts++;
+            if (deepestRealizedSegment > DeepestRealizedSegment)
+            {
+                DeepestRealizedSegment = deepestRealizedSegment;
+                NoProgressAttempts = 0;
+                return true;
+            }
+
+            NoProgressAttempts++;
+            return NoProgressAttempts < MaxNoProgressAttempts;
+        }
+    }
+
+    private sealed class BringIntoViewRequest(
+        TreeNodeViewModel node,
+        TreeNodeViewModel[] path,
+        int version,
+        bool adjustHorizontalOffset,
+        double? originalHorizontalOffset)
+    {
+        public TreeNodeViewModel Node { get; } = node;
+        public TreeNodeViewModel[] Path { get; } = path;
+        public int Version { get; } = version;
+        public bool AdjustHorizontalOffset { get; } = adjustHorizontalOffset;
+        public double? OriginalHorizontalOffset { get; } = originalHorizontalOffset;
+        public BringIntoViewPathProgress Progress { get; } = new(path.Length);
+        public bool HorizontalAdjustmentApplied { get; set; }
+    }
+
     private enum BringIntoViewResult
     {
         NotFound = 0,
@@ -14,7 +62,6 @@ public sealed class TreeSearchCoordinator(
         Visible = 2
     }
 
-    private const int MaxBringIntoViewAttempts = 6;
     private static readonly DispatcherPriority[] BringIntoViewRetryPriorities =
     [
         DispatcherPriority.Render,
@@ -27,43 +74,49 @@ public sealed class TreeSearchCoordinator(
     private readonly object _searchCtsLock = new();
     private CancellationTokenSource? _searchDebounceCts;
     private CancellationTokenSource? _searchCts;
-    private readonly List<TreeNodeViewModel> _searchMatches = [];
+    private readonly List<int> _pendingImmediateNavigationSteps = [];
+    private TaskCompletionSource<NavigationResult>? _immediateNavigationCompletion;
+    private string? _immediateNavigationQuery;
+    private TreeNodeViewModel? _immediateNavigationRoot;
+    private int _immediateNavigationVersion;
+    private bool _immediateNavigationActive;
+    private readonly TreeDescriptorSearchSession _descriptorSearch = new();
+    private int[] _searchMatches = [];
+    private readonly Dictionary<int, TreeNodeViewModel> _resolvedSearchNodes = [];
     private readonly HashSet<TreeNodeViewModel> _activeHighlightNodes = [];
     private readonly HashSet<TreeNodeViewModel> _nextHighlightNodes = [];
     private readonly HashSet<TreeNodeViewModel> _searchExpandedNodes = [];
     private readonly HashSet<TreeNodeViewModel> _nextSearchExpandedNodes = [];
     private readonly HashSet<TreeNodeViewModel> _searchSelfMatchedNodes = [];
+    private readonly HashSet<TreeNodeViewModel> _searchLazyChildrenSnapshots = [];
     private readonly List<TreeNodeViewModel> _highlightAddedNodes = [];
     private readonly List<TreeNodeViewModel> _highlightRemovedNodes = [];
-    private readonly List<TreeNodeViewModel> _flatNodeIndex = [];
-    private readonly List<TreeNodeViewModel> _lastComputedMatches = [];
-    private readonly Dictionary<string, List<TreeNodeViewModel>> _queryMatchesCache =
-        new(StringComparer.OrdinalIgnoreCase);
-    private readonly LinkedList<string> _queryMatchesCacheLru = [];
-    private readonly Dictionary<string, LinkedListNode<string>> _queryMatchesCacheNodes =
-        new(StringComparer.OrdinalIgnoreCase);
     private readonly object _highlightCtsLock = new();
-    private readonly object _expansionCtsLock = new();
     private CancellationTokenSource? _highlightApplyCts;
-    private CancellationTokenSource? _expansionApplyCts;
     private int _searchMatchIndex = -1;
     private TreeNodeViewModel? _currentSearchMatch;
+    private TreeNodeViewModel? _searchRetainedSelectionNode;
+    private TreeNodeViewModel? _searchRoot;
+    private TreeDescriptorSearchIndex? _currentSearchIndex;
     private string? _activeHighlightQuery;
     private string? _lastComputedQuery;
-    private TreeNodeViewModel? _indexedFirstRoot;
-    private int _indexedRootCount;
     private int _searchVersion;
     private int _bringIntoViewVersion;
-    private double? _searchNavigationTargetHorizontalOffset;
     private int _searchExpansionEpoch;
+    private int _searchBranchReleaseVersion;
     private bool _searchExpansionStateInitialized;
-    private const int SearchQueryCacheLimit = 8;
-    private const int MaxCachedMatchCount = 4096;
+    private bool _searchLazyChildrenSnapshotInitialized;
+    private bool _searchBranchReleasePending;
+    private bool _autoExpandAllMatches;
+    private bool _treeAutoScrollSuppressed;
+    private bool _restoreTreeAutoScroll;
+    internal int LastBringIntoViewAttemptCount { get; private set; }
     private const int HighlightBatchSize = 256;
-    private const int ExpansionBatchSize = 192;
-    private const int ExpansionBatchThreshold = 256;
-    private const int SearchAutoExpandMatchCap = 2500;
+    private const int ProgressiveMaterializationMatchThreshold = 48;
+    private const int MaterializationBatchSize = 32;
     private const int SearchGlobalHighlightMatchCap = 3500;
+    private static readonly TimeSpan DispatcherWorkSlice =
+        TimeSpan.FromMilliseconds(6);
 
     // Cached brushes to avoid creating new objects for each node
     private IBrush? _cachedHighlightBackground;
@@ -98,6 +151,7 @@ public sealed class TreeSearchCoordinator(
     public void OnSearchQueryChanged()
     {
         viewModel.SetSearchInProgress(!string.IsNullOrWhiteSpace(viewModel.SearchQuery));
+        Interlocked.Increment(ref _bringIntoViewVersion);
 
         CancellationToken token;
         int version;
@@ -105,6 +159,8 @@ public sealed class TreeSearchCoordinator(
         {
             _searchDebounceCts?.Cancel();
             _searchDebounceCts?.Dispose();
+            _searchCts?.Cancel();
+            CompleteImmediateNavigationLocked();
             _searchDebounceCts = new CancellationTokenSource();
             token = _searchDebounceCts.Token;
             version = Interlocked.Increment(ref _searchVersion);
@@ -118,14 +174,16 @@ public sealed class TreeSearchCoordinator(
     /// </summary>
     public void CancelPending()
     {
+        Interlocked.Increment(ref _searchVersion);
+        Interlocked.Increment(ref _bringIntoViewVersion);
         lock (_searchCtsLock)
         {
             _searchDebounceCts?.Cancel();
             _searchCts?.Cancel();
+            CompleteImmediateNavigationLocked();
         }
 
         CancelPendingHighlightApply();
-        CancelPendingExpansionApply();
     }
 
     private void CancelPendingHighlightApply()
@@ -138,34 +196,25 @@ public sealed class TreeSearchCoordinator(
         }
     }
 
-    private void CancelPendingExpansionApply()
-    {
-        lock (_expansionCtsLock)
-        {
-            _expansionApplyCts?.Cancel();
-            _expansionApplyCts?.Dispose();
-            _expansionApplyCts = null;
-        }
-    }
-
     public void UpdateSearchMatches(bool normalizeTreeWhenEmptyQuery = true)
     {
         var stopwatch = Stopwatch.StartNew();
         viewModel.SetSearchInProgress(false);
+        Interlocked.Increment(ref _bringIntoViewVersion);
 
         lock (_searchCtsLock)
         {
             _searchDebounceCts?.Cancel();
             _searchCts?.Cancel();
+            CompleteImmediateNavigationLocked();
         }
 
         var query = viewModel.SearchQuery ?? string.Empty;
         if (string.IsNullOrWhiteSpace(query))
         {
-            CancelPendingExpansionApply();
             if (!normalizeTreeWhenEmptyQuery)
             {
-                _searchMatches.Clear();
+                _searchMatches = [];
                 _searchMatchIndex = -1;
                 UpdateCurrentSearchMatch(null);
                 UpdateSearchMatchSummary();
@@ -175,11 +224,10 @@ public sealed class TreeSearchCoordinator(
                 _searchSelfMatchedNodes.Clear();
                 _searchExpansionStateInitialized = false;
                 _lastComputedQuery = null;
-                _lastComputedMatches.Clear();
                 return;
             }
 
-            ApplySearchResultCore(query, Array.Empty<TreeNodeViewModel>());
+            ApplySearchResultCore(query, searchResult: null);
             metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
                 query,
                 stopwatch.Elapsed,
@@ -189,71 +237,161 @@ public sealed class TreeSearchCoordinator(
             return;
         }
 
-        EnsureSearchIndexCurrent();
-        var source = CreateSearchSource(query);
-        var usedCache = TryGetCachedMatches(query, out var cachedMatches);
-        var matches = usedCache
-            ? cachedMatches
-            : CollectMatches(source, query);
-        if (!ReferenceEquals(matches, cachedMatches))
-            CacheMatches(query, matches);
-        ApplySearchResultCore(query, matches);
+        var root = viewModel.TreeNodes.FirstOrDefault();
+        if (root is null)
+        {
+            ApplySearchResultCore(query, searchResult: null);
+            return;
+        }
+
+        var searchResult = _descriptorSearch.Search(
+            root.Descriptor,
+            root.DisplayName,
+            query,
+            CancellationToken.None);
+        ApplySearchResultCore(query, searchResult);
         metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
             query,
             stopwatch.Elapsed,
-            source.Count,
-            matches.Count,
-            usedCache));
+            searchResult.Index.Count,
+            searchResult.MatchIndices.Length,
+            searchResult.UsedCache));
     }
 
-    public bool HasMatches => _searchMatches.Count > 0;
+    public Task UpdateSearchMatchesAsync(bool normalizeTreeWhenEmptyQuery = true)
+    {
+        if (string.IsNullOrWhiteSpace(viewModel.SearchQuery))
+        {
+            UpdateSearchMatches(normalizeTreeWhenEmptyQuery);
+            return Task.CompletedTask;
+        }
+
+        CancellationToken token;
+        int version;
+        lock (_searchCtsLock)
+        {
+            _searchDebounceCts?.Cancel();
+            _searchDebounceCts?.Dispose();
+            _searchDebounceCts = null;
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+            CompleteImmediateNavigationLocked();
+
+            _searchCts = new CancellationTokenSource();
+            token = _searchCts.Token;
+            version = Interlocked.Increment(ref _searchVersion);
+            Interlocked.Increment(ref _bringIntoViewVersion);
+        }
+
+        viewModel.SetSearchInProgress(true);
+        return RunSearchAsync(version, token);
+    }
+
+    public bool HasMatches => _searchMatches.Length > 0;
+
+    public bool HasAppliedSearchState =>
+        _lastComputedQuery is not null ||
+        _currentSearchIndex is not null ||
+        _searchExpansionStateInitialized ||
+        _activeHighlightNodes.Count > 0;
 
     public void UpdateHighlights(string? query)
     {
         var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
-        TreeNodeViewModel.ForEachDescendant(viewModel.TreeNodes, node =>
+        TreeNodeViewModel.ForEachRealizedDescendant(viewModel.TreeNodes, node =>
             node.UpdateSearchHighlight(query, highlightBackground, highlightForeground, normalForeground, currentBackground));
     }
 
-    public void ClearSearchState()
+    public int ApplyFilterPresentation(string query)
+    {
+        var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
+        using var _ = TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope();
+        var result = TreeSearchEngine.ApplyFilterPresentation(
+            viewModel.TreeNodes,
+            query,
+            node => node.DisplayName,
+            node => node.Children,
+            (node, isMatch) => node.UpdateSearchHighlight(
+                isMatch ? query : null,
+                highlightBackground,
+                highlightForeground,
+                normalForeground,
+                currentBackground),
+            (node, expanded) => node.IsExpanded = expanded);
+
+        return result.MatchCount;
+    }
+
+    public void ClearSearchState(bool preservePendingHighlightCleanup = false)
     {
         Interlocked.Increment(ref _bringIntoViewVersion);
-        CancelPendingHighlightApply();
-        CancelPendingExpansionApply();
+        if (!preservePendingHighlightCleanup)
+            CancelPendingHighlightApply();
         viewModel.SetSearchInProgress(false);
 
         // Clear current match reference first
         _currentSearchMatch = null;
         _searchMatchIndex = -1;
         ClearActiveHighlights();
+        _activeHighlightNodes.TrimExcess();
 
         // Clear and trim the matches list
-        _searchMatches.Clear();
-        _searchMatches.TrimExcess();
+        _searchMatches = [];
         _nextHighlightNodes.Clear();
-        _flatNodeIndex.Clear();
-        _lastComputedMatches.Clear();
-        _queryMatchesCache.Clear();
-        _queryMatchesCacheLru.Clear();
-        _queryMatchesCacheNodes.Clear();
+        _nextHighlightNodes.TrimExcess();
+        _resolvedSearchNodes.Clear();
+        _resolvedSearchNodes.TrimExcess();
+        if (!_searchBranchReleasePending)
+            ReleaseSearchMaterializedBranches(finalize: true);
+        _descriptorSearch.Clear();
+        _currentSearchIndex = null;
+        _searchRoot = null;
         _searchExpandedNodes.Clear();
+        _searchExpandedNodes.TrimExcess();
         _nextSearchExpandedNodes.Clear();
+        _nextSearchExpandedNodes.TrimExcess();
         _searchSelfMatchedNodes.Clear();
+        _searchSelfMatchedNodes.TrimExcess();
+        _highlightAddedNodes.Clear();
+        _highlightAddedNodes.TrimExcess();
+        _highlightRemovedNodes.Clear();
+        _highlightRemovedNodes.TrimExcess();
         _searchExpansionStateInitialized = false;
         _lastComputedQuery = null;
-        _indexedFirstRoot = null;
-        _indexedRootCount = 0;
         _searchExpansionEpoch = 0;
         UpdateSearchMatchSummary();
 
         // Note: Don't call UpdateHighlights here - nodes may already be cleared
     }
 
+    public async Task CompleteSearchCloseAsync()
+    {
+        if (!_searchBranchReleasePending)
+            return;
+
+        var releaseVersion = Volatile.Read(ref _searchBranchReleaseVersion);
+        await treeView.Dispatcher.InvokeAsync(
+            static () => { },
+            DispatcherPriority.Render);
+        await treeView.Dispatcher.InvokeAsync(
+            static () => { },
+            DispatcherPriority.Background);
+
+        if (!_searchBranchReleasePending ||
+            releaseVersion != Volatile.Read(ref _searchBranchReleaseVersion))
+        {
+            return;
+        }
+
+        ReleaseSearchMaterializedBranches(finalize: true);
+        _searchBranchReleasePending = false;
+    }
+
     public void Dispose()
     {
         Interlocked.Increment(ref _bringIntoViewVersion);
+        RestoreTreeAutoScroll();
         CancelPendingHighlightApply();
-        CancelPendingExpansionApply();
         viewModel.SetSearchInProgress(false);
         lock (_searchCtsLock)
         {
@@ -263,28 +401,29 @@ public sealed class TreeSearchCoordinator(
             _searchCts?.Cancel();
             _searchCts?.Dispose();
             _searchCts = null;
+            CompleteImmediateNavigationLocked();
         }
 
         // Clear search state to release references
-        _searchMatches.Clear();
-        _searchMatches.TrimExcess();
+        _searchMatches = [];
         _activeHighlightNodes.Clear();
         _nextHighlightNodes.Clear();
-        _flatNodeIndex.Clear();
-        _lastComputedMatches.Clear();
-        _queryMatchesCache.Clear();
-        _queryMatchesCacheLru.Clear();
-        _queryMatchesCacheNodes.Clear();
+        _resolvedSearchNodes.Clear();
+        Interlocked.Increment(ref _searchBranchReleaseVersion);
+        _searchBranchReleasePending = false;
+        ReleaseSearchMaterializedBranches(finalize: true);
+        _descriptorSearch.Clear();
         _searchExpandedNodes.Clear();
         _nextSearchExpandedNodes.Clear();
         _searchSelfMatchedNodes.Clear();
         _highlightAddedNodes.Clear();
         _highlightRemovedNodes.Clear();
         _currentSearchMatch = null;
+        _searchRetainedSelectionNode = null;
+        _currentSearchIndex = null;
+        _searchRoot = null;
         _activeHighlightQuery = null;
         _lastComputedQuery = null;
-        _indexedFirstRoot = null;
-        _indexedRootCount = 0;
         UpdateSearchMatchSummary();
 
         // Clear cached brushes
@@ -296,12 +435,12 @@ public sealed class TreeSearchCoordinator(
 
     public void Navigate(int step)
     {
-        if (_searchMatches.Count == 0)
+        if (_searchMatches.Length == 0)
             return;
 
-        _searchMatchIndex = (_searchMatchIndex + step + _searchMatches.Count) % _searchMatches.Count;
-        SelectSearchMatch();
-        metricsSink?.RecordTreeSearchNavigation(step, _searchMatchIndex + 1, _searchMatches.Count);
+        _searchMatchIndex = (_searchMatchIndex + step + _searchMatches.Length) % _searchMatches.Length;
+        SelectSearchMatch(adjustHorizontalOffset: true);
+        metricsSink?.RecordTreeSearchNavigation(step, _searchMatchIndex + 1, _searchMatches.Length);
     }
 
     public bool TryNavigateForCurrentQuery(int step)
@@ -310,27 +449,158 @@ public sealed class TreeSearchCoordinator(
         if (string.IsNullOrWhiteSpace(query))
             return false;
 
-        var shouldRefreshMatches =
-            viewModel.IsSearchInProgress ||
-            _searchMatches.Count == 0 ||
-            !string.Equals(_lastComputedQuery, query, StringComparison.OrdinalIgnoreCase);
-
-        if (!shouldRefreshMatches)
+        var hasComputedCurrentQuery =
+            !viewModel.IsSearchInProgress &&
+            string.Equals(_lastComputedQuery, query, StringComparison.OrdinalIgnoreCase);
+        if (hasComputedCurrentQuery)
         {
+            if (_searchMatches.Length == 0)
+                return false;
+
             Navigate(step);
             return true;
         }
 
-        UpdateSearchMatches(normalizeTreeWhenEmptyQuery: false);
-        if (_searchMatches.Count == 0)
+        var root = viewModel.TreeNodes.FirstOrDefault();
+        if (root is null)
             return false;
 
-        // Forward activation should land on the first result after a query refresh
-        // instead of skipping straight to the second match.
-        if (step < 0)
-            Navigate(step);
-
+        StartOrJoinImmediateNavigationSearch(query, root, step);
         return true;
+    }
+
+    internal Task<NavigationResult> TryNavigateForCurrentQueryAsync(int step)
+    {
+        var query = viewModel.SearchQuery ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(query))
+            return Task.FromResult(NavigationResult.Canceled);
+
+        var hasComputedCurrentQuery =
+            !viewModel.IsSearchInProgress &&
+            string.Equals(_lastComputedQuery, query, StringComparison.OrdinalIgnoreCase);
+        if (hasComputedCurrentQuery)
+        {
+            if (_searchMatches.Length == 0)
+                return Task.FromResult(NavigationResult.NoMatches);
+
+            Navigate(step);
+            return Task.FromResult(NavigationResult.Navigated);
+        }
+
+        var root = viewModel.TreeNodes.FirstOrDefault();
+        return root is null
+            ? Task.FromResult(NavigationResult.NoMatches)
+            : StartOrJoinImmediateNavigationSearch(query, root, step);
+    }
+
+    internal Task WaitForImmediateNavigationAsync()
+    {
+        lock (_searchCtsLock)
+            return _immediateNavigationCompletion?.Task ?? Task.CompletedTask;
+    }
+
+    private Task<NavigationResult> StartOrJoinImmediateNavigationSearch(
+        string query,
+        TreeNodeViewModel root,
+        int step)
+    {
+        CancellationToken token;
+        int version;
+        Task<NavigationResult> completion;
+        lock (_searchCtsLock)
+        {
+            if (_immediateNavigationActive &&
+                !_searchCts!.IsCancellationRequested &&
+                string.Equals(_immediateNavigationQuery, query, StringComparison.OrdinalIgnoreCase) &&
+                ReferenceEquals(_immediateNavigationRoot, root))
+            {
+                _pendingImmediateNavigationSteps.Add(step);
+                return _immediateNavigationCompletion!.Task;
+            }
+
+            _searchDebounceCts?.Cancel();
+            _searchDebounceCts?.Dispose();
+            _searchDebounceCts = null;
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+            CompleteImmediateNavigationLocked();
+
+            _searchCts = new CancellationTokenSource();
+            token = _searchCts.Token;
+            version = Interlocked.Increment(ref _searchVersion);
+            Interlocked.Increment(ref _bringIntoViewVersion);
+            _immediateNavigationVersion = version;
+            _immediateNavigationQuery = query;
+            _immediateNavigationRoot = root;
+            _pendingImmediateNavigationSteps.Add(step);
+            _immediateNavigationCompletion = new TaskCompletionSource<NavigationResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _immediateNavigationActive = true;
+            completion = _immediateNavigationCompletion.Task;
+        }
+
+        viewModel.SetSearchInProgress(true);
+        _ = RunSearchAsync(version, token);
+        return completion;
+    }
+
+    private NavigationResult ApplyPendingImmediateNavigation(
+        int version,
+        string query,
+        TreeNodeViewModel? root)
+    {
+        int[] steps;
+        lock (_searchCtsLock)
+        {
+            if (!_immediateNavigationActive ||
+                version != _immediateNavigationVersion ||
+                !string.Equals(_immediateNavigationQuery, query, StringComparison.OrdinalIgnoreCase) ||
+                !ReferenceEquals(_immediateNavigationRoot, root))
+            {
+                return NavigationResult.Canceled;
+            }
+
+            steps = [.. _pendingImmediateNavigationSteps];
+            _pendingImmediateNavigationSteps.Clear();
+            _immediateNavigationActive = false;
+            _immediateNavigationQuery = null;
+            _immediateNavigationRoot = null;
+        }
+
+        if (_searchMatches.Length == 0 || steps.Length == 0)
+        {
+            return steps.Length == 0
+                ? NavigationResult.Canceled
+                : NavigationResult.NoMatches;
+        }
+
+        for (var index = 0; index < steps.Length; index++)
+        {
+            var step = steps[index];
+            if (index > 0 || step < 0)
+            {
+                Navigate(step);
+                continue;
+            }
+
+            // A fresh forward request lands on the first result selected by result
+            // application; subsequent queued requests advance normally.
+            if (_currentSearchMatch is not null)
+                BringNodeIntoView(_currentSearchMatch, adjustHorizontalOffset: true);
+        }
+
+        return NavigationResult.Navigated;
+    }
+
+    private void CompleteImmediateNavigationLocked(
+        NavigationResult result = NavigationResult.Canceled)
+    {
+        _immediateNavigationActive = false;
+        _immediateNavigationQuery = null;
+        _immediateNavigationRoot = null;
+        _pendingImmediateNavigationSteps.Clear();
+        _immediateNavigationCompletion?.TrySetResult(result);
+        _immediateNavigationCompletion = null;
     }
 
     public void RefreshThemeHighlights()
@@ -338,32 +608,51 @@ public sealed class TreeSearchCoordinator(
         UpdateHighlights(viewModel.SearchQuery);
     }
 
-    private void SelectSearchMatch()
+    private void SelectSearchMatch(bool adjustHorizontalOffset)
     {
-        if (_searchMatchIndex < 0 || _searchMatchIndex >= _searchMatches.Count)
+        if (_searchMatchIndex < 0 || _searchMatchIndex >= _searchMatches.Length)
         {
             UpdateSearchMatchSummary();
             return;
         }
 
-        var node = _searchMatches[_searchMatchIndex];
-        _searchNavigationTargetHorizontalOffset = CaptureTreeHorizontalOffset();
-        node.EnsureParentsExpanded();
-        SelectTreeNode(node);
-        UpdateCurrentSearchMatch(node);
-        UpdateSearchMatchSummary();
-        var bringIntoViewVersion = BringNodeIntoView(node);
-        treeView.Focus();
-        RestoreTreeHorizontalOffsetAfterSearchNavigation(bringIntoViewVersion);
+        var node = ResolveSearchNode(_searchMatches[_searchMatchIndex]);
+        if (node is null)
+        {
+            UpdateSearchMatchSummary();
+            return;
+        }
+
+        SuppressTreeAutoScroll();
+        try
+        {
+            if (!_autoExpandAllMatches)
+                ApplySmartExpandFromMatches([node]);
+
+            node.EnsureParentsExpanded();
+            SelectTreeNode(node);
+            UpdateCurrentSearchMatch(node);
+            UpdateSearchMatchSummary();
+            BringNodeIntoView(node, adjustHorizontalOffset);
+            treeView.Focus();
+        }
+        catch
+        {
+            RestoreTreeAutoScroll();
+            throw;
+        }
     }
 
     private async Task RunSearchAsync(int version, CancellationToken token)
     {
         var stopwatch = Stopwatch.StartNew();
+        TreeNodeViewModel? root = null;
+        var immediateNavigationResult = NavigationResult.Canceled;
         try
         {
             string query = string.Empty;
-            IReadOnlyList<TreeNodeViewModel>? sourceNodes = null;
+            TreeNodeDescriptor? rootDescriptor = null;
+            string rootDisplayName = string.Empty;
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -371,8 +660,9 @@ public sealed class TreeSearchCoordinator(
                     return;
 
                 query = viewModel.SearchQuery ?? string.Empty;
-                EnsureSearchIndexCurrent();
-                sourceNodes = CreateSearchSource(query);
+                root = viewModel.TreeNodes.FirstOrDefault();
+                rootDescriptor = root?.Descriptor;
+                rootDisplayName = root?.DisplayName ?? string.Empty;
             }, DispatcherPriority.Background);
 
             if (token.IsCancellationRequested || version != Volatile.Read(ref _searchVersion))
@@ -383,7 +673,19 @@ public sealed class TreeSearchCoordinator(
                 await Dispatcher.UIThread.InvokeAsync(
                     () =>
                     {
-                        ApplySearchResultCore(query, Array.Empty<TreeNodeViewModel>());
+                        if (!CanApplySearchResult(
+                                token,
+                                version,
+                                Volatile.Read(ref _searchVersion),
+                                root,
+                                viewModel.TreeNodes.FirstOrDefault()))
+                        {
+                            return;
+                        }
+
+                        ApplySearchResultCore(query, searchResult: null);
+                        immediateNavigationResult =
+                            ApplyPendingImmediateNavigation(version, query, root);
                         metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
                             query,
                             stopwatch.Elapsed,
@@ -395,31 +697,64 @@ public sealed class TreeSearchCoordinator(
                 return;
             }
 
-            List<TreeNodeViewModel> matches;
-            var usedCache = false;
-            if (TryGetCachedMatches(query, out var cachedMatches))
+            if (root is null || rootDescriptor is null)
+                return;
+
+            var searchResult = await Task.Run(
+                () => _descriptorSearch.Search(
+                    rootDescriptor,
+                    rootDisplayName,
+                    query,
+                    token),
+                token).ConfigureAwait(false);
+            if (searchResult.MatchIndices.Length >=
+                ProgressiveMaterializationMatchThreshold)
             {
-                matches = cachedMatches;
-                usedCache = true;
+                await ApplySearchResultProgressivelyAsync(
+                    query,
+                    searchResult,
+                    version,
+                    root,
+                    token);
             }
             else
             {
-                matches = CollectMatches(sourceNodes ?? Array.Empty<TreeNodeViewModel>(), query, token, version);
-                CacheMatches(query, matches);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (!CanApplySearchResult(
+                            token,
+                            version,
+                            Volatile.Read(ref _searchVersion),
+                            root,
+                            viewModel.TreeNodes.FirstOrDefault()))
+                    {
+                        return;
+                    }
+
+                    ApplySearchResultCore(query, searchResult);
+                }, DispatcherPriority.Background);
             }
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (token.IsCancellationRequested || version != Volatile.Read(ref _searchVersion))
+                if (!CanApplySearchResult(
+                        token,
+                        version,
+                        Volatile.Read(ref _searchVersion),
+                        root,
+                        viewModel.TreeNodes.FirstOrDefault()))
+                {
                     return;
+                }
 
-                ApplySearchResultCore(query, matches);
+                immediateNavigationResult =
+                    ApplyPendingImmediateNavigation(version, query, root);
                 metricsSink?.RecordTreeSearch(new TreeSearchMetrics(
                     query,
                     stopwatch.Elapsed,
-                    sourceNodes?.Count ?? 0,
-                    matches.Count,
-                    usedCache));
+                    searchResult.Index.Count,
+                    searchResult.MatchIndices.Length,
+                    searchResult.UsedCache));
             }, DispatcherPriority.Background);
         }
         catch (OperationCanceledException)
@@ -431,15 +766,67 @@ public sealed class TreeSearchCoordinator(
             if (!token.IsCancellationRequested && version == Volatile.Read(ref _searchVersion))
             {
                 await Dispatcher.UIThread.InvokeAsync(
-                    () => viewModel.SetSearchInProgress(false),
+                    () =>
+                    {
+                        if (!CanApplySearchResult(
+                                token,
+                                version,
+                                Volatile.Read(ref _searchVersion),
+                                root,
+                                viewModel.TreeNodes.FirstOrDefault()))
+                        {
+                            return;
+                        }
+
+                        viewModel.SetSearchInProgress(false);
+                    },
                     DispatcherPriority.Background);
+            }
+
+            lock (_searchCtsLock)
+            {
+                if (_immediateNavigationVersion == version)
+                    CompleteImmediateNavigationLocked(immediateNavigationResult);
             }
         }
     }
 
-    private void ApplySearchResultCore(string query, IReadOnlyList<TreeNodeViewModel> matches)
+    internal static bool CanApplySearchResult(
+        CancellationToken token,
+        int requestVersion,
+        int currentVersion,
+        TreeNodeViewModel? capturedRoot,
+        TreeNodeViewModel? currentRoot) =>
+        !token.IsCancellationRequested &&
+        requestVersion == currentVersion &&
+        ReferenceEquals(capturedRoot, currentRoot);
+
+    private void ApplySearchResultCore(
+        string query,
+        TreeDescriptorSearchResult? searchResult,
+        bool resolveAllMatches = true)
     {
-        _searchMatches.Clear();
+        Interlocked.Increment(ref _bringIntoViewVersion);
+        RestoreTreeAutoScroll();
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            var selectedNode = treeView.SelectedItem as TreeNodeViewModel;
+            if (!IsAttachedToCurrentTree(selectedNode))
+                selectedNode = null;
+
+            _searchRetainedSelectionNode = selectedNode ??
+                (IsAttachedToCurrentTree(_currentSearchMatch)
+                    ? _currentSearchMatch
+                    : null);
+            if (!ReferenceEquals(
+                    treeView.SelectedItem,
+                    _searchRetainedSelectionNode))
+            {
+                treeView.SelectedItem = _searchRetainedSelectionNode;
+            }
+        }
+
+        _searchMatches = [];
         _searchMatchIndex = -1;
         UpdateCurrentSearchMatch(null);
 
@@ -453,47 +840,78 @@ public sealed class TreeSearchCoordinator(
                 node.IsExpanded = true;
                 CollapseAllExceptRoot(node);
             }
-
+            PrepareSearchMaterializedBranchRelease();
             _searchExpandedNodes.Clear();
             _nextSearchExpandedNodes.Clear();
             _searchSelfMatchedNodes.Clear();
             _searchExpansionStateInitialized = false;
             _lastComputedQuery = null;
-            _lastComputedMatches.Clear();
+            _currentSearchIndex = null;
+            _searchRoot = null;
+            _resolvedSearchNodes.Clear();
+            _descriptorSearch.Clear();
+            _autoExpandAllMatches = false;
             UpdateSearchMatchSummary();
             return;
         }
 
-        _searchMatches.AddRange(matches);
-        if (_searchMatches.Count <= SearchAutoExpandMatchCap)
+        if (searchResult is null || viewModel.TreeNodes.FirstOrDefault() is not { } root)
         {
-            ApplySmartExpandFromMatches(_searchMatches);
+            _autoExpandAllMatches = false;
+            UpdateSearchMatchSummary();
+            return;
+        }
+
+        _currentSearchIndex = searchResult.Value.Index;
+        _searchRoot = root;
+        _resolvedSearchNodes.Clear();
+        _resolvedSearchNodes[0] = root;
+        CancelPendingSearchMaterializedBranchRelease();
+        _searchRetainedSelectionNode = null;
+        CaptureLazyChildrenSnapshot();
+        _searchMatches = searchResult.Value.MatchIndices;
+        _autoExpandAllMatches = resolveAllMatches;
+
+        List<TreeNodeViewModel>? resolvedMatches = null;
+        TreeNodeViewModel? firstResolvedMatch = null;
+        if (resolveAllMatches)
+        {
+            resolvedMatches = ResolveSearchNodes(_searchMatches);
+            firstResolvedMatch = resolvedMatches.FirstOrDefault();
+            ApplySmartExpandFromMatches(resolvedMatches);
         }
         else
         {
-            // For massive match sets, skip global expand to prevent container explosion
-            // and keep the tree responsive.
-            _searchExpandedNodes.Clear();
-            _nextSearchExpandedNodes.Clear();
-            _searchSelfMatchedNodes.Clear();
-            _searchExpansionStateInitialized = false;
+            // Progressive searches publish one navigable path while the remaining
+            // matches are materialized in dispatcher-sized batches.
+            firstResolvedMatch = _searchMatches.Length > 0
+                ? ResolveSearchNode(_searchMatches[0])
+                : null;
+            ApplySmartExpandFromMatches(
+                firstResolvedMatch is null
+                    ? Array.Empty<TreeNodeViewModel>()
+                    : [firstResolvedMatch]);
         }
 
-        if (_searchMatches.Count <= SearchGlobalHighlightMatchCap)
+        if (_searchMatches.Length <= SearchGlobalHighlightMatchCap)
         {
-            ApplySearchHighlightDiff(query);
+            ApplySearchHighlightDiff(
+                query,
+                CollectRealizedSearchMatches(_searchMatches));
         }
         else
         {
-            // Avoid allocating and mutating highlights for thousands of nodes at once.
-            // Current-match highlight remains active via SelectSearchMatch().
-            ClearActiveHighlights();
+            ApplySearchHighlightDiff(
+                query,
+                firstResolvedMatch is null
+                    ? Array.Empty<TreeNodeViewModel>()
+                    : [firstResolvedMatch]);
         }
 
-        if (_searchMatches.Count > 0)
+        if (_searchMatches.Length > 0)
         {
             _searchMatchIndex = 0;
-            SelectSearchMatch();
+            SelectSearchMatch(adjustHorizontalOffset: false);
         }
         else
         {
@@ -501,53 +919,10 @@ public sealed class TreeSearchCoordinator(
         }
 
         _lastComputedQuery = query;
-        _lastComputedMatches.Clear();
-        _lastComputedMatches.AddRange(_searchMatches);
-        onSearchApplied?.Invoke();
     }
 
-    private List<TreeNodeViewModel> CollectMatches(
-        IReadOnlyList<TreeNodeViewModel> source,
-        string query,
-        CancellationToken cancellationToken,
-        int version)
-    {
-        if (string.IsNullOrWhiteSpace(query) || source.Count == 0)
-            return [];
-
-        var matches = new List<TreeNodeViewModel>(capacity: Math.Min(source.Count, 1024));
-        for (var i = 0; i < source.Count; i++)
-        {
-            if (cancellationToken.IsCancellationRequested || version != Volatile.Read(ref _searchVersion))
-                break;
-
-            var node = source[i];
-            if (node.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase))
-                matches.Add(node);
-        }
-
-        return matches;
-    }
-
-    private static List<TreeNodeViewModel> CollectMatches(
-        IReadOnlyList<TreeNodeViewModel> source,
-        string query)
-    {
-        if (string.IsNullOrWhiteSpace(query) || source.Count == 0)
-            return [];
-
-        var matches = new List<TreeNodeViewModel>(capacity: Math.Min(source.Count, 1024));
-        for (var i = 0; i < source.Count; i++)
-        {
-            var node = source[i];
-            if (node.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase))
-                matches.Add(node);
-        }
-
-        return matches;
-    }
-
-    private void ApplySmartExpandFromMatches(IReadOnlyList<TreeNodeViewModel> matches)
+    private void ApplySmartExpandFromMatches(
+        IReadOnlyList<TreeNodeViewModel> matches)
     {
         if (!_searchExpansionStateInitialized)
         {
@@ -602,253 +977,361 @@ public sealed class TreeSearchCoordinator(
 
         ApplyExpansionDiff(
             removedNodes,
-            addedNodes,
-            matches.Count > 0 ? matches[0] : null);
-
-        _searchExpandedNodes.Clear();
-        foreach (var node in _nextSearchExpandedNodes)
-            _searchExpandedNodes.Add(node);
+            addedNodes);
     }
 
     private void ApplyExpansionDiff(
         List<TreeNodeViewModel>? removedNodes,
-        List<TreeNodeViewModel>? addedNodes,
-        TreeNodeViewModel? firstMatch)
+        List<TreeNodeViewModel>? addedNodes)
     {
         var removedCount = removedNodes?.Count ?? 0;
         var addedCount = addedNodes?.Count ?? 0;
         if (removedCount == 0 && addedCount == 0)
-        {
-            CancelPendingExpansionApply();
             return;
-        }
 
-        if (removedCount + addedCount < ExpansionBatchThreshold)
+        // Navigation must observe a settled hierarchy. Delayed expansion makes every
+        // Next action reveal more rows and causes the scroll position to move underneath
+        // the user, so apply the model diff before search is reported as complete.
+        using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
         {
-            CancelPendingExpansionApply();
-            using var _ = TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope();
             if (removedNodes is not null)
             {
                 foreach (var node in removedNodes)
+                {
                     node.IsExpanded = false;
+                    _searchExpandedNodes.Remove(node);
+                }
             }
 
             if (addedNodes is not null)
             {
                 foreach (var node in addedNodes)
+                {
                     node.IsExpanded = true;
+                    _searchExpandedNodes.Add(node);
+                }
             }
-
-            return;
         }
 
-        if (firstMatch is not null)
-        {
-            // Keep the first selected match path expanded synchronously so selection and bring-into-view
-            // stay responsive while the rest of a large expansion diff is applied in background batches.
-            using var _ = TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope();
-            firstMatch.EnsureParentsExpanded();
-            if (addedNodes is not null)
-                RemoveAncestorPathNodes(addedNodes, firstMatch);
-        }
-
-        ScheduleExpansionDiffApplication(
-            removedNodes?.ToArray() ?? Array.Empty<TreeNodeViewModel>(),
-            addedNodes?.ToArray() ?? Array.Empty<TreeNodeViewModel>());
     }
 
-    private static void RemoveAncestorPathNodes(List<TreeNodeViewModel> addedNodes, TreeNodeViewModel firstMatch)
+    private async Task ApplySearchResultProgressivelyAsync(
+        string query,
+        TreeDescriptorSearchResult searchResult,
+        int version,
+        TreeNodeViewModel root,
+        CancellationToken token)
     {
-        var ancestor = firstMatch.Parent;
-        while (ancestor is not null)
+        await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            addedNodes.Remove(ancestor);
-            ancestor = ancestor.Parent;
-        }
-    }
-
-    private void ScheduleExpansionDiffApplication(
-        TreeNodeViewModel[] removedNodes,
-        TreeNodeViewModel[] addedNodes)
-    {
-        CancellationToken token;
-        lock (_expansionCtsLock)
-        {
-            _expansionApplyCts?.Cancel();
-            _expansionApplyCts?.Dispose();
-            _expansionApplyCts = new CancellationTokenSource();
-            token = _expansionApplyCts.Token;
-        }
-
-        void ApplyRemovedBatch(int startIndex)
-        {
-            if (token.IsCancellationRequested)
-                return;
-
-            var endIndex = Math.Min(startIndex + ExpansionBatchSize, removedNodes.Length);
-            using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
+            if (!CanApplySearchResult(
+                    token,
+                    version,
+                    Volatile.Read(ref _searchVersion),
+                    root,
+                    viewModel.TreeNodes.FirstOrDefault()))
             {
-                for (var i = startIndex; i < endIndex; i++)
-                    removedNodes[i].IsExpanded = false;
-            }
-
-            if (endIndex < removedNodes.Length)
-            {
-                treeView.Dispatcher.Post(() => ApplyRemovedBatch(endIndex), DispatcherPriority.Background);
                 return;
             }
 
-            ApplyAddedBatch(0);
-        }
+            ApplySearchResultCore(
+                query,
+                searchResult,
+                resolveAllMatches: false);
+        }, DispatcherPriority.Background);
 
-        void ApplyAddedBatch(int startIndex)
+        var resolvedMatches = new List<TreeNodeViewModel>(
+            searchResult.MatchIndices.Length);
+        var nextMatchIndex = 0;
+        while (nextMatchIndex < searchResult.MatchIndices.Length)
         {
-            if (token.IsCancellationRequested)
+            token.ThrowIfCancellationRequested();
+            var processedThrough = nextMatchIndex;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!CanApplySearchResult(
+                        token,
+                        version,
+                        Volatile.Read(ref _searchVersion),
+                        root,
+                        viewModel.TreeNodes.FirstOrDefault()))
+                {
+                    return;
+                }
+
+                var sliceStarted = Stopwatch.GetTimestamp();
+                var maximumIndex = Math.Min(
+                    processedThrough + MaterializationBatchSize,
+                    searchResult.MatchIndices.Length);
+                while (processedThrough < maximumIndex)
+                {
+                    if (ResolveSearchNode(
+                            searchResult.MatchIndices[processedThrough]) is { } node)
+                    {
+                        resolvedMatches.Add(node);
+                    }
+
+                    processedThrough++;
+                    if (processedThrough < maximumIndex &&
+                        Stopwatch.GetElapsedTime(sliceStarted) >= DispatcherWorkSlice)
+                    {
+                        break;
+                    }
+                }
+            }, DispatcherPriority.Background);
+
+            if (processedThrough == nextMatchIndex)
                 return;
 
-            var endIndex = Math.Min(startIndex + ExpansionBatchSize, addedNodes.Length);
-            using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-            {
-                for (var i = startIndex; i < endIndex; i++)
-                    addedNodes[i].IsExpanded = true;
-            }
-
-            if (endIndex < addedNodes.Length)
-                treeView.Dispatcher.Post(() => ApplyAddedBatch(endIndex), DispatcherPriority.Background);
+            nextMatchIndex = processedThrough;
         }
 
-        ApplyRemovedBatch(0);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (!CanApplySearchResult(
+                    token,
+                    version,
+                    Volatile.Read(ref _searchVersion),
+                    root,
+                    viewModel.TreeNodes.FirstOrDefault()))
+            {
+                return;
+            }
+
+            _autoExpandAllMatches = true;
+            ApplySmartExpandFromMatches(resolvedMatches);
+            var highlightedMatches =
+                _searchMatches.Length <= SearchGlobalHighlightMatchCap
+                    ? CollectRealizedSearchMatches(_searchMatches)
+                    : resolvedMatches.Count == 0
+                        ? []
+                        : [resolvedMatches[0]];
+            ApplySearchHighlightDiff(
+                query,
+                highlightedMatches);
+        }, DispatcherPriority.Background);
     }
 
     private void SeedExpandedNodesSnapshot()
     {
         _searchExpandedNodes.Clear();
-        TreeNodeViewModel.ForEachDescendant(viewModel.TreeNodes, node =>
+        TreeNodeViewModel.ForEachRealizedDescendant(viewModel.TreeNodes, node =>
         {
-            if (node.Children.Count > 0 && node.IsExpanded)
+            if (node.HasChildren && node.IsExpanded)
                 _searchExpandedNodes.Add(node);
         });
     }
 
-    private void EnsureSearchIndexCurrent()
+    private List<TreeNodeViewModel> ResolveSearchNodes(IReadOnlyList<int> entryIndices)
     {
-        var currentRootCount = viewModel.TreeNodes.Count;
-        var currentFirstRoot = currentRootCount > 0 ? viewModel.TreeNodes[0] : null;
+        var resolved = new List<TreeNodeViewModel>(entryIndices.Count);
+        for (var index = 0; index < entryIndices.Count; index++)
+        {
+            if (ResolveSearchNode(entryIndices[index]) is { } node)
+                resolved.Add(node);
+        }
 
-        if (_indexedRootCount == currentRootCount && ReferenceEquals(_indexedFirstRoot, currentFirstRoot))
+        return resolved;
+    }
+
+    private void CaptureLazyChildrenSnapshot()
+    {
+        if (_searchLazyChildrenSnapshotInitialized)
             return;
 
-        _flatNodeIndex.Clear();
-        TreeNodeViewModel.ForEachDescendant(viewModel.TreeNodes, node => _flatNodeIndex.Add(node));
-
-        _indexedRootCount = currentRootCount;
-        _indexedFirstRoot = currentFirstRoot;
-        _queryMatchesCache.Clear();
-        _queryMatchesCacheLru.Clear();
-        _queryMatchesCacheNodes.Clear();
-        _lastComputedQuery = null;
-        _lastComputedMatches.Clear();
-    }
-
-    private IReadOnlyList<TreeNodeViewModel> CreateSearchSource(string query)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            return Array.Empty<TreeNodeViewModel>();
-
-        if (!string.IsNullOrWhiteSpace(_lastComputedQuery) &&
-            query.StartsWith(_lastComputedQuery, StringComparison.OrdinalIgnoreCase) &&
-            _lastComputedMatches.Count > 0)
-        {
-            return _lastComputedMatches;
-        }
-
-        if (TryGetBestCachedPrefixMatches(query, out var cachedPrefixMatches))
-            return cachedPrefixMatches;
-
-        return _flatNodeIndex;
-    }
-
-    private bool TryGetCachedMatches(string query, out List<TreeNodeViewModel> matches)
-    {
-        if (_queryMatchesCache.TryGetValue(query, out matches!))
-        {
-            if (_queryMatchesCacheNodes.TryGetValue(query, out var node))
+        _searchLazyChildrenSnapshots.Clear();
+        TreeNodeViewModel.ForEachRealizedDescendant(
+            viewModel.TreeNodes,
+            node =>
             {
-                _queryMatchesCacheLru.Remove(node);
-                _queryMatchesCacheLru.AddFirst(node);
-            }
+                if (node.HasChildren && !node.AreChildrenRealized)
+                    _searchLazyChildrenSnapshots.Add(node);
+            });
+        _searchLazyChildrenSnapshotInitialized = true;
+    }
 
-            return true;
+    private void PrepareSearchMaterializedBranchRelease()
+    {
+        _searchBranchReleasePending = true;
+        Interlocked.Increment(ref _searchBranchReleaseVersion);
+        ReleaseSearchMaterializedBranches(finalize: false);
+    }
+
+    private void CancelPendingSearchMaterializedBranchRelease()
+    {
+        if (!_searchBranchReleasePending)
+            return;
+
+        Interlocked.Increment(ref _searchBranchReleaseVersion);
+        _searchBranchReleasePending = false;
+        ReleaseSearchMaterializedBranches(finalize: true);
+    }
+
+    private void ReleaseSearchMaterializedBranches(bool finalize)
+    {
+        if (!_searchLazyChildrenSnapshotInitialized)
+            return;
+
+        var preservedSelection =
+            IsAttachedToCurrentTree(_searchRetainedSelectionNode)
+                ? _searchRetainedSelectionNode
+                : treeView.SelectedItem as TreeNodeViewModel;
+        if (!IsAttachedToCurrentTree(preservedSelection))
+            preservedSelection = null;
+
+        foreach (var node in _searchLazyChildrenSnapshots)
+            node.TryReleaseChildrenToLazyState(preservedSelection);
+
+        if (finalize)
+        {
+            _searchLazyChildrenSnapshots.Clear();
+            _searchLazyChildrenSnapshots.TrimExcess();
+            _searchLazyChildrenSnapshotInitialized = false;
+            _searchRetainedSelectionNode = null;
+        }
+    }
+
+    private List<TreeNodeViewModel> CollectRealizedSearchMatches(
+        IReadOnlyList<int> entryIndices)
+    {
+        if (_currentSearchIndex is null || entryIndices.Count == 0)
+            return [];
+
+        var matchingDescriptors = new HashSet<TreeNodeDescriptor>(
+            ReferenceEqualityComparer.Instance);
+        for (var index = 0; index < entryIndices.Count; index++)
+        {
+            var entryIndex = entryIndices[index];
+            if (entryIndex >= 0 && entryIndex < _currentSearchIndex.Count)
+                matchingDescriptors.Add(_currentSearchIndex[entryIndex].Descriptor);
         }
 
-        matches = null!;
+        var realizedMatches = new List<TreeNodeViewModel>(
+            Math.Min(entryIndices.Count, 256));
+        TreeNodeViewModel.ForEachRealizedDescendant(
+            viewModel.TreeNodes,
+            node =>
+            {
+                if (matchingDescriptors.Contains(node.Descriptor))
+                    realizedMatches.Add(node);
+            });
+        return realizedMatches;
+    }
+
+    private TreeNodeViewModel? ResolveSearchNode(int entryIndex)
+    {
+        if (_currentSearchIndex is null ||
+            _searchRoot is null ||
+            entryIndex < 0 ||
+            entryIndex >= _currentSearchIndex.Count)
+        {
+            return null;
+        }
+
+        if (_resolvedSearchNodes.TryGetValue(entryIndex, out var resolved))
+            return resolved;
+
+        var unresolvedPath = new Stack<int>();
+        var currentIndex = entryIndex;
+        while (!_resolvedSearchNodes.TryGetValue(currentIndex, out resolved))
+        {
+            unresolvedPath.Push(currentIndex);
+            currentIndex = _currentSearchIndex[currentIndex].ParentIndex;
+            if (currentIndex < 0)
+                return null;
+        }
+
+        while (unresolvedPath.Count > 0)
+        {
+            var childIndex = unresolvedPath.Pop();
+            var childEntry = _currentSearchIndex[childIndex];
+            var child = FindChild(
+                resolved,
+                childEntry.Descriptor,
+                childEntry.ChildIndex);
+            if (child is null)
+                return null;
+
+            resolved = child;
+            _resolvedSearchNodes[childIndex] = child;
+        }
+
+        return resolved;
+    }
+
+    private TreeNodeViewModel? FindChild(
+        TreeNodeViewModel parent,
+        TreeNodeDescriptor childDescriptor,
+        int childIndex)
+    {
+        TrackSearchMaterializedParent(parent);
+        var children = parent.Children;
+        if ((uint)childIndex < (uint)children.Count)
+        {
+            var indexedChild = children[childIndex];
+            if (ReferenceEquals(indexedChild.Descriptor, childDescriptor) ||
+                PathComparer.Default.Equals(
+                    indexedChild.FullPath,
+                    childDescriptor.FullPath))
+            {
+                return indexedChild;
+            }
+        }
+
+        // A fallback keeps search correct if a future projection no longer preserves
+        // descriptor order in its view-model child collection.
+        foreach (var child in children)
+        {
+            if (ReferenceEquals(child.Descriptor, childDescriptor) ||
+                PathComparer.Default.Equals(child.FullPath, childDescriptor.FullPath))
+            {
+                return child;
+            }
+        }
+
+        return null;
+    }
+
+    private void TrackSearchMaterializedParent(TreeNodeViewModel parent)
+    {
+        if (_searchLazyChildrenSnapshotInitialized &&
+            parent.HasChildren &&
+            !parent.AreChildrenRealized)
+        {
+            _searchLazyChildrenSnapshots.Add(parent);
+        }
+    }
+
+    private bool IsAttachedToCurrentTree(TreeNodeViewModel? node)
+    {
+        if (node is null)
+            return false;
+
+        while (node.Parent is not null)
+            node = node.Parent;
+
+        for (var index = 0; index < viewModel.TreeNodes.Count; index++)
+        {
+            if (ReferenceEquals(viewModel.TreeNodes[index], node))
+                return true;
+        }
+
         return false;
     }
 
-    private bool TryGetBestCachedPrefixMatches(string query, out List<TreeNodeViewModel> matches)
-    {
-        matches = null!;
-        string? bestPrefix = null;
-
-        foreach (var cachedQuery in _queryMatchesCache.Keys)
-        {
-            if (string.IsNullOrWhiteSpace(cachedQuery))
-                continue;
-
-            if (!query.StartsWith(cachedQuery, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            if (bestPrefix is null || cachedQuery.Length > bestPrefix.Length)
-                bestPrefix = cachedQuery;
-        }
-
-        if (bestPrefix is null)
-            return false;
-
-        return TryGetCachedMatches(bestPrefix, out matches);
-    }
-
-    private void CacheMatches(string query, List<TreeNodeViewModel> matches)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            return;
-
-        if (matches.Count > MaxCachedMatchCount)
-            return;
-
-        if (_queryMatchesCache.ContainsKey(query))
-        {
-            if (_queryMatchesCacheNodes.TryGetValue(query, out var existingNode))
-            {
-                _queryMatchesCacheLru.Remove(existingNode);
-                _queryMatchesCacheLru.AddFirst(existingNode);
-            }
-
-            return;
-        }
-
-        _queryMatchesCache[query] = matches;
-        var node = new LinkedListNode<string>(query);
-        _queryMatchesCacheLru.AddFirst(node);
-        _queryMatchesCacheNodes[query] = node;
-
-        while (_queryMatchesCacheLru.Count > SearchQueryCacheLimit)
-        {
-            var oldestNode = _queryMatchesCacheLru.Last;
-            if (oldestNode is null)
-                break;
-
-            _queryMatchesCacheLru.RemoveLast();
-            _queryMatchesCacheNodes.Remove(oldestNode.Value);
-            _queryMatchesCache.Remove(oldestNode.Value);
-        }
-    }
-
-    private int BringNodeIntoView(TreeNodeViewModel node)
+    private void BringNodeIntoView(
+        TreeNodeViewModel node,
+        bool adjustHorizontalOffset)
     {
         var version = Interlocked.Increment(ref _bringIntoViewVersion);
-        TryBringNodeIntoViewWithRetries(node, version, attempt: 0);
-        return version;
+        var request = new BringIntoViewRequest(
+            node,
+            BuildNavigationPath(node),
+            version,
+            adjustHorizontalOffset,
+            GetTreeScrollViewer()?.Offset.X);
+        LastBringIntoViewAttemptCount = 0;
+        TryBringNodeIntoViewWithRetries(request);
     }
 
     private void SelectTreeNode(TreeNodeViewModel node)
@@ -892,20 +1375,14 @@ public sealed class TreeSearchCoordinator(
 
     private void UpdateSearchMatchSummary()
     {
-        var currentIndex = _searchMatchIndex >= 0 && _searchMatchIndex < _searchMatches.Count
+        var currentIndex = _searchMatchIndex >= 0 && _searchMatchIndex < _searchMatches.Length
             ? _searchMatchIndex + 1
             : 0;
-        viewModel.UpdateSearchMatchSummary(currentIndex, _searchMatches.Count);
+        viewModel.UpdateSearchMatchSummary(currentIndex, _searchMatches.Length);
     }
 
     private void CollapseAllExceptRoot(TreeNodeViewModel node)
-    {
-        foreach (var child in node.Children)
-        {
-            child.IsExpanded = false;
-            CollapseAllExceptRoot(child);
-        }
-    }
+        => node.CollapseRealizedDescendants();
 
     private void ClearHighlightsIfNeeded()
     {
@@ -917,7 +1394,7 @@ public sealed class TreeSearchCoordinator(
 
         var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
 
-        TreeNodeViewModel.ForEachDescendant(viewModel.TreeNodes, node =>
+        TreeNodeViewModel.ForEachRealizedDescendant(viewModel.TreeNodes, node =>
         {
             if (!node.HasHighlightedDisplay && !node.IsCurrentSearchMatch)
                 return;
@@ -926,12 +1403,14 @@ public sealed class TreeSearchCoordinator(
         });
     }
 
-    private void ApplySearchHighlightDiff(string query)
+    private void ApplySearchHighlightDiff(
+        string query,
+        IReadOnlyList<TreeNodeViewModel> matches)
     {
         var (highlightBackground, highlightForeground, normalForeground, currentBackground) = GetSearchHighlightBrushes();
         _nextHighlightNodes.Clear();
-        for (var i = 0; i < _searchMatches.Count; i++)
-            _nextHighlightNodes.Add(_searchMatches[i]);
+        for (var index = 0; index < matches.Count; index++)
+            _nextHighlightNodes.Add(matches[index]);
 
         var queryChanged = !string.Equals(_activeHighlightQuery, query, StringComparison.Ordinal);
         _highlightRemovedNodes.Clear();
@@ -1046,197 +1525,359 @@ public sealed class TreeSearchCoordinator(
         ApplyRemovedBatch(0);
     }
 
-    private void TryBringNodeIntoViewWithRetries(TreeNodeViewModel node, int version, int attempt)
+    private void TryBringNodeIntoViewWithRetries(BringIntoViewRequest request)
     {
-        if (version != Volatile.Read(ref _bringIntoViewVersion))
+        if (request.Version != Volatile.Read(ref _bringIntoViewVersion))
             return;
 
-        var result = TryBringNodeIntoView(node);
-        if (result == BringIntoViewResult.Visible || attempt >= MaxBringIntoViewAttempts - 1)
+        var result = TryBringNodeIntoView(request, out var deepestRealizedSegment);
+        var shouldRetry = request.Progress.Observe(deepestRealizedSegment);
+        LastBringIntoViewAttemptCount = request.Progress.TotalAttempts;
+        if (result == BringIntoViewResult.Visible || !shouldRetry)
+        {
+            RestoreTreeAutoScroll();
             return;
+        }
 
-        var priority = BringIntoViewRetryPriorities[Math.Min(attempt, BringIntoViewRetryPriorities.Length - 1)];
+        ScheduleCapturedHorizontalOffsetRestore(request);
+        var priority = BringIntoViewRetryPriorities[
+            Math.Min(
+                request.Progress.NoProgressAttempts,
+                BringIntoViewRetryPriorities.Length - 1)];
         treeView.Dispatcher.Post(
-            () => TryBringNodeIntoViewWithRetries(node, version, attempt + 1),
+            () =>
+            {
+                if (request.Version != Volatile.Read(ref _bringIntoViewVersion))
+                    return;
+
+                RestoreCapturedHorizontalOffset(request);
+                TryBringNodeIntoViewWithRetries(request);
+            },
             priority);
     }
 
-    private BringIntoViewResult TryBringNodeIntoView(TreeNodeViewModel node)
+    private BringIntoViewResult TryBringNodeIntoView(
+        BringIntoViewRequest request,
+        out int deepestRealizedSegment)
     {
-        if (TryGetContainer(node, out var directContainer) && directContainer is not null)
+        if (TryGetContainer(request.Node, out var directContainer) &&
+            directContainer is not null)
         {
-            BringContainerIntoViewForSearchNavigation(directContainer);
-            if (IsContainerVisibleInViewport(directContainer))
-                return BringIntoViewResult.Visible;
+            deepestRealizedSegment = request.Path.Length - 1;
+            if (!BringContainerIntoViewForSearchNavigation(
+                    directContainer,
+                    request.AdjustHorizontalOffset,
+                    request.OriginalHorizontalOffset))
+            {
+                RestoreCapturedHorizontalOffset(request);
+                return BringIntoViewResult.Pending;
+            }
 
-            return IsContainerVisibleInViewport(directContainer)
+            request.HorizontalAdjustmentApplied =
+                request.AdjustHorizontalOffset;
+            if (!IsContainerPositionedForSearchNavigation(
+                    directContainer,
+                    request.AdjustHorizontalOffset))
+                return BringIntoViewResult.Pending;
+
+            return !request.AdjustHorizontalOffset ||
+                   IsHorizontalTargetVisibleInViewport(directContainer)
                 ? BringIntoViewResult.Visible
                 : BringIntoViewResult.Pending;
         }
 
-        // The target container may not be materialized yet under virtualization.
-        // Scrolling to the nearest realized ancestor progressively materializes descendants.
-        if (TryGetNearestRealizedAncestorContainer(node, out var ancestorContainer) && ancestorContainer is not null)
+        deepestRealizedSegment = FindDeepestRealizedPathSegment(
+            request.Path,
+            request.Progress.DeepestRealizedSegment);
+        if (deepestRealizedSegment >= 0 &&
+            deepestRealizedSegment < request.Path.Length - 1 &&
+            TryGetContainer(
+                request.Path[deepestRealizedSegment],
+                out var ancestorContainer) &&
+            ancestorContainer is not null)
         {
-            if (!IsContainerVisibleInViewport(ancestorContainer))
-                BringContainerIntoViewForSearchNavigation(ancestorContainer);
+            ancestorContainer.ScrollIntoView(
+                request.Path[deepestRealizedSegment + 1]);
+            RestoreCapturedHorizontalOffset(request);
+            return BringIntoViewResult.Pending;
+        }
 
+        if (request.Path.Length > 0)
+        {
+            treeView.ScrollIntoView(request.Path[0]);
+            RestoreCapturedHorizontalOffset(request);
             return BringIntoViewResult.Pending;
         }
 
         return BringIntoViewResult.NotFound;
     }
 
-    private void BringContainerIntoViewForSearchNavigation(TreeViewItem container)
+    private int FindDeepestRealizedPathSegment(
+        IReadOnlyList<TreeNodeViewModel> path,
+        int previouslyRealizedSegment)
+    {
+        var deepest = Math.Max(-1, previouslyRealizedSegment);
+        for (var index = Math.Max(0, deepest); index < path.Count; index++)
+        {
+            if (!TryGetContainer(path[index], out _))
+                break;
+
+            deepest = index;
+        }
+
+        return deepest;
+    }
+
+    private void ScheduleCapturedHorizontalOffsetRestore(
+        BringIntoViewRequest request)
+    {
+        if (request.OriginalHorizontalOffset is null)
+            return;
+
+        treeView.Dispatcher.Post(
+            () =>
+            {
+                if (request.Version != Volatile.Read(ref _bringIntoViewVersion) ||
+                    request.HorizontalAdjustmentApplied)
+                {
+                    return;
+                }
+
+                RestoreCapturedHorizontalOffset(request);
+            },
+            DispatcherPriority.Render);
+    }
+
+    private void RestoreCapturedHorizontalOffset(BringIntoViewRequest request)
+    {
+        if (request.OriginalHorizontalOffset is not { } originalOffset ||
+            request.HorizontalAdjustmentApplied ||
+            GetTreeScrollViewer() is not { } scrollViewer)
+        {
+            return;
+        }
+
+        var restoredOffsetX = ResolveClampedTreeHorizontalOffset(
+            originalOffset,
+            scrollViewer.Extent.Width,
+            scrollViewer.Viewport.Width);
+        var currentOffset = scrollViewer.Offset;
+        if (Math.Abs(currentOffset.X - restoredOffsetX) >= 0.5)
+            scrollViewer.Offset = new Vector(restoredOffsetX, currentOffset.Y);
+    }
+
+    private void SuppressTreeAutoScroll()
+    {
+        if (_treeAutoScrollSuppressed)
+            return;
+
+        _treeAutoScrollSuppressed = true;
+        _restoreTreeAutoScroll = treeView.AutoScrollToSelectedItem;
+        if (_restoreTreeAutoScroll)
+            treeView.AutoScrollToSelectedItem = false;
+    }
+
+    private void RestoreTreeAutoScroll()
+    {
+        if (!_treeAutoScrollSuppressed)
+            return;
+
+        if (_restoreTreeAutoScroll)
+            treeView.AutoScrollToSelectedItem = true;
+
+        _treeAutoScrollSuppressed = false;
+        _restoreTreeAutoScroll = false;
+    }
+
+    internal static TreeNodeViewModel[] BuildNavigationPath(
+        TreeNodeViewModel node)
+    {
+        var depth = 1;
+        var ancestor = node.Parent;
+        while (ancestor is not null)
+        {
+            depth++;
+            ancestor = ancestor.Parent;
+        }
+
+        var path = new TreeNodeViewModel[depth];
+        var current = node;
+        for (var index = depth - 1; index >= 0; index--)
+        {
+            path[index] = current;
+            current = current.Parent!;
+        }
+
+        return path;
+    }
+
+    private bool BringContainerIntoViewForSearchNavigation(
+        TreeViewItem container,
+        bool adjustHorizontalOffset,
+        double? originalHorizontalOffset)
     {
         var scrollViewer = GetTreeScrollViewer();
         if (scrollViewer is null)
         {
             container.BringIntoView();
-            return;
+            return true;
         }
 
-        var containerTopLeft = container.TranslatePoint(default, scrollViewer);
-        if (containerTopLeft is null)
-            return;
+        var navigationTarget =
+            ResolveTreeItemNavigationTarget(container);
+        var navigationTopLeft =
+            navigationTarget.TranslatePoint(default, scrollViewer);
+        if (navigationTopLeft is null ||
+            navigationTarget.Bounds.Height <= 0)
+        {
+            return false;
+        }
 
-        var horizontalTarget = ResolveTreeItemHorizontalScrollTarget(container);
-        var horizontalTopLeft = horizontalTarget.TranslatePoint(default, scrollViewer) ?? containerTopLeft.Value;
         var currentOffset = scrollViewer.Offset;
-        var baseOffsetX = _searchNavigationTargetHorizontalOffset ?? currentOffset.X;
-        var itemLeftAtBaseOffset = currentOffset.X + horizontalTopLeft.X - baseOffsetX;
-        var targetY = ResolveVerticalOffsetForSearchNavigation(
-            currentOffset.Y,
-            containerTopLeft.Value.Y,
-            containerTopLeft.Value.Y + container.Bounds.Height,
-            scrollViewer.Viewport.Height,
-            scrollViewer.Extent.Height);
-        var targetX = ResolveHorizontalOffsetForSearchNavigation(
-            baseOffsetX,
-            itemLeftAtBaseOffset,
-            itemLeftAtBaseOffset + horizontalTarget.Bounds.Width,
-            scrollViewer.Viewport.Width,
-            scrollViewer.Extent.Width);
-
-        _searchNavigationTargetHorizontalOffset = targetX;
+        var targetY = adjustHorizontalOffset
+            ? ResolveComfortableVerticalOffsetForSearchNavigation(
+                currentOffset.Y,
+                navigationTopLeft.Value.Y,
+                navigationTopLeft.Value.Y +
+                navigationTarget.Bounds.Height,
+                scrollViewer.Viewport.Height,
+                scrollViewer.Extent.Height)
+            : ResolveVerticalOffsetForSearchNavigation(
+                currentOffset.Y,
+                navigationTopLeft.Value.Y,
+                navigationTopLeft.Value.Y +
+                navigationTarget.Bounds.Height,
+                scrollViewer.Viewport.Height,
+                scrollViewer.Extent.Height);
+        var baselineOffsetX = ResolveClampedTreeHorizontalOffset(
+            originalHorizontalOffset ?? currentOffset.X,
+            scrollViewer.Extent.Width,
+            scrollViewer.Viewport.Width);
+        var targetX = baselineOffsetX;
+        if (adjustHorizontalOffset)
+        {
+            // TranslatePoint observes the current scroll position, which may have been
+            // changed by TreeView while realizing a lazy path. Convert it back to the
+            // captured navigation baseline before deciding whether X must move.
+            var itemLeftAtBaselineOffset =
+                currentOffset.X +
+                navigationTopLeft.Value.X -
+                baselineOffsetX;
+            targetX = ResolveHorizontalOffsetForSearchNavigation(
+                baselineOffsetX,
+                itemLeftAtBaselineOffset,
+                itemLeftAtBaselineOffset +
+                navigationTarget.Bounds.Width,
+                scrollViewer.Viewport.Width,
+                scrollViewer.Extent.Width,
+                navigationTarget.Bounds.Width);
+        }
 
         if (Math.Abs(targetX - currentOffset.X) < 0.5 && Math.Abs(targetY - currentOffset.Y) < 0.5)
-            return;
+            return true;
 
         scrollViewer.Offset = new Vector(targetX, targetY);
+        return true;
     }
 
-    private static Control ResolveTreeItemHorizontalScrollTarget(TreeViewItem container)
+    private static Control ResolveTreeItemNavigationTarget(
+        TreeViewItem container)
     {
-        // TreeViewItem can be a stretched row container. Horizontal search navigation must
-        // use the actual row content width, otherwise the tree may side-scroll even when
-        // the visible text/icon block already fits inside the narrow preview tree island.
+        // An expanded TreeViewItem includes its descendants in Bounds. Measuring the
+        // data-template content keeps both axes anchored to the node's own header row.
         return container.FindDescendantOfType<Control>(
             includeSelf: false,
-            visual => visual is Control { Name: "TreeItemContent" }) ?? container;
+            visual =>
+                visual is Control
+                {
+                    Name: "TreeItemContent"
+                } content &&
+                ReferenceEquals(
+                    content.FindAncestorOfType<TreeViewItem>(),
+                    container)) ??
+               container;
     }
 
     private bool TryGetContainer(TreeNodeViewModel node, out TreeViewItem? container)
     {
-        if (treeView.ContainerFromItem(node) is TreeViewItem directContainer)
+        if (treeView.TreeContainerFromItem(node) is TreeViewItem directContainer)
         {
             container = directContainer;
             return true;
         }
 
-        container = treeView.FindDescendantOfType<TreeViewItem>(
-            includeSelf: false,
-            visual => ReferenceEquals(visual.DataContext, node));
-        return container is not null;
-    }
-
-    private bool TryGetNearestRealizedAncestorContainer(TreeNodeViewModel node, out TreeViewItem? ancestorContainer)
-    {
-        var current = node.Parent;
-        while (current is not null)
-        {
-            if (TryGetContainer(current, out ancestorContainer))
-                return true;
-
-            current = current.Parent;
-        }
-
-        ancestorContainer = null;
+        container = null;
         return false;
     }
 
-    private bool IsContainerVisibleInViewport(TreeViewItem container)
+    private bool IsContainerPositionedForSearchNavigation(
+        TreeViewItem container,
+        bool preferComfortZone)
     {
         var scrollViewer = GetTreeScrollViewer();
         if (scrollViewer is null)
             return true;
 
-        var topLeft = container.TranslatePoint(default, scrollViewer);
-        if (topLeft is null)
-            return true;
+        var target = ResolveTreeItemNavigationTarget(container);
+        var topLeft = target.TranslatePoint(default, scrollViewer);
+        if (topLeft is null || target.Bounds.Height <= 0)
+            return false;
 
         var top = topLeft.Value.Y;
-        var bottom = top + container.Bounds.Height;
+        var bottom = top + target.Bounds.Height;
         var viewportHeight = scrollViewer.Viewport.Height;
+        if (viewportHeight <= 0)
+            return false;
 
         const double tolerance = 1.0;
-        return bottom >= -tolerance && top <= viewportHeight + tolerance;
+        var fullyVisible = target.Bounds.Height > viewportHeight
+            ? top <= tolerance && bottom >= viewportHeight - tolerance
+            : top >= -tolerance && bottom <= viewportHeight + tolerance;
+        if (!fullyVisible)
+            return false;
+
+        var currentOffsetY = scrollViewer.Offset.Y;
+        var settledOffsetY = preferComfortZone
+            ? ResolveComfortableVerticalOffsetForSearchNavigation(
+                currentOffsetY,
+                top,
+                bottom,
+                viewportHeight,
+                scrollViewer.Extent.Height)
+            : ResolveVerticalOffsetForSearchNavigation(
+                currentOffsetY,
+                top,
+                bottom,
+                viewportHeight,
+                scrollViewer.Extent.Height);
+        return Math.Abs(settledOffsetY - currentOffsetY) < 0.5;
+    }
+
+    private bool IsHorizontalTargetVisibleInViewport(TreeViewItem container)
+    {
+        var scrollViewer = GetTreeScrollViewer();
+        if (scrollViewer is null)
+            return true;
+
+        var target = ResolveTreeItemNavigationTarget(container);
+        var topLeft = target.TranslatePoint(default, scrollViewer);
+        var viewportWidth = scrollViewer.Viewport.Width;
+        if (topLeft is null || viewportWidth <= 0)
+            return false;
+
+        const double tolerance = 1.0;
+        var left = topLeft.Value.X;
+        if (target.Bounds.Width > viewportWidth)
+            return left >= -tolerance && left <= tolerance;
+
+        return left >= -tolerance &&
+               left + target.Bounds.Width <= viewportWidth + tolerance;
     }
 
     private ScrollViewer? GetTreeScrollViewer() =>
         treeView.FindDescendantOfType<ScrollViewer>(
             includeSelf: false,
             visual => visual is ScrollViewer);
-
-    private double? CaptureTreeHorizontalOffset() =>
-        GetTreeScrollViewer()?.Offset.X;
-
-    private void RestoreTreeHorizontalOffsetAfterSearchNavigation(int version)
-    {
-        var targetOffsetX = _searchNavigationTargetHorizontalOffset;
-        if (targetOffsetX is null)
-            return;
-
-        RestoreTreeHorizontalOffset(targetOffsetX.Value);
-
-        treeView.Dispatcher.Post(
-            () => RestoreTreeHorizontalOffsetIfCurrent(version),
-            DispatcherPriority.Render);
-        treeView.Dispatcher.Post(
-            () => RestoreTreeHorizontalOffsetIfCurrent(version),
-            DispatcherPriority.Loaded);
-        treeView.Dispatcher.Post(
-            () => RestoreTreeHorizontalOffsetIfCurrent(version),
-            DispatcherPriority.Background);
-    }
-
-    private void RestoreTreeHorizontalOffsetIfCurrent(int version)
-    {
-        if (version != Volatile.Read(ref _bringIntoViewVersion))
-            return;
-
-        var targetOffsetX = _searchNavigationTargetHorizontalOffset;
-        if (targetOffsetX is null)
-            return;
-
-        RestoreTreeHorizontalOffset(targetOffsetX.Value);
-    }
-
-    private void RestoreTreeHorizontalOffset(double preservedOffsetX)
-    {
-        var scrollViewer = GetTreeScrollViewer();
-        if (scrollViewer is null)
-            return;
-
-        var targetX = ResolveClampedTreeHorizontalOffset(
-            preservedOffsetX,
-            scrollViewer.Extent.Width,
-            scrollViewer.Viewport.Width);
-        if (Math.Abs(scrollViewer.Offset.X - targetX) < 0.5)
-            return;
-
-        scrollViewer.Offset = new Vector(targetX, scrollViewer.Offset.Y);
-    }
 
     internal static double ResolveClampedTreeHorizontalOffset(
         double preservedOffsetX,
@@ -1248,24 +1889,39 @@ public sealed class TreeSearchCoordinator(
     }
 
     internal static double ResolveHorizontalOffsetForSearchNavigation(
-        double currentOffsetX,
+        double baselineOffsetX,
         double itemLeft,
         double itemRight,
         double viewportWidth,
-        double extentWidth)
+        double extentWidth,
+        double itemWidth)
     {
         const double tolerance = 1.0;
         if (viewportWidth <= 0 ||
-            itemLeft >= -tolerance && itemRight <= viewportWidth + tolerance)
+            itemLeft >= -tolerance &&
+            itemRight <= viewportWidth + tolerance)
         {
-            return ResolveClampedTreeHorizontalOffset(currentOffsetX, extentWidth, viewportWidth);
+            return ResolveClampedTreeHorizontalOffset(
+                baselineOffsetX,
+                extentWidth,
+                viewportWidth);
         }
 
-        var targetX = itemLeft < 0
-            ? currentOffsetX + itemLeft
-            : currentOffsetX + itemRight - viewportWidth;
+        // When a label itself is wider than the viewport, aligning its start is more
+        // predictable than jumping to an arbitrary suffix on every navigation step.
+        var comfortPadding = itemWidth >= viewportWidth
+            ? 0
+            : Math.Min(12, Math.Max(0, (viewportWidth - itemWidth) / 2));
+        var targetX = itemWidth > viewportWidth
+            ? baselineOffsetX + itemLeft
+            : itemLeft < 0
+                ? baselineOffsetX + itemLeft - comfortPadding
+                : baselineOffsetX + itemRight - viewportWidth + comfortPadding;
 
-        return ResolveClampedTreeHorizontalOffset(targetX, extentWidth, viewportWidth);
+        return ResolveClampedTreeHorizontalOffset(
+            targetX,
+            extentWidth,
+            viewportWidth);
     }
 
     internal static double ResolveVerticalOffsetForSearchNavigation(
@@ -1277,16 +1933,64 @@ public sealed class TreeSearchCoordinator(
     {
         // Avalonia BringIntoView can adjust both axes too eagerly. Search navigation uses
         // explicit offsets so horizontal scrolling happens only when the target is clipped.
-        if (viewportHeight <= 0 || itemBottom >= 0 && itemTop <= viewportHeight)
+        if (viewportHeight <= 0)
+            return currentOffsetY;
+
+        var maxY = Math.Max(0, extentHeight - viewportHeight);
+        var itemHeight = Math.Max(0, itemBottom - itemTop);
+        if (itemHeight >= viewportHeight)
+            return Math.Clamp(currentOffsetY + itemTop, 0, maxY);
+
+        if (itemTop >= 0 && itemBottom <= viewportHeight)
             return currentOffsetY;
 
         var targetY = itemTop < 0
             ? currentOffsetY + itemTop
             : currentOffsetY + itemBottom - viewportHeight;
-
-        var maxY = Math.Max(0, extentHeight - viewportHeight);
         return Math.Clamp(targetY, 0, maxY);
     }
+
+    internal static double ResolveComfortableVerticalOffsetForSearchNavigation(
+        double currentOffsetY,
+        double itemTop,
+        double itemBottom,
+        double viewportHeight,
+        double extentHeight)
+    {
+        if (viewportHeight <= 0)
+            return currentOffsetY;
+
+        var itemHeight = Math.Max(0, itemBottom - itemTop);
+        var maxY = Math.Max(0, extentHeight - viewportHeight);
+        if (itemHeight >= viewportHeight)
+            return Math.Clamp(currentOffsetY + itemTop, 0, maxY);
+
+        const double comfortInsetRatio = 0.2;
+        var maximumInset = Math.Max(0, (viewportHeight - itemHeight) / 2);
+        var comfortInset = Math.Min(
+            viewportHeight * comfortInsetRatio,
+            maximumInset);
+        var comfortTop = comfortInset;
+        var comfortBottom = viewportHeight - comfortInset;
+        if (itemTop >= comfortTop && itemBottom <= comfortBottom)
+            return currentOffsetY;
+
+        // A directional anchor near the center provides hysteresis: adjacent results
+        // can move inside the comfort band without scrolling on every navigation step.
+        var preferredCenter = viewportHeight *
+                              (itemTop < comfortTop ? 0.45 : 0.55);
+        var halfItemHeight = itemHeight / 2;
+        var minimumCenter = comfortTop + halfItemHeight;
+        var maximumCenter = comfortBottom - halfItemHeight;
+        var anchoredCenter = Math.Clamp(
+            preferredCenter,
+            minimumCenter,
+            maximumCenter);
+        var itemCenter = (itemTop + itemBottom) / 2;
+        var targetY = currentOffsetY + itemCenter - anchoredCenter;
+        return Math.Clamp(targetY, 0, maxY);
+    }
+
 
     private (IBrush highlightBackground, IBrush highlightForeground, IBrush normalForeground, IBrush currentBackground)
         GetSearchHighlightBrushes()

@@ -22,12 +22,14 @@ public partial class MainWindow
     }
 
     private bool IsSessionMetricsIdle()
-        => IsVisible &&
+        => Volatile.Read(ref _startupSequenceStarted) != 0 &&
            !_viewModel.StatusBusy &&
            !_viewModel.IsSearchInProgress &&
            !_viewModel.IsFilterInProgress &&
            !_viewModel.IsPreviewLoading &&
            !_workspacePresentation.IsSettingsAnimating &&
+           !_workspacePresentation.IsPreviewPaneAnimating &&
+           !_workspacePresentation.IsTreePaneAnimating &&
            !_searchFilterController.IsAnimating &&
            !_previewWorkspaceController.IsModeSwitchInProgress;
 
@@ -140,7 +142,7 @@ public partial class MainWindow
 
     private void OnActivated(object? sender, EventArgs e)
     {
-        CancelBackgroundMemoryCleanup();
+        CancelAllMemoryCleanup();
         _systemDialogActivationTcs?.TrySetResult(true);
     }
 

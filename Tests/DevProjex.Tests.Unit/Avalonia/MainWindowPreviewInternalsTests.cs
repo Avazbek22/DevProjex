@@ -76,19 +76,6 @@ public sealed class MainWindowPreviewInternalsTests
         Assert.Equal(200_000, result);
     }
 
-    [Theory]
-    [InlineData(0, 0, false)]
-    [InlineData(1_499_999, 34_999, false)]
-    [InlineData(1_500_000, 10, true)]
-    [InlineData(10, 35_000, true)]
-    [InlineData(2_000_000, 100_000, true)]
-    public void ShouldForcePreviewMemoryCleanup_UsesThresholdPolicy(int textLength, int lineCount, bool expected)
-    {
-        var result = PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(textLength, lineCount);
-
-        Assert.Equal(expected, result);
-    }
-
     [Fact]
     public void BuildPathSetHash_EmptySet_IsZero()
     {
@@ -376,6 +363,50 @@ public sealed class MainWindowPreviewInternalsTests
         var keyB = PreviewFileCollectionPolicy.BuildPreviewCacheKey("/root", root, PreviewContentMode.Content, TreeTextFormat.Json, selected);
 
         Assert.Equal(keyA, keyB);
+    }
+
+    [Fact]
+    public void BuildPreviewCacheKey_ImplicitAndCheckedRootSelectionProduceEqualKey()
+    {
+        var root = CreateTree("root");
+        var implicitSelection = new HashSet<string>(PathComparer.Default);
+        var checkedRoot = new HashSet<string>(PathComparer.Default)
+        {
+            root.FullPath
+        };
+
+        var implicitKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+            "/root",
+            root,
+            PreviewContentMode.Content,
+            TreeTextFormat.Ascii,
+            implicitSelection);
+        var checkedRootKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+            "/root",
+            root,
+            PreviewContentMode.Content,
+            TreeTextFormat.Ascii,
+            checkedRoot);
+
+        Assert.Equal(implicitKey, checkedRootKey);
+        Assert.Equal(0, checkedRootKey.SelectedCount);
+        Assert.Equal(0, checkedRootKey.SelectedHash);
+    }
+
+    [Fact]
+    public void CollectOrderedPreviewFiles_CheckedRootMatchesImplicitFullTree()
+    {
+        var root = CreateTree("root");
+        var implicitFiles = PreviewFileCollectionPolicy.CollectOrderedPreviewFiles(
+            new HashSet<string>(PathComparer.Default),
+            hasSelection: false,
+            root);
+        var checkedRootFiles = PreviewFileCollectionPolicy.CollectOrderedPreviewFiles(
+            new HashSet<string>(PathComparer.Default) { root.FullPath },
+            hasSelection: true,
+            root);
+
+        Assert.Equal(implicitFiles, checkedRootFiles);
     }
 
     [Fact]

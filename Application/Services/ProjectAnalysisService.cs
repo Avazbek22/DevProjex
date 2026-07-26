@@ -263,7 +263,7 @@ public sealed class ProjectAnalysisService(
 			RootPath: request.RootPath,
 			Selection: new ProjectAnalysisSelectionReport(
 				SelectedRootFolders: NormalizeRootFolders(request.SelectedRootFolders).ToArray(),
-				SelectedExtensions: NormalizeExtensions(request.SelectedExtensions).ToArray(),
+				SelectedExtensions: NormalizeResolvedExtensionNames(request.SelectedExtensions).ToArray(),
 				SelectedIgnoreOptions: request.SelectedIgnoreOptions.OrderBy(static option => (int)option).ToArray()),
 			Inventory: new ProjectAnalysisInventoryReport(
 				AvailableRootFolders: request.AvailableRootFolders.OrderBy(static value => value, PathComparer.Default).ToArray(),
@@ -457,6 +457,20 @@ public sealed class ProjectAnalysisService(
 			.Where(static value => !string.IsNullOrWhiteSpace(value))
 			.Select(NormalizeExtension)
 			.Where(static value => value.Length > 0)
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+	}
+
+	private static IReadOnlyCollection<string> NormalizeResolvedExtensionNames(
+		IReadOnlyCollection<string>? extensions)
+	{
+		if (extensions is null || extensions.Count == 0)
+			return [];
+
+		return extensions
+			.Where(static value => !string.IsNullOrWhiteSpace(value))
+			.Select(static value => value.Trim())
 			.Distinct(StringComparer.OrdinalIgnoreCase)
 			.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
 			.ToArray();
