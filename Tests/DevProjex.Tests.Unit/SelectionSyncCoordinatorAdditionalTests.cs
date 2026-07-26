@@ -2224,6 +2224,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		int emptyFolderCount = 433)
 	{
 		var ignoreOptions = Enum.GetValues<IgnoreOptionId>()
+			.Where(static optionId => optionId != IgnoreOptionId.TrackedGitFilesOnly)
 			.Select(optionId => new ResolvedIgnoreOptionState(
 				optionId,
 				$"{optionId} ({(optionId == IgnoreOptionId.EmptyFolders ? emptyFolderCount : 1)})",

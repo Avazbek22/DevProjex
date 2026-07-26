@@ -81,6 +81,8 @@ public sealed class ProjectRootFacts
 
 	public bool HasGitIgnoreFile => HasFile(".gitignore");
 
+	public bool HasGitMetadataEntry => HasFile(".git") || HasDirectory(".git");
+
 	public static ProjectRootFacts Missing(string rootPath) =>
 		new(
 			rootPath,

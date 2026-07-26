@@ -322,7 +322,7 @@ public sealed partial class SelectionSyncCoordinator(
         viewModel.AllIgnoreChecked = isChecked;
         _suppressIgnoreAllCheck = false;
 
-        SetAllChecked(viewModel.IgnoreOptions, isChecked, ref _suppressIgnoreItemCheck);
+        SetAllIgnoreOptionsChecked(isChecked);
         UpdateIgnoreSelectionCache();
         _session.AdvanceRevision();
         RequestPendingApplyEvaluation();
@@ -566,6 +566,7 @@ public sealed partial class SelectionSyncCoordinator(
             ExtensionlessFilesCount: counts.ExtensionlessFiles,
             IncludeEmptyFiles: visibleIds.Contains(IgnoreOptionId.EmptyFiles),
             EmptyFilesCount: counts.EmptyFiles,
+            IncludeTrackedGitFilesOnly: visibleIds.Contains(IgnoreOptionId.TrackedGitFilesOnly),
             ShowAdvancedCounts: showAdvancedCounts);
         var localizedDescriptors = ignoreOptionsService.GetOptions(availability);
         var descriptorsById = localizedDescriptors.ToDictionary(static descriptor => descriptor.Id);
@@ -1064,16 +1065,27 @@ public sealed partial class SelectionSyncCoordinator(
         bool hasPreviousSelections)
     {
         var useDefaultCheckedFallback = ShouldUseIgnoreDefaultFallback(options, previousSelections);
+        var controllerGroupEndIndex = FindLastControllerOptionIndex(
+            options,
+            static option => option.Id);
         var optionViewModels = new List<IgnoreOptionViewModel>(options.Count);
-        foreach (var option in options)
+        for (var index = 0; index < options.Count; index++)
         {
+            var option = options[index];
             var isChecked = ResolveIgnoreOptionCheckedState(
                 option,
                 previousSelections,
                 hasPreviousSelections,
                 useDefaultCheckedFallback);
-            optionViewModels.Add(new IgnoreOptionViewModel(option.Id, option.Label, isChecked));
+            optionViewModels.Add(new IgnoreOptionViewModel(
+                option.Id,
+                option.Label,
+                isChecked,
+                isControllerGroupEnd: index == controllerGroupEndIndex));
         }
+        NormalizeGitFilteringOptions(
+            optionViewModels,
+            ResolvePreferredGitFilteringMode(previousSelections));
 
         _suppressIgnoreItemCheck = true;
         try
@@ -1092,6 +1104,23 @@ public sealed partial class SelectionSyncCoordinator(
         SyncIgnoreAllCheckbox();
         SynchronizeStableIgnoreOptionLabels();
         RequestPendingApplyEvaluation();
+    }
+
+    private static int FindLastControllerOptionIndex<T>(
+        IReadOnlyList<T> options,
+        Func<T, IgnoreOptionId> idSelector)
+    {
+        for (var index = options.Count - 1; index >= 0; index--)
+        {
+            if (idSelector(options[index]) is IgnoreOptionId.UseGitIgnore
+                or IgnoreOptionId.TrackedGitFilesOnly
+                or IgnoreOptionId.SmartIgnore)
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     private static bool HasGitIgnore(string? rootPath)
@@ -1149,8 +1178,36 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void SyncIgnoreAllCheckbox()
     {
-        SyncAllCheckbox(viewModel.IgnoreOptions, ref _suppressIgnoreAllCheck,
-            value => viewModel.AllIgnoreChecked = value);
+        _suppressIgnoreAllCheck = true;
+        try
+        {
+            var hasItems = false;
+            var hasGitFilteringOptions = false;
+            var hasSelectedGitFilteringMode = false;
+            var allOrdinaryOptionsChecked = true;
+            foreach (var option in viewModel.IgnoreOptions)
+            {
+                hasItems = true;
+                if (GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+                {
+                    hasGitFilteringOptions = true;
+                    hasSelectedGitFilteringMode |= option.IsChecked;
+                    continue;
+                }
+
+                if (!option.IsChecked)
+                    allOrdinaryOptionsChecked = false;
+            }
+
+            viewModel.AllIgnoreChecked =
+                hasItems &&
+                allOrdinaryOptionsChecked &&
+                (!hasGitFilteringOptions || hasSelectedGitFilteringMode);
+        }
+        finally
+        {
+            _suppressIgnoreAllCheck = false;
+        }
     }
 
     private void OnOptionCheckedChanged(object? sender, EventArgs e)
@@ -1193,8 +1250,13 @@ public sealed partial class SelectionSyncCoordinator(
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = null;
 
-        SyncAllCheckbox(viewModel.IgnoreOptions, ref _suppressIgnoreAllCheck,
-            value => viewModel.AllIgnoreChecked = value);
+        if (changedOption is { IsChecked: true } &&
+            GitFilteringModeResolver.IsGitFilteringOption(changedOption.Id))
+        {
+            SelectExclusiveGitFilteringOption(changedOption.Id);
+        }
+
+        SyncIgnoreAllCheckbox();
 
         UpdateIgnoreSelectionCache();
         _session.AdvanceRevision();
@@ -1561,9 +1623,19 @@ public sealed partial class SelectionSyncCoordinator(
         }
         else
         {
+            var controllerGroupEndIndex = FindLastControllerOptionIndex(
+                options,
+                static option => option.Id);
             var optionViewModels = new List<IgnoreOptionViewModel>(options.Count);
-            foreach (var option in options)
-                optionViewModels.Add(new IgnoreOptionViewModel(option.Id, option.Label, option.IsChecked));
+            for (var index = 0; index < options.Count; index++)
+            {
+                var option = options[index];
+                optionViewModels.Add(new IgnoreOptionViewModel(
+                    option.Id,
+                    option.Label,
+                    option.IsChecked,
+                    isControllerGroupEnd: index == controllerGroupEndIndex));
+            }
 
             _suppressIgnoreItemCheck = true;
             try
@@ -2611,6 +2683,7 @@ public sealed partial class SelectionSyncCoordinator(
     private bool ShouldIncludeControllerImpactProbeRoots(IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions)
     {
         if (selectedIgnoreOptions.Contains(IgnoreOptionId.UseGitIgnore) ||
+            selectedIgnoreOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly) ||
             selectedIgnoreOptions.Contains(IgnoreOptionId.SmartIgnore))
         {
             // Root-level controller impact keeps .gitignore/Smart Ignore visible when the
@@ -2648,6 +2721,100 @@ public sealed partial class SelectionSyncCoordinator(
             return true;
 
         return option.DefaultChecked;
+    }
+
+    private GitFilteringMode ResolvePreferredGitFilteringMode(
+        IReadOnlySet<IgnoreOptionId> previousSelections)
+    {
+        var mode = GitFilteringModeResolver.Resolve(_session.IgnoreOptions.OptionStateCache);
+        if (mode != GitFilteringMode.None)
+            return mode;
+
+        mode = GitFilteringModeResolver.Resolve(previousSelections);
+        if (mode != GitFilteringMode.None)
+            return mode;
+
+        return _session.IgnoreOptions.AllPreference == true
+            ? GitFilteringMode.RespectGitIgnore
+            : GitFilteringMode.None;
+    }
+
+    private static void NormalizeGitFilteringOptions(
+        IReadOnlyList<IgnoreOptionViewModel> options,
+        GitFilteringMode preferredMode)
+    {
+        IgnoreOptionViewModel? useGitIgnore = null;
+        IgnoreOptionViewModel? trackedOnly = null;
+        foreach (var option in options)
+        {
+            if (option.Id == IgnoreOptionId.UseGitIgnore)
+                useGitIgnore = option;
+            else if (option.Id == IgnoreOptionId.TrackedGitFilesOnly)
+                trackedOnly = option;
+        }
+
+        if (useGitIgnore is not { IsChecked: true } ||
+            trackedOnly is not { IsChecked: true })
+        {
+            return;
+        }
+
+        if (preferredMode == GitFilteringMode.TrackedFilesOnly)
+            useGitIgnore.IsChecked = false;
+        else
+            trackedOnly.IsChecked = false;
+    }
+
+    private void SelectExclusiveGitFilteringOption(IgnoreOptionId selectedOptionId)
+    {
+        _suppressIgnoreItemCheck = true;
+        try
+        {
+            foreach (var option in viewModel.IgnoreOptions)
+            {
+                if (option.Id != selectedOptionId &&
+                    GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+                {
+                    option.IsChecked = false;
+                }
+            }
+        }
+        finally
+        {
+            _suppressIgnoreItemCheck = false;
+        }
+    }
+
+    private void SetAllIgnoreOptionsChecked(bool isChecked)
+    {
+        var gitMode = GitFilteringModeResolver.Resolve(_session.IgnoreOptions.OptionStateCache);
+        if (isChecked && gitMode == GitFilteringMode.None)
+        {
+            gitMode = viewModel.IgnoreOptions.Any(
+                static option => option.Id == IgnoreOptionId.UseGitIgnore)
+                ? GitFilteringMode.RespectGitIgnore
+                : GitFilteringMode.TrackedFilesOnly;
+        }
+
+        _suppressIgnoreItemCheck = true;
+        try
+        {
+            foreach (var option in viewModel.IgnoreOptions)
+            {
+                option.IsChecked = option.Id switch
+                {
+                    IgnoreOptionId.UseGitIgnore =>
+                        isChecked && gitMode == GitFilteringMode.RespectGitIgnore,
+                    IgnoreOptionId.TrackedGitFilesOnly =>
+                        isChecked && gitMode == GitFilteringMode.TrackedFilesOnly,
+                    _ => isChecked
+                };
+            }
+        }
+        finally
+        {
+            _suppressIgnoreItemCheck = false;
+        }
     }
 
     private IReadOnlyList<SelectionOption> ApplyMissingProfileSelectionsFallbackToExtensions(

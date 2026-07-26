@@ -147,6 +147,7 @@
   "Dialog.TerminalCommand.ReconfigureSucceeded": "Терминал пәрмені сәтті қайта бапталды.",
   "Settings.IgnoreTitle": "Елемеу:",
   "Settings.Ignore.UseGitIgnore": ".gitignore пайдалану",
+  "Settings.Ignore.TrackedGitFilesOnly": "Тек Git бақылайтын файлдар",
   "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HiddenFolders": "жасырын қалталар",
   "Settings.Ignore.HiddenFiles": "жасырын файлдар",

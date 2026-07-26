@@ -147,6 +147,7 @@
   "Dialog.TerminalCommand.ReconfigureSucceeded": "Фармони терминал бомуваффақият аз нав танзим шуд.",
   "Settings.IgnoreTitle": "Нодида гирифтан:",
   "Settings.Ignore.UseGitIgnore": "Истифодаи .gitignore",
+  "Settings.Ignore.TrackedGitFilesOnly": "Танҳо файлҳои пайгиришавандаи Git",
   "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HiddenFolders": "ҷузвдонҳои пинҳонӣ",
   "Settings.Ignore.HiddenFiles": "файлҳои пинҳонӣ",

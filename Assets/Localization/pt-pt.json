@@ -147,6 +147,7 @@
     "Dialog.TerminalCommand.ReconfigureSucceeded":  "O comando do terminal foi configurado novamente com sucesso.",
     "Settings.IgnoreTitle":  "Ignorar:",
     "Settings.Ignore.UseGitIgnore":  "Usar .gitignore",
+    "Settings.Ignore.TrackedGitFilesOnly":  "Apenas ficheiros controlados pelo Git",
     "Settings.Ignore.SmartIgnore":  "Smart Ignore",
     "Settings.Ignore.HiddenFolders":  "Pastas ocultas",
     "Settings.Ignore.HiddenFiles":  "Arquivos ocultos",

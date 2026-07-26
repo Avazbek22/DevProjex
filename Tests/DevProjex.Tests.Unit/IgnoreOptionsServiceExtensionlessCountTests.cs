@@ -69,8 +69,8 @@ public sealed class IgnoreOptionsServiceExtensionlessCountTests
 			ShowAdvancedCounts: true));
 
 		Assert.Equal(7, options.Count);
-		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
+		Assert.Equal(IgnoreOptionId.SmartIgnore, options[1].Id);
 		Assert.Equal(IgnoreOptionId.HiddenFolders, options[2].Id);
 		Assert.Equal(IgnoreOptionId.HiddenFiles, options[3].Id);
 		Assert.Equal(IgnoreOptionId.DotFolders, options[4].Id);

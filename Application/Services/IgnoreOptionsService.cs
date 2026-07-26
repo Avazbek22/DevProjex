@@ -5,19 +5,27 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
 		var options = new List<IgnoreOptionDescriptor>();
-		if (availability.IncludeSmartIgnore)
-		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.SmartIgnore,
-				localization["Settings.Ignore.SmartIgnore"],
-				true));
-		}
-
 		if (availability.IncludeGitIgnore)
 		{
 			options.Add(new IgnoreOptionDescriptor(
 				IgnoreOptionId.UseGitIgnore,
 				localization["Settings.Ignore.UseGitIgnore"],
+				true));
+		}
+
+		if (availability.IncludeTrackedGitFilesOnly)
+		{
+			options.Add(new IgnoreOptionDescriptor(
+				IgnoreOptionId.TrackedGitFilesOnly,
+				localization["Settings.Ignore.TrackedGitFilesOnly"],
+				false));
+		}
+
+		if (availability.IncludeSmartIgnore)
+		{
+			options.Add(new IgnoreOptionDescriptor(
+				IgnoreOptionId.SmartIgnore,
+				localization["Settings.Ignore.SmartIgnore"],
 				true));
 		}
 

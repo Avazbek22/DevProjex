@@ -1458,8 +1458,27 @@ public partial class MainWindow : Window
             _viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
 
         _viewModel.IgnoreOptions.Clear();
-        foreach (var option in snapshot.IgnoreOptions)
-            _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, option.IsChecked));
+        var controllerGroupEndIndex = -1;
+        for (var index = snapshot.IgnoreOptions.Count - 1; index >= 0; index--)
+        {
+            if (snapshot.IgnoreOptions[index].Id is IgnoreOptionId.UseGitIgnore
+                or IgnoreOptionId.TrackedGitFilesOnly
+                or IgnoreOptionId.SmartIgnore)
+            {
+                controllerGroupEndIndex = index;
+                break;
+            }
+        }
+
+        for (var index = 0; index < snapshot.IgnoreOptions.Count; index++)
+        {
+            var option = snapshot.IgnoreOptions[index];
+            _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+                option.Id,
+                option.Label,
+                option.IsChecked,
+                isControllerGroupEnd: index == controllerGroupEndIndex));
+        }
 
         _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
         _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;

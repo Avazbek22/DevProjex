@@ -23,8 +23,11 @@ public sealed class GitTrackedPathIndexTests
 		Assert.True(index.Contains(Path.Combine(repositoryRoot, "src", "deep", "файл без расширения")));
 		Assert.True(index.HasDescendant(Path.Combine(repositoryRoot, "src")));
 		Assert.True(index.HasDescendant(Path.Combine(repositoryRoot, "src", "deep")));
+		Assert.True(index.ContainsOrHasDescendant(Path.Combine(repositoryRoot, "src")));
+		Assert.True(index.ContainsOrHasDescendant(Path.Combine(repositoryRoot, "src", "main.cs")));
 		Assert.False(index.Contains(Path.Combine(repositoryRoot, "src", "missing.cs")));
 		Assert.False(index.HasDescendant(Path.Combine(repositoryRoot, "other")));
+		Assert.False(index.ContainsOrHasDescendant(Path.Combine(repositoryRoot, "other")));
 		Assert.False(index.Contains(Path.Combine(temp.Path, "outside.txt")));
 	}
 
@@ -122,6 +125,44 @@ public sealed class GitTrackedPathIndexTests
 			"submodule");
 
 		Assert.False(evaluation.IsIgnored);
+	}
+
+	[Fact]
+	public void TrackedOnlyScanContext_HidesUntrackedEntriesButTraversesDirectoriesForNestedRepositories()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repo");
+		var trackedFile = temp.CreateFile("repo/src/tracked.cs", "tracked");
+		var untrackedFile = temp.CreateFile("repo/src/local.cs", "untracked");
+		var untrackedDirectory = temp.CreateFolder("repo/untracked/deep");
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseTrackedGitFilesOnly = true,
+			EnableGitIgnoreTraversal = true
+		};
+		var context = rules
+			.CreateGitIgnoreScanContext(repositoryRoot)
+			.WithTrackedPathIndex(new GitTrackedPathIndex(repositoryRoot, ["src/tracked.cs"]));
+
+		var tracked = context.Evaluate(trackedFile, "src/tracked.cs", isDirectory: false, "tracked.cs");
+		var untracked = context.Evaluate(untrackedFile, "src/local.cs", isDirectory: false, "local.cs");
+		var traversalOnly = context.Evaluate(
+			untrackedDirectory,
+			"untracked/deep",
+			isDirectory: true,
+			"deep");
+
+		Assert.False(tracked.IsIgnored);
+		Assert.True(untracked.IsIgnored);
+		Assert.False(untracked.ShouldTraverseIgnoredDirectory);
+		Assert.True(traversalOnly.IsIgnored);
+		Assert.True(traversalOnly.ShouldTraverseIgnoredDirectory);
 	}
 
 	[Fact]

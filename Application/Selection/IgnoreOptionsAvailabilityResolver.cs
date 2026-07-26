@@ -4,10 +4,12 @@ public static class IgnoreOptionsAvailabilityResolver
 {
 	public static IgnoreOptionsAvailability CreateUnmeasured(
 		bool includeGitIgnore,
-		bool includeSmartIgnore) =>
+		bool includeSmartIgnore,
+		bool includeTrackedGitFilesOnly = false) =>
 		new(
 			IncludeGitIgnore: includeGitIgnore,
-			IncludeSmartIgnore: includeSmartIgnore);
+			IncludeSmartIgnore: includeSmartIgnore,
+			IncludeTrackedGitFilesOnly: includeTrackedGitFilesOnly);
 
 	public static IgnoreOptionsAvailability Resolve(
 		IgnoreOptionsAvailability structuralAvailability,
@@ -31,21 +33,17 @@ public static class IgnoreOptionsAvailabilityResolver
 		var controllerCounts = snapshotState.ControllerImpactCounts;
 		return availability with
 		{
-			// A controller can hide the very root that proves its structural availability.
-			// Measured impact is therefore authoritative, while an explicit unchecked state
-			// remains visible so the user can always enable the controller again.
-			IncludeGitIgnore = (availability.IncludeGitIgnore || controllerCounts.GitIgnore > 0) &&
-			                   ShouldKeepControllerVisible(
-				                   IgnoreOptionId.UseGitIgnore,
-				                   controllerCounts.GitIgnore,
-				                   stateCache,
-				                   stateCacheIsComplete),
-			IncludeSmartIgnore = (availability.IncludeSmartIgnore || controllerCounts.SmartIgnore > 0) &&
-			                     ShouldKeepControllerVisible(
-				                     IgnoreOptionId.SmartIgnore,
-				                     controllerCounts.SmartIgnore,
-				                     stateCache,
-				                     stateCacheIsComplete),
+			// Inside a real repository the two Git modes form a stable toggle pair.
+			// A standalone .gitignore file remains evidence-driven and is hidden when
+			// it cannot change the effective tree.
+			IncludeGitIgnore =
+				availability.IncludeTrackedGitFilesOnly ||
+				controllerCounts.GitIgnore > 0,
+			IncludeTrackedGitFilesOnly = ShouldKeepModeVisible(
+				availability.IncludeTrackedGitFilesOnly),
+			// Smart Ignore is evidence-driven after the measured pass. A project marker
+			// alone must not leave a checkbox that cannot change the effective tree.
+			IncludeSmartIgnore = controllerCounts.SmartIgnore > 0,
 			IncludeHiddenFolders = counts.HiddenFolders > 0,
 			HiddenFoldersCount = counts.HiddenFolders,
 			IncludeHiddenFiles = counts.HiddenFiles > 0,
@@ -83,17 +81,6 @@ public static class IgnoreOptionsAvailabilityResolver
 			ExtensionlessFilesCount = 0
 		};
 
-	private static bool ShouldKeepControllerVisible(
-		IgnoreOptionId optionId,
-		int controllerImpactCount,
-		IReadOnlyDictionary<IgnoreOptionId, bool> stateCache,
-		bool stateCacheIsComplete)
-	{
-		if (controllerImpactCount > 0)
-			return true;
-
-		return stateCacheIsComplete &&
-		       stateCache.TryGetValue(optionId, out var isChecked) &&
-		       !isChecked;
-	}
+	private static bool ShouldKeepModeVisible(bool structurallyAvailable) =>
+		structurallyAvailable;
 }

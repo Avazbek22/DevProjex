@@ -453,6 +453,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		// latter is a final tree-pruning rule, not a traversal rule for finding extensions.
 		// Directory/controller rules define reachability and must stay shared.
 		if (extensionDiscoveryRules.IsGitIgnoreTraversalEnabled != effectiveRules.IsGitIgnoreTraversalEnabled ||
+		    extensionDiscoveryRules.GitFilteringMode != effectiveRules.GitFilteringMode ||
 		    extensionDiscoveryRules.UseSmartIgnore != effectiveRules.UseSmartIgnore ||
 		    extensionDiscoveryRules.IgnoreHiddenFolders != effectiveRules.IgnoreHiddenFolders ||
 		    extensionDiscoveryRules.IgnoreDotFolders != effectiveRules.IgnoreDotFolders ||
@@ -480,7 +481,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		try
 		{
 			if (useGitIgnore &&
-			    gitIgnoreContext.HasIgnoreRules &&
+			    gitIgnoreContext.RequiresTrackedPathIndex &&
 			    GitTrackedPathIndexCache.TryLoadNearest(
 				    rootPath,
 				    cancellationToken,
@@ -1384,7 +1385,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 
 		if (useGitIgnore &&
-		    gitIgnoreContext.HasIgnoreRules &&
+		    gitIgnoreContext.RequiresTrackedPathIndex &&
 		    GitTrackedPathIndexCache.TryLoadNearest(
 			    rootPath,
 			    cancellationToken,
@@ -2245,7 +2246,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		var activeContext = rules.CreateGitIgnoreScanContext(rootPath);
 		var candidateContext = rules.CreateGitIgnoreCandidateScanContext(rootPath);
-		return (activeContext.HasIgnoreRules || candidateContext.HasIgnoreRules) &&
+		return (activeContext.RequiresTrackedPathIndex || candidateContext.RequiresTrackedPathIndex) &&
 		       GitTrackedPathIndexCache.TryLoadNearest(
 			       rootPath,
 			       cancellationToken,
@@ -3393,7 +3394,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			return false;
 
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(directoryPath);
-		if (gitIgnoreContext.HasIgnoreRules &&
+		if (gitIgnoreContext.RequiresTrackedPathIndex &&
 		    GitTrackedPathIndexCache.TryLoadNearest(
 			    directoryPath,
 			    cancellationToken,
@@ -3429,8 +3430,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 
 		var requiresTrackedPathIndex =
-			activeContext.HasIgnoreRules ||
-			candidateContext.HasIgnoreRules ||
+			activeContext.RequiresTrackedPathIndex ||
+			candidateContext.RequiresTrackedPathIndex ||
 			scopedMatcher is not null &&
 			!ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty);
 		var reachedRepositoryBoundary = !string.IsNullOrWhiteSpace(gitMetadataPath);
@@ -3484,7 +3485,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules.GitIgnoreScanContext candidateContext,
 		CancellationToken cancellationToken)
 	{
-		if (!activeContext.HasIgnoreRules && !candidateContext.HasIgnoreRules)
+		if (!activeContext.RequiresTrackedPathIndex && !candidateContext.RequiresTrackedPathIndex)
 			return (activeContext, candidateContext, null);
 
 		if (!GitTrackedPathIndexCache.TryLoadNearest(

@@ -1279,6 +1279,38 @@ public sealed class CommandLineOptionsTests
 	}
 
 	[Theory]
+	[InlineData("tracked")]
+	[InlineData("tracked-only")]
+	[InlineData(CommandLineOptionTokens.IgnoreTrackedGitFilesOnly)]
+	public void Parse_TrackedOnlyAliasesSelectCanonicalGitMode(string value)
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Ignore,
+			value
+		]);
+
+		AssertValid(result);
+		Assert.Equal([IgnoreOptionId.TrackedGitFilesOnly], result.Options.IgnoreOptions);
+		Assert.Contains(
+			CommandLineOptionTokens.IgnoreTrackedGitFilesOnly,
+			result.Options.ToArguments(),
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Parse_RejectsBothGitFilteringModes()
+	{
+		var result = CommandLineOptions.Parse([
+			CommandLineOptionTokens.Ignore,
+			CommandLineOptionTokens.IgnoreGitIgnore,
+			CommandLineOptionTokens.Ignore,
+			CommandLineOptionTokens.IgnoreTrackedGitFilesOnly
+		]);
+
+		AssertInvalid(result, "conflicting-git-filter-options");
+	}
+
+	[Theory]
 	[InlineData(CommandLineOptionTokens.Help)]
 	[InlineData(CommandLineOptionTokens.ShortHelp)]
 	[InlineData(CommandLineOptionTokens.WindowsHelp)]
@@ -1320,27 +1352,30 @@ public sealed class CommandLineOptionsTests
 	[Fact]
 	public void ToArguments_UsesDocumentedCanonicalIgnoreOptionNames()
 	{
-		var options = CommandLineOptions.Empty with
+		var expectedNames = new Dictionary<IgnoreOptionId, string>
 		{
-			IgnoreOptionsSpecified = true,
-			IgnoreOptions =
-			[
-				IgnoreOptionId.SmartIgnore,
-				IgnoreOptionId.UseGitIgnore,
-				IgnoreOptionId.HiddenFolders,
-				IgnoreOptionId.HiddenFiles,
-				IgnoreOptionId.DotFolders,
-				IgnoreOptionId.DotFiles,
-				IgnoreOptionId.EmptyFolders,
-				IgnoreOptionId.EmptyFiles,
-				IgnoreOptionId.ExtensionlessFiles
-			]
+			[IgnoreOptionId.SmartIgnore] = CommandLineOptionTokens.IgnoreSmartIgnore,
+			[IgnoreOptionId.UseGitIgnore] = CommandLineOptionTokens.IgnoreGitIgnore,
+			[IgnoreOptionId.TrackedGitFilesOnly] = CommandLineOptionTokens.IgnoreTrackedGitFilesOnly,
+			[IgnoreOptionId.HiddenFolders] = CommandLineOptionTokens.IgnoreHiddenFolders,
+			[IgnoreOptionId.HiddenFiles] = CommandLineOptionTokens.IgnoreHiddenFiles,
+			[IgnoreOptionId.DotFolders] = CommandLineOptionTokens.IgnoreDotFolders,
+			[IgnoreOptionId.DotFiles] = CommandLineOptionTokens.IgnoreDotFiles,
+			[IgnoreOptionId.EmptyFolders] = CommandLineOptionTokens.IgnoreEmptyFolders,
+			[IgnoreOptionId.EmptyFiles] = CommandLineOptionTokens.IgnoreEmptyFiles,
+			[IgnoreOptionId.ExtensionlessFiles] = CommandLineOptionTokens.IgnoreExtensionlessFiles
 		};
 
-		var args = options.ToArguments();
+		foreach (var (optionId, expectedName) in expectedNames)
+		{
+			var options = CommandLineOptions.Empty with
+			{
+				IgnoreOptionsSpecified = true,
+				IgnoreOptions = [optionId]
+			};
 
-		foreach (var optionName in CommandLineOptionTokens.PublicIgnoreOptionNames.Where(static name => name != CommandLineOptionTokens.IgnoreNone))
-			Assert.Contains(optionName, args, StringComparison.Ordinal);
+			Assert.Contains(expectedName, options.ToArguments(), StringComparison.Ordinal);
+		}
 	}
 
 	[Fact]
@@ -1837,6 +1872,7 @@ public sealed class CommandLineOptionsTests
 	{
 		{ CommandLineOptionTokens.IgnoreSmartIgnore, IgnoreOptionId.SmartIgnore },
 		{ CommandLineOptionTokens.IgnoreGitIgnore, IgnoreOptionId.UseGitIgnore },
+		{ CommandLineOptionTokens.IgnoreTrackedGitFilesOnly, IgnoreOptionId.TrackedGitFilesOnly },
 		{ CommandLineOptionTokens.IgnoreHiddenFolders, IgnoreOptionId.HiddenFolders },
 		{ CommandLineOptionTokens.IgnoreHiddenFiles, IgnoreOptionId.HiddenFiles },
 		{ CommandLineOptionTokens.IgnoreDotFolders, IgnoreOptionId.DotFolders },

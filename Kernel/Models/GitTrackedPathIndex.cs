@@ -1,9 +1,9 @@
 namespace DevProjex.Kernel.Models;
 
 /// <summary>
-/// Immutable Git index projection used only to protect tracked working-tree paths
-/// from .gitignore rules. Paths are sorted once so exact and descendant probes do
-/// not require a second ancestor set for large repositories.
+/// Immutable Git index projection shared by .gitignore overrides and tracked-only
+/// filtering. Paths are sorted once so exact and descendant probes do not require
+/// a second ancestor set for large repositories.
 /// </summary>
 public sealed class GitTrackedPathIndex(string repositoryRootPath, IEnumerable<string> trackedPaths)
 {
@@ -33,6 +33,24 @@ public sealed class GitTrackedPathIndex(string repositoryRootPath, IEnumerable<s
 
 		var prefix = relativePath + "/";
 		var index = FindLowerBound(prefix);
+		return index < _trackedPaths.Length &&
+		       _trackedPaths[index].StartsWith(prefix, RelativePathComparison);
+	}
+
+	public bool ContainsOrHasDescendant(string directoryPath)
+	{
+		if (!TryGetRelativePath(directoryPath, out var relativePath))
+			return false;
+
+		if (relativePath.Length == 0)
+			return _trackedPaths.Length > 0;
+
+		var index = Array.BinarySearch(_trackedPaths, relativePath, RelativePathComparer);
+		if (index >= 0)
+			return true;
+
+		var prefix = relativePath + "/";
+		index = FindLowerBound(prefix);
 		return index < _trackedPaths.Length &&
 		       _trackedPaths[index].StartsWith(prefix, RelativePathComparison);
 	}

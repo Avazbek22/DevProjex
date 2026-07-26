@@ -47,10 +47,12 @@ Options:
   --help, -h, /?                  Show help.
 
 Ignore option names:
-  smart-ignore, git-ignore, hidden-folders, hidden-files,
+  smart-ignore, git-ignore, git-tracked-only, hidden-folders, hidden-files,
   dot-folders, dot-files, empty-folders, empty-files,
   extensionless-files, none
   git-ignore keeps tracked files when a readable Git index is available.
+  git-tracked-only includes existing working-tree files recorded in the Git index.
+  git-ignore and git-tracked-only are mutually exclusive.
 
 Examples:
   DevProjex "C:\Projects\App"

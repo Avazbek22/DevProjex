@@ -97,9 +97,36 @@ public sealed class IgnoreOptionsAvailabilityResolverTests
 		{ false, 3, false, null, true },
 		{ true, 0, false, null, false },
 		{ true, 0, true, true, false },
-		{ true, 0, true, false, true },
+		{ true, 0, true, false, false },
 		{ false, 0, true, false, false }
 	};
+
+	[Fact]
+	public void Resolve_RepositoryKeepsBothGitModesVisibleAfterMeasuredImpactDropsToZero()
+	{
+		var snapshot = new IgnoreSectionSnapshotState(
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			HasExtensionlessEntries: false,
+			ExtensionlessEntriesCount: 0);
+
+		var actual = IgnoreOptionsAvailabilityResolver.Resolve(
+			new IgnoreOptionsAvailability(
+				IncludeGitIgnore: false,
+				IncludeSmartIgnore: false,
+				IncludeTrackedGitFilesOnly: true),
+			snapshot,
+			new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = false,
+				[IgnoreOptionId.TrackedGitFilesOnly] = true
+			},
+			stateCacheIsComplete: true);
+
+		Assert.True(actual.IncludeGitIgnore);
+		Assert.True(actual.IncludeTrackedGitFilesOnly);
+	}
 
 	[Fact]
 	public void Resolve_UnmeasuredSnapshotPreservesControllersButHidesUnverifiedAdvancedOptions()

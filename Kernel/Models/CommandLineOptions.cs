@@ -438,6 +438,14 @@ public sealed record CommandLineOptions(
 		ValidateUiBenchmarkOptions(path, noUi, strict, report, benchmark, uiBenchmark, sessionMetrics, uiBenchmarkScript, export, ui, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
 		ValidateSessionMetricsOptions(path, noUi, strict, report, benchmark, uiBenchmark, sessionMetrics, uiBenchmarkScript, export, includeRootFolders, includeExtensions, ignoreOptionsSpecified, errors);
 		ValidateProjectCopyOptions(projectCopy, report, export, benchmark, uiBenchmark, sessionMetrics, ui, errors);
+		if (ignoreOptions.Contains(IgnoreOptionId.UseGitIgnore) &&
+		    ignoreOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly))
+		{
+			errors.Add(new CommandLineParseError(
+				"conflicting-git-filter-options",
+				"'git-ignore' and 'git-tracked-only' are mutually exclusive.",
+				CommandLineOptionTokens.Ignore));
+		}
 
 		var options = new CommandLineOptions(path, lang, elevationAttempted)
 		{
@@ -1365,6 +1373,11 @@ public sealed record CommandLineOptions(
 			case "use-git-ignore":
 				optionId = IgnoreOptionId.UseGitIgnore;
 				return true;
+			case "tracked":
+			case "tracked-only":
+			case CommandLineOptionTokens.IgnoreTrackedGitFilesOnly:
+				optionId = IgnoreOptionId.TrackedGitFilesOnly;
+				return true;
 			case CommandLineOptionTokens.IgnoreHiddenFolders:
 				optionId = IgnoreOptionId.HiddenFolders;
 				return true;
@@ -1397,6 +1410,7 @@ public sealed record CommandLineOptions(
 	{
 		IgnoreOptionId.SmartIgnore => CommandLineOptionTokens.IgnoreSmartIgnore,
 		IgnoreOptionId.UseGitIgnore => CommandLineOptionTokens.IgnoreGitIgnore,
+		IgnoreOptionId.TrackedGitFilesOnly => CommandLineOptionTokens.IgnoreTrackedGitFilesOnly,
 		IgnoreOptionId.HiddenFolders => CommandLineOptionTokens.IgnoreHiddenFolders,
 		IgnoreOptionId.HiddenFiles => CommandLineOptionTokens.IgnoreHiddenFiles,
 		IgnoreOptionId.DotFolders => CommandLineOptionTokens.IgnoreDotFolders,

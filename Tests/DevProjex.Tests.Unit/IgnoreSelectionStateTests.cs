@@ -111,6 +111,65 @@ public sealed class IgnoreSelectionStateTests
 	}
 
 	[Fact]
+	public void RestoreProfileSelection_ConflictingGitModesFailClosedToTrackedOnly()
+	{
+		var state = new IgnoreSelectionState();
+
+		state.RestoreProfileSelection([
+			IgnoreOptionId.UseGitIgnore,
+			IgnoreOptionId.TrackedGitFilesOnly,
+			IgnoreOptionId.SmartIgnore
+		]);
+
+		Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, state.SelectedOptions);
+		Assert.Contains(IgnoreOptionId.TrackedGitFilesOnly, state.SelectedOptions);
+		Assert.Contains(IgnoreOptionId.SmartIgnore, state.SelectedOptions);
+	}
+
+	[Fact]
+	public void ApplyAllPreferenceToKnownStates_PreservesTrackedModeAsTheLogicalGitSlot()
+	{
+		var state = new IgnoreSelectionState();
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.UseGitIgnore] = false,
+			[IgnoreOptionId.TrackedGitFilesOnly] = true,
+			[IgnoreOptionId.SmartIgnore] = false,
+			[IgnoreOptionId.DotFolders] = false
+		});
+
+		state.ApplyAllPreferenceToKnownStates(true);
+
+		Assert.False(state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
+		Assert.True(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
+		Assert.True(state.OptionStateCache[IgnoreOptionId.SmartIgnore]);
+		Assert.True(state.OptionStateCache[IgnoreOptionId.DotFolders]);
+
+		state.ApplyAllPreferenceToKnownStates(false);
+
+		Assert.Empty(state.SelectedOptions);
+		Assert.All(state.OptionStateCache, static pair => Assert.False(pair.Value));
+	}
+
+	[Fact]
+	public void ApplyAllPreferenceToKnownStates_DefaultsEmptyGitSlotToGitIgnore()
+	{
+		var state = new IgnoreSelectionState();
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.UseGitIgnore] = false,
+			[IgnoreOptionId.TrackedGitFilesOnly] = false,
+			[IgnoreOptionId.SmartIgnore] = false
+		});
+
+		state.ApplyAllPreferenceToKnownStates(true);
+
+		Assert.True(state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
+		Assert.False(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
+		Assert.True(state.OptionStateCache[IgnoreOptionId.SmartIgnore]);
+	}
+
+	[Fact]
 	public void Reset_ClearsSelectionStateAndAllPreference()
 	{
 		var state = new IgnoreSelectionState();

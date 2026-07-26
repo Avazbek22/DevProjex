@@ -65,7 +65,9 @@ public sealed class IgnoreRulesService(
 		// A nested .gitignore can be discovered by the scanner after bounded project-scope
 		// discovery has completed. An explicit/default selection must therefore activate the
 		// traversal controller even when no prebuilt scope matcher exists yet.
-		var requestedGitIgnore = selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
+		var gitFilteringMode = GitFilteringModeResolver.Resolve(selectedOptions);
+		var requestedGitIgnore = gitFilteringMode == GitFilteringMode.RespectGitIgnore;
+		var useTrackedGitFilesOnly = gitFilteringMode == GitFilteringMode.TrackedFilesOnly;
 		var useSmartIgnore = selectedOptions.Contains(IgnoreOptionId.SmartIgnore);
 
 		var candidateScopedGitMatchers = context.HasAnyGitIgnore
@@ -126,7 +128,8 @@ public sealed class IgnoreRulesService(
 			IgnoreEmptyFiles = selectedOptions.Contains(IgnoreOptionId.EmptyFiles),
 			IgnoreExtensionlessFiles = selectedOptions.Contains(IgnoreOptionId.ExtensionlessFiles),
 			UseGitIgnore = useGitIgnore,
-			EnableGitIgnoreTraversal = requestedGitIgnore,
+			UseTrackedGitFilesOnly = useTrackedGitFilesOnly,
+			EnableGitIgnoreTraversal = requestedGitIgnore || useTrackedGitFilesOnly,
 			UseSmartIgnore = useSmartIgnore,
 			GitIgnoreCandidateMatchesActiveRules = useGitIgnore,
 			SmartIgnoreCandidateMatchesActiveRules = useSmartIgnore,
@@ -153,24 +156,69 @@ public sealed class IgnoreRulesService(
 		IReadOnlyCollection<string> selectedRootFolders)
 	{
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
-		return BuildUiIgnoreOptionsAvailability(context);
+		return BuildUiIgnoreOptionsAvailability(rootPath, context);
 	}
 
 	private static readonly IReadOnlySet<string> EmptyStringSet =
 		Array.Empty<string>().ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-	private IgnoreOptionsAvailability BuildUiIgnoreOptionsAvailability(ProjectScanContext context)
+	private IgnoreOptionsAvailability BuildUiIgnoreOptionsAvailability(
+		string rootPath,
+		ProjectScanContext context)
 	{
-		if (context.Scopes.Count == 0)
-			return new IgnoreOptionsAvailability(IncludeGitIgnore: false, IncludeSmartIgnore: false);
-
 		// UI availability is intentionally evidence-based. A Smart Ignore checkbox should
 		// appear only when there is a project marker, a rule-specific root artifact, or a
 		// signature-backed generic artifact candidate. That keeps clean workspaces quiet
 		// while still surfacing the option for messy polyglot folders.
 		var includeGitIgnore = context.HasAnyGitIgnore;
-		var includeSmartIgnore = HasRelevantSmartIgnoreCandidates(context);
-		return new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore);
+		var includeTrackedGitFilesOnly =
+			context.HasAnyGitRepository ||
+			HasGitMetadataAtOrAbove(rootPath);
+		var includeSmartIgnore =
+			context.Scopes.Count > 0 &&
+			HasRelevantSmartIgnoreCandidates(context);
+		return new IgnoreOptionsAvailability(
+			IncludeGitIgnore: includeGitIgnore,
+			IncludeSmartIgnore: includeSmartIgnore,
+			IncludeTrackedGitFilesOnly: includeTrackedGitFilesOnly);
+	}
+
+	private static bool HasGitMetadataAtOrAbove(string rootPath)
+	{
+		string? currentPath;
+		try
+		{
+			currentPath = Path.GetFullPath(rootPath);
+		}
+		catch
+		{
+			return false;
+		}
+
+		while (!string.IsNullOrWhiteSpace(currentPath))
+		{
+			var gitMetadataPath = Path.Combine(currentPath, ".git");
+			try
+			{
+				if (Directory.Exists(gitMetadataPath) || File.Exists(gitMetadataPath))
+					return true;
+			}
+			catch
+			{
+				return false;
+			}
+
+			var parentPath = Path.GetDirectoryName(currentPath);
+			if (string.IsNullOrWhiteSpace(parentPath) ||
+			    PathComparer.Default.Equals(parentPath, currentPath))
+			{
+				break;
+			}
+
+			currentPath = parentPath;
+		}
+
+		return false;
 	}
 
 	private bool HasRelevantSmartIgnoreCandidates(ProjectScanContext context)

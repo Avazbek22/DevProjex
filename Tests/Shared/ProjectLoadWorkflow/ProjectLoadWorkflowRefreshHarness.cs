@@ -603,8 +603,27 @@ internal static class ProjectLoadWorkflowRefreshHarness
         if (ignoreOptions.Count == 0)
             return null;
 
-        if (ignoreOptions.All(option => option.IsChecked))
+        var hasGitFilteringOptions = false;
+        var hasSelectedGitFilteringMode = false;
+        var allOrdinaryOptionsChecked = true;
+        foreach (var option in ignoreOptions)
+        {
+            if (GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+            {
+                hasGitFilteringOptions = true;
+                hasSelectedGitFilteringMode |= option.IsChecked;
+                continue;
+            }
+
+            allOrdinaryOptionsChecked &= option.IsChecked;
+        }
+
+        if (allOrdinaryOptionsChecked &&
+            (!hasGitFilteringOptions || hasSelectedGitFilteringMode))
+        {
             return true;
+        }
+
         if (ignoreOptions.All(option => !option.IsChecked))
             return false;
 

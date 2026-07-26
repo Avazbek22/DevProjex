@@ -65,7 +65,7 @@ internal static class ProjectTreeInventoryScanner
 		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
 		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
 		var inheritedGitIgnoreContexts = initialGitIgnoreContexts;
-		if (initialGitIgnoreContexts.HasIgnoreRules &&
+		if (initialGitIgnoreContexts.RequiresTrackedPathIndex &&
 		    GitTrackedPathIndexCache.TryLoadNearest(
 			    rootPath,
 			    cancellationToken,
@@ -467,6 +467,9 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 	public bool HasIgnoreRules =>
 		Enabled && (Primary.HasIgnoreRules || Secondary.HasIgnoreRules);
 
+	public bool RequiresTrackedPathIndex =>
+		Enabled && (Primary.RequiresTrackedPathIndex || Secondary.RequiresTrackedPathIndex);
+
 	public ProjectTreeGitIgnoreContexts WithTrackedPathIndex(GitTrackedPathIndex trackedPathIndex) =>
 		this with
 		{
@@ -493,8 +496,8 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 			GitIgnoreMatcherFileCache.TryLoad(directoryPath, gitIgnorePath, out matcher);
 
 		var requiresTrackedPathIndex =
-			primaryContext.HasIgnoreRules ||
-			secondaryContext.HasIgnoreRules ||
+			primaryContext.RequiresTrackedPathIndex ||
+			secondaryContext.RequiresTrackedPathIndex ||
 			matcher is not null &&
 			!ReferenceEquals(matcher.Matcher, GitIgnoreMatcher.Empty);
 		var reachedRepositoryBoundary = !string.IsNullOrWhiteSpace(gitMetadataPath);

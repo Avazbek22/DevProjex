@@ -41,6 +41,43 @@ public sealed class ProjectProfileStoreTests
 	}
 
 	[Fact]
+	public void SaveProfile_ConflictingGitModesRoundTripAsTrackedOnly()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			store.SaveProfile(
+				projectPath,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: [],
+					SelectedExtensions: [],
+					SelectedIgnoreOptions:
+					[
+						IgnoreOptionId.UseGitIgnore,
+						IgnoreOptionId.TrackedGitFilesOnly
+					],
+					IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.UseGitIgnore] = true,
+						[IgnoreOptionId.TrackedGitFilesOnly] = true
+					}));
+
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+			Assert.Contains(IgnoreOptionId.TrackedGitFilesOnly, loaded.SelectedIgnoreOptions);
+			Assert.NotNull(loaded.IgnoreOptionStates);
+			Assert.False(loaded.IgnoreOptionStates![IgnoreOptionId.UseGitIgnore]);
+			Assert.True(loaded.IgnoreOptionStates[IgnoreOptionId.TrackedGitFilesOnly]);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void TryLoadProfile_MissingFile_ReturnsFalse_AndDoesNotCreateStorageFile()
 	{
 		var tempRoot = CreateTempDirectory();

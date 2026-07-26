@@ -147,6 +147,7 @@
   "Dialog.TerminalCommand.ReconfigureSucceeded": "Terminal buyrug'i muvaffaqiyatli qayta sozlandi.",
   "Settings.IgnoreTitle": "E’tiborsiz qoldirish:",
   "Settings.Ignore.UseGitIgnore": ".gitignore dan foydalanish",
+  "Settings.Ignore.TrackedGitFilesOnly": "Faqat Git kuzatadigan fayllar",
   "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HiddenFolders": "yashirin jildlar",
   "Settings.Ignore.HiddenFiles": "yashirin fayllar",

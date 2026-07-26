@@ -9,6 +9,7 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
 				["Settings.Ignore.DotFolders"] = "Dot folders",
@@ -175,8 +176,8 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 		bool includeExtensionless)
 	{
 		var ordered = new List<IgnoreOptionId>(9);
-		if (includeSmart) ordered.Add(IgnoreOptionId.SmartIgnore);
 		if (includeGit) ordered.Add(IgnoreOptionId.UseGitIgnore);
+		if (includeSmart) ordered.Add(IgnoreOptionId.SmartIgnore);
 		if (includeEmptyFolders) ordered.Add(IgnoreOptionId.EmptyFolders);
 		if (includeEmptyFiles) ordered.Add(IgnoreOptionId.EmptyFiles);
 		if (includeHiddenFolders) ordered.Add(IgnoreOptionId.HiddenFolders);

@@ -415,11 +415,17 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		Assert.Equal(hiddenFoldersSupported, expected.Contains(IgnoreOptionId.HiddenFolders));
 		Assert.Equal(hiddenFilesSupported, expected.Contains(IgnoreOptionId.HiddenFiles));
 		Assert.Equal(
-			Enum.GetValues<IgnoreOptionId>().Length - (hiddenFoldersSupported ? 0 : 1) - (hiddenFilesSupported ? 0 : 1),
+			Enum.GetValues<IgnoreOptionId>().Length - 1 -
+			(hiddenFoldersSupported ? 0 : 1) -
+			(hiddenFilesSupported ? 0 : 1),
 			expected.Count);
 		Assert.All(
 			Enum.GetValues<IgnoreOptionId>()
-				.Except([IgnoreOptionId.HiddenFolders, IgnoreOptionId.HiddenFiles]),
+				.Except([
+					IgnoreOptionId.TrackedGitFilesOnly,
+					IgnoreOptionId.HiddenFolders,
+					IgnoreOptionId.HiddenFiles
+				]),
 			optionId => Assert.Contains(optionId, expected));
 	}
 
@@ -1135,6 +1141,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 	{
 		return Enum.GetValues<IgnoreOptionId>()
 			.Where(optionId =>
+				optionId != IgnoreOptionId.TrackedGitFilesOnly &&
 				(optionId != IgnoreOptionId.HiddenFolders || hiddenFoldersSupported) &&
 				(optionId != IgnoreOptionId.HiddenFiles || hiddenFilesSupported))
 			.ToArray();

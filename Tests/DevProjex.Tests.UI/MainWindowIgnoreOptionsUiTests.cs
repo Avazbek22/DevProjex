@@ -268,6 +268,94 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task RepositoryGitModes_RemainVisibleToggleExclusivelyAndApplyTrackedProjection()
+    {
+        EnsureGitAvailable();
+        using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+        await File.WriteAllTextAsync(
+            Path.Combine(project.RootPath, "LocalOnly.cs"),
+            "class LocalOnly {}\n",
+            TestContext.Current.CancellationToken);
+        RunGit(project.RootPath, "init", "--quiet");
+        RunGit(
+            project.RootPath,
+            "add",
+            "--",
+            ".gitignore",
+            "App.csproj",
+            "Program.cs");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                visible: true,
+                isChecked: false);
+            var initialIgnoreOptions = UiTestDriver.GetViewModel(window).IgnoreOptions;
+            Assert.DoesNotContain(initialIgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore);
+            Assert.Equal(
+                IgnoreOptionId.TrackedGitFilesOnly,
+                Assert.Single(initialIgnoreOptions, option => option.IsControllerGroupEnd).Id);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "LocalOnly.cs");
+
+            await SetIgnoreOptionCheckedAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: false, "LocalOnly.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "Program.cs");
+
+            await SetIgnoreOptionCheckedAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                visible: true,
+                isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "LocalOnly.cs");
+
+            await SetIgnoreOptionCheckedAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                isChecked: false);
+            Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
+            await UiTestDriver.ClickAsync(
+                window,
+                UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                visible: true,
+                isChecked: false);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task ExplicitUncheckedGitIgnoreController_RemainsVisibleWhenDotFilesTakesOver()
     {
         using var project = UiTestProject.CreateWithGitIgnoreDotFileOnlyWorkspace();
@@ -2126,6 +2214,60 @@ public sealed class MainWindowIgnoreOptionsUiTests
             visible: true,
             isChecked: isChecked);
     }
+
+    private static void EnsureGitAvailable()
+    {
+        var startInfo = CreateGitStartInfo(workingDirectory: null);
+        startInfo.ArgumentList.Add("--version");
+        Process? startedProcess;
+        try
+        {
+            startedProcess = Process.Start(startInfo);
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.Skip("Git is not available in this test environment.");
+            return;
+        }
+
+        using var process = startedProcess;
+        if (process is null)
+            Assert.Skip("Git is not available in this test environment.");
+        process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        if (!process.WaitForExit(10_000) || process.ExitCode != 0)
+            Assert.Skip("Git is not available in this test environment.");
+    }
+
+    private static void RunGit(string workingDirectory, params string[] arguments)
+    {
+        var startInfo = CreateGitStartInfo(workingDirectory);
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        if (!process.WaitForExit(20_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("Git command did not complete within 20 seconds.");
+        }
+
+        Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
+    }
+
+    private static ProcessStartInfo CreateGitStartInfo(string? workingDirectory) =>
+        new("git")
+        {
+            WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
 
     private static async Task SetVisibleIgnoreOptionsCheckedAsync(
         MainWindow window,

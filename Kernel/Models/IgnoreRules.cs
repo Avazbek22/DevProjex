@@ -30,8 +30,18 @@ public sealed record IgnoreRules(
 	private readonly ConcurrentQueue<string> _candidateSmartScopeApplicabilityCacheOrder = new();
 
 	public bool UseGitIgnore { get; init; }
+	public bool UseTrackedGitFilesOnly { get; init; }
 	public bool EnableGitIgnoreTraversal { get; init; }
-	public bool IsGitIgnoreTraversalEnabled => UseGitIgnore || EnableGitIgnoreTraversal;
+	public bool IsGitIgnoreTraversalEnabled =>
+		UseGitIgnore ||
+		UseTrackedGitFilesOnly ||
+		EnableGitIgnoreTraversal;
+	public GitFilteringMode GitFilteringMode =>
+		UseTrackedGitFilesOnly
+			? GitFilteringMode.TrackedFilesOnly
+			: UseGitIgnore
+				? GitFilteringMode.RespectGitIgnore
+				: GitFilteringMode.None;
 	public bool UseSmartIgnore { get; init; }
 	public bool GitIgnoreCandidateMatchesActiveRules { get; init; }
 	public bool SmartIgnoreCandidateMatchesActiveRules { get; init; }
@@ -159,7 +169,12 @@ public sealed record IgnoreRules(
 			if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty) ||
 			    !matcher.TryGetRelativePath(scanRootPath, out var baseRelativePath, allowRoot: true))
 			{
-				return GitIgnoreScanContext.Disabled(this, useCandidates);
+				return !useCandidates && UseTrackedGitFilesOnly
+					? GitIgnoreScanContext.Scoped(
+						this,
+						useCandidates: false,
+						evaluateRulesFallback: false)
+					: GitIgnoreScanContext.Disabled(this, useCandidates);
 			}
 
 			return GitIgnoreScanContext.Relative(this, matcher, baseRelativePath, useCandidates);
@@ -787,6 +802,10 @@ public sealed record IgnoreRules(
 			}
 		}
 
+		public bool RequiresTrackedPathIndex =>
+			(!_useCandidates && _rules.UseTrackedGitFilesOnly) ||
+			HasIgnoreRules;
+
 		public GitIgnoreScanContext WithScope(
 			ScopedGitIgnoreMatcher scopedMatcher,
 			string scopeRelativePath)
@@ -849,6 +868,9 @@ public sealed record IgnoreRules(
 			if (IsGitAdministrativeEntryForActiveScope(fullPath, name))
 				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 
+			if (!_useCandidates && _rules.UseTrackedGitFilesOnly)
+				return EvaluateTrackedFilesOnly(fullPath, isDirectory);
+
 			GitIgnoreEvaluation evaluation;
 			if (_relativeMatcher is null)
 			{
@@ -898,6 +920,38 @@ public sealed record IgnoreRules(
 			return ApplyTrackedPathOverride(fullPath, isDirectory, evaluation);
 		}
 
+		private GitIgnoreEvaluation EvaluateTrackedFilesOnly(
+			string fullPath,
+			bool isDirectory)
+		{
+			var trackedPathIndex = _trackedPathIndexes?.Resolve(fullPath);
+			if (trackedPathIndex is null)
+			{
+				// Outside a known repository, directories remain traversal-only containers
+				// so a workspace root can still discover repositories at any descendant depth.
+				return new GitIgnoreEvaluation(
+					IsIgnored: true,
+					ShouldTraverseIgnoredDirectory: isDirectory);
+			}
+
+			if (!isDirectory)
+			{
+				return trackedPathIndex.Contains(fullPath)
+					? GitIgnoreEvaluation.NotIgnored
+					: new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
+			}
+
+			if (trackedPathIndex.ContainsOrHasDescendant(fullPath))
+				return GitIgnoreEvaluation.NotIgnored;
+
+			// Untracked directories are traversal-only containers. This lets the scanner
+			// discover an independent nested repository at any depth without exposing the
+			// container when it has no tracked descendants.
+			return new GitIgnoreEvaluation(
+				IsIgnored: true,
+				ShouldTraverseIgnoredDirectory: true);
+		}
+
 		private GitIgnoreEvaluation ApplyTrackedPathOverride(
 			string fullPath,
 			bool isDirectory,
@@ -930,7 +984,7 @@ public sealed record IgnoreRules(
 			if (!IsGitAdministrativeEntry(name))
 				return false;
 
-			if (_useCandidates || _rules.UseGitIgnore)
+			if (_useCandidates || _rules.UseGitIgnore || _rules.UseTrackedGitFilesOnly)
 				return true;
 
 			var parentPath = Path.GetDirectoryName(fullPath);
