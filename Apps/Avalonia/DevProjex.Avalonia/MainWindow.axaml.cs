@@ -1160,7 +1160,15 @@ public partial class MainWindow : Window
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(cancellationToken);
-        _postLoadVisualReadyTask = settingsRevealTask;
+        // A completed transition has reached its target values, but its final layout may not have
+        // been presented yet. Share one settle gate so metrics, Git discovery and cleanup cannot
+        // race that final frame. Refreshes keep their immediate path because no reveal is pending.
+        var postLoadVisualReadyTask = settingsRevealTask.IsCompletedSuccessfully
+            ? Task.CompletedTask
+            : PostLoadVisualStabilityGate.WaitAsync(
+                settingsRevealTask,
+                cancellationToken);
+        _postLoadVisualReadyTask = postLoadVisualReadyTask;
         ObserveDetachedTask(settingsRevealTask, "AnimateSettingsPanelWhenTreeReady");
 #if DEVPROJEX_PROJECT_LOAD_TIMING
         var timing = _projectLoadTiming;
@@ -1174,7 +1182,7 @@ public partial class MainWindow : Window
             TrackProjectAnalysisTimingAsync(
                 _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
                     currentTree,
-                    settingsRevealTask,
+                    postLoadVisualReadyTask,
                     cancellationToken),
                 timing),
             "InitializeFileMetricsCache");
@@ -1182,7 +1190,7 @@ public partial class MainWindow : Window
         ObserveDetachedTask(
             _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
                 currentTree,
-                settingsRevealTask,
+                postLoadVisualReadyTask,
                 cancellationToken),
             "InitializeFileMetricsCache");
 #endif
