@@ -33,7 +33,8 @@ internal static class UiTestDriver
         string? managedClonePath = null,
         string? repositoryUrl = null)
     {
-        var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
+        var options = new DesktopStartupOptions(
+            new DesktopOpenRequest(project.RootPath, Language: AppLanguage.En));
         var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 

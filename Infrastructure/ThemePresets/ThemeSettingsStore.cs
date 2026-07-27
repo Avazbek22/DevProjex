@@ -21,7 +21,7 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
     private static readonly IReadOnlyDictionary<string, ThemePreset> DefaultPresets = CreateDefaultPresets();
     private readonly Func<string> _appDataPathProvider =
-        appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+        appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
     private readonly object _sync = new();
 
     public bool EnsureStorageExists()

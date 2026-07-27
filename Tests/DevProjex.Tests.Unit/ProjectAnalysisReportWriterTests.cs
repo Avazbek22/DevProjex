@@ -125,15 +125,6 @@ public sealed class ProjectAnalysisReportWriterTests
 		Assert.Equal(750_000_004L, content.GetProperty("tokens").GetInt64());
 	}
 
-	[Fact]
-	public void StartupReportOptions_WriteToStandardOutputRecognizesTrimmedDashOnly()
-	{
-		Assert.True(new StartupReportOptions(true, "-", StartupReportFormat.Json).WriteToStandardOutput);
-		Assert.True(new StartupReportOptions(true, " - ", StartupReportFormat.Json).WriteToStandardOutput);
-		Assert.False(new StartupReportOptions(true, "./-", StartupReportFormat.Json).WriteToStandardOutput);
-		Assert.False(StartupReportOptions.Disabled.WriteToStandardOutput);
-	}
-
 	private static ProjectAnalysisReport CreateReport(string rootPath) =>
 		new(
 			SchemaVersion: ProjectAnalysisReport.CurrentSchemaVersion,

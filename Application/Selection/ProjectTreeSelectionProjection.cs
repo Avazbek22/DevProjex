@@ -25,9 +25,13 @@ public static class ProjectTreeSelectionProjection
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(selectedPaths);
 
-		return CoversWholeTree(root, selectedPaths)
-			? FullTreeSelection
-			: selectedPaths;
+		if (CoversWholeTree(root, selectedPaths))
+			return FullTreeSelection;
+
+		// Preserve the caller's sparse path set. Preview warmup and collection code use
+		// it as a direct lookup index; traversing the full tree here makes a rare leaf
+		// selection scale with every sibling in a wide workspace.
+		return selectedPaths;
 	}
 
 	public static bool CoversWholeTree(

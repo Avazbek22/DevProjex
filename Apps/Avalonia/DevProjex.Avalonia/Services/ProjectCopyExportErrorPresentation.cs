@@ -26,6 +26,7 @@ public static class ProjectCopyExportErrorPresentation
         ProjectCopyExportError.AccessDenied => "Error.ProjectCopy.AccessDenied",
         ProjectCopyExportError.IoFailure => "Error.ProjectCopy.IoFailure",
         ProjectCopyExportError.UnsafeDestinationPath => "Error.ProjectCopy.UnsafeDestinationPath",
+        ProjectCopyExportError.DestinationConflict => "Error.ProjectCopy.DestinationConflict",
         ProjectCopyExportError.UnexpectedFailure => "Error.ProjectCopy.UnexpectedFailure",
         _ => "Error.ProjectCopy.UnexpectedFailure"
     };

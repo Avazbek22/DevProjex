@@ -24,9 +24,19 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			return request.Format switch
 			{
 				ProjectCopyExportFormat.Folder => await ExportFolderAsync(
-					plan, request.DestinationPath, progress, cancellationToken).ConfigureAwait(false),
+					plan,
+					request.DestinationPath,
+					request.DestinationMode,
+					request.ConflictPolicy,
+					progress,
+					cancellationToken).ConfigureAwait(false),
 				ProjectCopyExportFormat.Zip => await ExportZipAsync(
-					plan, request.DestinationPath, progress, cancellationToken).ConfigureAwait(false),
+					plan,
+					request.DestinationPath,
+					request.DestinationMode,
+					request.ConflictPolicy,
+					progress,
+					cancellationToken).ConfigureAwait(false),
 				_ => throw new ProjectCopyExportException(
 					ProjectCopyExportError.InvalidRequest,
 					$"Unsupported project copy format: {request.Format}.")
@@ -68,18 +78,38 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 
 	private static async Task<ProjectCopyExportResult> ExportFolderAsync(
 		ProjectCopyExportPlan plan,
-		string destinationParentPath,
+		string destinationPath,
+		ProjectCopyDestinationMode destinationMode,
+		ProjectCopyConflictPolicy conflictPolicy,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
-		var requestedDestinationParent = PathUtility.Normalize(destinationParentPath);
+		if (conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically)
+		{
+			throw new ProjectCopyExportException(
+				ProjectCopyExportError.InvalidRequest,
+				"Atomic replacement is not supported for folder export.");
+		}
+
+		var requestedPath = PathUtility.Normalize(destinationPath);
+		var requestedDestinationParent = destinationMode == ProjectCopyDestinationMode.Exact
+			? Path.GetDirectoryName(requestedPath)
+			: requestedPath;
+		if (string.IsNullOrWhiteSpace(requestedDestinationParent))
+			throw DestinationUnavailable("The folder destination parent is unavailable.");
+
 		var destinationParent = ResolveSafeDestinationOutsideSource(
 			plan.ProjectRootPath,
 			requestedDestinationParent);
 		Directory.CreateDirectory(destinationParent);
 		destinationParent = ResolveSafeDestinationOutsideSource(plan.ProjectRootPath, destinationParent);
-		var preferredPath = ResolveAvailableDirectoryPath(destinationParent, $"{plan.ProjectName}-copy");
+		var preferredPath = destinationMode == ProjectCopyDestinationMode.Exact
+			? Path.Combine(destinationParent, Path.GetFileName(requestedPath))
+			: ResolveAvailableDirectoryPath(destinationParent, $"{plan.ProjectName}-copy");
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, preferredPath);
+		if (destinationMode == ProjectCopyDestinationMode.Exact)
+			EnsureDestinationDoesNotExist(preferredPath);
+
 		// A sibling staging directory keeps the final rename atomic and prevents partial results from becoming visible.
 		var stagingPath = Path.Combine(destinationParent, $".devprojex-{Guid.NewGuid():N}.tmp");
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
@@ -118,13 +148,20 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
-			var finalPath = MoveStagingDirectoryToAvailablePath(
-				stagingPath,
-				destinationParent,
-				preferredPath,
-				plan.ProjectName,
-				plan.ProjectRootPath);
-			var requestedFinalPath = Path.Combine(requestedDestinationParent, Path.GetFileName(finalPath));
+			var finalPath = destinationMode == ProjectCopyDestinationMode.Exact
+				? MoveStagingDirectoryToExactPath(
+					stagingPath,
+					preferredPath,
+					plan.ProjectRootPath)
+				: MoveStagingDirectoryToAvailablePath(
+					stagingPath,
+					destinationParent,
+					preferredPath,
+					plan.ProjectName,
+					plan.ProjectRootPath);
+			var requestedFinalPath = destinationMode == ProjectCopyDestinationMode.Exact
+				? requestedPath
+				: Path.Combine(requestedDestinationParent, Path.GetFileName(finalPath));
 			var reportedPath = ResolveReportedDestinationPath(requestedFinalPath, finalPath);
 			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
@@ -138,10 +175,23 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 	private static async Task<ProjectCopyExportResult> ExportZipAsync(
 		ProjectCopyExportPlan plan,
 		string destinationArchivePath,
+		ProjectCopyDestinationMode destinationMode,
+		ProjectCopyConflictPolicy conflictPolicy,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
-		var requestedDestinationPath = EnsureZipExtension(PathUtility.Normalize(destinationArchivePath));
+		var requestedDestinationPath = PathUtility.Normalize(destinationArchivePath);
+		if (destinationMode == ProjectCopyDestinationMode.Exact &&
+		    !requestedDestinationPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+		{
+			throw new ProjectCopyExportException(
+				ProjectCopyExportError.InvalidRequest,
+				"The exact ZIP destination must use the .zip extension.");
+		}
+
+		if (destinationMode == ProjectCopyDestinationMode.AutomaticName)
+			requestedDestinationPath = EnsureZipExtension(requestedDestinationPath);
+
 		var requestedDestinationDirectory = Path.GetDirectoryName(requestedDestinationPath);
 		if (string.IsNullOrWhiteSpace(requestedDestinationDirectory))
 			throw new ProjectCopyExportException(ProjectCopyExportError.DestinationUnavailable, "The ZIP destination directory is unavailable.");
@@ -154,6 +204,12 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		destinationDirectory = ResolveSafeDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
 		var destinationPath = Path.Combine(destinationDirectory, Path.GetFileName(requestedDestinationPath));
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
+		if (destinationMode == ProjectCopyDestinationMode.Exact &&
+		    conflictPolicy == ProjectCopyConflictPolicy.Fail)
+		{
+			EnsureDestinationDoesNotExist(destinationPath);
+		}
+
 		var stagingPath = Path.Combine(destinationDirectory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
@@ -198,7 +254,16 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			cancellationToken.ThrowIfCancellationRequested();
 			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 			ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
-			File.Move(stagingPath, destinationPath, overwrite: true);
+			try
+			{
+				var overwrite = destinationMode == ProjectCopyDestinationMode.AutomaticName ||
+				                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
+				File.Move(stagingPath, destinationPath, overwrite);
+			}
+			catch (IOException exception) when (File.Exists(destinationPath) || Directory.Exists(destinationPath))
+			{
+				throw DestinationConflict(destinationPath, exception);
+			}
 			var reportedPath = ResolveReportedDestinationPath(requestedDestinationPath, destinationPath);
 			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
@@ -289,6 +354,12 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			normalizedDestination = EnsureZipExtension(normalizedDestination);
 
 		ValidateDestinationOutsideSource(rootPath, normalizedDestination);
+	}
+
+	private static void EnsureDestinationDoesNotExist(string path)
+	{
+		if (Directory.Exists(path) || File.Exists(path))
+			throw DestinationConflict(path);
 	}
 
 	private static void ValidateDestinationOutsideSource(string rootPath, string path)
@@ -487,6 +558,25 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		}
 	}
 
+	private static string MoveStagingDirectoryToExactPath(
+		string stagingPath,
+		string destinationPath,
+		string projectRootPath)
+	{
+		ValidateDestinationOutsideSource(projectRootPath, stagingPath);
+		ValidateDestinationOutsideSource(projectRootPath, destinationPath);
+		EnsureDestinationDoesNotExist(destinationPath);
+		try
+		{
+			Directory.Move(stagingPath, destinationPath);
+			return destinationPath;
+		}
+		catch (IOException exception) when (Directory.Exists(destinationPath) || File.Exists(destinationPath))
+		{
+			throw DestinationConflict(destinationPath, exception);
+		}
+	}
+
 	private static async Task<long> CopyFileAsync(
 		string sourcePath,
 		string destinationPath,
@@ -624,6 +714,16 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 
 	private static ProjectCopyExportException UnsafeDestination(string message, Exception? innerException = null) =>
 		new(ProjectCopyExportError.UnsafeDestinationPath, message, innerException);
+
+	private static ProjectCopyExportException DestinationUnavailable(string message, Exception? innerException = null) =>
+		new(ProjectCopyExportError.DestinationUnavailable, message, innerException);
+
+	private static ProjectCopyExportException DestinationConflict(string path, Exception? innerException = null) =>
+		new(
+			ProjectCopyExportError.DestinationConflict,
+			$"The destination already exists: {path}",
+			innerException,
+			path);
 
 	private static ProjectCopyExportException ExportFailure(ProjectCopyExportError error, Exception exception) =>
 		new(error, $"Project copy export failed with {exception.GetType().Name}.", exception);

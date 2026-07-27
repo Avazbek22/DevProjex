@@ -340,6 +340,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			"#!/bin/sh",
 			UnixWrapperMarker,
 			UnixTargetPrefix + targetPath,
+			"export DEVPROJEX_TERMINAL_HOST=1",
 			"exec " + ShellQuote(targetPath) + " \"$@\"",
 			string.Empty);
 
@@ -360,10 +361,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			WindowsTargetPrefix + targetPath,
 			"set \"DEVPROJEX_EXE=" + escapedTargetPath + "\"",
 			"set \"DEVPROJEX_DLL=" + escapedManagedAssemblyPath + "\"",
-			"if \"%~1\"==\"\" (",
-			"  start \"\" \"%DEVPROJEX_EXE%\"",
-			"  exit /b 0",
-			")",
+			"set \"DEVPROJEX_TERMINAL_HOST=1\"",
 			"if exist \"%DEVPROJEX_DLL%\" (",
 			"  dotnet \"%DEVPROJEX_DLL%\" %*",
 			"  exit /b %ERRORLEVEL%",

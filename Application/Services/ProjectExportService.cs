@@ -7,22 +7,30 @@ public sealed class ProjectExportService(
 {
 	public async Task<string> BuildAsync(
 		LoadedProjectAnalysisRequest project,
-		StartupExportOptions options,
+		ProjectTextExportRequest request,
 		CancellationToken cancellationToken = default)
 	{
-		if (!options.Enabled)
-			throw new ArgumentException("Export options must be enabled.", nameof(options));
-
-		return options.Mode switch
+		return request.Mode switch
 		{
-			StartupExportMode.Tree => treeExport.BuildFullTree(project.RootPath, project.Tree.Root, options.Format),
-			StartupExportMode.Content => await contentExport
+			ProjectTextExportMode.Tree => treeExport.BuildFullTree(project.RootPath, project.Tree.Root, request.Format),
+			ProjectTextExportMode.Content => await contentExport
 				.BuildAsync(project.Tree.OrderedFilePaths ?? [], cancellationToken)
 				.ConfigureAwait(false),
-			StartupExportMode.TreeContent => await treeAndContentExport
-				.BuildAsync(project.RootPath, project.Tree.Root, new HashSet<string>(PathComparer.Default), options.Format, cancellationToken)
+			ProjectTextExportMode.TreeContent => await treeAndContentExport
+				.BuildAsync(project.RootPath, project.Tree.Root, new HashSet<string>(PathComparer.Default), request.Format, cancellationToken)
 				.ConfigureAwait(false),
-			_ => throw new InvalidOperationException($"Unsupported export mode: {options.Mode}.")
+			_ => throw new InvalidOperationException($"Unsupported export mode: {request.Mode}.")
 		};
 	}
 }
+
+public enum ProjectTextExportMode
+{
+	Tree,
+	Content,
+	TreeContent
+}
+
+public sealed record ProjectTextExportRequest(
+	ProjectTextExportMode Mode,
+	TreeTextFormat Format);

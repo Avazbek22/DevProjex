@@ -18,7 +18,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	};
 
     private readonly object _sync = new();
-    private readonly Func<string> _appDataPathProvider = appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+    private readonly Func<string> _appDataPathProvider =
+	    appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 
     public bool EnsureStorageExists()
 	{
@@ -123,6 +124,26 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
+	public bool TryDeleteProfile(string localProjectPath)
+	{
+		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
+			return false;
+
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			var db = LoadInternal(fileSet);
+			if (!db.Profiles.Remove(normalizedPath))
+				return true;
+
+			return TrySaveInternal(fileSet, db);
+		}
+	}
+
 	public string GetPath()
 	{
 		return GetFileSet().PrimaryPath;
@@ -217,6 +238,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default);
 		profile.ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		profile.IgnoreOptionStates ??= [];
+		profile.SelectedPaths ??= [];
 
 		profile.SelectedRootFolders = profile.SelectedRootFolders
 			.Where(static item => !string.IsNullOrWhiteSpace(item))
@@ -228,6 +250,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			.ToList();
 		profile.SelectedIgnoreOptions = profile.SelectedIgnoreOptions
 			.Distinct()
+			.ToList();
+		profile.SelectedPaths = profile.SelectedPaths
+			.Where(static item => !string.IsNullOrWhiteSpace(item))
+			.Select(static item => item.Trim().Replace('\\', '/'))
+			.Distinct(PathComparer.Default)
+			.OrderBy(static item => item, PathComparer.Default)
 			.ToList();
 
 		if (sourceSchemaVersion < 3 &&
@@ -281,6 +309,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default),
 			ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
 			IgnoreOptionStates = ignoreOptionStates,
+			SelectedPaths = (profile.SelectedPaths ?? [])
+				.Where(static item => !string.IsNullOrWhiteSpace(item))
+				.Select(static item => item.Trim().Replace('\\', '/'))
+				.Distinct(PathComparer.Default)
+				.OrderBy(static item => item, PathComparer.Default)
+				.ToList(),
 			UpdatedUtc = updatedUtc
 		};
 	}
@@ -304,7 +338,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			SelectedIgnoreOptions: ignoreOptions,
 			RootFolderStates: rootStates,
 			ExtensionStates: extensionStates,
-			IgnoreOptionStates: ignoreStates);
+			IgnoreOptionStates: ignoreStates,
+			SelectedPaths: profile.SelectedPaths.ToArray());
 	}
 
 	private static void NormalizeGitFilteringState(

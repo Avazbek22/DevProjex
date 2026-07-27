@@ -69,7 +69,7 @@ Règles :
 Pour chaque élément, le dossier parent et le nom du projet sont affichés, par exemple `Projects / App`.
 
 ## 4) Lancement depuis le terminal
-DevProjex peut être lancé depuis le terminal.
+DevProjex fournit un espace de travail interactif dans le terminal et des commandes directes pour les scripts et la CI.
 
 Si la commande est déjà configurée, ouvrez un terminal et exécutez :
 `devprojex --help`
@@ -77,21 +77,20 @@ Si la commande est déjà configurée, ouvrez un terminal et exécutez :
 Vous verrez ainsi toutes les commandes, options et exemples disponibles.
 
 Exemples :
-* `devprojex .` — ouvrir le dossier courant.
-* `devprojex "C:\Projects\App"` — ouvrir le dossier indiqué.
-* `devprojex . --export tree` — afficher l’arborescence du projet dans le terminal.
-* `devprojex . --export content` — afficher le contenu des fichiers dans le terminal.
-* `devprojex . --export tree-content` — afficher l’arborescence et le contenu dans le terminal.
-* `devprojex . --export tree-content -o context.txt` — enregistrer le résultat dans un fichier.
-* `devprojex --benchmark "C:\Projects\App"` — mesurer le workflow standard de rapport de projet.
-* `devprojex --last --preview` — ouvrir le dernier projet directement en mode aperçu.
-* `devprojex --benchmark-ui "C:\Projects\App"` — mesurer le scénario UI standard.
-* `devprojex --session-metrics "C:\Projects\App"` — enregistrer les métriques de la session UI jusqu’à la fermeture de la fenêtre.
+* `devprojex` — ouvrir l’espace de travail interactif du terminal.
+* `devprojex open . --preview` — ouvrir le dossier courant dans l’aperçu Desktop.
+* `devprojex analyze . --format json` — analyser le projet courant au format JSON.
+* `devprojex export context . --format markdown -o context.md` — enregistrer un contexte prêt pour l’IA.
+* `devprojex export project . --as folder -o submission` — exporter l’arborescence effective vers un dossier exact.
+* `devprojex export project . --as zip -o submission.zip` — exporter l’arborescence effective vers une archive ZIP.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analyser les fichiers suivis par Git avec Smart Ignore.
 
 Particularités :
 * `.` désigne le dossier courant du terminal ;
 * les chemins contenant des espaces doivent être placés entre guillemets ;
-* si aucun fichier de sortie n’est indiqué, le résultat est affiché directement dans le terminal ;
+* `--git-mode` choisit aucune filtration Git, `.gitignore` ou uniquement les fichiers suivis par Git ;
+* `--exclude` gère les exclusions ordinaires séparément de la filtration Git ;
+* les commandes directes sont déterministes et n’ouvrent pas l’interface Desktop ;
 * la commande ne modifie pas les fichiers du projet — DevProjex fonctionne en lecture seule.
 
 Si la commande `devprojex` ne fonctionne pas, ouvrez dans DevProjex :

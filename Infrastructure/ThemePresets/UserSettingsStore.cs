@@ -18,7 +18,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private static readonly AppViewSettings DefaultViewSettings = new();
     private readonly Func<string> _appDataPathProvider =
-        appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+        appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
     private readonly object _sync = new();
 
     public bool EnsureStorageExists()

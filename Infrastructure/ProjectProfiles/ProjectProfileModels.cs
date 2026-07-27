@@ -14,5 +14,6 @@ internal sealed class PersistedProjectProfile
 	public Dictionary<string, bool> RootFolderStates { get; set; } = new(PathComparer.Default);
 	public Dictionary<string, bool> ExtensionStates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 	public Dictionary<IgnoreOptionId, bool> IgnoreOptionStates { get; set; } = [];
+	public List<string> SelectedPaths { get; set; } = [];
 	public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

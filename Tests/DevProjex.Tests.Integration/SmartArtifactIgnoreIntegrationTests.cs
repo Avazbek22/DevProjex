@@ -1,4 +1,3 @@
-using DevProjex.Avalonia.Services;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
@@ -221,27 +220,26 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 	}
 
 	[Fact]
-	public async Task CommandLineAutomationRunner_SmartIgnoreExportHidesSignatureArtifactsWithoutMarkers()
+	public async Task TerminalExport_SmartIgnoreHidesSignatureArtifactsWithoutMarkers()
 	{
 		using var temp = new TemporaryDirectory();
 		SeedMixedArtifactWorkspace(temp);
-		using var output = new StringWriter();
-		using var error = new StringWriter();
-		var parseResult = CommandLineOptions.Parse(
-		[
-			CommandLineOptionTokens.Path, temp.Path,
-			CommandLineOptionTokens.Export, "tree",
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore
-		]);
+		var terminal = new TerminalTestHost();
 
-		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
-			parseResult,
-			CreateContext(output, error),
-			TestContext.Current.CancellationToken);
+		var exitCode = await terminal.RunAsync(
+			[
+				"export", "context", temp.Path,
+				"--view", "tree",
+				"--format", "text",
+				"--git-mode", "none",
+				"--exclude", "smart-ignore",
+				"-o", "-"
+			],
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Equal(string.Empty, error.ToString());
-		var stdout = output.ToString();
+		Assert.Equal(string.Empty, terminal.StandardError);
+		var stdout = terminal.StandardOutput;
 		Assert.Contains("Program.cs", stdout, StringComparison.Ordinal);
 		Assert.Contains("index.ts", stdout, StringComparison.Ordinal);
 		Assert.Contains("main.py", stdout, StringComparison.Ordinal);
@@ -254,58 +252,54 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 	}
 
 	[Fact]
-	public async Task CommandLineAutomationRunner_OtherIgnoreTogglesDoNotActivateSmartArtifacts()
+	public async Task TerminalExport_OtherExclusionsDoNotActivateSmartArtifacts()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("src/App.cs", "class App {}\n");
 		temp.CreateFile("obj/project.assets.json", "{}\n");
 		temp.CreateFile(".dot/payload.txt", "dot folder\n");
-		using var output = new StringWriter();
-		using var error = new StringWriter();
-		var parseResult = CommandLineOptions.Parse(
-		[
-			CommandLineOptionTokens.Path, temp.Path,
-			CommandLineOptionTokens.Export, "tree",
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreDotFolders,
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreEmptyFiles,
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreExtensionlessFiles
-		]);
-
-		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
-			parseResult,
-			CreateContext(output, error),
-			TestContext.Current.CancellationToken);
+		var terminal = new TerminalTestHost();
+		var exitCode = await terminal.RunAsync(
+			[
+				"export", "context", temp.Path,
+				"--view", "tree",
+				"--format", "text",
+				"--git-mode", "none",
+				"--exclude", "dot-folders",
+				"--exclude", "empty-files",
+				"--exclude", "extensionless-files",
+				"-o", "-"
+			],
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Equal(string.Empty, error.ToString());
-		var stdout = output.ToString();
+		Assert.Equal(string.Empty, terminal.StandardError);
+		var stdout = terminal.StandardOutput;
 		Assert.Contains("App.cs", stdout, StringComparison.Ordinal);
 		Assert.Contains("project.assets.json", stdout, StringComparison.Ordinal);
 		Assert.DoesNotContain(".dot", stdout, StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public async Task CommandLineAutomationRunner_SmartIgnoreExportHidesLegacyPackagesAndLocalProjectState()
+	public async Task TerminalExport_SmartIgnoreHidesLegacyPackagesAndLocalProjectState()
 	{
 		using var temp = new TemporaryDirectory();
 		SeedLegacyNuGetWorkspace(temp);
-		using var output = new StringWriter();
-		using var error = new StringWriter();
-		var parseResult = CommandLineOptions.Parse(
-		[
-			CommandLineOptionTokens.Path, temp.Path,
-			CommandLineOptionTokens.Export, "tree",
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreSmartIgnore
-		]);
-
-		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
-			parseResult,
-			CreateContext(output, error),
-			TestContext.Current.CancellationToken);
+		var terminal = new TerminalTestHost();
+		var exitCode = await terminal.RunAsync(
+			[
+				"export", "context", temp.Path,
+				"--view", "tree",
+				"--format", "text",
+				"--git-mode", "none",
+				"--exclude", "smart-ignore",
+				"-o", "-"
+			],
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Equal(string.Empty, error.ToString());
-		var stdout = output.ToString();
+		Assert.Equal(string.Empty, terminal.StandardError);
+		var stdout = terminal.StandardOutput;
 		Assert.Contains("App.cs", stdout, StringComparison.Ordinal);
 		Assert.Contains("packages.config", stdout, StringComparison.Ordinal);
 		Assert.Contains("App.sln.DotSettings", stdout, StringComparison.Ordinal);
@@ -425,11 +419,4 @@ public sealed class SmartArtifactIgnoreIntegrationTests
 		return true;
 	}
 
-	private static CommandLineAutomationContext CreateContext(TextWriter output, TextWriter error) =>
-		new(
-			Output: output,
-			Error: error,
-			ServicesFactory: options => AvaloniaCompositionRoot.CreateDefault(options),
-			HelpContentProvider: new CommandLineHelpContentProvider(),
-			VersionProvider: () => "test-version");
 }

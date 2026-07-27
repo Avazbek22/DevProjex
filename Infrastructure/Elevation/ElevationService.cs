@@ -17,7 +17,7 @@ public sealed class ElevationService : IElevationService
 		}
 	}
 
-	public bool TryRelaunchAsAdministrator(CommandLineOptions options)
+	public bool TryRelaunchAsAdministrator(IReadOnlyList<string> arguments)
 	{
 		// Store builds must never trigger UAC or relaunch with elevation.
 #if DEVPROJEX_STORE
@@ -34,9 +34,10 @@ public sealed class ElevationService : IElevationService
 			{
 				FileName = exePath,
 				UseShellExecute = true,
-				Verb = "runas",
-				Arguments = options.ToArguments()
+				Verb = "runas"
 			};
+			foreach (var argument in arguments)
+				psi.ArgumentList.Add(argument);
 
 			Process.Start(psi);
 			return true;

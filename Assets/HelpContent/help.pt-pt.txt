@@ -69,7 +69,7 @@ Regras:
 Cada item mostra a pasta pai e o nome do projeto, por exemplo `Projects / App`.
 
 ## 4) Inicie a partir do terminal
-O DevProjex pode ser iniciado a partir do terminal.
+O DevProjex oferece um espaço de trabalho interativo no terminal e comandos diretos para scripts e CI.
 
 Se o comando já estiver configurado, abra um terminal e execute:
 `devprojex --help`
@@ -77,21 +77,20 @@ Se o comando já estiver configurado, abra um terminal e execute:
 Este mostra todos os comandos, opções e exemplos disponíveis.
 
 Exemplos:
-* `devprojex .` — abra a pasta atual.
-* `devprojex "C:\Projects\App"` — abra a pasta especificada.
-* `devprojex . --export tree` — imprime a árvore do projeto no terminal.
-* `devprojex . --export content` — imprime o conteúdo do ficheiro no terminal.
-* `devprojex . --export tree-content` — imprime a árvore e o conteúdo no terminal.
-* `devprojex . --export tree-content -o context.txt` — guarde o resultado num ficheiro.
-* `devprojex --benchmark "C:\Projects\App"` — mede o fluxo de trabalho padrão do relatório do projeto.
-* `devprojex --last --preview` — abra o projeto mais recente diretamente no modo de visualização.
-* `devprojex --benchmark-ui "C:\Projects\App"` — mede o fluxo de trabalho de UI padrão.
-* `devprojex --session-metrics "C:\Projects\App"` — registe as métricas da sessão da IU até que a janela feche.
+* `devprojex` — abre o espaço de trabalho interativo do terminal.
+* `devprojex open . --preview` — abre a pasta atual na pré-visualização do Desktop.
+* `devprojex analyze . --format json` — analisa o projeto atual como JSON.
+* `devprojex export context . --format markdown -o context.md` — guarda contexto pronto para IA.
+* `devprojex export project . --as folder -o submission` — exporta a árvore efetiva para uma pasta exata.
+* `devprojex export project . --as zip -o submission.zip` — exporta a árvore efetiva para um arquivo ZIP.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analisa ficheiros seguidos pelo Git com Smart Ignore.
 
 Notas:
 * `.` significa a pasta atual do terminal;
 * os caminhos com espaços devem ser colocados entre aspas;
-* se não for especificado nenhum ficheiro de saída, o resultado será impresso diretamente no terminal;
+* `--git-mode` seleciona sem filtragem Git, `.gitignore` ou apenas ficheiros seguidos pelo Git;
+* `--exclude` controla as exclusões comuns separadamente da filtragem Git;
+* os comandos diretos são determinísticos e não abrem a interface Desktop;
 * o comando não modifica os ficheiros do projeto – o DevProjex funciona em modo de leitura apenas.
 
 Se o comando `devprojex` não funcionar, abra no DevProjex:

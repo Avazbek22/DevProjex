@@ -65,6 +65,8 @@ sudo gtk-update-icon-cache /usr/share/icons/hicolor
 
 The application window icon is set automatically via Avalonia's `Window.Icon` property using the embedded PNG resource. This works independently of the desktop entry and hicolor icons.
 
+The desktop entry invokes `devprojex open`, so graphical launchers always open DevProjex Desktop. Running `devprojex` from an interactive terminal opens DevProjex Terminal instead.
+
 ## Future: DEB/RPM Packages
 
 For proper distribution packages (`.deb`, `.rpm`, Flatpak, Snap), additional configuration files will be needed. The icon assets and desktop entry in this folder serve as the foundation for those packages.

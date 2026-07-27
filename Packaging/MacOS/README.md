@@ -124,6 +124,7 @@ cat > ~/.local/bin/devprojex <<'EOF'
 #!/bin/sh
 # DevProjex terminal command wrapper
 # target: /Applications/DevProjex.app/Contents/MacOS/DevProjex
+export DEVPROJEX_TERMINAL_HOST=1
 exec '/Applications/DevProjex.app/Contents/MacOS/DevProjex' "$@"
 EOF
 chmod +x ~/.local/bin/devprojex

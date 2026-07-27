@@ -1,0 +1,92 @@
+using System.Threading.Channels;
+using DevProjex.Terminal.CommandLine;
+using Spectre.Console;
+
+namespace DevProjex.Terminal.Rendering;
+
+public sealed class ProgressRenderer(
+	ITerminalEnvironment environment,
+	TerminalOutputOptions options,
+	LocalizationService localization)
+{
+	public async Task<T> RunProjectExportAsync<T>(
+		Func<IProgress<ProjectCopyExportProgress>?, Task<T>> operation)
+	{
+		var capabilities = TerminalCapabilities.Resolve(environment, options, forStandardError: true);
+		if (!capabilities.UseInteractiveProgress)
+			return await operation(null).ConfigureAwait(false);
+
+		var channel = Channel.CreateUnbounded<ProjectCopyExportProgress>(
+			new UnboundedChannelOptions
+			{
+				SingleReader = true,
+				SingleWriter = false,
+				AllowSynchronousContinuations = false
+			});
+		var progress = new Progress<ProjectCopyExportProgress>(
+			value => channel.Writer.TryWrite(value));
+		var operationTask = operation(progress);
+		var console = AnsiConsoleFactory.Create(environment.Error, capabilities);
+
+		await console.Progress()
+			.AutoClear(true)
+			.HideCompleted(true)
+			.Columns(
+				new TaskDescriptionColumn(),
+				new ProgressBarColumn())
+			.StartAsync(async context =>
+			{
+				var task = context.AddTask(
+					localization["Terminal.Progress.PreparingProjectExport"],
+					maxValue: 1);
+				task.IsIndeterminate = true;
+				while (!operationTask.IsCompleted)
+				{
+					while (channel.Reader.TryRead(out var update))
+						ApplyUpdate(task, update);
+
+					await Task.WhenAny(operationTask, Task.Delay(40)).ConfigureAwait(false);
+				}
+
+				while (channel.Reader.TryRead(out var update))
+					ApplyUpdate(task, update);
+				task.IsIndeterminate = false;
+				task.Value = task.MaxValue;
+			}).ConfigureAwait(false);
+
+		channel.Writer.TryComplete();
+		return await operationTask.ConfigureAwait(false);
+	}
+
+	private void ApplyUpdate(
+		ProgressTask task,
+		ProjectCopyExportProgress update)
+	{
+		var total = Math.Max(1, update.TotalEntryCount);
+		task.IsIndeterminate = false;
+		task.MaxValue = total;
+		task.Value = Math.Clamp(update.ProcessedEntryCount, 0, total);
+		task.Description = localization.Format(
+			"Terminal.Progress.ExportProject",
+			update.ProcessedEntryCount,
+			update.TotalEntryCount,
+			FormatBytes(update.BytesWritten));
+	}
+
+	private static string FormatBytes(long bytes)
+	{
+		string[] units = ["B", "KB", "MB", "GB", "TB"];
+		var value = Math.Max(0, bytes);
+		var unit = 0;
+		var display = (double)value;
+		while (display >= 1024 && unit < units.Length - 1)
+		{
+			display /= 1024;
+			unit++;
+		}
+
+		return unit == 0
+			? $"{value} {units[unit]}"
+			: $"{display:0.##} {units[unit]}";
+	}
+}

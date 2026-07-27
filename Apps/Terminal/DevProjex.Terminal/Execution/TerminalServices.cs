@@ -1,0 +1,20 @@
+using DevProjex.Terminal.Tui;
+
+namespace DevProjex.Terminal.Execution;
+
+public sealed record TerminalServices(
+	LocalizationService Localization,
+	ProjectAnalysisService AnalysisService,
+	ProjectContextPlanner ContextPlanner,
+	ProjectContextDocumentService ContextDocumentService,
+	ProjectCopyExportService ProjectCopyExportService,
+	ProjectAnalysisReportWriter AnalysisReportWriter,
+	IProjectProfileStore LocalProfileStore,
+	PortableProjectProfileService PortableProfileService,
+	ProjectSelectionResolver SelectionResolver,
+	TerminalSettingsStore TerminalSettingsStore,
+	ITerminalCommandSetupService TerminalCommandSetupService,
+	GitTrackedModeReadinessProbe GitTrackedModeReadinessProbe,
+	RecentProjectsStore RecentProjectsStore,
+	IGitRepositoryService GitRepositoryService,
+	IRepoCacheService RepoCacheService);

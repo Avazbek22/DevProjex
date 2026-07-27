@@ -25,7 +25,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 
 	private readonly object _sync = new();
 	private readonly Func<string> _appDataPathProvider =
-		appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 
 	public RecentProjectsDb Load()
 	{

@@ -530,7 +530,7 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 				// Do not let an ancestor repository index leak through a nested repository
 				// whose own index cannot be read. The empty boundary is retained in the
 				// inventory so direct and projected builds keep identical ownership.
-				var unavailableBoundaryIndex = new GitTrackedPathIndex(directoryPath, []);
+				var unavailableBoundaryIndex = GitTrackedPathIndex.Unavailable(directoryPath);
 				discoveredTrackedPathIndexes.Add(unavailableBoundaryIndex);
 				primaryContext = primaryContext.WithTrackedPathIndex(unavailableBoundaryIndex);
 				secondaryContext = secondaryContext.WithTrackedPathIndex(unavailableBoundaryIndex);

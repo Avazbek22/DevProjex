@@ -23,7 +23,6 @@ public sealed record AvaloniaAppServices(
     TreeExportService TreeExportService,
     SelectedContentExportService ContentExportService,
     TreeAndContentExportService TreeAndContentExportService,
-    ProjectExportService ProjectExportService,
     ProjectCopyExportService ProjectCopyExportService,
     PreviewDocumentBuilder PreviewDocumentBuilder,
     RepositoryWebPathPresentationService RepositoryWebPathPresentationService,
@@ -35,8 +34,6 @@ public sealed record AvaloniaAppServices(
     IZipDownloadService ZipDownloadService,
     IFileContentAnalyzer FileContentAnalyzer,
     ProjectAnalysisService ProjectAnalysisService,
-    ReportPathResolver ReportPathResolver,
-    ProjectAnalysisReportWriter ProjectAnalysisReportWriter,
     ITerminalCommandSetupService TerminalCommandSetupService,
     ITaskbarProgressService TaskbarProgressService,
     SessionMetricsRecorder SessionMetricsRecorder);

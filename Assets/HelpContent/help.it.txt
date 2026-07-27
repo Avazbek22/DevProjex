@@ -69,7 +69,7 @@ Regole:
 Per ogni elemento vengono mostrati la cartella padre e il nome del progetto, ad esempio `Projects / App`.
 
 ## 4) Avvio dal terminale
-DevProjex può essere avviato dal terminale.
+DevProjex offre uno spazio di lavoro interattivo nel terminale e comandi diretti per script e CI.
 
 Se il comando è già configurato, apri un terminale ed esegui:
 `devprojex --help`
@@ -77,21 +77,20 @@ Se il comando è già configurato, apri un terminale ed esegui:
 Così vedrai tutti i comandi, le opzioni e gli esempi disponibili.
 
 Esempi:
-* `devprojex .` — aprire la cartella corrente.
-* `devprojex "C:\Projects\App"` — aprire la cartella indicata.
-* `devprojex . --export tree` — stampare l’albero del progetto nel terminale.
-* `devprojex . --export content` — stampare il contenuto dei file nel terminale.
-* `devprojex . --export tree-content` — stampare albero e contenuti nel terminale.
-* `devprojex . --export tree-content -o context.txt` — salvare il risultato in un file.
-* `devprojex --benchmark "C:\Projects\App"` — misurare il workflow standard del report di progetto.
-* `devprojex --last --preview` — aprire l’ultimo progetto direttamente in modalità anteprima.
-* `devprojex --benchmark-ui "C:\Projects\App"` — misurare lo scenario UI standard.
-* `devprojex --session-metrics "C:\Projects\App"` — registrare le metriche della sessione UI fino alla chiusura della finestra.
+* `devprojex` — aprire lo spazio di lavoro interattivo del terminale.
+* `devprojex open . --preview` — aprire la cartella corrente nell’anteprima Desktop.
+* `devprojex analyze . --format json` — analizzare il progetto corrente in formato JSON.
+* `devprojex export context . --format markdown -o context.md` — salvare un contesto pronto per l’IA.
+* `devprojex export project . --as folder -o submission` — esportare l’albero effettivo in una cartella esatta.
+* `devprojex export project . --as zip -o submission.zip` — esportare l’albero effettivo in un archivio ZIP.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analizzare i file tracciati da Git con Smart Ignore.
 
 Note:
 * `.` indica la cartella corrente del terminale;
 * i percorsi con spazi devono essere racchiusi tra virgolette;
-* se non viene indicato un file di output, il risultato viene stampato direttamente nel terminale;
+* `--git-mode` seleziona nessun filtro Git, `.gitignore` o solo i file tracciati da Git;
+* `--exclude` gestisce le esclusioni ordinarie separatamente dal filtro Git;
+* i comandi diretti sono deterministici e non aprono l’interfaccia Desktop;
 * il comando non modifica i file del progetto — DevProjex lavora in sola lettura.
 
 Se il comando `devprojex` non funziona, apri in DevProjex:

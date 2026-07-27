@@ -1,0 +1,17 @@
+global using System.Text;
+global using DevProjex.Application.Context;
+global using DevProjex.Application.DesktopControl;
+global using DevProjex.Application.Services;
+global using DevProjex.Application.UseCases;
+global using DevProjex.Infrastructure.FileSystem;
+global using DevProjex.Infrastructure.Git;
+global using DevProjex.Infrastructure.ProjectProfiles;
+global using DevProjex.Infrastructure.RecentProjects;
+global using DevProjex.Infrastructure.Reports;
+global using DevProjex.Infrastructure.ResourceStore;
+global using DevProjex.Infrastructure.SmartIgnore;
+global using DevProjex.Infrastructure.TerminalCommands;
+global using DevProjex.Kernel;
+global using DevProjex.Kernel.Abstractions;
+global using DevProjex.Kernel.Contracts;
+global using DevProjex.Kernel.Models;

@@ -127,27 +127,47 @@ public sealed class ProjectAnalysisService(
 				AllowedExtensions: allowedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 				AllowedRootFolders: allowedRootFolders.ToHashSet(PathComparer.Default),
 				IgnoreRules: rules));
-		var treeResult = treeInventory is null
-			? buildTree.Execute(treeRequest, cancellationToken)
-			: buildTree.ExecuteWithInventory(treeRequest, treeInventory, cancellationToken).Tree;
+		BuildTreeSnapshotResult treeResult;
+		if (treeInventory is not null)
+		{
+			treeResult = buildTree.ExecuteWithInventory(treeRequest, treeInventory, cancellationToken);
+		}
+		else if (selectedIgnoreOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly))
+		{
+			// Tracked mode needs inventory evidence to distinguish a valid empty index
+			// from an unreadable repository. Other explicit selections retain the
+			// bounded direct-build path and avoid an unnecessary inventory projection.
+			treeResult = buildTree.ExecuteWithInventory(treeRequest, cancellationToken);
+			treeInventory = treeResult.Inventory;
+		}
+		else
+		{
+			treeResult = new BuildTreeSnapshotResult(
+				buildTree.Execute(treeRequest, cancellationToken),
+				Inventory: null);
+		}
 		if (request.SelectedRootFolders is null)
 		{
-			allowedRootFolders = GetVisibleRootFolderNames(treeResult.Root);
+			allowedRootFolders = GetVisibleRootFolderNames(treeResult.Tree.Root);
 			scan = scan with { RootFolders = allowedRootFolders };
 		}
 		loadingStopwatch.Stop();
 
 		return new LoadedProjectAnalysisRequest(
 			RootPath: rootPath,
-			Tree: treeResult,
+			Tree: treeResult.Tree,
 			AvailableRootFolders: scan.RootFolders,
 			AvailableExtensions: scan.Extensions,
 			SelectedRootFolders: allowedRootFolders,
 			SelectedExtensions: allowedExtensions,
 			SelectedIgnoreOptions: selectedIgnoreOptions,
-			RootAccessDenied: scan.RootAccessDenied || treeResult.RootAccessDenied,
-			HadAccessDenied: scan.HadAccessDenied || treeResult.HadAccessDenied,
-			KnownLoadingElapsed: loadingStopwatch.Elapsed);
+			RootAccessDenied: scan.RootAccessDenied || treeResult.Tree.RootAccessDenied,
+			HadAccessDenied: scan.HadAccessDenied || treeResult.Tree.HadAccessDenied,
+			KnownLoadingElapsed: loadingStopwatch.Elapsed,
+			DiscoveredGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count ?? 0,
+			UnavailableGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count(
+				static index => !index.IsAvailable) ?? 0,
+			TreeInventory: treeInventory);
 	}
 
 	private static bool CanUseUnifiedDefaultSelectionPipeline(ProjectAnalysisRequest request) =>
@@ -225,7 +245,11 @@ public sealed class ProjectAnalysisService(
 			SelectedIgnoreOptions: selectedIgnoreOptions,
 			RootAccessDenied: snapshot.RootAccessDenied || treeResult.RootAccessDenied,
 			HadAccessDenied: snapshot.HadAccessDenied || treeResult.HadAccessDenied,
-			KnownLoadingElapsed: loadingStopwatch.Elapsed);
+			KnownLoadingElapsed: loadingStopwatch.Elapsed,
+			DiscoveredGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count,
+			UnavailableGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count(
+				static index => !index.IsAvailable),
+			TreeInventory: inventory);
 	}
 
 	private static IReadOnlyList<string> GetVisibleRootFolderNames(TreeNodeDescriptor root)
@@ -509,4 +533,7 @@ public sealed record LoadedProjectAnalysisRequest(
 	IReadOnlyCollection<IgnoreOptionId> SelectedIgnoreOptions,
 	bool RootAccessDenied,
 	bool HadAccessDenied,
-	TimeSpan? KnownLoadingElapsed = null);
+	TimeSpan? KnownLoadingElapsed = null,
+	int DiscoveredGitTrackedIndexCount = 0,
+	int UnavailableGitTrackedIndexCount = 0,
+	ProjectTreeInventorySnapshot? TreeInventory = null);

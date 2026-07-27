@@ -299,8 +299,9 @@ public sealed class AppInstancePackagingContractTests
 
         Assert.Contains($"/usr/local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"~/.local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
-        Assert.Contains($"Exec={CommandLineExecutableAliases.UnixCommand} %F", desktopEntry, StringComparison.Ordinal);
+        Assert.Contains($"Exec={CommandLineExecutableAliases.UnixCommand} open %F", desktopEntry, StringComparison.Ordinal);
         Assert.Contains($"Icon={CommandLineExecutableAliases.UnixCommand}", desktopEntry, StringComparison.Ordinal);
+        Assert.Contains("always open DevProjex Desktop", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsPortableExecutable, readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, desktopEntry, StringComparison.Ordinal);
     }
@@ -315,6 +316,7 @@ public sealed class AppInstancePackagingContractTests
 
         Assert.Contains($"~/.local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"/Applications/{CommandLineExecutableAliases.DisplayName}.app/Contents/MacOS/{CommandLineExecutableAliases.DisplayName}", readme, StringComparison.Ordinal);
+        Assert.Contains("DEVPROJEX_TERMINAL_HOST=1", readme, StringComparison.Ordinal);
         Assert.Contains("does not modify shell profiles or global environment variables", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, readme, StringComparison.Ordinal);
     }

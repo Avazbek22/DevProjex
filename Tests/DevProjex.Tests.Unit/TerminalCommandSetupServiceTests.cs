@@ -134,17 +134,18 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
-	public void BuildWindowsLauncherContent_ArgumentModeUsesConsoleRouteForSingleFilePublish()
+	public void BuildWindowsLauncherContent_AllInvocationsUseTerminalRouteForSingleFilePublish()
 	{
 		var target = @"C:\Tools\DevProjex\DevProjex.exe";
 
 		var launcher = TerminalCommandSetupService.BuildWindowsLauncherContent(target);
 
-		Assert.Contains("if \"%~1\"==\"\" (", launcher, StringComparison.Ordinal);
-		Assert.Contains("  start \"\" \"%DEVPROJEX_EXE%\"", launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_TERMINAL_HOST=1\"", launcher, StringComparison.Ordinal);
 		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", launcher, StringComparison.Ordinal);
 		Assert.Contains("\"%DEVPROJEX_EXE%\" %*", launcher, StringComparison.Ordinal);
 		Assert.Contains("exit /b %ERRORLEVEL%", launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("if \"%~1\"==\"\"", launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("start \"\"", launcher, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("start /wait", launcher, StringComparison.OrdinalIgnoreCase);
 	}
 

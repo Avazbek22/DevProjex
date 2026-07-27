@@ -198,7 +198,8 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 
-        var options = new CommandLineOptions(workspace.Project.RootPath, AppLanguage.En, false);
+        var options = new DesktopStartupOptions(
+            new DesktopOpenRequest(workspace.Project.RootPath, Language: AppLanguage.En));
         var baseServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
         var recentPathCallCount = 0;
         var services = baseServices with
@@ -263,7 +264,8 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 
-        var options = new CommandLineOptions(workspace.Project.RootPath, AppLanguage.En, false);
+        var options = new DesktopStartupOptions(
+            new DesktopOpenRequest(workspace.Project.RootPath, Language: AppLanguage.En));
         var baseServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
         var flakyStore = new FlakyProjectProfileStore(Path.Combine(appDataPath, "DevProjex", "project-profiles.json"));
         var services = baseServices with

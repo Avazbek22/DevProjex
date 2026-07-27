@@ -1,0 +1,252 @@
+using System.Diagnostics;
+using System.IO.Compression;
+
+namespace DevProjex.Tests.Integration;
+
+public sealed class TerminalProcessSmokeIntegrationTests
+{
+	[Fact]
+	public async Task HelpVersionAndLegacyMigrationRunThroughTheRealEntryPoint()
+	{
+		var help = await RunAsync(["--help", "--language", "en"]);
+		Assert.Equal(CommandLineExitCodes.Success, help.ExitCode);
+		Assert.Contains("USAGE", help.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(help.StandardError);
+
+		var version = await RunAsync(["--version"]);
+		Assert.Equal(CommandLineExitCodes.Success, version.ExitCode);
+		Assert.Matches(@"^\d+\.\d+(?:\.\d+)?$", version.StandardOutput.Trim());
+		Assert.Empty(version.StandardError);
+
+		var legacy = await RunAsync(["--path", ".", "--report", "-"]);
+		Assert.Equal(CommandLineExitCodes.UsageError, legacy.ExitCode);
+		Assert.Empty(legacy.StandardOutput);
+		Assert.Contains("DPX-CLI-LEGACY-SYNTAX", legacy.StandardError, StringComparison.Ordinal);
+		Assert.Contains(
+			"devprojex analyze . --format json -o -",
+			legacy.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task AnalyzeAndContextStdoutRemainPureMachineDocuments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("source");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(
+			Path.Combine(project, "src", "App.cs"),
+			"class App {}\n",
+			new UTF8Encoding(false));
+
+		var analysis = await RunAsync(
+		[
+			"analyze",
+			project,
+			"--format",
+			"json",
+			"--git-mode",
+			"none",
+			"--exclude",
+			"none",
+			"--language",
+			"en"
+		]);
+		Assert.Equal(CommandLineExitCodes.Success, analysis.ExitCode);
+		using (var document = JsonDocument.Parse(analysis.StandardOutput))
+		{
+			Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+			Assert.Equal(1, document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		}
+		Assert.DoesNotContain("\u001b", analysis.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(analysis.StandardError);
+
+		var context = await RunAsync(
+		[
+			"export",
+			"context",
+			project,
+			"--view",
+			"tree-content",
+			"--format",
+			"json",
+			"--output",
+			"-",
+			"--git-mode",
+			"none",
+			"--exclude",
+			"none",
+			"--progress",
+			"never",
+			"--language",
+			"en"
+		]);
+		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
+		using (var document = JsonDocument.Parse(context.StandardOutput))
+		{
+			Assert.Equal("1", document.RootElement.GetProperty("schemaVersion").GetString());
+			Assert.Equal("devprojex-context", document.RootElement.GetProperty("kind").GetString());
+			Assert.Contains(
+				document.RootElement.GetProperty("files").EnumerateArray(),
+				static file => file.GetProperty("path").GetString() == "src/App.cs");
+		}
+		Assert.DoesNotContain("\u001b", context.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(context.StandardError);
+	}
+
+	[Fact]
+	public async Task FileFolderAndZipOutputsReturnOneExactAbsolutePath()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("source");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(
+			Path.Combine(project, "src", "App.cs"),
+			"class App {}\n",
+			new UTF8Encoding(false));
+		var contextPath = Path.Combine(workspace.Path, "context.md");
+		var folderPath = Path.Combine(workspace.Path, "submission");
+		var zipPath = Path.Combine(workspace.Path, "submission.zip");
+
+		var context = await RunAsync(
+		[
+			"export", "context", project,
+			"--format", "markdown",
+			"--output", contextPath,
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+		AssertSuccessfulPath(context, contextPath);
+		Assert.Contains("class App", File.ReadAllText(contextPath), StringComparison.Ordinal);
+
+		var folder = await RunAsync(
+		[
+			"export", "project", project,
+			"--as", "folder",
+			"--output", folderPath,
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+		AssertSuccessfulPath(folder, folderPath);
+		Assert.True(File.Exists(Path.Combine(folderPath, "src", "App.cs")));
+
+		var zip = await RunAsync(
+		[
+			"export", "project", project,
+			"--as", "zip",
+			"--output", zipPath,
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+		AssertSuccessfulPath(zip, zipPath);
+		using var archive = ZipFile.OpenRead(zipPath);
+		Assert.Contains(
+			archive.Entries,
+			static entry => entry.FullName.EndsWith("/src/App.cs", StringComparison.Ordinal));
+	}
+
+	private static void AssertSuccessfulPath(ProcessResult result, string expectedPath)
+	{
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(Path.GetFullPath(expectedPath), result.StandardOutput.Trim());
+		Assert.Single(result.StandardOutput.Split(
+			['\r', '\n'],
+			StringSplitOptions.RemoveEmptyEntries));
+		Assert.Empty(result.StandardError);
+	}
+
+	private static async Task<ProcessResult> RunAsync(IReadOnlyList<string> arguments)
+	{
+		var executableAssembly = ResolveExecutableAssembly();
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = "dotnet",
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		startInfo.ArgumentList.Add(executableAssembly);
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		startInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		startInfo.Environment["DOTNET_NOLOGO"] = "1";
+		startInfo.Environment["NO_COLOR"] = "1";
+
+		using var process = new Process { StartInfo = startInfo };
+		Assert.True(process.Start(), "Failed to start the DevProjex process.");
+		var outputTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var errorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(30));
+		try
+		{
+			await process.WaitForExitAsync(timeout.Token);
+		}
+		catch
+		{
+			try
+			{
+				process.Kill(entireProcessTree: true);
+			}
+			catch
+			{
+				// The process may have exited between timeout and cleanup.
+			}
+			throw;
+		}
+
+		return new ProcessResult(
+			process.ExitCode,
+			await outputTask,
+			await errorTask);
+	}
+
+	private static string ResolveExecutableAssembly()
+	{
+		var root = FindRepositoryRoot();
+#if DEBUG
+		const string configuration = "Debug";
+#else
+		const string configuration = "Release";
+#endif
+		var path = Path.Combine(
+			root,
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"bin",
+			configuration,
+			"net10.0",
+			"DevProjex.dll");
+		Assert.True(File.Exists(path), $"DevProjex entry assembly was not built: {path}");
+		Assert.True(
+			File.Exists(Path.ChangeExtension(path, ".runtimeconfig.json")),
+			$"DevProjex runtime config was not built next to: {path}");
+		return path;
+	}
+
+	private static string FindRepositoryRoot()
+	{
+		var directory = new DirectoryInfo(AppContext.BaseDirectory);
+		while (directory is not null)
+		{
+			if (File.Exists(Path.Combine(directory.FullName, "DevProjex.sln")))
+				return directory.FullName;
+			directory = directory.Parent;
+		}
+
+		throw new InvalidOperationException("Repository root not found.");
+	}
+
+	private sealed record ProcessResult(
+		int ExitCode,
+		string StandardOutput,
+		string StandardError);
+}

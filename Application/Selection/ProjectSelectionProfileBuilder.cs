@@ -54,7 +54,8 @@ public static class ProjectSelectionProfileBuilder
             ExtensionStates: profile.ExtensionStates is null
                 ? null
                 : new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
-            IgnoreOptionStates: ignoreOptionStates);
+            IgnoreOptionStates: ignoreOptionStates,
+            SelectedPaths: profile.SelectedPaths?.ToArray());
     }
 
     private static List<SelectionOption> MaterializeSelectionOptions(IEnumerable<SelectionOption> options)

@@ -1,5 +1,3 @@
-using DevProjex.Avalonia.Services;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
@@ -11,10 +9,8 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 		var projectPath = SeedMetricsWorkspace(temp);
 
 		using var report = await RunReportToStdoutAsync(
-			CommandLineOptionTokens.Silent,
-			CommandLineOptionTokens.Path, projectPath,
-			CommandLineOptionTokens.Roots, "src",
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+			projectPath,
+			selectedRoot: "src");
 		var expected = await CalculateRenderedMetricsAsync(
 			projectPath,
 			selectedRootFolders: ["src"],
@@ -22,7 +18,7 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 			selectedIgnoreOptions: []);
 
 		AssertReportMetrics(report.RootElement, expected);
-		Assert.Equal(4, report.RootElement.GetProperty("inventory").GetProperty("tree").GetProperty("fileCount").GetInt32());
+		Assert.Equal(4, report.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
 	}
 
 	[Fact]
@@ -31,16 +27,11 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 		using var temp = new TemporaryDirectory();
 		var projectPath = SeedMetricsWorkspace(temp);
 
-		using var fullReport = await RunReportToStdoutAsync(
-			CommandLineOptionTokens.Silent,
-			CommandLineOptionTokens.Path, projectPath,
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+		using var fullReport = await RunReportToStdoutAsync(projectPath);
 		using var docsReport = await RunReportToStdoutAsync(
-			CommandLineOptionTokens.Silent,
-			CommandLineOptionTokens.Path, projectPath,
-			CommandLineOptionTokens.Roots, "docs",
-			CommandLineOptionTokens.Extensions, "md",
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+			projectPath,
+			selectedRoot: "docs",
+			selectedExtension: "md");
 		var expectedDocs = await CalculateRenderedMetricsAsync(
 			projectPath,
 			selectedRootFolders: ["docs"],
@@ -56,8 +47,8 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 
 		Assert.True(docsTreeChars < fullTreeChars);
 		Assert.True(docsContentChars < fullContentChars);
-		Assert.Equal(["docs"], ReadStringArray(docsReport.RootElement.GetProperty("selection").GetProperty("selectedRootFolders")));
-		Assert.Equal([".md"], ReadStringArray(docsReport.RootElement.GetProperty("selection").GetProperty("selectedExtensions")));
+		Assert.Equal(["docs"], ReadStringArray(docsReport.RootElement.GetProperty("selection").GetProperty("roots")));
+		Assert.Equal([".md"], ReadStringArray(docsReport.RootElement.GetProperty("selection").GetProperty("extensions")));
 	}
 
 	[Fact]
@@ -68,20 +59,14 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 		var reportPath = Path.Combine(temp.Path, "reports", "metrics.json");
 
 		using var stdoutReport = await RunReportToStdoutAsync(
-			CommandLineOptionTokens.NoUi,
-			CommandLineOptionTokens.Path, projectPath,
-			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
-			CommandLineOptionTokens.Roots, "src",
-			CommandLineOptionTokens.Extensions, "cs",
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+			projectPath,
+			selectedRoot: "src",
+			selectedExtension: "cs");
 		await RunReportToFileAsync(
 			reportPath,
-			CommandLineOptionTokens.NoUi,
-			CommandLineOptionTokens.Path, projectPath,
-			CommandLineOptionTokens.ReportPath, reportPath,
-			CommandLineOptionTokens.Roots, "src",
-			CommandLineOptionTokens.Extensions, "cs",
-			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreNone);
+			projectPath,
+			selectedRoot: "src",
+			selectedExtension: "cs");
 
 		using var fileReport = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
 
@@ -89,8 +74,8 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 			stdoutReport.RootElement.GetProperty("metrics").GetRawText(),
 			fileReport.RootElement.GetProperty("metrics").GetRawText());
 		Assert.Equal(
-			stdoutReport.RootElement.GetProperty("inventory").GetProperty("tree").GetRawText(),
-			fileReport.RootElement.GetProperty("inventory").GetProperty("tree").GetRawText());
+			stdoutReport.RootElement.GetProperty("inventory").GetRawText(),
+			fileReport.RootElement.GetProperty("inventory").GetRawText());
 	}
 
 	private static string SeedMetricsWorkspace(TemporaryDirectory temp)
@@ -105,38 +90,67 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 		return projectPath;
 	}
 
-	private static async Task<JsonDocument> RunReportToStdoutAsync(params string[] args)
+	private static async Task<JsonDocument> RunReportToStdoutAsync(
+		string projectPath,
+		string? selectedRoot = null,
+		string? selectedExtension = null)
 	{
-		using var output = new StringWriter();
-		using var error = new StringWriter();
-		var parseResult = CommandLineOptions.Parse(args);
-
-		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
-			parseResult,
-			CreateContext(output, error),
-			TestContext.Current.CancellationToken);
+		var terminal = new TerminalTestHost();
+		var arguments = BuildAnalyzeArguments(projectPath, selectedRoot, selectedExtension, "-");
+		var exitCode = await terminal.RunAsync(
+			arguments,
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Equal(string.Empty, error.ToString());
-		Assert.StartsWith("{", output.ToString().TrimStart(), StringComparison.Ordinal);
-		return JsonDocument.Parse(output.ToString());
+		Assert.Equal(string.Empty, terminal.StandardError);
+		Assert.StartsWith("{", terminal.StandardOutput.TrimStart(), StringComparison.Ordinal);
+		return JsonDocument.Parse(terminal.StandardOutput);
 	}
 
-	private static async Task RunReportToFileAsync(string reportPath, params string[] args)
+	private static async Task RunReportToFileAsync(
+		string reportPath,
+		string projectPath,
+		string? selectedRoot = null,
+		string? selectedExtension = null)
 	{
-		using var output = new StringWriter();
-		using var error = new StringWriter();
-		var parseResult = CommandLineOptions.Parse(args);
-
-		var exitCode = await CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(
-			parseResult,
-			CreateContext(output, error),
-			TestContext.Current.CancellationToken);
+		var terminal = new TerminalTestHost();
+		var arguments = BuildAnalyzeArguments(projectPath, selectedRoot, selectedExtension, reportPath);
+		var exitCode = await terminal.RunAsync(
+			arguments,
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", output.ToString());
-		Assert.Equal(string.Empty, error.ToString());
+		Assert.Equal($"{Path.GetFullPath(reportPath)}{Environment.NewLine}", terminal.StandardOutput);
+		Assert.Equal(string.Empty, terminal.StandardError);
 		Assert.True(File.Exists(reportPath));
+	}
+
+	private static IReadOnlyList<string> BuildAnalyzeArguments(
+		string projectPath,
+		string? selectedRoot,
+		string? selectedExtension,
+		string outputPath)
+	{
+		var arguments = new List<string>
+		{
+			"analyze",
+			projectPath,
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"-o", outputPath
+		};
+		if (selectedRoot is not null)
+		{
+			arguments.Add("--root");
+			arguments.Add(selectedRoot);
+		}
+		if (selectedExtension is not null)
+		{
+			arguments.Add("--extension");
+			arguments.Add(selectedExtension);
+		}
+		return arguments;
 	}
 
 	private static async Task<ExpectedReportMetrics> CalculateRenderedMetricsAsync(
@@ -145,8 +159,8 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 		IReadOnlyCollection<string>? selectedExtensions,
 		IReadOnlyCollection<IgnoreOptionId>? selectedIgnoreOptions)
 	{
-		var services = AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty);
-		var loaded = services.ProjectAnalysisService.Load(new ProjectAnalysisRequest(
+		var services = new TerminalServiceFactory().Create(AppLanguage.En);
+		var loaded = services.AnalysisService.Load(new ProjectAnalysisRequest(
 			RootPath: projectPath,
 			SelectedRootFolders: selectedRootFolders,
 			SelectedExtensions: selectedExtensions,
@@ -173,14 +187,6 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 		Assert.Equal(expected.Chars, actual.GetProperty("chars").GetInt64());
 		Assert.Equal(expected.Tokens, actual.GetProperty("tokens").GetInt64());
 	}
-
-	private static CommandLineAutomationContext CreateContext(TextWriter output, TextWriter error) =>
-		new(
-			Output: output,
-			Error: error,
-			ServicesFactory: AvaloniaCompositionRoot.CreateDefault,
-			HelpContentProvider: new CommandLineHelpContentProvider(),
-			VersionProvider: () => "test-version");
 
 	private static string[] ReadStringArray(JsonElement element) =>
 		element.EnumerateArray()

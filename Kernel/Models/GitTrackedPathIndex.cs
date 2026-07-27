@@ -34,10 +34,20 @@ public sealed class GitTrackedPathIndex
 		string repositoryRootPath,
 		IEnumerable<string> trackedPaths,
 		GitPathComparisonSemantics comparisonSemantics)
+		: this(repositoryRootPath, trackedPaths, comparisonSemantics, isAvailable: true)
+	{
+	}
+
+	private GitTrackedPathIndex(
+		string repositoryRootPath,
+		IEnumerable<string> trackedPaths,
+		GitPathComparisonSemantics comparisonSemantics,
+		bool isAvailable)
 	{
 		ArgumentNullException.ThrowIfNull(trackedPaths);
 
 		RepositoryRootPath = PathUtility.Normalize(repositoryRootPath);
+		IsAvailable = isAvailable;
 		_relativePathComparer = comparisonSemantics.IgnoreCase
 			? StringComparer.OrdinalIgnoreCase
 			: StringComparer.Ordinal;
@@ -55,6 +65,14 @@ public sealed class GitTrackedPathIndex
 	public string RepositoryRootPath { get; }
 
 	public int Count => _trackedPaths.Length;
+	public bool IsAvailable { get; }
+
+	public static GitTrackedPathIndex Unavailable(string repositoryRootPath) =>
+		new(
+			repositoryRootPath,
+			[],
+			GitPathComparisonSemantics.PlatformDefault,
+			isAvailable: false);
 
 	internal bool MatchesRepositoryRoot(string repositoryRootPath)
 	{

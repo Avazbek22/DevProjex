@@ -69,7 +69,7 @@ Regeln:
 Für jeden Eintrag werden der übergeordnete Ordner und der Projektname angezeigt, zum Beispiel `Projects / App`.
 
 ## 4) Aus dem Terminal starten
-DevProjex kann aus dem Terminal gestartet werden.
+DevProjex bietet einen interaktiven Terminal-Arbeitsbereich und direkte Befehle für Skripte und CI.
 
 Wenn der Befehl bereits eingerichtet ist, öffnen Sie ein Terminal und führen Sie aus:
 `devprojex --help`
@@ -77,21 +77,20 @@ Wenn der Befehl bereits eingerichtet ist, öffnen Sie ein Terminal und führen S
 So sehen Sie alle verfügbaren Befehle, Optionen und Beispiele.
 
 Beispiele:
-* `devprojex .` — den aktuellen Ordner öffnen.
-* `devprojex "C:\Projects\App"` — den angegebenen Ordner öffnen.
-* `devprojex . --export tree` — den Projektbaum im Terminal ausgeben.
-* `devprojex . --export content` — Dateiinhalte im Terminal ausgeben.
-* `devprojex . --export tree-content` — Baum und Inhalte im Terminal ausgeben.
-* `devprojex . --export tree-content -o context.txt` — das Ergebnis in eine Datei speichern.
-* `devprojex --benchmark "C:\Projects\App"` — den Standard-Projektreport-Workflow messen.
-* `devprojex --last --preview` — das letzte Projekt direkt im Vorschaumodus öffnen.
-* `devprojex --benchmark-ui "C:\Projects\App"` — den Standard-UI-Workflow messen.
-* `devprojex --session-metrics "C:\Projects\App"` — UI-Sitzungsmetriken bis zum Schließen des Fensters aufzeichnen.
+* `devprojex` — den interaktiven Terminal-Arbeitsbereich öffnen.
+* `devprojex open . --preview` — den aktuellen Ordner in der Desktop-Vorschau öffnen.
+* `devprojex analyze . --format json` — das aktuelle Projekt als JSON analysieren.
+* `devprojex export context . --format markdown -o context.md` — KI-fertigen Kontext speichern.
+* `devprojex export project . --as folder -o submission` — den effektiven Projektbaum in einen exakten Ordner exportieren.
+* `devprojex export project . --as zip -o submission.zip` — den effektiven Projektbaum in ein ZIP-Archiv exportieren.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — von Git verfolgte Dateien mit Smart Ignore analysieren.
 
 Hinweise:
 * `.` bedeutet den aktuellen Terminal-Ordner;
 * Pfade mit Leerzeichen müssen in Anführungszeichen stehen;
-* wenn keine Ausgabedatei angegeben ist, wird das Ergebnis direkt im Terminal ausgegeben;
+* `--git-mode` wählt keine Git-Filterung, `.gitignore` oder nur von Git verfolgte Dateien;
+* `--exclude` steuert gewöhnliche Ausschlüsse getrennt von der Git-Filterung;
+* direkte Befehle sind deterministisch und öffnen die Desktop-Oberfläche nicht;
 * der Befehl ändert keine Projektdateien — DevProjex arbeitet im Lesemodus.
 
 Wenn der Befehl `devprojex` nicht funktioniert, öffnen Sie in DevProjex:

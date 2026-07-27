@@ -180,7 +180,7 @@ public sealed class SessionMetricsRecorderTests
 		using var temp = new TemporaryDirectory();
 		var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 7, 11, 10, 0, 0, TimeSpan.Zero));
 		var recorder = new SessionMetricsRecorder(
-			new StartupSessionMetricsOptions(true, temp.Path, null),
+			new SessionMetricsOptions(true, temp.Path, null),
 			() => temp.Path,
 			new FakeSessionMetricsSampler(),
 			timeProvider,
@@ -213,7 +213,7 @@ public sealed class SessionMetricsRecorderTests
 		FakeSessionMetricsSampler sampler,
 		ManualTimeProvider timeProvider)
 		=> new(
-			new StartupSessionMetricsOptions(true, projectPath, outputPath),
+			new SessionMetricsOptions(true, projectPath, outputPath),
 			() => Path.GetDirectoryName(outputPath) ?? Path.GetTempPath(),
 			sampler,
 			timeProvider,

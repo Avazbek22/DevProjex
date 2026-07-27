@@ -70,9 +70,14 @@ public partial class MainWindow
         current.Dispose();
     }
 
-    private void OnWindowClosed(object? sender, EventArgs e)
+    private async void OnWindowClosed(object? sender, EventArgs e)
     {
         CancelAndDispose(ref _windowLifetimeCts);
+        if (_desktopControlServer is not null)
+        {
+            await _desktopControlServer.DisposeAsync();
+            _desktopControlServer = null;
+        }
         CompleteSessionMetricsRecording();
         FlushPersistedStateOnWindowClose();
 
@@ -168,6 +173,7 @@ public partial class MainWindow
         _repoCacheService.ClearAllCache();
 
         _taskbarProgress.Dispose();
+        _desktopInteractionGate.Dispose();
 
         // Dispose ZipDownloadService
         if (_zipDownloadService is IDisposable disposable)
