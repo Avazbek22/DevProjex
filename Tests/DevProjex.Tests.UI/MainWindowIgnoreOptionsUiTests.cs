@@ -356,6 +356,62 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
+    public async Task SwitchingToTrackedOnlyRescansGitIgnoredContainerForNestedRepository()
+    {
+        EnsureGitAvailable();
+        using var project = UiTestProject.CreateWithIgnoredNestedGitRepositoryWorkspace();
+        RunGit(project.RootPath, "init", "--quiet");
+        RunGit(
+            project.RootPath,
+            "add",
+            "--",
+            ".gitignore",
+            "App.csproj",
+            "Program.cs");
+        var nestedRepositoryPath = Path.Combine(project.RootPath, "ignored-container", "nested");
+        RunGit(nestedRepositoryPath, "init", "--quiet");
+        RunGit(nestedRepositoryPath, "add", "--", "Nested.csproj", "Tracked.cs");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                visible: true,
+                isChecked: false);
+            await WaitForProjectTreePathStateAsync(
+                window,
+                exists: false,
+                "ignored-container",
+                "nested",
+                "Tracked.cs");
+
+            await SetIgnoreOptionCheckedAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                isChecked: true);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+
+            await WaitForProjectTreePathStateAsync(
+                window,
+                exists: true,
+                "ignored-container",
+                "nested",
+                "Tracked.cs");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task ExplicitUncheckedGitIgnoreController_RemainsVisibleWhenDotFilesTakesOver()
     {
         using var project = UiTestProject.CreateWithGitIgnoreDotFileOnlyWorkspace();

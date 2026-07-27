@@ -246,6 +246,24 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateWithIgnoredNestedGitRepositoryWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(rootPath, ".gitignore", "ignored-container/\n");
+            WriteFile(rootPath, "App.csproj", "<Project />\n");
+            WriteFile(rootPath, "Program.cs", "Console.WriteLine(\"outer\");\n");
+            WriteFile(
+                rootPath,
+                Path.Combine("ignored-container", "nested", "Nested.csproj"),
+                "<Project />\n");
+            WriteFile(
+                rootPath,
+                Path.Combine("ignored-container", "nested", "Tracked.cs"),
+                "namespace Nested;\n");
+        });
+    }
+
     public static UiTestProject CreateWithGitIgnoreDotFileOnlyWorkspace()
     {
         return Create(static rootPath =>

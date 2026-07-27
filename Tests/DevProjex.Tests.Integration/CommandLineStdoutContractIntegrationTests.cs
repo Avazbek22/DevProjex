@@ -215,6 +215,48 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_TrackedOnlyIgnoresInheritedGitRepositoryOverrides()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("intended repository");
+		WriteFile(projectPath, Path.Combine("src", "tracked.cs"), "class Tracked {}\n");
+		WriteFile(projectPath, Path.Combine("src", "local.cs"), "class Local {}\n");
+		InitializeGitIndex(projectPath, "src/tracked.cs");
+
+		var foreignRepositoryPath = temp.CreateDirectory("foreign repository");
+		WriteFile(foreignRepositoryPath, "foreign.cs", "class Foreign {}\n");
+		InitializeGitIndex(foreignRepositoryPath, "foreign.cs");
+		var foreignGitDirectory = Path.Combine(foreignRepositoryPath, ".git");
+		var environmentOverrides = new Dictionary<string, string>
+		{
+			["GIT_DIR"] = foreignGitDirectory,
+			["GIT_WORK_TREE"] = foreignRepositoryPath,
+			["GIT_INDEX_FILE"] = Path.Combine(foreignGitDirectory, "index"),
+			["GIT_COMMON_DIR"] = foreignGitDirectory,
+			["GIT_CONFIG_COUNT"] = "1",
+			["GIT_CONFIG_KEY_0"] = "core.worktree",
+			["GIT_CONFIG_VALUE_0"] = foreignRepositoryPath
+		};
+
+		var result = await RunAppAsync(
+			environmentOverrides,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreTrackedGitFilesOnly);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		var exportedPaths = JsonTreeExportTestHelper.ExtractFilePaths(
+			JsonTreeExportTestHelper.GetTree(document));
+		Assert.Equal(["src/tracked.cs"], exportedPaths);
+	}
+
+	[Fact]
 	public async Task Process_TrackedOnlyProjectCopyExcludesUntrackedFiles()
 	{
 		EnsureGitAvailable();
@@ -871,7 +913,12 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		return line;
 	}
 
-	private static async Task<CommandLineProcessResult> RunAppAsync(params string[] args)
+	private static Task<CommandLineProcessResult> RunAppAsync(params string[] args) =>
+		RunAppAsync(environmentOverrides: null, args);
+
+	private static async Task<CommandLineProcessResult> RunAppAsync(
+		IReadOnlyDictionary<string, string>? environmentOverrides,
+		params string[] args)
 	{
 		var appPath = typeof(App).Assembly.Location;
 		var startInfo = new ProcessStartInfo
@@ -888,6 +935,11 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		startInfo.ArgumentList.Add(appPath);
 		foreach (var arg in args)
 			startInfo.ArgumentList.Add(arg);
+		if (environmentOverrides is not null)
+		{
+			foreach (var (variable, value) in environmentOverrides)
+				startInfo.Environment[variable] = value;
+		}
 
 		using var process = Process.Start(startInfo)
 			?? throw new InvalidOperationException("Failed to start DevProjex command-line stdout contract process.");

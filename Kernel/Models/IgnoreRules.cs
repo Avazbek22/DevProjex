@@ -1182,10 +1182,7 @@ public sealed record IgnoreRules(
 			{
 				for (var current = this; current is not null; current = current._parent)
 				{
-					if (string.Equals(
-						    current._trackedPathIndex.RepositoryRootPath,
-						    repositoryRootPath,
-						    PathComparison))
+					if (current._trackedPathIndex.MatchesRepositoryRoot(repositoryRootPath))
 					{
 						return true;
 					}
@@ -1200,7 +1197,7 @@ public sealed record IgnoreRules(
 				for (var current = this; current is not null; current = current._parent)
 				{
 					var candidate = current._trackedPathIndex;
-					if (!PathUtility.IsPathInside(fullPath, candidate.RepositoryRootPath))
+					if (!candidate.IsPathInsideRepository(fullPath))
 						continue;
 					if (bestMatch is null ||
 					    candidate.RepositoryRootPath.Length > bestMatch.RepositoryRootPath.Length)

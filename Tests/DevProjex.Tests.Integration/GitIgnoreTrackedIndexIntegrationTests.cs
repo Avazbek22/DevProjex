@@ -3,6 +3,60 @@ namespace DevProjex.Tests.Integration;
 public sealed class GitIgnoreTrackedIndexIntegrationTests
 {
 	[Fact]
+	public void RepositoryPathComparisonSemanticsFollowMetadataDirectoryFilesystem()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		var gitMetadataPath = temp.CreateDirectory("repo/.git");
+		var alternateMetadataPath = Path.Combine(repositoryRoot, ".Git");
+		var alternatePathResolves = Directory.Exists(alternateMetadataPath);
+		var hasBothStoredSpellings = Directory
+			.EnumerateFileSystemEntries(repositoryRoot)
+			.Select(Path.GetFileName)
+			.Contains(".git", StringComparer.Ordinal) &&
+			Directory
+				.EnumerateFileSystemEntries(repositoryRoot)
+				.Select(Path.GetFileName)
+				.Contains(".Git", StringComparer.Ordinal);
+
+		var semantics = GitTrackedPathIndexCache.ResolvePathComparisonSemantics(gitMetadataPath);
+
+		Assert.Equal(alternatePathResolves && !hasBothStoredSpellings, semantics.IgnoreCase);
+		Assert.Equal(OperatingSystem.IsMacOS(), semantics.NormalizeUnicode);
+	}
+
+	[Fact]
+	public void TrackedOnlyModeMatchesIndexCasingOnCaseInsensitiveMacFileSystem()
+	{
+		if (!OperatingSystem.IsMacOS())
+			Assert.Skip("This regression test targets case-insensitive macOS repository volumes.");
+
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		var originalPath = temp.CreateFile("repo/TrackedCase.cs", "tracked");
+		InitializeIndex(repositoryRoot, "TrackedCase.cs");
+		var semantics = GitTrackedPathIndexCache.ResolvePathComparisonSemantics(
+			Path.Combine(repositoryRoot, ".git"));
+		if (!semantics.IgnoreCase)
+			Assert.Skip("The macOS temporary directory is on a case-sensitive volume.");
+
+		var intermediatePath = Path.Combine(repositoryRoot, "case-rename.tmp");
+		var workingTreePath = Path.Combine(repositoryRoot, "trackedcase.cs");
+		File.Move(originalPath, intermediatePath);
+		File.Move(intermediatePath, workingTreePath);
+
+		var tree = BuildTree(
+			repositoryRoot,
+			RootSet(),
+			ExtensionSet(".cs"),
+			CreateTrackedOnlyRules(repositoryRoot));
+
+		AssertVisible(tree.Paths, "trackedcase.cs");
+		Assert.Equal(1, Assert.Single(tree.Inventory.DiscoveredGitTrackedPathIndexes).Count);
+	}
+
+	[Fact]
 	public void TrackedIgnoredFilesAndDirectoriesRemainVisibleWhileUntrackedSiblingsStayIgnored()
 	{
 		EnsureGitAvailable();
