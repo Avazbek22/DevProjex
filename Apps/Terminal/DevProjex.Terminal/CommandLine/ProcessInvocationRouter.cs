@@ -11,7 +11,8 @@ public static class ProcessInvocationRouter
 	public static ProcessInvocationMode Resolve(
 		IReadOnlyList<string> arguments,
 		ITerminalEnvironment environment,
-		bool hasPendingDesktopRequest)
+		bool hasPendingDesktopRequest,
+		bool isFrameworkDependentLaunch)
 	{
 		if (hasPendingDesktopRequest)
 			return ProcessInvocationMode.Desktop;
@@ -21,6 +22,16 @@ public static class ProcessInvocationRouter
 			return ProcessInvocationMode.Terminal;
 		if (environment.IsCi)
 			return ProcessInvocationMode.Terminal;
+
+		if (environment.IsInputInteractive && environment.IsOutputInteractive)
+			return ProcessInvocationMode.Terminal;
+
+		// IDE run consoles expose valid redirected handles, but they are not an
+		// intentional terminal invocation. The generated launcher and CI have
+		// explicit signals above, while a real shell remains interactive.
+		if (isFrameworkDependentLaunch)
+			return ProcessInvocationMode.Desktop;
+
 		return environment.HasAttachedConsole
 			? ProcessInvocationMode.Terminal
 			: ProcessInvocationMode.Desktop;

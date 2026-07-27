@@ -7,7 +7,7 @@ public sealed class InvocationRoutingTests
 	{
 		var environment = new TestTerminalEnvironment();
 
-		var result = ProcessInvocationRouter.Resolve([], environment, hasPendingDesktopRequest: false);
+		var result = Resolve([], environment);
 
 		Assert.Equal(ProcessInvocationMode.Desktop, result);
 	}
@@ -22,17 +22,52 @@ public sealed class InvocationRoutingTests
 			IsOutputInteractive = true
 		};
 
-		var result = ProcessInvocationRouter.Resolve([], environment, hasPendingDesktopRequest: false);
+		var result = Resolve([], environment);
 
 		Assert.Equal(ProcessInvocationMode.Terminal, result);
 	}
 
 	[Fact]
-	public void RedirectedAttachedConsoleWithoutArgumentsUsesTerminalHelpPath()
+	public void PublishedExecutableWithRedirectedAttachedConsoleUsesTerminalHelpPath()
 	{
 		var environment = new TestTerminalEnvironment { HasAttachedConsole = true };
 
-		var result = ProcessInvocationRouter.Resolve([], environment, hasPendingDesktopRequest: false);
+		var result = Resolve([], environment);
+
+		Assert.Equal(ProcessInvocationMode.Terminal, result);
+	}
+
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(true, false)]
+	[InlineData(false, true)]
+	public void FrameworkDependentIdeLaunchWithoutInteractiveTtyUsesDesktop(
+		bool inputInteractive,
+		bool outputInteractive)
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			HasAttachedConsole = true,
+			IsInputInteractive = inputInteractive,
+			IsOutputInteractive = outputInteractive
+		};
+
+		var result = Resolve([], environment, isFrameworkDependentLaunch: true);
+
+		Assert.Equal(ProcessInvocationMode.Desktop, result);
+	}
+
+	[Fact]
+	public void FrameworkDependentLaunchInInteractiveShellUsesTerminal()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			HasAttachedConsole = true,
+			IsInputInteractive = true,
+			IsOutputInteractive = true
+		};
+
+		var result = Resolve([], environment, isFrameworkDependentLaunch: true);
 
 		Assert.Equal(ProcessInvocationMode.Terminal, result);
 	}
@@ -42,7 +77,7 @@ public sealed class InvocationRoutingTests
 	{
 		var environment = new TestTerminalEnvironment { IsTerminalHost = true };
 
-		var result = ProcessInvocationRouter.Resolve([], environment, hasPendingDesktopRequest: false);
+		var result = Resolve([], environment, isFrameworkDependentLaunch: true);
 
 		Assert.Equal(ProcessInvocationMode.Terminal, result);
 	}
@@ -52,7 +87,7 @@ public sealed class InvocationRoutingTests
 	{
 		var environment = new TestTerminalEnvironment { IsCi = true };
 
-		var result = ProcessInvocationRouter.Resolve([], environment, hasPendingDesktopRequest: false);
+		var result = Resolve([], environment, isFrameworkDependentLaunch: true);
 
 		Assert.Equal(ProcessInvocationMode.Terminal, result);
 	}
@@ -68,7 +103,11 @@ public sealed class InvocationRoutingTests
 			IsOutputInteractive = true
 		};
 
-		var result = ProcessInvocationRouter.Resolve(["analyze"], environment, hasPendingDesktopRequest: true);
+		var result = ProcessInvocationRouter.Resolve(
+			["analyze"],
+			environment,
+			hasPendingDesktopRequest: true,
+			isFrameworkDependentLaunch: true);
 
 		Assert.Equal(ProcessInvocationMode.Desktop, result);
 	}
@@ -113,4 +152,14 @@ public sealed class InvocationRoutingTests
 			environment.StandardError,
 			StringComparison.Ordinal);
 	}
+
+	private static ProcessInvocationMode Resolve(
+		IReadOnlyList<string> arguments,
+		ITerminalEnvironment environment,
+		bool isFrameworkDependentLaunch = false) =>
+		ProcessInvocationRouter.Resolve(
+			arguments,
+			environment,
+			hasPendingDesktopRequest: false,
+			isFrameworkDependentLaunch: isFrameworkDependentLaunch);
 }

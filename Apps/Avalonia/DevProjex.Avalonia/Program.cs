@@ -19,7 +19,8 @@ internal static class Program
             args,
             environment,
             DesktopLaunchRequestStore.HasPendingRequest ||
-            DesktopDiagnosticRequestStore.HasPendingRequest);
+            DesktopDiagnosticRequestStore.HasPendingRequest,
+            isFrameworkDependentLaunch: !ProcessEntryPointResolver.IsSingleFile());
         if (route == ProcessInvocationMode.Terminal)
         {
             using var cancellationSource = new CancellationTokenSource();

@@ -47,7 +47,11 @@ public sealed class DocumentationAndPackagingContractTests
 				};
 				Assert.Equal(
 					ProcessInvocationMode.Terminal,
-					ProcessInvocationRouter.Resolve(arguments, environment, hasPendingDesktopRequest: false));
+					ProcessInvocationRouter.Resolve(
+						arguments,
+						environment,
+						hasPendingDesktopRequest: false,
+						isFrameworkDependentLaunch: false));
 				continue;
 			}
 			var parseResult = commandTree.Parse(arguments);

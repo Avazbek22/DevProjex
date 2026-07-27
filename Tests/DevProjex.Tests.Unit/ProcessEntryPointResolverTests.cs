@@ -7,7 +7,10 @@ public sealed class ProcessEntryPointResolverTests
 	[InlineData("dotnet.exe", true)]
 	[InlineData(@"C:\Program Files\dotnet\dotnet.exe", true)]
 	[InlineData("/usr/local/share/dotnet/dotnet", true)]
+	[InlineData(@"/usr/local/share/dotnet\DOTNET.EXE", true)]
 	[InlineData("DevProjex.exe", false)]
+	[InlineData(@"C:\tools\dotnet.exe.backup", false)]
+	[InlineData("/usr/local/share/dotnet/", false)]
 	[InlineData("", false)]
 	[InlineData(null, false)]
 	public void IsDotnetHost_UsesExecutableFileName(string? path, bool expected)
