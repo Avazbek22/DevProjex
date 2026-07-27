@@ -3,6 +3,31 @@ namespace DevProjex.Tests.Integration;
 public sealed class ProjectAnalysisServiceIntegrationTests
 {
 	[Fact]
+	public void Load_ExplicitRootSelectionDiscoversDeepRepositoryDefault()
+	{
+		using var temp = new TemporaryDirectory();
+		var current = Path.Combine(temp.Path, "workspace");
+		for (var index = 0; index < 16; index++)
+			current = Path.Combine(current, $"level-{index:D2}");
+
+		Directory.CreateDirectory(Path.Combine(current, ".git"));
+		temp.CreateFile(
+			Path.GetRelativePath(temp.Path, Path.Combine(current, "App.cs")),
+			"class App {}\n");
+		var service = CreateService();
+
+		var loaded = service.Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedRootFolders: ["workspace"]),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+		Assert.DoesNotContain(IgnoreOptionId.TrackedGitFilesOnly, loaded.SelectedIgnoreOptions);
+		Assert.Contains(".cs", loaded.AvailableExtensions);
+	}
+
+	[Fact]
 	public void Load_DefaultSelection_ReportsOnlyRootFoldersPresentInProjectedTree()
 	{
 		using var temp = new TemporaryDirectory();

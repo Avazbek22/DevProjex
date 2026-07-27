@@ -38,6 +38,7 @@ public static class ProjectWorkspaceScanProjection
 		var rawCounts = rootFiles.RawIgnoreOptionCounts;
 		var effectiveCounts = rootFiles.EffectiveIgnoreOptionCounts;
 		var controllerImpactCounts = rootFiles.ControllerImpactCounts;
+		var gitEvidence = rootFiles.GitEvidence;
 		var rootAccessDenied = breakdown.RootEnumerationAccessDenied || breakdown.RootFilesAccessDenied;
 		var hadAccessDenied = breakdown.RootEnumerationHadAccessDenied || breakdown.RootFilesHadAccessDenied;
 
@@ -48,6 +49,7 @@ public static class ProjectWorkspaceScanProjection
 				rawCounts = rawCounts.Add(rootSnapshot.IgnoreSection.RawIgnoreOptionCounts);
 				effectiveCounts = effectiveCounts.Add(rootSnapshot.IgnoreSection.EffectiveIgnoreOptionCounts);
 				controllerImpactCounts = controllerImpactCounts.Add(rootSnapshot.IgnoreSection.ControllerImpactCounts);
+				gitEvidence = gitEvidence.Add(rootSnapshot.IgnoreSection.GitEvidence);
 				rootAccessDenied |= rootSnapshot.RootAccessDenied;
 				hadAccessDenied |= rootSnapshot.HadAccessDenied;
 				continue;
@@ -84,7 +86,8 @@ public static class ProjectWorkspaceScanProjection
 			rawCounts,
 			effectiveCounts,
 			controllerImpactCounts,
-			effectiveExtensions);
+			effectiveExtensions,
+			GitEvidence: gitEvidence);
 		projected = new ScanResult<ProjectWorkspaceScanSnapshot>(
 			new ProjectWorkspaceScanSnapshot(ignoreSection, source.TreeInventory, breakdown),
 			rootAccessDenied,

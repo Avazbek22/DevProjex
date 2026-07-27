@@ -26,4 +26,5 @@ internal sealed record SelectionRefreshRollbackSnapshot(
     bool IgnoreOptionsInitialized,
     bool? IgnoreAllPreference,
     bool IgnoreOptionStateCacheIsComplete,
-    bool HasAuthoritativeRootOptions);
+    bool HasAuthoritativeRootOptions,
+    GitWorkspaceEvidence GitEvidence = default);

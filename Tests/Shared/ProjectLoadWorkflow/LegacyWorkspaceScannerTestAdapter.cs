@@ -84,6 +84,7 @@ internal sealed class LegacyWorkspaceScannerTestAdapter(IFileSystemScanner scann
 		var rawCounts = rootFiles.Value.RawIgnoreOptionCounts;
 		var effectiveCounts = rootFiles.Value.EffectiveIgnoreOptionCounts;
 		var controllerCounts = rootFiles.Value.ControllerImpactCounts;
+		var gitEvidence = rootFiles.Value.GitEvidence;
 		var rootAccessDenied = rootFiles.RootAccessDenied;
 		var hadAccessDenied = rootFiles.HadAccessDenied;
 
@@ -99,6 +100,7 @@ internal sealed class LegacyWorkspaceScannerTestAdapter(IFileSystemScanner scann
 			rawCounts = rawCounts.Add(folder.Value.RawIgnoreOptionCounts);
 			effectiveCounts = effectiveCounts.Add(folder.Value.EffectiveIgnoreOptionCounts);
 			controllerCounts = controllerCounts.Add(folder.Value.ControllerImpactCounts);
+			gitEvidence = gitEvidence.Add(folder.Value.GitEvidence);
 			rootAccessDenied |= folder.RootAccessDenied;
 			hadAccessDenied |= folder.HadAccessDenied;
 		}
@@ -109,7 +111,8 @@ internal sealed class LegacyWorkspaceScannerTestAdapter(IFileSystemScanner scann
 				rawCounts,
 				effectiveCounts,
 				controllerCounts,
-				visibleExtensions),
+				visibleExtensions,
+				GitEvidence: gitEvidence),
 			rootAccessDenied,
 			hadAccessDenied);
 	}

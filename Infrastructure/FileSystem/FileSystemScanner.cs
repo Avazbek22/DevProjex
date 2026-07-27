@@ -227,6 +227,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var rawCounts = IgnoreOptionCounts.Empty;
 		var effectiveCounts = IgnoreOptionCounts.Empty;
 		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
+		var gitEvidence = GitWorkspaceEvidence.Empty;
 		var rootAccessDenied = scanPlan.RootAccessDenied ? 1 : 0;
 		var hadAccessDenied = scanPlan.HadAccessDenied ? 1 : 0;
 		var mergeLock = new object();
@@ -246,6 +247,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		rawCounts = rawCounts.Add(rootFileSnapshot.Value.RawIgnoreOptionCounts);
 		effectiveCounts = effectiveCounts.Add(rootFileSnapshot.Value.EffectiveIgnoreOptionCounts);
 		controllerImpactCounts = controllerImpactCounts.Add(rootFileSnapshot.Value.ControllerImpactCounts);
+		gitEvidence = gitEvidence.Add(rootFileSnapshot.Value.GitEvidence);
 		if (rootFileSnapshot.RootAccessDenied)
 			Interlocked.Exchange(ref rootAccessDenied, 1);
 		if (rootFileSnapshot.HadAccessDenied)
@@ -302,6 +304,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					localState.EffectiveCounts = localState.EffectiveCounts.Add(snapshot.Value.EffectiveIgnoreOptionCounts);
 					localState.ControllerImpactCounts =
 						localState.ControllerImpactCounts.Add(snapshot.Value.ControllerImpactCounts);
+					localState.GitEvidence = localState.GitEvidence.Add(snapshot.Value.GitEvidence);
 					if (localState.TreeInventories is not null &&
 					    inventoryCapture?.Inventory is not null)
 					{
@@ -355,6 +358,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						rawCounts = rawCounts.Add(localState.RawCounts.ToImmutable());
 						effectiveCounts = effectiveCounts.Add(localState.EffectiveCounts);
 						controllerImpactCounts = controllerImpactCounts.Add(localState.ControllerImpactCounts);
+						gitEvidence = gitEvidence.Add(localState.GitEvidence);
 						if (subtreeInventories is not null &&
 						    localState.TreeInventories is not null &&
 						    localState.TreeInventories.Count > 0)
@@ -413,7 +417,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			rawCounts,
 			effectiveCounts,
 			controllerImpactCounts,
-			aggregatedEffectiveExtensions);
+			aggregatedEffectiveExtensions,
+			GitEvidence: gitEvidence);
 		var treeInventory = captureTreeInventory
 			? BuildRootSelectionInventory(
 				rootPath,
@@ -1514,6 +1519,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadAccessDenied: false);
 		}
 
+		var gitEvidence = ReadGitWorkspaceEvidenceAtRoot(rootPath);
+
 		// The combined ignore-section path intentionally reuses one file-fact record.
 		// This keeps the snapshot cheap enough for live refreshes, so the caller must
 		// keep structural ignore semantics aligned between discovery and effective rules.
@@ -1601,7 +1608,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					IgnoreOptionCounts.Empty,
 					IgnoreOptionCounts.Empty,
 					IgnoreControllerImpactCounts.Empty,
-					effectiveExtensions),
+					effectiveExtensions,
+					GitEvidence: gitEvidence),
 				RootAccessDenied: true,
 				HadAccessDenied: true);
 		}
@@ -1613,7 +1621,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					IgnoreOptionCounts.Empty,
 					IgnoreOptionCounts.Empty,
 					IgnoreControllerImpactCounts.Empty,
-					effectiveExtensions),
+					effectiveExtensions,
+					GitEvidence: gitEvidence),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
@@ -1624,9 +1633,26 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				rawCounts.ToImmutable(),
 				effectiveCounts.ToImmutable(),
 				controllerImpactCounts,
-				effectiveExtensions),
+				effectiveExtensions,
+				GitEvidence: gitEvidence),
 			RootAccessDenied: false,
 			HadAccessDenied: false);
+	}
+
+	private static GitWorkspaceEvidence ReadGitWorkspaceEvidenceAtRoot(string rootPath)
+	{
+		try
+		{
+			var attributes = File.GetAttributes(Path.Combine(rootPath, ".git"));
+			return attributes.HasFlag(FileAttributes.ReparsePoint)
+				? GitWorkspaceEvidence.Empty
+				: new GitWorkspaceEvidence(HasRepositoryBoundary: true);
+		}
+		catch
+		{
+			// Structural evidence is best-effort; normal access diagnostics remain authoritative.
+			return GitWorkspaceEvidence.Empty;
+		}
 	}
 
 	private ScanResult<IgnoreSectionScanData> ScanIgnoreSectionSnapshotCore(
@@ -1657,7 +1683,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 					IgnoreOptionCounts.Empty,
 					IgnoreOptionCounts.Empty,
-					IgnoreControllerImpactCounts.Empty),
+					IgnoreControllerImpactCounts.Empty,
+					GitEvidence: discovery.Value.GitEvidence),
 				discovery.RootAccessDenied,
 				discovery.HadAccessDenied);
 		}
@@ -1954,7 +1981,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					effectiveExtensions,
 					HasVisibleTreeStructure: rootVisibility.BaseFinalVisible,
 					IsTreeStructureHiddenByEmptyFolders:
-						!rootVisibility.BaseFinalVisible && rootVisibility.EmptyFoldersFinalVisible),
+						!rootVisibility.BaseFinalVisible && rootVisibility.EmptyFoldersFinalVisible,
+					GitEvidence: discovery.Value.GitEvidence),
 				discovery.RootAccessDenied,
 				hadAccessDenied == 1);
 		}
@@ -2356,7 +2384,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
-				new EffectiveIgnoreScanDiscovery([], [], []),
+				new EffectiveIgnoreScanDiscovery([], [], [], GitWorkspaceEvidence.Empty),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
@@ -2403,7 +2431,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		    rootDirectControllerImpactCounts == IgnoreControllerImpactCounts.Empty)
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
-				new EffectiveIgnoreScanDiscovery([], [], []),
+				new EffectiveIgnoreScanDiscovery([], [], [], GitWorkspaceEvidence.Empty),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
@@ -2411,6 +2439,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var directories = new List<EffectiveIgnoreScanNode>(capacity: 256);
 		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
 		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
+		var gitEvidence = GitWorkspaceEvidence.Empty;
 		if (inheritedTrackedPathIndex is not null)
 			discoveredGitTrackedPathIndexes.Add(inheritedTrackedPathIndex);
 		var rootAccessDenied = 0;
@@ -2472,6 +2501,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						facts.FullPath,
 						facts.RelativePath,
 						cancellationToken);
+					if (!string.IsNullOrWhiteSpace(directoryBatch.GitMetadataPath))
+						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
 					(gitIgnoreContext, gitIgnoreCandidateContext) = EnterGitIgnoreScope(
 						facts.FullPath,
 						facts.RelativePath,
@@ -2612,7 +2643,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			new EffectiveIgnoreScanDiscovery(
 				directories,
 				discoveredGitIgnoreMatchers,
-				discoveredGitTrackedPathIndexes),
+				discoveredGitTrackedPathIndexes,
+				gitEvidence),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1);
 	}

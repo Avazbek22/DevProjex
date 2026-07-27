@@ -43,6 +43,7 @@ public sealed partial class SelectionSyncCoordinator(
     private bool _hasIgnoreOptionCounts;
     private IgnoreOptionCounts _ignoreOptionCounts;
     private IgnoreControllerImpactCounts _ignoreControllerImpactCounts;
+    private GitWorkspaceEvidence _gitWorkspaceEvidence;
 
     private bool _suppressRootAllCheck;
     private bool _suppressRootItemCheck;
@@ -965,6 +966,7 @@ public sealed partial class SelectionSyncCoordinator(
         _hasIgnoreOptionCounts = false;
         _ignoreOptionCounts = IgnoreOptionCounts.Empty;
         _ignoreControllerImpactCounts = IgnoreControllerImpactCounts.Empty;
+        _gitWorkspaceEvidence = GitWorkspaceEvidence.Empty;
         _stableSelectionSnapshot = null;
         _reversibleSelectionSnapshot = null;
 
@@ -1044,7 +1046,8 @@ public sealed partial class SelectionSyncCoordinator(
                 _ignoreOptionCounts,
                 _ignoreControllerImpactCounts,
                 _hasExtensionlessExtensionEntries,
-                _extensionlessExtensionEntriesCount);
+                _extensionlessExtensionEntriesCount,
+                _gitWorkspaceEvidence);
             return IgnoreOptionsAvailabilityResolver.Resolve(
                 getIgnoreOptionsAvailability(path, selectedRootFolders),
                 snapshotState,
@@ -1688,6 +1691,7 @@ public sealed partial class SelectionSyncCoordinator(
         BeginPendingApplyEvaluationDeferral();
         try
         {
+            _gitWorkspaceEvidence = snapshot.GitEvidence;
             if (snapshot.RootOptions is not null)
                 ApplyRootOptions(snapshot.RootOptions);
 
@@ -1758,7 +1762,8 @@ public sealed partial class SelectionSyncCoordinator(
             _session.IgnoreOptionStateCacheIsComplete,
             // A live refresh can project known roots but cannot discover roots hidden by
             // its input filters. Structural rollback therefore requires a full snapshot.
-            rootOptionsAreAuthoritative && snapshot.RootOptions is not null);
+            rootOptionsAreAuthoritative && snapshot.RootOptions is not null,
+            GitEvidence: snapshot.GitEvidence);
     }
 
     private bool TryRestoreKnownSelectionSnapshot(
@@ -1972,6 +1977,7 @@ public sealed partial class SelectionSyncCoordinator(
         BeginPendingApplyEvaluationDeferral();
         try
         {
+            _gitWorkspaceEvidence = snapshot.GitEvidence;
             ApplyRootOptions(snapshot.RootOptions);
             ApplyExtensionOptions(
                 snapshot.ExtensionOptions,
@@ -2466,7 +2472,8 @@ public sealed partial class SelectionSyncCoordinator(
             _ignoreOptionCounts,
             _ignoreControllerImpactCounts,
             _hasExtensionlessExtensionEntries,
-            _extensionlessExtensionEntriesCount);
+            _extensionlessExtensionEntriesCount,
+            _gitWorkspaceEvidence);
 
     private IgnoreRules GetOrBuildIgnoreRules(
         string path,

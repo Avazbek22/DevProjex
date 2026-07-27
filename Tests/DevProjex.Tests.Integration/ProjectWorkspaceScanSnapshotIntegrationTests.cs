@@ -172,6 +172,7 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		temp.CreateFile(".gitignore", "ignored-by-git/\n");
 		temp.CreateFile("root.txt", "root");
 		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateDirectory("src/nested/.git");
 		temp.CreateFile("src/.env", "secret");
 		temp.CreateFile("docs/readme.md", "# docs");
 		temp.CreateFile("node_modules/pkg/index.js", "module.exports = {};");
@@ -210,6 +211,7 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(full.Value.TreeInventory);
 		AssertIgnoreSectionEquivalent(light.Value.IgnoreSection, full.Value.IgnoreSection);
 		AssertIgnoreSectionEquivalent(useCaseIgnoreOnly.Value, full.Value.IgnoreSection);
+		Assert.True(full.Value.IgnoreSection.GitEvidence.HasRepositoryBoundary);
 		AssertTreeProjectionEqualsDirectBuild(temp.Path, selectedRoots, selectedExtensions, rules, inventory);
 	}
 
@@ -327,6 +329,7 @@ public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 		Assert.Equal(expected.RawIgnoreOptionCounts, actual.RawIgnoreOptionCounts);
 		Assert.Equal(expected.EffectiveIgnoreOptionCounts, actual.EffectiveIgnoreOptionCounts);
 		Assert.Equal(expected.ControllerImpactCounts, actual.ControllerImpactCounts);
+		Assert.Equal(expected.GitEvidence, actual.GitEvidence);
 	}
 
 	private static void AssertTreeProjectionEqualsDirectBuild(

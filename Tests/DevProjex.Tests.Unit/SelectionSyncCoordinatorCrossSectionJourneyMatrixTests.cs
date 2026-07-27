@@ -1508,7 +1508,8 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 					CurrentSnapshot.IgnoreOptionCounts,
 					CurrentSnapshot.ControllerImpactCounts,
 					CurrentSnapshot.ExtensionlessEntriesCount > 0,
-					CurrentSnapshot.ExtensionlessEntriesCount),
+					CurrentSnapshot.ExtensionlessEntriesCount,
+					CurrentSnapshot.GitEvidence),
 				RootOptionStateCache: new Dictionary<string, bool>(_rootStates, PathComparer.Default),
 				ExtensionOptionStateCache: new Dictionary<string, bool>(
 					_extensionStates,

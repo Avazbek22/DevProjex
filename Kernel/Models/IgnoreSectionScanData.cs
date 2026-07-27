@@ -9,7 +9,8 @@ public sealed record IgnoreSectionScanData(
 	IgnoreControllerImpactCounts ControllerImpactCounts = default,
 	HashSet<string>? EffectiveExtensions = null,
 	bool? HasVisibleTreeStructure = null,
-	bool IsTreeStructureHiddenByEmptyFolders = false)
+	bool IsTreeStructureHiddenByEmptyFolders = false,
+	GitWorkspaceEvidence GitEvidence = default)
 {
 	public IReadOnlySet<string> VisibleExtensions => EffectiveExtensions ?? Extensions;
 }

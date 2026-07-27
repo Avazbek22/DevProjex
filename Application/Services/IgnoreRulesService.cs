@@ -198,27 +198,40 @@ public sealed class IgnoreRulesService(
 		while (!string.IsNullOrWhiteSpace(currentPath))
 		{
 			var gitMetadataPath = Path.Combine(currentPath, ".git");
+			if (!Directory.Exists(gitMetadataPath) && !File.Exists(gitMetadataPath))
+			{
+				currentPath = GetParentPath(currentPath);
+				continue;
+			}
+
 			try
 			{
-				if (Directory.Exists(gitMetadataPath) || File.Exists(gitMetadataPath))
-					return true;
+				var attributes = File.GetAttributes(gitMetadataPath);
+				// Git index discovery fails closed at reparse metadata boundaries. Keep
+				// option availability aligned so an unsafe boundary cannot expose a mode
+				// that the scanner will never use.
+				if (attributes.HasFlag(FileAttributes.ReparsePoint))
+					return false;
+
+				return true;
 			}
 			catch
 			{
+				// An entry that cannot be inspected is not safe structural evidence.
 				return false;
 			}
-
-			var parentPath = Path.GetDirectoryName(currentPath);
-			if (string.IsNullOrWhiteSpace(parentPath) ||
-			    PathComparer.Default.Equals(parentPath, currentPath))
-			{
-				break;
-			}
-
-			currentPath = parentPath;
 		}
 
 		return false;
+	}
+
+	private static string? GetParentPath(string path)
+	{
+		var parentPath = Path.GetDirectoryName(path);
+		return string.IsNullOrWhiteSpace(parentPath) ||
+		       PathComparer.Default.Equals(parentPath, path)
+			? null
+			: parentPath;
 	}
 
 	private bool HasRelevantSmartIgnoreCandidates(ProjectScanContext context)

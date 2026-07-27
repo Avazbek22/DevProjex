@@ -111,6 +111,82 @@ public sealed class ProjectWorkspaceScanProjectionTests
 		Assert.False(reused);
 	}
 
+	[Fact]
+	public void TryProjectSelectedRoots_GitEvidenceComesOnlyFromRootFilesAndRetainedRoots()
+	{
+		var source = CreateSource();
+		var breakdown = Assert.IsType<ProjectWorkspaceScanBreakdown>(source.Breakdown);
+		var roots = breakdown.SelectedRoots.ToDictionary(
+			static pair => pair.Key,
+			static pair => pair.Value,
+			PathComparer.Default);
+		roots["keep"] = roots["keep"] with
+		{
+			IgnoreSection = roots["keep"].IgnoreSection with
+			{
+				GitEvidence = GitWorkspaceEvidence.Empty
+			}
+		};
+		roots["remove"] = roots["remove"] with
+		{
+			IgnoreSection = roots["remove"].IgnoreSection with
+			{
+				GitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true)
+			}
+		};
+		source = source with
+		{
+			IgnoreSection = source.IgnoreSection with
+			{
+				GitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true)
+			},
+			Breakdown = breakdown with { SelectedRoots = roots }
+		};
+
+		var reused = ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
+			source,
+			["keep"],
+			includeDirectoryToggleProbeRoots: true,
+			includeControllerImpactProbeRoots: true,
+			retainedRemovedRootEmptyFolderImpactRoots: null,
+			out var projected);
+
+		Assert.True(reused);
+		Assert.False(projected.Value.IgnoreSection.GitEvidence.HasRepositoryBoundary);
+	}
+
+	[Fact]
+	public void TryProjectSelectedRoots_ProjectRootGitEvidenceSurvivesRootProjection()
+	{
+		var source = CreateSource();
+		var breakdown = Assert.IsType<ProjectWorkspaceScanBreakdown>(source.Breakdown);
+		source = source with
+		{
+			IgnoreSection = source.IgnoreSection with
+			{
+				GitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true)
+			},
+			Breakdown = breakdown with
+			{
+				RootFiles = breakdown.RootFiles with
+				{
+					GitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true)
+				}
+			}
+		};
+
+		var reused = ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
+			source,
+			["keep"],
+			includeDirectoryToggleProbeRoots: true,
+			includeControllerImpactProbeRoots: true,
+			retainedRemovedRootEmptyFolderImpactRoots: null,
+			out var projected);
+
+		Assert.True(reused);
+		Assert.True(projected.Value.IgnoreSection.GitEvidence.HasRepositoryBoundary);
+	}
+
 	private static ProjectWorkspaceScanSnapshot CreateSource(bool removedRootHadAccessDenied = false)
 	{
 		var rootFiles = CreateSection(

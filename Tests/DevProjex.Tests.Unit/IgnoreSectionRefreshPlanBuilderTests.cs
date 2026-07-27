@@ -50,6 +50,32 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 	}
 
 	[Fact]
+	public void Build_WhenGitEvidenceChangesWithoutSelectionChange_RefreshesOptionsOnly()
+	{
+		var beforeSnapshot = new IgnoreSectionSnapshotState(
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			HasExtensionlessEntries: false,
+			ExtensionlessEntriesCount: 0);
+		var afterSnapshot = beforeSnapshot with
+		{
+			GitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true)
+		};
+
+		var plan = IgnoreSectionRefreshPlanBuilder.Build(
+			beforeSnapshot,
+			afterSnapshot,
+			new HashSet<IgnoreOptionId>(),
+			new HashSet<IgnoreOptionId>());
+
+		Assert.True(plan.RequiresIgnoreOptionsRefresh);
+		Assert.False(plan.RequiresSecondSnapshotPass);
+		Assert.False(plan.RequiresRootFolderRefresh);
+		Assert.Equal(IgnoreOptionRefreshImpact.None, plan.Impact);
+	}
+
+	[Fact]
 	public void Build_WhenFileLevelSelectionChanged_SchedulesSecondSnapshotWithoutRootRefresh()
 	{
 		var beforeSnapshot = new IgnoreSectionSnapshotState(

@@ -18,6 +18,14 @@ public static class IgnoreOptionsAvailabilityResolver
 		bool stateCacheIsComplete)
 	{
 		var availability = WithoutMeasuredOptions(structuralAvailability);
+		var hasRepositoryBoundary =
+			availability.IncludeTrackedGitFilesOnly ||
+			snapshotState.GitEvidence.HasRepositoryBoundary;
+		availability = availability with
+		{
+			IncludeGitIgnore = availability.IncludeGitIgnore || hasRepositoryBoundary,
+			IncludeTrackedGitFilesOnly = hasRepositoryBoundary
+		};
 		if (!snapshotState.HasIgnoreOptionCounts)
 		{
 			return snapshotState.HasExtensionlessEntries
@@ -37,10 +45,9 @@ public static class IgnoreOptionsAvailabilityResolver
 			// A standalone .gitignore file remains evidence-driven and is hidden when
 			// it cannot change the effective tree.
 			IncludeGitIgnore =
-				availability.IncludeTrackedGitFilesOnly ||
+				hasRepositoryBoundary ||
 				controllerCounts.GitIgnore > 0,
-			IncludeTrackedGitFilesOnly = ShouldKeepModeVisible(
-				availability.IncludeTrackedGitFilesOnly),
+			IncludeTrackedGitFilesOnly = hasRepositoryBoundary,
 			// Smart Ignore is evidence-driven after the measured pass. A project marker
 			// alone must not leave a checkbox that cannot change the effective tree.
 			IncludeSmartIgnore = controllerCounts.SmartIgnore > 0,
@@ -81,6 +88,4 @@ public static class IgnoreOptionsAvailabilityResolver
 			ExtensionlessFilesCount = 0
 		};
 
-	private static bool ShouldKeepModeVisible(bool structurallyAvailable) =>
-		structurallyAvailable;
 }

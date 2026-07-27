@@ -71,7 +71,8 @@ public sealed class SelectionRefreshEngine(
             RootAccessDenied: rootSection.RootAccessDenied || dynamicSection.RootAccessDenied,
             HadAccessDenied: rootSection.HadAccessDenied || dynamicSection.HadAccessDenied,
             TreeInventory: dynamicSection.TreeInventory,
-            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions);
+            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
+            GitEvidence: dynamicSection.SnapshotState.GitEvidence);
     }
 
     public SelectionRefreshSnapshot ComputeLiveRefreshSnapshot(
@@ -117,7 +118,8 @@ public sealed class SelectionRefreshEngine(
             RootAccessDenied: dynamicSection.RootAccessDenied,
             HadAccessDenied: dynamicSection.HadAccessDenied,
             TreeInventory: dynamicSection.TreeInventory,
-            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions);
+            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
+            GitEvidence: dynamicSection.SnapshotState.GitEvidence);
     }
 
     private static bool SelectionOptionsMatch(
@@ -433,9 +435,7 @@ public sealed class SelectionRefreshEngine(
             cancellationToken);
         var scanData = scan.Value.IgnoreSection;
 
-        var snapshotState = CreateSnapshotState(
-            scanData.EffectiveIgnoreOptionCounts,
-            scanData.ControllerImpactCounts);
+        var snapshotState = CreateSnapshotState(scanData);
         snapshotState = PreserveActiveRuntimeSnapshotState(
             snapshotState,
             previousRuntimeSnapshotState,
@@ -485,9 +485,7 @@ public sealed class SelectionRefreshEngine(
                 cancellationToken);
             scanData = scan.Value.IgnoreSection;
 
-            snapshotState = CreateSnapshotState(
-                scanData.EffectiveIgnoreOptionCounts,
-                scanData.ControllerImpactCounts);
+            snapshotState = CreateSnapshotState(scanData);
             snapshotState = PreserveActiveRuntimeSnapshotState(
                 snapshotState,
                 previousRuntimeSnapshotState,
@@ -971,15 +969,14 @@ public sealed class SelectionRefreshEngine(
         }
     }
 
-    private static IgnoreSectionSnapshotState CreateSnapshotState(
-        IgnoreOptionCounts counts,
-        IgnoreControllerImpactCounts controllerImpactCounts) =>
+    private static IgnoreSectionSnapshotState CreateSnapshotState(IgnoreSectionScanData scanData) =>
         new(
             HasIgnoreOptionCounts: true,
-            IgnoreOptionCounts: counts,
-            ControllerImpactCounts: controllerImpactCounts,
-            HasExtensionlessEntries: counts.ExtensionlessFiles > 0,
-            ExtensionlessEntriesCount: counts.ExtensionlessFiles);
+            IgnoreOptionCounts: scanData.EffectiveIgnoreOptionCounts,
+            ControllerImpactCounts: scanData.ControllerImpactCounts,
+            HasExtensionlessEntries: scanData.EffectiveIgnoreOptionCounts.ExtensionlessFiles > 0,
+            ExtensionlessEntriesCount: scanData.EffectiveIgnoreOptionCounts.ExtensionlessFiles,
+            GitEvidence: scanData.GitEvidence);
 
     private static IReadOnlyList<SelectionOption> ForceAllChecked(IReadOnlyList<SelectionOption> options)
     {
