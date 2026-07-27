@@ -62,6 +62,7 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
         {
             var viewModel = UiTestDriver.GetViewModel(window);
             var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             Assert.True(applyButton.IsEnabled);
 
             viewModel.StatusBusy = true;

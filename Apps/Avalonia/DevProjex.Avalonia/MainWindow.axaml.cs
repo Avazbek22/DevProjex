@@ -1160,9 +1160,9 @@ public partial class MainWindow : Window
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(cancellationToken);
-        // A completed transition has reached its target values, but its final layout may not have
-        // been presented yet. Share one settle gate so metrics, Git discovery and cleanup cannot
-        // race that final frame. Refreshes keep their immediate path because no reveal is pending.
+        // Do not fan out the raw reveal task here. All heavy post-load consumers must share the
+        // same settle gate or they can wake together on the final animation frame and stall the
+        // settings island. Refreshes keep their immediate path because no reveal is pending.
         var postLoadVisualReadyTask = settingsRevealTask.IsCompletedSuccessfully
             ? Task.CompletedTask
             : PostLoadVisualStabilityGate.WaitAsync(

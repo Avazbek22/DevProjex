@@ -879,6 +879,26 @@ internal static class UiTestDriver
         await WaitForSettledFramesAsync(frameCount: 6);
     }
 
+    public static async Task WaitForInitialMetricsBaselineAsync(
+        MainWindow window,
+        TimeSpan? timeout = null)
+    {
+        var metrics = GetRequiredPrivateField<MetricsPipeline>(
+            window,
+            "_metrics");
+
+        // Project load can be idle briefly before deferred post-load metrics become eligible.
+        // Tests that take ownership of StatusBusy must wait for the baseline itself, otherwise a
+        // later metrics completion can overwrite their synthetic status operation.
+        await WaitForConditionAsync(
+            window,
+            () => metrics.HasCompleteBaseline &&
+                  !metrics.IsBackgroundActive &&
+                  !GetViewModel(window).StatusBusy,
+            "initial metrics baseline to finish",
+            timeout);
+    }
+
     public static bool TryGetCurrentStatusMetrics(
         MainWindow window,
         out ExportOutputMetrics treeMetrics,

@@ -16,7 +16,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
         try
         {
-            await WaitForInitialMetricsBaselineAsync(window);
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             Assert.Equal(1, taskbarProgress.AttachCount);
 
             taskbarProgress.Calls.Clear();
@@ -51,7 +51,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
         try
         {
-            await WaitForInitialMetricsBaselineAsync(window);
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             taskbarProgress.Calls.Clear();
             var initialAttachCount = taskbarProgress.AttachCount;
 
@@ -88,7 +88,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
         try
         {
-            await WaitForInitialMetricsBaselineAsync(window);
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             var viewModel = UiTestDriver.GetViewModel(window);
 
             viewModel.StatusProgressIsIndeterminate = false;
@@ -152,7 +152,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
         try
         {
-            await WaitForInitialMetricsBaselineAsync(window);
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             taskbarProgress.Calls.Clear();
 
             InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "Receiving objects: 42%");
@@ -185,17 +185,6 @@ public sealed class MainWindowTaskbarProgressUiTests
         }
     }
 
-    private static async Task WaitForInitialMetricsBaselineAsync(MainWindow window)
-    {
-        var metrics = GetMetricsPipeline(window);
-        await UiTestDriver.WaitForConditionAsync(
-            window,
-            () => metrics.HasCompleteBaseline &&
-                  !metrics.IsBackgroundActive &&
-                  !UiTestDriver.GetViewModel(window).StatusBusy,
-            "initial metrics baseline to finish before taskbar assertions");
-    }
-
     private static void InvokeGitCloneTaskbarMethod(MainWindow window, string methodName, params object[] args)
     {
         var coordinator = GetTaskbarProgressCoordinator(window);
@@ -225,15 +214,6 @@ public sealed class MainWindowTaskbarProgressUiTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(field);
         return (TaskbarProgressCoordinator)field.GetValue(window)!;
-    }
-
-    private static MetricsPipeline GetMetricsPipeline(MainWindow window)
-    {
-        var field = typeof(MainWindow).GetField(
-            "_metrics",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        return (MetricsPipeline)field.GetValue(window)!;
     }
 
     private sealed class RecordingTaskbarProgressService : ITaskbarProgressService

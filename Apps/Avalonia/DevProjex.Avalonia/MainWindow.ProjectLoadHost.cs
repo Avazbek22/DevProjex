@@ -75,6 +75,8 @@ public partial class MainWindow : IProjectLoadPipelineHost
 
     void IProjectLoadPipelineHost.ScheduleProjectLoadMemoryCleanup(bool hadLoadedProjectBefore)
     {
+        // Cleanup's own delay runs concurrently with this task, so it is not a substitute for the
+        // shared visual gate. Compaction must remain ineligible until the final layout has settled.
         ScheduleBackgroundMemoryCleanup(
             hadLoadedProjectBefore
                 ? MemoryCleanupReason.ProjectSwitchPostLoad

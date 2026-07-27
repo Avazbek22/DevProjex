@@ -2,8 +2,13 @@ using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Coordinators;
 
+// Initial project loading has one shared visual boundary. Transition completion only means that
+// target values were reached; it does not guarantee that Avalonia published the final layout.
+// Keep metrics, Git discovery and compacting GC behind this gate instead of giving each consumer
+// the raw animation task or an independent delay.
 internal static class PostLoadVisualStabilityGate
 {
+    // This is compositor breathing room after the transition, not part of its duration.
     internal static readonly TimeSpan QuietPeriod =
         TimeSpan.FromMilliseconds(120);
 
@@ -28,8 +33,8 @@ internal static class PostLoadVisualStabilityGate
             cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
-        // The transition task ends when its values reach their targets, but Avalonia and the
-        // compositor still need a quiet frame to publish final layout before background work starts.
+        // Render once before and after the quiet period so both the final layout mutation and its
+        // presentation are drained before CPU, IO or stop-the-world GC work becomes eligible.
         await yieldUiAsync(DispatcherPriority.Render, cancellationToken);
 
         var quietPeriod = UiTimingProfile.Scale(QuietPeriod);

@@ -196,9 +196,9 @@ internal sealed class MemoryCleanupCoordinator(
                     deferredCleanupTask,
                     visualReadyWaitTask);
 
-                // Readiness is sampled only after both gates. Running the delay and visual wait
-                // concurrently preserves the earliest safe cleanup time without letting compacting
-                // GC rely on an observation made before an animation started.
+                // Keep both gates: the delay limits cleanup frequency, while visualReadyTask can
+                // include compositor settling that a timer cannot infer. Running them concurrently
+                // preserves the earliest safe cleanup time without weakening either condition.
                 if (cleanupPlan.WaitForUiSettled &&
                     !await WaitForUiReadyAsync(cleanupToken))
                 {

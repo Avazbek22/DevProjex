@@ -212,9 +212,9 @@ internal sealed class MetricsPipeline(
         var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
         await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
 
-        // Do not prewarm files while the settings island is revealing. Even a single background
-        // reader competes with Avalonia's layout/render work on large projects and causes visible
-        // frame stalls. Refreshes pass a completed task here, so F5 keeps its immediate fast path.
+        // This task represents visual stability, not merely animation completion. Replacing it
+        // with the raw reveal task lets file prewarming compete with the island's final layout and
+        // causes visible stalls on large projects. F5 passes a completed task and stays immediate.
         await WaitForInitialVisualReadyAsync(initialVisualReadyTask, cancellationToken);
         if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
             return;
@@ -234,8 +234,8 @@ internal sealed class MetricsPipeline(
         var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
         await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
 
-        // Keep measured builds behaviorally identical to production: animation time is excluded
-        // from the metric, but no file-system warmup is allowed to overlap the initial reveal.
+        // Keep measured builds behaviorally identical to production: visual-settle time is excluded
+        // from the metric, and file-system warmup cannot overlap the initial reveal's final frame.
         await WaitForInitialVisualReadyAsync(initialVisualReadyTask, cancellationToken);
         if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
             return TimeSpan.Zero;
