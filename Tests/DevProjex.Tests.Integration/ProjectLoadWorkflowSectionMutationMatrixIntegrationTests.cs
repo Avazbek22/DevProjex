@@ -237,7 +237,8 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
                 snapshot.IgnoreOptionCounts,
                 snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
-                snapshot.ExtensionlessEntriesCount),
+                snapshot.ExtensionlessEntriesCount,
+                snapshot.GitEvidence),
             RootOptionStateCache: snapshot.RootOptions?.ToDictionary(
                 option => option.Name,
                 option => option.IsChecked,

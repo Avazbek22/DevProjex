@@ -137,7 +137,6 @@ public sealed class MemoryCleanupCoordinatorTests
             });
 
         coordinator.Schedule(MemoryCleanupReason.PreviewRebuildCompleted);
-        await Task.Delay(50);
         coordinator.Schedule(MemoryCleanupReason.PreviewRebuildCompleted);
 
         var mode = await completion.Task.WaitAsync(CompletionTimeout);
@@ -544,6 +543,80 @@ public sealed class MemoryCleanupCoordinatorTests
     }
 
     [AvaloniaFact]
+    public async Task Schedule_PostLoadCleanupWaitsForVisualReadyAndRechecksUiAfterDelay()
+    {
+        var visualReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var delayEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelay = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var collection = NewCompletionSource();
+        var readinessChecks = 0;
+        var uiReady = 1;
+        using var coordinator = CreateCoordinator(
+            captureMemorySnapshot: static () => EmptySnapshot(),
+            collect: mode => collection.TrySetResult(mode),
+            uiReady: () =>
+            {
+                Interlocked.Increment(ref readinessChecks);
+                return Volatile.Read(ref uiReady) != 0;
+            },
+            deferCleanup: (_, cancellationToken) =>
+            {
+                delayEntered.TrySetResult();
+                return releaseDelay.Task.WaitAsync(cancellationToken);
+            });
+
+        coordinator.Schedule(
+            MemoryCleanupReason.InitialProjectLoad,
+            visualReady.Task);
+
+        await delayEntered.Task.WaitAsync(CompletionTimeout);
+        Assert.Equal(0, Volatile.Read(ref readinessChecks));
+
+        Volatile.Write(ref uiReady, 0);
+        releaseDelay.TrySetResult();
+        await Task.Delay(50);
+        Assert.Equal(0, Volatile.Read(ref readinessChecks));
+        Assert.False(collection.Task.IsCompleted);
+
+        visualReady.TrySetResult();
+        await WaitForConditionAsync(
+            () => Volatile.Read(ref readinessChecks) > 0);
+        Assert.False(collection.Task.IsCompleted);
+
+        Volatile.Write(ref uiReady, 1);
+        var mode = await collection.Task.WaitAsync(CompletionTimeout);
+        await WaitUntilIdleAsync(coordinator);
+
+        Assert.Equal(MemoryCleanupCollectionMode.Aggressive, mode);
+    }
+
+    [AvaloniaFact]
+    public async Task Schedule_PostLoadCleanupCanceledBeforeVisualReadyDoesNotCollect()
+    {
+        var visualReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var collectionCount = 0;
+        using var coordinator = CreateCoordinator(
+            captureMemorySnapshot: static () => EmptySnapshot(),
+            collect: _ => Interlocked.Increment(ref collectionCount));
+
+        coordinator.Schedule(
+            MemoryCleanupReason.InitialProjectLoad,
+            visualReady.Task);
+        Assert.True(coordinator.IsCleanupPendingOrRunning);
+
+        coordinator.CancelBackground();
+        await WaitUntilIdleAsync(coordinator);
+        visualReady.TrySetResult();
+        await Task.Delay(100);
+
+        Assert.Equal(0, Volatile.Read(ref collectionCount));
+    }
+
+    [AvaloniaFact]
     public async Task Schedule_BackgroundCleanupDoesNotTrimWorkingSet()
     {
         var trimCount = 0;
@@ -568,7 +641,8 @@ public sealed class MemoryCleanupCoordinatorTests
         TimeSpan? uiReadinessTimeout = null,
         TimeSpan? uiReadinessPollInterval = null,
         int uiReadinessMaximumAttempts = 24,
-        Action? trimWorkingSet = null) =>
+        Action? trimWorkingSet = null,
+        Func<TimeSpan, CancellationToken, Task>? deferCleanup = null) =>
         new(
             SessionMetricsRecorder.Disabled,
             uiReady ?? (static () => true),
@@ -578,7 +652,8 @@ public sealed class MemoryCleanupCoordinatorTests
             uiReadinessTimeout,
             uiReadinessPollInterval,
             uiReadinessMaximumAttempts,
-            trimWorkingSet ?? (static () => { }));
+            trimWorkingSet ?? (static () => { }),
+            deferCleanup);
 
     private static async Task WaitUntilIdleAsync(
         MemoryCleanupCoordinator coordinator)
@@ -593,6 +668,15 @@ public sealed class MemoryCleanupCoordinatorTests
         Assert.False(
             coordinator.IsCleanupPendingOrRunning,
             "Memory cleanup did not reach an idle state before the timeout.");
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> condition)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (!condition() && stopwatch.Elapsed < CompletionTimeout)
+            await Task.Delay(10);
+
+        Assert.True(condition(), "Condition was not reached before the timeout.");
     }
 
     private static TaskCompletionSource<MemoryCleanupCollectionMode>

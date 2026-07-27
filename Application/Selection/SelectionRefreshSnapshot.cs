@@ -16,7 +16,8 @@ public sealed record SelectionRefreshSnapshot(
     bool RootAccessDenied,
     bool HadAccessDenied,
     ProjectTreeInventorySnapshot? TreeInventory = null,
-    IReadOnlyList<SelectionOption>? VisibleExtensionOptions = null)
+    IReadOnlyList<SelectionOption>? VisibleExtensionOptions = null,
+    GitWorkspaceEvidence GitEvidence = default)
 {
     public IReadOnlyList<SelectionOption> EffectiveExtensionOptions =>
         VisibleExtensionOptions ?? ExtensionOptions;

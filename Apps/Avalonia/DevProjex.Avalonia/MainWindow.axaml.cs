@@ -585,6 +585,11 @@ public partial class MainWindow : Window
     private void ScheduleBackgroundMemoryCleanup(MemoryCleanupReason reason)
         => _memoryCleanup.Schedule(reason);
 
+    private void ScheduleBackgroundMemoryCleanup(
+        MemoryCleanupReason reason,
+        Task visualReadyTask)
+        => _memoryCleanup.Schedule(reason, visualReadyTask);
+
     private void CancelBackgroundMemoryCleanup()
         => _memoryCleanup.CancelBackground();
 
@@ -1155,7 +1160,15 @@ public partial class MainWindow : Window
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(cancellationToken);
-        _postLoadVisualReadyTask = settingsRevealTask;
+        // Do not fan out the raw reveal task here. All heavy post-load consumers must share the
+        // same settle gate or they can wake together on the final animation frame and stall the
+        // settings island. Refreshes keep their immediate path because no reveal is pending.
+        var postLoadVisualReadyTask = settingsRevealTask.IsCompletedSuccessfully
+            ? Task.CompletedTask
+            : PostLoadVisualStabilityGate.WaitAsync(
+                settingsRevealTask,
+                cancellationToken);
+        _postLoadVisualReadyTask = postLoadVisualReadyTask;
         ObserveDetachedTask(settingsRevealTask, "AnimateSettingsPanelWhenTreeReady");
 #if DEVPROJEX_PROJECT_LOAD_TIMING
         var timing = _projectLoadTiming;
@@ -1169,7 +1182,7 @@ public partial class MainWindow : Window
             TrackProjectAnalysisTimingAsync(
                 _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
                     currentTree,
-                    settingsRevealTask,
+                    postLoadVisualReadyTask,
                     cancellationToken),
                 timing),
             "InitializeFileMetricsCache");
@@ -1177,7 +1190,7 @@ public partial class MainWindow : Window
         ObserveDetachedTask(
             _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
                 currentTree,
-                settingsRevealTask,
+                postLoadVisualReadyTask,
                 cancellationToken),
             "InitializeFileMetricsCache");
 #endif
@@ -1458,8 +1471,27 @@ public partial class MainWindow : Window
             _viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
 
         _viewModel.IgnoreOptions.Clear();
-        foreach (var option in snapshot.IgnoreOptions)
-            _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(option.Id, option.Label, option.IsChecked));
+        var controllerGroupEndIndex = -1;
+        for (var index = snapshot.IgnoreOptions.Count - 1; index >= 0; index--)
+        {
+            if (snapshot.IgnoreOptions[index].Id is IgnoreOptionId.UseGitIgnore
+                or IgnoreOptionId.TrackedGitFilesOnly
+                or IgnoreOptionId.SmartIgnore)
+            {
+                controllerGroupEndIndex = index;
+                break;
+            }
+        }
+
+        for (var index = 0; index < snapshot.IgnoreOptions.Count; index++)
+        {
+            var option = snapshot.IgnoreOptions[index];
+            _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+                option.Id,
+                option.Label,
+                option.IsChecked,
+                isControllerGroupEnd: index == controllerGroupEndIndex));
+        }
 
         _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
         _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;

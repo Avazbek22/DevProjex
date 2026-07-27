@@ -19,17 +19,17 @@ public sealed class HelpContentDocumentationContractTests
 
     public static TheoryData<string, string, string> TreeFontAndSettingsContracts => new()
     {
-        { "help.ru.txt", "### Шрифт дерева", "Изменения в списках «Игнорировать», «Типы файлов» и «Папки верхнего уровня» подготавливаются" },
-        { "help.en.txt", "### Tree font", "Changes in “Ignore options”, “Extensions”, and “Root folders” are staged" },
-        { "help.de.txt", "### Baum-Schrift", "Änderungen in „Ignorieren“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet" },
-        { "help.fr.txt", "### Police de l’arborescence", "Les changements dans « Ignorer », « Types de fichiers » et « Dossiers de premier niveau » sont préparés" },
-        { "help.it.txt", "### Font albero", "Le modifiche in « Ignora », « Tipi di file » e « Cartelle di primo livello » vengono preparate" },
-        { "help.es.txt", "### fuente de árbol", "Los cambios en \"Ignorar opciones\", \"Extensiones\" y \"Carpetas raíz\" se organizan" },
-        { "help.pt.txt", "### Fonte de árvore", "As alterações em “Ignorar opções”, “Extensões” e “Pastas raiz” são preparadas" },
-        { "help.pt-pt.txt", "### Fonte de árvore", "As alterações em “Ignorar opções”, “Extensões” e “Pastas raiz” são preparadas" },
-        { "help.kk.txt", "### Ағаш қарпі", "«Елемеу», «Файл түрлері» және «Жоғарғы деңгей қалталары» өзгерістері панельде дайындалып" },
-        { "help.tg.txt", "### Шрифти дарахт", "Тағйирот дар «Нодида гирифтан», «Навъҳои файл» ва «Ҷузвдонҳои сатҳи боло» дар панел омода мешаванд" },
-        { "help.uz.txt", "### Daraxt shrifti", "«E’tiborsiz qoldirish», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi" }
+        { "help.ru.txt", "### Шрифт дерева", "Изменения в списках «Исключения», «Типы файлов» и «Папки верхнего уровня» подготавливаются" },
+        { "help.en.txt", "### Tree font", "Changes in “Exclusions”, “Extensions”, and “Root folders” are staged" },
+        { "help.de.txt", "### Baum-Schrift", "Änderungen in „Ausschlüsse“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet" },
+        { "help.fr.txt", "### Police de l’arborescence", "Les changements dans « Exclusions », « Types de fichiers » et « Dossiers de premier niveau » sont préparés" },
+        { "help.it.txt", "### Font albero", "Le modifiche in « Esclusioni », « Tipi di file » e « Cartelle di primo livello » vengono preparate" },
+        { "help.es.txt", "### fuente de árbol", "Los cambios en \"Exclusiones\", \"Extensiones\" y \"Carpetas raíz\" se organizan" },
+        { "help.pt.txt", "### Fonte de árvore", "As alterações em “Exclusões”, “Extensões” e “Pastas raiz” são preparadas" },
+        { "help.pt-pt.txt", "### Fonte de árvore", "As alterações em “Exclusões”, “Extensões” e “Pastas raiz” são preparadas" },
+        { "help.kk.txt", "### Ағаш қарпі", "«Ерекшеліктер», «Файл түрлері» және «Жоғарғы деңгей қалталары» өзгерістері панельде дайындалып" },
+        { "help.tg.txt", "### Шрифти дарахт", "Тағйирот дар «Истисноҳо», «Навъҳои файл» ва «Ҷузвдонҳои сатҳи боло» дар панел омода мешаванд" },
+        { "help.uz.txt", "### Daraxt shrifti", "«Istisnolar», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi" }
     };
 
     public static TheoryData<string, string, string> IgnoreScopeContracts => new()
@@ -105,6 +105,21 @@ public sealed class HelpContentDocumentationContractTests
         { "help.kk.txt", "бақыланатын файлдар", "индекс немесе Git CLI болмаса" },
         { "help.tg.txt", "файлҳои пайгиришаванда", "бе индекс ё Git CLI" },
         { "help.uz.txt", "kuzatiladigan fayllar", "indeks yoki Git CLI bo‘lmasa" }
+    };
+
+    public static TheoryData<string, string, string, string, string, string> TrackedOnlyGitModeContracts => new()
+    {
+        { "help.ru.txt", "### 12.4 Только отслеживаемые Git-файлы", "неотслеживаемые файлы исключаются", "взаимно исключают", "поддержкой профилей", "стабильной парой" },
+        { "help.en.txt", "### 12.4 Tracked Git files only", "untracked files are excluded", "mutually exclusive", "support profiles", "stable pair" },
+        { "help.de.txt", "### 12.4 Nur von Git verfolgte Dateien", "nicht verfolgte Dateien werden ausgeschlossen", "schließen sich gegenseitig aus", "Profilunterstützung", "stabiles Schalterpaar" },
+        { "help.fr.txt", "### 12.4 Uniquement les fichiers suivis par Git", "les fichiers non suivis sont exclus", "s’excluent mutuellement", "prenant en charge les profils", "paire stable" },
+        { "help.it.txt", "### 12.4 Solo file tracciati da Git", "i file non tracciati vengono esclusi", "si escludono a vicenda", "supportano i profili", "coppia stabile" },
+        { "help.es.txt", "### 12.4 Solo archivos rastreados por Git", "los archivos no rastreados quedan excluidos", "se excluyen mutuamente", "admiten perfiles", "par estable" },
+        { "help.pt.txt", "### 12.4 Somente arquivos rastreados pelo Git", "arquivos não rastreados são excluídos", "mutuamente exclusivos", "compatíveis com perfis", "par estável" },
+        { "help.pt-pt.txt", "### 12.4 Apenas ficheiros controlados pelo Git", "os ficheiros não controlados são excluídos", "mutuamente exclusivos", "suportam perfis", "par estável" },
+        { "help.kk.txt", "### 12.4 Тек Git бақылайтын файлдар", "бақыланбайтын файлдар алынып тасталады", "бір-бірін өзара жоққа шығарады", "Профильдерді қолдайтын", "тұрақты" },
+        { "help.tg.txt", "### 12.4 Танҳо файлҳои пайгиришавандаи Git", "файлҳои пайгиринашаванда хориҷ мешаванд", "ҳамдигарро истисно мекунанд", "профилҳоро дастгирӣ мекунанд", "ҷуфти устувор" },
+        { "help.uz.txt", "### 12.4 Faqat Git kuzatadigan fayllar", "kuzatilmaydigan fayllar chiqariladi", "o‘zaro istisno qilinadi", "Profillarni qo‘llaydigan", "barqaror" }
     };
 
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
@@ -250,6 +265,28 @@ public sealed class HelpContentDocumentationContractTests
 
         Assert.Contains(expectedTrackedBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(expectedFallbackBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [MemberData(nameof(TrackedOnlyGitModeContracts))]
+    public void HelpContent_TrackedOnlySection_DescribesIndexOwnershipAndStableGitModePair(
+        string fileName,
+        string expectedHeading,
+        string expectedUntrackedBehavior,
+        string expectedMutualExclusion,
+        string expectedProfilePersistence,
+        string expectedStablePair)
+    {
+        var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
+        var trackedOnlySection = ExtractSection(ignoreSection, expectedHeading, "### 12.5");
+
+        Assert.Contains(expectedUntrackedBehavior, trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedMutualExclusion, trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedProfilePersistence, trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains("worktree", trackedOnlySection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("HEAD", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(".gitignore", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedStablePair, ignoreSection, StringComparison.Ordinal);
     }
 
     [Theory]

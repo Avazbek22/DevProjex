@@ -27,6 +27,7 @@ public sealed partial class FileSystemScanner
         public MutableIgnoreOptionCounts RawCounts;
         public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
+        public GitWorkspaceEvidence GitEvidence { get; set; }
         public List<ProjectTreeInventorySnapshot>? TreeInventories { get; } = captureTreeInventory ? [] : null;
         public List<KeyValuePair<string, ProjectWorkspaceRootScanSnapshot>>? RootSnapshots { get; } =
             captureRootScanBreakdown ? [] : null;
@@ -37,6 +38,7 @@ public sealed partial class FileSystemScanner
             RawCounts.IsEmpty &&
             EffectiveCounts == IgnoreOptionCounts.Empty &&
             ControllerImpactCounts == IgnoreControllerImpactCounts.Empty &&
+            GitEvidence == GitWorkspaceEvidence.Empty &&
             (TreeInventories is null || TreeInventories.Count == 0) &&
             (RootSnapshots is null || RootSnapshots.Count == 0);
     }
@@ -155,7 +157,8 @@ public sealed partial class FileSystemScanner
     private sealed record EffectiveIgnoreScanDiscovery(
         List<EffectiveIgnoreScanNode> Nodes,
         IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers,
-        IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes);
+        IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes,
+        GitWorkspaceEvidence GitEvidence);
 
     private struct EffectiveIgnoreNodeFileMetrics
     {

@@ -9,6 +9,7 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart Ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
+				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Ignore hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Ignore hidden files",
 				["Settings.Ignore.DotFolders"] = "Ignore dot folders",
@@ -40,12 +41,37 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 			IncludeGitIgnore: true,
 			IncludeSmartIgnore: true));
 
-		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
+		Assert.Equal(IgnoreOptionId.SmartIgnore, options[1].Id);
 		Assert.Equal(IgnoreOptionId.HiddenFolders, options[2].Id);
 		Assert.Equal(IgnoreOptionId.HiddenFiles, options[3].Id);
 		Assert.Equal(IgnoreOptionId.DotFolders, options[4].Id);
 		Assert.Equal(IgnoreOptionId.DotFiles, options[5].Id);
+	}
+
+	[Fact]
+	public void GetOptions_RepositoryAvailability_KeepsGitModesAdjacentAndMutuallyExclusiveByDefault()
+	{
+		var service = CreateService();
+
+		var options = service.GetOptions(new IgnoreOptionsAvailability(
+			IncludeGitIgnore: true,
+			IncludeSmartIgnore: true,
+			IncludeTrackedGitFilesOnly: true));
+
+		Assert.Equal(
+			[
+				IgnoreOptionId.UseGitIgnore,
+				IgnoreOptionId.TrackedGitFilesOnly,
+				IgnoreOptionId.SmartIgnore,
+				IgnoreOptionId.HiddenFolders,
+				IgnoreOptionId.HiddenFiles,
+				IgnoreOptionId.DotFolders,
+				IgnoreOptionId.DotFiles
+			],
+			options.Select(static option => option.Id));
+		Assert.True(options[0].DefaultChecked);
+		Assert.False(options[1].DefaultChecked);
 	}
 
 	[Fact]

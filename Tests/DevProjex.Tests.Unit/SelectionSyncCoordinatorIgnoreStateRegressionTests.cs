@@ -93,7 +93,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 	}
 
 	[Fact]
-	public void PopulateIgnoreOptionsForRootSelection_ExplicitUncheckedGitController_RemainsVisibleWithZeroImpact()
+	public void PopulateIgnoreOptionsForRootSelection_StandaloneUncheckedGitController_HidesAtZeroImpactAndKeepsIntent()
 	{
 		var viewModel = CreateViewModel();
 		using var coordinator = CreateCoordinator(viewModel, includeGitIgnore: true);
@@ -113,8 +113,9 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 		ApplyIgnoreCounts(coordinator, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty);
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
 
-		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.UseGitIgnore).IsChecked);
+		Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
 		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.False(coordinator.SnapshotIgnoreOptionStatesForPersistence()![IgnoreOptionId.UseGitIgnore]);
 	}
 
 	[Fact]
@@ -202,6 +203,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
 				["Settings.Ignore.DotFolders"] = "dot folders",

@@ -144,6 +144,54 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void HandleIgnoreAllChanged_OffOnCyclePreservesTrackedGitFilteringMode()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => projectPath,
+			availabilityProvider: (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true));
+		coordinator.ApplyProjectProfileSelections(
+			projectPath,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions:
+				[
+					IgnoreOptionId.TrackedGitFilesOnly,
+					IgnoreOptionId.SmartIgnore
+				],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.UseGitIgnore] = false,
+					[IgnoreOptionId.TrackedGitFilesOnly] = true,
+					[IgnoreOptionId.SmartIgnore] = true
+				}));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], projectPath);
+
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked);
+
+		coordinator.HandleIgnoreAllChanged(isChecked: false, currentPath: null);
+
+		Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
+
+		coordinator.HandleIgnoreAllChanged(isChecked: true, currentPath: null);
+
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
+	}
+
+	[Fact]
 	public void RootFolderReset_UnsubscribesRemovedItemsAndDoesNotDuplicateRetainedSubscriptions()
 	{
 		var viewModel = CreateViewModel();
@@ -1735,7 +1783,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	private static SelectionSyncCoordinator CreateCoordinator(
 		MainWindowViewModel viewModel,
 		IFileSystemScanner? scanner = null,
-		Func<string?>? currentPathProvider = null)
+		Func<string?>? currentPathProvider = null,
+		Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability>? availabilityProvider = null)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		scanner ??= new StubFileSystemScanner();
@@ -1749,12 +1798,25 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			new HashSet<string>(),
 			new HashSet<string>());
 
+		if (availabilityProvider is null)
+		{
+			return new SelectionSyncCoordinator(
+				viewModel,
+				scanOptions,
+				filterService,
+				ignoreService,
+				buildIgnoreRules,
+				_ => false,
+				currentPathProvider ?? (() => null));
+		}
+
 		return new SelectionSyncCoordinator(
 			viewModel,
 			scanOptions,
 			filterService,
 			ignoreService,
-			buildIgnoreRules,
+			(path, _, _) => buildIgnoreRules(path),
+			availabilityProvider,
 			_ => false,
 			currentPathProvider ?? (() => null));
 	}
@@ -2073,6 +2135,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
 				["Settings.Ignore.DotFolders"] = "dot folders",
@@ -2085,6 +2148,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Умное исключение",
 				["Settings.Ignore.UseGitIgnore"] = "Использовать .gitignore",
+				["Settings.Ignore.TrackedGitFilesOnly"] = "Только файлы под контролем Git",
 				["Settings.Ignore.HiddenFolders"] = "Скрытые папки",
 				["Settings.Ignore.HiddenFiles"] = "Скрытые файлы",
 				["Settings.Ignore.DotFolders"] = "Папки с точкой",
@@ -2224,6 +2288,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		int emptyFolderCount = 433)
 	{
 		var ignoreOptions = Enum.GetValues<IgnoreOptionId>()
+			.Where(static optionId => optionId != IgnoreOptionId.TrackedGitFilesOnly)
 			.Select(optionId => new ResolvedIgnoreOptionState(
 				optionId,
 				$"{optionId} ({(optionId == IgnoreOptionId.EmptyFolders ? emptyFolderCount : 1)})",

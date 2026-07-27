@@ -135,4 +135,48 @@ public sealed class ProjectRootFactsProviderTests
 		Assert.False(facts.HasGitIgnoreFile);
 		Assert.Null(facts.GitIgnoreSignature);
 	}
+
+	[Fact]
+	public void HasGitMetadataEntry_RejectsReparseFilesAndDirectories()
+	{
+		var fileLinkFacts = new ProjectRootFacts(
+			rootPath: "project",
+			exists: true,
+			isAccessible: true,
+			files: [new ProjectRootFileFact(".git", string.Empty, IsReparsePoint: true)],
+			directories: [],
+			gitIgnoreSignature: null);
+		var directoryLinkFacts = new ProjectRootFacts(
+			rootPath: "project",
+			exists: true,
+			isAccessible: true,
+			files: [],
+			directories: [new ProjectRootDirectoryFact(".git", "project/.git", IsReparsePoint: true)],
+			gitIgnoreSignature: null);
+
+		Assert.False(fileLinkFacts.HasGitMetadataEntry);
+		Assert.False(directoryLinkFacts.HasGitMetadataEntry);
+	}
+
+	[Fact]
+	public void HasGitMetadataEntry_AcceptsDirectoryAndWorktreeFile()
+	{
+		var fileFacts = new ProjectRootFacts(
+			rootPath: "project",
+			exists: true,
+			isAccessible: true,
+			files: [new ProjectRootFileFact(".git", string.Empty)],
+			directories: [],
+			gitIgnoreSignature: null);
+		var directoryFacts = new ProjectRootFacts(
+			rootPath: "project",
+			exists: true,
+			isAccessible: true,
+			files: [],
+			directories: [new ProjectRootDirectoryFact(".git", "project/.git", IsReparsePoint: false)],
+			gitIgnoreSignature: null);
+
+		Assert.True(fileFacts.HasGitMetadataEntry);
+		Assert.True(directoryFacts.HasGitMetadataEntry);
+	}
 }

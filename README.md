@@ -73,7 +73,8 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **Export to file** from menu (tree / content / tree + content)
 * **Export project copies** to a separate folder or ZIP archive, preserving the effective tree, binary files, and included empty folders
 * **Search & name filtering** for large projects
-* **Smart Ignore + hierarchical .gitignore support** (scope-aware behavior for mixed workspaces and monorepos)
+* **Two Git-aware filtering modes**: hierarchical `.gitignore` evaluation or an index-backed tracked-files-only view across nested repositories and worktrees
+* **Scope-aware Smart Ignore** for mixed workspaces and monorepos
 * **Extensionless files handling** via dedicated ignore option
 * **Git integration** (clone by URL, switch branches, get updates in cached copies)
 * **Status bar with live metrics** (tree/content lines, chars, ~tokens)
@@ -129,20 +130,31 @@ repo/
 
 Deep projects are not limited to the repository root. When an artifact candidate is encountered during tree traversal, DevProjex validates it against the applicable ancestor project markers. This keeps deeply nested and mixed-language workspaces predictable.
 
-### 4. Compose with `.gitignore`, not replace it
+### 4. Choose the Git view you need
 
-Smart Ignore and **Use `.gitignore`** are independent switches:
+`.gitignore` answers “which paths should Git ignore?” It does not mean “show only files owned by the repository.” DevProjex supports both workflows as two mutually exclusive modes:
 
-1. Every reachable `.gitignore` is evaluated in its own directory scope, including nested files and negation rules.
-2. When a readable Git index is available, tracked files remain visible even if they match `.gitignore`; without an index or Git CLI, evaluation safely remains pattern-only.
-3. Smart Ignore processes the items that remain.
-4. Explicit dot-file, hidden-item, empty-item, and extensionless-file rules run afterward.
+| Mode | Result |
+|---|---|
+| **Use `.gitignore`** | Keeps tracked files and untracked files that are not excluded by reachable `.gitignore` rules. If no readable Git index is available, DevProjex safely falls back to pattern-only evaluation. |
+| **Tracked Git files only** | Starts from existing working-tree files recorded in each readable Git index. Modified tracked files and staged additions remain included; untracked files are excluded. |
 
-An option appears in the settings panel only when it can change the current effective tree. For example, Smart Ignore may stay hidden while `.gitignore` already excludes all matching artifacts, then appear when `.gitignore` is disabled.
+In `.gitignore` mode, every reachable `.gitignore` is evaluated in its own directory scope, including nested rules and negations.
+
+DevProjex resolves every reachable nested repository and worktree independently, at any reachable nesting level. A child repository never inherits tracked state from its parent or sibling. Strict tracked-files mode does not silently fall back to `.gitignore` patterns when an index cannot be read.
+
+This is a view of the current working tree, not a historical snapshot of `HEAD` or a promise that the files match a remote Git host. The current bytes of modified tracked files are used.
+
+### 5. Compose filters predictably
+
+The selected Git mode runs first. Smart Ignore processes the remaining items, followed by the explicit dot-file, hidden-item, empty-item, and extensionless-file rules. Root-folder, file-type, and checkbox selections can narrow the same effective tree further.
+
+Inside a Git repository, the two Git modes remain visible as a stable toggle pair. Smart Ignore and the evidence-based basic options appear only when they can affect the current tree. Smart Ignore may therefore stay hidden while the selected Git mode already excludes all matching artifacts, then appear after that mode is changed.
 
 ### Control stays with you
 
-* Toggle Smart Ignore and `.gitignore` independently.
+* Switch between hierarchical `.gitignore` evaluation and the tracked-files-only Git view.
+* Combine the selected Git mode with Smart Ignore and the basic ignore switches.
 * Put project-specific patterns in `.gitignore`; the curated Smart Ignore rules are intentionally not an arbitrary user-editable pattern list.
 * Control dot-prefixed and hidden items through their separate switches instead of having Smart Ignore hide them implicitly.
 * Narrow the result by top-level folders and file types.

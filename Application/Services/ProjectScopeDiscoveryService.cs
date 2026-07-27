@@ -368,6 +368,7 @@ public sealed class ProjectScopeDiscoveryService(
 		var rootPath = rootFacts.RootPath;
 		var hasExplicitRootSelection = selectedRootFolders is not null && selectedRootFolders.Count > 0;
 		var rootHasGitIgnore = rootFacts.HasGitIgnoreFile;
+		var rootHasGitRepository = rootFacts.HasGitMetadataEntry;
 		var rootHasProjectMarker = HasProjectMarker(rootFacts);
 		// Scope discovery is intentionally about project ownership, not artifact hiding.
 		// The generic artifact matcher handles dependency/build/cache folders later, after
@@ -385,7 +386,8 @@ public sealed class ProjectScopeDiscoveryService(
 					rootPath,
 					rootHasGitIgnore,
 					HasProjectMarker: rootHasProjectMarker,
-					LooksLikeProject: rootHasGitIgnore || rootHasProjectMarker)
+					LooksLikeProject: rootHasGitIgnore || rootHasGitRepository || rootHasProjectMarker,
+					HasGitRepository: rootHasGitRepository)
 			]);
 		}
 
@@ -399,10 +401,12 @@ public sealed class ProjectScopeDiscoveryService(
 			{
 				var candidateFacts = rootFactsCache.Get(directoryPath);
 				var hasGitIgnore = candidateFacts.HasGitIgnoreFile;
+				var hasGitRepository = candidateFacts.HasGitMetadataEntry;
 				var hasMarker = HasProjectMarker(candidateFacts);
 				if (ShouldSkipProjectScopeCandidate(
 					    directoryPath,
 					    hasGitIgnore,
+					    hasGitRepository,
 					    hasMarker,
 					    isExplicitRootSelection: hasExplicitRootSelection))
 				{
@@ -413,7 +417,8 @@ public sealed class ProjectScopeDiscoveryService(
 					directoryPath,
 					hasGitIgnore,
 					HasProjectMarker: hasMarker,
-					LooksLikeProject: hasGitIgnore || hasMarker));
+					LooksLikeProject: hasGitIgnore || hasGitRepository || hasMarker,
+					HasGitRepository: hasGitRepository));
 				return localCandidates;
 			},
 			localCandidates =>
@@ -432,7 +437,7 @@ public sealed class ProjectScopeDiscoveryService(
 		{
 			// A marked opened root still owns its selected child folders. Dropping the root
 			// scope here disables its stack rules whenever the UI supplies explicit roots.
-			var rootLooksLikeProject = rootHasGitIgnore || rootHasProjectMarker;
+			var rootLooksLikeProject = rootHasGitIgnore || rootHasGitRepository || rootHasProjectMarker;
 			var selectedScopes = new List<ProjectScope>(expandedCandidates.Length + (rootLooksLikeProject ? 1 : 0));
 			if (rootLooksLikeProject)
 			{
@@ -440,7 +445,8 @@ public sealed class ProjectScopeDiscoveryService(
 					rootPath,
 					rootHasGitIgnore,
 					HasProjectMarker: rootHasProjectMarker,
-					LooksLikeProject: true));
+					LooksLikeProject: true,
+					HasGitRepository: rootHasGitRepository));
 				selectedScopes.AddRange(expandedCandidates.Where(static scope => scope.LooksLikeProject));
 			}
 			else
@@ -459,18 +465,20 @@ public sealed class ProjectScopeDiscoveryService(
 					rootPath,
 					rootHasGitIgnore,
 					HasProjectMarker: rootHasProjectMarker,
-					LooksLikeProject: rootHasGitIgnore || rootHasProjectMarker)
+					LooksLikeProject: rootHasGitIgnore || rootHasGitRepository || rootHasProjectMarker,
+					HasGitRepository: rootHasGitRepository)
 			]);
 		}
 
-		var rootLooksLikeProjectForWorkspace = rootHasGitIgnore || rootHasProjectMarker;
+		var rootLooksLikeProjectForWorkspace = rootHasGitIgnore || rootHasGitRepository || rootHasProjectMarker;
 		var scopes = new List<ProjectScope>(expandedCandidates.Length + (rootLooksLikeProjectForWorkspace ? 1 : 0));
 		if (rootLooksLikeProjectForWorkspace)
 			scopes.Add(new ProjectScope(
 				rootPath,
 				rootHasGitIgnore,
 				HasProjectMarker: rootHasProjectMarker,
-				LooksLikeProject: true));
+				LooksLikeProject: true,
+				HasGitRepository: rootHasGitRepository));
 		scopes.AddRange(expandedCandidates);
 
 		return ProjectScanContext.FromScopes(scopes);
@@ -504,23 +512,26 @@ public sealed class ProjectScopeDiscoveryService(
 				{
 					var childFacts = rootFactsCache.Get(childPath);
 					var hasGitIgnore = childFacts.HasGitIgnoreFile;
+					var hasGitRepository = childFacts.HasGitMetadataEntry;
 					var hasMarker = HasProjectMarker(childFacts);
 					if (ShouldSkipProjectScopeCandidate(
 						    childPath,
 						    hasGitIgnore,
+						    hasGitRepository,
 						    hasMarker,
 						    isExplicitRootSelection: false))
 					{
 						continue;
 					}
-					if (!hasGitIgnore && !hasMarker)
+					if (!hasGitIgnore && !hasGitRepository && !hasMarker)
 						continue;
 
 					localScopes.Add(new ProjectScope(
 						childPath,
 						hasGitIgnore,
 						HasProjectMarker: hasMarker,
-						LooksLikeProject: true));
+						LooksLikeProject: true,
+						HasGitRepository: hasGitRepository));
 				}
 				return localScopes;
 			},
@@ -648,6 +659,7 @@ public sealed class ProjectScopeDiscoveryService(
 	private static bool ShouldSkipProjectScopeCandidate(
 		string directoryPath,
 		bool hasGitIgnore,
+		bool hasGitRepository,
 		bool hasProjectMarker,
 		bool isExplicitRootSelection)
 	{
@@ -658,7 +670,7 @@ public sealed class ProjectScopeDiscoveryService(
 		if (!isExplicitRootSelection && ScopeDiscoveryPruneDirectoryNames.Contains(name))
 			return true;
 
-		if (hasProjectMarker)
+		if (hasGitRepository || hasProjectMarker)
 			return false;
 
 		// A confirmed generated/dependency layout must never become an independent
@@ -859,7 +871,8 @@ public sealed record ProjectScope(
 	string RootPath,
 	bool HasGitIgnore,
 	bool HasProjectMarker,
-	bool LooksLikeProject);
+	bool LooksLikeProject,
+	bool HasGitRepository = false);
 
 public sealed record ProjectScanContext(
 	IReadOnlyList<ProjectScope> Scopes,
@@ -867,6 +880,8 @@ public sealed record ProjectScanContext(
 	ConcurrentDictionary<string, SmartIgnoreResult> SmartIgnoreResultCache)
 {
 	private static readonly StringComparer PathStringComparer = PathComparer.Default;
+
+	public bool HasAnyGitRepository => Scopes.Any(static scope => scope.HasGitRepository);
 
 	public static ProjectScanContext Empty => new(
 		[],

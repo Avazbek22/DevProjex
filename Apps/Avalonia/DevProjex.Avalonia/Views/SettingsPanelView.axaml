@@ -122,7 +122,7 @@
                               IsChecked="{Binding IsChecked, Mode=TwoWay}" />
                     <Border Grid.Row="1"
                             Classes="ignore-option-separator"
-                            IsVisible="{Binding IsGitIgnoreOption}" />
+                            IsVisible="{Binding IsControllerGroupEnd}" />
                   </Grid>
                 </Border>
               </DataTemplate>

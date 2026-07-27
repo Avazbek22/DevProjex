@@ -5,16 +5,18 @@ public readonly record struct IgnoreSectionSnapshotState(
     IgnoreOptionCounts IgnoreOptionCounts,
     IgnoreControllerImpactCounts ControllerImpactCounts,
     bool HasExtensionlessEntries,
-    int ExtensionlessEntriesCount)
+    int ExtensionlessEntriesCount,
+    GitWorkspaceEvidence GitEvidence = default)
 {
-    // Ignore-option visibility is driven by both aggregated counts and the special
-    // extensionless marker path, so orchestration decisions must compare both.
+    // Availability is driven by counts, the extensionless marker, and structural Git
+    // evidence collected by the same scan. Comparing all three keeps convergence exact.
     public bool HasAvailabilityDifference(in IgnoreSectionSnapshotState other)
     {
         return HasIgnoreOptionCounts != other.HasIgnoreOptionCounts ||
                IgnoreOptionCounts != other.IgnoreOptionCounts ||
                ControllerImpactCounts != other.ControllerImpactCounts ||
                HasExtensionlessEntries != other.HasExtensionlessEntries ||
-               ExtensionlessEntriesCount != other.ExtensionlessEntriesCount;
+               ExtensionlessEntriesCount != other.ExtensionlessEntriesCount ||
+               GitEvidence != other.GitEvidence;
     }
 }

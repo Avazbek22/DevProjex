@@ -8,6 +8,7 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		int caseId,
 		IgnoreOptionId[] projectASavedIgnore,
 		bool projectAIncludeGit,
+		bool projectAIncludeTrackedGitFiles,
 		bool projectAIncludeSmart,
 		string[] projectAExtensions)
 	{
@@ -26,7 +27,8 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 				{
 					return new IgnoreOptionsAvailability(
 						IncludeGitIgnore: projectAIncludeGit,
-						IncludeSmartIgnore: projectAIncludeSmart);
+						IncludeSmartIgnore: projectAIncludeSmart,
+						IncludeTrackedGitFilesOnly: projectAIncludeTrackedGitFiles);
 				}
 
 				return new IgnoreOptionsAvailability(
@@ -43,6 +45,7 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		coordinator.ApplyExtensionScan(projectAExtensions);
 		coordinator.PopulateIgnoreOptionsForRootSelection([], projectA);
 		var initialProjectAState = SnapshotIgnoreState(viewModel.IgnoreOptions);
+		AssertMutuallyExclusiveGitFilteringModes(initialProjectAState);
 
 		currentPath = projectB;
 		coordinator.ResetProjectProfileSelections(projectB);
@@ -56,6 +59,7 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		var restoredProjectAState = SnapshotIgnoreState(viewModel.IgnoreOptions);
 
 		AssertIgnoreState(restoredProjectAState, initialProjectAState);
+		AssertMutuallyExclusiveGitFilteringModes(restoredProjectAState);
 	}
 
 	[Theory]
@@ -106,9 +110,11 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 			new[] { IgnoreOptionId.HiddenFolders },
 			new[] { IgnoreOptionId.HiddenFiles, IgnoreOptionId.DotFiles },
 			new[] { IgnoreOptionId.UseGitIgnore },
+			new[] { IgnoreOptionId.TrackedGitFilesOnly },
 			new[] { IgnoreOptionId.SmartIgnore },
 			new[] { IgnoreOptionId.ExtensionlessFiles },
 			new[] { IgnoreOptionId.UseGitIgnore, IgnoreOptionId.HiddenFolders },
+			new[] { IgnoreOptionId.TrackedGitFilesOnly, IgnoreOptionId.SmartIgnore, IgnoreOptionId.DotFiles },
 			new[] { IgnoreOptionId.SmartIgnore, IgnoreOptionId.DotFiles },
 			new[] { IgnoreOptionId.ExtensionlessFiles, IgnoreOptionId.HiddenFiles },
 			new[] { IgnoreOptionId.UseGitIgnore, IgnoreOptionId.SmartIgnore, IgnoreOptionId.HiddenFolders },
@@ -117,10 +123,10 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 
 		var availabilityVariants = new[]
 		{
-			(IncludeGit: false, IncludeSmart: false),
-			(IncludeGit: true, IncludeSmart: false),
-			(IncludeGit: false, IncludeSmart: true),
-			(IncludeGit: true, IncludeSmart: true)
+			(IncludeGit: false, IncludeTracked: false, IncludeSmart: false),
+			(IncludeGit: true, IncludeTracked: true, IncludeSmart: false),
+			(IncludeGit: false, IncludeTracked: false, IncludeSmart: true),
+			(IncludeGit: true, IncludeTracked: true, IncludeSmart: true)
 		};
 
 		var extensionScanVariants = new[]
@@ -140,6 +146,7 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 						caseId++,
 						saved,
 						availability.IncludeGit,
+						availability.IncludeTracked,
 						availability.IncludeSmart,
 						scan
 					];
@@ -235,6 +242,7 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
 				["Settings.Ignore.DotFolders"] = "dot folders",
@@ -267,6 +275,16 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 			Assert.True(actualState.ContainsKey(id), $"Expected ignore option is missing: {id}");
 			Assert.Equal(expectedChecked, actualState[id]);
 		}
+	}
+
+	private static void AssertMutuallyExclusiveGitFilteringModes(
+		IReadOnlyDictionary<IgnoreOptionId, bool> state)
+	{
+		var useGitIgnore = state.TryGetValue(IgnoreOptionId.UseGitIgnore, out var gitIgnoreState) &&
+		                   gitIgnoreState;
+		var trackedOnly = state.TryGetValue(IgnoreOptionId.TrackedGitFilesOnly, out var trackedState) &&
+		                  trackedState;
+		Assert.False(useGitIgnore && trackedOnly);
 	}
 
 	private static void AssertSelectionState(

@@ -151,6 +151,160 @@ public sealed class CommandLineStdoutContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task Process_TrackedOnlyNoUiReportAndJsonTreeMatchGitIndex()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("tracked-only project");
+		WriteFile(projectPath, ".gitignore", "*.ignored\n");
+		WriteFile(projectPath, "README.md", "# Tracked\n");
+		WriteFile(projectPath, Path.Combine("src", "tracked file.cs"), "class Tracked {}\n");
+		WriteFile(projectPath, Path.Combine("src", "forced.ignored"), "tracked despite ignore\n");
+		WriteFile(projectPath, Path.Combine("src", "local.cs"), "untracked\n");
+		WriteFile(projectPath, Path.Combine("src", "local.ignored"), "ignored and untracked\n");
+		InitializeGitIndex(
+			projectPath,
+			".gitignore",
+			"README.md",
+			"src/tracked file.cs",
+			"src/forced.ignored");
+
+		var reportResult = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreTrackedGitFilesOnly);
+
+		Assert.Equal(CommandLineExitCodes.Success, reportResult.ExitCode);
+		Assert.Equal(string.Empty, reportResult.Stderr);
+		using (var report = JsonDocument.Parse(reportResult.Stdout))
+		{
+			Assert.Equal(
+				["trackedGitFilesOnly"],
+				ReadStringArray(report.RootElement.GetProperty("selection").GetProperty("selectedIgnoreOptions")));
+			Assert.Equal(
+				4,
+				report.RootElement
+					.GetProperty("inventory")
+					.GetProperty("tree")
+					.GetProperty("fileCount")
+					.GetInt32());
+		}
+
+		var treeResult = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreTrackedGitFilesOnly);
+
+		Assert.Equal(CommandLineExitCodes.Success, treeResult.ExitCode);
+		Assert.Equal(string.Empty, treeResult.Stderr);
+		using var treeDocument = JsonDocument.Parse(treeResult.Stdout);
+		var exportedPaths = JsonTreeExportTestHelper.ExtractFilePaths(
+			JsonTreeExportTestHelper.GetTree(treeDocument));
+		Assert.Equal(
+			[
+				".gitignore",
+				"README.md",
+				"src/forced.ignored",
+				"src/tracked file.cs"
+			],
+			exportedPaths.Order(StringComparer.Ordinal).ToArray());
+	}
+
+	[Fact]
+	public async Task Process_TrackedOnlyIgnoresInheritedGitRepositoryOverrides()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("intended repository");
+		WriteFile(projectPath, Path.Combine("src", "tracked.cs"), "class Tracked {}\n");
+		WriteFile(projectPath, Path.Combine("src", "local.cs"), "class Local {}\n");
+		InitializeGitIndex(projectPath, "src/tracked.cs");
+
+		var foreignRepositoryPath = temp.CreateDirectory("foreign repository");
+		WriteFile(foreignRepositoryPath, "foreign.cs", "class Foreign {}\n");
+		InitializeGitIndex(foreignRepositoryPath, "foreign.cs");
+		var foreignGitDirectory = Path.Combine(foreignRepositoryPath, ".git");
+		var environmentOverrides = new Dictionary<string, string>
+		{
+			["GIT_DIR"] = foreignGitDirectory,
+			["GIT_WORK_TREE"] = foreignRepositoryPath,
+			["GIT_INDEX_FILE"] = Path.Combine(foreignGitDirectory, "index"),
+			["GIT_COMMON_DIR"] = foreignGitDirectory,
+			["GIT_CONFIG_COUNT"] = "1",
+			["GIT_CONFIG_KEY_0"] = "core.worktree",
+			["GIT_CONFIG_VALUE_0"] = foreignRepositoryPath
+		};
+
+		var result = await RunAppAsync(
+			environmentOverrides,
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Export, "tree",
+			CommandLineOptionTokens.Format, "json",
+			CommandLineOptionTokens.Output, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreTrackedGitFilesOnly);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		using var document = JsonDocument.Parse(result.Stdout);
+		var exportedPaths = JsonTreeExportTestHelper.ExtractFilePaths(
+			JsonTreeExportTestHelper.GetTree(document));
+		Assert.Equal(["src/tracked.cs"], exportedPaths);
+	}
+
+	[Fact]
+	public async Task Process_TrackedOnlyProjectCopyExcludesUntrackedFiles()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var projectPath = temp.CreateDirectory("tracked copy project");
+		var destinationParent = temp.CreateDirectory("tracked copy exports");
+		WriteFile(projectPath, Path.Combine("src", "tracked.bin"), "tracked bytes");
+		WriteFile(projectPath, Path.Combine("src", "local.bin"), "untracked bytes");
+		InitializeGitIndex(projectPath, "src/tracked.bin");
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Copy, "folder",
+			CommandLineOptionTokens.Output, destinationParent,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreTrackedGitFilesOnly);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stderr);
+		var resultPath = AssertSingleOutputLine(result.Stdout);
+		Assert.Equal("tracked bytes", await File.ReadAllTextAsync(
+			Path.Combine(resultPath, "src", "tracked.bin"),
+			TestContext.Current.CancellationToken));
+		Assert.False(File.Exists(Path.Combine(resultPath, "src", "local.bin")));
+	}
+
+	[Fact]
+	public async Task Process_ConflictingGitModesFailBeforeAnalysis()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = SeedTerminalWorkspace(temp);
+
+		var result = await RunAppAsync(
+			CommandLineOptionTokens.NoUi,
+			CommandLineOptionTokens.Path, projectPath,
+			CommandLineOptionTokens.Report, CommandLineOptionTokens.StandardOutputReportPath,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreGitIgnore,
+			CommandLineOptionTokens.Ignore, CommandLineOptionTokens.IgnoreTrackedGitFilesOnly);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Equal(string.Empty, result.Stdout);
+		Assert.Contains(
+			"'git-ignore' and 'git-tracked-only' are mutually exclusive.",
+			result.Stderr,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task Process_ProjectCopyZip_PreservesBinaryUnicodeEntryAndAddsZipExtension()
 	{
 		using var temp = new TemporaryDirectory();
@@ -759,7 +913,12 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		return line;
 	}
 
-	private static async Task<CommandLineProcessResult> RunAppAsync(params string[] args)
+	private static Task<CommandLineProcessResult> RunAppAsync(params string[] args) =>
+		RunAppAsync(environmentOverrides: null, args);
+
+	private static async Task<CommandLineProcessResult> RunAppAsync(
+		IReadOnlyDictionary<string, string>? environmentOverrides,
+		params string[] args)
 	{
 		var appPath = typeof(App).Assembly.Location;
 		var startInfo = new ProcessStartInfo
@@ -776,6 +935,11 @@ public sealed class CommandLineStdoutContractIntegrationTests
 		startInfo.ArgumentList.Add(appPath);
 		foreach (var arg in args)
 			startInfo.ArgumentList.Add(arg);
+		if (environmentOverrides is not null)
+		{
+			foreach (var (variable, value) in environmentOverrides)
+				startInfo.Environment[variable] = value;
+		}
 
 		using var process = Process.Start(startInfo)
 			?? throw new InvalidOperationException("Failed to start DevProjex command-line stdout contract process.");
@@ -791,6 +955,68 @@ public sealed class CommandLineStdoutContractIntegrationTests
 
 		return new CommandLineProcessResult(process.ExitCode, await stdoutTask, await stderrTask);
 	}
+
+	private static void InitializeGitIndex(string repositoryRoot, params string[] trackedPaths)
+	{
+		RunGit(repositoryRoot, "init", "--quiet");
+		RunGit(repositoryRoot, ["add", "-f", "--", .. trackedPaths]);
+	}
+
+	private static void EnsureGitAvailable()
+	{
+		var startInfo = CreateGitStartInfo(workingDirectory: null);
+		startInfo.ArgumentList.Add("--version");
+		Process? startedProcess;
+		try
+		{
+			startedProcess = Process.Start(startInfo);
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip("Git is not available in this test environment.");
+			return;
+		}
+
+		using var process = startedProcess;
+		if (process is null)
+			Assert.Skip("Git is not available in this test environment.");
+		process.StandardOutput.ReadToEnd();
+		process.StandardError.ReadToEnd();
+		if (!process.WaitForExit(10_000) || process.ExitCode != 0)
+			Assert.Skip("Git is not available in this test environment.");
+	}
+
+	private static string RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = CreateGitStartInfo(workingDirectory);
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+
+		using var process = Process.Start(startInfo)
+			?? throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		if (!process.WaitForExit(20_000))
+		{
+			process.Kill(entireProcessTree: true);
+			throw new TimeoutException("Git command did not complete within 20 seconds.");
+		}
+
+		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
+		return output;
+	}
+
+	private static ProcessStartInfo CreateGitStartInfo(string? workingDirectory) =>
+		new(OperatingSystem.IsWindows() ? "git.exe" : "git")
+		{
+			WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			StandardOutputEncoding = Encoding.UTF8,
+			StandardErrorEncoding = Encoding.UTF8
+		};
 
 	private static string[] ReadStringArray(JsonElement element) =>
 		element.EnumerateArray()

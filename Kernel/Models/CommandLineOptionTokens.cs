@@ -45,6 +45,7 @@ public static class CommandLineOptionTokens
 	public const string IgnoreNone = "none";
 	public const string IgnoreSmartIgnore = "smart-ignore";
 	public const string IgnoreGitIgnore = "git-ignore";
+	public const string IgnoreTrackedGitFilesOnly = "git-tracked-only";
 	public const string IgnoreHiddenFolders = "hidden-folders";
 	public const string IgnoreHiddenFiles = "hidden-files";
 	public const string IgnoreDotFolders = "dot-folders";
@@ -102,6 +103,7 @@ public static class CommandLineOptionTokens
 	[
 		IgnoreSmartIgnore,
 		IgnoreGitIgnore,
+		IgnoreTrackedGitFilesOnly,
 		IgnoreHiddenFolders,
 		IgnoreHiddenFiles,
 		IgnoreDotFolders,

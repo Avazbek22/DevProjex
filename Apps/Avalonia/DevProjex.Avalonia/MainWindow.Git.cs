@@ -218,8 +218,8 @@ public partial class MainWindow
 
         RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? requestedUrl : result.RepositoryUrl);
 
-        // Clone-only branch discovery stays behind the reveal barrier so it cannot compete
-        // with the settings animation or make the clone completion appear frozen.
+        // Clone-only branch discovery stays behind the shared post-reveal stability gate. Waiting
+        // only for transition completion can still compete with the island's final layout pass.
         if (result.SourceType == ProjectSourceType.GitClone)
         {
             var visualReadyTask = _postLoadVisualReadyTask;

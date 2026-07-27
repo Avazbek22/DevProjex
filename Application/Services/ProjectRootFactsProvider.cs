@@ -124,7 +124,10 @@ public sealed class ProjectRootFactsProvider(
 					continue;
 				}
 
-				files.Add(new ProjectRootFileFact(entry.Name, Path.GetExtension(entry.Name)));
+				files.Add(new ProjectRootFileFact(
+					entry.Name,
+					Path.GetExtension(entry.Name),
+					entry.IsReparsePoint));
 			}
 		}
 		catch (UnauthorizedAccessException)

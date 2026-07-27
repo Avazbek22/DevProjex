@@ -78,7 +78,7 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 	}
 
 	[Fact]
-	public void FullRefresh_ExtensionFilterOffAndEmptyFoldersOn_KeepsExplicitlyUncheckedGitIgnoreReversible()
+	public void FullRefresh_ExtensionFilterOffAndEmptyFoldersOn_HidesZeroImpactGitIgnoreButKeepsIntent()
 	{
 		using var workspace = CreateComprehensiveWorkspace();
 		var services = CreateServices();
@@ -96,7 +96,12 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 
 		AssertExtensionOption(logExtensionOffAndEmptyFoldersOn, ".log", expectedChecked: false);
 		AssertIgnoreOption(logExtensionOffAndEmptyFoldersOn, IgnoreOptionId.EmptyFolders, expectedVisible: true, expectedChecked: true);
-		AssertIgnoreOption(logExtensionOffAndEmptyFoldersOn, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+		AssertIgnoreOption(
+			logExtensionOffAndEmptyFoldersOn,
+			IgnoreOptionId.UseGitIgnore,
+			expectedVisible: false,
+			expectedChecked: null);
+		Assert.False(logExtensionOffAndEmptyFoldersOn.IgnoreOptionStateCache[IgnoreOptionId.UseGitIgnore]);
 		AssertTreeState(
 			workspace.Path,
 			logExtensionOffAndEmptyFoldersOn,

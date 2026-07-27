@@ -321,7 +321,8 @@ public sealed class ProjectAnalysisService(
 			IgnoreOptionCounts: counts,
 			ControllerImpactCounts: controllerImpactCounts,
 			HasExtensionlessEntries: counts.ExtensionlessFiles > 0,
-			ExtensionlessEntriesCount: counts.ExtensionlessFiles);
+			ExtensionlessEntriesCount: counts.ExtensionlessFiles,
+			GitEvidence: scan.Value.GitEvidence);
 		var dynamicAvailability = IgnoreOptionsAvailabilityResolver.Resolve(
 			availability,
 			snapshotState,

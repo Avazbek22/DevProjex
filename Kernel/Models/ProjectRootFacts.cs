@@ -17,6 +17,7 @@ public sealed class ProjectRootFacts
 	private readonly FrozenSet<string> _markerDirectoryNames;
 	private readonly FrozenSet<string> _nonReparseMarkerDirectoryNames;
 	private readonly FrozenDictionary<string, ProjectRootDirectoryFact> _directoriesByName;
+	private readonly bool _hasGitMetadataEntry;
 
 	public ProjectRootFacts(
 		string rootPath,
@@ -65,6 +66,31 @@ public sealed class ProjectRootFacts
 					static group => group.Key,
 					static group => group.First(),
 					PathComparer.Default);
+		var hasGitMetadataEntry = false;
+		for (var index = 0; index < files.Count; index++)
+		{
+			var file = files[index];
+			if (file.IsReparsePoint || !PathComparer.Default.Equals(file.Name, ".git"))
+				continue;
+
+			hasGitMetadataEntry = true;
+			break;
+		}
+
+		if (!hasGitMetadataEntry)
+		{
+			for (var index = 0; index < directories.Count; index++)
+			{
+				var directory = directories[index];
+				if (directory.IsReparsePoint || !PathComparer.Default.Equals(directory.Name, ".git"))
+					continue;
+
+				hasGitMetadataEntry = true;
+				break;
+			}
+		}
+
+		_hasGitMetadataEntry = hasGitMetadataEntry;
 	}
 
 	public string RootPath { get; }
@@ -80,6 +106,8 @@ public sealed class ProjectRootFacts
 	public ProjectRootFileSignature? GitIgnoreSignature { get; }
 
 	public bool HasGitIgnoreFile => HasFile(".gitignore");
+
+	public bool HasGitMetadataEntry => _hasGitMetadataEntry;
 
 	public static ProjectRootFacts Missing(string rootPath) =>
 		new(
@@ -156,7 +184,8 @@ public sealed class ProjectRootFacts
 
 public readonly record struct ProjectRootFileFact(
 	string Name,
-	string Extension);
+	string Extension,
+	bool IsReparsePoint = false);
 
 public readonly record struct ProjectRootDirectoryFact(
 	string Name,

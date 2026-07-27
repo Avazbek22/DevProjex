@@ -71,7 +71,8 @@ public sealed class SelectionRefreshEngine(
             RootAccessDenied: rootSection.RootAccessDenied || dynamicSection.RootAccessDenied,
             HadAccessDenied: rootSection.HadAccessDenied || dynamicSection.HadAccessDenied,
             TreeInventory: dynamicSection.TreeInventory,
-            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions);
+            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
+            GitEvidence: dynamicSection.SnapshotState.GitEvidence);
     }
 
     public SelectionRefreshSnapshot ComputeLiveRefreshSnapshot(
@@ -117,7 +118,8 @@ public sealed class SelectionRefreshEngine(
             RootAccessDenied: dynamicSection.RootAccessDenied,
             HadAccessDenied: dynamicSection.HadAccessDenied,
             TreeInventory: dynamicSection.TreeInventory,
-            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions);
+            VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
+            GitEvidence: dynamicSection.SnapshotState.GitEvidence);
     }
 
     private static bool SelectionOptionsMatch(
@@ -338,7 +340,10 @@ public sealed class SelectionRefreshEngine(
             var refreshPlan = IgnoreSectionRefreshPlanBuilder.Build(
                 previousSnapshot,
                 snapshot.SnapshotState,
-                BuildMeasuredSelectionForRefreshPlanning(currentSelectedIgnoreOptions, snapshot.SnapshotState),
+                BuildMeasuredSelectionForRefreshPlanning(
+                    currentSelectedIgnoreOptions,
+                    snapshot.SelectedIgnoreOptions,
+                    snapshot.SnapshotState),
                 snapshot.SelectedIgnoreOptions);
             var canReuseWorkspaceScan = rootProjectionChanged &&
                                        !refreshPlan.RequiresSecondSnapshotPass;
@@ -430,9 +435,7 @@ public sealed class SelectionRefreshEngine(
             cancellationToken);
         var scanData = scan.Value.IgnoreSection;
 
-        var snapshotState = CreateSnapshotState(
-            scanData.EffectiveIgnoreOptionCounts,
-            scanData.ControllerImpactCounts);
+        var snapshotState = CreateSnapshotState(scanData);
         snapshotState = PreserveActiveRuntimeSnapshotState(
             snapshotState,
             previousRuntimeSnapshotState,
@@ -482,9 +485,7 @@ public sealed class SelectionRefreshEngine(
                 cancellationToken);
             scanData = scan.Value.IgnoreSection;
 
-            snapshotState = CreateSnapshotState(
-                scanData.EffectiveIgnoreOptionCounts,
-                scanData.ControllerImpactCounts);
+            snapshotState = CreateSnapshotState(scanData);
             snapshotState = PreserveActiveRuntimeSnapshotState(
                 snapshotState,
                 previousRuntimeSnapshotState,
@@ -600,6 +601,10 @@ public sealed class SelectionRefreshEngine(
                                      : EmptyIgnoreSelection);
         var stateCache = new Dictionary<IgnoreOptionId, bool>(
             stateCacheOverride ?? context.IgnoreOptionStateCache);
+        var preferredGitMode = ResolvePreferredGitFilteringMode(
+            context,
+            previousSelections,
+            stateCache);
         var availability = ResolveIgnoreOptionsAvailability(
             path,
             selectedRoots,
@@ -635,6 +640,17 @@ public sealed class SelectionRefreshEngine(
 
 		PreserveMissingIgnoreSelections(previousSelections, visibleIds, stateCache);
 		RemoveTransientControllerDefaults(context, visibleIds, stateCache);
+		GitFilteringModeResolver.Normalize(stateCache, preferredGitMode);
+		for (var index = 0; index < resolved.Count; index++)
+		{
+			var option = resolved[index];
+			if (stateCache.TryGetValue(option.Id, out var isChecked) &&
+			    option.IsChecked != isChecked)
+			{
+				resolved[index] = option with { IsChecked = isChecked };
+			}
+		}
+
 		return new IgnoreOptionResolutionResult(
 			resolved,
 			stateCache,
@@ -679,10 +695,17 @@ public sealed class SelectionRefreshEngine(
             context.IgnoreSelectionInitialized ||
             context.IgnoreAllPreference == false)
         {
+            GitFilteringModeResolver.Normalize(
+                selected,
+                ResolvePreferredGitFilteringMode(
+                    context,
+                    selected,
+                    context.IgnoreOptionStateCache));
             return selected;
         }
 
         AddDefaultDynamicIgnoreOptions(selected);
+        GitFilteringModeResolver.Normalize(selected, GitFilteringMode.RespectGitIgnore);
         return selected;
     }
 
@@ -698,6 +721,12 @@ public sealed class SelectionRefreshEngine(
         if (context.IgnoreOptionStateCacheIsComplete)
             AddCheckedIgnoreStateCacheSelections(selected, context.IgnoreOptionStateCache);
 
+        GitFilteringModeResolver.Normalize(
+            selected,
+            ResolvePreferredGitFilteringMode(
+                context,
+                selected,
+                context.IgnoreOptionStateCache));
         return selected;
     }
 
@@ -864,6 +893,7 @@ public sealed class SelectionRefreshEngine(
 
     private static IReadOnlySet<IgnoreOptionId> BuildMeasuredSelectionForRefreshPlanning(
         IReadOnlySet<IgnoreOptionId> selectedOptions,
+        IReadOnlySet<IgnoreOptionId> resolvedSelectedOptions,
         IgnoreSectionSnapshotState snapshotState)
     {
         if (selectedOptions.Count == 0 || !snapshotState.HasIgnoreOptionCounts)
@@ -876,8 +906,11 @@ public sealed class SelectionRefreshEngine(
         HashSet<IgnoreOptionId>? measured = null;
         foreach (var optionId in selectedOptions)
         {
-            if (!HasMeasuredIgnoreImpact(optionId, snapshotState))
+            if (!resolvedSelectedOptions.Contains(optionId) &&
+                !HasMeasuredIgnoreImpact(optionId, snapshotState))
+            {
                 continue;
+            }
 
             measured ??= new HashSet<IgnoreOptionId>();
             measured.Add(optionId);
@@ -895,6 +928,7 @@ public sealed class SelectionRefreshEngine(
         return optionId switch
         {
             IgnoreOptionId.UseGitIgnore => controllerImpactCounts.GitIgnore > 0,
+            IgnoreOptionId.TrackedGitFilesOnly => true,
             IgnoreOptionId.SmartIgnore => controllerImpactCounts.SmartIgnore > 0,
             IgnoreOptionId.HiddenFolders => counts.HiddenFolders > 0,
             IgnoreOptionId.HiddenFiles => counts.HiddenFiles > 0,
@@ -935,15 +969,14 @@ public sealed class SelectionRefreshEngine(
         }
     }
 
-    private static IgnoreSectionSnapshotState CreateSnapshotState(
-        IgnoreOptionCounts counts,
-        IgnoreControllerImpactCounts controllerImpactCounts) =>
+    private static IgnoreSectionSnapshotState CreateSnapshotState(IgnoreSectionScanData scanData) =>
         new(
             HasIgnoreOptionCounts: true,
-            IgnoreOptionCounts: counts,
-            ControllerImpactCounts: controllerImpactCounts,
-            HasExtensionlessEntries: counts.ExtensionlessFiles > 0,
-            ExtensionlessEntriesCount: counts.ExtensionlessFiles);
+            IgnoreOptionCounts: scanData.EffectiveIgnoreOptionCounts,
+            ControllerImpactCounts: scanData.ControllerImpactCounts,
+            HasExtensionlessEntries: scanData.EffectiveIgnoreOptionCounts.ExtensionlessFiles > 0,
+            ExtensionlessEntriesCount: scanData.EffectiveIgnoreOptionCounts.ExtensionlessFiles,
+            GitEvidence: scanData.GitEvidence);
 
     private static IReadOnlyList<SelectionOption> ForceAllChecked(IReadOnlyList<SelectionOption> options)
     {
@@ -1063,7 +1096,9 @@ public sealed class SelectionRefreshEngine(
 			// rules can measure real impact. A zero-impact controller was never presented to
 			// the user and must not become a "known unchecked" option after Ignore All is
 			// toggled. Explicit/profile states are already present in the cache and survive.
-			if (id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
+			if (id is IgnoreOptionId.UseGitIgnore
+			    or IgnoreOptionId.TrackedGitFilesOnly
+			    or IgnoreOptionId.SmartIgnore)
 				continue;
 
             ref var cachedState = ref CollectionsMarshal.GetValueRefOrAddDefault(
@@ -1122,6 +1157,7 @@ public sealed class SelectionRefreshEngine(
     {
         var hasActiveController =
             selectedIgnoreOptions.Contains(IgnoreOptionId.UseGitIgnore) ||
+            selectedIgnoreOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly) ||
             selectedIgnoreOptions.Contains(IgnoreOptionId.SmartIgnore);
 
         if (hasActiveController)
@@ -1201,6 +1237,40 @@ public sealed class SelectionRefreshEngine(
         }
 
         return false;
+    }
+
+    private static GitFilteringMode ResolvePreferredGitFilteringMode(
+        SelectionRefreshContext context,
+        IReadOnlySet<IgnoreOptionId> previousSelections,
+        IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
+    {
+        var stateContainsBothModes =
+            stateCache.TryGetValue(IgnoreOptionId.UseGitIgnore, out var useGitIgnore) &&
+            useGitIgnore &&
+            stateCache.TryGetValue(IgnoreOptionId.TrackedGitFilesOnly, out var trackedOnly) &&
+            trackedOnly;
+        var selectionContainsBothModes =
+            previousSelections.Contains(IgnoreOptionId.UseGitIgnore) &&
+            previousSelections.Contains(IgnoreOptionId.TrackedGitFilesOnly);
+        if (context.IgnoreAllPreference == true &&
+            (stateContainsBothModes || selectionContainsBothModes))
+        {
+            // Legacy bulk toggles set every visible option to true. Treat the Git pair as
+            // one logical slot and use the regular default instead of entering strict mode.
+            return GitFilteringMode.RespectGitIgnore;
+        }
+
+        var mode = GitFilteringModeResolver.Resolve(stateCache);
+        if (mode != GitFilteringMode.None)
+            return mode;
+
+        mode = GitFilteringModeResolver.Resolve(previousSelections);
+        if (mode != GitFilteringMode.None)
+            return mode;
+
+        return context.IgnoreAllPreference == true
+            ? GitFilteringMode.RespectGitIgnore
+            : GitFilteringMode.None;
     }
 
     private sealed record RootSectionSnapshot(

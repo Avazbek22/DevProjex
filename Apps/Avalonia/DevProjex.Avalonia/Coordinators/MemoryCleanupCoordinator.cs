@@ -28,6 +28,8 @@ internal sealed class MemoryCleanupCoordinator(
         CollectMemory;
     private readonly Action _trimWorkingSet =
         ProcessWorkingSetTrimmer.TrimCurrentProcess;
+    private readonly Func<TimeSpan, CancellationToken, Task> _deferCleanup =
+        Task.Delay;
     private readonly TimeSpan _uiReadinessTimeout = UiReadinessTimeout;
     private readonly TimeSpan _uiReadinessPollInterval =
         UiReadinessPollInterval;
@@ -55,7 +57,8 @@ internal sealed class MemoryCleanupCoordinator(
         TimeSpan? uiReadinessTimeout = null,
         TimeSpan? uiReadinessPollInterval = null,
         int uiReadinessMaximumAttempts = UiReadinessMaximumAttempts,
-        Action? trimWorkingSet = null)
+        Action? trimWorkingSet = null,
+        Func<TimeSpan, CancellationToken, Task>? deferCleanup = null)
         : this(sessionMetrics, uiReady, animationDuration)
     {
         _captureMemorySnapshot = captureMemorySnapshot;
@@ -69,9 +72,12 @@ internal sealed class MemoryCleanupCoordinator(
         _uiReadinessMaximumAttempts = Math.Max(
             UiReadinessRequiredStableSamples,
             uiReadinessMaximumAttempts);
+        _deferCleanup = deferCleanup ?? Task.Delay;
     }
 
-    public void Schedule(MemoryCleanupReason reason)
+    public void Schedule(
+        MemoryCleanupReason reason,
+        Task? visualReadyTask = null)
     {
         if (Volatile.Read(ref _disposed) != 0)
             return;
@@ -81,7 +87,10 @@ internal sealed class MemoryCleanupCoordinator(
         if (cleanupPlan.CollectionMode == MemoryCleanupCollectionMode.None)
             return;
 
-        ScheduleCore(reason, cleanupPlan);
+        ScheduleCore(
+            reason,
+            cleanupPlan,
+            visualReadyTask: visualReadyTask);
     }
 
     public void SchedulePreview(MemoryCleanupReason reason)
@@ -107,7 +116,10 @@ internal sealed class MemoryCleanupCoordinator(
                     return;
 
                 cleanupToken.ThrowIfCancellationRequested();
-                ScheduleCore(reason, cleanupPlan, cleanupToken);
+                ScheduleCore(
+                    reason,
+                    cleanupPlan,
+                    cleanupToken);
             }
             catch (OperationCanceledException)
             {
@@ -155,7 +167,8 @@ internal sealed class MemoryCleanupCoordinator(
     private void ScheduleCore(
         MemoryCleanupReason reason,
         MemoryCleanupPlan cleanupPlan,
-        CancellationToken triggerCancellationToken = default)
+        CancellationToken triggerCancellationToken = default,
+        Task? visualReadyTask = null)
     {
         if (!TryScheduleBackgroundCleanup(
                 cleanupPlan.CollectionMode,
@@ -172,15 +185,25 @@ internal sealed class MemoryCleanupCoordinator(
         {
             try
             {
+                var scaledDelay = UiTimingProfile.Scale(cleanupPlan.Delay);
+                var deferredCleanupTask = scaledDelay > TimeSpan.Zero
+                    ? _deferCleanup(scaledDelay, cleanupToken)
+                    : Task.CompletedTask;
+                var visualReadyWaitTask = visualReadyTask is not null
+                    ? visualReadyTask.WaitAsync(cleanupToken)
+                    : Task.CompletedTask;
+                await Task.WhenAll(
+                    deferredCleanupTask,
+                    visualReadyWaitTask);
+
+                // Keep both gates: the delay limits cleanup frequency, while visualReadyTask can
+                // include compositor settling that a timer cannot infer. Running them concurrently
+                // preserves the earliest safe cleanup time without weakening either condition.
                 if (cleanupPlan.WaitForUiSettled &&
                     !await WaitForUiReadyAsync(cleanupToken))
                 {
                     return;
                 }
-
-                var scaledDelay = UiTimingProfile.Scale(cleanupPlan.Delay);
-                if (scaledDelay > TimeSpan.Zero)
-                    await Task.Delay(scaledDelay, cleanupToken);
 
                 cleanupToken.ThrowIfCancellationRequested();
                 var stopwatch = Stopwatch.StartNew();

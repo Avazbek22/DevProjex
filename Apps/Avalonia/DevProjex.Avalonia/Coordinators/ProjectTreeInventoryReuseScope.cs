@@ -6,6 +6,7 @@ internal sealed record ProjectTreeInventoryReuseScope(
     string RootPath,
     IReadOnlySet<string> AllowedRootFolders,
     bool UseGitIgnore,
+    GitFilteringMode GitFilteringMode,
     bool UseSmartIgnore,
     bool IgnoreHiddenFolders,
     bool IgnoreDotFolders,
@@ -20,6 +21,7 @@ internal sealed record ProjectTreeInventoryReuseScope(
             rootPath,
             new HashSet<string>(options.AllowedRootFolders, PathComparer.Default),
             options.IgnoreRules.IsGitIgnoreTraversalEnabled,
+            options.IgnoreRules.GitFilteringMode,
             options.IgnoreRules.UseSmartIgnore,
             options.IgnoreRules.IgnoreHiddenFolders,
             options.IgnoreRules.IgnoreDotFolders,
@@ -35,6 +37,8 @@ internal sealed record ProjectTreeInventoryReuseScope(
             return false;
 
         var rules = options.IgnoreRules;
+        if (GitFilteringMode != rules.GitFilteringMode)
+            return false;
         if (UseGitIgnore && !rules.IsGitIgnoreTraversalEnabled)
             return false;
         if (UseSmartIgnore && !rules.UseSmartIgnore)

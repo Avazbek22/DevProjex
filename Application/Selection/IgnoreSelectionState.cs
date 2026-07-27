@@ -4,6 +4,7 @@ public sealed class IgnoreSelectionState
 {
 	private readonly HashSet<IgnoreOptionId> _selectedOptions = [];
 	private readonly Dictionary<IgnoreOptionId, bool> _optionStateCache = [];
+	private GitFilteringMode _preferredGitFilteringMode;
 
 	public bool IsInitialized { get; set; }
 
@@ -26,6 +27,7 @@ public sealed class IgnoreSelectionState
 		AllPreference = null;
 		_selectedOptions.Clear();
 		_optionStateCache.Clear();
+		_preferredGitFilteringMode = GitFilteringMode.None;
 
 		if (!trimExcess)
 			return;
@@ -43,6 +45,10 @@ public sealed class IgnoreSelectionState
 			_selectedOptions.Add(id);
 			_optionStateCache[id] = true;
 		}
+
+		GitFilteringModeResolver.Normalize(_optionStateCache);
+		_preferredGitFilteringMode = GitFilteringModeResolver.Resolve(_optionStateCache);
+		RebuildSelectedOptions();
 	}
 
 	public void ReplaceStateCache(IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
@@ -51,6 +57,8 @@ public sealed class IgnoreSelectionState
 		foreach (var (id, isChecked) in stateCache)
 			_optionStateCache[id] = isChecked;
 
+		GitFilteringModeResolver.Normalize(_optionStateCache);
+		_preferredGitFilteringMode = GitFilteringModeResolver.Resolve(_optionStateCache);
 		RebuildSelectedOptions();
 		IsInitialized = true;
 	}
@@ -64,6 +72,7 @@ public sealed class IgnoreSelectionState
 		foreach (var option in options)
 			_optionStateCache[option.Id] = option.DefaultChecked;
 
+		_preferredGitFilteringMode = GitFilteringModeResolver.Resolve(_optionStateCache);
 		RebuildSelectedOptions();
 	}
 
@@ -78,6 +87,8 @@ public sealed class IgnoreSelectionState
 		foreach (var (id, isChecked) in visibleOptions)
 			_optionStateCache[id] = isChecked;
 
+		GitFilteringModeResolver.Normalize(_optionStateCache);
+		RememberActiveGitFilteringMode();
 		RebuildSelectedOptions();
 	}
 
@@ -86,11 +97,32 @@ public sealed class IgnoreSelectionState
 		if (_optionStateCache.Count == 0)
 			return;
 
+		RememberActiveGitFilteringMode();
 		var knownIds = new List<IgnoreOptionId>(_optionStateCache.Keys);
 		foreach (var id in knownIds)
 			_optionStateCache[id] = isChecked;
 
+		if (isChecked &&
+		    _optionStateCache.ContainsKey(IgnoreOptionId.UseGitIgnore) &&
+		    _optionStateCache.ContainsKey(IgnoreOptionId.TrackedGitFilesOnly))
+		{
+			// "All off" is a temporary UI state. Restoring all options must not silently
+			// replace the user's strict tracked-files mode with the regular .gitignore mode.
+			if (_preferredGitFilteringMode == GitFilteringMode.TrackedFilesOnly)
+				_optionStateCache[IgnoreOptionId.UseGitIgnore] = false;
+			else
+				_optionStateCache[IgnoreOptionId.TrackedGitFilesOnly] = false;
+		}
+
+		RememberActiveGitFilteringMode();
 		RebuildSelectedOptions();
+	}
+
+	private void RememberActiveGitFilteringMode()
+	{
+		var activeMode = GitFilteringModeResolver.Resolve(_optionStateCache);
+		if (activeMode != GitFilteringMode.None)
+			_preferredGitFilteringMode = activeMode;
 	}
 
 	private void PreserveMissingSelections(

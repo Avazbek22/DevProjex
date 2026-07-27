@@ -249,6 +249,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			}
 		}
 
+		NormalizeGitFilteringState(profile.SelectedIgnoreOptions, profile.IgnoreOptionStates);
+
 		if (profile.UpdatedUtc <= DateTimeOffset.UnixEpoch)
 			profile.UpdatedUtc = DateTimeOffset.UtcNow;
 
@@ -257,6 +259,14 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private static PersistedProjectProfile ToPersistedProfile(ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
 	{
+		var selectedIgnoreOptions = profile.SelectedIgnoreOptions
+			.Distinct()
+			.ToList();
+		var ignoreOptionStates = profile.IgnoreOptionStates is null
+			? []
+			: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
+		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
+
 		return new PersistedProjectProfile
 		{
 			SelectedRootFolders = profile.SelectedRootFolders
@@ -267,14 +277,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				.Where(static item => !string.IsNullOrWhiteSpace(item))
 				.Distinct(StringComparer.OrdinalIgnoreCase)
 				.ToList(),
-			SelectedIgnoreOptions = profile.SelectedIgnoreOptions
-				.Distinct()
-				.ToList(),
+			SelectedIgnoreOptions = selectedIgnoreOptions,
 			RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default),
 			ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
-			IgnoreOptionStates = profile.IgnoreOptionStates is null
-				? []
-				: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates),
+			IgnoreOptionStates = ignoreOptionStates,
 			UpdatedUtc = updatedUtc
 		};
 	}
@@ -283,12 +289,14 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	{
 		var rootFolders = new HashSet<string>(profile.SelectedRootFolders, PathComparer.Default);
 		var extensions = new HashSet<string>(profile.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
-		var ignoreOptions = new HashSet<IgnoreOptionId>(profile.SelectedIgnoreOptions);
+		var selectedIgnoreOptions = profile.SelectedIgnoreOptions.ToList();
 		// Empty state maps still carry v2 semantics: options first seen after reopen
 		// use current defaults instead of being treated as unchecked legacy misses.
 		var rootStates = new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default);
 		var extensionStates = new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		var ignoreStates = new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
+		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreStates);
+		var ignoreOptions = new HashSet<IgnoreOptionId>(selectedIgnoreOptions);
 
 		return new ProjectSelectionProfile(
 			SelectedRootFolders: rootFolders,
@@ -297,6 +305,31 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			RootFolderStates: rootStates,
 			ExtensionStates: extensionStates,
 			IgnoreOptionStates: ignoreStates);
+	}
+
+	private static void NormalizeGitFilteringState(
+		List<IgnoreOptionId> selectedIgnoreOptions,
+		Dictionary<IgnoreOptionId, bool> ignoreOptionStates)
+	{
+		var selected = new HashSet<IgnoreOptionId>(selectedIgnoreOptions);
+		var hasPersistedGitState =
+			ignoreOptionStates.ContainsKey(IgnoreOptionId.UseGitIgnore) ||
+			ignoreOptionStates.ContainsKey(IgnoreOptionId.TrackedGitFilesOnly);
+		var preferredMode = hasPersistedGitState
+			? GitFilteringModeResolver.Resolve(ignoreOptionStates)
+			: GitFilteringModeResolver.Resolve(selected);
+
+		GitFilteringModeResolver.Normalize(selected, preferredMode);
+		GitFilteringModeResolver.Normalize(ignoreOptionStates, preferredMode);
+		selected.Remove(IgnoreOptionId.UseGitIgnore);
+		selected.Remove(IgnoreOptionId.TrackedGitFilesOnly);
+		if (preferredMode == GitFilteringMode.RespectGitIgnore)
+			selected.Add(IgnoreOptionId.UseGitIgnore);
+		else if (preferredMode == GitFilteringMode.TrackedFilesOnly)
+			selected.Add(IgnoreOptionId.TrackedGitFilesOnly);
+
+		selectedIgnoreOptions.Clear();
+		selectedIgnoreOptions.AddRange(selected);
 	}
 
 	private static Dictionary<string, bool> NormalizeStringStateDictionary(

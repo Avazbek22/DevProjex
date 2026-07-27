@@ -124,6 +124,57 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.False(scope.CanProject(rootPath, disabledOptions));
     }
 
+    [Fact]
+    public void ProjectTreeInventoryReuseScope_RejectsGitIgnoreInventoryForTrackedOnlyMode()
+    {
+        var rootPath = Path.Combine(Path.GetTempPath(), "reuse-scope-git-mode");
+        var gitIgnoreOptions = CreateInventoryScopeOptions(
+            roots: ["src"],
+            useGitIgnore: true,
+            useSmartIgnore: false,
+            ignoreHiddenFolders: false,
+            ignoreDotFolders: false);
+        var trackedOnlyOptions = CreateInventoryScopeOptions(
+            roots: ["src"],
+            useGitIgnore: false,
+            useSmartIgnore: false,
+            ignoreHiddenFolders: false,
+            ignoreDotFolders: false,
+            useTrackedGitFilesOnly: true);
+        var scope = ProjectTreeInventoryReuseScope.Create(
+            rootPath,
+            gitIgnoreOptions,
+            supportsHiddenDotFolderVariants: true);
+
+        Assert.False(scope.CanProject(rootPath, trackedOnlyOptions));
+    }
+
+    [Fact]
+    public void ProjectTreeInventoryReuseScope_RejectsTrackedOnlyInventoryForGitIgnoreMode()
+    {
+        var rootPath = Path.Combine(Path.GetTempPath(), "reuse-scope-tracked-mode");
+        var trackedOnlyOptions = CreateInventoryScopeOptions(
+            roots: ["src"],
+            useGitIgnore: false,
+            useSmartIgnore: false,
+            ignoreHiddenFolders: false,
+            ignoreDotFolders: false,
+            useTrackedGitFilesOnly: true);
+        var gitIgnoreOptions = CreateInventoryScopeOptions(
+            roots: ["src"],
+            useGitIgnore: true,
+            useSmartIgnore: false,
+            ignoreHiddenFolders: false,
+            ignoreDotFolders: false);
+        var scope = ProjectTreeInventoryReuseScope.Create(
+            rootPath,
+            trackedOnlyOptions,
+            supportsHiddenDotFolderVariants: true);
+
+        Assert.True(scope.CanProject(rootPath, trackedOnlyOptions));
+        Assert.False(scope.CanProject(rootPath, gitIgnoreOptions));
+    }
+
     [Theory]
     [InlineData(1_000_000, 17_300, true)]
     [InlineData(50_000, 0, true)]
@@ -1117,6 +1168,13 @@ public sealed class MainWindowCoordinatorRefactorTests
         viewModel.RootFolders.Add(new SelectionOptionViewModel("docs", false));
         viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
         viewModel.Extensions.Add(new SelectionOptionViewModel(".csv", false));
+        selectionCoordinator.PopulateIgnoreOptionsForRootSelection(["src"], @"C:\Project");
+        viewModel.IgnoreOptions.Single(
+            static option => option.Id == IgnoreOptionId.UseGitIgnore).IsChecked = false;
+        viewModel.IgnoreOptions.Single(
+            static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked = true;
+        viewModel.IgnoreOptions.Single(
+            static option => option.Id == IgnoreOptionId.SmartIgnore).IsChecked = true;
 
         store.FailNextSave = true;
         coordinator.PersistIfNeeded(@"C:\Project");
@@ -1132,6 +1190,13 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal([".cs"], persisted.SelectedExtensions);
         Assert.False(persisted.RootFolderStates!["docs"]);
         Assert.False(persisted.ExtensionStates![".csv"]);
+        Assert.Contains(IgnoreOptionId.TrackedGitFilesOnly, persisted.SelectedIgnoreOptions);
+        Assert.Contains(IgnoreOptionId.SmartIgnore, persisted.SelectedIgnoreOptions);
+        Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, persisted.SelectedIgnoreOptions);
+        Assert.NotNull(persisted.IgnoreOptionStates);
+        Assert.True(persisted.IgnoreOptionStates![IgnoreOptionId.TrackedGitFilesOnly]);
+        Assert.True(persisted.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
+        Assert.False(persisted.IgnoreOptionStates[IgnoreOptionId.UseGitIgnore]);
     }
 
     private static ProjectLoadCancellationSnapshot CreateProjectLoadSnapshot(bool hadLoadedProjectBefore)
@@ -1166,7 +1231,8 @@ public sealed class MainWindowCoordinatorRefactorTests
         bool useGitIgnore,
         bool useSmartIgnore,
         bool ignoreHiddenFolders,
-        bool ignoreDotFolders)
+        bool ignoreDotFolders,
+        bool useTrackedGitFilesOnly = false)
     {
         return new TreeFilterOptions(
             AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
@@ -1180,6 +1246,7 @@ public sealed class MainWindowCoordinatorRefactorTests
                 SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
             {
                 UseGitIgnore = useGitIgnore,
+                UseTrackedGitFilesOnly = useTrackedGitFilesOnly,
                 UseSmartIgnore = useSmartIgnore
             });
     }
@@ -1235,7 +1302,10 @@ public sealed class MainWindowCoordinatorRefactorTests
                 IgnoreDotFiles: false,
                 SmartIgnoredFolders: new HashSet<string>(),
                 SmartIgnoredFiles: new HashSet<string>()),
-            (_, _) => new IgnoreOptionsAvailability(false, false),
+            (_, _) => new IgnoreOptionsAvailability(
+                IncludeGitIgnore: true,
+                IncludeSmartIgnore: true,
+                IncludeTrackedGitFilesOnly: true),
             _ => false,
             () => @"C:\Project");
     }
@@ -1276,6 +1346,7 @@ public sealed class MainWindowCoordinatorRefactorTests
             {
                 ["Settings.Ignore.SmartIgnore"] = "Smart ignore",
                 ["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+                ["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
                 ["Settings.Ignore.HiddenFolders"] = "Hidden folders",
                 ["Settings.Ignore.HiddenFiles"] = "Hidden files",
                 ["Settings.Ignore.DotFolders"] = "dot folders",

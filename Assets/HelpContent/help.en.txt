@@ -279,11 +279,11 @@ Constraints:
 ## 11) Options (settings panel)
 Available on the right:
 * Apply settings
-* Ignore options
+* Exclusions
 * Extensions
 * Root folders
 
-Changes in “Ignore options”, “Extensions”, and “Root folders” are staged in the panel and applied after clicking “Apply settings”.
+Changes in “Exclusions”, “Extensions”, and “Root folders” are staged in the panel and applied after clicking “Apply settings”.
 
 After a checkbox changes, the app may update available options and their counts in the background. The resulting tree is rebuilt only after clicking “Apply settings”.
 
@@ -293,7 +293,7 @@ Each list has an All toggle.
 
 Note about "Extensions":
 * this list shows only files that have an extension;
-* files without an extension are not added to this list and are controlled by a separate option in "Ignore".
+* files without an extension are not added to this list and are controlled by a separate option in "Exclusions".
 
 Ctrl+P — show/hide the panel.
 
@@ -301,7 +301,7 @@ Ctrl+P — show/hide the panel.
 For local folders, DevProjex remembers the last applied project parameters:
 * selected top-level folders;
 * selected file types;
-* selected options in the "Ignore" block.
+* selected options in the "Exclusions" section.
 
 Saving is performed when you click "Apply settings".
 When the same local folder is opened again, parameters are restored automatically.
@@ -310,11 +310,11 @@ Important:
 * profiles are saved only for local projects;
 * for projects opened via Git Clone, profiles are not saved;
 * if some saved options are no longer available in the current project, they are skipped, and the remaining parameters are applied.
-* if refresh or reopening reveals a new top-level folder, file type, or option in "Ignore", it is enabled by default;
+* if refresh or reopening reveals a new top-level folder, file type, or option in "Exclusions", it is enabled by default;
 * options already seen keep the user's explicit choice: new files of a disabled type do not enable that type again.
 
-## 12) Ignore
-The "Ignore" block controls which files and folders are excluded from the tree, content, copy, and export results.
+## 12) Exclusions
+The "Exclusions" section controls which files and folders are excluded from the tree, content, copy, and export results.
 
 An item is shown only when all of these conditions are met:
 * its top-level folder is selected;
@@ -328,6 +328,7 @@ Depending on the project contents, the following options may be shown:
 
 * Smart Ignore
 * Use .gitignore
+* Tracked Git files only
 * Empty folders
 * Empty files
 * Hidden folders
@@ -336,7 +337,7 @@ Depending on the project contents, the following options may be shown:
 * Dot-prefixed files
 * Files without extension
 
-An option is shown when its rule can change the current tree. The list may therefore change after switching another rule, a top-level folder, or a file type.
+Inside a Git repository, "Use .gitignore" and "Tracked Git files only" remain visible as a stable toggle pair. Other options are shown when their rules can change the current tree. The list may therefore change after switching another rule, a top-level folder, or a file type.
 
 A new option is enabled by default when it first appears. A known option keeps the user's choice even if it temporarily disappears from the list.
 
@@ -377,14 +378,21 @@ A malformed or unsupported line is skipped independently. Other valid rules in t
 
 This option covers working-tree `.gitignore` files only. Rules from `.git/info/exclude` and global Git configuration are not applied. When a readable Git index is available, tracked files remain visible even if they match `.gitignore`; without an index or Git CLI, DevProjex safely falls back to pattern-only evaluation.
 
-### 12.4 Relationship between .gitignore and Smart Ignore
-`.gitignore` and Smart Ignore are independent switches. Each applies to all of its scopes at every reachable nesting level. An option is shown only when changing it can affect the current effective tree.
+### 12.4 Tracked Git files only
+"Tracked Git files only" builds the Git stage of the tree from existing working-tree files recorded in each readable Git index. Modified tracked files and staged additions remain included; untracked files are excluded. This is the current working tree, not a historical snapshot of `HEAD` or a remote repository.
 
-`.gitignore` runs first, Smart Ignore processes the remaining items, and the basic rules run last. Smart Ignore can therefore stay hidden while `.gitignore` already covers all of its candidates, then appear after `.gitignore` is disabled.
+Every reachable nested repository and worktree is resolved independently at any reachable nesting level. A child repository does not inherit tracked paths from its parent or sibling. If an index cannot be read safely, strict mode does not silently replace it with `.gitignore` pattern evaluation.
+
+"Use .gitignore" and "Tracked Git files only" are mutually exclusive. Enabling one disables the other. For local projects that support profiles, the selected mode is saved with the root-folder, file-type, and other ignore settings.
+
+### 12.5 Relationship between Git filtering and Smart Ignore
+The selected Git mode and Smart Ignore are independent switches. The Git mode applies first at every reachable Git scope. Smart Ignore then processes the remaining items, and the basic rules run last.
+
+Smart Ignore can stay hidden while the selected Git mode already covers all of its candidates, then appear after the Git mode is changed. The two Git modes remain visible as a stable pair inside a Git repository.
 
 A Git negation rule starting with `!` cancels only a Git result. It does not disable Smart Ignore or a basic rule.
 
-### 12.5 Basic rules
+### 12.6 Basic rules
 "Dot-prefixed folders" and "Dot-prefixed files" inspect the item name.
 
 "Hidden folders" and "Hidden files" inspect the system hidden attribute. On some platforms, a dot-prefixed name and the system attribute may describe the same item or different items.
@@ -397,7 +405,7 @@ A Git negation rule starting with `!` cancels only a Git result. It does not dis
 
 The empty-folder count can therefore change after another rule is switched: hiding files can make their containing folders logically empty.
 
-### 12.6 Counters
+### 12.7 Counters
 The count next to a rule shows its direct contribution under the current settings, not the physical number of similar items on disk.
 
 One item is not attributed to several overlapping counters at the same time. For example, the `.git` folder may have both a dot-prefixed name and the system Hidden attribute, but its exclusion is attributed to only one rule.
@@ -409,7 +417,7 @@ A stable order is used to select the owner of an exclusion:
 
 This order affects counters only. Final visibility follows a simpler rule: an item is hidden if any enabled mechanism excludes it.
 
-### 12.7 Applying changes
+### 12.8 Applying changes
 Switching checkboxes first updates the available settings and counters in the panel. The final tree is rebuilt after "Apply settings" is selected.
 
 If settings preparation is cancelled, DevProjex returns the panel to the last fully completed state. Partially calculated rules are not applied.
@@ -453,7 +461,7 @@ Content metrics:
 ### 13.3 When counters update
 Recalculation runs:
 * after opening/refreshing a project;
-* after applying settings (ignore, extensions, root folders);
+* after applying settings (exclusions, extensions, root folders);
 * when tree checkboxes change (with debounce);
 * when switching tree format (for operations where tree output is used).
 * when background calculation is canceled, counters are set to 0 until the next completed recalculation.
@@ -492,7 +500,7 @@ Reset settings (Help → Reset settings) restores the default theme, effects, Co
 Reset data (Help → Reset data) removes saved local-project parameter profiles:
 * selected top-level folders;
 * selected file types;
-* selected options in the "Ignore" block.
+* selected options in the "Exclusions" section.
 
 Important:
 * Recent history for local folders is not cleared;

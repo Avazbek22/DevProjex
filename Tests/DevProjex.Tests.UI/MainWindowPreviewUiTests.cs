@@ -218,8 +218,16 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
                 viewModel.SelectedExportFormat = format;
                 await UiTestDriver.WaitForConditionAsync(
                     window,
-                    () => IsExpectedTreeFormat(UiTestDriver.ComputeCurrentPreviewCopyPayload(window), format),
-                    $"{format} tree and content preview payload to be rendered");
+                    () =>
+                    {
+                        var candidatePayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+                        return IsExpectedTreeFormat(candidatePayload, format) &&
+                               string.Equals(
+                                   contentBody,
+                                   ExtractContentBodyFromTreeAndContentPayload(candidatePayload),
+                                   StringComparison.Ordinal);
+                    },
+                    $"{format} tree and complete content preview payload to be rendered");
                 await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
 
                 var formatPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);

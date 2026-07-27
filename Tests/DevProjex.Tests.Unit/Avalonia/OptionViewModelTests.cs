@@ -46,14 +46,28 @@ public sealed class OptionViewModelTests
     }
 
     [Fact]
-    public void IgnoreOptionViewModel_Constructor_SetsProperties()
-    {
-        var option = new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "Bin", true);
+	public void IgnoreOptionViewModel_Constructor_SetsProperties()
+	{
+		var option = new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "Bin", true);
 
         Assert.Equal(IgnoreOptionId.HiddenFolders, option.Id);
         Assert.Equal("Bin", option.Label);
-        Assert.True(option.IsChecked);
-    }
+		Assert.True(option.IsChecked);
+	}
+
+	[Fact]
+	public void IgnoreOptionViewModel_ControllerGroupEnd_IsExplicitPresentationMetadata()
+	{
+		var regular = new IgnoreOptionViewModel(IgnoreOptionId.SmartIgnore, "Smart", true);
+		var groupEnd = new IgnoreOptionViewModel(
+			IgnoreOptionId.TrackedGitFilesOnly,
+			"Tracked",
+			false,
+			isControllerGroupEnd: true);
+
+		Assert.False(regular.IsControllerGroupEnd);
+		Assert.True(groupEnd.IsControllerGroupEnd);
+	}
 
     [Fact]
     public void IgnoreOptionViewModel_Label_Changes()

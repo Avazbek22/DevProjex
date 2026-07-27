@@ -204,7 +204,7 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
-	public void ComputeFullRefreshSnapshot_ExplicitUncheckedControllersStayVisibleWhenImpactDropsToZero()
+	public void ComputeFullRefreshSnapshot_StandaloneControllersHideWhenImpactDropsToZeroButKeepCachedIntent()
 	{
 		var scanner = new ProfileFallbackVisibilityScanner();
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
@@ -237,8 +237,8 @@ public sealed class SelectionRefreshEngineTests
 
 		var snapshot = engine.ComputeFullRefreshSnapshot(context, CancellationToken.None);
 
-		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && !option.IsChecked);
-		Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore && !option.IsChecked);
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		Assert.DoesNotContain(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore);
 		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.UseGitIgnore, out var gitState));
 		Assert.False(gitState);
 		Assert.True(snapshot.IgnoreOptionStateCache.TryGetValue(IgnoreOptionId.SmartIgnore, out var smartState));
@@ -458,6 +458,7 @@ public sealed class SelectionRefreshEngineTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
 				["Settings.Ignore.DotFolders"] = "Dot folders",

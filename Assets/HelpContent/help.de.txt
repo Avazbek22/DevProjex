@@ -279,11 +279,11 @@ Einschränkungen:
 ## 11) Optionen
 Rechts verfügbar:
 * Anwenden
-* Ignorieren
+* Ausschlüsse
 * Dateitypen
 * Ordner der obersten Ebene
 
-Änderungen in „Ignorieren“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet und nach dem Klick auf „Anwenden“ angewendet.
+Änderungen in „Ausschlüsse“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet und nach dem Klick auf „Anwenden“ angewendet.
 
 Nach dem Ändern eines Kontrollkästchens kann die App verfügbare Optionen und deren Zähler im Hintergrund aktualisieren. Der resultierende Baum wird erst nach dem Klick auf „Anwenden“ neu aufgebaut.
 
@@ -293,7 +293,7 @@ Jede Liste hat einen Alle‑Schalter.
 
 Hinweis zu „Dateitypen“:
 * in dieser Liste werden nur Dateien mit Erweiterung angezeigt;
-* Dateien ohne Erweiterung werden hier nicht angezeigt und über eine separate Option in „Ignorieren“ gesteuert.
+* Dateien ohne Erweiterung werden hier nicht angezeigt und über eine separate Option in „Ausschlüsse“ gesteuert.
 
 Ctrl+P — Panel anzeigen/ausblenden.
 
@@ -301,7 +301,7 @@ Ctrl+P — Panel anzeigen/ausblenden.
 Für lokale Ordner merkt sich DevProjex die zuletzt angewendeten Projektparameter:
 * ausgewählte Ordner der obersten Ebene;
 * ausgewählte Dateitypen;
-* ausgewählte Optionen im Block „Ignorieren“.
+* ausgewählte Optionen im Bereich „Ausschlüsse“.
 
 Gespeichert wird beim Klick auf „Anwenden“.
 Beim erneuten Öffnen desselben lokalen Ordners werden die Parameter automatisch wiederhergestellt.
@@ -310,18 +310,18 @@ Wichtig:
 * Profile werden nur für lokale Projekte gespeichert;
 * für Projekte, die über Git Clone geöffnet wurden, werden keine Profile gespeichert;
 * wenn einzelne gespeicherte Punkte im aktuellen Projekt nicht mehr verfügbar sind, werden sie übersprungen, die übrigen Parameter werden angewendet.
-* wenn nach Aktualisieren oder erneutem Öffnen ein neuer Ordner der obersten Ebene, ein neuer Dateityp oder eine neue Option in „Ignorieren“ erscheint, ist dieser Punkt standardmäßig aktiviert;
+* wenn nach Aktualisieren oder erneutem Öffnen ein neuer Ordner der obersten Ebene, ein neuer Dateityp oder eine neue Option in „Ausschlüsse“ erscheint, ist dieser Punkt standardmäßig aktiviert;
 * bereits bekannte Punkte behalten die ausdrückliche Auswahl des Benutzers: neue Dateien eines deaktivierten Typs aktivieren diesen Typ nicht erneut.
 
-## 12) Ignorieren
-Der Block „Ignorieren“ steuert, welche Dateien und Ordner aus Baum, Inhalt, Kopier- und Exportergebnissen ausgeschlossen werden.
+## 12) Ausschlüsse
+Der Bereich „Ausschlüsse“ steuert, welche Dateien und Ordner aus Baum, Inhalt, Kopier- und Exportergebnissen ausgeschlossen werden.
 
 Ein Element wird nur angezeigt, wenn sein Ordner der obersten Ebene und sein Dateityp ausgewählt sind und keine aktivierte Ignore-Regel es ausschließt. Die Regeln wirken gemeinsam: Blendet mindestens eine Regel ein Element aus, kann eine andere Regel es nicht wieder sichtbar machen.
 
 ### 12.1 Verfügbare Regeln
-Je nach Projektinhalt können Smart Ignore, „.gitignore verwenden“, leere, versteckte oder mit Punkt beginnende Ordner und Dateien sowie Dateien ohne Erweiterung angezeigt werden.
+Je nach Projektinhalt können Smart Ignore, „.gitignore verwenden“, „Nur von Git verfolgte Dateien“, leere, versteckte oder mit Punkt beginnende Ordner und Dateien sowie Dateien ohne Erweiterung angezeigt werden.
 
-Eine Option erscheint, wenn sie den aktuellen Baum verändern kann. Die Liste kann sich daher nach dem Umschalten einer anderen Regel, eines Ordners der obersten Ebene oder eines Dateityps ändern. Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert; eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend verschwindet.
+In einem Git-Repository bleiben „.gitignore verwenden“ und „Nur von Git verfolgte Dateien“ als stabiles Schalterpaar sichtbar. Andere Optionen erscheinen, wenn sie den aktuellen Baum verändern können. Die Liste kann sich daher nach dem Umschalten einer anderen Regel, eines Ordners der obersten Ebene oder eines Dateityps ändern. Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert; eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend verschwindet.
 
 ### 12.2 Smart Ignore
 Smart Ignore blendet Abhängigkeiten, Build-Ausgaben, Caches und andere Projektartefakte aus. DevProjex erkennt den Projekttyp anhand der Struktur und Markerdateien wie `.csproj`, `package.json`, `pyproject.toml` oder `Cargo.toml`. Die Regeln des entsprechenden Stacks gelten nur innerhalb des erkannten Projektbereichs und nicht für benachbarte Projekte anderer Stacks.
@@ -339,26 +339,33 @@ Eine Regel mit `!` hebt nur einen früheren Git-Ausschluss in ihrem Bereich auf.
 
 Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude` und globale Git-Regeln werden nicht berücksichtigt. Ist ein lesbarer Git-Index verfügbar, bleiben verfolgte Dateien trotz eines Treffers in `.gitignore` sichtbar; ohne Index oder Git CLI fällt DevProjex sicher auf die reine Musterauswertung zurück.
 
-### 12.4 Zusammenspiel von .gitignore und Smart Ignore
-`.gitignore` und Smart Ignore sind unabhängige Schalter. Jeder gilt für alle eigenen Bereiche auf jeder erreichbaren Verschachtelungsebene. Eine Option wird nur angezeigt, wenn ihre Änderung den aktuellen effektiven Baum beeinflussen kann.
+### 12.4 Nur von Git verfolgte Dateien
+„Nur von Git verfolgte Dateien“ baut die Git-Stufe des Baums aus vorhandenen Arbeitsbaumdateien auf, die in jedem lesbaren Git-Index eingetragen sind. Geänderte verfolgte Dateien und neu zum Index hinzugefügte Dateien bleiben enthalten; nicht verfolgte Dateien werden ausgeschlossen. Dies ist der aktuelle Arbeitsbaum, kein historischer Snapshot von `HEAD` oder einem entfernten Repository.
 
-Zuerst wird `.gitignore` angewendet, danach verarbeitet Smart Ignore die verbleibenden Elemente und zuletzt folgen die Grundregeln. Smart Ignore kann daher ausgeblendet bleiben, solange `.gitignore` bereits alle seine Kandidaten abdeckt, und nach dem Deaktivieren von `.gitignore` erscheinen.
+Jedes erreichbare verschachtelte Repository und jeder Worktree wird auf jeder erreichbaren Verschachtelungsebene unabhängig verarbeitet. Ein untergeordnetes Repository übernimmt keine verfolgten Pfade vom übergeordneten oder einem benachbarten Repository. Kann ein Index nicht sicher gelesen werden, ersetzt der strikte Modus ihn nicht stillschweigend durch eine `.gitignore`-Musterauswertung.
+
+„.gitignore verwenden“ und „Nur von Git verfolgte Dateien“ schließen sich gegenseitig aus: Das Aktivieren des einen deaktiviert das andere. Bei lokalen Projekten mit Profilunterstützung wird der gewählte Modus zusammen mit den Ordnern der obersten Ebene, Dateitypen und übrigen Ausschlusseinstellungen gespeichert.
+
+### 12.5 Zusammenspiel von Git-Filterung und Smart Ignore
+Der gewählte Git-Modus und Smart Ignore sind unabhängige Schalter. Der Git-Modus wird zuerst in jedem erreichbaren Git-Bereich angewendet, danach verarbeitet Smart Ignore die verbleibenden Elemente und zuletzt folgen die Grundregeln.
+
+Smart Ignore kann ausgeblendet bleiben, solange der gewählte Git-Modus bereits alle seine Kandidaten abdeckt, und nach einem Moduswechsel erscheinen. In einem Git-Repository bleiben beide Git-Modi als stabiles Schalterpaar sichtbar.
 
 Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam.
 
-### 12.5 Grundregeln
+### 12.6 Grundregeln
 Regeln für führende Punkte prüfen den Namen; Regeln für versteckte Elemente prüfen das Hidden-Systemattribut. Beides kann je nach Plattform dasselbe oder verschiedene Elemente betreffen.
 
 „Leere Dateien“ blendet Dateien mit 0 Byte aus. „Dateien ohne Erweiterung“ betrifft beispielsweise `Dockerfile`, `Makefile` und `README`.
 
 „Leere Ordner“ blendet logisch leere Ordner aus. Ein Ordner ist logisch leer, wenn nach Anwendung der ausgewählten Dateitypen und aller anderen Regeln keine sichtbaren Dateien oder Unterordner verbleiben. Deshalb kann sich sein Zähler ändern, wenn eine andere Regel umgeschaltet wird.
 
-### 12.6 Zähler
+### 12.7 Zähler
 Ein Zähler zeigt den direkten Beitrag einer Regel unter den aktuellen Einstellungen, nicht die physische Anzahl ähnlicher Elemente auf dem Datenträger. Ein Element wird nicht gleichzeitig mehreren überlappenden Zählern zugeordnet.
 
 Die feste Zuordnung lautet: für Ordner `.gitignore`, Smart Ignore, führender Punkt, Hidden-Attribut; für Dateien `.gitignore`, Smart Ignore, führender Punkt, keine Erweiterung, leere Datei, Hidden-Attribut. Diese Reihenfolge betrifft nur die Zähler. Für die Sichtbarkeit genügt jeder aktivierte Mechanismus, der das Element ausschließt.
 
-### 12.7 Änderungen anwenden
+### 12.8 Änderungen anwenden
 Das Umschalten von Kontrollkästchen aktualisiert zuerst die verfügbaren Einstellungen und Zähler. Der endgültige Baum wird nach „Einstellungen anwenden“ neu aufgebaut. Wird die Vorbereitung abgebrochen, kehrt DevProjex zum letzten vollständig abgeschlossenen Zustand zurück; teilweise berechnete Regeln werden nicht angewendet.
 
 ## 13) Wie Baum und Kennzahlen berechnet werden
@@ -400,7 +407,7 @@ Inhalt-Kennzahlen:
 ### 13.3 Wann die Zähler aktualisiert werden
 Neu berechnet wird:
 * nach dem Öffnen/Aktualisieren eines Projekts;
-* nach dem Anwenden von Einstellungen (Ignore, Dateitypen, Root-Ordner);
+* nach dem Anwenden von Einstellungen (Ausschlüsse, Dateitypen, Root-Ordner);
 * bei Änderungen von Checkboxen im Baum (mit Debounce);
 * beim Umschalten des Baumformats (für Operationen mit Baum-Ausgabe).
 * wenn die Hintergrundberechnung abgebrochen wird, werden die Zähler auf 0 gesetzt, bis die nächste vollständige Neuberechnung abgeschlossen ist.
@@ -439,7 +446,7 @@ Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
 * ausgewählte Ordner der obersten Ebene;
 * ausgewählte Dateitypen;
-* ausgewählte Optionen im Block „Ignorieren“.
+* ausgewählte Optionen im Bereich „Ausschlüsse“.
 
 Wichtig:
 * der Verlauf „Zuletzt verwendet“ für lokale Ordner wird nicht gelöscht;

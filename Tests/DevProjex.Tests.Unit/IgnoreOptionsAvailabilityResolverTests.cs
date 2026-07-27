@@ -45,6 +45,7 @@ public sealed class IgnoreOptionsAvailabilityResolverTests
 			stateCacheIsComplete: false);
 
 		Assert.True(actual.IncludeGitIgnore);
+		Assert.False(actual.IncludeTrackedGitFilesOnly);
 		Assert.False(actual.IncludeSmartIgnore);
 		Assert.True(actual.IncludeHiddenFolders);
 		Assert.Equal(2, actual.HiddenFoldersCount);
@@ -97,9 +98,103 @@ public sealed class IgnoreOptionsAvailabilityResolverTests
 		{ false, 3, false, null, true },
 		{ true, 0, false, null, false },
 		{ true, 0, true, true, false },
-		{ true, 0, true, false, true },
+		{ true, 0, true, false, false },
 		{ false, 0, true, false, false }
 	};
+
+	[Fact]
+	public void Resolve_RepositoryKeepsBothGitModesVisibleAfterMeasuredImpactDropsToZero()
+	{
+		var snapshot = new IgnoreSectionSnapshotState(
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			HasExtensionlessEntries: false,
+			ExtensionlessEntriesCount: 0);
+
+		var actual = IgnoreOptionsAvailabilityResolver.Resolve(
+			new IgnoreOptionsAvailability(
+				IncludeGitIgnore: false,
+				IncludeSmartIgnore: false,
+				IncludeTrackedGitFilesOnly: true),
+			snapshot,
+			new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = false,
+				[IgnoreOptionId.TrackedGitFilesOnly] = true
+			},
+			stateCacheIsComplete: true);
+
+		Assert.True(actual.IncludeGitIgnore);
+		Assert.True(actual.IncludeTrackedGitFilesOnly);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void Resolve_ScanEvidenceExposesStableGitModePair(bool hasMeasuredCounts)
+	{
+		var snapshot = new IgnoreSectionSnapshotState(
+			HasIgnoreOptionCounts: hasMeasuredCounts,
+			IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			HasExtensionlessEntries: false,
+			ExtensionlessEntriesCount: 0,
+			GitEvidence: new GitWorkspaceEvidence(HasRepositoryBoundary: true));
+
+		var actual = IgnoreOptionsAvailabilityResolver.Resolve(
+			new IgnoreOptionsAvailability(
+				IncludeGitIgnore: false,
+				IncludeSmartIgnore: false),
+			snapshot,
+			new Dictionary<IgnoreOptionId, bool>(),
+			stateCacheIsComplete: false);
+
+		Assert.True(actual.IncludeGitIgnore);
+		Assert.True(actual.IncludeTrackedGitFilesOnly);
+	}
+
+	[Fact]
+	public void Resolve_RemovedScanEvidenceDoesNotLeakCachedGitModes()
+	{
+		var actual = IgnoreOptionsAvailabilityResolver.Resolve(
+			new IgnoreOptionsAvailability(
+				IncludeGitIgnore: false,
+				IncludeSmartIgnore: false),
+			new IgnoreSectionSnapshotState(
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+				HasExtensionlessEntries: false,
+				ExtensionlessEntriesCount: 0),
+			new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = true,
+				[IgnoreOptionId.TrackedGitFilesOnly] = false
+			},
+			stateCacheIsComplete: true);
+
+		Assert.False(actual.IncludeGitIgnore);
+		Assert.False(actual.IncludeTrackedGitFilesOnly);
+	}
+
+	[Fact]
+	public void SnapshotState_GitEvidenceChangeAffectsAvailabilityComparison()
+	{
+		var before = new IgnoreSectionSnapshotState(
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			HasExtensionlessEntries: false,
+			ExtensionlessEntriesCount: 0);
+		var after = before with
+		{
+			GitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true)
+		};
+
+		Assert.True(before.HasAvailabilityDifference(after));
+		Assert.True(after.HasAvailabilityDifference(before));
+	}
 
 	[Fact]
 	public void Resolve_UnmeasuredSnapshotPreservesControllersButHidesUnverifiedAdvancedOptions()

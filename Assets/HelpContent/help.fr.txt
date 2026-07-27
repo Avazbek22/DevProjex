@@ -279,11 +279,11 @@ Limitations :
 ## 11) Options
 À droite sont disponibles :
 * Appliquer
-* Ignorer
+* Exclusions
 * Types de fichiers
 * Dossiers de premier niveau
 
-Les changements dans « Ignorer », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
+Les changements dans « Exclusions », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
 
 Après la modification d’une case, l’application peut actualiser en arrière-plan les options disponibles et leurs compteurs. L’arborescence résultante n’est reconstruite qu’après un clic sur « Appliquer ».
 
@@ -293,7 +293,7 @@ Chaque liste a un bouton Tous.
 
 Remarque sur « Types de fichiers » :
 * cette liste affiche uniquement les fichiers avec extension ;
-* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Ignorer ».
+* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Exclusions ».
 
 Ctrl+P — afficher/masquer le panneau.
 
@@ -301,7 +301,7 @@ Ctrl+P — afficher/masquer le panneau.
 Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
-* options sélectionnées dans le bloc « Ignorer ».
+* options sélectionnées dans la section « Exclusions ».
 
 L’enregistrement est effectué après clic sur « Appliquer ».
 Lors de la réouverture du même dossier local, les paramètres sont restaurés automatiquement.
@@ -310,18 +310,18 @@ Important :
 * les profils sont enregistrés uniquement pour les projets locaux ;
 * pour les projets ouverts via Git Clone, les profils ne sont pas enregistrés ;
 * si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués.
-* si l’actualisation ou la réouverture fait apparaître un nouveau dossier de premier niveau, un nouveau type de fichiers ou une nouvelle option dans « Ignorer », cet élément est activé par défaut ;
+* si l’actualisation ou la réouverture fait apparaître un nouveau dossier de premier niveau, un nouveau type de fichiers ou une nouvelle option dans « Exclusions », cet élément est activé par défaut ;
 * les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
 
-## 12) Ignorer
-Le bloc « Ignorer » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
+## 12) Exclusions
+La section « Exclusions » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
 
 Un élément n’est affiché que si son dossier de premier niveau et son type de fichier sont sélectionnés et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
 
 ### 12.1 Règles disponibles
-Selon le contenu du projet, Smart Ignore, « Utiliser .gitignore », les dossiers et fichiers vides, cachés ou commençant par un point, ainsi que les fichiers sans extension peuvent être proposés.
+Selon le contenu du projet, Smart Ignore, « Utiliser .gitignore », « Uniquement les fichiers suivis par Git », les dossiers et fichiers vides, cachés ou commençant par un point, ainsi que les fichiers sans extension peuvent être proposés.
 
-Une option apparaît lorsqu’elle peut modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle, d’un dossier de premier niveau ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
+Dans un dépôt Git, « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » restent visibles sous la forme d’une paire stable. Les autres options apparaissent lorsqu’elles peuvent modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle, d’un dossier de premier niveau ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
 
 ### 12.2 Smart Ignore
 Smart Ignore masque les dépendances, résultats de build, caches et autres artefacts de service. DevProjex identifie le type du projet à partir de sa structure et de fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml`. Les règles de la technologie reconnue restent dans la zone du projet et ne s’étendent pas aux projets voisins d’une autre technologie.
@@ -339,26 +339,33 @@ Une règle commençant par `!` annule uniquement une exclusion Git antérieure d
 
 Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude` et les règles Git globales ne sont pas appliqués. Si un index Git lisible est disponible, les fichiers suivis restent visibles même s’ils correspondent à `.gitignore` ; sans index ou Git CLI, DevProjex revient en toute sécurité à l’évaluation des motifs seuls.
 
-### 12.4 Relation entre .gitignore et Smart Ignore
-`.gitignore` et Smart Ignore sont des interrupteurs indépendants. Chacun s’applique à toutes ses zones, à chaque niveau d’imbrication accessible. Une option n’est affichée que si sa modification peut changer l’arborescence effective actuelle.
+### 12.4 Uniquement les fichiers suivis par Git
+« Uniquement les fichiers suivis par Git » construit l’étape Git de l’arbre à partir des fichiers existants de l’arbre de travail enregistrés dans chaque index Git lisible. Les fichiers suivis modifiés et les nouveaux fichiers ajoutés à l’index restent inclus ; les fichiers non suivis sont exclus. Il s’agit de l’arbre de travail actuel, et non d’un instantané historique de `HEAD` ou d’un dépôt distant.
 
-`.gitignore` est appliqué en premier, Smart Ignore traite ensuite les éléments restants, puis les règles de base s’appliquent. Smart Ignore peut donc rester masqué tant que `.gitignore` couvre déjà tous ses candidats, puis apparaître après la désactivation de `.gitignore`.
+Chaque dépôt imbriqué et worktree accessible est traité indépendamment à chaque niveau d’imbrication accessible. Un dépôt enfant n’hérite pas des chemins suivis de son parent ni d’un dépôt voisin. Si un index ne peut pas être lu en toute sécurité, le mode strict ne le remplace pas silencieusement par l’évaluation des motifs `.gitignore`.
+
+« Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent mutuellement : activer l’un désactive l’autre. Pour les projets locaux prenant en charge les profils, le mode choisi est enregistré avec les dossiers de premier niveau, les types de fichiers et les autres règles d’exclusion.
+
+### 12.5 Relation entre le filtrage Git et Smart Ignore
+Le mode Git sélectionné et Smart Ignore sont des interrupteurs indépendants. Le mode Git est appliqué en premier dans chaque zone Git accessible, puis Smart Ignore traite les éléments restants et les règles de base s’appliquent en dernier.
+
+Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déjà tous ses candidats, puis apparaître après un changement de mode. Dans un dépôt Git, les deux modes Git restent visibles sous la forme d’une paire stable.
 
 Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
 
-### 12.5 Règles de base
+### 12.6 Règles de base
 Les règles « commençant par un point » vérifient le nom ; les règles « caché » vérifient l’attribut système Hidden. Selon la plateforme, elles peuvent viser le même élément ou des éléments différents.
 
 « Fichiers vides » masque les fichiers de 0 octet. « Fichiers sans extension » masque par exemple `Dockerfile`, `Makefile` et `README`.
 
 « Dossiers vides » masque les dossiers logiquement vides. Un dossier est logiquement vide lorsqu’aucun fichier ou sous-dossier visible ne reste après l’application des types sélectionnés et de toutes les autres règles. Son compteur peut donc changer lorsqu’une autre règle est modifiée.
 
-### 12.6 Compteurs
+### 12.7 Compteurs
 Un compteur indique la contribution directe d’une règle avec les paramètres actuels, et non le nombre physique d’éléments similaires sur le disque. Un élément n’est pas attribué simultanément à plusieurs compteurs qui se recouvrent.
 
 L’ordre stable d’attribution est : pour les dossiers, `.gitignore`, Smart Ignore, nom commençant par un point, attribut Hidden ; pour les fichiers, `.gitignore`, Smart Ignore, nom commençant par un point, absence d’extension, fichier vide, attribut Hidden. Cet ordre ne concerne que les compteurs. Pour la visibilité, tout mécanisme actif peut exclure l’élément.
 
-### 12.7 Application des modifications
+### 12.8 Application des modifications
 Les cases à cocher mettent d’abord à jour les options disponibles et leurs compteurs. L’arbre final est reconstruit après « Appliquer les paramètres ». Si la préparation est annulée, DevProjex revient au dernier état entièrement terminé ; aucune règle partiellement calculée n’est appliquée.
 
 ## 13) Comment l'arbre et les métriques sont calculés
@@ -400,7 +407,7 @@ Métriques du contenu :
 ### 13.3 Quand les compteurs sont mis à jour
 Le recalcul est effectué :
 * après ouverture/actualisation d’un projet ;
-* après application des paramètres (ignore, types de fichiers, dossiers racine) ;
+* après application des paramètres (exclusions, types de fichiers, dossiers racine) ;
 * lors des changements de cases à cocher dans l’arbre (avec debounce) ;
 * lors du basculement du format d’arborescence (pour les opérations utilisant l’arbre).
 * si le calcul en arrière-plan est annulé, les compteurs sont remis à 0 jusqu’au prochain recalcul terminé.
@@ -439,7 +446,7 @@ Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétabl
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
-* options sélectionnées dans le bloc « Ignorer ».
+* options sélectionnées dans la section « Exclusions ».
 
 Important :
 * l’historique « Récents » des dossiers locaux n’est pas effacé ;
