@@ -78,7 +78,8 @@ public partial class MainWindow : IProjectLoadPipelineHost
         ScheduleBackgroundMemoryCleanup(
             hadLoadedProjectBefore
                 ? MemoryCleanupReason.ProjectSwitchPostLoad
-                : MemoryCleanupReason.InitialProjectLoad);
+                : MemoryCleanupReason.InitialProjectLoad,
+            _postLoadVisualReadyTask);
     }
 
     void IProjectLoadPipelineHost.ShowLoadCanceledToast() =>

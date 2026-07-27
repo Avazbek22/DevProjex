@@ -585,6 +585,11 @@ public partial class MainWindow : Window
     private void ScheduleBackgroundMemoryCleanup(MemoryCleanupReason reason)
         => _memoryCleanup.Schedule(reason);
 
+    private void ScheduleBackgroundMemoryCleanup(
+        MemoryCleanupReason reason,
+        Task visualReadyTask)
+        => _memoryCleanup.Schedule(reason, visualReadyTask);
+
     private void CancelBackgroundMemoryCleanup()
         => _memoryCleanup.CancelBackground();
 
