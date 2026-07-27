@@ -42,6 +42,28 @@ public sealed class LocalizationLanguageCoverageIntegrationTests
         Assert.DoesNotContain("Apply settings", localized.Values);
     }
 
+    [Theory]
+    [InlineData(AppLanguage.En, "Exclusions:")]
+    [InlineData(AppLanguage.Ru, "Исключения:")]
+    [InlineData(AppLanguage.De, "Ausschlüsse:")]
+    [InlineData(AppLanguage.Fr, "Exclusions :")]
+    [InlineData(AppLanguage.It, "Esclusioni:")]
+    [InlineData(AppLanguage.Es, "Exclusiones:")]
+    [InlineData(AppLanguage.Pt, "Exclusões:")]
+    [InlineData(AppLanguage.PtPt, "Exclusões:")]
+    [InlineData(AppLanguage.Kk, "Ерекшеліктер:")]
+    [InlineData(AppLanguage.Tg, "Истисноҳо:")]
+    [InlineData(AppLanguage.Uz, "Istisnolar:")]
+    public void ExclusionSection_UsesLocalizedNounLabel(
+        AppLanguage language,
+        string expectedLabel)
+    {
+        var localized = new JsonLocalizationCatalog().Get(language);
+
+        Assert.Equal(expectedLabel, localized["Settings.IgnoreTitle"]);
+        Assert.Equal(expectedLabel, localized["Settings.Ignore"]);
+    }
+
     [Fact]
     public void WindowsPackage_DeclaresSpanishAndPortugueseResources()
     {

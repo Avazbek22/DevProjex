@@ -279,11 +279,11 @@ Limitazioni:
 ## 11) Opzioni
 A destra sono disponibili:
 * Applica
-* Ignora
+* Esclusioni
 * Tipi di file
 * Cartelle di primo livello
 
-Le modifiche in « Ignora », « Tipi di file » e « Cartelle di primo livello » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
+Le modifiche in « Esclusioni », « Tipi di file » e « Cartelle di primo livello » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
 
 Dopo la modifica di una casella, l’app può aggiornare in background le opzioni disponibili e i relativi contatori. L’albero risultante viene ricostruito solo dopo aver premuto « Applica ».
 
@@ -293,7 +293,7 @@ Ogni lista ha il toggle Tutti.
 
 Nota su « Tipi di file »:
 * in questa lista vengono mostrati solo file con estensione;
-* i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Ignora ».
+* i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Esclusioni ».
 
 Ctrl+P — mostra/nascondi pannello.
 
@@ -301,7 +301,7 @@ Ctrl+P — mostra/nascondi pannello.
 Per le cartelle locali, DevProjex memorizza gli ultimi parametri di progetto applicati:
 * cartelle di primo livello selezionate;
 * tipi di file selezionati;
-* opzioni selezionate nel blocco «Ignora».
+* opzioni selezionate nella sezione «Esclusioni».
 
 Il salvataggio avviene quando fai clic su «Applica».
 Quando si riapre la stessa cartella locale, i parametri vengono ripristinati automaticamente.
@@ -310,11 +310,11 @@ Importante:
 * i profili vengono salvati solo per i progetti locali;
 * per i progetti aperti tramite Git Clone, i profili non vengono salvati;
 * se alcune opzioni salvate non sono più disponibili nel progetto corrente, vengono ignorate e gli altri parametri vengono applicati.
-* se l’aggiornamento o la riapertura mostra una nuova cartella di primo livello, un nuovo tipo di file o una nuova opzione in « Ignora », quel punto viene attivato per impostazione predefinita;
+* se l’aggiornamento o la riapertura mostra una nuova cartella di primo livello, un nuovo tipo di file o una nuova opzione in « Esclusioni », quel punto viene attivato per impostazione predefinita;
 * i punti già noti mantengono la scelta esplicita dell’utente: nuovi file di un tipo disattivato non riattivano quel tipo.
 
-## 12) Ignora
-Il blocco «Ignora» controlla quali file e cartelle vengono esclusi dall’albero, dal contenuto, dalla copia e dall’esportazione.
+## 12) Esclusioni
+La sezione «Esclusioni» controlla quali file e cartelle vengono esclusi dall’albero, dal contenuto, dalla copia e dall’esportazione.
 
 Un elemento viene mostrato solo se la cartella di primo livello e il tipo di file sono selezionati e nessuna regola attiva lo esclude. Le regole si sommano: se almeno una nasconde un elemento, un’altra non può renderlo visibile.
 
@@ -407,7 +407,7 @@ Metriche contenuto:
 ### 13.3 Quando i contatori vengono aggiornati
 Il ricalcolo avviene:
 * dopo apertura/aggiornamento progetto;
-* dopo applicazione impostazioni (ignore, tipi file, cartelle root);
+* dopo l’applicazione delle impostazioni (esclusioni, tipi di file, cartelle root);
 * quando cambiano le checkbox nell’albero (con debounce);
 * quando si cambia formato albero (per operazioni che usano l’albero).
 * quando il calcolo in background viene annullato, i contatori vengono impostati a 0 fino al successivo ricalcolo completato.
@@ -446,7 +446,7 @@ Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori 
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
 * cartelle di primo livello selezionate;
 * tipi di file selezionati;
-* opzioni selezionate nel blocco «Ignora».
+* opzioni selezionate nella sezione «Esclusioni».
 
 Importante:
 * la cronologia «Recenti» delle cartelle locali non viene cancellata;

@@ -279,11 +279,11 @@ Restricciones:
 ## 11) Opciones (panel de configuración)
 Disponible a la derecha:
 * Aplicar configuración
-* Ignorar opciones
+* Exclusiones
 * Extensiones
 * Carpetas raíz
 
-Los cambios en "Ignorar opciones", "Extensiones" y "Carpetas raíz" se organizan en el panel y se aplican después de hacer clic en "Aplicar configuración".
+Los cambios en "Exclusiones", "Extensiones" y "Carpetas raíz" se organizan en el panel y se aplican después de hacer clic en "Aplicar configuración".
 
 Después de que cambia una casilla de verificación, la aplicación puede actualizar las opciones disponibles y sus recuentos en segundo plano. El árbol resultante se reconstruye sólo después de hacer clic en "Aplicar configuración".
 
@@ -293,7 +293,7 @@ Cada lista tiene un conmutador Todo.
 
 Nota sobre las "Extensiones":
 * esta lista muestra sólo archivos que tienen una extensión;
-* Los archivos sin extensión no se agregan a esta lista y se controlan mediante una opción separada en "Ignorar".
+* Los archivos sin extensión no se agregan a esta lista y se controlan mediante una opción separada en "Exclusiones".
 
 Ctrl+P: muestra/oculta el panel.
 
@@ -301,7 +301,7 @@ Ctrl+P: muestra/oculta el panel.
 Para las carpetas locales, DevProjex recuerda los últimos parámetros del proyecto aplicados:
 * carpetas de nivel superior seleccionadas;
 * tipos de archivos seleccionados;
-* opciones seleccionadas en el bloque "Ignorar".
+* opciones seleccionadas en la sección "Exclusiones".
 
 El guardado se realiza al hacer clic en "Aplicar configuración".
 Cuando se vuelve a abrir la misma carpeta local, los parámetros se restauran automáticamente.
@@ -310,11 +310,11 @@ Importante:
 * los perfiles se guardan sólo para proyectos locales;
 * para proyectos abiertos mediante Git Clone, los perfiles no se guardan;
 * Si algunas opciones guardadas ya no están disponibles en el proyecto actual, se omiten y se aplican los parámetros restantes.
-* si la actualización o la reapertura revelan una nueva carpeta de nivel superior, tipo de archivo u opción en "Ignorar", está habilitado de forma predeterminada;
+* si la actualización o la reapertura revelan una nueva carpeta de nivel superior, tipo de archivo u opción en "Exclusiones", está habilitado de forma predeterminada;
 * Las opciones ya vistas mantienen la elección explícita del usuario: los archivos nuevos de un tipo deshabilitado no habilitan ese tipo nuevamente.
 
-## 12) Ignorar
-El bloque "Ignorar" controla qué archivos y carpetas se excluyen del árbol, el contenido, la copia y los resultados de exportación.
+## 12) Exclusiones
+La sección "Exclusiones" controla qué archivos y carpetas se excluyen del árbol, el contenido, la copia y los resultados de exportación.
 
 Un elemento se muestra solo cuando se cumplen todas estas condiciones:
 * su carpeta de nivel superior está seleccionada;
@@ -461,7 +461,7 @@ Métricas de contenido:
 ### 13.3 Cuando se actualizan los contadores
 El recálculo se ejecuta:
 * después de abrir/actualizar un proyecto;
-* después de aplicar la configuración (ignorar, extensiones, carpetas raíz);
+* después de aplicar la configuración (exclusiones, extensiones, carpetas raíz);
 * cuando cambian las casillas de verificación del árbol (con rebote);
 * al cambiar el formato del árbol (para operaciones donde se utiliza la salida del árbol).
 * cuando se cancela el cálculo en segundo plano, los contadores se establecen en 0 hasta el siguiente recálculo completo.
@@ -500,7 +500,7 @@ Restablecer configuración (Ayuda → Restablecer configuración) restaura el te
 Restablecer datos (Ayuda → Restablecer datos) elimina los perfiles de parámetros del proyecto local guardados:
 * carpetas de nivel superior seleccionadas;
 * tipos de archivos seleccionados;
-* opciones seleccionadas en el bloque "Ignorar".
+* opciones seleccionadas en la sección "Exclusiones".
 
 Importante:
 * El historial reciente de las carpetas locales no se borra;

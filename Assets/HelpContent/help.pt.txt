@@ -279,11 +279,11 @@ Restrições:
 ## 11) Opções (painel de configurações)
 Disponível à direita:
 * Aplicar configurações
-* Ignorar opções
+* Exclusões
 * Extensões
 * Pastas raiz
 
-As alterações em “Ignorar opções”, “Extensões” e “Pastas raiz” são preparadas no painel e aplicadas após clicar em “Aplicar configurações”.
+As alterações em “Exclusões”, “Extensões” e “Pastas raiz” são preparadas no painel e aplicadas após clicar em “Aplicar configurações”.
 
 Depois que uma caixa de seleção for alterada, o aplicativo poderá atualizar as opções disponíveis e suas contagens em segundo plano. A árvore resultante é reconstruída somente após clicar em “Aplicar configurações”.
 
@@ -293,7 +293,7 @@ Cada lista possui uma alternância para Todos.
 
 Nota sobre "Extensões":
 * esta lista mostra apenas arquivos que possuem uma extensão;
-* arquivos sem extensão não são adicionados a esta lista e são controlados por uma opção separada em "Ignorar".
+* arquivos sem extensão não são adicionados a esta lista e são controlados por uma opção separada em "Exclusões".
 
 Ctrl+P — mostra/oculta o painel.
 
@@ -301,7 +301,7 @@ Ctrl+P — mostra/oculta o painel.
 Para pastas locais, o DevProjex lembra os últimos parâmetros de projeto aplicados:
 * pastas de nível superior selecionadas;
 * tipos de arquivo selecionados;
-* opções selecionadas no bloco "Ignorar".
+* opções selecionadas na seção "Exclusões".
 
 O salvamento é realizado quando você clica em "Aplicar configurações".
 Quando a mesma pasta local for aberta novamente, os parâmetros serão restaurados automaticamente.
@@ -310,11 +310,11 @@ Importante:
 * os perfis são salvos apenas para projetos locais;
 * para projetos abertos via Git Clone, os perfis não são salvos;
 * se algumas opções salvas não estiverem mais disponíveis no projeto atual, elas serão ignoradas e os parâmetros restantes serão aplicados.
-* se a atualização ou reabertura revelar uma nova pasta de nível superior, tipo de arquivo ou opção em "Ignorar", ela será habilitada por padrão;
+* se a atualização ou reabertura revelar uma nova pasta de nível superior, tipo de arquivo ou opção em "Exclusões", ela será habilitada por padrão;
 * as opções já vistas mantêm a escolha explícita do usuário: novos arquivos de um tipo desabilitado não habilitam aquele tipo novamente.
 
-## 12) Ignorar
-O bloco "Ignorar" controla quais arquivos e pastas são excluídos da árvore, conteúdo, cópia e resultados de exportação.
+## 12) Exclusões
+A seção "Exclusões" controla quais arquivos e pastas são excluídos da árvore, conteúdo, cópia e resultados de exportação.
 
 Um item é mostrado somente quando todas estas condições são atendidas:
 * sua pasta de nível superior está selecionada;
@@ -461,7 +461,7 @@ Métricas de conteúdo:
 ### 13.3 Quando os contadores são atualizados
 O recálculo é executado:
 * depois de abrir/atualizar um projeto;
-* após aplicar configurações (ignorar, extensões, pastas raiz);
+* após aplicar configurações (exclusões, extensões, pastas raiz);
 * quando as caixas de seleção da árvore mudam (com debounce);
 * ao mudar o formato de árvore (para operações onde a saída de árvore é usada).
 * quando o cálculo em segundo plano é cancelado, os contadores são definidos como 0 até o próximo recálculo concluído.
@@ -500,7 +500,7 @@ Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema 
 Redefinir dados (Ajuda → Redefinir dados) remove perfis de parâmetros de projeto local salvos:
 * pastas de nível superior selecionadas;
 * tipos de arquivo selecionados;
-* opções selecionadas no bloco "Ignorar".
+* opções selecionadas na seção "Exclusões".
 
 Importante:
 * O histórico recente das pastas locais não é apagado;

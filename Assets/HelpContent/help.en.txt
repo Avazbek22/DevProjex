@@ -279,11 +279,11 @@ Constraints:
 ## 11) Options (settings panel)
 Available on the right:
 * Apply settings
-* Ignore options
+* Exclusions
 * Extensions
 * Root folders
 
-Changes in “Ignore options”, “Extensions”, and “Root folders” are staged in the panel and applied after clicking “Apply settings”.
+Changes in “Exclusions”, “Extensions”, and “Root folders” are staged in the panel and applied after clicking “Apply settings”.
 
 After a checkbox changes, the app may update available options and their counts in the background. The resulting tree is rebuilt only after clicking “Apply settings”.
 
@@ -293,7 +293,7 @@ Each list has an All toggle.
 
 Note about "Extensions":
 * this list shows only files that have an extension;
-* files without an extension are not added to this list and are controlled by a separate option in "Ignore".
+* files without an extension are not added to this list and are controlled by a separate option in "Exclusions".
 
 Ctrl+P — show/hide the panel.
 
@@ -301,7 +301,7 @@ Ctrl+P — show/hide the panel.
 For local folders, DevProjex remembers the last applied project parameters:
 * selected top-level folders;
 * selected file types;
-* selected options in the "Ignore" block.
+* selected options in the "Exclusions" section.
 
 Saving is performed when you click "Apply settings".
 When the same local folder is opened again, parameters are restored automatically.
@@ -310,11 +310,11 @@ Important:
 * profiles are saved only for local projects;
 * for projects opened via Git Clone, profiles are not saved;
 * if some saved options are no longer available in the current project, they are skipped, and the remaining parameters are applied.
-* if refresh or reopening reveals a new top-level folder, file type, or option in "Ignore", it is enabled by default;
+* if refresh or reopening reveals a new top-level folder, file type, or option in "Exclusions", it is enabled by default;
 * options already seen keep the user's explicit choice: new files of a disabled type do not enable that type again.
 
-## 12) Ignore
-The "Ignore" block controls which files and folders are excluded from the tree, content, copy, and export results.
+## 12) Exclusions
+The "Exclusions" section controls which files and folders are excluded from the tree, content, copy, and export results.
 
 An item is shown only when all of these conditions are met:
 * its top-level folder is selected;
@@ -461,7 +461,7 @@ Content metrics:
 ### 13.3 When counters update
 Recalculation runs:
 * after opening/refreshing a project;
-* after applying settings (ignore, extensions, root folders);
+* after applying settings (exclusions, extensions, root folders);
 * when tree checkboxes change (with debounce);
 * when switching tree format (for operations where tree output is used).
 * when background calculation is canceled, counters are set to 0 until the next completed recalculation.
@@ -500,7 +500,7 @@ Reset settings (Help → Reset settings) restores the default theme, effects, Co
 Reset data (Help → Reset data) removes saved local-project parameter profiles:
 * selected top-level folders;
 * selected file types;
-* selected options in the "Ignore" block.
+* selected options in the "Exclusions" section.
 
 Important:
 * Recent history for local folders is not cleared;

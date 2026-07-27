@@ -279,11 +279,11 @@ Limitations :
 ## 11) Options
 À droite sont disponibles :
 * Appliquer
-* Ignorer
+* Exclusions
 * Types de fichiers
 * Dossiers de premier niveau
 
-Les changements dans « Ignorer », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
+Les changements dans « Exclusions », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
 
 Après la modification d’une case, l’application peut actualiser en arrière-plan les options disponibles et leurs compteurs. L’arborescence résultante n’est reconstruite qu’après un clic sur « Appliquer ».
 
@@ -293,7 +293,7 @@ Chaque liste a un bouton Tous.
 
 Remarque sur « Types de fichiers » :
 * cette liste affiche uniquement les fichiers avec extension ;
-* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Ignorer ».
+* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Exclusions ».
 
 Ctrl+P — afficher/masquer le panneau.
 
@@ -301,7 +301,7 @@ Ctrl+P — afficher/masquer le panneau.
 Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
-* options sélectionnées dans le bloc « Ignorer ».
+* options sélectionnées dans la section « Exclusions ».
 
 L’enregistrement est effectué après clic sur « Appliquer ».
 Lors de la réouverture du même dossier local, les paramètres sont restaurés automatiquement.
@@ -310,11 +310,11 @@ Important :
 * les profils sont enregistrés uniquement pour les projets locaux ;
 * pour les projets ouverts via Git Clone, les profils ne sont pas enregistrés ;
 * si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués.
-* si l’actualisation ou la réouverture fait apparaître un nouveau dossier de premier niveau, un nouveau type de fichiers ou une nouvelle option dans « Ignorer », cet élément est activé par défaut ;
+* si l’actualisation ou la réouverture fait apparaître un nouveau dossier de premier niveau, un nouveau type de fichiers ou une nouvelle option dans « Exclusions », cet élément est activé par défaut ;
 * les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
 
-## 12) Ignorer
-Le bloc « Ignorer » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
+## 12) Exclusions
+La section « Exclusions » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
 
 Un élément n’est affiché que si son dossier de premier niveau et son type de fichier sont sélectionnés et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
 
@@ -407,7 +407,7 @@ Métriques du contenu :
 ### 13.3 Quand les compteurs sont mis à jour
 Le recalcul est effectué :
 * après ouverture/actualisation d’un projet ;
-* après application des paramètres (ignore, types de fichiers, dossiers racine) ;
+* après application des paramètres (exclusions, types de fichiers, dossiers racine) ;
 * lors des changements de cases à cocher dans l’arbre (avec debounce) ;
 * lors du basculement du format d’arborescence (pour les opérations utilisant l’arbre).
 * si le calcul en arrière-plan est annulé, les compteurs sont remis à 0 jusqu’au prochain recalcul terminé.
@@ -446,7 +446,7 @@ Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétabl
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
-* options sélectionnées dans le bloc « Ignorer ».
+* options sélectionnées dans la section « Exclusions ».
 
 Important :
 * l’historique « Récents » des dossiers locaux n’est pas effacé ;

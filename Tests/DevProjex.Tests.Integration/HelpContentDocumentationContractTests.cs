@@ -19,17 +19,17 @@ public sealed class HelpContentDocumentationContractTests
 
     public static TheoryData<string, string, string> TreeFontAndSettingsContracts => new()
     {
-        { "help.ru.txt", "### Шрифт дерева", "Изменения в списках «Игнорировать», «Типы файлов» и «Папки верхнего уровня» подготавливаются" },
-        { "help.en.txt", "### Tree font", "Changes in “Ignore options”, “Extensions”, and “Root folders” are staged" },
-        { "help.de.txt", "### Baum-Schrift", "Änderungen in „Ignorieren“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet" },
-        { "help.fr.txt", "### Police de l’arborescence", "Les changements dans « Ignorer », « Types de fichiers » et « Dossiers de premier niveau » sont préparés" },
-        { "help.it.txt", "### Font albero", "Le modifiche in « Ignora », « Tipi di file » e « Cartelle di primo livello » vengono preparate" },
-        { "help.es.txt", "### fuente de árbol", "Los cambios en \"Ignorar opciones\", \"Extensiones\" y \"Carpetas raíz\" se organizan" },
-        { "help.pt.txt", "### Fonte de árvore", "As alterações em “Ignorar opções”, “Extensões” e “Pastas raiz” são preparadas" },
-        { "help.pt-pt.txt", "### Fonte de árvore", "As alterações em “Ignorar opções”, “Extensões” e “Pastas raiz” são preparadas" },
-        { "help.kk.txt", "### Ағаш қарпі", "«Елемеу», «Файл түрлері» және «Жоғарғы деңгей қалталары» өзгерістері панельде дайындалып" },
-        { "help.tg.txt", "### Шрифти дарахт", "Тағйирот дар «Нодида гирифтан», «Навъҳои файл» ва «Ҷузвдонҳои сатҳи боло» дар панел омода мешаванд" },
-        { "help.uz.txt", "### Daraxt shrifti", "«E’tiborsiz qoldirish», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi" }
+        { "help.ru.txt", "### Шрифт дерева", "Изменения в списках «Исключения», «Типы файлов» и «Папки верхнего уровня» подготавливаются" },
+        { "help.en.txt", "### Tree font", "Changes in “Exclusions”, “Extensions”, and “Root folders” are staged" },
+        { "help.de.txt", "### Baum-Schrift", "Änderungen in „Ausschlüsse“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet" },
+        { "help.fr.txt", "### Police de l’arborescence", "Les changements dans « Exclusions », « Types de fichiers » et « Dossiers de premier niveau » sont préparés" },
+        { "help.it.txt", "### Font albero", "Le modifiche in « Esclusioni », « Tipi di file » e « Cartelle di primo livello » vengono preparate" },
+        { "help.es.txt", "### fuente de árbol", "Los cambios en \"Exclusiones\", \"Extensiones\" y \"Carpetas raíz\" se organizan" },
+        { "help.pt.txt", "### Fonte de árvore", "As alterações em “Exclusões”, “Extensões” e “Pastas raiz” são preparadas" },
+        { "help.pt-pt.txt", "### Fonte de árvore", "As alterações em “Exclusões”, “Extensões” e “Pastas raiz” são preparadas" },
+        { "help.kk.txt", "### Ағаш қарпі", "«Ерекшеліктер», «Файл түрлері» және «Жоғарғы деңгей қалталары» өзгерістері панельде дайындалып" },
+        { "help.tg.txt", "### Шрифти дарахт", "Тағйирот дар «Истисноҳо», «Навъҳои файл» ва «Ҷузвдонҳои сатҳи боло» дар панел омода мешаванд" },
+        { "help.uz.txt", "### Daraxt shrifti", "«Istisnolar», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi" }
     };
 
     public static TheoryData<string, string, string> IgnoreScopeContracts => new()

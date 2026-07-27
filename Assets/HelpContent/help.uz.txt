@@ -279,11 +279,11 @@ Cheklovlar:
 ## 11) Sozlamalar
 O‘ng tomonda mavjud:
 * Sozlamalarni qo‘llash
-* E’tiborsiz qoldirish
+* Istisnolar
 * Fayl turlari
 * Yuqori darajadagi jildlar
 
-«E’tiborsiz qoldirish», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi va «Sozlamalarni qo‘llash» bosilgandan keyin qo‘llanadi.
+«Istisnolar», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi va «Sozlamalarni qo‘llash» bosilgandan keyin qo‘llanadi.
 
 Belgilash katagi o‘zgargandan keyin ilova mavjud bandlar va ularning hisoblagichlarini fonda yangilashi mumkin. Yakuniy daraxt faqat «Sozlamalarni qo‘llash» bosilgandan keyin qayta quriladi.
 
@@ -293,7 +293,7 @@ Har bir ro‘yxatda Barchasi tugmasi bor.
 
 «Fayl turlari» bo‘yicha izoh:
 * bu ro‘yxatda faqat kengaytmali fayllar ko‘rsatiladi;
-* kengaytmasiz fayllar bu ro‘yxatga qo‘shilmaydi va «E’tiborsiz qoldirish» ichidagi alohida band orqali boshqariladi.
+* kengaytmasiz fayllar bu ro‘yxatga qo‘shilmaydi va «Istisnolar» ichidagi alohida band orqali boshqariladi.
 
 Ctrl+P — panelni ko‘rsatish/yashirish.
 
@@ -301,7 +301,7 @@ Ctrl+P — panelni ko‘rsatish/yashirish.
 Mahalliy jildlar uchun DevProjex loyihaning oxirgi qo‘llangan parametrlarini eslab qoladi:
 * tanlangan yuqori darajadagi jildlar;
 * tanlangan fayl turlari;
-* «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
+* «Istisnolar» bo‘limidagi tanlangan qoidalar.
 
 Saqlash «Sozlamalarni qo‘llash» tugmasi bosilganda bajariladi.
 Xuddi shu mahalliy jild qayta ochilganda parametrlar avtomatik tiklanadi.
@@ -310,11 +310,11 @@ Muhim:
 * profillar faqat mahalliy loyihalar uchun saqlanadi;
 * Git Clone orqali ochilgan loyihalar uchun profillar saqlanmaydi;
 * agar joriy loyihada saqlangan ayrim bandlar endi mavjud bo‘lmasa, ular o‘tkazib yuboriladi, qolgan parametrlar qo‘llanadi.
-* yangilash yoki qayta ochishdan keyin yangi yuqori darajadagi jild, yangi fayl turi yoki «E’tiborsiz qoldirish» ichida yangi band paydo bo‘lsa, u odatda yoqilgan bo‘ladi;
+* yangilash yoki qayta ochishdan keyin yangi yuqori darajadagi jild, yangi fayl turi yoki «Istisnolar» ichida yangi band paydo bo‘lsa, u odatda yoqilgan bo‘ladi;
 * avvaldan ma’lum bandlar foydalanuvchining aniq tanlovini saqlaydi: o‘chirilgan turdagi yangi fayllar bu turni qayta yoqmaydi.
 
-## 12) Ignorlash
-«Ignorlash» bloki daraxt, kontent, nusxalash va eksportdan qaysi fayl hamda papkalar chiqarilishini boshqaradi.
+## 12) Istisnolar
+«Istisnolar» bo‘limi daraxt, kontent, nusxalash va eksportdan qaysi fayl hamda papkalar chiqarilishini boshqaradi.
 
 Element faqat uning yuqori darajadagi papkasi va fayl turi tanlangan, shuningdek hech bir faol qoida uni yashirmagan bo‘lsa ko‘rsatiladi. Qoidalar birgalikda ishlaydi: kamida bittasi elementni yashirsa, boshqa qoida uni ko‘rsata olmaydi.
 
@@ -344,7 +344,7 @@ Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘
 
 Har bir yetib boriladigan ichki repozitoriya va worktree istalgan erishiladigan chuqurlikda mustaqil qayta ishlanadi. Ichki repozitoriya ota yoki qo‘shni repozitoriyaning kuzatiladigan yo‘llarini meros qilib olmaydi. Indeksni xavfsiz o‘qib bo‘lmasa, qat’iy rejim uni `.gitignore` andozalarini baholash bilan yashirincha almashtirmaydi.
 
-«.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» o‘zaro istisno qilinadi: birini yoqish ikkinchisini o‘chiradi. Profillarni qo‘llaydigan mahalliy loyihalarda tanlangan rejim yuqori darajadagi papkalar, fayl turlari va boshqa e’tiborsiz qoldirish sozlamalari bilan birga saqlanadi.
+«.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» o‘zaro istisno qilinadi: birini yoqish ikkinchisini o‘chiradi. Profillarni qo‘llaydigan mahalliy loyihalarda tanlangan rejim yuqori darajadagi papkalar, fayl turlari va boshqa istisno sozlamalari bilan birga saqlanadi.
 
 ### 12.5 Git filtrlashi va Smart Ignore aloqasi
 Tanlangan Git rejimi va Smart Ignore mustaqil almashtirgichlardir. Avval har bir erishiladigan Git hududida Git rejimi, keyin qolgan elementlarga Smart Ignore, oxirida esa asosiy qoidalar qo‘llanadi.
@@ -407,7 +407,7 @@ Mazmun metrikalari:
 ### 13.3 Hisoblagichlar qachon yangilanadi
 Qayta hisoblash quyidagi holatlarda bajariladi:
 * loyiha ochilgandan/yangilangandan keyin;
-* sozlamalar qo‘llangandan keyin (ignore, fayl turlari, root jildlar);
+* sozlamalar qo‘llangandan keyin (istisnolar, fayl turlari, root jildlar);
 * daraxtdagi checkboxlar o‘zgarganda (debounce bilan);
 * daraxt formati almashtirilganda (daraxt ishlatiladigan amallar uchun).
 * fon hisoblash bekor qilinsa, keyingi to‘liq yakunlangan qayta hisoblashgacha hisoblagichlar 0 ga o‘rnatiladi.
@@ -446,7 +446,7 @@ Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham 
 Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:
 * tanlangan yuqori darajadagi jildlar;
 * tanlangan fayl turlari;
-* «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
+* «Istisnolar» bo‘limidagi tanlangan qoidalar.
 
 Muhim:
 * lokal jildlar uchun “So‘nggilar” tarixi tozalanmaydi;
