@@ -208,10 +208,13 @@ public sealed class TerminalRecentProjectsPtyTests
 
 		await OpenRecentOverlayAsync(terminal, TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var recovery = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"Local profile recovery",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Use Standard", recovery, StringComparison.Ordinal);
+		var recovery = await terminal.WaitForScreenAsync(
+			"Use Standard",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Local profile recovery", recovery, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);

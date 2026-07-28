@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace DevProjex.Terminal.CommandLine;
 
 public interface ITerminalEnvironment
@@ -100,7 +102,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 		var request = OperatingSystem.IsMacOS() ? 0x40087468u : 0x5413u;
 		foreach (var descriptor in new[] { 1, 0, 2 })
 		{
-			if (ioctl(descriptor, request, out var windowSize) == 0 &&
+			if (ReadUnixWindowSize(descriptor, request, out var windowSize) == 0 &&
 			    windowSize.Columns > 0 &&
 			    windowSize.Rows > 0)
 			{
@@ -113,13 +115,56 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 		return false;
 	}
 
-	[System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+	private static int ReadUnixWindowSize(
+		int descriptor,
+		nuint request,
+		out UnixWindowSize windowSize)
+	{
+		if (RequiresDarwinArm64VarArgIoctl(
+			    OperatingSystem.IsMacOS(),
+			    RuntimeInformation.OSArchitecture))
+		{
+			// Darwin ARM64 passes variadic arguments on the stack. Fill x2-x7 so the
+			// output pointer reaches the ABI-defined vararg position instead of corrupting memory.
+			return ioctlDarwinArm64(
+				descriptor,
+				request,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				out windowSize);
+		}
+
+		return ioctl(descriptor, request, out windowSize);
+	}
+
+	internal static bool RequiresDarwinArm64VarArgIoctl(
+		bool isMacOs,
+		Architecture architecture) =>
+		isMacOs && architecture == Architecture.Arm64;
+
+	[DllImport("libc", SetLastError = true)]
 	private static extern int ioctl(
 		int descriptor,
 		nuint request,
 		out UnixWindowSize windowSize);
 
-	[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+	[DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+	private static extern int ioctlDarwinArm64(
+		int descriptor,
+		nuint request,
+		nint register2,
+		nint register3,
+		nint register4,
+		nint register5,
+		nint register6,
+		nint register7,
+		out UnixWindowSize windowSize);
+
+	[StructLayout(LayoutKind.Sequential)]
 	private readonly struct UnixWindowSize
 	{
 		public readonly ushort Rows;

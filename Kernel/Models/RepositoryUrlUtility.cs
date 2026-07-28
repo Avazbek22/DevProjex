@@ -35,7 +35,10 @@ public static class RepositoryUrlUtility
 			if (uri.Scheme is "http" or "https")
 				builder.UserName = string.Empty;
 
-			return builder.Uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+			var sanitizedUri = builder.Uri;
+			return sanitizedUri.IsFile
+				? sanitizedUri.AbsoluteUri.TrimEnd('/')
+				: sanitizedUri.GetLeftPart(UriPartial.Path).TrimEnd('/');
 		}
 		catch
 		{

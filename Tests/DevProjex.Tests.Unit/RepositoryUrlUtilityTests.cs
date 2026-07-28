@@ -43,6 +43,18 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.DoesNotContain("access_token", display, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void SafeDisplayPreservesFileUriIdentityAcrossPlatforms()
+	{
+		using var temporary = new TemporaryDirectory();
+		var repositoryUrl = new Uri(temporary.Path).AbsoluteUri;
+
+		var display = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
+
+		Assert.StartsWith("file://", display, StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(repositoryUrl.TrimEnd('/'), display);
+	}
+
 	[Theory]
 	[InlineData("")]
 	[InlineData("-uploader")]
