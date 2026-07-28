@@ -1,0 +1,30 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
+┌┤PROJECT TREE├───────────────────────────────────────┐┌┤CONTEXT PREVIEW · Tree + content · Markdown├──────────────────┐
+│v [x] <ID-PART>┌┤Export summary├───────────────────────────────────────────────────────────────┐                   │
+│  > [x] src       │ Output kind: Export context                                                 ▲ │                   │
+│    [x] global.jso│ View: Tree + content                                                        █ │                   │
+│    [x] README.md │ Format: Markdown                                                            █ │                   │
+│                  │ Files: 4                                                                    █ │                   │
+│                  │ Folders: 3                                                                  █ │Tests.Terminal\<PROJECT>│
+│                  │ Size: 76 B                                                                  █ │                   │
+│                  │ Characters: 774                                                             █ │                   │
+│                  │ Estimated tokens: 194                                                       █ │                   │
+│                  │ Destination:                                                                █ │                   │
+│                  │ <OUTPUT_ROOT>\context-out█ │                   │
+│                  │ put.md                                                                      █ │                   │
+│                  │ Destination state: Ready                                                    █ │                   │
+│                  │ Git filtering: .gitignore                                                   █ │                   │
+│                  │ Exclusions: Smart ignore, Hidden folders, Hidden files, dot folders, dot    ░ │                   │
+│                  │ files, Empty folders, Empty files, Files without extension                  ▼ │                   │
+│                  │                                                                               │                   │
+│                  │                                                                               │                   │
+│                  │                    ⟦ Cancel ⟧▖ ⟦ Dry run ⟧▖ ⟦► Export ◄⟧▖                     │                   │
+│                  │                    ▝▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▘                     │                   │
+│                  └───────────────────────────────────────────────────────────────────────────────┘                   │
+│                                                     ││                                                               │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 4  |  Folders 3  |  76 B  |  ~132 tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   M Git   X Exclusions   E/Z Export

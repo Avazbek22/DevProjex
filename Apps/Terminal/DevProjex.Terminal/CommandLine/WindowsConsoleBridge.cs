@@ -14,9 +14,6 @@ public static class WindowsConsoleBridge
 
 		try
 		{
-			if (HasRedirectedStandardStream())
-				return HasUsableStandardHandle();
-
 			if (GetConsoleWindow() != IntPtr.Zero)
 			{
 				ResetStandardStreams();
@@ -25,12 +22,13 @@ public static class WindowsConsoleBridge
 
 			if (!AttachConsole(AttachParentProcess))
 			{
-				if (Marshal.GetLastWin32Error() != ErrorAccessDenied)
-					return false;
+				var error = Marshal.GetLastWin32Error();
+				if (error != ErrorAccessDenied)
+					return HasRedirectedStandardStream() && HasUsableStandardHandle();
 			}
 
 			ResetStandardStreams();
-			return GetConsoleWindow() != IntPtr.Zero;
+			return GetConsoleWindow() != IntPtr.Zero || HasUsableStandardHandle();
 		}
 		catch
 		{

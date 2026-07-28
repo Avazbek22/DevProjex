@@ -1,0 +1,30 @@
+
+  DevProjex Terminal                                                                                              v<VERSION>
+  Choose a workspace action. No project is scanned until you open it.
+
+  Current directory                                                                      No project workspace detected
+  <PROJECT_ROOT>
+
+  ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
+  │> Recent projects                       │  │ Choose a previously opened project and return here when canceled.    │
+  │  Browse folder                         │  │                                                                      │
+  │  Clone repository                      │  │                                                                      │
+  │  Open saved profile                    │  │                                                                      │
+  │  Open Desktop                          │  │                                                                      │
+  │  Help                                  │  │                                                                      │
+  │  Exit                                  │  │                                                                      │
+  └────────────────────────────────────────┘  └──────────────────────────────────────────────────────────────────────┘
+
+  Direct automation: devprojex analyze .  |  devprojex export context . -o context.md
+
+
+
+
+
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   ? Help   q Exit

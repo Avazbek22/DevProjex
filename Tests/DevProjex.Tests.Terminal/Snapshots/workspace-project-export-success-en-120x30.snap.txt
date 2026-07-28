@@ -1,0 +1,30 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
+┌┤PROJECT TREE├───────────────────────────────────────┐┌┤CONTEXT PREVIEW · Tree + content · Markdown├──────────────────┐
+│v [x] <PROJECT>               ││+ <PROJECT>                             │
+│  > [x] src                                          ││  + src                                                        │
+│    [x] global.jso┌┤Export project├───────────────────────────────────────────────────────────────┐                   │
+│    [x] README.md │ Destination:                                                                ▲ │                   │
+│                  │ <OUTPUT_ROOT>\project-expo█ │                   │
+│                  │ rt                                                                          █ │                   │
+│                  │ Files: 4  |  Folders: 3  |  Size: 76 B                                      █ │                   │
+│                  │                                                                             █ │                   │
+│                  │ Equivalent command:                                                         █ │                   │
+│                  │ devprojex export project                                                    █ │                   │
+│                  │ <TEMP_ROOT>\<PROJECT>█ │                   │
+│                  │ <ID-PART> --as folder -o                                              ░ │                   │
+│                  │ <OUTPUT_ROOT>\project-expo░ │                   │
+│                  │ rt --profile standard --git-mode gitignore --exclude smart-ignore --exclude ▼ │                   │
+│                  │                                                                               │                   │
+│                  │                                                                               │                   │
+│                  │                                 ⟦► Close ◄⟧▖                                  │                   │
+│                  │                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │                   │
+│                  └───────────────────────────────────────────────────────────────────────────────┘                   │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 4  |  Folders 3  |  76 B  |  ~132 tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   M Git   X Exclusions   E/Z Export

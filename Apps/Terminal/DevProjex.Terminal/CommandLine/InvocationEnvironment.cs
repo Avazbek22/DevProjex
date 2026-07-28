@@ -23,6 +23,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 {
 	public const string TerminalHostVariable = "DEVPROJEX_TERMINAL_HOST";
 	public const string DesktopRequestVariable = "DEVPROJEX_DESKTOP_REQUEST_FILE";
+	internal const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
 
 	public InvocationEnvironment(bool hasAttachedConsole)
 	{
@@ -80,6 +81,9 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 
 	private static (int Width, int Height) ReadTerminalSize()
 	{
+		if (!OperatingSystem.IsWindows() && TryReadUnixTerminalSize(out var unixSize))
+			return unixSize;
+
 		try
 		{
 			return (Math.Max(1, Console.WindowWidth), Math.Max(1, Console.WindowHeight));
@@ -88,6 +92,40 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 		{
 			return (80, 24);
 		}
+	}
+
+	private static bool TryReadUnixTerminalSize(out (int Width, int Height) size)
+	{
+		// Console.Window* can report the allocated inline region instead of the PTY dimensions.
+		var request = OperatingSystem.IsMacOS() ? 0x40087468u : 0x5413u;
+		foreach (var descriptor in new[] { 1, 0, 2 })
+		{
+			if (ioctl(descriptor, request, out var windowSize) == 0 &&
+			    windowSize.Columns > 0 &&
+			    windowSize.Rows > 0)
+			{
+				size = (windowSize.Columns, windowSize.Rows);
+				return true;
+			}
+		}
+
+		size = default;
+		return false;
+	}
+
+	[System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+	private static extern int ioctl(
+		int descriptor,
+		nuint request,
+		out UnixWindowSize windowSize);
+
+	[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+	private readonly struct UnixWindowSize
+	{
+		public readonly ushort Rows;
+		public readonly ushort Columns;
+		private readonly ushort _pixelWidth;
+		private readonly ushort _pixelHeight;
 	}
 
 	private static bool DetectUnicodeCapability()
@@ -118,7 +156,8 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 			["TMUX"] = Environment.GetEnvironmentVariable("TMUX"),
 			["ZELLIJ"] = Environment.GetEnvironmentVariable("ZELLIJ"),
 			["WT_SESSION"] = Environment.GetEnvironmentVariable("WT_SESSION"),
-			[TerminalHostVariable] = Environment.GetEnvironmentVariable(TerminalHostVariable)
+			[TerminalHostVariable] = Environment.GetEnvironmentVariable(TerminalHostVariable),
+			[InternalDataRootVariable] = Environment.GetEnvironmentVariable(InternalDataRootVariable)
 		};
 }
 

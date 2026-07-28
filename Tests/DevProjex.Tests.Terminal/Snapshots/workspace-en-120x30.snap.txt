@@ -1,0 +1,30 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
+┌┤PROJECT TREE├───────────────────────────────────────┐┌┤CONTEXT PREVIEW · Tree + content · Markdown├──────────────────┐
+│v [x] <PROJECT>               ││# <PROJECT>                             │
+│  > [x] src                                          ││                                                               │
+│    [x] global.json                                  ││## Project tree                                                │
+│    [x] README.md                                    ││                                                               │
+│                                                     ││```text                                                        │
+│                                                     ││<TEMP_ROOT>\<PROJECT>│
+│                                                     ││                                                               │
+│                                                     ││├── <PROJECT>                           │
+│                                                     │││   ├── src                                                    │
+│                                                     │││   │   ├── Feature                                            │
+│                                                     │││   │   │   └── Handler.cs                                     │
+│                                                     │││   │   └── App.cs                                             │
+│                                                     │││   ├── global.json                                            │
+│                                                     │││   └── README.md                                              │
+│                                                     ││```                                                            │
+│                                                     ││                                                               │
+│                                                     ││## `global.json`                                               │
+│                                                     ││                                                               │
+│                                                     ││```json                                                        │
+│                                                     ││{}                                                             │
+│                                                     ││```                                                            │
+│                                                     ││                                                               │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 4  |  Folders 3  |  76 B  |  ~132 tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   M Git   X Exclusions   E/Z Export

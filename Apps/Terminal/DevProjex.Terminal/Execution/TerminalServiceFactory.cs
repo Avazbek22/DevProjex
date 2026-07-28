@@ -50,6 +50,9 @@ public sealed class TerminalServiceFactory(
 		var selectionResolver = new ProjectSelectionResolver(
 			localProfiles,
 			portableProfiles.LoadAsync);
+		var repoCache = appDataPathProvider is null
+			? new RepoCacheService()
+			: new RepoCacheService(Path.Combine(resolvedAppDataPathProvider(), "RepoCache"));
 
 		return new TerminalServices(
 			Localization: localization,
@@ -66,6 +69,6 @@ public sealed class TerminalServiceFactory(
 			GitTrackedModeReadinessProbe: new GitTrackedModeReadinessProbe(),
 			RecentProjectsStore: new RecentProjectsStore(resolvedAppDataPathProvider),
 			GitRepositoryService: new GitRepositoryService(),
-			RepoCacheService: new RepoCacheService());
+			RepoCacheService: repoCache);
 	}
 }

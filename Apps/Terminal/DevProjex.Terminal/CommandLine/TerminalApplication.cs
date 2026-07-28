@@ -25,27 +25,24 @@ public sealed class TerminalApplication(
 			return CommandLineExitCodes.UsageError;
 		}
 
-		var implicitTuiInvocation = arguments.Count == 0 &&
+		var implicitTuiInvocation = IsImplicitTuiInvocation(arguments) &&
 		                            environment.IsInputInteractive &&
 		                            environment.IsOutputInteractive &&
 		                            !environment.IsTermDumb;
 		var root = new DevProjexCommandTree(
 			environment,
-			serviceFactory,
+			serviceFactory ?? CreateDefaultServiceFactory(),
 			developerCommandRunner,
 			implicitTuiInvocation,
 			localization).Build();
-		if (arguments.Count == 0)
+		if (implicitTuiInvocation)
 		{
-			if (implicitTuiInvocation)
-			{
-				arguments = ["tui"];
-			}
-			else
-			{
-				new CommandHelpRenderer(environment, localization).Write(root);
-				return CommandLineExitCodes.Success;
-			}
+			arguments = ["tui", .. arguments];
+		}
+		else if (arguments.Count == 0)
+		{
+			new CommandHelpRenderer(environment, localization).Write(root);
+			return CommandLineExitCodes.Success;
 		}
 
 		if (ContainsHelpTokenBeforeDelimiter(arguments))
@@ -102,6 +99,32 @@ public sealed class TerminalApplication(
 
 	private static bool IsHelpToken(string value) =>
 		value is "--help" or "-h" or "-?" or "/h" or "/?";
+
+	private TerminalServiceFactory CreateDefaultServiceFactory()
+	{
+		if (!environment.Variables.TryGetValue(
+			    InvocationEnvironment.InternalDataRootVariable,
+			    out var value) ||
+		    string.IsNullOrWhiteSpace(value) ||
+		    !Path.IsPathFullyQualified(value))
+		{
+			return new TerminalServiceFactory();
+		}
+
+		var dataRoot = Path.GetFullPath(value);
+		return new TerminalServiceFactory(() => dataRoot);
+	}
+
+	private static bool IsImplicitTuiInvocation(IReadOnlyList<string> arguments)
+	{
+		if (arguments.Count == 0)
+			return true;
+		if (arguments.Count == 1)
+			return arguments[0].StartsWith("--language=", StringComparison.Ordinal);
+		return arguments.Count == 2 &&
+		       arguments[0] == "--language" &&
+		       !string.IsNullOrWhiteSpace(arguments[1]);
+	}
 
 	private static bool ContainsHelpTokenBeforeDelimiter(IReadOnlyList<string> arguments)
 	{

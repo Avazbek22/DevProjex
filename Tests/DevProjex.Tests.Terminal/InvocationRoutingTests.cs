@@ -126,21 +126,19 @@ public sealed class InvocationRoutingTests
 	}
 
 	[Theory]
-	[InlineData(false, true, false)]
-	[InlineData(true, false, false)]
-	[InlineData(true, true, true)]
-	public async Task ExplicitTuiRequiresBothInteractiveStreams(
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	public async Task ExplicitTuiRejectsMissingInteractiveStream(
 		bool inputInteractive,
-		bool outputInteractive,
-		bool succeedsRoutingGate)
+		bool outputInteractive)
 	{
 		var environment = new TestTerminalEnvironment
 		{
 			HasAttachedConsole = true,
 			IsInputInteractive = inputInteractive,
 			IsOutputInteractive = outputInteractive,
-			Width = succeedsRoutingGate ? 10 : 120,
-			Height = succeedsRoutingGate ? 10 : 30
+			Width = 120,
+			Height = 30
 		};
 
 		var exitCode = await new TerminalApplication(environment)
@@ -148,7 +146,7 @@ public sealed class InvocationRoutingTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Contains(
-			succeedsRoutingGate ? "DPX-TUI-TERMINAL-TOO-SMALL" : "DPX-TUI-NOT-INTERACTIVE",
+			"DPX-TUI-NOT-INTERACTIVE",
 			environment.StandardError,
 			StringComparison.Ordinal);
 	}

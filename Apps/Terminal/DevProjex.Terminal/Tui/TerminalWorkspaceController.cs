@@ -7,6 +7,7 @@ public sealed class TerminalWorkspaceController(
 	TerminalServices services,
 	ITerminalEnvironment environment)
 {
+	private const string TrackedIndexUnavailableCode = "DPX-GIT-TRACKED-INDEX-UNAVAILABLE";
 	private static readonly ProjectContextDocumentLimits PreviewLimits = new();
 
 	public async Task<TerminalWorkspaceState> OpenAsync(
@@ -17,9 +18,8 @@ public sealed class TerminalWorkspaceController(
 		var selection = await services.SelectionResolver
 			.ResolveAsync(projectPath, profile, new ProjectSelectionSpec(), cancellationToken)
 			.ConfigureAwait(false);
-		var plan = await services.ContextPlanner
-			.BuildAsync(new ProjectContextRequest(projectPath, selection), cancellationToken)
-			.ConfigureAwait(false);
+		var plan = await BuildPlanAsync(projectPath, selection, cancellationToken).ConfigureAwait(false);
+		ThrowIfTrackedModeIsUnavailable(plan);
 		return new TerminalWorkspaceState(plan);
 	}
 
@@ -28,9 +28,9 @@ public sealed class TerminalWorkspaceController(
 		ProjectSelectionSpec selection,
 		CancellationToken cancellationToken)
 	{
-		var plan = await services.ContextPlanner
-			.BuildAsync(
-				new ProjectContextRequest(state.Plan.SourceRoot, selection),
+		var plan = await BuildPlanAsync(
+				state.Plan.SourceRoot,
+				selection,
 				cancellationToken)
 			.ConfigureAwait(false);
 		state.ReplacePlan(plan);
@@ -49,14 +49,20 @@ public sealed class TerminalWorkspaceController(
 		state.ReplacePlan(plan);
 	}
 
-	public Task SetGitModeAsync(
+	public async Task SetGitModeAsync(
 		TerminalWorkspaceState state,
 		GitFilteringMode mode,
-		CancellationToken cancellationToken) =>
-		RebuildAsync(
-			state,
-			state.BuildSelection() with { GitMode = mode },
-			cancellationToken);
+		CancellationToken cancellationToken)
+	{
+		var plan = await BuildPlanAsync(
+				state.Plan.SourceRoot,
+				state.BuildSelection() with { GitMode = mode },
+				cancellationToken)
+			.ConfigureAwait(false);
+		// Keep the last usable plan when an explicit tracked-mode request cannot be honored.
+		ThrowIfTrackedModeIsUnavailable(plan);
+		state.ReplacePlan(plan);
+	}
 
 	public Task SetExclusionsAsync(
 		TerminalWorkspaceState state,
@@ -238,6 +244,27 @@ public sealed class TerminalWorkspaceController(
 			throw new ProjectContextValidationException(
 				error.Code,
 				"The current project context contains a blocking diagnostic.");
+		}
+	}
+
+	private Task<ProjectContextPlan> BuildPlanAsync(
+		string projectPath,
+		ProjectSelectionSpec selection,
+		CancellationToken cancellationToken) =>
+		services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(projectPath, selection),
+			cancellationToken);
+
+	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)
+	{
+		var diagnostic = plan.Diagnostics.FirstOrDefault(static item =>
+			item.Code == TrackedIndexUnavailableCode &&
+			item.Severity == ContextDiagnosticSeverity.Error);
+		if (diagnostic is not null)
+		{
+			throw new ProjectContextValidationException(
+				diagnostic.Code,
+				"Tracked Git files mode requires a readable repository index.");
 		}
 	}
 

@@ -33,6 +33,40 @@ The welcome screen offers:
 DevProjex does not automatically scan a filesystem root, a broad home directory,
 or another unsafe default location.
 
+Opening a project from Welcome uses its local profile when one exists and the
+deterministic standard profile otherwise. Recent Projects, Browse, Clone, Help,
+and Open Profile are nested workflows: canceling or closing them returns to
+Welcome without ending the terminal session.
+
+## Navigation Lifecycle
+
+The Terminal Workspace runs under one persistent application root. Dialogs and
+secondary screens are overlays over that root; closing an overlay restores the
+previous screen, selected row, and keyboard focus.
+
+- Enter opens or confirms the focused action.
+- Esc cancels the current operation or returns exactly one level.
+- Ctrl+C cancels active work first and otherwise asks before exiting.
+- `q` exits only from a root screen.
+- Errors remain visible until dismissed and then return to a usable prior state.
+
+Only an explicit Exit action, root-level `q`, or confirmed Ctrl+C ends the TUI.
+Opening Desktop reports the handoff result instead of silently terminating the
+Terminal Workspace.
+
+## Interface
+
+The Welcome screen uses the terminal background, a compact action list, a
+focused detail pane, and contextual keyboard hints instead of a modal selector.
+
+![DevProjex Terminal Welcome](Media/terminal-workspace/welcome.png)
+
+After a project opens, the wide layout keeps the project tree and generated
+context visible together. Narrow terminals switch to one focused pane without
+losing selection or navigation state.
+
+![DevProjex Terminal Workspace](Media/terminal-workspace/workspace.png)
+
 ## Layout
 
 The workspace adapts to terminal size:
