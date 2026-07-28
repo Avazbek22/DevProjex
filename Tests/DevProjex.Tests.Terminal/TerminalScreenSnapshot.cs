@@ -48,7 +48,27 @@ internal static partial class TerminalScreenSnapshot
 			File.Exists(path),
 			$"Snapshot does not exist: {path}. Set {UpdateVariable}=1 to create it.");
 		var expected = Normalize(File.ReadAllText(path), []);
-		Assert.Equal(expected, normalized);
+		if (!string.Equals(expected, normalized, StringComparison.Ordinal))
+		{
+			var replacementDetails = replacements.Length == 0
+				? "(none)"
+				: string.Join(
+					Environment.NewLine,
+					replacements.Select(
+						static replacement =>
+							$"{replacement.Replacement} <= {replacement.Value}"));
+			throw new Xunit.Sdk.XunitException(
+				$"""
+				Terminal snapshot mismatch: {path}
+				Platform: {System.Runtime.InteropServices.RuntimeInformation.OSDescription} / {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}
+				Replacements:
+				{replacementDetails}
+				--- Expected ---
+				{expected}
+				--- Actual ---
+				{normalized}
+				""");
+		}
 	}
 
 	private static string? GetPlatformSnapshotPath(string directory, string name)
