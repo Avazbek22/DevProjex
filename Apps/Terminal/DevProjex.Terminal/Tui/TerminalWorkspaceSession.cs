@@ -185,7 +185,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.TooSmall;
-		_tooSmall = new Label
+		_tooSmall = new TerminalLiteralLabel
 		{
 			X = Pos.Center(),
 			Y = Pos.Center(),
@@ -208,7 +208,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_welcomeRows.Count > 0)
 			_welcomeRows[0].IsSelected = true;
 
-		_welcomeHeading = new Label
+		_welcomeHeading = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 1,
@@ -216,7 +216,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			SchemeName = TerminalWorkspaceTheme.Accent
 		};
 		var versionText = $"v{GetProductVersion()}";
-		_welcomeVersion = new Label
+		_welcomeVersion = new TerminalLiteralLabel
 		{
 			X = Pos.AnchorEnd(versionText.Length + 2),
 			Y = 1,
@@ -224,7 +224,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Text = versionText,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		_welcomeTagline = new Label
+		_welcomeTagline = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 2,
@@ -232,14 +232,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Text = L("Terminal.Tui.Welcome.Description"),
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
-		_welcomeCurrentTitle = new Label
+		_welcomeCurrentTitle = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 4,
 			Text = L("Terminal.Tui.CurrentDirectory"),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		_welcomeCurrentPath = new Label
+		_welcomeCurrentPath = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 5,
@@ -248,7 +248,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Text = _welcomeContext.CurrentDirectory,
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
-		_welcomeCurrentStatus = new Label
+		_welcomeCurrentStatus = new TerminalLiteralLabel
 		{
 			X = Pos.AnchorEnd(31),
 			Y = 4,
@@ -262,7 +262,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				: TerminalWorkspaceTheme.Secondary
 		};
 
-		_welcomeActionsFrame = new FrameView
+		_welcomeActionsFrame = new TerminalLiteralFrameView
 		{
 			Title = L("Terminal.Tui.Actions"),
 			SchemeName = TerminalWorkspaceTheme.FocusedPanel,
@@ -285,7 +285,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeList.Accepted += (_, _) => _application.Invoke(ActivateWelcomeSelection);
 		_welcomeActionsFrame.Add(_welcomeList);
 
-		_welcomeDetailFrame = new FrameView
+		_welcomeDetailFrame = new TerminalLiteralFrameView
 		{
 			Title = L("Terminal.Tui.Details"),
 			SchemeName = TerminalWorkspaceTheme.Panel,
@@ -303,14 +303,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
 		_welcomeDetailFrame.Add(_welcomeDetail);
-		_welcomeQuickStart = new Label
+		_welcomeQuickStart = new TerminalLiteralLabel
 		{
 			X = 2,
 			Width = Dim.Fill(2),
 			SchemeName = TerminalWorkspaceTheme.Secondary,
 			Text = L("Terminal.Tui.Welcome.QuickStart")
 		};
-		_welcomeFooter = new Label
+		_welcomeFooter = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = Pos.AnchorEnd(1),
@@ -560,7 +560,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			L("Terminal.Tui.Welcome.Recent"),
 			dialogWidth,
 			height);
-		var description = new Label
+		var description = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = 0,
@@ -1075,7 +1075,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Loading;
 		_layoutMode = ResolveLayout();
-		var heading = new Label
+		var heading = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 1,
@@ -1089,7 +1089,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			AutoSpin = true,
 			SchemeName = TerminalWorkspaceTheme.Accent
 		};
-		var operation = new Label
+		var operation = new TerminalLiteralLabel
 		{
 			X = 6,
 			Y = 4,
@@ -1109,7 +1109,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Text = detail,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		var footer = new Label
+		var footer = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = Pos.AnchorEnd(1),
@@ -1132,7 +1132,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_layoutMode = ResolveLayout();
 		_activePane = TerminalWorkspacePane.Tree;
 
-		_workspaceHeading = new Label
+		_workspaceHeading = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = 0,
@@ -1141,7 +1141,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Text = $"DevProjex Terminal  {GetProjectDisplayName(state.Plan)}",
 			SchemeName = TerminalWorkspaceTheme.Accent
 		};
-		_workspacePath = new Label
+		_workspacePath = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = 1,
@@ -1150,7 +1150,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Text = GetProjectDisplaySource(state.Plan),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		_workspaceContext = new Label
+		_workspaceContext = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = 2,
@@ -1160,13 +1160,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
 
-		_treeFrame = new FrameView
+		_treeFrame = new TerminalLiteralFrameView
 		{
 			Title = L("Terminal.Tui.Tree"),
 			BorderStyle = LineStyle.Single,
 			SchemeName = TerminalWorkspaceTheme.FocusedPanel
 		};
-		_previewFrame = new FrameView
+		_previewFrame = new TerminalLiteralFrameView
 		{
 			BorderStyle = LineStyle.Single,
 			SchemeName = TerminalWorkspaceTheme.Panel
@@ -1195,7 +1195,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Height = Dim.Fill(1)
 		};
 		_preview.SetDocument(state.PreviewDocument, preserveViewport: false);
-		_previewRange = new Label
+		_previewRange = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = Pos.AnchorEnd(1),
@@ -1214,14 +1214,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_selectedTreePath = state.VisibleRows[0].Node.FullPath;
 		}
 
-		_status = new Label
+		_status = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = Pos.AnchorEnd(2),
 			Width = Dim.Fill(1),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		_footer = new Label
+		_footer = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = Pos.AnchorEnd(1),
@@ -2969,7 +2969,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var rows = new ObservableCollection<string>(
 			modes.Select(mode => $"{(mode.Item1 == current ? "(*)" : "( )")} {mode.Item2}"));
 		using var dialog = CreateDialog(L("Terminal.Tui.GitFiltering"), 66, 12);
-		var description = new Label
+		var description = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = 0,
@@ -3037,7 +3037,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 		var height = Math.Clamp(available.Count + 11, 12, Math.Max(12, _application.Screen.Height - 4));
 		using var dialog = CreateDialog(title, 74, height);
-		var hint = new Label
+		var hint = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = 0,

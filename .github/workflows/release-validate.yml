@@ -828,6 +828,7 @@ jobs:
           $env:DEVPROJEX_TUI_TEST_REPOSITORY_ROOT = (Resolve-Path ".").Path
           $filter = @(
             "FullyQualifiedName~TerminalPtyJourneyTests.OpenCurrentProjectFromWelcomeReachesWorkspaceAndStaysAlive",
+            "FullyQualifiedName~TerminalPtyJourneyTests.DynamicTerminalIdentityPreservesLiteralUnderscores",
             "FullyQualifiedName~TerminalPreviewNavigationPtyTests.PreviewViewportAndFocusSurviveKeyboardNavigationOverlaysAndResize",
             "FullyQualifiedName~TerminalRecentRepositoriesPtyTests.PopulatedCachedRepositoryOpensOfflineWithCleanIdentity",
             "FullyQualifiedName~TerminalClonePtyTests.CloneProgressCancellationCleansCacheAndRetryOpensWorkspace",

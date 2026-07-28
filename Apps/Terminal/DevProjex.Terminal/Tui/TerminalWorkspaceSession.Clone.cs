@@ -18,7 +18,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_layoutMode = ResolveLayout();
 		_clonePhaseKey = "Terminal.Tui.Clone.Validating";
 		_clonePercent = null;
-		var heading = new Label
+		var heading = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 1,

@@ -75,6 +75,83 @@ public sealed class TerminalPtyJourneyTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact(Timeout = 60_000)]
+	public async Task DynamicTerminalIdentityPreservesLiteralUnderscores()
+	{
+		using var owner = new TemporaryDirectory();
+		var welcomePath = owner.CreateDirectory("Welcome_With_Multiple_Underscores");
+		File.WriteAllText(
+			Path.Combine(welcomePath, "notes.txt"),
+			"markerless directory",
+			new UTF8Encoding(false));
+		await using var welcome = await TerminalPtyHarness.StartAsync(
+			welcomePath,
+			["--language", "en"],
+			columns: 180,
+			rows: 35,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var welcomeScreen = await welcome.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(welcomePath, welcomeScreen, StringComparison.Ordinal);
+		TerminalVisualArtifactWriter.WriteIfRequested(
+			"literal-underscores-welcome-en-180x35",
+			welcome);
+		await welcome.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await welcome.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+
+		var projectName = "Project_With_Multiple_Underscores";
+		var projectPath = owner.CreateDirectory(projectName);
+		File.WriteAllText(
+			Path.Combine(projectPath, "global.json"),
+			"{}",
+			new UTF8Encoding(false));
+		Directory.CreateDirectory(Path.Combine(projectPath, "src"));
+		File.WriteAllText(
+			Path.Combine(projectPath, "src", "Marker_With_Underscores.cs"),
+			"internal sealed class Marker_With_Underscores {}",
+			new UTF8Encoding(false));
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			projectPath,
+			[
+				"tui",
+				projectPath,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			columns: 180,
+			rows: 35,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var screen = await terminal.WaitForScreenAsync(
+			"Marker_With_Underscores.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(
+			$"DevProjex Terminal  {projectName}",
+			screen,
+			StringComparison.Ordinal);
+		Assert.Contains(projectPath, screen, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		TerminalVisualArtifactWriter.WriteIfRequested(
+			"literal-underscores-workspace-en-180x35",
+			terminal);
+
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	[Fact(Timeout = 90_000)]
 	public async Task SuccessfulLocalCloneOpensWorkspaceWithoutClosingTerminal()
 	{

@@ -38,14 +38,14 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		_application = application;
 		_elapsedFormatter = elapsedFormatter;
 		_sourceText = source ?? string.Empty;
-		_frame = new FrameView
+		_frame = new TerminalLiteralFrameView
 		{
 			Title = operationName,
 			BorderStyle = LineStyle.Single,
 			SchemeName = TerminalWorkspaceTheme.Dialog,
 			CanFocus = false
 		};
-		_phase = new Label
+		_phase = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 1,
@@ -53,7 +53,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			Text = phase,
 			SchemeName = TerminalWorkspaceTheme.Accent
 		};
-		_source = new Label
+		_source = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 2,
@@ -83,21 +83,21 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			ProgressBarFormat = ProgressBarFormat.SimplePlusPercentage,
 			SchemeName = TerminalWorkspaceTheme.Accent
 		};
-		_metrics = new Label
+		_metrics = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 7,
 			Width = Dim.Fill(2),
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
-		_detail = new Label
+		_detail = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 8,
 			Width = Dim.Fill(2),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		_elapsed = new Label
+		_elapsed = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = 9,
@@ -105,7 +105,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			Text = elapsedFormatter(TimeSpan.Zero),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		_cancelHint = new Label
+		_cancelHint = new TerminalLiteralLabel
 		{
 			X = 2,
 			Y = Pos.AnchorEnd(1),

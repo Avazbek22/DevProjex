@@ -20,7 +20,7 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void CreateContextControls()
 	{
-		_controlsFrame = new FrameView
+		_controlsFrame = new TerminalLiteralFrameView
 		{
 			BorderStyle = LineStyle.Single,
 			SchemeName = TerminalWorkspaceTheme.Panel
@@ -355,7 +355,7 @@ internal sealed partial class TerminalWorkspaceSession
 			14,
 			Math.Max(14, _application.Screen.Height - 2));
 		using var dialog = CreateDialog(L("Terminal.Tui.ActionPalette"), width, height);
-		var prompt = new Label
+		var prompt = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = 0,
