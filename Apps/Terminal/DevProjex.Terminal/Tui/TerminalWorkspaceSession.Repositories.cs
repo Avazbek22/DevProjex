@@ -197,6 +197,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Welcome.RecentRepositories"),
 			dialogWidth,
 			height);
+		AlignWelcomeDialogAfterActions(dialog, dialogWidth);
 		var description = new TerminalLiteralLabel
 		{
 			X = 1,

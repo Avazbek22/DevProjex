@@ -6,24 +6,24 @@
   <WELCOME_ROOT>
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├───────────────────────────────────────────────────────────────────────────────────────────┐
-  │> Recent projects      ┌┤Recent Git repositories├──────────────────────────────────────────────────────────────────────┐                        │
-  │  Recent Git repositori│ Open a cached repository without network access, or choose an explicit recovery action.       │                        │
-  │  Browse folder        │                                                                                               │                        │
-  │  Clone repository     │ > [+] DevProjex                                                                               │                        │
-  │  Open saved profile   │                                                                                               │                        │
-  │  Open Desktop         │                                                                                               │                        │
-  │  Help                 │                                                                                               │                        │
-  │  Exit                 │ Repository: DevProjex                                                                         │                        │
-  └───────────────────────│ Host / owner: github.com/Avazbek22                                                            │────────────────────────┘
-                          │ Local cache: Cached and ready                                                                 │
-  Direct automation: devpr│ Last opened: <TIMESTAMP>│
-                          │ Repository URL:                                                                               │
-                          │ https://github.com/Avazbek22/DevProjex                                                        │
-                          │                                                                                               │
-                          │                                                                                               │
-                          │                            ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                            │
-                          │                            ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                            │
-                          └───────────────────────────────────────────────────────────────────────────────────────────────┘
+  │> Recent projects                       │  ┌┤Recent Git repositories├──────────────────────────────────────────────────────────────────────┐    │
+  │  Recent Git repositories               │  │ Open a cached repository without network access, or choose an explicit recovery action.       │    │
+  │  Browse folder                         │  │                                                                                               │    │
+  │  Clone repository                      │  │ > [+] DevProjex                                                                               │    │
+  │  Open saved profile                    │  │                                                                                               │    │
+  │  Open Desktop                          │  │                                                                                               │    │
+  │  Help                                  │  │                                                                                               │    │
+  │  Exit                                  │  │ Repository: DevProjex                                                                         │    │
+  └────────────────────────────────────────┘  │ Host / owner: github.com/Avazbek22                                                            │────┘
+                                              │ Local cache: Cached and ready                                                                 │
+  Direct automation: devprojex analyze .  |  d│ Last opened: <TIMESTAMP>│
+                                              │ Repository URL:                                                                               │
+                                              │ https://github.com/Avazbek22/DevProjex                                                        │
+                                              │                                                                                               │
+                                              │                                                                                               │
+                                              │                            ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                            │
+                                              │                            ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                            │
+                                              └───────────────────────────────────────────────────────────────────────────────────────────────┘
 
 
 

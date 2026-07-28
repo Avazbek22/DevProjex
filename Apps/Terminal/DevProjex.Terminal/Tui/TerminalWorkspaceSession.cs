@@ -18,6 +18,9 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed partial class TerminalWorkspaceSession : IDisposable
 {
+	private const int WelcomeHorizontalMargin = 2;
+	private const int WelcomeWideActionsWidth = 42;
+
 	private readonly IApplication _application;
 	private readonly Window _root;
 	private readonly TerminalServices _services;
@@ -560,6 +563,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			L("Terminal.Tui.Welcome.Recent"),
 			dialogWidth,
 			height);
+		AlignWelcomeDialogAfterActions(dialog, dialogWidth);
 		var description = new TerminalLiteralLabel
 		{
 			X = 1,
@@ -1568,17 +1572,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeCurrentStatus.Visible = statusWidth >= currentStatus.GetColumns();
 		if (_layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide)
 		{
-			_welcomeActionsFrame.X = 2;
+			_welcomeActionsFrame.X = WelcomeHorizontalMargin;
 			_welcomeActionsFrame.Y = 7;
-			_welcomeActionsFrame.Width = 42;
+			_welcomeActionsFrame.Width = WelcomeWideActionsWidth;
 			_welcomeActionsFrame.Height = actionHeight;
 			_welcomeDetailFrame.X = Pos.Right(_welcomeActionsFrame) + 2;
 			_welcomeDetailFrame.Y = 7;
-			_welcomeDetailFrame.Width = Dim.Fill(2);
+			_welcomeDetailFrame.Width = Dim.Fill(WelcomeHorizontalMargin);
 			_welcomeDetailFrame.Height = actionHeight;
 			_welcomeQuickStart.Y = 7 + actionHeight + 1;
 			_welcomeQuickStart.Height = 3;
-			_welcomeCurrentPath.Width = Dim.Fill(2);
+			_welcomeCurrentPath.Width = Dim.Fill(WelcomeHorizontalMargin);
 			return;
 		}
 
@@ -3318,6 +3322,21 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			SchemeName = TerminalWorkspaceTheme.Dialog,
 			ButtonAlignment = Alignment.Center
 		};
+	}
+
+	private void AlignWelcomeDialogAfterActions(
+		Dialog dialog,
+		int dialogWidth)
+	{
+		var minimumDialogX =
+			WelcomeHorizontalMargin + WelcomeWideActionsWidth + 2;
+		var availableWidth =
+			_terminalWidth - minimumDialogX - WelcomeHorizontalMargin;
+		if (_layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide &&
+		    availableWidth >= dialogWidth)
+		{
+			dialog.X = minimumDialogX;
+		}
 	}
 
 	private int ResolveDialogWidth(int preferredWidth)

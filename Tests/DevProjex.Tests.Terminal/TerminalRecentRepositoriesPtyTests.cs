@@ -39,6 +39,7 @@ public sealed class TerminalRecentRepositoriesPtyTests
 		var repositoryList = terminal.CaptureScreen();
 		Assert.Contains("DevProjex", repositoryList, StringComparison.Ordinal);
 		Assert.Contains("Cached and ready", repositoryList, StringComparison.Ordinal);
+		Assert.Contains("│  Recent Git repositories", repositoryList, StringComparison.Ordinal);
 		Assert.DoesNotContain(CacheFolderName, repositoryList, StringComparison.Ordinal);
 		Verify(
 			"recent-repositories-cached-en-150x35",
