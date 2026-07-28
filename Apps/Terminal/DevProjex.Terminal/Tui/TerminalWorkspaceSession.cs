@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using DevProjex.Terminal.CommandLine;
@@ -24,6 +25,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalWorkspaceOptions _options;
 	private readonly TerminalWorkspace _workspace;
 	private readonly TerminalWorkspaceController _controller;
+	private readonly TerminalProgressTestCheckpoint? _progressTestCheckpoint;
 	private readonly CancellationTokenSource _sessionCts;
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
 
@@ -43,6 +45,9 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 	private Task? _previewTask;
 
 	private TerminalWelcomeContext? _welcomeContext;
+	private RecentProjectsDb? _recentProjectsSnapshot;
+	private RecentProjectsLoadStatus _recentProjectsLoadStatus;
+	private string? _recentSelectionPath;
 	private ObservableCollection<TerminalWelcomeActionRow>? _welcomeRows;
 	private ListView? _welcomeList;
 	private TextView? _welcomeDetail;
@@ -68,6 +73,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 	private Label? _workspaceContext;
 	private Label? _status;
 	private Label? _footer;
+	private TerminalOperationProgressView? _operationProgress;
 	private TerminalWorkspacePane _activePane = TerminalWorkspacePane.Tree;
 	private ProjectContextView _previewView = ProjectContextView.TreeContent;
 	private ProjectContextDocumentFormat _format = ProjectContextDocumentFormat.Markdown;
@@ -90,6 +96,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		_options = options;
 		_workspace = workspace;
 		_controller = new TerminalWorkspaceController(services, environment);
+		_progressTestCheckpoint = TerminalProgressTestCheckpoint.TryCreate();
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
@@ -97,25 +104,32 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		_application.Keyboard.KeyDown += OnRootKeyDown;
 		_application.ScreenChanged += (_, _) =>
 		{
-			if (_application.AppModel != AppModel.Inline)
-			{
-				var screen = _application.Driver?.Screen ?? _application.Screen;
-				UpdateTerminalSize(screen.Width, screen.Height);
-			}
+			// Inline roots are resized in Driver.SizeChanged below. Applying the old
+			// geometry here would draw a split frame into the already resized buffer.
+			if (_application.AppModel == AppModel.Inline)
+				return;
+			var sizeChanged = false;
+			var screen = _application.Driver?.Screen ?? _application.Screen;
+			sizeChanged = UpdateTerminalSize(screen.Width, screen.Height);
 			ApplyCurrentLayout();
+			if (sizeChanged)
+				InvalidateAfterTerminalResize();
 		};
 		if (_application.Driver is { } driver)
 		{
 			driver.SizeChanged += (_, args) => _application.Invoke(() =>
 			{
+				var sizeChanged = false;
 				if (_application.AppModel == AppModel.Inline && args.Size is { } size)
 				{
 					_root.Width = size.Width;
 					_root.Height = size.Height;
 				}
 				if (args.Size is { } terminalSize)
-					UpdateTerminalSize(terminalSize.Width, terminalSize.Height);
+					sizeChanged = UpdateTerminalSize(terminalSize.Width, terminalSize.Height);
 				ApplyCurrentLayout();
+				if (sizeChanged)
+					InvalidateAfterTerminalResize();
 			});
 		}
 	}
@@ -323,8 +337,11 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 
 	private TerminalWelcomeContext LoadWelcomeContext()
 	{
-		var recent = _services.RecentProjectsStore.LoadForStartup(TimeSpan.FromMilliseconds(200))
-			.RecentFolders
+		var loadResult = _services.RecentProjectsStore.LoadForStartupWithStatus(
+			TimeSpan.FromMilliseconds(200));
+		_recentProjectsSnapshot = loadResult.Database;
+		_recentProjectsLoadStatus = loadResult.Status;
+		var recent = loadResult.Database.RecentFolders
 			.Select(static entry => entry.Path);
 		return TerminalWelcomePolicy.Create(_options.ProjectPath, recent);
 	}
@@ -434,23 +451,203 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 
 	private void OpenRecentProject()
 	{
-		if (_welcomeContext is null)
-			return;
-		if (_welcomeContext.RecentProjects.Count == 0)
+		while (!_stopping)
 		{
-			ShowNotice(
-				L("Terminal.Tui.Welcome.Recent"),
-				L("Terminal.Tui.NoneAvailable"),
-				TerminalWorkspaceTheme.Warning);
+			if (_recentProjectsLoadStatus != RecentProjectsLoadStatus.Success)
+			{
+				var action = ShowChoice(
+					L("Terminal.Tui.Welcome.Recent"),
+					L("Terminal.Tui.Recent.StorageUnavailable"),
+					L("Terminal.Tui.Back"),
+					L("Terminal.Tui.Retry"));
+				if (action != 1)
+					return;
+				LoadWelcomeContext();
+				continue;
+			}
+
+			var projects = BuildRecentProjects();
+			if (projects.Count == 0)
+			{
+				ShowNotice(
+					L("Terminal.Tui.Welcome.Recent"),
+					L("Terminal.Tui.NoneAvailable"),
+					TerminalWorkspaceTheme.Warning);
+				return;
+			}
+
+			var decision = SelectRecentProject(projects);
+			if (decision.Kind == TerminalRecentProjectDecisionKind.Back ||
+			    decision.Project is null)
+			{
+				return;
+			}
+
+			_recentSelectionPath = decision.Project.Path;
+			if (decision.Kind == TerminalRecentProjectDecisionKind.Remove)
+			{
+				RemoveRecentProject(decision.Project.Path);
+				continue;
+			}
+
+			if (!decision.Project.IsAvailable)
+			{
+				var staleAction = ShowChoice(
+					L("Terminal.Tui.Error"),
+					$"{L("Terminal.Tui.Error.ProjectUnavailable")}\n\n{decision.Project.Path}",
+					L("Terminal.Tui.Back"),
+					L("Terminal.Tui.Recent.Remove"));
+				if (staleAction == 1)
+					RemoveRecentProject(decision.Project.Path);
+				continue;
+			}
+
+			if (!TryResolveAutomaticProfileInteractively(
+				    decision.Project.Path,
+				    out var profile))
+			{
+				continue;
+			}
+
+			BeginOpenProject(
+				decision.Project.Path,
+				profile,
+				TerminalProjectOpenSource.Recent);
 			return;
 		}
+	}
 
-		var selected = SelectFromList(
+	private IReadOnlyList<TerminalRecentProject> BuildRecentProjects()
+	{
+		if (_recentProjectsSnapshot is null)
+			return [];
+
+		var profileStore = _services.LocalProfileStore as ProjectProfileStore;
+		return _recentProjectsSnapshot.RecentFolders
+			.Select(entry =>
+			{
+				var hasLocalProfile = profileStore?.LookupProfile(entry.Path, TimeSpan.Zero).Status ==
+				                      ProjectProfileLookupStatus.Found;
+				return new TerminalRecentProject(
+					entry.Path,
+					entry.OpenedUtc,
+					Directory.Exists(entry.Path),
+					hasLocalProfile);
+			})
+			.ToArray();
+	}
+
+	private TerminalRecentProjectDecision SelectRecentProject(
+		IReadOnlyList<TerminalRecentProject> projects)
+	{
+		var dialogWidth = ResolveDialogWidth(92);
+		var detailsWidth = Math.Max(8, dialogWidth - 6);
+		var height = Math.Clamp(
+			projects.Count + 17,
+			18,
+			Math.Max(18, _application.Screen.Height - 2));
+		using var dialog = CreateDialog(
 			L("Terminal.Tui.Welcome.Recent"),
-			L("Terminal.Tui.Welcome.RecentDescription"),
-			_welcomeContext.RecentProjects);
-		if (selected is not null)
-			BeginOpenProject(selected, ResolveAutomaticProfile(selected));
+			dialogWidth,
+			height);
+		var description = new Label
+		{
+			X = 1,
+			Y = 0,
+			Width = Dim.Fill(1),
+			Text = L("Terminal.Tui.Welcome.RecentDescription"),
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		};
+		var rows = new ObservableCollection<TerminalRecentProjectRow>(
+			projects.Select(static project => new TerminalRecentProjectRow(project)));
+		var list = new ListView
+		{
+			X = 1,
+			Y = 2,
+			Width = Dim.Fill(1),
+			Height = Math.Min(Math.Max(3, projects.Count), 8),
+			SchemeName = TerminalWorkspaceTheme.List
+		};
+		list.SetSource(rows);
+		var selectedIndex = string.IsNullOrWhiteSpace(_recentSelectionPath)
+			? 0
+			: projects
+				.Select((project, index) => (project, index))
+				.FirstOrDefault(pair => PathComparer.Default.Equals(
+					pair.project.Path,
+					_recentSelectionPath))
+				.index;
+		list.SelectedItem = Math.Clamp(selectedIndex, 0, projects.Count - 1);
+		var details = new TextView
+		{
+			X = 1,
+			Y = Pos.Bottom(list) + 1,
+			Width = Dim.Fill(1),
+			Height = Dim.Fill(1),
+			ReadOnly = true,
+			WordWrap = true,
+			CanFocus = false,
+			SchemeName = TerminalWorkspaceTheme.Base
+		};
+		var decision = new TerminalRecentProjectDecision(
+			TerminalRecentProjectDecisionKind.Back);
+
+		void UpdateSelection()
+		{
+			var index = Math.Clamp(list.SelectedItem ?? 0, 0, projects.Count - 1);
+			for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+				rows[rowIndex].IsSelected = rowIndex == index;
+			list.SetNeedsDraw();
+			var project = projects[index];
+			_recentSelectionPath = project.Path;
+			details.Text =
+				$"{L("Terminal.Tui.Recent.Status")}: " +
+				$"{L(project.IsAvailable
+					? "Terminal.Tui.Recent.Available"
+					: "Terminal.Tui.Recent.Unavailable")}\n" +
+				$"{L("Terminal.Tui.Profile")}: " +
+				$"{L(project.HasLocalProfile
+					? "Terminal.Profile.Local"
+					: "Terminal.Profile.Standard")}\n" +
+				$"{L("Terminal.Tui.Recent.LastOpened")}: " +
+				$"{project.OpenedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)}\n" +
+				$"{L("Terminal.Tui.Recent.Path")}:\n" +
+				FitPathToWidth(project.Path, detailsWidth);
+		}
+
+		void SelectCurrent(TerminalRecentProjectDecisionKind kind)
+		{
+			var index = Math.Clamp(list.SelectedItem ?? 0, 0, projects.Count - 1);
+			decision = new TerminalRecentProjectDecision(kind, projects[index]);
+		}
+
+		list.ValueChanged += (_, _) => UpdateSelection();
+		list.Accepted += (_, _) =>
+		{
+			SelectCurrent(TerminalRecentProjectDecisionKind.Open);
+			_application.RequestStop(dialog);
+		};
+		dialog.Add(description, list, details);
+		dialog.AddButton(new Button { Text = L("Terminal.Tui.Back") });
+		var remove = new Button { Text = L("Terminal.Tui.Recent.Remove") };
+		remove.Accepted += (_, _) => SelectCurrent(TerminalRecentProjectDecisionKind.Remove);
+		dialog.AddButton(remove);
+		var open = new Button { Text = L("Terminal.Tui.Open") };
+		open.Accepted += (_, _) => SelectCurrent(TerminalRecentProjectDecisionKind.Open);
+		dialog.AddButton(open);
+		UpdateSelection();
+		RunOverlay(dialog, list);
+		return decision;
+	}
+
+	private void RemoveRecentProject(string projectPath)
+	{
+		_recentProjectsSnapshot = _services.RecentProjectsStore.RemoveFolder(
+			_recentProjectsSnapshot,
+			projectPath);
+		_recentProjectsLoadStatus = RecentProjectsLoadStatus.Success;
+		if (PathComparer.Default.Equals(_recentSelectionPath, projectPath))
+			_recentSelectionPath = null;
 	}
 
 	private void BrowseForProject()
@@ -467,7 +664,8 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 
-		BeginOpenProject(project, ResolveAutomaticProfile(project));
+		if (TryResolveAutomaticProfileInteractively(project, out var profile))
+			BeginOpenProject(project, profile);
 	}
 
 	private void OpenPortableProfile()
@@ -528,8 +726,9 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 
 				await OpenProjectCoreAsync(
 						result.LocalPath,
-						ResolveAutomaticProfile(result.LocalPath),
+						ResolveAutomaticProfile(result.LocalPath).Profile,
 						operationCts,
+						TerminalProjectOpenSource.Clone,
 						releaseOperation: false)
 					.ConfigureAwait(false);
 			}
@@ -555,10 +754,66 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		}, CancellationToken.None);
 	}
 
-	private ProjectProfileReference ResolveAutomaticProfile(string projectPath) =>
-		_services.LocalProfileStore.TryLoadProfile(projectPath, out _)
-			? ProjectProfileReference.Local
-			: ProjectProfileReference.Standard;
+	private AutomaticProfileResolution ResolveAutomaticProfile(string projectPath)
+	{
+		if (_services.LocalProfileStore is ProjectProfileStore store)
+		{
+			var lookup = store.LookupProfile(projectPath, TimeSpan.FromMilliseconds(200));
+			return lookup.Status switch
+			{
+				ProjectProfileLookupStatus.Found => new AutomaticProfileResolution(
+					ProjectProfileReference.Local,
+					lookup.Status),
+				_ => new AutomaticProfileResolution(
+					ProjectProfileReference.Standard,
+					lookup.Status)
+			};
+		}
+
+		return _services.LocalProfileStore.TryLoadProfile(projectPath, out _)
+			? new AutomaticProfileResolution(
+				ProjectProfileReference.Local,
+				ProjectProfileLookupStatus.Found)
+			: new AutomaticProfileResolution(
+				ProjectProfileReference.Standard,
+				ProjectProfileLookupStatus.Missing);
+	}
+
+	private bool TryResolveAutomaticProfileInteractively(
+		string projectPath,
+		out ProjectProfileReference profile)
+	{
+		while (true)
+		{
+			var resolution = ResolveAutomaticProfile(projectPath);
+			profile = resolution.Profile;
+			if (resolution.Status is
+			    ProjectProfileLookupStatus.Found or
+			    ProjectProfileLookupStatus.Missing)
+			{
+				return true;
+			}
+
+			var action = ShowChoice(
+				L("Terminal.Tui.ProfileRecovery"),
+				L(resolution.Status == ProjectProfileLookupStatus.InvalidStorage
+					? "Terminal.Tui.ProfileInvalidRecovery"
+					: "Terminal.Tui.ProfileUnavailableRecovery"),
+				L("Terminal.Tui.Back"),
+				L("Terminal.Tui.Retry"),
+				L("Terminal.Tui.UseStandardProfile"));
+			switch (action)
+			{
+				case 1:
+					continue;
+				case 2:
+					profile = ProjectProfileReference.Standard;
+					return true;
+				default:
+					return false;
+			}
+		}
+	}
 
 	private void BeginOpenDesktopFromWelcome()
 	{
@@ -606,12 +861,15 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		}, CancellationToken.None);
 	}
 
-	private void BeginOpenProject(string projectPath, ProjectProfileReference profile)
+	private void BeginOpenProject(
+		string projectPath,
+		ProjectProfileReference profile,
+		TerminalProjectOpenSource source = TerminalProjectOpenSource.Other)
 	{
 		ShowLoading(L("Terminal.Tui.LoadingProject"), projectPath);
 		var operationCts = ReplaceActiveOperation();
 		_openTask = Task.Run(
-			() => OpenProjectCoreAsync(projectPath, profile, operationCts),
+			() => OpenProjectCoreAsync(projectPath, profile, operationCts, source),
 			CancellationToken.None);
 	}
 
@@ -619,15 +877,25 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		string projectPath,
 		ProjectProfileReference profile,
 		CancellationTokenSource operationCts,
+		TerminalProjectOpenSource source = TerminalProjectOpenSource.Other,
 		bool releaseOperation = true)
 	{
 		try
 		{
+			if (_progressTestCheckpoint is not null)
+			{
+				await _progressTestCheckpoint
+					.PausePhaseAsync("project-loading", operationCts.Token)
+					.ConfigureAwait(false);
+			}
 			var state = await _controller
 				.OpenAsync(projectPath, profile, operationCts.Token)
 				.ConfigureAwait(false);
 			if (_stopping || operationCts.IsCancellationRequested)
 				return;
+			_recentProjectsSnapshot = _services.RecentProjectsStore.AddFolder(
+				_recentProjectsSnapshot,
+				state.Plan.SourceRoot);
 			await InvokeAsync(() =>
 			{
 				if (ReferenceEquals(_activeOperationCts, operationCts))
@@ -641,30 +909,63 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		}
 		catch (PortableProjectProfileException exception)
 		{
-			ReturnToWelcomeWithError(
+			ReturnFromProjectOpenError(
 				operationCts,
 				exception.Code,
-				L("Terminal.Error.ProfileInvalid"));
+				L("Terminal.Error.ProfileInvalid"),
+				projectPath,
+				source);
 		}
 		catch (ProjectContextValidationException exception)
 		{
-			ReturnToWelcomeWithError(
+			ReturnFromProjectOpenError(
 				operationCts,
 				exception.Code,
-				ResolveValidationErrorMessage(exception.Code));
+				ResolveValidationErrorMessage(exception.Code),
+				projectPath,
+				source);
 		}
 		catch
 		{
-			ReturnToWelcomeWithError(
+			ReturnFromProjectOpenError(
 				operationCts,
 				"DPX-TUI-PROJECT-OPEN-FAILED",
-				L("Terminal.Tui.Error.ProjectUnavailable"));
+				L("Terminal.Tui.Error.ProjectUnavailable"),
+				projectPath,
+				source);
 		}
 		finally
 		{
 			if (releaseOperation)
 				ReleaseActiveOperation(operationCts);
 		}
+	}
+
+	private void ReturnFromProjectOpenError(
+		CancellationTokenSource operationCts,
+		string code,
+		string message,
+		string projectPath,
+		TerminalProjectOpenSource source)
+	{
+		if (source != TerminalProjectOpenSource.Recent)
+		{
+			ReturnToWelcomeWithError(operationCts, code, message);
+			return;
+		}
+		if (_stopping || !ReferenceEquals(_activeOperationCts, operationCts))
+			return;
+
+		_application.Invoke(() =>
+		{
+			ShowWelcome();
+			_application.Invoke(() =>
+			{
+				ShowError(code, $"{message}\n\n{projectPath}");
+				if (!_stopping)
+					OpenRecentProject();
+			});
+		});
 	}
 
 	private void ReturnToWelcomeAfterCancellation(CancellationTokenSource operationCts)
@@ -818,6 +1119,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 			Height = Dim.Fill(),
 			ReadOnly = true,
 			WordWrap = false,
+			ScrollBars = true,
 			Text = state.PreviewText,
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
@@ -870,9 +1172,12 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		var selected = FindSelectedTreeRow();
 		var treeHadFocus = _tree.HasFocus;
 		var previewHadFocus = _preview.HasFocus;
+		var previewRow = _preview.CurrentRow;
+		var previewColumn = _preview.CurrentColumn;
 		if (_state.VisibleRows.Count > 0)
 			_tree.SelectedItem = Math.Clamp(selected, 0, _state.VisibleRows.Count - 1);
 		_preview.Text = _state.PreviewText;
+		RestorePreviewViewport(previewRow, previewColumn);
 		if (treeHadFocus)
 			_tree.SetFocus();
 		else if (previewHadFocus)
@@ -881,7 +1186,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 			_status.Text = BuildStatus(_state, _application.Screen.Width);
 		if (_workspaceContext is not null)
 			_workspaceContext.Text = BuildWorkspaceContext(_state, _terminalWidth);
-		UpdatePreviewTitle();
+		UpdatePanelTitles();
 		UpdateFooter();
 	}
 
@@ -970,11 +1275,14 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		       $"{L("Terminal.Tui.Warnings")} {state.Plan.Diagnostics.Count:N0}";
 	}
 
-	private void UpdatePreviewTitle()
+	private void UpdatePanelTitles()
 	{
-		if (_previewFrame is null)
+		if (_treeFrame is null || _previewFrame is null)
 			return;
+		_treeFrame.Title =
+			$"{(_activePane == TerminalWorkspacePane.Tree ? "> " : "  ")}{L("Terminal.Tui.Tree")}";
 		_previewFrame.Title =
+			$"{(_activePane == TerminalWorkspacePane.Preview ? "> " : "  ")}" +
 			$"{L("Terminal.Tui.Preview")} · {_workspace.LocalizeView(_previewView)} · {_format}";
 	}
 
@@ -1003,6 +1311,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		_previewFrame.SchemeName = _activePane == TerminalWorkspacePane.Preview
 			? TerminalWorkspaceTheme.FocusedPanel
 			: TerminalWorkspaceTheme.Panel;
+		UpdatePanelTitles();
 		UpdateFooter();
 	}
 
@@ -1062,6 +1371,8 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 			_welcomeQuickStart,
 			_welcomeFooter);
 		_tooSmall.Visible = tooSmall;
+		if (_operationProgress is not null)
+			_operationProgress.View.Visible = !tooSmall;
 		if (tooSmall)
 			return;
 
@@ -1169,6 +1480,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 
 		RefreshWorkspace();
 		UpdateWorkspaceFocus();
+		_operationProgress?.ApplyLayout(_terminalWidth, _terminalHeight);
 	}
 
 	private void ShowSinglePane(TerminalWorkspacePane pane)
@@ -1184,12 +1496,40 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		return TerminalWorkspaceLayout.Resolve(_terminalWidth, _terminalHeight);
 	}
 
-	private void UpdateTerminalSize(int width, int height)
+	private bool UpdateTerminalSize(int width, int height)
 	{
+		var previousWidth = _terminalWidth;
+		var previousHeight = _terminalHeight;
 		if (width > 0)
 			_terminalWidth = width;
 		if (height > 0)
 			_terminalHeight = height;
+		return previousWidth != _terminalWidth || previousHeight != _terminalHeight;
+	}
+
+	private void InvalidateAfterTerminalResize()
+	{
+		_application.Invoke(() =>
+		{
+			if (_disposed)
+				return;
+			// Terminal.Gui keeps untouched cells clean in inline mode to preserve scrollback.
+			// Clear and redraw the complete hierarchy in one callback so a resize cannot expose
+			// either stale cells or an intermediate empty frame.
+			_application.ClearScreenNextIteration = true;
+			_root.SetNeedsLayout();
+			InvalidateViewHierarchy(_root);
+			_application.LayoutAndDraw(forceRedraw: true);
+		});
+	}
+
+	private static void InvalidateViewHierarchy(View view)
+	{
+		if (!view.Visible)
+			return;
+		view.SetNeedsDraw();
+		foreach (var child in view.SubViews)
+			InvalidateViewHierarchy(child);
 	}
 
 	private Label CreateTooSmallLabel() =>
@@ -1214,7 +1554,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 			if (HasActiveOperation)
 			{
 				CancelActiveOperation();
-				SetOperationStatus(L("Terminal.Tui.CancelingOperation"), TerminalWorkspaceTheme.Warning);
+				ShowCancelingOperation();
 			}
 			else if (Confirm(
 					L("Terminal.Tui.Exit"),
@@ -1231,12 +1571,20 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 			if (HasActiveOperation)
 			{
 				CancelActiveOperation();
-				SetOperationStatus(L("Terminal.Tui.CancelingOperation"), TerminalWorkspaceTheme.Warning);
+				ShowCancelingOperation();
 			}
 			else
 			{
 				RequestExit();
 			}
+			return;
+		}
+
+		if (key == Key.Esc && HasActiveOperation)
+		{
+			key.Handled = true;
+			CancelActiveOperation();
+			ShowCancelingOperation();
 			return;
 		}
 
@@ -1297,25 +1645,38 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 				ShowWelcome();
 			return;
 		}
+		if (key == Key.Tab.WithShift || key == Key.F6.WithShift)
+		{
+			key.Handled = true;
+			MovePane(TerminalPaneNavigation.Previous);
+			return;
+		}
+		if (key == Key.Tab || key == Key.F6)
+		{
+			key.Handled = true;
+			MovePane(TerminalPaneNavigation.Next);
+			return;
+		}
 		if (key.NoShift == Key.J || key.NoShift == Key.K)
 		{
 			key.Handled = true;
 			if (_tree.HasFocus)
 				MoveListSelection(_tree, key.NoShift == Key.J ? 1 : -1);
 			else
-				ScrollPreview(key.NoShift == Key.J ? 1 : -1);
+				ScrollPreview(
+					key.NoShift == Key.J
+						? TerminalPreviewScroll.LineDown
+						: TerminalPreviewScroll.LineUp);
 			return;
 		}
+		if (_preview.HasFocus && TryHandlePreviewNavigation(key))
+			return;
+		if (_tree.HasFocus && TryHandleTreeNavigation(key))
+			return;
 		if (key == Key.Enter && _tree.HasFocus)
 		{
 			key.Handled = true;
 			ToggleCurrentTreeExpansion();
-			return;
-		}
-		if (key.NoShift == Key.Tab)
-		{
-			key.Handled = true;
-			SwitchPane();
 			return;
 		}
 		if (key == Key.CursorRight && _tree.HasFocus)
@@ -1668,12 +2029,15 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		var operationCts = ReplaceActiveOperation();
 		try
 		{
-			SetWorkspaceBusy(operationName);
+			SetWorkspaceBusy(
+				operationName,
+				L("Terminal.Tui.Progress.Working"));
 			var result = await operation(operationCts.Token).ConfigureAwait(false);
 			if (_stopping)
 				return;
 			await InvokeAsync(() =>
 			{
+				MarkActiveOperationFinished(operationCts);
 				RefreshWorkspace();
 				SchedulePreviewRefresh();
 				SetWorkspaceBusy(null);
@@ -1740,7 +2104,15 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		var operationCts = ReplaceActiveOperation();
 		try
 		{
-			SetWorkspaceBusy(operationName);
+			SetWorkspaceBusy(
+				operationName,
+				L("Terminal.Tui.Progress.Preparing"));
+			if (_progressTestCheckpoint is not null)
+			{
+				await _progressTestCheckpoint
+					.PausePhaseAsync("preparing", operationCts.Token)
+					.ConfigureAwait(false);
+			}
 			var summary = await prepare(operationCts.Token).ConfigureAwait(false);
 			var decision = await InvokeAsync(() =>
 			{
@@ -1773,32 +2145,50 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 				return;
 			}
 
-			SetWorkspaceBusy(operationName);
-			var progress = new Progress<ProjectCopyExportProgress>(value =>
+			var progressPhase = summary.Kind switch
+			{
+				TerminalExportKind.Context => L("Terminal.Tui.Progress.WritingContext"),
+				TerminalExportKind.Zip => L("Terminal.Tui.Progress.BuildingZip"),
+				_ => L("Terminal.Tui.Progress.CopyingFiles")
+			};
+			SetWorkspaceBusy(operationName, progressPhase);
+			if (_progressTestCheckpoint is not null &&
+			    summary.Kind == TerminalExportKind.Context)
+			{
+				await _progressTestCheckpoint
+					.PausePhaseAsync("writing-context", operationCts.Token)
+					.ConfigureAwait(false);
+			}
+			var exportStopwatch = Stopwatch.StartNew();
+			var progress = new SynchronousProgress<ProjectCopyExportProgress>(value =>
+			{
 				_application.Invoke(() =>
-				{
-					if (_status is not null)
-					{
-						_status.Text = string.Format(
-							CultureInfo.CurrentCulture,
-							L("Status.Operation.ExportingProjectCopy.Progress"),
-							value.ProcessedEntryCount,
-							value.TotalEntryCount);
-						_status.SchemeName = TerminalWorkspaceTheme.Accent;
-					}
-				}));
+				UpdateMeasuredProgress(
+					value,
+					summary.Kind,
+					progressPhase));
+				_progressTestCheckpoint?.PauseIfReached(value, operationCts.Token);
+			});
 			var result = await export(progress, operationCts.Token).ConfigureAwait(false);
+			exportStopwatch.Stop();
 			if (_stopping)
 				return;
 			await InvokeAsync(() =>
 			{
+				MarkActiveOperationFinished(operationCts);
 				SetWorkspaceBusy(null);
 				RefreshWorkspace();
 				SchedulePreviewRefresh();
 				ShowNotice(
 					operationName,
-					BuildExportCompletion(summary, result, command),
-					TerminalWorkspaceTheme.Success);
+					BuildExportCompletion(
+						summary,
+						result,
+						command,
+						exportStopwatch.Elapsed),
+					TerminalWorkspaceTheme.Success,
+					preferredWidth: 108,
+					preferredHeight: 20);
 				return true;
 			}).ConfigureAwait(false);
 		}
@@ -1847,12 +2237,22 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 	private string BuildExportCompletion(
 		TerminalExportSummary summary,
 		string destination,
-		string equivalentCommand) =>
-		$"{L("Terminal.Tui.Destination").TrimEnd(':')}: {destination}\n" +
-		$"{L("Terminal.Analysis.Files")}: {summary.FileCount:N0}  |  " +
-		$"{L("Terminal.Analysis.Folders")}: {summary.FolderCount:N0}  |  " +
-		$"{L("Terminal.Analysis.Size")}: {TerminalWorkspace.FormatBytes(summary.Bytes)}\n\n" +
-		$"{L("Terminal.Tui.EquivalentCommand")}:\n{equivalentCommand}";
+		string equivalentCommand,
+		TimeSpan elapsed)
+	{
+		var destinationLabel = $"{L("Terminal.Tui.Destination").TrimEnd(':')}: ";
+		var dialogWidth = Math.Min(108, Math.Max(12, _terminalWidth - 4));
+		var bodyWidth = Math.Max(20, dialogWidth - 6);
+		var destinationWidth = Math.Max(8, bodyWidth - destinationLabel.GetColumns());
+		var displayDestination = FitPathToWidth(destination, destinationWidth);
+		return
+			$"{destinationLabel}{displayDestination}\n" +
+			$"{L("Terminal.Analysis.Files")}: {summary.FileCount:N0}  |  " +
+			$"{L("Terminal.Analysis.Folders")}: {summary.FolderCount:N0}  |  " +
+			$"{L("Terminal.Analysis.Size")}: {TerminalWorkspace.FormatBytes(summary.Bytes)}\n" +
+			$"{FormatElapsed(elapsed)}\n\n" +
+			$"{L("Terminal.Tui.EquivalentCommand")}:\n{equivalentCommand}";
+	}
 
 	private async Task ShowFailureAsync(string code, string message)
 	{
@@ -1877,7 +2277,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 			_ => L("Terminal.Tui.Error.InvalidOperation")
 		};
 
-	private void SetWorkspaceBusy(string? operationName)
+	private void SetWorkspaceBusy(string? operationName, string? phase = null)
 	{
 		_application.Invoke(() =>
 		{
@@ -1886,10 +2286,26 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 				_tree.Enabled = !busy;
 			if (_preview is not null)
 				_preview.Enabled = !busy;
+			if (busy && _screen == TerminalWorkspaceScreen.Workspace)
+			{
+				DismissOperationProgress();
+				_operationProgress = new TerminalOperationProgressView(
+					_application,
+					operationName!,
+					phase ?? L("Terminal.Tui.Progress.Working"),
+					L("Terminal.Tui.Progress.CancelHint"),
+					FormatElapsed);
+				_operationProgress.ApplyLayout(_terminalWidth, _terminalHeight);
+				_root.Add(_operationProgress.View);
+			}
+			else if (!busy)
+			{
+				DismissOperationProgress();
+			}
 			if (_status is not null)
 			{
 				_status.Text = busy
-					? $"{operationName}...  {L("Terminal.Tui.CancelOperation")}"
+					? operationName!
 					: _state is null
 						? string.Empty
 						: BuildStatus(_state, _application.Screen.Width);
@@ -1897,7 +2313,56 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 					? TerminalWorkspaceTheme.Accent
 					: TerminalWorkspaceTheme.Secondary;
 			}
+			if (!busy && _screen == TerminalWorkspaceScreen.Workspace)
+			{
+				RestoreScreenFocus();
+				UpdateWorkspaceFocus();
+			}
 		});
+	}
+
+	private void UpdateMeasuredProgress(
+		ProjectCopyExportProgress progress,
+		TerminalExportKind kind,
+		string activePhase)
+	{
+		if (_operationProgress is null)
+			return;
+
+		var total = Math.Max(0, progress.TotalEntryCount);
+		var processed = Math.Clamp(progress.ProcessedEntryCount, 0, total);
+		var fraction = total == 0 ? 1d : processed / (double)total;
+		var phase = total > 0 && processed >= total
+			? L("Terminal.Tui.Progress.Finalizing")
+			: activePhase;
+		var operationKind = kind == TerminalExportKind.Zip
+			? "ZIP"
+			: L("Terminal.Tui.Folder");
+		var metrics =
+			$"{operationKind}  |  {processed:N0} / {total:N0}  |  " +
+			$"{TerminalWorkspace.FormatBytes(progress.BytesWritten)}";
+		_operationProgress.SetMeasured(phase, fraction, metrics);
+	}
+
+	private string FormatElapsed(TimeSpan elapsed) =>
+		$"{L("Terminal.Tui.Progress.Elapsed")}: " +
+		$"{(elapsed.TotalHours >= 1
+			? elapsed.ToString(@"h\:mm\:ss", CultureInfo.CurrentCulture)
+			: elapsed.ToString(@"m\:ss", CultureInfo.CurrentCulture))}";
+
+	private void ShowCancelingOperation()
+	{
+		_operationProgress?.SetIndeterminate(L("Terminal.Tui.CancelingOperation"));
+		SetOperationStatus(L("Terminal.Tui.CancelingOperation"), TerminalWorkspaceTheme.Warning);
+	}
+
+	private void DismissOperationProgress()
+	{
+		if (_operationProgress is null)
+			return;
+		_root.Remove(_operationProgress.View);
+		_operationProgress.Dispose();
+		_operationProgress = null;
 	}
 
 	private void SetOperationStatus(string text, string schemeName)
@@ -1999,26 +2464,138 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		CancelAndDispose(ref _previewCts);
 	}
 
-	private void SwitchPane()
+	private void MovePane(TerminalPaneNavigation navigation)
 	{
 		if (_tree is null || _preview is null)
 			return;
-		_activePane = _activePane == TerminalWorkspacePane.Tree
-			? TerminalWorkspacePane.Preview
-			: TerminalWorkspacePane.Tree;
+		var panes = new[]
+		{
+			TerminalWorkspacePane.Tree,
+			TerminalWorkspacePane.Preview
+		};
+		var currentIndex = Array.IndexOf(panes, _activePane);
+		var offset = navigation == TerminalPaneNavigation.Next ? 1 : -1;
+		var nextIndex = (currentIndex + offset + panes.Length) % panes.Length;
+		_activePane = panes[nextIndex];
 		if (_layoutMode != TerminalWorkspaceLayoutMode.Split)
 			ShowSinglePane(_activePane);
 		(_activePane == TerminalWorkspacePane.Tree ? (View)_tree : _preview).SetFocus();
 		UpdateWorkspaceFocus();
 	}
 
-	private void ScrollPreview(int delta)
+	private bool TryHandleTreeNavigation(Key key)
+	{
+		if (_tree is null || _state is null)
+			return false;
+
+		if (key == Key.CursorUp || key == Key.CursorDown)
+		{
+			key.Handled = true;
+			MoveListSelection(_tree, key == Key.CursorDown ? 1 : -1);
+			return true;
+		}
+		if (key == Key.PageUp || key == Key.PageDown)
+		{
+			key.Handled = true;
+			if (key == Key.PageDown)
+				_tree.MovePageDown(false);
+			else
+				_tree.MovePageUp(false);
+			TrackTreeSelection();
+			return true;
+		}
+		if (key == Key.Home || key == Key.Home.WithCtrl)
+		{
+			key.Handled = true;
+			_tree.SelectedItem = 0;
+			TrackTreeSelection();
+			return true;
+		}
+		if (key == Key.End || key == Key.End.WithCtrl)
+		{
+			key.Handled = true;
+			_tree.SelectedItem = Math.Max(0, _state.VisibleRows.Count - 1);
+			TrackTreeSelection();
+			return true;
+		}
+
+		return false;
+	}
+
+	private bool TryHandlePreviewNavigation(Key key)
+	{
+		var scroll = key switch
+		{
+			_ when key == Key.CursorUp => TerminalPreviewScroll.LineUp,
+			_ when key == Key.CursorDown => TerminalPreviewScroll.LineDown,
+			_ when key == Key.PageUp => TerminalPreviewScroll.PageUp,
+			_ when key == Key.PageDown => TerminalPreviewScroll.PageDown,
+			_ when key == Key.Home || key == Key.Home.WithCtrl => TerminalPreviewScroll.Start,
+			_ when key == Key.End || key == Key.End.WithCtrl => TerminalPreviewScroll.End,
+			_ when key == Key.CursorLeft => TerminalPreviewScroll.ColumnLeft,
+			_ when key == Key.CursorRight => TerminalPreviewScroll.ColumnRight,
+			_ => (TerminalPreviewScroll?)null
+		};
+		if (scroll is null)
+			return false;
+
+		key.Handled = true;
+		ScrollPreview(scroll.Value);
+		return true;
+	}
+
+	private void ScrollPreview(TerminalPreviewScroll scroll)
 	{
 		if (_preview is null)
 			return;
-		var row = Math.Max(0, _preview.CurrentRow + delta);
-		_preview.InsertionPoint = new System.Drawing.Point(0, row);
-		_preview.ScrollTo(new System.Drawing.Point(0, row));
+		var lastRow = Math.Max(0, _preview.Lines - 1);
+		var pageSize = Math.Max(1, _preview.Viewport.Height - 1);
+		var row = Math.Clamp(_preview.CurrentRow, 0, lastRow);
+		var column = Math.Max(0, _preview.CurrentColumn);
+		switch (scroll)
+		{
+			case TerminalPreviewScroll.LineUp:
+				row--;
+				break;
+			case TerminalPreviewScroll.LineDown:
+				row++;
+				break;
+			case TerminalPreviewScroll.PageUp:
+				row -= pageSize;
+				break;
+			case TerminalPreviewScroll.PageDown:
+				row += pageSize;
+				break;
+			case TerminalPreviewScroll.Start:
+				row = 0;
+				column = 0;
+				break;
+			case TerminalPreviewScroll.End:
+				row = lastRow;
+				column = 0;
+				break;
+			case TerminalPreviewScroll.ColumnLeft:
+				column -= 4;
+				break;
+			case TerminalPreviewScroll.ColumnRight:
+				column += 4;
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(scroll), scroll, null);
+		}
+
+		RestorePreviewViewport(row, column);
+	}
+
+	private void RestorePreviewViewport(int row, int column)
+	{
+		if (_preview is null)
+			return;
+		var clampedRow = Math.Clamp(row, 0, Math.Max(0, _preview.Lines - 1));
+		var clampedColumn = Math.Max(0, column);
+		var position = new System.Drawing.Point(clampedColumn, clampedRow);
+		_preview.InsertionPoint = position;
+		_preview.ScrollTo(position);
 	}
 
 	private string? Prompt(string title, string label, string? initialValue)
@@ -2047,8 +2624,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		dialog.Add(prompt, input);
 		dialog.AddButton(new Button { Text = L("Terminal.Tui.Cancel") });
 		dialog.AddButton(new Button { Text = L("Terminal.Tui.Accept") });
-		input.SetFocus();
-		RunOverlay(dialog);
+		RunOverlay(dialog, input);
 		return TerminalWorkspace.CompletePrompt(dialog.Result == 1, input.Text);
 	}
 
@@ -2092,8 +2668,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		};
 		dialog.Add(label, list);
 		dialog.AddButton(new Button { Text = L("Terminal.Tui.Back") });
-		list.SetFocus();
-		RunOverlay(dialog);
+		RunOverlay(dialog, list);
 		return selected;
 	}
 
@@ -2161,8 +2736,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 				selected = modes[index].Item1;
 		};
 		dialog.AddButton(apply);
-		list.SetFocus();
-		RunOverlay(dialog);
+		RunOverlay(dialog, list);
 		return dialog.Result == 1 || selected is not null ? selected : null;
 	}
 
@@ -2235,8 +2809,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		dialog.Add(hint, list, toggleAll);
 		dialog.AddButton(new Button { Text = L("Terminal.Tui.Cancel") });
 		dialog.AddButton(new Button { Text = L("Terminal.Tui.Accept") });
-		list.SetFocus();
-		RunOverlay(dialog);
+		RunOverlay(dialog, list);
 		if (dialog.Result != 1)
 			return null;
 		return list.GetAllMarkedItems()
@@ -2329,8 +2902,13 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 			preferredHeight: 22);
 	}
 
-	private void ShowNotice(string title, string message, string schemeName) =>
-		ShowScrollableOverlay(title, message, schemeName, 82, 18);
+	private void ShowNotice(
+		string title,
+		string message,
+		string schemeName,
+		int preferredWidth = 82,
+		int preferredHeight = 18) =>
+		ShowScrollableOverlay(title, message, schemeName, preferredWidth, preferredHeight);
 
 	private void ShowError(string code, string message) =>
 		ShowScrollableOverlay(
@@ -2368,8 +2946,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		};
 		dialog.Add(body);
 		dialog.AddButton(new Button { Text = L("Terminal.Tui.Close") });
-		body.SetFocus();
-		RunOverlay(dialog);
+		RunOverlay(dialog, body);
 	}
 
 	private static int EstimateWrappedLineCount(string message, int width)
@@ -2453,11 +3030,13 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		return Math.Clamp(preferredWidth, minimumWidth, maximumWidth);
 	}
 
-	private void RunOverlay(IRunnable overlay)
+	private void RunOverlay(IRunnable overlay, View? initialFocus = null)
 	{
 		var previousFocus = _root.MostFocused;
 		try
 		{
+			if (initialFocus is not null)
+				_application.Invoke(_ => initialFocus.SetFocus());
 			_application.Run(overlay);
 		}
 		finally
@@ -2510,6 +3089,12 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		operationCts.Dispose();
 	}
 
+	private void MarkActiveOperationFinished(CancellationTokenSource operationCts)
+	{
+		if (ReferenceEquals(_activeOperationCts, operationCts))
+			_activeOperationCts = null;
+	}
+
 	private void CancelActiveOperation() =>
 		_activeOperationCts?.Cancel();
 
@@ -2551,6 +3136,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 
 	private void ClearRoot()
 	{
+		DismissOperationProgress();
 		_state = null;
 		_tree = null;
 		_preview = null;
@@ -2636,6 +3222,7 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 		CancelAndDispose(ref _activeOperationCts);
 		CancelAndDispose(ref _projectionCts);
 		CancelAndDispose(ref _previewCts);
+		DismissOperationProgress();
 		_sessionCts.Dispose();
 		_operationGate.Dispose();
 	}
@@ -2652,6 +3239,40 @@ internal sealed class TerminalWorkspaceSession : IDisposable
 	{
 		Tree,
 		Preview
+	}
+
+	private enum TerminalPaneNavigation
+	{
+		Next,
+		Previous
+	}
+
+	private enum TerminalPreviewScroll
+	{
+		LineUp,
+		LineDown,
+		PageUp,
+		PageDown,
+		Start,
+		End,
+		ColumnLeft,
+		ColumnRight
+	}
+
+	private enum TerminalProjectOpenSource
+	{
+		Other,
+		Recent,
+		Clone
+	}
+
+	private sealed record AutomaticProfileResolution(
+		ProjectProfileReference Profile,
+		ProjectProfileLookupStatus Status);
+
+	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+	{
+		public void Report(T value) => report(value);
 	}
 
 	private sealed class TerminalWorkspaceOperationException(string code) : Exception

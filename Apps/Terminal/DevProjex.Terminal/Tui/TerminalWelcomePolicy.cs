@@ -39,7 +39,6 @@ public static class TerminalWelcomePolicy
 			.Select(TryNormalize)
 			.Where(static path => path is not null)
 			.Select(static path => path!)
-			.Where(Directory.Exists)
 			.Where(path => !PathComparer.Default.Equals(path, normalizedCurrent))
 			.Distinct(PathComparer.Default)
 			.Take(15)

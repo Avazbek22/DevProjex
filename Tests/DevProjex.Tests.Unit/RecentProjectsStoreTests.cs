@@ -503,4 +503,52 @@ public sealed class RecentProjectsStoreTests
 		Assert.Contains(reloaded.RecentFolderRemovals, entry => entry.Path.EndsWith("Removed69", StringComparison.Ordinal));
 		Assert.DoesNotContain(reloaded.RecentFolderRemovals, entry => entry.Path.EndsWith("Removed0", StringComparison.Ordinal));
 	}
+
+	[Fact]
+	public void LoadForStartupWithStatus_CorruptPrimaryRecoversFromBackup()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folder = temp.CreateFolder("Recovered");
+		store.AddFolder(null, folder);
+		File.WriteAllText(store.GetPath(), "{ invalid");
+
+		var result = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+		Assert.Equal(RecentProjectsLoadStatus.Success, result.Status);
+		Assert.Equal(PathUtility.Normalize(folder), Assert.Single(result.Database.RecentFolders).Path);
+	}
+
+	[Fact]
+	public void LoadForStartupWithStatus_CorruptPrimaryAndBackupReportsInvalidStorage()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		Assert.True(store.EnsureStorageExists());
+		File.WriteAllText(store.GetPath(), "{ invalid-primary");
+		File.WriteAllText(store.GetPath() + ".bak", "{ invalid-backup");
+
+		var result = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+		Assert.Equal(RecentProjectsLoadStatus.InvalidStorage, result.Status);
+		Assert.Empty(result.Database.RecentFolders);
+	}
+
+	[Fact]
+	public void LoadForStartupWithStatus_HeldStoreLockReportsTemporaryUnavailability()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		Assert.True(store.EnsureStorageExists());
+		using var heldLock = new FileStream(
+			store.GetPath() + ".lock",
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+
+		var result = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+		Assert.Equal(RecentProjectsLoadStatus.TemporarilyUnavailable, result.Status);
+		Assert.Empty(result.Database.RecentFolders);
+	}
 }

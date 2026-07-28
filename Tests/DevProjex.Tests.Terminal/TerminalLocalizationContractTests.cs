@@ -31,6 +31,11 @@ public sealed partial class TerminalLocalizationContractTests
 		"Terminal.Tui.ExportSummary",
 		"Terminal.Tui.DryRunReady",
 		"Terminal.Tui.Help",
+		"Terminal.Tui.Footer.Preview",
+		"Terminal.Tui.Recent.StorageUnavailable",
+		"Terminal.Tui.ProfileInvalidRecovery",
+		"Terminal.Tui.Progress.CopyingFiles",
+		"Terminal.Tui.Progress.CancelHint",
 		"Terminal.Exit.Runtime",
 		"Terminal.Doctor.current-directory"
 	];

@@ -1,0 +1,30 @@
+
+  DevProjex Terminal                                                                                              v<VERSION>
+  Choose a workspace action. No project is scanned until you open it.
+
+  Current directory                                                                      No project workspace detected
+  C:\Users\ava┌┤Recent projects├────────────────────────────────────────────────────────────────────────┐
+              │ Open a recent project:                                                                  │
+  ┌┤Actions├──│                                                                                         │────────────┐
+  │> Recent pr│   [+] AlphaProject                                                                      │anceled.    │
+  │  Browse fo│ > [+] Beta Project                                                                      │            │
+  │  Clone rep│                                                                                         │            │
+  │  Open save│                                                                                         │            │
+  │  Open Desk│ Status: Available                                                                       │            │
+  │  Help     │ Profile: Standard                                                                       │            │
+  │  Exit     │ Last opened: <TIMESTAMP>│            │
+  └───────────│ Full path:                                                                              │────────────┘
+              │ ...a\Local\Temp\DevProjex.Tests.Terminal\<ID>\Beta Project  │
+  Direct autom│                                                                                         │
+              │                                                                                         │
+              │                                                                                         │
+              │                         ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                         │
+              │                         ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                         │
+              └─────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   ? Help   q Exit

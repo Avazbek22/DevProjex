@@ -51,7 +51,18 @@ internal static partial class TerminalScreenSnapshot
 		normalized = IdentifierPattern().Replace(normalized, "<ID>");
 		normalized = TruncatedProjectIdentifierPattern().Replace(normalized, "<PROJECT>");
 		normalized = TestProjectIdentifierPattern().Replace(normalized, "<PROJECT>");
+		normalized = ClippedTestProjectIdentifierPattern().Replace(normalized, "<ID-PART>");
 		normalized = IdentifierFragmentPattern().Replace(normalized, "<ID-PART>");
+		normalized = ElapsedPattern().Replace(
+			normalized,
+			static match => $"{match.Groups["label"].Value}: <ELAPSED>");
+		normalized = RecentOpenedPattern().Replace(
+			normalized,
+			static match => $"{match.Groups["label"].Value}: <TIMESTAMP>");
+		normalized = SpinnerFramePattern().Replace(
+			normalized,
+			static match =>
+				$"{match.Groups["prefix"].Value}<SPINNER>{match.Groups["suffix"].Value}");
 		normalized = string.Join(
 			'\n',
 			normalized
@@ -72,6 +83,20 @@ internal static partial class TerminalScreenSnapshot
 	[GeneratedRegex(@"(?<=Tests\.Terminal[\\/])[0-9a-f]{1,32}", RegexOptions.IgnoreCase)]
 	private static partial Regex TestProjectIdentifierPattern();
 
+	[GeneratedRegex(@"(?<=\.Terminal[\\/])[0-9a-f]{1,32}", RegexOptions.IgnoreCase)]
+	private static partial Regex ClippedTestProjectIdentifierPattern();
+
 	[GeneratedRegex(@"\b[0-9a-f]{8,31}\b", RegexOptions.IgnoreCase)]
 	private static partial Regex IdentifierFragmentPattern();
+
+	[GeneratedRegex(
+		@"(?<label>Elapsed|Прошло|Vergangen|Transcurrido|Écoulé|Trascorso|Өткен уақыт|Decorrido|Вақти гузашта|O‘tgan vaqt):\s*\d{1,2}:\d{2}(?::\d{2})?")]
+	private static partial Regex ElapsedPattern();
+
+	[GeneratedRegex(
+		@"(?<label>Last opened|Zuletzt geöffnet|Última apertura|Dernière ouverture|Ultima apertura|Соңғы ашылуы|Última abertura|Последнее открытие|Кушодани охирин|So‘nggi ochilish):[^\n│]*")]
+	private static partial Regex RecentOpenedPattern();
+
+	[GeneratedRegex(@"(?m)(?<prefix>│\s{2})[|/\\-](?<suffix>\s{10,})")]
+	private static partial Regex SpinnerFramePattern();
 }

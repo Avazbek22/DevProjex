@@ -10,6 +10,9 @@ internal static class AnsiConsoleFactory
 		{
 			Ansi = capabilities.UseAnsi ? AnsiSupport.Yes : AnsiSupport.No,
 			ColorSystem = capabilities.UseAnsi ? ColorSystemSupport.Detect : ColorSystemSupport.NoColors,
+			Interactive = capabilities.UseInteractiveProgress
+				? InteractionSupport.Yes
+				: InteractionSupport.No,
 			Out = new AnsiConsoleOutput(writer)
 		};
 		var console = AnsiConsole.Create(settings);

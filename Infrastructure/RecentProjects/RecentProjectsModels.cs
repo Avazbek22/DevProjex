@@ -25,3 +25,14 @@ public sealed record RecentFolderRemovalEntry
 	public string Path { get; set; } = string.Empty;
 	public DateTimeOffset RemovedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
+
+public enum RecentProjectsLoadStatus
+{
+	Success = 0,
+	TemporarilyUnavailable = 1,
+	InvalidStorage = 2
+}
+
+public sealed record RecentProjectsLoadResult(
+	RecentProjectsDb Database,
+	RecentProjectsLoadStatus Status);

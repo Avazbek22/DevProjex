@@ -1,0 +1,30 @@
+ DevProjex Terminal  <ID>
+ <PROJECTS_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  View: Content / Markdown
+┌┤  PROJECT TREE├─────────────────────────────────────┐┌┤> CONTEXT PREVIEW · Content · Markdown├───────────────────────┐
+│v [x] <ID>               ││## `src/Feature003.cs`                                        ▲│
+│  > [x] src                                          ││                                                              ░│
+│    [x] global.json                                  ││```cs                                                         █│
+│                                                     ││internal sealed class ContentMarker003 { }                    ░│
+│                                                     ││```                                                           ░│
+│                                                     ││                                                              ░│
+│                                                     ││## `src/Feature004.cs`                                        ░│
+│                                                     ││                                                              ░│
+│                                                     ││```cs                                                         ░│
+│                                                     ││internal sealed class ContentMarker004 { }                    ░│
+│                                                     ││```                                                           ░│
+│                                                     ││                                                              ░│
+│                                                     ││## `src/Feature005.cs`                                        ░│
+│                                                     ││                                                              ░│
+│                                                     ││```cs                                                         ░│
+│                                                     ││internal sealed class ContentMarker005 { }                    ░│
+│                                                     ││```                                                           ░│
+│                                                     ││                                                              ░│
+│                                                     ││## `src/Feature006.cs`                                        ░│
+│                                                     ││                                                              ░│
+│                                                     ││```cs                                                         ░│
+│                                                     ││internal sealed class ContentMarker006 { }                    ▼│
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 61  |  Folders 2  |  2,46 KB  |  ~2 428 tokens  |  Warnings 0
+ Up/Down or j/k Scroll   PgUp/PgDn Page   Tab/F6 Tree   1/2/3 View   F Format   ? Help

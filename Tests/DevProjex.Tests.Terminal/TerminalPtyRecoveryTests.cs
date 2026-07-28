@@ -114,10 +114,16 @@ public sealed class TerminalPtyRecoveryTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
+		var completed = await terminal.WaitForScreenAsync(
 			"Equivalent command:",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("project-export", terminal.CaptureScreen(), StringComparison.Ordinal);
+		if (!completed.Contains("project-export", StringComparison.Ordinal))
+		{
+			completed = await terminal.WaitForScreenAsync(
+				"project-export",
+				cancellationToken: TestContext.Current.CancellationToken);
+		}
+		Assert.Contains("Equivalent command:", completed, StringComparison.Ordinal);
 
 		Assert.True(File.Exists(Path.Combine(folderDestination, "src", "App.cs")));
 		Assert.Equal(

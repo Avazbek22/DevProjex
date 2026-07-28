@@ -12,6 +12,42 @@ public sealed class TerminalProcessCollection
 public sealed class TerminalPtyJourneyTests
 {
 	[Fact(Timeout = 60_000)]
+	public async Task ImplicitTuiPreservesExplicitlySavedInlineScreenMode()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		string? dataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken,
+			initializeDataRoot: root =>
+			{
+				dataRoot = root;
+				new TerminalSettingsStore(() => root)
+					.SaveScreenModeAsync(
+						TerminalScreenMode.Inline,
+						TestContext.Current.CancellationToken)
+					.GetAwaiter()
+					.GetResult();
+			});
+
+		await terminal.WaitForScreenAsync(
+			"q Exit",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("\u001b[?1049h", terminal.RawOutput, StringComparison.Ordinal);
+		Assert.Equal(
+			TerminalScreenMode.Inline,
+			new TerminalSettingsStore(() => dataRoot!).LoadScreenMode());
+
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 60_000)]
 	public async Task OpenCurrentProjectFromWelcomeReachesWorkspaceAndStaysAlive()
 	{
 		using var workspace = CreateProject();
@@ -27,9 +63,9 @@ public sealed class TerminalPtyJourneyTests
 		Assert.False(terminal.HasExited);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var workspaceScreen = await terminal.WaitForScreenAsync(
-			"PROJECT TREE",
+			"App.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("App.cs", workspaceScreen, StringComparison.Ordinal);
+		Assert.Contains("PROJECT TREE", workspaceScreen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
@@ -67,11 +103,19 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 
 		var workspace = await terminal.WaitForScreenAsync(
-			"PROJECT TREE",
+			"App.cs",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("App.cs", workspace, StringComparison.Ordinal);
+		Assert.Contains("PROJECT TREE", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
+		await terminal.SendF6Async(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendShiftF6Async(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,

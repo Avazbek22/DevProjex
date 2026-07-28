@@ -1,0 +1,30 @@
+ DevProjex Terminal  <PROJECT>
+ ...ers\avazb\AppData\Local\Temp\DevProjex.Tests.Terminal\<ID>\<PROJECT>
+ Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · Markdown├────────────────┐
+│v [x] <PROJECT>                   ││# <PROJECT>                                ▲│
+│  > [x] src                                          ││                                                              █│
+│    [x] global.json                                  ││## Project tree                                               ░│
+│                                                     ││                                                              ░│
+│                                                     ││```text                                                       ░│
+│                                                     ││C:\Users\avazb\AppData\Local\Temp\DevProjex.Tests.Terminal\<PROJECT>░│
+│                                                     ││                                                              ░│
+│                                                     ││├── <PROJECT>                              ░│
+│                                                     │││   ├── src                                                   ░│
+│                                                     │││   │   ├── File0001.bin                                      ░│
+│                                                     │││   │   ├── File0002.bin                                      ░│
+│                                                     │││   │   ├── File0003.bin                                      ░│
+│                                                     │││   │   ├── File0004.bin                                      ░│
+│                                                     │││   │   ├── File0005.bin                                      ░│
+│                                                     │││   │   ├── File0006.bin                                      ░│
+│                                                     │││   │   ├── File0007.bin                                      ░│
+│                                                     │││   │   ├── File0008.bin                                      ░│
+│                                                     │││   │   ├── File0009.bin                                      ░│
+│                                                     │││   │   ├── File0010.bin                                      ░│
+│                                                     │││   │   ├── File0011.bin                                      ░│
+│                                                     │││   │   ├── File0012.bin                                      ▼│
+│                                                     ││◄██████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░► │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Operation canceled
+ Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   / Search   X Exclusions   E/Z Export

@@ -124,6 +124,51 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
+	public ProjectProfileLookupResult LookupProfile(
+		string localProjectPath,
+		TimeSpan lockTimeout)
+	{
+		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.InvalidProjectPath,
+				null);
+		}
+
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
+			{
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.TemporarilyUnavailable,
+					null);
+			}
+
+			using var _ = heldLock;
+			if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+			{
+				if (primaryRequiresRewrite)
+					TrySaveInternal(fileSet, primaryDb);
+				return ResolveLookup(primaryDb, normalizedPath);
+			}
+
+			if (TryLoadFromPath(
+				    fileSet.BackupPath,
+				    out var backupDb,
+				    out var backupRequiresRewrite))
+			{
+				TrySaveInternal(fileSet, backupDb);
+				return ResolveLookup(backupDb, normalizedPath);
+			}
+
+			var status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
+				? ProjectProfileLookupStatus.InvalidStorage
+				: ProjectProfileLookupStatus.Missing;
+			return new ProjectProfileLookupResult(status, null);
+		}
+	}
+
 	public bool TryDeleteProfile(string localProjectPath)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
@@ -147,6 +192,22 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	public string GetPath()
 	{
 		return GetFileSet().PrimaryPath;
+	}
+
+	private static ProjectProfileLookupResult ResolveLookup(
+		ProjectProfileDb database,
+		string normalizedPath)
+	{
+		if (!database.Profiles.TryGetValue(normalizedPath, out var entry) || entry is null)
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.Missing,
+				null);
+		}
+
+		return new ProjectProfileLookupResult(
+			ProjectProfileLookupStatus.Found,
+			ToProfile(entry));
 	}
 
 	private JsonStoreFileSet GetFileSet()

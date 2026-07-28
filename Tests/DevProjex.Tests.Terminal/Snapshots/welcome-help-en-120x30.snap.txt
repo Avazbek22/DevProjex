@@ -4,23 +4,23 @@
 
   Current directory                                                                      No project workspace detected
   <PROJECT_ROOT>
-
-  ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
-  │  Recent projec┌┤Help├───────────────────────────────────────────────────────────────────────────┐il you confirm  │
-  │> Browse folder│ Up/Down or j/k moves through actions; Enter opens the selected action.          │                │
-  │  Clone reposit│ Esc closes a dialog and returns here without exiting. ? or F1 opens this help.  │                │
-  │  Open saved pr│ Long operations show their state. Esc or Ctrl+C cancels the active operation    │                │
-  │  Open Desktop │ first.                                                                          │                │
-  │  Help         │ Only Exit or q on this root screen closes DevProjex Terminal.                   │                │
-  │  Exit         │ No project is scanned until you choose it. Use analyze and export for direct    │                │
-  └───────────────│ automation.                                                                     │────────────────┘
+                  ┌┤Help├───────────────────────────────────────────────────────────────────────────┐
+  ┌┤Actions├──────│ Up/Down or j/k moves through actions; Enter opens the selected action.          │────────────────┐
+  │  Recent projec│ Esc closes a dialog and returns here without exiting. ? or F1 opens this help.  │il you confirm  │
+  │> Browse folder│ In a workspace, Tab or F6 moves to the next pane; Shift+Tab or Shift+F6 moves   │                │
+  │  Clone reposit│ to the previous pane.                                                           │                │
+  │  Open saved pr│ Preview supports Up/Down, j/k, Page Up/Page Down, Home/End, and Left/Right      │                │
+  │  Open Desktop │ scrolling.                                                                      │                │
+  │  Help         │ Long operations show their state. Esc or Ctrl+C cancels the active operation    │                │
+  │  Exit         │ first.                                                                          │                │
+  └───────────────│ Only Exit or q on this root screen closes DevProjex Terminal.                   │────────────────┘
+                  │ No project is scanned until you choose it. Use analyze and export for direct    │
+  Direct automatio│ automation.                                                                     │
                   │                                                                                 │
-  Direct automatio│                                                                                 │
+                  │                                                                                 │
                   │                                  ⟦► Close ◄⟧▖                                   │
                   │                                  ▝▀▀▀▀▀▀▀▀▀▀▘                                   │
                   └─────────────────────────────────────────────────────────────────────────────────┘
-
-
 
 
 

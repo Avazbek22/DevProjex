@@ -182,4 +182,69 @@ public sealed class RenderingContractTests
 		Assert.Empty(environment.StandardError);
 		Assert.Empty(environment.StandardOutput);
 	}
+
+	[Fact]
+	public async Task InteractiveProjectExportProgressShowsMeasuredStateOnlyOnStandardError()
+	{
+		using var appData = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = true,
+			Width = 100
+		};
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var renderer = new ProgressRenderer(
+			environment,
+			new TerminalOutputOptions(
+				Color: TerminalColorMode.Always,
+				Progress: TerminalProgressMode.Always),
+			services.Localization);
+
+		var result = await renderer.RunProjectExportAsync(async progress =>
+		{
+			Assert.NotNull(progress);
+			progress.Report(new ProjectCopyExportProgress(1, 4, 1_024, 25));
+			await Task.Delay(120, TestContext.Current.CancellationToken);
+			progress.Report(new ProjectCopyExportProgress(2, 4, 2_048, 50));
+			await Task.Delay(300, TestContext.Current.CancellationToken);
+			return 42;
+		});
+
+		Assert.Equal(42, result);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("Exporting project 1/4 (1 KB)", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("25%", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("50%", environment.StandardError, StringComparison.Ordinal);
+		Assert.Matches(@"\d+:\d{2}", environment.StandardError);
+	}
+
+	[Fact]
+	public async Task NoColorProjectExportProgressRemainsReadableWithoutAnsi()
+	{
+		using var appData = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = true,
+			IsNoColor = true,
+			Width = 100
+		};
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var renderer = new ProgressRenderer(
+			environment,
+			new TerminalOutputOptions(Progress: TerminalProgressMode.Always),
+			services.Localization);
+
+		await renderer.RunProjectExportAsync(async progress =>
+		{
+			Assert.NotNull(progress);
+			progress.Report(new ProjectCopyExportProgress(2, 4, 2_048, 50));
+			await Task.Delay(300, TestContext.Current.CancellationToken);
+			return true;
+		});
+
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("Exporting project 2/4 (2 KB)", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("50%", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", environment.StandardError, StringComparison.Ordinal);
+	}
 }

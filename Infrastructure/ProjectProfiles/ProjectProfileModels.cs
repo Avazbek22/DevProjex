@@ -17,3 +17,16 @@ internal sealed class PersistedProjectProfile
 	public List<string> SelectedPaths { get; set; } = [];
 	public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
+
+public enum ProjectProfileLookupStatus
+{
+	Found = 0,
+	Missing = 1,
+	TemporarilyUnavailable = 2,
+	InvalidStorage = 3,
+	InvalidProjectPath = 4
+}
+
+public sealed record ProjectProfileLookupResult(
+	ProjectProfileLookupStatus Status,
+	ProjectSelectionProfile? Profile);

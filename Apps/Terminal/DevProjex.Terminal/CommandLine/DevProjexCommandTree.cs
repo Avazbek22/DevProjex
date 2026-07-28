@@ -78,10 +78,12 @@ public sealed class DevProjexCommandTree(
 					var projectPath = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					var profileValue = parseResult.GetValue(profile) ?? "auto";
 					var profileReference = ResolveTuiProfile(services, projectPath, profileValue);
-					var screenMode = parseResult.GetResult(screen) is null
-						? services.TerminalSettingsStore.LoadScreenMode()
-						: ParseScreenMode(parseResult.GetValue(screen) ?? "auto");
-					if (parseResult.GetResult(screen) is not null)
+					var screenResult = parseResult.GetResult(screen);
+					var hasExplicitScreenMode = screenResult is { Implicit: false };
+					var screenMode = hasExplicitScreenMode
+						? ParseScreenMode(parseResult.GetValue(screen) ?? "auto")
+						: services.TerminalSettingsStore.LoadScreenMode();
+					if (hasExplicitScreenMode)
 					{
 						await services.TerminalSettingsStore
 							.SaveScreenModeAsync(screenMode, cancellationToken)

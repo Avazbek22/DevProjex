@@ -29,18 +29,19 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
-	public void WelcomeRecognizesProjectMarkerWithoutRecursiveEnumeration()
+	public void WelcomeRecognizesProjectMarkerAndRetainsUnavailableRecentEntries()
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("package.json", "{}");
 		workspace.WriteFile("nested/deep/file.cs", "class C {}");
+		var unavailable = Path.Combine(workspace.Path, "not-a-directory");
 
 		var context = TerminalWelcomePolicy.Create(
 			workspace.Path,
-			[workspace.Path, Path.Combine(workspace.Path, "."), "not-a-directory"]);
+			[workspace.Path, Path.Combine(workspace.Path, "."), unavailable]);
 
 		Assert.True(context.CanOpenCurrentDirectory);
-		Assert.Empty(context.RecentProjects);
+		Assert.Equal([Path.GetFullPath(unavailable)], context.RecentProjects);
 	}
 
 	[Fact]

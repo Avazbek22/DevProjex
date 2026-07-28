@@ -58,7 +58,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		int columns = 120,
 		int rows = 30,
 		IReadOnlyDictionary<string, string>? environment = null,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		Action<string>? initializeDataRoot = null)
 	{
 		var binary = PublishedApplicationLocator.FindExecutable();
 		var launchArguments = arguments?.ToArray() ?? [];
@@ -96,6 +97,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			foreach (var pair in environment)
 				variables[pair.Key] = pair.Value;
 		}
+		initializeDataRoot?.Invoke(variables["DEVPROJEX_INTERNAL_DATA_ROOT"]);
 		var (host, commandLine, startupInput) = CreateShellCommand(
 			binary,
 			launchArguments);
@@ -196,6 +198,12 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	public Task SendEndAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\u001b[F", cancellationToken);
 
+	public Task SendPageUpAsync(CancellationToken cancellationToken = default) =>
+		SendAsync("\u001b[5~", cancellationToken);
+
+	public Task SendPageDownAsync(CancellationToken cancellationToken = default) =>
+		SendAsync("\u001b[6~", cancellationToken);
+
 	public Task SendCtrlEndAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\u001b[1;5F", cancellationToken);
 
@@ -210,6 +218,12 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 
 	public Task SendShiftTabAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\u001b[Z", cancellationToken);
+
+	public Task SendF6Async(CancellationToken cancellationToken = default) =>
+		SendAsync("\u001b[17~", cancellationToken);
+
+	public Task SendShiftF6Async(CancellationToken cancellationToken = default) =>
+		SendAsync("\u001b[17;2~", cancellationToken);
 
 	public Task SendSpaceAsync(CancellationToken cancellationToken = default) =>
 		SendAsync(" ", cancellationToken);

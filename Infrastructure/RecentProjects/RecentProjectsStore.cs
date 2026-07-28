@@ -43,6 +43,9 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	}
 
 	public RecentProjectsDb LoadForStartup(TimeSpan lockTimeout)
+		=> LoadForStartupWithStatus(lockTimeout).Database;
+
+	public RecentProjectsLoadResult LoadForStartupWithStatus(TimeSpan lockTimeout)
 	{
 		lock (_sync)
 		{
@@ -50,15 +53,22 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 			{
 				var fileSet = GetFileSet();
 				if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
-					return CreateDefaultDb();
+				{
+					return new RecentProjectsLoadResult(
+						CreateDefaultDb(),
+						RecentProjectsLoadStatus.TemporarilyUnavailable);
+				}
 
 				using var _ = heldLock;
-				return LoadInternal(fileSet);
+				var database = LoadInternal(fileSet, out var status);
+				return new RecentProjectsLoadResult(database, status);
 			}
 			catch
 			{
 				// Recent history is optional during bootstrap and must never stall the first window.
-				return CreateDefaultDb();
+				return new RecentProjectsLoadResult(
+					CreateDefaultDb(),
+					RecentProjectsLoadStatus.InvalidStorage);
 			}
 		}
 	}
@@ -230,9 +240,15 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		=> JsonStoreFileSet.Create(_appDataPathProvider, FolderName, FileName);
 
 	private RecentProjectsDb LoadInternal(JsonStoreFileSet fileSet)
+		=> LoadInternal(fileSet, out _);
+
+	private RecentProjectsDb LoadInternal(
+		JsonStoreFileSet fileSet,
+		out RecentProjectsLoadStatus status)
 	{
 		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
+			status = RecentProjectsLoadStatus.Success;
 			var sanitizedPrimaryDb = SanitizeState(fileSet, primaryDb, out var primaryRequiresSanitizationRewrite);
 			if (primaryRequiresRewrite || primaryRequiresSanitizationRewrite)
 				TrySave(fileSet, sanitizedPrimaryDb);
@@ -244,11 +260,15 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		// A partially written or externally corrupted primary file must not silently erase history.
 		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
 		{
+			status = RecentProjectsLoadStatus.Success;
 			var sanitizedBackupDb = SanitizeState(fileSet, backupDb);
 			TrySave(fileSet, sanitizedBackupDb);
 			return sanitizedBackupDb;
 		}
 
+		status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
+			? RecentProjectsLoadStatus.InvalidStorage
+			: RecentProjectsLoadStatus.Success;
 		return CreateDefaultDb();
 	}
 

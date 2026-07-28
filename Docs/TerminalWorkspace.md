@@ -38,6 +38,17 @@ deterministic standard profile otherwise. Recent Projects, Browse, Clone, Help,
 and Open Profile are nested workflows: canceling or closing them returns to
 Welcome without ending the terminal session.
 
+Recent Projects reads and updates the same per-user history as Desktop. Selecting
+an available entry shows a loading state and opens its workspace without ending
+the TUI. A successfully opened entry moves to the front of the existing history.
+Unavailable entries remain visible so they can be removed intentionally.
+
+If recent-project storage is temporarily locked, the workflow offers Retry
+instead of presenting an empty list. A valid backup is used when the primary
+history is corrupt. An invalid local-profile store offers a deterministic
+Standard-profile recovery path; unavailable roots or file types in an otherwise
+valid local profile open with diagnostics.
+
 ## Navigation Lifecycle
 
 The Terminal Workspace runs under one persistent application root. Dialogs and
@@ -111,7 +122,8 @@ refresh is cancelable, debounced, and bounded for large projects.
 | Enter | open or activate |
 | Space | toggle the selected node |
 | `/` | search |
-| Tab | switch panes |
+| Tab / F6 | focus the next major pane |
+| Shift+Tab / Shift+F6 | focus the previous major pane |
 | `1`, `2`, `3` | tree, content, tree plus content |
 | `F` | format |
 | `X` | Exclusions |
@@ -127,6 +139,13 @@ refresh is cancelable, debounced, and bounded for large projects.
 | `Q` | quit |
 
 The footer shows actions relevant to the active layout.
+
+When Context Preview has focus, Up/Down and `j`/`k` scroll by line,
+Page Up/Page Down scroll by page, and Home/End move to the start or end.
+Left/Right scroll horizontally when wrapping is disabled. In compact layouts,
+moving focus also makes the corresponding Tree or Preview pane visible. Pane
+focus and preview position survive Help, settings overlays, refreshes, exports,
+cancellation, and terminal resize.
 
 ## Screen Safety
 
@@ -148,6 +167,17 @@ boundary.
 The export dialog reports output kind, view/format, destination, selected counts,
 estimated metrics, Git mode, Exclusions, conflicts, and warnings. After a
 successful interactive operation it shows an equivalent direct command.
+
+Folder and ZIP exports use measured progress from the shared copy engine:
+processed entries, total entries, percentage, written bytes, elapsed time, and
+the real operation phase. Context preparation and document writing use an
+indeterminate status because those stages do not expose a trustworthy total.
+DevProjex never manufactures a percentage.
+
+Esc or Ctrl+C cancels active export work before it can quit the TUI. Cancellation
+removes staging data and returns to the same usable workspace and pane focus.
+Completion remains visible until dismissed and reports the output path, file and
+folder counts, size, measured duration, and equivalent direct command.
 
 For very large explicit selections, save a portable profile and use
 `--profile FILE` instead of producing a command with hundreds of `--select`

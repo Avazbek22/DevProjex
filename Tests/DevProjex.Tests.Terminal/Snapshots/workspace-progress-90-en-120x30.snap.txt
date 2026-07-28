@@ -1,0 +1,30 @@
+ DevProjex Terminal  <PROJECT>
+ ...s\avazb\AppData\Local\Temp\DevProjex.Tests.Terminal\<ID>\<PROJECT>
+ Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · Markdown├────────────────┐
+│v [x] <PROJECT>                 ││+ <PROJECT>                              ▲│
+│  > [x] src                                          ││  + src                                                       █│
+│    [x] global.json                                  ││    - File0001.bin                                            █│
+│                                                     ││    - File0002.bin                                            █│
+│                                                     ││    - File0003.bin                                            █│
+│              ┌┤Export project├────────────────────────────────────────────────────────────────────────┐             ░│
+│              │                                                                                        │             ░│
+│              │  Copying files                                                                         │             ░│
+│              │                                                                                        │             ░│
+│              │  ████████████████████████████████████████90%████████████████████████████████           │             ░│
+│              │                                                                                        │             ░│
+│              │  Folder  |  93 / 103  |  90 KB                                                         │             ░│
+│              │  Elapsed: <ELAPSED>                                                                         │             ░│
+│              │                                                                                        │             ░│
+│              │  Esc or Ctrl+C cancels this operation                                                  │             ░│
+│              └────────────────────────────────────────────────────────────────────────────────────────┘             ░│
+│                                                     ││    - File0015.bin                                            ░│
+│                                                     ││    - File0016.bin                                            ░│
+│                                                     ││    - File0017.bin                                            ░│
+│                                                     ││    - File0018.bin                                            ░│
+│                                                     ││    - File0019.bin                                            ░│
+│                                                     ││    - File0020.bin                                            ▼│
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 101  |  Folders 2  |  100 KB  |  ~35 tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   / Search   X Exclusions   E/Z Export

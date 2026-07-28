@@ -1,0 +1,30 @@
+
+  DevProjex Terminal
+
+
+  |   Loading project
+
+      <PROJECTS_ROOT>\Beta Project
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Esc Cancel operation   ? Help

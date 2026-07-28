@@ -1,0 +1,30 @@
+ DevProjex Terminal  <PROJECT>
+ ...s\avazb\AppData\Local\Temp\DevProjex.Tests.Terminal\<ID>\<PROJECT>
+ Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · Markdown├────────────────┐
+│v [x] <PROJECT>                 ││# <PROJECT>                              ▲│
+│  > [x] src                                          ││                                                              █│
+│    [x] global.json                                  ││## Project tree                                               ░│
+│                                                     ││                                                              ░│
+│                                                     ││```text                                                       ░│
+│              ┌┤Export project├────────────────────────────────────────────────────────────────────────┐.Terminal\<ID-PART>░│
+│              │                                                                                        │             ░│
+│              │  Copying files                                                                         │             ░│
+│              │                                                                                        │             ░│
+│              │  ████████████████████████████████████████50%                                           │             ░│
+│              │                                                                                        │             ░│
+│              │  Folder  |  52 / 103  |  49 KB                                                         │             ░│
+│              │  Elapsed: <ELAPSED>                                                                         │             ░│
+│              │                                                                                        │             ░│
+│              │  Esc or Ctrl+C cancels this operation                                                  │             ░│
+│              └────────────────────────────────────────────────────────────────────────────────────────┘             ░│
+│                                                     │││   │   ├── File0008.bin                                      ░│
+│                                                     │││   │   ├── File0009.bin                                      ░│
+│                                                     │││   │   ├── File0010.bin                                      ░│
+│                                                     │││   │   ├── File0011.bin                                      ░│
+│                                                     │││   │   ├── File0012.bin                                      ▼│
+│                                                     ││◄██████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░► │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Export project
+ Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   / Search   X Exclusions   E/Z Export

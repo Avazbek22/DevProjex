@@ -1,0 +1,30 @@
+ DevProjex Terminal  Beta Project
+ <PROJECTS_ROOT>\Beta Project
+ Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · Markdown├────────────────┐
+│v [x] Beta Project                                   ││# Beta Project                                                ▲│
+│  > [x] src                                          ││                                                              █│
+│    [x] global.json                                  ││## Project tree                                               █│
+│                                                     ││                                                              █│
+│                                                     ││```text                                                       █│
+│                                                     ││<TEMP_ROOT>\<PROJECT>█│
+│                                                     ││                                                              █│
+│                                                     ││├── Beta Project                                              █│
+│                                                     │││   ├── src                                                   █│
+│                                                     │││   │   └── BetaMarker.cs                                     █│
+│                                                     │││   └── global.json                                           █│
+│                                                     ││```                                                           █│
+│                                                     ││                                                              █│
+│                                                     ││## `global.json`                                              █│
+│                                                     ││                                                              █│
+│                                                     ││```json                                                       █│
+│                                                     ││{}                                                            █│
+│                                                     ││```                                                           ░│
+│                                                     ││                                                              ░│
+│                                                     ││## `src/BetaMarker.cs`                                        ░│
+│                                                     ││                                                              ▼│
+│                                                     ││◄███████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░► │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 2  |  Folders 2  |  33 B  |  ~71 tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   / Search   X Exclusions   E/Z Export
