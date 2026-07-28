@@ -3232,7 +3232,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		return lineCount;
 	}
 
-	private static string FitPathToWidth(string value, int width)
+	internal static string FitPathToWidth(string value, int width)
 	{
 		if (string.IsNullOrEmpty(value) || width <= 0)
 			return string.Empty;
@@ -3241,7 +3241,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (width <= 3)
 			return new string('.', width);
 
-		var remaining = width - 3;
+		var stablePrefix = GetStableSourcePrefix(value, width);
+		var remaining = width - stablePrefix.GetColumns() - 3;
+		if (remaining <= 0)
+		{
+			stablePrefix = string.Empty;
+			remaining = width - 3;
+		}
 		var runes = value.EnumerateRunes().ToArray();
 		var start = runes.Length;
 		while (start > 0)
@@ -3253,7 +3259,23 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			start--;
 		}
 
-		return "..." + string.Concat(runes.AsSpan(start).ToArray());
+		return stablePrefix + "..." + string.Concat(runes.AsSpan(start).ToArray());
+	}
+
+	private static string GetStableSourcePrefix(string value, int width)
+	{
+		if (!value.Contains("://", StringComparison.Ordinal) ||
+		    !Uri.TryCreate(value, UriKind.Absolute, out var uri))
+		{
+			return string.Empty;
+		}
+
+		var prefix = uri.IsFile
+			? "file:///"
+			: $"{uri.Scheme}://{uri.Host}/";
+		return prefix.GetColumns() + 4 <= width
+			? prefix
+			: string.Empty;
 	}
 
 	private static string FitEndToWidth(string value, int width)
