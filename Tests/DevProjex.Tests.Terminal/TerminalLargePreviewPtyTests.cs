@@ -38,6 +38,9 @@ public sealed class TerminalLargePreviewPtyTests
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Files 1-", first, StringComparison.Ordinal);
+		await terminal.WaitForScreenAsync(
+			"j/k Scroll",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Verify("large-preview-first-en-120x30", terminal, project.Path);
 
 		await terminal.SendAsync("/", TestContext.Current.CancellationToken);
@@ -56,6 +59,9 @@ public sealed class TerminalLargePreviewPtyTests
 		await terminal.WaitForScreenAsync(
 			"Files 60-",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"j/k Scroll",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Verify("large-preview-middle-search-en-120x30", terminal, project.Path);
 
 		await terminal.SendEndAsync(TestContext.Current.CancellationToken);
@@ -68,6 +74,9 @@ public sealed class TerminalLargePreviewPtyTests
 			"F 117-120/120",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("C 1-62/5", finalRange, StringComparison.Ordinal);
+		await terminal.WaitForScreenAsync(
+			"j/k Scroll",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Verify("large-preview-final-en-120x30", terminal, project.Path);
 		Assert.False(terminal.HasExited);
 

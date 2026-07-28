@@ -3434,6 +3434,24 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_root.SetNeedsDraw();
 	}
 
+	private void DrawTransitionedRoot()
+	{
+		// Paint blank cells through the normal output buffer so ANSI drivers erase
+		// content from the previous root before a nested overlay starts drawing.
+		_application.ClearScreenNextIteration = false;
+		_root.SetAttributeForRole(VisualRole.Normal);
+		_root.FillRect(
+			new System.Drawing.Rectangle(
+				0,
+				0,
+				_root.Viewport.Width,
+				_root.Viewport.Height),
+			new Rune(' '));
+		_root.SetNeedsLayout();
+		_root.SetNeedsDraw();
+		_application.LayoutAndDraw();
+	}
+
 	private static void SetVisible(bool visible, params View[] views)
 	{
 		foreach (var view in views)
