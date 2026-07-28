@@ -1,6 +1,7 @@
 global using System.Text;
 global using DevProjex.Application.Context;
 global using DevProjex.Application.DesktopControl;
+global using DevProjex.Application.Preview;
 global using DevProjex.Application.Services;
 global using DevProjex.Application.UseCases;
 global using DevProjex.Infrastructure.FileSystem;

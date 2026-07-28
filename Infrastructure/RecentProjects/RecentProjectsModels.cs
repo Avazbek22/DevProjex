@@ -6,6 +6,7 @@ public sealed class RecentProjectsDb
 	public List<RecentFolderEntry> RecentFolders { get; set; } = [];
 	public List<RecentFolderRemovalEntry> RecentFolderRemovals { get; set; } = [];
 	public List<RecentRepositoryEntry> RecentRepositories { get; set; } = [];
+	public List<RecentRepositoryRemovalEntry> RecentRepositoryRemovals { get; set; } = [];
 }
 
 public sealed record RecentFolderEntry
@@ -23,6 +24,12 @@ public sealed record RecentRepositoryEntry
 public sealed record RecentFolderRemovalEntry
 {
 	public string Path { get; set; } = string.Empty;
+	public DateTimeOffset RemovedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed record RecentRepositoryRemovalEntry
+{
+	public string Url { get; set; } = string.Empty;
 	public DateTimeOffset RemovedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 

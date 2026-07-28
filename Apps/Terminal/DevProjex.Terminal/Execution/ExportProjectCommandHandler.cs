@@ -29,9 +29,10 @@ public sealed class ExportProjectCommandHandler(
 		var plan = await new StatusRenderer(environment, request.Output)
 			.RunAsync(
 				services.Localization["Terminal.Status.PreparingProjectExport"],
-				() => services.ContextPlanner.BuildAsync(
-					new ProjectContextRequest(request.ProjectPath, request.Selection),
-					cancellationToken))
+				() => services.ContextFactory.BuildAsync(
+					request.ProjectPath,
+					request.Selection,
+					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
@@ -51,7 +52,8 @@ public sealed class ExportProjectCommandHandler(
 
 		var exportRequest = new ProjectCopyExportRequest(
 			ProjectRootPath: plan.SourceRoot,
-			ProjectName: Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
+			ProjectName: plan.SourceIdentity?.DisplayName ??
+			             Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 			TreeRoot: plan.ProjectedTree,
 			SelectedPaths: new HashSet<string>(PathComparer.Default),
 			DestinationPath: exactOutput,

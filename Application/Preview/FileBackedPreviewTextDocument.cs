@@ -32,6 +32,12 @@ public sealed class FileBackedPreviewTextDocument(
     public IReadOnlyList<PreviewDocumentSection> Sections { get; } =
         sections is { Count: > 0 } ? sections.ToArray() : Array.Empty<PreviewDocumentSection>();
 
+    public string GetFullText()
+    {
+        ThrowIfDisposed();
+        return ReadTextRange(0, fileLength, trimTrailingLineEnding: false);
+    }
+
     public string GetLineText(int lineNumber)
     {
         ThrowIfDisposed();
@@ -45,7 +51,7 @@ public sealed class FileBackedPreviewTextDocument(
             ? lineOffsets[normalizedLine]
             : fileLength;
 
-        return ReadTextRange(startOffset, endOffset);
+        return ReadTextRange(startOffset, endOffset, trimTrailingLineEnding: true);
     }
 
     public string GetLineRangeText(int firstLine, int lastLine)
@@ -65,7 +71,7 @@ public sealed class FileBackedPreviewTextDocument(
             ? lineOffsets[normalizedLastLine]
             : fileLength;
 
-        return ReadTextRange(startOffset, endOffset);
+        return ReadTextRange(startOffset, endOffset, trimTrailingLineEnding: true);
     }
 
     public void Dispose()
@@ -115,7 +121,10 @@ public sealed class FileBackedPreviewTextDocument(
         }
     }
 
-    private string ReadTextRange(long startOffset, long endOffset)
+    private string ReadTextRange(
+        long startOffset,
+        long endOffset,
+        bool trimTrailingLineEnding)
     {
         var byteCount = checked((int)Math.Max(0, endOffset - startOffset));
         if (byteCount == 0)
@@ -125,10 +134,14 @@ public sealed class FileBackedPreviewTextDocument(
         try
         {
             var bytesRead = ReadBytes(startOffset, buffer, byteCount);
-            if (bytesRead > 0 && buffer[bytesRead - 1] == (byte)'\n')
+            if (trimTrailingLineEnding &&
+                bytesRead > 0 &&
+                buffer[bytesRead - 1] == (byte)'\n')
                 bytesRead--;
 
-            if (bytesRead > 0 && buffer[bytesRead - 1] == (byte)'\r')
+            if (trimTrailingLineEnding &&
+                bytesRead > 0 &&
+                buffer[bytesRead - 1] == (byte)'\r')
                 bytesRead--;
 
             return bytesRead == 0

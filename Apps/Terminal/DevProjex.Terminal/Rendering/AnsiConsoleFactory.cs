@@ -9,7 +9,7 @@ internal static class AnsiConsoleFactory
 		var settings = new AnsiConsoleSettings
 		{
 			Ansi = capabilities.UseAnsi ? AnsiSupport.Yes : AnsiSupport.No,
-			ColorSystem = capabilities.UseAnsi ? ColorSystemSupport.Detect : ColorSystemSupport.NoColors,
+			ColorSystem = capabilities.UseAnsi ? ColorSystemSupport.Standard : ColorSystemSupport.NoColors,
 			Interactive = capabilities.UseInteractiveProgress
 				? InteractionSupport.Yes
 				: InteractionSupport.No,

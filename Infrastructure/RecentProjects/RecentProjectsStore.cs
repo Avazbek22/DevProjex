@@ -4,10 +4,11 @@ namespace DevProjex.Infrastructure.RecentProjects;
 
 public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null)
 {
-	private const int CurrentSchemaVersion = 2;
+	private const int CurrentSchemaVersion = 3;
 	private const int MaxRecentFolders = 15;
 	private const int MaxRecentFolderRemovals = 64;
 	private const int MaxRecentRepositories = 7;
+	private const int MaxRecentRepositoryRemovals = 32;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "recent-projects.json";
 	private static readonly string RepoCacheRootPath = Path.Combine(
@@ -157,7 +158,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				// cannot be reached. The caller keeps the returned snapshot in memory and
 				// a later flush can still retry persistence.
 				var inMemoryState = SanitizeState(fileSet, MergeStates(CreateDefaultDb(), db));
-				if (!TryNormalizeRepositoryUrl(repositoryUrl, out var inMemoryNormalizedUrl))
+				if (!RepositoryUrlUtility.TryNormalize(repositoryUrl, out var inMemoryNormalizedUrl))
 					return inMemoryState;
 
 				MoveToFront(
@@ -166,18 +167,19 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 					MaxRecentRepositories,
 					StringComparer.OrdinalIgnoreCase,
 					static entry => entry.Url,
-					static value => NormalizeRepositoryComparisonKey(value),
+					static value => RepositoryUrlUtility.GetComparisonKey(value),
 					static (value, openedUtc) => new RecentRepositoryEntry
 					{
 						Url = value,
 						OpenedUtc = openedUtc
-					});
+					},
+					CreateRepositoryOpenedUtc(inMemoryState, inMemoryNormalizedUrl));
 				return inMemoryState;
 			}
 
 			using var _ = heldLock;
 			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
-			if (!TryNormalizeRepositoryUrl(repositoryUrl, out var normalizedUrl))
+			if (!RepositoryUrlUtility.TryNormalize(repositoryUrl, out var normalizedUrl))
 				return state;
 
 			MoveToFront(
@@ -186,12 +188,13 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				MaxRecentRepositories,
 				StringComparer.OrdinalIgnoreCase,
 				static entry => entry.Url,
-				static value => NormalizeRepositoryComparisonKey(value),
+				static value => RepositoryUrlUtility.GetComparisonKey(value),
 				static (value, openedUtc) => new RecentRepositoryEntry
 				{
 					Url = value,
 					OpenedUtc = openedUtc
-				});
+				},
+				CreateRepositoryOpenedUtc(state, normalizedUrl));
 
 			TrySave(fileSet, state);
 			return state;
@@ -272,6 +275,25 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		return CreateDefaultDb();
 	}
 
+	public RecentProjectsDb RemoveRepository(RecentProjectsDb? db, string repositoryUrl)
+	{
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+			{
+				var inMemoryState = SanitizeState(fileSet, MergeStates(CreateDefaultDb(), db));
+				return ApplyRepositoryRemoval(fileSet, inMemoryState, repositoryUrl);
+			}
+
+			using var _ = heldLock;
+			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
+			state = ApplyRepositoryRemoval(fileSet, state, repositoryUrl);
+			TrySave(fileSet, state);
+			return state;
+		}
+	}
+
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
 	{
 		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
@@ -301,7 +323,8 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 			SchemaVersion = CurrentSchemaVersion,
 			RecentFolders = [],
 			RecentFolderRemovals = [],
-			RecentRepositories = []
+			RecentRepositories = [],
+			RecentRepositoryRemovals = []
 		};
 	}
 
@@ -311,6 +334,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		db.RecentFolders ??= [];
 		db.RecentFolderRemovals ??= [];
 		db.RecentRepositories ??= [];
+		db.RecentRepositoryRemovals ??= [];
 
 		db.RecentFolderRemovals = NormalizeFolderRemovals(db.RecentFolderRemovals);
 		var removalTimes = new Dictionary<string, DateTimeOffset>(PathComparer.Default);
@@ -318,7 +342,12 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 			removalTimes[removal.Path] = removal.RemovedUtc;
 
 		db.RecentFolders = NormalizeFolders(db.RecentFolders, removalTimes);
-		db.RecentRepositories = NormalizeRepositories(db.RecentRepositories);
+		db.RecentRepositoryRemovals = NormalizeRepositoryRemovals(db.RecentRepositoryRemovals);
+		var repositoryRemovalTimes = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+		foreach (var removal in db.RecentRepositoryRemovals)
+			repositoryRemovalTimes[RepositoryUrlUtility.GetComparisonKey(removal.Url)] = removal.RemovedUtc;
+
+		db.RecentRepositories = NormalizeRepositories(db.RecentRepositories, repositoryRemovalTimes);
 		return db;
 	}
 
@@ -351,6 +380,8 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		merged.RecentFolderRemovals.AddRange(current.RecentFolderRemovals);
 		merged.RecentRepositories.AddRange(snapshot.RecentRepositories);
 		merged.RecentRepositories.AddRange(current.RecentRepositories);
+		merged.RecentRepositoryRemovals.AddRange(snapshot.RecentRepositoryRemovals);
+		merged.RecentRepositoryRemovals.AddRange(current.RecentRepositoryRemovals);
 		return Normalize(merged);
 	}
 
@@ -413,14 +444,21 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		return unique;
 	}
 
-	private static List<RecentRepositoryEntry> NormalizeRepositories(IEnumerable<RecentRepositoryEntry> entries)
+	private static List<RecentRepositoryEntry> NormalizeRepositories(
+		IEnumerable<RecentRepositoryEntry> entries,
+		IReadOnlyDictionary<string, DateTimeOffset> removalTimes)
 	{
 		var ordered = entries
-			.Where(static entry => entry is not null && TryNormalizeRepositoryUrl(entry.Url, out _))
+			.Where(static entry => entry is not null && RepositoryUrlUtility.TryNormalize(entry.Url, out _))
 			.Select(static entry => new RecentRepositoryEntry
 			{
-				Url = NormalizeRepositoryUrl(entry.Url),
+				Url = RepositoryUrlUtility.Normalize(entry.Url),
 				OpenedUtc = entry.OpenedUtc <= DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : entry.OpenedUtc
+			})
+			.Where(entry =>
+			{
+				var key = RepositoryUrlUtility.GetComparisonKey(entry.Url);
+				return !removalTimes.TryGetValue(key, out var removedUtc) || entry.OpenedUtc > removedUtc;
 			})
 			.OrderByDescending(static entry => entry.OpenedUtc)
 			.ToList();
@@ -429,12 +467,41 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		foreach (var entry in ordered)
 		{
-			if (seen.Add(NormalizeRepositoryComparisonKey(entry.Url)))
+			if (seen.Add(RepositoryUrlUtility.GetComparisonKey(entry.Url)))
 				unique.Add(entry);
 		}
 
 		if (unique.Count > MaxRecentRepositories)
 			unique.RemoveRange(MaxRecentRepositories, unique.Count - MaxRecentRepositories);
+
+		return unique;
+	}
+
+	private static List<RecentRepositoryRemovalEntry> NormalizeRepositoryRemovals(
+		IEnumerable<RecentRepositoryRemovalEntry> entries)
+	{
+		var ordered = entries
+			.Where(static entry => entry is not null && RepositoryUrlUtility.TryNormalize(entry.Url, out _))
+			.Select(static entry => new RecentRepositoryRemovalEntry
+			{
+				Url = RepositoryUrlUtility.Normalize(entry.Url),
+				RemovedUtc = entry.RemovedUtc <= DateTimeOffset.UnixEpoch
+					? DateTimeOffset.UtcNow
+					: entry.RemovedUtc
+			})
+			.OrderByDescending(static entry => entry.RemovedUtc)
+			.ToList();
+
+		var unique = new List<RecentRepositoryRemovalEntry>();
+		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var entry in ordered)
+		{
+			if (seen.Add(RepositoryUrlUtility.GetComparisonKey(entry.Url)))
+				unique.Add(entry);
+		}
+
+		if (unique.Count > MaxRecentRepositoryRemovals)
+			unique.RemoveRange(MaxRecentRepositoryRemovals, unique.Count - MaxRecentRepositoryRemovals);
 
 		return unique;
 	}
@@ -498,6 +565,80 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		{
 			if (PathComparer.Default.Equals(removal.Path, normalizedPath) && removal.RemovedUtc >= openedUtc)
 				openedUtc = removal.RemovedUtc.AddTicks(1);
+		}
+
+		return openedUtc;
+	}
+
+	private static RecentProjectsDb ApplyRepositoryRemoval(
+		JsonStoreFileSet fileSet,
+		RecentProjectsDb state,
+		string repositoryUrl)
+	{
+		if (!RepositoryUrlUtility.TryNormalize(repositoryUrl, out var normalizedUrl))
+			return state;
+
+		var comparisonKey = RepositoryUrlUtility.GetComparisonKey(normalizedUrl);
+		var removedUtc = DateTimeOffset.UtcNow;
+		foreach (var entry in state.RecentRepositories)
+		{
+			if (string.Equals(
+				    RepositoryUrlUtility.GetComparisonKey(entry.Url),
+				    comparisonKey,
+				    StringComparison.OrdinalIgnoreCase) &&
+			    entry.OpenedUtc >= removedUtc)
+			{
+				removedUtc = entry.OpenedUtc.AddTicks(1);
+			}
+		}
+
+		foreach (var removal in state.RecentRepositoryRemovals)
+		{
+			if (string.Equals(
+				    RepositoryUrlUtility.GetComparisonKey(removal.Url),
+				    comparisonKey,
+				    StringComparison.OrdinalIgnoreCase) &&
+			    removal.RemovedUtc >= removedUtc)
+			{
+				removedUtc = removal.RemovedUtc.AddTicks(1);
+			}
+		}
+
+		state.RecentRepositories.RemoveAll(entry =>
+			string.Equals(
+				RepositoryUrlUtility.GetComparisonKey(entry.Url),
+				comparisonKey,
+				StringComparison.OrdinalIgnoreCase));
+		state.RecentRepositoryRemovals.RemoveAll(entry =>
+			string.Equals(
+				RepositoryUrlUtility.GetComparisonKey(entry.Url),
+				comparisonKey,
+				StringComparison.OrdinalIgnoreCase));
+		state.RecentRepositoryRemovals.Add(new RecentRepositoryRemovalEntry
+		{
+			Url = normalizedUrl,
+			RemovedUtc = removedUtc
+		});
+
+		return SanitizeState(fileSet, state);
+	}
+
+	private static DateTimeOffset CreateRepositoryOpenedUtc(
+		RecentProjectsDb state,
+		string normalizedUrl)
+	{
+		var comparisonKey = RepositoryUrlUtility.GetComparisonKey(normalizedUrl);
+		var openedUtc = DateTimeOffset.UtcNow;
+		foreach (var removal in state.RecentRepositoryRemovals)
+		{
+			if (string.Equals(
+				    RepositoryUrlUtility.GetComparisonKey(removal.Url),
+				    comparisonKey,
+				    StringComparison.OrdinalIgnoreCase) &&
+			    removal.RemovedUtc >= openedUtc)
+			{
+				openedUtc = removal.RemovedUtc.AddTicks(1);
+			}
 		}
 
 		return openedUtc;
@@ -591,42 +732,4 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-	private static bool TryNormalizeRepositoryUrl(string repositoryUrl, out string normalizedUrl)
-	{
-		normalizedUrl = string.Empty;
-		if (string.IsNullOrWhiteSpace(repositoryUrl))
-			return false;
-
-		normalizedUrl = NormalizeRepositoryUrl(repositoryUrl);
-		return !string.IsNullOrWhiteSpace(normalizedUrl);
-	}
-
-	private static string NormalizeRepositoryUrl(string repositoryUrl)
-	{
-		var trimmed = repositoryUrl.Trim();
-		if (string.IsNullOrWhiteSpace(trimmed))
-			return string.Empty;
-
-		trimmed = trimmed.Replace('\\', '/').TrimEnd('/');
-		if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
-		{
-			var builder = new UriBuilder(uri)
-			{
-				Fragment = string.Empty,
-				Query = string.Empty
-			};
-
-			return builder.Uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
-		}
-
-		return trimmed;
-	}
-
-	private static string NormalizeRepositoryComparisonKey(string repositoryUrl)
-	{
-		var normalized = NormalizeRepositoryUrl(repositoryUrl);
-		return normalized.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
-			? normalized[..^4]
-			: normalized;
-	}
 }

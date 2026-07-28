@@ -112,7 +112,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
             // Propagate cancellation - caller will clean up the directory
             throw;
         }
-        catch (Exception ex)
+        catch
         {
             return new GitCloneResult(
                 Success: false,
@@ -121,7 +121,34 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 DefaultBranch: null,
                 RepositoryName: repoName,
                 RepositoryUrl: url,
-                ErrorMessage: ex.Message);
+                ErrorMessage: "Clone failed");
+        }
+    }
+
+    public async Task<string?> GetRemoteUrlAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await RunGitCommandAsync(
+                repositoryPath,
+                "config --get remote.origin.url",
+                cancellationToken);
+            if (result.ExitCode != 0)
+                return null;
+
+            return result.Output
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -163,8 +190,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
             return "Connection timeout - repository may be too large or network is slow";
         }
 
-        // Return original error if no specific pattern matched
-        return gitError;
+        // Do not surface arbitrary Git stderr because it may echo authenticated URLs.
+        return "Clone failed";
     }
 
     /// <summary>
@@ -676,6 +703,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
                         var previousPercent = Interlocked.Exchange(ref lastReportedPercent, percent);
                         if (previousPercent != percent)
                             progress.Report($"{percent}%");
+                        if (IsSafeGitProgressLine(line))
+                            progress.Report(line);
                     }
 
                     // Progress lines can be very noisy during clone/fetch and are not
@@ -685,7 +714,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
                 errorBuffer.Add(line);
 
-                if (progress is not null && !string.IsNullOrWhiteSpace(line))
+                if (progress is not null && IsSafeGitProgressLine(line))
                     progress.Report(line);
             }
         };
@@ -751,6 +780,18 @@ public sealed class GitRepositoryService : IGitRepositoryService
         }
 
         return false;
+    }
+
+    private static bool IsSafeGitProgressLine(string line)
+    {
+        var trimmed = line.AsSpan().TrimStart();
+        return trimmed.StartsWith("remote: Enumerating objects:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("remote: Counting objects:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("remote: Compressing objects:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Receiving objects:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Resolving deltas:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Checking out files:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Updating files:", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class BoundedLineBuffer(int maxChars)

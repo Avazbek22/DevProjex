@@ -19,6 +19,15 @@ public sealed record ProjectContextGitReadiness(
 	bool IsReady,
 	int UnavailableTrackedIndexCount = 0);
 
+public sealed record ProjectSourceIdentity(
+	string DisplayName,
+	ProjectSourceType SourceType,
+	string SourceReference,
+	string? RepositoryUrl = null,
+	string? Branch = null,
+	string? CommitHash = null,
+	bool IsCachedRepository = false);
+
 public sealed record ProjectContextPlan(
 	string SourceRoot,
 	ProjectSelectionSpec Selection,
@@ -36,7 +45,8 @@ public sealed record ProjectContextPlan(
 	ProjectContextGitReadiness GitReadiness,
 	string Fingerprint,
 	long IncludedBytes = 0,
-	IReadOnlyDictionary<string, long>? EffectiveFileSizes = null)
+	IReadOnlyDictionary<string, long>? EffectiveFileSizes = null,
+	ProjectSourceIdentity? SourceIdentity = null)
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);
@@ -44,7 +54,8 @@ public sealed record ProjectContextPlan(
 
 public sealed record ProjectContextRequest(
 	string ProjectPath,
-	ProjectSelectionSpec Selection);
+	ProjectSelectionSpec Selection,
+	ProjectSourceIdentity? SourceIdentity = null);
 
 public sealed class ProjectContextValidationException(string code, string message)
 	: ArgumentException(message)

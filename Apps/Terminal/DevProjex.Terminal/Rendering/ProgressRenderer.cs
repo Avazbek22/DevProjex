@@ -32,8 +32,8 @@ public sealed class ProgressRenderer(
 		var console = AnsiConsoleFactory.Create(environment.Error, capabilities);
 
 		await console.Progress()
-			.AutoClear(true)
-			.HideCompleted(true)
+			.AutoClear(false)
+			.HideCompleted(false)
 			.Columns(
 				new TaskDescriptionColumn(),
 				new ProgressBarColumn(),

@@ -14,9 +14,10 @@ public sealed class AnalyzeCommandHandler(
 		var plan = await new StatusRenderer(environment, request.Output)
 			.RunAsync(
 				services.Localization["Terminal.Status.AnalyzingProject"],
-				() => services.ContextPlanner.BuildAsync(
-					new ProjectContextRequest(request.ProjectPath, request.Selection),
-					cancellationToken))
+				() => services.ContextFactory.BuildAsync(
+					request.ProjectPath,
+					request.Selection,
+					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
@@ -76,7 +77,10 @@ internal static class AnalysisTextFormatter
 	public static string Build(ProjectContextPlan plan, LocalizationService localization)
 	{
 		var output = new StringBuilder();
-		output.Append(localization["Terminal.Analysis.Project"]).Append(": ").AppendLine(plan.SourceRoot);
+		output.Append(localization["Terminal.Analysis.Project"]).Append(": ")
+			.AppendLine(plan.SourceIdentity?.DisplayName ?? plan.SourceRoot);
+		if (plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
+			output.Append(localization["Terminal.Analysis.Source"]).Append(": ").AppendLine(repositoryUrl);
 		output.Append(localization["Terminal.Analysis.Profile"]).Append(": ")
 			.AppendLine(plan.Selection.ProfileSource?.Kind.ToString().ToLowerInvariant() ?? "standard");
 		output.Append(localization["Terminal.Analysis.GitMode"]).Append(": ")

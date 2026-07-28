@@ -3,14 +3,15 @@ using System.Buffers;
 namespace DevProjex.Application.Services;
 
 /// <summary>
-/// Builds preview documents with bounded memory usage.
-/// Preview keeps the same visible output as export, but stores large payloads in a temporary
-/// UTF-8 backing file instead of a single giant managed string.
+/// Builds readable preview documents with bounded memory usage.
+/// Large payloads are stored in a temporary UTF-8 backing file instead of one giant managed string.
 /// </summary>
 public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
 {
     private const string ClipboardBlankLine = "\u00A0";
     private const string NoContentMarker = "[No Content, 0 bytes]";
+    private const string BinaryOrUnreadableMarker = "[Binary or unreadable file; content omitted]";
+    private const string LargeTextMarker = "[Large text file; open Raw output or export to inspect complete content]";
     private const string WhitespaceMarkerPrefix = "[Whitespace, ";
     private const string WhitespaceMarkerSuffix = " bytes]";
     private const int InMemoryDocumentThresholdChars = 500_000;
@@ -18,10 +19,54 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
     public IPreviewTextDocument CreateInMemory(string? text, IReadOnlyList<PreviewDocumentSection>? sections = null)
         => new InMemoryPreviewTextDocument(text, sections);
 
+    public IPreviewTextDocument CreateDocument(
+        string? text,
+        IReadOnlyList<PreviewDocumentSection>? sections = null)
+    {
+        var value = text ?? string.Empty;
+        if (value.Length <= InMemoryDocumentThresholdChars)
+            return CreateInMemory(value, sections);
+
+        using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
+        builder.AppendExactText(value.AsSpan());
+        return builder.BuildDocument(sections);
+    }
+
+    public async Task<IPreviewTextDocument> CreateDocumentAsync(
+        Func<Stream, CancellationToken, Task> writeAsync,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(writeAsync);
+
+        var storagePath = CreateStoragePath();
+        try
+        {
+            await using (var stream = new FileStream(
+                             storagePath,
+                             FileMode.CreateNew,
+                             FileAccess.ReadWrite,
+                             FileShare.None,
+                             bufferSize: 8192,
+                             options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await writeAsync(stream, cancellationToken).ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return BuildDocumentFromUtf8File(storagePath);
+        }
+        catch
+        {
+            DisposeStorageFile(storagePath);
+            throw;
+        }
+    }
+
     public async Task<IPreviewTextDocument?> BuildContentDocumentAsync(
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
-        Func<string, string>? displayPathMapper)
+        Func<string, string>? displayPathMapper,
+        bool includeOmissionMarkers = false)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         if (orderedFiles.Count == 0)
@@ -35,6 +80,7 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
             sections,
             displayPathMapper,
             prependSectionSeparator: false,
+            includeOmissionMarkers,
             cancellationToken).ConfigureAwait(false);
 
         return anyWritten ? builder.BuildDocument(sections) : null;
@@ -44,7 +90,8 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
         string treeText,
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
-        Func<string, string>? displayPathMapper)
+        Func<string, string>? displayPathMapper,
+        bool includeOmissionMarkers = false)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         var normalizedTreeText = treeText.TrimEnd('\r', '\n');
@@ -61,6 +108,7 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
             sections,
             displayPathMapper,
             prependSectionSeparator: wroteTree,
+            includeOmissionMarkers,
             cancellationToken).ConfigureAwait(false);
 
         if (!wroteTree && !wroteContent)
@@ -75,6 +123,7 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
         ICollection<PreviewDocumentSection> sections,
         Func<string, string>? displayPathMapper,
         bool prependSectionSeparator,
+        bool includeOmissionMarkers,
         CancellationToken cancellationToken)
     {
         var anyWritten = false;
@@ -85,7 +134,7 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
             cancellationToken.ThrowIfCancellationRequested();
 
             var content = await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
-            if (content is null)
+            if (content is null && !includeOmissionMarkers)
                 continue;
 
             if (!anyWritten)
@@ -109,6 +158,18 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
             var sectionStartLine = builder.LineCount + 1;
             builder.AppendLine($"{displayPath}:");
             builder.AppendLine(ClipboardBlankLine);
+
+            if (content is null)
+            {
+                builder.AppendLine(BinaryOrUnreadableMarker);
+                sections.Add(new PreviewDocumentSection(
+                    displayPath,
+                    sectionStartLine,
+                    builder.LineCount,
+                    sectionStartLine,
+                    sectionStartLine + 2));
+                continue;
+            }
 
             if (content.IsEmpty)
             {
@@ -136,10 +197,16 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
 
             if (content.IsEstimated)
             {
-                // Export writes an empty content line for estimated files. We mirror that behavior
-                // and trim the terminal empty line only for the final entry to keep visible output stable.
-                builder.AppendLine(string.Empty);
-                trimTrailingEstimatedLine = true;
+                if (includeOmissionMarkers)
+                {
+                    builder.AppendLine(LargeTextMarker);
+                }
+                else
+                {
+                    builder.AppendLine(string.Empty);
+                    trimTrailingEstimatedLine = true;
+                }
+
                 sections.Add(new PreviewDocumentSection(
                     displayPath,
                     sectionStartLine,
@@ -243,9 +310,133 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
         }
     }
 
+    private static IPreviewTextDocument BuildDocumentFromUtf8File(string storagePath)
+    {
+        var lineOffsets = BuildLineOffsets(storagePath);
+        var (characterCount, maxLineLength) = ReadTextMetrics(storagePath);
+        var fileLength = new FileInfo(storagePath).Length;
+        if (characterCount <= InMemoryDocumentThresholdChars)
+        {
+            var text = File.ReadAllText(storagePath, PreviewTextStorageBuilder.Utf8WithoutBom);
+            DisposeStorageFile(storagePath);
+            return new InMemoryPreviewTextDocument(text);
+        }
+
+        return new FileBackedPreviewTextDocument(
+            storagePath,
+            lineOffsets,
+            fileLength,
+            maxLineLength,
+            characterCount);
+    }
+
+    private static long[] BuildLineOffsets(string storagePath)
+    {
+        using var stream = new FileStream(
+            storagePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 8192,
+            options: FileOptions.SequentialScan);
+        if (stream.Length == 0)
+            return [];
+
+        var offsets = new List<long> { 0 };
+        var buffer = ArrayPool<byte>.Shared.Rent(8192);
+        try
+        {
+            long absoluteOffset = 0;
+            int bytesRead;
+            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                for (var index = 0; index < bytesRead; index++)
+                {
+                    if (buffer[index] == (byte)'\n')
+                        offsets.Add(absoluteOffset + index + 1);
+                }
+
+                absoluteOffset += bytesRead;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return offsets.ToArray();
+    }
+
+    private static (long CharacterCount, int MaxLineLength) ReadTextMetrics(string storagePath)
+    {
+        using var stream = new FileStream(
+            storagePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 8192,
+            options: FileOptions.SequentialScan);
+        using var reader = new StreamReader(
+            stream,
+            PreviewTextStorageBuilder.Utf8WithoutBom,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 8192);
+
+        var buffer = ArrayPool<char>.Shared.Rent(8192);
+        try
+        {
+            long characterCount = 0;
+            var currentLineLength = 0;
+            var maxLineLength = 0;
+            int charactersRead;
+            while ((charactersRead = reader.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                characterCount += charactersRead;
+                foreach (var character in buffer.AsSpan(0, charactersRead))
+                {
+                    if (character == '\n')
+                    {
+                        maxLineLength = Math.Max(maxLineLength, currentLineLength);
+                        currentLineLength = 0;
+                    }
+                    else if (character != '\r')
+                    {
+                        currentLineLength++;
+                    }
+                }
+            }
+
+            return (characterCount, Math.Max(maxLineLength, currentLineLength));
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(buffer);
+        }
+    }
+
+    private static string CreateStoragePath()
+    {
+        var previewDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "Preview");
+        Directory.CreateDirectory(previewDirectory);
+        return Path.Combine(previewDirectory, $"{Guid.NewGuid():N}.preview.txt");
+    }
+
+    private static void DisposeStorageFile(string storagePath)
+    {
+        try
+        {
+            if (File.Exists(storagePath))
+                File.Delete(storagePath);
+        }
+        catch
+        {
+            // Best-effort cleanup only.
+        }
+    }
+
     private sealed class PreviewTextStorageBuilder : IDisposable
     {
-        private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+        internal static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
         private readonly string _storagePath;
         private readonly FileStream _stream;
@@ -260,10 +451,7 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
         public PreviewTextStorageBuilder(int inMemoryThresholdChars)
         {
             _inMemoryThresholdChars = inMemoryThresholdChars;
-            var previewDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "Preview");
-            Directory.CreateDirectory(previewDirectory);
-
-            _storagePath = Path.Combine(previewDirectory, $"{Guid.NewGuid():N}.preview.txt");
+            _storagePath = CreateStoragePath();
             _stream = new FileStream(
                 _storagePath,
                 FileMode.Create,
@@ -289,6 +477,33 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
         }
 
         public int LineCount => _lineLengths.Count;
+
+        public void AppendExactText(ReadOnlySpan<char> text)
+        {
+            ThrowIfDisposed();
+            if (text.Length == 0)
+                return;
+
+            var lineStart = 0;
+            for (var index = 0; index < text.Length; index++)
+            {
+                if (text[index] != '\n')
+                    continue;
+
+                AppendExactLine(text[lineStart..(index + 1)]);
+                lineStart = index + 1;
+            }
+
+            if (lineStart < text.Length)
+            {
+                AppendExactLine(text[lineStart..]);
+            }
+            else
+            {
+                _lineOffsets.Add(_stream.Position);
+                _lineLengths.Add(0);
+            }
+        }
 
         public void TrimTrailingEmptyLine()
         {
@@ -370,17 +585,23 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
             }
         }
 
+        private void AppendExactLine(ReadOnlySpan<char> rawLine)
+        {
+            _lineOffsets.Add(_stream.Position);
+            var displayLength = rawLine.Length;
+            if (displayLength > 0 && rawLine[displayLength - 1] == '\n')
+                displayLength--;
+            if (displayLength > 0 && rawLine[displayLength - 1] == '\r')
+                displayLength--;
+            _lineLengths.Add(displayLength);
+            _maxLineLength = Math.Max(_maxLineLength, displayLength);
+            _characterCount += rawLine.Length;
+            WriteUtf8(rawLine);
+        }
+
         private void DisposeStorageFile()
         {
-            try
-            {
-                if (File.Exists(_storagePath))
-                    File.Delete(_storagePath);
-            }
-            catch
-            {
-                // Best-effort cleanup only.
-            }
+            PreviewDocumentBuilder.DisposeStorageFile(_storagePath);
         }
 
         private void ThrowIfDisposed()

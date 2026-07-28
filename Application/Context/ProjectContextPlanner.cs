@@ -27,10 +27,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				selection.Extensions,
 				selectedIgnoreOptions),
 			cancellationToken);
+		var sourceIdentity = ResolveSourceIdentity(sourceRoot, request.SourceIdentity);
+		var effectiveRoot = loaded.Tree.Root with
+		{
+			DisplayName = sourceIdentity.DisplayName
+		};
 
 		var diagnostics = new List<ContextDiagnostic>();
 		var selectedFullPaths = ResolveSelectedPaths(
-			loaded.Tree.Root,
+			effectiveRoot,
 			sourceRoot,
 			selection.SelectedPaths,
 			diagnostics,
@@ -41,23 +46,23 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var includedNodes = selectsNoEffectivePaths
 			? []
 			: ProjectTreeSelectionProjection.BuildIncludedNodes(
-				loaded.Tree.Root,
+				effectiveRoot,
 				selectedFullPaths);
 		var includedPathSet = includedNodes
 			.Select(static node => node.FullPath)
 			.ToHashSet(PathComparer.Default);
 		var projectedTree = selectsNoEffectivePaths
 			? loaded.Tree.Root with { Children = [] }
-			: BuildProjectedTree(loaded.Tree.Root, includedPathSet) ??
-			  loaded.Tree.Root with { Children = [] };
+			: BuildProjectedTree(effectiveRoot, includedPathSet) ??
+			  effectiveRoot with { Children = [] };
 		var includedFiles = selectsNoEffectivePaths
 			? []
 			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
-				loaded.Tree.Root,
+				effectiveRoot,
 				selectedFullPaths,
 				ensureExists: false);
 		var effectiveFileSizes = BuildEffectiveFileSizes(
-			loaded.Tree.Root,
+			effectiveRoot,
 			loaded.TreeInventory,
 			cancellationToken);
 		var includedBytes = CalculateIncludedBytes(
@@ -123,7 +128,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			SelectedRoots: loaded.SelectedRootFolders.OrderBy(static value => value, PathComparer.Default).ToArray(),
 			AvailableExtensions: loaded.AvailableExtensions.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
 			SelectedExtensions: loaded.SelectedExtensions.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
-			EffectiveTree: loaded.Tree.Root,
+			EffectiveTree: effectiveRoot,
 			ProjectedTree: projectedTree,
 			SelectedFullPaths: selectedFullPaths,
 			IncludedFiles: includedFiles,
@@ -137,7 +142,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				unavailableTrackedIndexCount),
 			Fingerprint: BuildFingerprint(sourceRoot, effectiveSelection, includedNodes),
 			IncludedBytes: includedBytes,
-			EffectiveFileSizes: effectiveFileSizes);
+			EffectiveFileSizes: effectiveFileSizes,
+			SourceIdentity: sourceIdentity);
 	}
 
 	public async Task<ProjectContextPlan> ReprojectSelectionAsync(
@@ -318,6 +324,33 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		}
 
 		return normalized;
+	}
+
+	private static ProjectSourceIdentity ResolveSourceIdentity(
+		string sourceRoot,
+		ProjectSourceIdentity? sourceIdentity)
+	{
+		var fallbackName = Path.GetFileName(Path.TrimEndingDirectorySeparator(sourceRoot));
+		if (string.IsNullOrWhiteSpace(fallbackName))
+			fallbackName = sourceRoot;
+
+		if (sourceIdentity is null)
+		{
+			return new ProjectSourceIdentity(
+				fallbackName,
+				ProjectSourceType.LocalFolder,
+				sourceRoot);
+		}
+
+		return sourceIdentity with
+		{
+			DisplayName = string.IsNullOrWhiteSpace(sourceIdentity.DisplayName)
+				? fallbackName
+				: sourceIdentity.DisplayName.Trim(),
+			SourceReference = string.IsNullOrWhiteSpace(sourceIdentity.SourceReference)
+				? sourceRoot
+				: sourceIdentity.SourceReference
+		};
 	}
 
 	private static ProjectSelectionSpec EnsureResolved(ProjectSelectionSpec selection)

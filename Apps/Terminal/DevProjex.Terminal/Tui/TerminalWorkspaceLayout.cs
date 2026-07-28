@@ -5,7 +5,8 @@ public enum TerminalWorkspaceLayoutMode
 	TooSmall,
 	Compact,
 	Tabbed,
-	Split
+	Split,
+	Wide
 }
 
 public static class TerminalWorkspaceLayout
@@ -18,6 +19,8 @@ public static class TerminalWorkspaceLayout
 			return TerminalWorkspaceLayoutMode.Compact;
 		if (width < 120)
 			return TerminalWorkspaceLayoutMode.Tabbed;
-		return TerminalWorkspaceLayoutMode.Split;
+		if (width < 150)
+			return TerminalWorkspaceLayoutMode.Split;
+		return TerminalWorkspaceLayoutMode.Wide;
 	}
 }

@@ -62,8 +62,8 @@ public sealed class ProfileCommandHandler(
 			.ConfigureAwait(false);
 		if (apply)
 		{
-			var plan = await services.ContextPlanner
-				.BuildAsync(new ProjectContextRequest(projectPath, selection), cancellationToken)
+			var plan = await services.ContextFactory
+				.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
 			{

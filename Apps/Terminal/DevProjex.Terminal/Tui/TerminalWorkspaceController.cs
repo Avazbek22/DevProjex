@@ -13,12 +13,18 @@ public sealed class TerminalWorkspaceController(
 	public async Task<TerminalWorkspaceState> OpenAsync(
 		string projectPath,
 		ProjectProfileReference profile,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		ProjectSourceIdentity? sourceIdentity = null)
 	{
 		var selection = await services.SelectionResolver
 			.ResolveAsync(projectPath, profile, new ProjectSelectionSpec(), cancellationToken)
 			.ConfigureAwait(false);
-		var plan = await BuildPlanAsync(projectPath, selection, cancellationToken).ConfigureAwait(false);
+		var plan = await BuildPlanAsync(
+				projectPath,
+				selection,
+				sourceIdentity,
+				cancellationToken)
+			.ConfigureAwait(false);
 		ThrowIfTrackedModeIsUnavailable(plan);
 		return new TerminalWorkspaceState(plan);
 	}
@@ -31,8 +37,27 @@ public sealed class TerminalWorkspaceController(
 		var plan = await BuildPlanAsync(
 				state.Plan.SourceRoot,
 				selection,
+				state.Plan.SourceIdentity,
 				cancellationToken)
 			.ConfigureAwait(false);
+		state.ReplacePlan(plan);
+	}
+
+	public async Task RebuildRepositoryAsync(
+		TerminalWorkspaceState state,
+		ProjectSelectionSpec selection,
+		CancellationToken cancellationToken)
+	{
+		var sourceIdentity = await services.SourceIdentityResolver
+			.ResolveAsync(state.Plan.SourceRoot, cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
+		var plan = await BuildPlanAsync(
+				state.Plan.SourceRoot,
+				selection,
+				sourceIdentity,
+				cancellationToken)
+			.ConfigureAwait(false);
+		ThrowIfTrackedModeIsUnavailable(plan);
 		state.ReplacePlan(plan);
 	}
 
@@ -57,6 +82,7 @@ public sealed class TerminalWorkspaceController(
 		var plan = await BuildPlanAsync(
 				state.Plan.SourceRoot,
 				state.BuildSelection() with { GitMode = mode },
+				state.Plan.SourceIdentity,
 				cancellationToken)
 			.ConfigureAwait(false);
 		// Keep the last usable plan when an explicit tracked-mode request cannot be honored.
@@ -114,6 +140,73 @@ public sealed class TerminalWorkspaceController(
 				PreviewLimits)
 			.ConfigureAwait(false);
 		state.SetPreviewText(preview);
+	}
+
+	public async Task RefreshPreviewAsync(
+		TerminalWorkspaceState state,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		TerminalPreviewPresentation presentation,
+		CancellationToken cancellationToken)
+	{
+		IPreviewTextDocument document;
+		if (presentation == TerminalPreviewPresentation.RawOutput)
+		{
+			document = await services.PreviewDocumentBuilder.CreateDocumentAsync(
+					(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
+						state.Plan,
+						view,
+						format,
+						stream,
+						token),
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
+		else
+		{
+			document = await BuildReadablePreviewAsync(state, view, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		state.SetPreviewDocument(document);
+	}
+
+	private async Task<IPreviewTextDocument> BuildReadablePreviewAsync(
+		TerminalWorkspaceState state,
+		ProjectContextView view,
+		CancellationToken cancellationToken)
+	{
+		var tree = view is ProjectContextView.Tree or ProjectContextView.TreeContent
+			? state.BuildTreePreview(int.MaxValue)
+			: string.Empty;
+		var files = view is ProjectContextView.Content or ProjectContextView.TreeContent
+			? state.Plan.IncludedFiles
+			: [];
+		string MapDisplayPath(string path) =>
+			Path.GetRelativePath(state.Plan.SourceRoot, path).Replace('\\', '/');
+
+		return view switch
+		{
+			ProjectContextView.Tree =>
+				services.PreviewDocumentBuilder.CreateDocument(tree),
+			ProjectContextView.Content =>
+				await services.PreviewDocumentBuilder
+					.BuildContentDocumentAsync(
+						files,
+						cancellationToken,
+						MapDisplayPath,
+						includeOmissionMarkers: true)
+					.ConfigureAwait(false) ??
+				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
+			_ => await services.PreviewDocumentBuilder
+				.BuildTreeAndContentDocumentAsync(
+					tree,
+					files,
+					cancellationToken,
+					MapDisplayPath,
+					includeOmissionMarkers: true)
+				.ConfigureAwait(false)
+		};
 	}
 
 	public async Task<string> ExportContextAsync(
@@ -193,7 +286,8 @@ public sealed class TerminalWorkspaceController(
 		var result = await services.ProjectCopyExportService.ExportAsync(
 				new ProjectCopyExportRequest(
 					ProjectRootPath: plan.SourceRoot,
-					ProjectName: Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
+					ProjectName: plan.SourceIdentity?.DisplayName ??
+					             Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 					TreeRoot: plan.ProjectedTree,
 					SelectedPaths: new HashSet<string>(PathComparer.Default),
 					DestinationPath: exactDestination,
@@ -250,9 +344,12 @@ public sealed class TerminalWorkspaceController(
 	private Task<ProjectContextPlan> BuildPlanAsync(
 		string projectPath,
 		ProjectSelectionSpec selection,
+		ProjectSourceIdentity? sourceIdentity,
 		CancellationToken cancellationToken) =>
-		services.ContextPlanner.BuildAsync(
-			new ProjectContextRequest(projectPath, selection),
+		services.ContextFactory.BuildAsync(
+			projectPath,
+			selection,
+			sourceIdentity,
 			cancellationToken);
 
 	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)

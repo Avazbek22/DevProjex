@@ -24,8 +24,22 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			kind = "devprojex-analysis",
 			project = new
 			{
-				root = plan.SourceRoot.Replace('\\', '/'),
-				name = Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot))
+				root = ResolveDocumentRoot(plan).Replace('\\', '/'),
+				name = plan.SourceIdentity?.DisplayName ??
+				       Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
+				source = plan.SourceIdentity is
+				{
+					SourceType: ProjectSourceType.GitClone,
+					RepositoryUrl.Length: > 0
+				} identity
+					? new
+					{
+						type = "git",
+						repositoryUrl = identity.RepositoryUrl,
+						branch = identity.Branch,
+						commit = identity.CommitHash
+					}
+					: null
 			},
 			selection = new
 			{
@@ -55,4 +69,12 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 
 	public TextWriter StandardOutput => environment.Output;
 
+	private static string ResolveDocumentRoot(ProjectContextPlan plan) =>
+		plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? identity.SourceReference
+			: plan.SourceRoot;
 }

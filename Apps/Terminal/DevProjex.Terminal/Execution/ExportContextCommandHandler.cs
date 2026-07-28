@@ -15,9 +15,10 @@ public sealed class ExportContextCommandHandler(
 		var plan = await status
 			.RunAsync(
 				services.Localization["Terminal.Status.AnalyzingProject"],
-				() => services.ContextPlanner.BuildAsync(
-					new ProjectContextRequest(request.ProjectPath, request.Selection),
-					cancellationToken))
+				() => services.ContextFactory.BuildAsync(
+					request.ProjectPath,
+					request.Selection,
+					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);

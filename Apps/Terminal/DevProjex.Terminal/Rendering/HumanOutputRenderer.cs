@@ -23,7 +23,15 @@ public sealed class HumanOutputRenderer(
 			.BorderColor(Color.Grey)
 			.AddColumn($"[cyan]{Markup.Escape(_localization["Terminal.Analysis.Field"])}[/]")
 			.AddColumn($"[cyan]{Markup.Escape(_localization["Terminal.Analysis.Value"])}[/]");
-		table.AddRow(_localization["Terminal.Analysis.Project"], Markup.Escape(plan.SourceRoot));
+		table.AddRow(
+			_localization["Terminal.Analysis.Project"],
+			Markup.Escape(plan.SourceIdentity?.DisplayName ?? plan.SourceRoot));
+		if (plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
+		{
+			table.AddRow(
+				_localization["Terminal.Analysis.Source"],
+				Markup.Escape(repositoryUrl));
+		}
 		table.AddRow(_localization["Terminal.Analysis.Profile"], Markup.Escape(FormatProfile(plan.Selection.ProfileSource)));
 		table.AddRow(_localization["Terminal.Analysis.GitMode"], Markup.Escape(FormatGitMode(plan.Selection.GitMode!.Value)));
 		table.AddRow(_localization["Terminal.Analysis.Exclusions"], Markup.Escape(string.Join(", ", plan.Selection.Exclusions!)));

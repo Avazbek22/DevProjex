@@ -36,7 +36,7 @@ public sealed record TerminalTreeRow(
 /// structural settings changes; expanding nodes and changing check state only rebuild the
 /// visible projection.
 /// </summary>
-public sealed class TerminalWorkspaceState
+public sealed class TerminalWorkspaceState : IDisposable
 {
 	private readonly HashSet<string> _expandedPaths = new(PathComparer.Default);
 	private readonly HashSet<string> _selectedFiles = new(PathComparer.Default);
@@ -45,7 +45,10 @@ public sealed class TerminalWorkspaceState
 	private readonly Dictionary<string, string?> _parentsByPath = new(PathComparer.Default);
 	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(PathComparer.Default);
 	private readonly List<string> _orderedPaths = [];
+	private readonly List<IPreviewTextDocument> _retiredPreviewDocuments = [];
+	private readonly object _previewSync = new();
 	private int _selectedFolderCount;
+	private bool _disposed;
 
 	public TerminalWorkspaceState(ProjectContextPlan plan)
 	{
@@ -62,14 +65,15 @@ public sealed class TerminalWorkspaceState
 		_expandedPaths.Add(plan.EffectiveTree.FullPath);
 		RecomputeCheckStates();
 		RebuildVisibleRows();
-		PreviewText = BuildTreePreview();
+		PreviewDocument = new InMemoryPreviewTextDocument(BuildTreePreview());
 	}
 
 	public ProjectContextPlan Plan { get; private set; }
 	public ObservableCollection<TerminalTreeRow> VisibleRows { get; } = [];
 	public int SelectedFileCount => _selectedFiles.Count;
 	public int SelectedFolderCount => _selectedFolderCount;
-	public string PreviewText { get; private set; }
+	public IPreviewTextDocument PreviewDocument { get; private set; }
+	public string PreviewText => PreviewDocument.GetFullText();
 
 	public void ReplacePlan(ProjectContextPlan plan)
 	{
@@ -98,11 +102,35 @@ public sealed class TerminalWorkspaceState
 		_expandedPaths.Add(plan.EffectiveTree.FullPath);
 		RecomputeCheckStates();
 		RebuildVisibleRows();
-		PreviewText = BuildTreePreview();
+		SetPreviewDocument(new InMemoryPreviewTextDocument(BuildTreePreview()));
 	}
 
 	public void SetPreviewText(string value) =>
-		PreviewText = value ?? string.Empty;
+		SetPreviewDocument(new InMemoryPreviewTextDocument(value));
+
+	public void SetPreviewDocument(IPreviewTextDocument document)
+	{
+		ArgumentNullException.ThrowIfNull(document);
+		lock (_previewSync)
+		{
+			ThrowIfDisposed();
+			_retiredPreviewDocuments.Add(PreviewDocument);
+			PreviewDocument = document;
+		}
+	}
+
+	public void ReleaseRetiredPreviewDocuments()
+	{
+		IPreviewTextDocument[] retired;
+		lock (_previewSync)
+		{
+			retired = _retiredPreviewDocuments.ToArray();
+			_retiredPreviewDocuments.Clear();
+		}
+
+		foreach (var document in retired)
+			document.Dispose();
+	}
 
 	public void ToggleExpansion(int rowIndex)
 	{
@@ -391,4 +419,31 @@ public sealed class TerminalWorkspaceState
 
 	private static int Mod(int value, int modulus) =>
 		(value % modulus + modulus) % modulus;
+
+	public void Dispose()
+	{
+		if (_disposed)
+			return;
+
+		IPreviewTextDocument[] documents;
+		lock (_previewSync)
+		{
+			if (_disposed)
+				return;
+			_disposed = true;
+			documents = _retiredPreviewDocuments
+				.Append(PreviewDocument)
+				.ToArray();
+			_retiredPreviewDocuments.Clear();
+		}
+
+		foreach (var document in documents)
+			document.Dispose();
+	}
+
+	private void ThrowIfDisposed()
+	{
+		if (_disposed)
+			throw new ObjectDisposedException(nameof(TerminalWorkspaceState));
+	}
 }
