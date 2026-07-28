@@ -61,7 +61,8 @@ internal sealed partial class TerminalWorkspaceSession
 				await InvokeAsync(() =>
 				{
 					ShowWelcome();
-					_application.Invoke(() => OpenRecentRepositoryList(repositories));
+					_application.LayoutAndDraw();
+					OpenRecentRepositoryList(repositories);
 					return true;
 				}).ConfigureAwait(false);
 			}

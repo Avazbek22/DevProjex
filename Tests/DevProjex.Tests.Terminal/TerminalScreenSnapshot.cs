@@ -116,6 +116,13 @@ internal static partial class TerminalScreenSnapshot
 		string source,
 		string replacement)
 	{
+		if (OperatingSystem.IsMacOS() &&
+		    (source.StartsWith("/var/", StringComparison.Ordinal) ||
+		     source.StartsWith("/tmp/", StringComparison.Ordinal)))
+		{
+			value = ReplacePathVariants(value, "/private" + source, replacement);
+		}
+
 		if (Path.IsPathFullyQualified(source))
 		{
 			try

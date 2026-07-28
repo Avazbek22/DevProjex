@@ -43,9 +43,13 @@ public sealed class TerminalClonePtyTests
 		await WaitForFileAsync(
 			Path.Combine(checkpointRoot, "reached-clone-connecting"),
 			TestContext.Current.CancellationToken);
-		var active = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"Starting the existing Git clone engine.",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Choose a workspace action.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var active = terminal.CaptureScreen();
 		Assert.Contains("Connecting", active, StringComparison.Ordinal);
 		Assert.Contains("CombatRepository", active, StringComparison.Ordinal);
 		Assert.Contains("file:///", active, StringComparison.OrdinalIgnoreCase);

@@ -30,9 +30,13 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			"Recent Git repositories",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var repositoryList = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			RepositoryUrl,
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Inspecting the local DevProjex repository cache.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var repositoryList = terminal.CaptureScreen();
 		Assert.Contains("DevProjex", repositoryList, StringComparison.Ordinal);
 		Assert.Contains("Cached and ready", repositoryList, StringComparison.Ordinal);
 		Assert.DoesNotContain(CacheFolderName, repositoryList, StringComparison.Ordinal);
