@@ -114,13 +114,17 @@ internal static partial class TerminalScreenSnapshot
 	private static string ReplacePathVariants(
 		string value,
 		string source,
-		string replacement)
+		string replacement,
+		bool includeMacOsAlias = true)
 	{
-		if (OperatingSystem.IsMacOS() &&
-		    (source.StartsWith("/var/", StringComparison.Ordinal) ||
-		     source.StartsWith("/tmp/", StringComparison.Ordinal)))
+		if (includeMacOsAlias &&
+		    GetMacOsPathAlias(source, OperatingSystem.IsMacOS()) is { } alias)
 		{
-			value = ReplacePathVariants(value, "/private" + source, replacement);
+			value = ReplacePathVariants(
+				value,
+				alias,
+				replacement,
+				includeMacOsAlias: false);
 		}
 
 		if (Path.IsPathFullyQualified(source))
@@ -197,6 +201,23 @@ internal static partial class TerminalScreenSnapshot
 			}
 		}
 		return value;
+	}
+
+	internal static string? GetMacOsPathAlias(string path, bool isMacOs)
+	{
+		if (!isMacOs)
+			return null;
+
+		if (path.StartsWith("/var/", StringComparison.Ordinal) ||
+		    path.StartsWith("/tmp/", StringComparison.Ordinal))
+		{
+			return "/private" + path;
+		}
+
+		return path.StartsWith("/private/var/", StringComparison.Ordinal) ||
+		       path.StartsWith("/private/tmp/", StringComparison.Ordinal)
+			? path["/private".Length..]
+			: null;
 	}
 
 	private static string ReplaceBoundedPathFragment(
