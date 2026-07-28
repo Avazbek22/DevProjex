@@ -248,6 +248,9 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("[Version]\"0.94.0\"", workflow, StringComparison.Ordinal);
         Assert.Contains("Startup Smoke (Linux X11)", workflow, StringComparison.Ordinal);
         Assert.Contains("xvfb-run -a", workflow, StringComparison.Ordinal);
+        Assert.Contains("env -u CI \"$2\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Portable Launcher ConPTY TUI Smoke", workflow, StringComparison.Ordinal);
+        Assert.Contains("DEVPROJEX_TUI_TEST_BINARY", workflow, StringComparison.Ordinal);
         Assert.Contains("/p:PublishSingleFile=true", workflow, StringComparison.Ordinal);
         Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", workflow, StringComparison.Ordinal);
         Assert.Contains("/p:PublishTrimmed=false", workflow, StringComparison.Ordinal);

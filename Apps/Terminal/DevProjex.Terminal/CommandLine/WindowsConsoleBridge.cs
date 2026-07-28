@@ -20,11 +20,25 @@ public static class WindowsConsoleBridge
 				return true;
 			}
 
+			var inheritedHandles = CaptureRedirectedStandardHandles();
 			if (!AttachConsole(AttachParentProcess))
 			{
 				var error = Marshal.GetLastWin32Error();
 				if (error != ErrorAccessDenied)
-					return HasRedirectedStandardStream() && HasUsableStandardHandle();
+				{
+					if (!HasRedirectedStandardStream() || !HasUsableStandardHandle())
+						return false;
+
+					ResetStandardStreams();
+					return true;
+				}
+			}
+			else
+			{
+				// A Windows-subsystem executable needs AttachConsole for inherited
+				// console pseudo-handles to become interactive. Windows may replace
+				// real file or pipe redirections during attach, so restore only those.
+				RestoreRedirectedStandardHandles(inheritedHandles);
 			}
 
 			ResetStandardStreams();
@@ -34,6 +48,26 @@ public static class WindowsConsoleBridge
 		{
 			return false;
 		}
+	}
+
+	private static IReadOnlyList<StandardHandleSnapshot> CaptureRedirectedStandardHandles()
+	{
+		var handles = new List<StandardHandleSnapshot>(3);
+		foreach (var id in new[] { StandardInputHandle, StandardOutputHandle, StandardErrorHandle })
+		{
+			var handle = GetStdHandle(id);
+			if (!IsUsableHandle(handle) || GetFileType(handle) == FileTypeChar)
+				continue;
+			handles.Add(new StandardHandleSnapshot(id, handle));
+		}
+		return handles;
+	}
+
+	private static void RestoreRedirectedStandardHandles(
+		IReadOnlyList<StandardHandleSnapshot> handles)
+	{
+		foreach (var handle in handles)
+			_ = SetStdHandle(handle.Id, handle.Handle);
 	}
 
 	private static bool HasRedirectedStandardStream()
@@ -55,11 +89,14 @@ public static class WindowsConsoleBridge
 		foreach (var id in new[] { StandardInputHandle, StandardOutputHandle, StandardErrorHandle })
 		{
 			var handle = GetStdHandle(id);
-			if (handle != IntPtr.Zero && handle != new IntPtr(-1))
+			if (IsUsableHandle(handle))
 				return true;
 		}
 		return false;
 	}
+
+	private static bool IsUsableHandle(IntPtr handle) =>
+		handle != IntPtr.Zero && handle != new IntPtr(-1);
 
 	private static bool HasUsableConsole()
 	{
@@ -94,7 +131,16 @@ public static class WindowsConsoleBridge
 	private const int StandardInputHandle = -10;
 	private const int StandardOutputHandle = -11;
 	private const int StandardErrorHandle = -12;
+	private const uint FileTypeChar = 0x0002;
 
 	[DllImport("kernel32.dll", SetLastError = true)]
 	private static extern IntPtr GetStdHandle(int standardHandle);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern bool SetStdHandle(int standardHandle, IntPtr handle);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern uint GetFileType(IntPtr handle);
+
+	private readonly record struct StandardHandleSnapshot(int Id, IntPtr Handle);
 }

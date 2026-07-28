@@ -215,7 +215,7 @@ jobs:
           xvfb-run -a bash -c '
             set -euo pipefail
             cd "$1"
-            "$2" &
+            env -u CI "$2" &
             pid=$!
             trap "kill $pid 2>/dev/null || true" EXIT
             sleep 5
@@ -794,3 +794,19 @@ jobs:
           }
 
           Write-Host "Portable launcher smoke passed for ${{ matrix.rid }}."
+
+      - name: Portable Launcher ConPTY TUI Smoke (Windows x64)
+        if: ${{ matrix.rid == 'win-x64' }}
+        shell: pwsh
+        run: |
+          $launcherPath = Join-Path $env:RUNNER_TEMP "devprojex.cmd"
+          if (-not (Test-Path -LiteralPath $launcherPath)) {
+            throw "Portable launcher was not created: $launcherPath"
+          }
+
+          $env:DEVPROJEX_TUI_TEST_BINARY = $launcherPath
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
+            -c Release `
+            --no-restore `
+            --filter "FullyQualifiedName~TerminalPtyJourneyTests.OpenCurrentProjectFromWelcomeReachesWorkspaceAndStaysAlive" `
+            --logger "console;verbosity=minimal"

@@ -187,6 +187,9 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("${{ matrix.binary }}", workflow, StringComparison.Ordinal);
 		Assert.Contains("Desktop IPC and Redirected EOF Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("retained redirected CLI handles", workflow, StringComparison.Ordinal);
+		Assert.Contains("env -u CI \"$2\"", workflow, StringComparison.Ordinal);
+		Assert.Contains("Portable Launcher ConPTY TUI Smoke", workflow, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_TUI_TEST_BINARY", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("DevProjex.Cli", workflow, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("\"--path\"", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("\"--copy\"", workflow, StringComparison.Ordinal);
