@@ -551,6 +551,8 @@ public sealed class MemoryCleanupCoordinatorTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDelay = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var readinessObserved = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var collection = NewCompletionSource();
         var readinessChecks = 0;
         var uiReady = 1;
@@ -560,8 +562,13 @@ public sealed class MemoryCleanupCoordinatorTests
             uiReady: () =>
             {
                 Interlocked.Increment(ref readinessChecks);
+                readinessObserved.TrySetResult();
                 return Volatile.Read(ref uiReady) != 0;
             },
+            // The production deadline guards a stalled dispatcher. This test drives the
+            // readiness transition explicitly, so CI scheduling must not consume that deadline.
+            uiReadinessTimeout: TimeSpan.FromMinutes(1),
+            uiReadinessPollInterval: TimeSpan.FromMilliseconds(10),
             deferCleanup: (_, cancellationToken) =>
             {
                 delayEntered.TrySetResult();
@@ -582,8 +589,8 @@ public sealed class MemoryCleanupCoordinatorTests
         Assert.False(collection.Task.IsCompleted);
 
         visualReady.TrySetResult();
-        await WaitForConditionAsync(
-            () => Volatile.Read(ref readinessChecks) > 0);
+        await readinessObserved.Task.WaitAsync(CompletionTimeout);
+        Assert.True(Volatile.Read(ref readinessChecks) > 0);
         Assert.False(collection.Task.IsCompleted);
 
         Volatile.Write(ref uiReady, 1);
@@ -668,15 +675,6 @@ public sealed class MemoryCleanupCoordinatorTests
         Assert.False(
             coordinator.IsCleanupPendingOrRunning,
             "Memory cleanup did not reach an idle state before the timeout.");
-    }
-
-    private static async Task WaitForConditionAsync(Func<bool> condition)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        while (!condition() && stopwatch.Elapsed < CompletionTimeout)
-            await Task.Delay(10);
-
-        Assert.True(condition(), "Condition was not reached before the timeout.");
     }
 
     private static TaskCompletionSource<MemoryCleanupCollectionMode>
