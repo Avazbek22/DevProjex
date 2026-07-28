@@ -70,13 +70,22 @@ internal static partial class TerminalScreenSnapshot
 		var normalized = value
 			.Replace("\r\n", "\n", StringComparison.Ordinal)
 			.Replace('\u00A0', ' ');
+		normalized = NormalizeMacOsSystemPathAliases(
+			normalized,
+			OperatingSystem.IsMacOS());
 		normalized = GroupedNumberSeparatorPattern().Replace(normalized, " ");
 		normalized = ByteSizeDecimalSeparatorPattern().Replace(normalized, ".");
 		normalized = EstimatedTokenCountPattern().Replace(normalized, "<TOKENS>");
 		foreach (var (source, replacement) in replacements)
 		{
 			if (!string.IsNullOrEmpty(source))
-				normalized = ReplacePathVariants(normalized, source, replacement);
+			{
+				normalized = ReplacePathForSnapshot(
+					normalized,
+					source,
+					replacement,
+					OperatingSystem.IsMacOS());
+			}
 		}
 
 		normalized = VersionPattern().Replace(normalized, "v<VERSION>");
@@ -111,27 +120,27 @@ internal static partial class TerminalScreenSnapshot
 		return normalized.TrimEnd();
 	}
 
-	private static string ReplacePathVariants(
+	internal static string ReplacePathForSnapshot(
 		string value,
 		string source,
 		string replacement,
-		bool includeMacOsAlias = true)
+		bool isMacOs)
 	{
-		if (includeMacOsAlias &&
-		    GetMacOsPathAlias(source, OperatingSystem.IsMacOS()) is { } alias)
-		{
-			value = ReplacePathVariants(
-				value,
-				alias,
-				replacement,
-				includeMacOsAlias: false);
-		}
+		value = NormalizeMacOsSystemPathAliases(value, isMacOs);
+		source = NormalizeMacOsSystemPathAliases(source, isMacOs);
+		var isFullyQualified =
+			(isMacOs && source.StartsWith("/", StringComparison.Ordinal)) ||
+			Path.IsPathFullyQualified(source);
 
-		if (Path.IsPathFullyQualified(source))
+		if (isFullyQualified)
 		{
 			try
 			{
-				var fileUri = new Uri(source).AbsoluteUri.TrimEnd('/');
+				var fileUri = (isMacOs && source.StartsWith("/", StringComparison.Ordinal)
+						? new Uri("file://" + source)
+						: new Uri(source))
+					.AbsoluteUri
+					.TrimEnd('/');
 				value = value.Replace(
 					fileUri,
 					"file:///" + replacement,
@@ -176,7 +185,7 @@ internal static partial class TerminalScreenSnapshot
 					StringComparison.OrdinalIgnoreCase);
 			}
 
-			if (!Path.IsPathFullyQualified(source))
+			if (!isFullyQualified)
 				continue;
 			const int minimumUniqueSuffixLength = 24;
 			for (var start = 1;
@@ -203,21 +212,16 @@ internal static partial class TerminalScreenSnapshot
 		return value;
 	}
 
-	internal static string? GetMacOsPathAlias(string path, bool isMacOs)
+	internal static string NormalizeMacOsSystemPathAliases(
+		string value,
+		bool isMacOs)
 	{
 		if (!isMacOs)
-			return null;
+			return value;
 
-		if (path.StartsWith("/var/", StringComparison.Ordinal) ||
-		    path.StartsWith("/tmp/", StringComparison.Ordinal))
-		{
-			return "/private" + path;
-		}
-
-		return path.StartsWith("/private/var/", StringComparison.Ordinal) ||
-		       path.StartsWith("/private/tmp/", StringComparison.Ordinal)
-			? path["/private".Length..]
-			: null;
+		return value
+			.Replace("/private/var/", "/var/", StringComparison.Ordinal)
+			.Replace("/private/tmp/", "/tmp/", StringComparison.Ordinal);
 	}
 
 	private static string ReplaceBoundedPathFragment(
