@@ -132,8 +132,10 @@ Options:
 ```
 
 The TUI uses the local project profile when one exists, otherwise the standard
-profile. It provides a lazy project tree, selection, search, roots, extensions,
-Git filtering, Exclusions, preview, metrics, profiles, and context/project export.
+profile. It provides recent local and Git workspaces, a lazy project tree,
+readable and exact Raw Preview, Context Controls, a searchable Action Palette,
+selection, search, roots, extensions, Git filtering, Exclusions, metrics,
+profiles, and context/folder/ZIP export.
 See [TerminalWorkspace.md](TerminalWorkspace.md).
 
 ## Open Desktop

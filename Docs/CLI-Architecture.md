@@ -66,6 +66,7 @@ The planner does not introduce a second scanner or ignore engine.
 The plan contains:
 
 - canonical source root;
+- user-facing source identity for local folders or cached Git repositories;
 - resolved selection and profile source;
 - available and selected roots/extensions;
 - effective and projected trees;
@@ -75,6 +76,11 @@ The plan contains:
 - Git readiness and partial-index evidence;
 - diagnostics;
 - deterministic fingerprint.
+
+Repository identity is deliberately separate from the physical cache path. A
+cached clone retains its internal unique directory while human surfaces use the
+clean repository name and safe original URL. Machine documents may expose this
+identity as additive source metadata without changing filesystem discovery.
 
 Future content representations and policy transformations can consume the plan
 without replacing filesystem discovery. No nonfunctional future command is

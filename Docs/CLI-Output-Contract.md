@@ -75,6 +75,11 @@ Property order is deterministic where contract tests require it. Paths use `/`
 inside machine documents. A binary entry has `isBinary: true` and null content;
 binary bytes are never inserted into AI context output.
 
+For a cached Git clone, `project.source` is an additive object containing the
+source type, safe repository URL, and optional branch/commit metadata. Human
+identity never uses the generated cache-directory suffix. Local projects retain
+the existing root/name representation and omit `source`.
+
 ## Context XML
 
 XML uses the root element `devprojexContext` with `schemaVersion="1"` and

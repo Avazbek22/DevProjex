@@ -24,6 +24,7 @@ The welcome screen offers:
 
 - open the current directory when it is a reasonable project candidate;
 - open a recent project;
+- open a recent Git repository;
 - browse for a folder;
 - clone through the existing DevProjex Git service;
 - open a portable profile;
@@ -49,6 +50,20 @@ history is corrupt. An invalid local-profile store offers a deterministic
 Standard-profile recovery path; unavailable roots or file types in an otherwise
 valid local profile open with diagnostics.
 
+Recent Git Repositories reads the repository history from the same
+`RecentProjectsStore` used by Desktop. A healthy cached clone opens without a
+network request. A missing or damaged cache remains visible and offers explicit
+Back, Remove, or Clone Again actions. Removing history never silently deletes a
+cache. Equivalent supported repository URLs are normalized to avoid duplicate
+rows.
+
+Cloned workspaces use repository identity rather than the physical cache folder:
+the heading, tree root, Preview, analysis, and context documents show the clean
+repository name and original safe URL. The internal cache path is available only
+from explicit source details and diagnostics. Clone progress shows the repository,
+safe URL, elapsed time, current Git phase and real Git measurements when Git
+provides them; it never manufactures a percentage or prints credentials.
+
 ## Navigation Lifecycle
 
 The Terminal Workspace runs under one persistent application root. Dialogs and
@@ -72,8 +87,10 @@ focused detail pane, and contextual keyboard hints instead of a modal selector.
 
 ![DevProjex Terminal Welcome](Media/terminal-workspace/welcome.png)
 
-After a project opens, the wide layout keeps the project tree and generated
-context visible together. Narrow terminals switch to one focused pane without
+After a project opens, the wide layout keeps Project Tree, Context Preview, and
+Context Controls visible together. Context Controls exposes the profile, source,
+selection, Git filtering, Exclusions, Preview settings, diagnostics, and all
+three export entry points. Narrow terminals switch to focused panes without
 losing selection or navigation state.
 
 ![DevProjex Terminal Workspace](Media/terminal-workspace/workspace.png)
@@ -84,9 +101,11 @@ The workspace adapts to terminal size:
 
 | Width | Layout |
 |---:|---|
-| 120 columns or wider | project tree and context preview side by side |
-| 80-119 columns | tree and preview tabs |
-| below 80 columns | compact single-pane workspace |
+| 150 columns or wider | Tree, Preview, and Context Controls |
+| 120-149 columns | Tree and Preview; Controls opens as a focused pane |
+| 80-119 columns | tabbed single-pane workspace |
+| 60-79 columns | compact single-pane workspace |
+| below 60 columns, or below 20 rows | resize guidance |
 
 If the terminal is too small to operate safely, the workspace shows a compact
 size hint rather than corrupting the screen.
@@ -102,12 +121,18 @@ The workspace supports:
 - one Git filtering choice: none, `.gitignore`, or tracked files;
 - ordinary Exclusions independent from Git filtering;
 - tree, content, and tree-plus-content preview;
+- readable Preview and exact Raw output presentation;
 - text, Markdown, JSON, and XML tree formats;
 - file, folder, character, token, and byte metrics;
 - standard, local, and portable profiles;
 - context, exact-folder, and ZIP export;
 - dry-run summaries and cancellation;
 - opening the current state in Desktop.
+
+`Ctrl+P` opens a searchable Action Palette from Welcome or the workspace.
+Important features do not depend on memorizing letter shortcuts: the palette and
+Context Controls call the same actions as the keyboard commands and restore the
+previous pane when canceled.
 
 Changing checked nodes updates the selection projection without rescanning the
 filesystem. Structural changes use the canonical refresh pipeline. Preview
@@ -122,10 +147,13 @@ refresh is cancelable, debounced, and bounded for large projects.
 | Enter | open or activate |
 | Space | toggle the selected node |
 | `/` | search |
+| Ctrl+P | searchable Action Palette |
 | Tab / F6 | focus the next major pane |
 | Shift+Tab / Shift+F6 | focus the previous major pane |
 | `1`, `2`, `3` | tree, content, tree plus content |
 | `F` | format |
+| `V` | readable Preview or Raw output |
+| `M` | Git filtering |
 | `X` | Exclusions |
 | `R` | roots |
 | `T` | file types |
@@ -143,9 +171,32 @@ The footer shows actions relevant to the active layout.
 When Context Preview has focus, Up/Down and `j`/`k` scroll by line,
 Page Up/Page Down scroll by page, and Home/End move to the start or end.
 Left/Right scroll horizontally when wrapping is disabled. In compact layouts,
-moving focus also makes the corresponding Tree or Preview pane visible. Pane
+moving focus also makes the corresponding Tree, Preview, or Controls pane visible. Pane
 focus and preview position survive Help, settings overlays, refreshes, exports,
 cancellation, and terminal resize.
+
+## Preview
+
+Readable Preview is the default human-facing representation. It removes
+document-format scaffolding such as Markdown headings and fences while keeping
+tree and file sections visually distinct. Raw output displays the exact Text,
+Markdown, JSON, or XML payload produced by context export. The active
+presentation, content view, and format are always visible.
+
+Large contexts use the shared preview document abstractions. Small documents
+stay in memory; larger documents use temporary file-backed UTF-8 storage with
+line indexes. Readable Preview also indexes file sections. Raw Preview streams
+the complete exact export document directly into the backing store instead of
+first constructing one complete managed string. The viewport reads only visible
+lines, global Preview search scans the indexed document, and Home/End can reach
+the first and final selected files. The range line reports visible
+files/sections, lines, columns, and totals, so partial visibility is never
+silent. Rapid changes cancel stale Preview work, and retired temporary documents
+are disposed after the replacement is active.
+
+The subtle position indicator is separate from operation progress. Horizontal
+position is reported only when long raw lines overflow; no progress-colored
+horizontal bar is drawn.
 
 ## Screen Safety
 
@@ -173,6 +224,10 @@ processed entries, total entries, percentage, written bytes, elapsed time, and
 the real operation phase. Context preparation and document writing use an
 indeterminate status because those stages do not expose a trustworthy total.
 DevProjex never manufactures a percentage.
+
+Repository cloning and project loading use the same operation surface. Stages
+without an honest total remain indeterminate and show their current phase;
+measured Git object/transfer progress is shown only when emitted by Git.
 
 Esc or Ctrl+C cancels active export work before it can quit the TUI. Cancellation
 removes staging data and returns to the same usable workspace and pane focus.
