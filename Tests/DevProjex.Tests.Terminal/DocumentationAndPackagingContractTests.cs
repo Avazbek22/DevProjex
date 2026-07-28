@@ -232,6 +232,54 @@ public sealed class DocumentationAndPackagingContractTests
 				element.Attribute("Condition")?.Value.Contains(".pdb", StringComparison.Ordinal) == true);
 	}
 
+	[Fact]
+	public void NativePtyAutomationDependencyIsPinnedAndTestOnly()
+	{
+		var rootPath = FindRepositoryRoot();
+		var packageVersions = XDocument.Load(Path.Combine(rootPath, "Directory.Packages.props"));
+		var hex1bVersion = packageVersions
+			.Descendants("PackageVersion")
+			.Single(element => element.Attribute("Include")?.Value == "Hex1b")
+			.Attribute("Version")?.Value;
+		Assert.Equal("0.165.0", hex1bVersion);
+		Assert.DoesNotContain(
+			packageVersions.Descendants("PackageVersion"),
+			element => element.Attribute("Include")?.Value == "Porta.Pty");
+
+		var terminalTestProject = XDocument.Load(
+			Path.Combine(
+				rootPath,
+				"Tests",
+				"DevProjex.Tests.Terminal",
+				"DevProjex.Tests.Terminal.csproj"));
+		Assert.Contains(
+			terminalTestProject.Descendants("PackageReference"),
+			element => element.Attribute("Include")?.Value == "Hex1b");
+
+		var productProjectPaths = new[]
+		{
+			Path.Combine(
+				rootPath,
+				"Apps",
+				"Terminal",
+				"DevProjex.Terminal",
+				"DevProjex.Terminal.csproj"),
+			Path.Combine(
+				rootPath,
+				"Apps",
+				"Avalonia",
+				"DevProjex.Avalonia",
+				"DevProjex.Avalonia.csproj")
+		};
+		foreach (var productProjectPath in productProjectPaths)
+		{
+			var productProject = XDocument.Load(productProjectPath);
+			Assert.DoesNotContain(
+				productProject.Descendants("PackageReference"),
+				element => element.Attribute("Include")?.Value is "Hex1b" or "Porta.Pty");
+		}
+	}
+
 	private static IEnumerable<IReadOnlyList<string>> EnumeratePublicCommandPaths(RootCommand root)
 	{
 		var stack = new Stack<(Command Command, string[] Path)>();

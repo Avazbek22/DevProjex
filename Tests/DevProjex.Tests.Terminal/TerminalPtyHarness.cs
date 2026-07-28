@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
-using Porta.Pty;
+using Hex1b;
 using XTerm;
 using XTerm.Options;
 using XTermTerminal = XTerm.Terminal;
@@ -11,7 +11,7 @@ namespace DevProjex.Tests.Terminal;
 internal sealed class TerminalPtyHarness : IAsyncDisposable
 {
 	private const string WindowSizeQuery = "\u001b[18t";
-	private readonly IPtyConnection _connection;
+	private readonly Hex1bTerminalChildProcess _process;
 	private readonly XTermTerminal _terminal;
 	private readonly CancellationTokenSource _readerCts = new();
 	private readonly SemaphoreSlim _writerGate = new(1, 1);
@@ -29,18 +29,18 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				SingleWriter = true
 			});
 	private readonly Task _readerTask;
+	private readonly Task _exitMonitorTask;
 	private readonly Task _terminalResponseTask;
 	private readonly string _dataRoot;
 
 	private TerminalPtyHarness(
-		IPtyConnection connection,
+		Hex1bTerminalChildProcess process,
 		XTermTerminal terminal,
 		string dataRoot)
 	{
-		_connection = connection;
+		_process = process;
 		_terminal = terminal;
 		_dataRoot = dataRoot;
-		_connection.ProcessExited += (_, args) => _exit.TrySetResult(args.ExitCode);
 		_terminal.DataReceived += (_, args) =>
 		{
 			if (!string.IsNullOrEmpty(args.Data))
@@ -48,6 +48,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		};
 		_terminalResponseTask = Task.Run(WriteTerminalResponsesAsync);
 		_readerTask = Task.Run(ReadOutputAsync);
+		_exitMonitorTask = Task.Run(ObserveExitAsync);
 	}
 
 	public bool HasExited => _exit.Task.IsCompleted;
@@ -118,20 +119,18 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		initializeDataRoot?.Invoke(variables["DEVPROJEX_INTERNAL_DATA_ROOT"]);
 		var (host, commandLine, startupInput) = CreateShellCommand(
 			binary,
-			launchArguments);
+			launchArguments,
+			variables);
 
-		var connection = await PtyProvider.SpawnAsync(
-			new PtyOptions
-			{
-				Name = "DevProjex terminal test",
-				Cols = columns,
-				Rows = rows,
-				Cwd = workingDirectory,
-				App = host,
-				CommandLine = commandLine,
-				Environment = variables
-			},
-			cancellationToken).ConfigureAwait(false);
+		var process = new Hex1bTerminalChildProcess(
+			host,
+			commandLine,
+			workingDirectory,
+			variables,
+			inheritEnvironment: true,
+			initialWidth: columns,
+			initialHeight: rows);
+		await process.StartAsync(cancellationToken).ConfigureAwait(false);
 		var terminal = new XTermTerminal(
 			new TerminalOptions
 			{
@@ -140,7 +139,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				Scrollback = 200,
 				TermName = "xterm-256color"
 			});
-		var harness = new TerminalPtyHarness(connection, terminal, dataRoot);
+		var harness = new TerminalPtyHarness(process, terminal, dataRoot);
 		if (startupInput is not null)
 			await harness.SendAsync(startupInput + "\r", cancellationToken).ConfigureAwait(false);
 		return harness;
@@ -148,7 +147,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 
 	private static (string Host, string[] CommandLine, string? StartupInput) CreateShellCommand(
 		string binary,
-		IReadOnlyList<string> arguments)
+		IReadOnlyList<string> arguments,
+		IReadOnlyDictionary<string, string> environment)
 	{
 		if (OperatingSystem.IsWindows())
 		{
@@ -168,9 +168,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				$"{launch} & exit /b !errorlevel!");
 		}
 
-		var shellCommand = "exec " + string.Join(
+		// Hex1b's Unix forkpty adapter inherits the test host environment. Use env
+		// inside the child shell so parallel journeys retain isolated production stores.
+		var environmentArguments = environment
+			.OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+			.Select(static pair => QuoteForPosixShell($"{pair.Key}={pair.Value}"));
+		var shellCommand = "exec env " + string.Join(
 			' ',
-			new[] { QuoteForPosixShell(binary) }
+			environmentArguments
+				.Append(QuoteForPosixShell(binary))
 				.Concat(arguments.Select(QuoteForPosixShell)));
 		return ("/bin/sh", ["-c", shellCommand], null);
 	}
@@ -187,10 +193,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		await _writerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			await _connection.WriterStream
-				.WriteAsync(payload, cancellationToken)
-				.ConfigureAwait(false);
-			await _connection.WriterStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+			await _process.WriteInputAsync(payload, cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -277,7 +280,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		cancellationToken.ThrowIfCancellationRequested();
 		lock (_terminalGate)
 			_terminal.Resize(columns, rows);
-		_connection.Resize(columns, rows);
+		await _process.ResizeAsync(columns, rows, cancellationToken).ConfigureAwait(false);
 		await Task.Delay(100, cancellationToken).ConfigureAwait(false);
 	}
 
@@ -343,7 +346,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				return screen;
 			if (HasExited)
 				throw new Xunit.Sdk.XunitException(
-					$"Terminal process exited with code {_connection.ExitCode} before '{expected}' appeared.\n" +
+					$"Terminal process exited with code {_process.ExitCode} before '{expected}' appeared.\n" +
 					$"Screen:\n{screen}\nRaw output:\n{CaptureRawOutput()}");
 			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 		}
@@ -368,7 +371,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				return screen;
 			if (HasExited)
 				throw new Xunit.Sdk.XunitException(
-					$"Terminal process exited with code {_connection.ExitCode} while waiting for " +
+					$"Terminal process exited with code {_process.ExitCode} while waiting for " +
 					$"'{unexpected}' to close.\nScreen:\n{screen}\nRaw output:\n{CaptureRawOutput()}");
 			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 		}
@@ -400,12 +403,12 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	public async ValueTask DisposeAsync()
 	{
 		if (!HasExited)
-			_connection.Kill();
+			_process.Kill();
 		_terminalResponses.Writer.TryComplete();
 		_readerCts.Cancel();
 		try
 		{
-			await Task.WhenAll(_readerTask, _terminalResponseTask)
+			await Task.WhenAll(_readerTask, _terminalResponseTask, _exitMonitorTask)
 				.WaitAsync(TimeSpan.FromSeconds(2))
 				.ConfigureAwait(false);
 		}
@@ -413,7 +416,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		{
 			// The PTY read is expected to end through either EOF or disposal.
 		}
-		_connection.Dispose();
+		await _process.DisposeAsync().ConfigureAwait(false);
 		_writerGate.Dispose();
 		_readerCts.Dispose();
 		TryDeleteDataRoot(_dataRoot);
@@ -440,24 +443,17 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	private async Task ReadOutputAsync()
 	{
 		var decoder = Encoding.UTF8.GetDecoder();
-		var bytes = new byte[8192];
 		var characters = new char[8192];
 		try
 		{
 			while (!_readerCts.IsCancellationRequested)
 			{
-				var count = await _connection.ReaderStream
-					.ReadAsync(bytes, _readerCts.Token)
+				var bytes = await _process
+					.ReadOutputAsync(_readerCts.Token)
 					.ConfigureAwait(false);
-				if (count == 0)
+				if (bytes.IsEmpty)
 					break;
-				var characterCount = decoder.GetChars(
-					bytes,
-					0,
-					count,
-					characters,
-					0,
-					flush: false);
+				var characterCount = decoder.GetChars(bytes.Span, characters, flush: false);
 				lock (_terminalGate)
 				{
 					var output = new string(characters, 0, characterCount);
@@ -471,6 +467,20 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		{
 		}
 		catch (ObjectDisposedException)
+		{
+		}
+	}
+
+	private async Task ObserveExitAsync()
+	{
+		try
+		{
+			var exitCode = await _process
+				.WaitForExitAsync(_readerCts.Token)
+				.ConfigureAwait(false);
+			_exit.TrySetResult(exitCode);
+		}
+		catch (OperationCanceledException) when (_readerCts.IsCancellationRequested)
 		{
 		}
 	}

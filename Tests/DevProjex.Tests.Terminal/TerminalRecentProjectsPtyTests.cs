@@ -33,10 +33,12 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Recent projects",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var recent = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"FirstProject",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Second Project", recent, StringComparison.Ordinal);
+		await terminal.WaitForScreenAsync(
+			"Second Project",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -54,11 +56,13 @@ public sealed class TerminalRecentProjectsPtyTests
 		await terminal.WaitForScreenAsync(
 			"Loading project",
 			cancellationToken: TestContext.Current.CancellationToken);
-		var workspace = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"SecondMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Second Project", workspace, StringComparison.Ordinal);
-		Assert.Contains("SecondMarker.cs", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -82,8 +86,11 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Recent projects",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var reordered = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"Second Project",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var reordered = await terminal.WaitForScreenAsync(
+			"FirstProject",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var secondRow = Array.FindIndex(
 			reordered.Split('\n'),
@@ -131,12 +138,14 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Проект с пробелом",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var workspace = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"UnicodeMarker.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("Profile: Local", workspace, StringComparison.Ordinal);
-		Assert.Contains("UnicodeMarker.cs", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -165,12 +174,14 @@ public sealed class TerminalRecentProjectsPtyTests
 
 		await OpenRecentOverlayAsync(terminal, TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var workspace = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"Warnings 2",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("Profile: Local", workspace, StringComparison.Ordinal);
-		Assert.Contains("Warnings 2", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -204,11 +215,13 @@ public sealed class TerminalRecentProjectsPtyTests
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var workspace = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"RecoveredMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Profile: Standard", workspace, StringComparison.Ordinal);
-		Assert.Contains("RecoveredMarker.cs", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -279,10 +292,12 @@ public sealed class TerminalRecentProjectsPtyTests
 			"BackupProject",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var workspace = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("BackupMarker.cs", workspace, StringComparison.Ordinal);
+		await terminal.WaitForScreenAsync(
+			"BackupMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -324,10 +339,12 @@ public sealed class TerminalRecentProjectsPtyTests
 				"LockedRecentProject",
 				cancellationToken: TestContext.Current.CancellationToken);
 			await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-			var workspace = await terminal.WaitForScreenAsync(
+			await terminal.WaitForScreenAsync(
 				"PROJECT TREE",
 				cancellationToken: TestContext.Current.CancellationToken);
-			Assert.Contains("LockMarker.cs", workspace, StringComparison.Ordinal);
+			await terminal.WaitForScreenAsync(
+				"LockMarker.cs",
+				cancellationToken: TestContext.Current.CancellationToken);
 			await ExitAsync(terminal);
 		}
 		finally
@@ -361,10 +378,12 @@ public sealed class TerminalRecentProjectsPtyTests
 			clickCount: 2,
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		var workspace = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("MouseMarker.cs", workspace, StringComparison.Ordinal);
+		await terminal.WaitForScreenAsync(
+			"MouseMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -387,17 +406,53 @@ public sealed class TerminalRecentProjectsPtyTests
 		string action,
 		CancellationToken cancellationToken)
 	{
-		for (var attempt = 0; attempt < 10; attempt++)
+		await terminal.WaitForScreenAsync(
+			action,
+			cancellationToken: cancellationToken);
+		for (var attempt = 0; attempt < 20; attempt++)
 		{
-			var screen = terminal.CaptureScreen();
-			if (screen.Contains($"> {action}", StringComparison.Ordinal))
-				return;
-			await terminal.SendDownAsync(cancellationToken);
-			await Task.Delay(40, cancellationToken);
+			var lines = terminal.CaptureScreen().Split('\n');
+			var targetRow = Array.FindIndex(
+				lines,
+				line => line.Contains(action, StringComparison.Ordinal));
+			var selectedRow = Array.FindIndex(
+				lines,
+				line => line.Contains("│> ", StringComparison.Ordinal));
+			if (targetRow == selectedRow && targetRow >= 0)
+			{
+				await Task.Delay(150, cancellationToken);
+				if (terminal.CaptureScreen()
+				    .Split('\n')
+				    .Any(line => line.Contains($"> {action}", StringComparison.Ordinal)))
+				{
+					return;
+				}
+				continue;
+			}
+			if (targetRow < 0 || selectedRow < 0)
+			{
+				await Task.Delay(50, cancellationToken);
+				continue;
+			}
+
+			if (targetRow < selectedRow)
+				await terminal.SendUpAsync(cancellationToken);
+			else
+				await terminal.SendDownAsync(cancellationToken);
+
+			for (var wait = 0; wait < 20; wait++)
+			{
+				var movedRow = Array.FindIndex(
+					terminal.CaptureScreen().Split('\n'),
+					line => line.Contains("│> ", StringComparison.Ordinal));
+				if (movedRow >= 0 && movedRow != selectedRow)
+					break;
+				await Task.Delay(25, cancellationToken);
+			}
 		}
 
 		throw new Xunit.Sdk.XunitException(
-			$"Could not select welcome action '{action}'.\n{terminal.CaptureScreen()}");
+			$"Welcome action '{action}' could not be selected.\n{terminal.CaptureScreen()}");
 	}
 
 	private static async Task OpenRecentOverlayAsync(

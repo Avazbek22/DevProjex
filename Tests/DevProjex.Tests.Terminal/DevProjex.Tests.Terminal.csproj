@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="Porta.Pty" />
+    <PackageReference Include="Hex1b" />
     <PackageReference Include="Spectre.Console.Testing" />
     <PackageReference Include="XTerm.NET" />
     <PackageReference Include="xunit.v3" />

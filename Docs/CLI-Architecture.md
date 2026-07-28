@@ -121,3 +121,17 @@ DevProjex.Avalonia executable
 
 Terminal presentation packages do not leak into Kernel or Application. Desktop
 and terminal use the same composition services without sharing UI types.
+
+## Terminal Test Boundary
+
+Published-binary interaction tests use two test-only components:
+
+- Hex1b `0.165.0` (MIT) provides the native PTY/ConPTY transport and preserves
+  signal exit codes on Windows, Linux, and macOS;
+- XTerm.NET `1.0.15` maintains the deterministic visible-cell and style model
+  used by assertions and visual artifacts.
+
+Neither package is referenced by the Terminal or Avalonia product projects.
+Release Validation drives the published single-file executable through this
+test boundary; the automation dependencies are never bundled into
+`DevProjex.exe`.

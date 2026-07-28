@@ -3,7 +3,6 @@ using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Execution;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
-using Terminal.Gui.Drivers;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -45,7 +44,7 @@ public sealed class TerminalWorkspace(
 			application.AppModel = screenMode == TerminalScreenMode.Inline
 				? AppModel.Inline
 				: AppModel.FullScreen;
-			application.Init(SelectTerminalDriver(OperatingSystem.IsMacOS()));
+			application.Init();
 			initialized = true;
 			application.Mouse.IsMouseDisabled = !options.MouseEnabled;
 			var rootWidth = environment.Width;
@@ -114,13 +113,6 @@ public sealed class TerminalWorkspace(
 
 	internal static string? CompletePrompt(bool accepted, string text) =>
 		accepted ? text : null;
-
-	internal static string? SelectTerminalDriver(bool isMacOs)
-	{
-		// Terminal.Gui 2.4.17's ANSI raw-mode helper uses the Linux termios ABI.
-		// The managed driver avoids memory corruption on Darwin while retaining its ANSI parser.
-		return isMacOs ? DriverRegistry.Names.DOTNET : null;
-	}
 
 	internal static bool TryToggleTreeRow(TerminalWorkspaceState state, int? selectedRow)
 	{

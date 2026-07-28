@@ -5,16 +5,6 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalWorkspaceContractTests
 {
-	[Theory]
-	[InlineData(true, "dotnet")]
-	[InlineData(false, null)]
-	public void TerminalDriverSelectionAvoidsUnsafeDarwinAnsiRawMode(
-		bool isMacOs,
-		string? expected)
-	{
-		Assert.Equal(expected, TerminalWorkspace.SelectTerminalDriver(isMacOs));
-	}
-
 	[Fact]
 	public void CanceledTextDialogNeverReturnsItsSuggestedValue()
 	{
