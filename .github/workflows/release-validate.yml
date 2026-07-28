@@ -51,7 +51,8 @@ jobs:
               @{ runner = 'ubuntu-latest'; rid = 'linux-x64'; binary = 'DevProjex' },
               @{ runner = 'ubuntu-24.04-arm'; rid = 'linux-arm64'; binary = 'DevProjex' },
               @{ runner = 'macos-15-intel'; rid = 'osx-x64'; binary = 'DevProjex' },
-              @{ runner = 'macos-latest'; rid = 'osx-arm64'; binary = 'DevProjex' }
+              # Keep native PTY validation on a stable GA image instead of a moving latest alias.
+              @{ runner = 'macos-15'; rid = 'osx-arm64'; binary = 'DevProjex' }
             )
           }
 

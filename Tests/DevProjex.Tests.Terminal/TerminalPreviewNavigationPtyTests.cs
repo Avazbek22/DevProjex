@@ -32,6 +32,9 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 		var initial = await terminal.WaitForScreenAsync(
 			"CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
+		initial = await terminal.WaitForScreenAsync(
+			"Tab/F6 Preview",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> PROJECT TREE", initial, StringComparison.Ordinal);
 		Assert.Contains("Tab/F6 Preview", initial, StringComparison.Ordinal);
 		await terminal.SendAsync("2", TestContext.Current.CancellationToken);

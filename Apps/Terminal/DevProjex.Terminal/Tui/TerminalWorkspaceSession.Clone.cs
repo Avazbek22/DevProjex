@@ -40,7 +40,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_tooSmall = CreateTooSmallLabel();
 		_root.Add(heading, _operationProgress.View, _tooSmall);
 		ApplyLoadingLayout();
-		DrawTransitionedRoot();
+		CompleteRootTransition();
 	}
 
 	private void UpdateCloneProgressSafe(string status)

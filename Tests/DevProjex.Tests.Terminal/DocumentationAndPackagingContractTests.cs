@@ -183,6 +183,10 @@ public sealed class DocumentationAndPackagingContractTests
 		var workflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "release-validate.yml"));
 		foreach (var rid in new[] { "win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64" })
 			Assert.Contains(rid, workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"runner = 'macos-15'; rid = 'osx-arm64'",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_TERMINAL_HOST=1", workflow, StringComparison.Ordinal);
 		Assert.Contains("Validate Single-File Output", workflow, StringComparison.Ordinal);
 		Assert.Contains("$files.Count -ne 1", workflow, StringComparison.Ordinal);

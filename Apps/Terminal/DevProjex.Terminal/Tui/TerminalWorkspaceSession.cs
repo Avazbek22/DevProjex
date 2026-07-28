@@ -335,6 +335,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		UpdateWelcomeSelection();
 		ApplyWelcomeLayout();
 		_welcomeList.SetFocus();
+		CompleteRootTransition();
 	}
 
 	private TerminalWelcomeContext LoadWelcomeContext()
@@ -1119,6 +1120,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_tooSmall = CreateTooSmallLabel();
 		_root.Add(heading, spinner, operation, details, footer, _tooSmall);
 		ApplyLoadingLayout();
+		CompleteRootTransition();
 	}
 
 	private void ShowWorkspace(TerminalWorkspaceState state)
@@ -1242,6 +1244,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		RefreshWorkspace();
 		ApplyWorkspaceLayout();
 		UpdateWorkspaceFocus();
+		CompleteRootTransition();
 		SchedulePreviewRefresh();
 	}
 
@@ -3450,6 +3453,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_root.SetNeedsLayout();
 		_root.SetNeedsDraw();
 		_application.LayoutAndDraw();
+	}
+
+	private void CompleteRootTransition()
+	{
+		// Initial content is rendered by Application.RunAsync. Runtime root changes
+		// must paint immediately so smaller screens cannot expose stale ANSI cells.
+		if (ReferenceEquals(_application.TopRunnableView, _root))
+			DrawTransitionedRoot();
 	}
 
 	private static void SetVisible(bool visible, params View[] views)

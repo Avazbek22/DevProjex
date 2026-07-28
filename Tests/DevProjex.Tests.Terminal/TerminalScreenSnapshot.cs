@@ -292,6 +292,6 @@ internal static partial class TerminalScreenSnapshot
 	private static partial Regex PreviewColumnCountPattern();
 
 	[GeneratedRegex(
-		@"(?<content><(?:PROJECT_ROOT|PROJECTS_ROOT|TEMP_ROOT|ORIGIN_ROOT|WELCOME_ROOT)>[^│\n]*?)\s{2,}(?=│)")]
+		@"(?<content><(?:PROJECT_ROOT|PROJECTS_ROOT|TEMP_ROOT|ORIGIN_ROOT|WELCOME_ROOT|TOKENS)>[^│\n]*?)\s{2,}(?=│)")]
 	private static partial Regex PlaceholderCellPaddingPattern();
 }
