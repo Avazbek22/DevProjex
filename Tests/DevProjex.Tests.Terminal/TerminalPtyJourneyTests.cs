@@ -78,6 +78,7 @@ public sealed class TerminalPtyJourneyTests
 	[Fact(Timeout = 60_000)]
 	public async Task DynamicTerminalIdentityPreservesLiteralUnderscores()
 	{
+		const int terminalColumns = 180;
 		using var owner = new TemporaryDirectory();
 		var welcomePath = owner.CreateDirectory("Welcome_With_Multiple_Underscores");
 		File.WriteAllText(
@@ -87,13 +88,16 @@ public sealed class TerminalPtyJourneyTests
 		await using var welcome = await TerminalPtyHarness.StartAsync(
 			welcomePath,
 			["--language", "en"],
-			columns: 180,
+			columns: terminalColumns,
 			rows: 35,
 			cancellationToken: TestContext.Current.CancellationToken);
 		var welcomeScreen = await welcome.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains(welcomePath, welcomeScreen, StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalWorkspaceSession.FitPathToWidth(welcomePath, terminalColumns - 4),
+			welcomeScreen,
+			StringComparison.Ordinal);
 		TerminalVisualArtifactWriter.WriteIfRequested(
 			"literal-underscores-welcome-en-180x35",
 			welcome);
@@ -128,7 +132,7 @@ public sealed class TerminalPtyJourneyTests
 				"--language",
 				"en"
 			],
-			columns: 180,
+			columns: terminalColumns,
 			rows: 35,
 			cancellationToken: TestContext.Current.CancellationToken);
 
@@ -139,7 +143,10 @@ public sealed class TerminalPtyJourneyTests
 			$"DevProjex Terminal  {projectName}",
 			screen,
 			StringComparison.Ordinal);
-		Assert.Contains(projectPath, screen, StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalWorkspaceSession.FitPathToWidth(projectPath, terminalColumns - 2),
+			screen,
+			StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		TerminalVisualArtifactWriter.WriteIfRequested(
 			"literal-underscores-workspace-en-180x35",
