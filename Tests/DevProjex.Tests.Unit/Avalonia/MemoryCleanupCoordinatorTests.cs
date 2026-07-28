@@ -649,10 +649,12 @@ public sealed class MemoryCleanupCoordinatorTests
         TimeSpan? uiReadinessPollInterval = null,
         int uiReadinessMaximumAttempts = 24,
         Action? trimWorkingSet = null,
-        Func<TimeSpan, CancellationToken, Task>? deferCleanup = null) =>
-        new(
+        Func<TimeSpan, CancellationToken, Task>? deferCleanup = null)
+    {
+        var readinessProbe = uiReady ?? (static () => true);
+        return new MemoryCleanupCoordinator(
             SessionMetricsRecorder.Disabled,
-            uiReady ?? (static () => true),
+            readinessProbe,
             animationDuration: TimeSpan.Zero,
             captureMemorySnapshot,
             collect,
@@ -660,7 +662,10 @@ public sealed class MemoryCleanupCoordinatorTests
             uiReadinessPollInterval,
             uiReadinessMaximumAttempts,
             trimWorkingSet ?? (static () => { }),
-            deferCleanup);
+            deferCleanup,
+            waitForRenderPasses: static _ => Task.CompletedTask,
+            queryUiReadiness: _ => Task.FromResult(readinessProbe()));
+    }
 
     private static async Task WaitUntilIdleAsync(
         MemoryCleanupCoordinator coordinator)
