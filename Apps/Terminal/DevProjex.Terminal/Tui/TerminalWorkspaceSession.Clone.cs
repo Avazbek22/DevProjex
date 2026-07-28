@@ -40,6 +40,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_tooSmall = CreateTooSmallLabel();
 		_root.Add(heading, _operationProgress.View, _tooSmall);
 		ApplyLoadingLayout();
+		_application.Driver?.ClearContents();
 		_application.LayoutAndDraw();
 	}
 

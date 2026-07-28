@@ -61,6 +61,7 @@ internal sealed partial class TerminalWorkspaceSession
 				await InvokeAsync(() =>
 				{
 					ShowWelcome();
+					_application.Driver?.ClearContents();
 					_application.LayoutAndDraw();
 					OpenRecentRepositoryList(repositories);
 					return true;

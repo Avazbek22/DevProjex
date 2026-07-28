@@ -53,6 +53,9 @@ public sealed class TerminalRecentRepositoriesPtyTests
 		await terminal.WaitForScreenAsync(
 			"# DevProjex",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Files 1-2/2",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("DevProjex Terminal  DevProjex", workspace, StringComparison.Ordinal);
 		Assert.Contains(RepositoryUrl, workspace, StringComparison.Ordinal);

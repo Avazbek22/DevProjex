@@ -252,8 +252,10 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("CONTEXT PREVIEW", terminal.CaptureScreen(), StringComparison.Ordinal);
-		Assert.Contains("Files 4", terminal.CaptureScreen(), StringComparison.Ordinal);
+		var initialWorkspace = await terminal.WaitForScreenAsync(
+			"Files 4",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("CONTEXT PREVIEW", initialWorkspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
